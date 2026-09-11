@@ -1,13 +1,13 @@
 ---
 chapter_type: block
 summary: Assign model tiers to every agent, prune dead entries, and register non-Anthropic provider endpoints for expert jobs to spawn against.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 no_diagram: true
 source_skills:
   - lazy-core.agent-models
   - lazy-core.agent-models-seed
   - lazy-core.providers
-source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Per-agent model routing
 
@@ -31,7 +31,7 @@ A related registry sits next to the wizard. `/lazy-core.providers` manages named
 
 ## How it fits together
 
-Run `/lazy-core.agent-models`. The skill loads the `agent_models` sections from both your global `~/.claude/lazy.settings.json` and the project `./.claude/lazy.settings.json`, merges them into a single lookup, and discovers every dispatchable agent across your vault — Claude Code built-ins (`Explore`, `Plan`, `general-purpose`, `statusline-setup`), globally-authored agents under `~/.claude/agents/`, project-local agents under `./.claude/agents/`, and plugin-shipped agents from the plugin cache. Any agent whose dispatch string already appears in the merged lookup — including those explicitly set to `default` — is considered decided and stays out of the wizard. An entry can look like either a bare tier string or a small object recording the tier plus the shipped default it was seeded from — install writes the object form, this wizard always writes bare strings when you make a choice here — but both forms count as decided the same way, so an install-seeded entry never resurfaces in the wizard just because it isn't a plain string.
+Run `/lazy-core.agent-models`. The skill loads the `agent_models` sections from both your global `~/.claude/lazy.settings.json` and the project `./.claude/lazy.settings.json`, merges them into a single lookup, and discovers every dispatchable agent across your vault — Claude Code built-ins (`Explore`, `Plan`, `general-purpose`, `statusline-setup`), globally-authored agents under `~/.claude/agents/`, project-local agents under `./.claude/agents/`, and plugin-shipped agents from the plugin cache. Any agent whose dispatch string already appears in the merged lookup — including those explicitly set to `default` — is considered decided and stays out of the wizard. An entry can look like either a bare tier string or a small object recording the tier plus the shipped default it was seeded from — install writes the object form, this wizard always writes bare strings when you make a choice here — but both forms count as decided the same way, so an install-seeded entry never resurfaces in the wizard just because it isn't a plain string. The distinction matters beyond the wizard, too: a seeded object left untouched can still change tier on its own the next time the plugin installs (see "Relationship to install" below), while a bare string — your pin, whether you set it here or hand-edited a seeded entry — never does.
 
 Plugin-shipped agents are filtered by install scope before they ever reach the missing list. The plugin cache on your machine is shared across every project, so the wizard only counts an agent from a plugin installed at user (global) scope, or installed at project scope for this exact repo. An agent belonging to a plugin some other project installed locally never surfaces here — so it can't get stuck popping up as "needs interactive" in every unrelated repo you happen to run this wizard in.
 
@@ -69,7 +69,7 @@ Assigning a provider to a specific expert is a separate, content-level decision 
 
 **Changing an existing tier.** `/lazy-core.agent-models` never overwrites existing entries; it only adds missing ones. To override a tier that is already set globally, run `/lazy-core.agent-models --scope=project` — the project entry shadows the global one. To remove that project-level override and fall back to the global tier, delete the entry from `./.claude/lazy.settings.json` via `/lazy-core.slim-context` Phase 7, which re-prompts for any entries that go missing after cleanup.
 
-**Relationship to install.** Every plugin's own install skill pre-seeds curated tiers for the agents it ships, through the same shared seeding step every LazyCortex plugin install calls — it reads the identical curated-tiers table this wizard uses, so a tier never drifts between the two paths. An entry already seeded that way, or one already set to `default`, doesn't reappear in the wizard's missing list. `/lazy-core.agent-models` fills the remaining per-agent entries — anything not curated, plus your own project agents — across all discovered sources interactively. They do not overlap — install handles the bootstrap, this wizard handles everything discovered afterwards.
+**Relationship to install.** Every plugin's own install skill pre-seeds curated tiers for the agents it ships, through the same shared seeding step every LazyCortex plugin install calls — it reads the identical curated-tiers table this wizard uses, so a tier never drifts between the two paths. An entry already seeded that way, or one already set to `default`, doesn't reappear in the wizard's missing list. `/lazy-core.agent-models` fills the remaining per-agent entries — anything not curated, plus your own project agents — across all discovered sources interactively. They do not overlap — install handles the bootstrap, this wizard handles everything discovered afterwards. That bootstrap step stays live on every re-install, too: if you never touched a seeded entry and the plugin later ships a different curated tier for that agent, the next install run silently rewrites it to match — a stale shipped default isn't something you decided, so it doesn't need your say-so to catch up. The moment you touch a seeded entry yourself — through this wizard, or by hand-editing the tier so it no longer matches what it was seeded from — that entry becomes your pin, and install leaves it alone for good, whatever the curated table says afterward.
 
 **After an automated rollout.** If a repo was brought current by `lazy-core.autosetup` rather than by you running the install chain by hand, expect only the curated-default agents to already have tiers. Run `/lazy-core.agent-models` yourself afterward to finish routing the rest — it picks up exactly where the automated run left off.
 

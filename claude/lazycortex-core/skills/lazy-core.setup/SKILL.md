@@ -1,7 +1,7 @@
 ---
 name: lazy-core.setup
 description: "Run after `/plugin update`, on a fresh clone, after enabling a new plugin, or whenever the operator asks to set lazycortex up in this project — the meta-installer that discovers and runs every enabled plugin's `<namespace>.install` skill plus any `lazy_setup_phase:` configurator in one ordered pass, so the operator never invokes install skills one by one. Idempotent; `--dry-run` previews the plan without executing."
-allowed-tools: Read, Write, Glob, AskUserQuestion, Skill, Bash(mkdir -p *), Bash(git rev-parse *), Bash(date *), Bash(PYTHONPATH=* python3 *), Bash(python3 *), Agent
+allowed-tools: Read, Write, Glob, AskUserQuestion, Skill, Bash(mkdir -p *), Bash(git rev-parse *), Bash(date *), Bash(PYTHONPATH=* python3 *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
 ---
 # Run lazycortex meta-installer
 
@@ -41,7 +41,7 @@ Bring `.claude/lazy.settings.json` up to the current per-section schema version 
 Run exactly:
 
 ```
-Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 ${CLAUDE_PLUGIN_ROOT}/bin/lazy_settings.py migrate .claude/lazy.settings.json)
+Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazy_settings.py" migrate .claude/lazy.settings.json)
 ```
 
 The script prints one summary line, optionally followed by per-section upgrade lines. Examples:
@@ -61,7 +61,7 @@ Outcome:
 
 Scan plugin sources for two opt-in mechanisms — both convention-based, no central registry:
 
-1. **Plugin installers** — any skill whose directory name matches `*.install` inside an enabled plugin. Identify enabled plugins by reading `~/.claude/plugins/installed_plugins.json`. Use the entry's `installPath` field to resolve the cached source root.
+1. **Plugin installers** — any skill whose directory name matches `*.install` inside an enabled plugin. Resolve the enabled set per `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.setup-phases-contract.md` § "Resolving a repo's enabled plugin set": the union of the `enabledPlugins` maps in `./.claude/settings.json` and `./.claude/settings.local.json`, every key whose value is `true`, with the `@<marketplace>` suffix stripped off each key. That union is the only authority for enablement. `~/.claude/plugins/installed_plugins.json` is a machine-wide registry spanning every project on this host, so it MUST NOT be read as an enablement signal — consult it solely to resolve an enabled plugin's `installPath` (any entry for that plugin will do; the cache path is per-plugin-version, not per-project).
 2. **Cross-cutting / configurator skills** — any skill whose `SKILL.md` frontmatter declares `lazy_setup_phase:` with a value in `{pre-install, per-plugin, post-install}`.
 
 Glob the source roots:
@@ -71,11 +71,11 @@ Glob the source roots:
 
 For each match, `Read` its frontmatter and record:
 
-- `dispatch` — full skill name in `<plugin>:<namespace>.<name>` form. Use the plugin name from `installed_plugins.json` for cache hits, or the parent directory name for monorepo hits.
+- `dispatch` — full skill name in `<plugin>:<namespace>.<name>` form. Use the plugin name the `installPath` was resolved for on cache hits, or the parent directory name for monorepo hits.
 - `phase` — value of `lazy_setup_phase:` if present; else `per-plugin` if the directory name matches `*.install`; else **skip** (not part of the plan).
 - `path` — absolute path to the `SKILL.md`.
 
-Skills inside disabled plugins (cache hit but plugin not present in `installed_plugins.json`) are excluded.
+Skills inside plugins outside the enabled union are excluded — a cache hit for a plugin this repo does not enable belongs to some other project on this host. A plugin the repo enables but the machine has no cache entry for is reported as `skipped: plugin not installed on this machine`, never a hard failure.
 
 Outcome: `discovered: N skills (M install + K configurator)`.
 

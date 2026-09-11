@@ -1,10 +1,11 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes during lazycortex-experts setup — symptoms, likely causes, and fixes.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 no_diagram: true
 source_skills:
   - lazy-experts.install
+  - lazy-experts.audit
   - lazy-experts.interpreter
   - lazy-experts.designer
   - lazy-experts.architect
@@ -17,7 +18,7 @@ source_skills:
   - lazy-experts.debugger
   - lazy-experts.reviewer
   - lazy-experts.tester
-source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Troubleshooting
 
@@ -128,3 +129,43 @@ source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
 **Likely cause**: Seeding `agent_models` is delegated to a shared tier-seeding primitive that locates `lazycortex-core`'s `default-tiers.json` and reads the `lazycortex-experts:*` rows out of it. `sot-missing` means the primitive couldn't find that file at all — the same root cause as the "lazycortex-core not installed" abort above, just surfaced from inside the primitive instead of at the top of the run. `no-entries` means the file was found but carries no `lazycortex-experts:*` rows yet — usually a version mismatch after `lazycortex-experts` was updated ahead of `lazycortex-core`.
 
 **Fix**: Run `/plugin update lazycortex-core@lazycortex` to refresh the tiers file (add `/plugin update lazycortex-experts@lazycortex` too if `no-entries` persists), then re-run `/lazy-experts.install`.
+
+---
+
+## `/lazy-experts.audit` aborts with "plugin-root-unresolved"
+
+**Symptom**: Running `/lazy-experts.audit` stops immediately with `FAIL plugin-root-unresolved` before any other check runs.
+
+**Likely cause**: The audit couldn't find `lazycortex-experts@lazycortex`'s `installPath` in `~/.claude/plugins/installed_plugins.json`, and this repo isn't the one authoring the plugin's own sources — so there is no shipped agent/reference tree to check your composed experts against.
+
+**Fix**: Run `/plugin install lazycortex/lazycortex-experts`, then re-run `/lazy-experts.audit`.
+
+---
+
+## `/lazy-experts.audit` reports "no-experts-configured"
+
+**Symptom**: The audit report includes `INFO no-experts-configured`, and only the shipped-surface checks ran — no per-entry findings for your composed experts.
+
+**Likely cause**: The project's `lazy.settings.json` has no `experts` section yet, or the section holds nothing besides `_version` — there is nothing composed yet to check.
+
+**Fix**: Run `/lazy-experts.install` to seed a class set, then re-run `/lazy-experts.audit` to check the seeded entries.
+
+---
+
+## `/lazy-experts.audit` reports `FAIL agent-missing` or `FAIL aspect-missing`
+
+**Symptom**: The report includes a line like `FAIL agent-missing: developer → lazy-experts.implementer.md` or `FAIL aspect-missing: lazy-experts.terms-aspect.md`.
+
+**Likely cause**: These two checks run against the plugin's own shipped tree, not your settings — a role the class map assigns has no matching agent file, or an aspect the map assigns has no matching reference file. The shipped plugin cache itself is incomplete, usually from an interrupted `/plugin install` or `/plugin update`.
+
+**Fix**: Run `/plugin update lazycortex-experts@lazycortex` to restore the missing file, then re-run `/lazy-experts.audit`. Unlike every other finding this skill raises, the fix here is NOT `/lazy-experts.install` — that skill has no way to repair a gap in the shipped plugin cache.
+
+---
+
+## `/lazy-experts.audit` reports `FAIL agent-ref-unresolved`
+
+**Symptom**: The report includes a line like `FAIL agent-ref-unresolved: claude-plugin.designer → lazycortex-experts:lazy-experts.designer`, for an entry already composed in your `lazy.settings.json`.
+
+**Likely cause**: This is the read-only counterpart to the `verify-failed: agent-ref-unresolved` abort `/lazy-experts.install` reports at its own verify step (above) — the entry's `agent` ref names a basename this plugin no longer ships under `agents/`, most often a hand-edited `agent` field in `lazy.settings.json`.
+
+**Fix**: Correct the ref by hand in `lazy.settings.json`, or delete the entry and re-run `/lazy-experts.install` to reseed it from the class map.

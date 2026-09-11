@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a product bound to an existing codebase, generate its vision, design, and tech docs from source, then scaffold the first feature.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 diagram_spec:
   anchor: "How the skills hand off"
   request: "Sequence diagram showing the three-skill journey: operator runs lazy-spec.product-config to register the product and write settings, then runs lazy-spec.create-from-code to scan source and produce design + tech docs, then runs lazy-spec.create-feature to scaffold the first feature asset; show the operator, each skill, and the spec vault as actors, with the key handoff points between them."
@@ -9,7 +9,7 @@ source_skills:
   - lazy-spec.product-config
   - lazy-spec.create-from-code
   - lazy-spec.create-feature
-source_sha: 4c1fc21fa461e2e75f749544b50b738a8a706cb2
+source_sha: 3f4c00192599a38cbb9db4308367d5db80ec2dfd
 ---
 # How do I get specs for a codebase that already exists?
 
@@ -68,11 +68,11 @@ The key decisions you will make:
 - **Asset types** — optional; declare any beyond the shipped feature/change/bug set now, or later via `/lazy-spec.add-asset-type`.
 - **Workflow mode** — `full` (design through implementation and testing, the default) or `spec-only` (stops after `design.md` approves, released only by an explicit operator word). Most code-bound products want `full`.
 
-When the wizard finishes, the skill writes the product record into settings, creates the product folder with its folder-note — now the level note the `spec.catalog-coordinator` owns, carrying `spec_role: product`, the four level gates (all starting `false`), and the coordinator's own sections (`# Summary`, `# Gates`, `# Status brief`, `# Coordinator rules`, `# Coordinator commands`, `# History`, `# Attachments`) alongside its précis and stats markers — plus the shared vault-root request inbox, and generates the built-in review classes — one per document type marked for review (use-cases, design, system-vision, system-design, system-tech, code-plan, test-plan, bug, plus the implementation and testing report docs) — reusing the vault's shared set when your expert choices match it. It then runs `/lazy-spec.doctor` automatically and reports any issues.
+When the wizard finishes, the skill writes the product record into settings, creates the product folder with its folder-note — now the level note the `spec.catalog-coordinator` owns, carrying `spec_role: product`, the four level gates (all starting `false`), and the coordinator's own sections (`# Summary`, `# Gates`, `# Status brief`, `# Coordinator rules`, `# Coordinator commands`, `# History`, `# Attachments`) alongside its précis and stats markers — plus the shared vault-root request inbox, and generates the built-in review classes — one per document type marked for review (use-cases, design, system-vision, system-design, system-tech, code-plan, test-plan, bug, plus the implementation and testing report docs) — reusing the vault's shared set when your expert choices match it. It then runs `/lazy-spec.audit` automatically and reports any issues.
 
 If `/lazy-spec.product-config` points you at `lazycortex-experts` before finishing, it means a chosen expert name is not registered. Compose the persona via `lazycortex-experts`, then re-run `/lazy-spec.product-config`.
 
-**Verification gate.** Before continuing, confirm that `lazy-spec.doctor` in the report shows no failures. The product folder and its folder-note should exist on disk, carrying `spec_role: product` and its four level gates all `false` — `features/`, `changes/`, and `bugs/` do not appear yet: group folders are created lazily, the first time an asset lands in one (Step 4 is what creates `features/`).
+**Verification gate.** Before continuing, confirm that `lazy-spec.audit` in the report shows no failures. The product folder and its folder-note should exist on disk, carrying `spec_role: product` and its four level gates all `false` — `features/`, `changes/`, and `bugs/` do not appear yet: group folders are created lazily, the first time an asset lands in one (Step 4 is what creates `features/`).
 
 ### Step 3 — Generate the spec from code with `/lazy-spec.create-from-code`
 
@@ -132,7 +132,7 @@ The product is registered and its initial spec is live. From here:
 - **Keep docs in sync with code** — when source changes land, run `/lazy-spec.sync-with-code <compound-key>` to surface behavior changes for the design doc, update branch pins if you are working on a non-default branch, and propose gate/stage corrections (e.g. flipping `spec_develop_done`) grounded in what actually shipped — always with your confirmation before anything is written.
 - **Drive assets through their gates** — use `/lazy-spec.flip-gate` to advance a feature's readiness gates (`spec_design_done` → `spec_plan_done` → …), or let `spec.coordinator` advance derived gates for you on its next wake (the `lazy-spec.gate-tick` routine itself only polls jobs and checks note structure).
 - **Re-run the doc scan** — if the codebase grows significantly, re-run `/lazy-spec.create-from-code <compound-key>` to refresh the design and tech docs. The skill reconciles existing branch pins before overwriting, and leaves an already-present `vision.md` untouched.
-- **Doctor checks** — run `/lazy-spec.doctor <compound-key>` at any time to audit the product tree for broken links, missing sections, role violations, and source-link staleness. It is read-only by default and only reports; pass `--apply` to walk through the findings and confirm fixes one at a time.
+- **Audit checks** — run `/lazy-spec.audit <compound-key>` at any time to audit the product tree for broken links, missing sections, role violations, and source-link staleness. It is read-only and only reports: each finding names the verb, skill, or hand edit that clears it.
 
 ## How the skills hand off
 

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """CLI entry shim for lazy-review.
 
-The daemon's ``lazy-review.scan`` md-scan routine dispatches
-``lazycortex-review process-file <abs-path>`` through this script.
-Operator-facing subcommands (``status``, ``start``, ``stop``,
-``finalize``) also dispatch here. See ``lazy_review.build_parser``
-for the full subcommand list.
+The daemon's review routines dispatch through this script:
+``lazy-review.coordinator-watch`` runs ``coordinator-dispatch``,
+``lazy-review.collect`` runs ``collect-tick``, and
+``lazy-review.sanitize`` runs ``sanitize``. Operator-facing
+subcommands (``status``, ``start``, ``stop``, ``finalize``) also
+dispatch here. See ``lazy_review.build_parser`` for the full
+subcommand list.
 """
 from __future__ import annotations
 import sys

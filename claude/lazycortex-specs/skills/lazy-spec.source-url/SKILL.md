@@ -1,6 +1,6 @@
 ---
 name: lazy-spec.source-url
-description: "Dispatched by every `spec.*` skill and generator agent that emits a link to a file or directory in a source repo — `lazy-spec.create-from-code`, `lazy-spec.sync-with-code`, `lazy-spec.doctor`, `lazy-spec.product-config`, `lazy-spec.rebase-pins`. Not for direct use except when a human is debugging a wrong URL. Nobody inlines a forge path scheme (GitHub `/blob/`, GitLab `/-/blob/`, Bitbucket `/src/`) anywhere else."
+description: "Dispatched by every `spec.*` skill and generator agent that emits a link to a file or directory in a source repo — `lazy-spec.create-from-code`, `lazy-spec.sync-with-code`, `lazy-spec.audit`, `lazy-spec.product-config`, `lazy-spec.rebase-pins`. Not for direct use except when a human is debugging a wrong URL. Nobody inlines a forge path scheme (GitHub `/blob/`, GitLab `/-/blob/`, Bitbucket `/src/`) anywhere else."
 execution-discipline-waiver: "Single-purpose primitive — wraps the known-forges table; no multi-phase orchestration where step-skip can hide."
 ---
 # Source URL

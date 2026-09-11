@@ -105,6 +105,8 @@ class _K:
     REMOTE_MIRROR_VERB: The core CLI's `remote-mirror` subcommand token.
     PROG: CLI program name shown in `--help` output.
     ARG_CWD: CLI flag overriding the repo root.
+    ARG_APPLY: `upstream-doctor` flag selecting its repair mode over its read-only default.
+    ACTION_STORE_TRUE: `argparse` action name for a boolean flag.
     MODE: `remote-mirror` request field naming the mode token.
     CACHE_DIR: `remote-mirror` request field naming the shared working-clone directory.
     INCLUDE: `remote-mirror` request field naming the include-glob list scoping the request.
@@ -198,6 +200,8 @@ class _K:
   REMOTE_MIRROR_VERB = "remote-mirror"
   PROG = "lazycortex-specs upstream-tick"
   ARG_CWD = "--cwd"
+  ARG_APPLY = "--apply"
+  ACTION_STORE_TRUE = "store_true"
   MODE = "mode"
   CACHE_DIR = "cache_dir"
   INCLUDE = "include"
@@ -257,6 +261,17 @@ _PROCESSED_WITHOUT_SNAPSHOT_DETAIL = (
     "note reads `spec_upstream_status: processed` but `processed/` is missing or empty"
 )
 _IN_REVIEW_NO_LINK_DETAIL = "note reads `spec_upstream_status: in-review` but carries no request link"
+
+# `doctor_apply` result keys, doubling as the tag `_apply_unit_reset` returns its entry under.
+_APPLY_RESET = "reset"
+_APPLY_SKIPPED = "skipped"
+
+# `doctor_apply` skip reason: an empty `processed/` classifies as neither released status —
+# `drifted` claims a baseline the directory does not hold, `new` claims the unit was never
+# accepted, which the directory's own existence contradicts.
+_AMBIGUOUS_SNAPSHOT_REASON = (
+    "`processed/` exists but is empty — neither `drifted` nor `new` describes the unit"
+)
 
 
 # ----------------------------------------------------------------------------------------
@@ -513,7 +528,7 @@ def _call_remote_mirror(repo: Path, payload: dict) -> dict:
   env = os.environ.copy()
   env[_K.REPO_ROOT_ENV] = str(repo)
   proc = subprocess.run(
-      [str(cli), _K.REMOTE_MIRROR_VERB],
+      [sys.executable, str(cli), _K.REMOTE_MIRROR_VERB],
       input = json.dumps(payload), capture_output = True, text = True, env = env, check = False,
   )
   # guard: the CLI's own contract is "0 on success, 1 on any failure — always valid JSON on
@@ -2585,7 +2600,7 @@ class DoctorFinding:
   """
   Closed vocabulary of `doctor_scan` finding kinds (`docs/tasks/lazycortex-specs.upstream.md`
   § 13). Every kind here is a FAIL — `doctor_scan` never emits a WARN-severity finding; the
-  severity call is `lazy-spec.doctor`'s own, made against the calling agent's report format.
+  severity call is `lazy-spec.audit`'s own, made against the calling agent's report format.
 
   Attributes:
     UNCONFIGURED_SOURCE: A `upstream/<repo-key>/` subtree exists with no matching config entry
@@ -2819,7 +2834,7 @@ def doctor_scan(repo: Path) -> dict:
 
   Wiki.domains-style honesty (§ 13): when `spec.upstream` carries no configured source, this
   returns `configured: False` with no findings at all — a scope the operator never set up has
-  nothing to be wrong. Every finding kind here is `lazy-spec.doctor`'s own to render as FAIL; this
+  nothing to be wrong. Every finding kind here is `lazy-spec.audit`'s own to render as FAIL; this
   worker never distinguishes severity or offers a fix — `orphaned` / `invalid` / `excluded` /
   `postponed` units and an active `in-review` freeze are the documented steady states (§ 13)
   and are never findings on their own.
@@ -2838,8 +2853,8 @@ def doctor_scan(repo: Path) -> dict:
   """
 
   # Contract:
-  # Read-only: no write, no commit, ever. `lazy-spec.doctor` (Check 9) and its own fix loop rely
-  # on this — a doctor scan must never itself be the thing that changes state.
+  # Read-only: no write, no commit, ever. `lazy-spec.audit` (Check 9) and the repair routes it
+  # names rely on this — a doctor scan must never itself be the thing that changes state.
 
   cfg = _load_upstream_config(repo)
   repo_keys = _source_keys(cfg)
@@ -2895,6 +2910,130 @@ def doctor_scan(repo: Path) -> dict:
   return { "configured": True, "findings": findings }
 
 
+def _apply_unit_reset(
+    repo: Path, repo_key: str, mount: str, unit_path: str, unit_dir: Path, url: str,
+) -> tuple[str, dict] | None:
+  """
+  Release one unit frozen on a request that no longer resolves, back onto its own § 8 ladder
+  position — the `DoctorFinding.DANGLING_REQUEST_LINK` repair.
+
+  A unit carrying an accepted snapshot is released onto `UpstreamStatus.DRIFTED`; one that never
+  held a snapshot is released onto `UpstreamStatus.NEW`. A snapshot directory that exists but
+  holds nothing answers to neither, and is reported rather than guessed at.
+
+  Args:
+    repo: Repository root.
+    repo_key: The unit's source key.
+    mount: The unit's mount name.
+    unit_path: The unit's own path, relative to its mount's `source_path`.
+    unit_dir: The unit's own directory.
+    url: The owning source's configured git URL.
+
+  Returns:
+    `(_APPLY_RESET, entry)` when the unit was released, `(_APPLY_SKIPPED, entry)` when it carries
+    the dangling mutex but cannot be classified, or `None` when the repair does not cover it at
+    all — a noteless directory, a unit outside `UpstreamStatus.IN_REVIEW`, or a freeze whose
+    request still resolves.
+  """
+  title = unit_path.rsplit("/", 1)[-1]
+  note_path = unit_dir / f"{title}{_K.MD_SUFFIX}"
+  # guard: material without a note — `doctor_scan` reports it, there is nothing here to reset
+  if not note_path.is_file():
+    return None
+  fm, body = _read_note(note_path)
+
+  # guard: only a frozen unit can carry the dangling mutex this repair clears
+  if fm.get(UpstreamKey.STATUS) != UpstreamStatus.IN_REVIEW:
+    return None
+  request_raw = fm.get(UpstreamKey.REQUEST)
+  # guard: the freeze still has a live request behind it — Phase A owns that unit, not the doctor
+  if request_raw and _read_request_frontmatter(repo, _wikilink_target(request_raw)) is not None:
+    return None
+
+  # the released ladder position, read off the snapshot exactly as `_advance_frozen_unit` reads it
+  processed_dir = unit_dir / _K.PROCESSED_DIR
+  entry = { "repo_key": repo_key, "mount": mount, "unit_path": unit_path }
+  # guard: a snapshot directory holding nothing answers to neither released status
+  if processed_dir.is_dir() and not any(processed_dir.iterdir()):
+    return _APPLY_SKIPPED, { **entry, "reason": _AMBIGUOUS_SNAPSHOT_REASON }
+  fallback_status = UpstreamStatus.DRIFTED if processed_dir.is_dir() else UpstreamStatus.NEW
+
+  # the closing outcome's own history line, in the same voice Phase A's release branches use
+  history_note = (
+      f"linked request [[{_wikilink_target(request_raw)}]] no longer resolves — "
+      f"released to {fallback_status}"
+      if request_raw else
+      f"no request link recorded — released to {fallback_status}"
+  )
+  _release_unit(
+      repo, unit_dir, unit_path, url, fm.get(UpstreamKey.REVISION, ""), body,
+      fallback_status, history_note,
+  )
+  return _APPLY_RESET, { **entry, "status": fallback_status }
+
+
+def doctor_apply(repo: Path) -> dict:
+  """
+  Perform the one `spec.upstream` repair no tick and no sibling verb reaches: reset every unit
+  frozen on `UpstreamStatus.IN_REVIEW` whose `spec_upstream_request` no longer resolves.
+
+  Every released unit's status, `tags:` mirror, icon paint, and `# History` line move together
+  in one atomic commit; the stale request link disappears with them. Nothing else in the
+  `DoctorFinding` vocabulary is touched: the other findings already have a repair route.
+
+  Guarantees:
+    - `source/` and `processed/` are never written, moved, or deleted — only the unit note is.
+    - A unit whose released status cannot be derived is reported under `skipped` and left
+      byte-for-byte alone, never guessed onto one of the two statuses.
+
+  Args:
+    repo: Repository root.
+
+  Returns:
+    `{configured, reset, skipped}` — `reset` lists `{repo_key, mount, unit_path, status}` for
+    every released unit, `skipped` lists `{repo_key, mount, unit_path, reason}` for every unit
+    carrying the dangling mutex that could not be classified. Both are empty, and `configured`
+    is `False`, when `spec.upstream` has no configured source at all.
+  """
+
+  # Contract:
+  # A unit's `source/` and `processed/` directories are never written, moved, or deleted by this
+  # pass; the unit note is the only file it rewrites.
+
+  # Contract:
+  # A unit whose released status cannot be derived is reported under `skipped` and left
+  # byte-for-byte alone — it is never guessed onto `drifted` or `new`.
+
+  cfg = _load_upstream_config(repo)
+  repo_keys = _source_keys(cfg)
+
+  # guard: nothing configured — silent, exactly as the read-only scan is
+  if not repo_keys:
+    return { "configured": False, _APPLY_RESET: [], _APPLY_SKIPPED: [] }
+
+  # walk the same configured-and-materialized units the scan walks, in the same order
+  upstream_root = repo / _K.UPSTREAM_ROOT
+  outcomes: dict[str, list[dict]] = { _APPLY_RESET: [], _APPLY_SKIPPED: [] }
+  for repo_key in repo_keys:
+    url = cfg[repo_key].get(_K.URL, "")
+    repo_base = upstream_root / repo_key
+    on_disk_mounts = (
+        { path.name for path in repo_base.iterdir() if path.is_dir() }
+        if repo_base.is_dir() else set()
+    )
+    for mount in sorted(_configured_mounts(cfg, repo_key) & on_disk_mounts):
+      for unit_path, unit_dir in sorted(_material_unit_dirs(repo_base / mount).items()):
+        outcome = _apply_unit_reset(repo, repo_key, mount, unit_path, unit_dir, url)
+        # guard: the repair does not cover this unit — nothing to record
+        if outcome is None:
+          continue
+        tag, entry = outcome
+        outcomes[tag].append(entry)
+
+  # both lists folded into the same envelope shape the scan returns
+  return { "configured": True, **outcomes }
+
+
 def main(argv: list[str]) -> int:
   """
   Run the `upstream-tick` subcommand.
@@ -2921,20 +3060,24 @@ def main(argv: list[str]) -> int:
 
 def main_doctor(argv: list[str]) -> int:
   """
-  Run the `upstream-doctor` subcommand.
+  Run the `upstream-doctor` subcommand, in its read-only default mode or its `--apply` repair mode.
 
   Args:
-    argv: Subcommand tail (optional `--cwd`).
+    argv: Subcommand tail (optional `--cwd`, optional `--apply`).
 
   Returns:
-    `0` always — `doctor_scan` is read-only and reports every finding in its own JSON output
-    rather than raising.
+    `0` always — both modes report their whole outcome in their own JSON output rather than
+    raising.
+
+  Raises:
+    SystemExit: `argparse` rejects an unrecognised flag or a missing option value (exit `2`).
   """
   parser = argparse.ArgumentParser(prog = _K.DOCTOR_PROG)
   parser.add_argument(_K.ARG_CWD, default = None)
+  parser.add_argument(_K.ARG_APPLY, action = _K.ACTION_STORE_TRUE)
   args = parser.parse_args(argv)
   repo = Path(args.cwd).resolve() if args.cwd else spec_paths.find_settings_root(Path.cwd())
-  print(json.dumps(doctor_scan(repo)))
+  print(json.dumps(doctor_apply(repo) if args.apply else doctor_scan(repo)))
   return 0
 
 

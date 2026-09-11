@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, likely causes, and fixes for lazycortex-obsidian — install, iconize, diagram render, plugin updates, tag pages, and vault manifest capture/deploy.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree branching first on which skill aborted or misbehaved (install / iconize-install / iconize-config / iconize-sync / diagram-install / update-plugin / gen-tag-pages); each branch then splits on the specific symptom; each leaf names the troubleshooting entry that resolves it"
@@ -16,7 +16,7 @@ source_skills:
   - lazy-obsidian.audit
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: 74f5515593a4aa6587f57c7df78a2fa5a85ee56f
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Troubleshooting
 
@@ -87,6 +87,26 @@ source_sha: 74f5515593a4aa6587f57c7df78a2fa5a85ee56f
 **Likely cause**: The plugin was updated via `/plugin update lazycortex-obsidian@lazycortex` and the vault's icon-map declares a `schema_version` this worker no longer supports (or a `min_hook_version` the worker does not satisfy).
 
 **Fix**: Run `/lazy-obsidian.iconize-sync check-versions` to confirm the drift report, then re-run `/lazy-obsidian.iconize-install` — it migrates the icon-map schema where a migration path exists.
+
+---
+
+## A lot of notes' icons changed after `/lazy-obsidian.iconize-sync reconcile` following a plugin update
+
+**Symptom**: After updating the plugin, running `/lazy-obsidian.iconize-sync reconcile` (directly, or via the repaint routine / `check-versions`) rewrites `iconize_icon` / `iconize_color` on far more notes than you expected, producing a large frontmatter diff across the vault.
+
+**Likely cause**: Two changes land together in a worker update. First, several document types that used to share one generic icon now each get their own, so every note of those types picks up a new icon on its next resolve. Second, a bug fix in how a state rule (one that only paints a colour, like a stage or status matcher) resolves its icon: it used to borrow whatever icon the note already carried through a self-referential token, and that borrowed value was wrongly treated as the rule naming a real icon — so a note whose icon had gone stale, or was wrong for its type, kept that icon forever, because the walk stopped there and the rule that actually owns the icon (keyed off the note's declared type) was never reached. The worker no longer treats that borrow as a name: the state's colour now carries down to the rule that owns the icon, which re-resolves it from the note's type.
+
+**Fix**: Expected, not a bug. Review the diff the same way you would after `/lazy-obsidian.capture` (see above) — a note whose icon disagreed with its declared type is now corrected; a note no rule claims is left exactly as it was. Commit the repaint once you've confirmed it looks right. Re-running `reconcile` is safe and idempotent.
+
+---
+
+## A custom iconize callback matcher produces no icon, or now refuses instead of staying silent
+
+**Symptom**: A registry matcher of shape `{"callback": "<id>"}` never produces an icon or colour for notes it should match, with no error visible anywhere. After updating the plugin, the same callback instead reports `callback '<id>' unusable: ...` on stderr during `/lazy-obsidian.iconize-sync reconcile` (or `reconcile-plugin <plugin>` for a shipped registry callback) and still paints nothing.
+
+**Likely cause**: The worker used to launch a callback script as a bare executable, requiring its execute bit to be set, and returned no answer at all — no error, no icon — when that bit was missing. A mode-blind git client strips execute bits on checkout (Obsidian's mobile sync is the common case, along with some Windows checkouts), so a callback that worked on the machine that authored it silently stopped answering everywhere else. The worker no longer checks or requires the execute bit: it reads the callback script's own first line and launches it through whatever interpreter that shebang names. A script with no `#!` line, or naming an interpreter that can't be resolved, is now refused out loud instead of failing dark.
+
+**Fix**: Give the callback script a proper shebang (`#!/usr/bin/env python3` or similar) — the execute bit is never checked and does not need setting. If a shebang is already present and the callback still fails, the stderr message names what interpreter resolution didn't find; fix that path in the shebang line or the environment. Re-run `/lazy-obsidian.iconize-sync reconcile` once fixed.
 
 ---
 

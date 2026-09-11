@@ -1,15 +1,16 @@
 ---
 chapter_type: block
 summary: Project-specific guideline files in docs/guidelines/ plus [tool.pcf] declarations in pyproject.toml let you extend the project-neutral canon per repo.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 no_diagram: true
 source_skills:
   - lazy-python.install
   - lazy-python.coding-guidelines
   - lazy-python.documenting-guidelines
+  - lazy-python.comment-guidelines
   - lazy-python.testing-guidelines
   - lazy-python.guidelines-index
-source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Per-repo overlay guidelines
 
@@ -25,20 +26,24 @@ When `/lazy-python.install` runs its Step 5, it scaffolds four stub files under 
 
 **`lazy-python.documenting-guidelines`** is the canon that `documenting_guidelines.md` extends: the fixed class-docstring section order (Summary, Scope, Responsibilities, Guarantees, Subclassing, Notes, Type Parameters, Attributes), plus two hooks the canon leaves for your project to fill — an extra section registered via `[tool.pcf] extra_docstring_sections`, and a private-attribute escape hatch registered via `[tool.pcf] d2_exempt_marker_attrs`. The overlay file itself carries the content rules for whatever you register.
 
+**`lazy-python.comment-guidelines`** is the sibling canon documenting-guidelines was split from for size — purpose comments and guard clauses, the marker-comment register (`TODO:`, `TMP:`, `DBG:`, `ref:`, `opt:`, `limit:`, `Decision:`, `guard:`, `waiver:`), `# Contract:` blocks, and `Domain(…):` blocks. It has no `[tool.pcf]` overlay hook of its own and no dedicated `docs/guidelines/*.md` stub — the one project-specific pointer it defers to is the domain-groups dictionary path (`docs/guidelines/domain-groups.md`), covered under "How they work together" below, where `Domain(…):` group names come from.
+
 **`lazy-python.testing-guidelines`** is the canon that `testing_guidelines.md` extends: the `<YourBaseTest>` placeholder every generated test class inherits from, the seven Paranoid-Testing categories tests are expected to cover, and the log-level suppression pattern (`with_log_level(...)`) tests use around expected warnings or errors. Your overlay is the only place that names the real base class, any aggregate test file pattern, and the log-suppression helper your project actually ships.
 
-**`lazy-python.guidelines-index`** is the entry point tying the four canon files together, and its own "Portability notes" section is effectively a pointer at what belongs in your overlay: CLI tool names (`chk`/`tst`/`imp`), the copyright header owner/license text, and the base test class are all called out there as placeholders a project ships in its own overlay rather than in the plugin.
+**`lazy-python.guidelines-index`** is the entry point tying the canon files together, and its own "Portability notes" section is effectively a pointer at what belongs in your overlay: CLI tool names (`chk`/`tst`/`imp`), the copyright header owner/license text, and the base test class are all called out there as placeholders a project ships in its own overlay rather than in the plugin.
 
 ## How they work together
 
-The overlay lives in four files, one per canon topic:
+The overlay lives in four files, one per stub topic:
 
 - `docs/guidelines/coding_guidelines.md` extends `lazy-python.coding-guidelines.md`
 - `docs/guidelines/documenting_guidelines.md` extends `lazy-python.documenting-guidelines.md`
 - `docs/guidelines/testing_guidelines.md` extends `lazy-python.testing-guidelines.md`
 - `docs/guidelines/checking_guidelines.md` extends `lazy-python.checking-guidelines.md`
 
-`docs/guidelines/` also holds a fifth file that is not one of these four: `domain-groups.md`, the language-neutral domain-groups dictionary that `Domain(<group>):` knowledge markers draw their group names from (per `lazy-python.coding-guidelines.md`'s Knowledge Marker Rules and the `docs/guidelines/domain-groups.md` path named in `lazy-python.documenting-guidelines.md`). `/lazy-python.install` Step 5 does not scaffold it — the dictionary is owned by the wiki plugin's domain tooling and built by `/lazy-python.knowledge-sweep` when a repo adopts markers without that tooling. Don't mistake it for a fifth overlay stub; it shares the directory, not the mechanism.
+`lazy-python.comment-guidelines` is not in this list — its marker-comment and `Contract:`/`Domain(…):` conventions are plugin-owned canon with no per-project stub of their own, aside from the domain-groups pointer below.
+
+`docs/guidelines/` also holds a fifth file that is not one of the four stubs: `domain-groups.md`, the language-neutral domain-groups dictionary that `Domain(<group>):` knowledge markers draw their group names from (per `lazy-python.comment-guidelines.md`'s Domain Comments section and the `docs/guidelines/domain-groups.md` path it names). `/lazy-python.install` Step 5 does not scaffold it — the dictionary is owned by the wiki plugin's domain tooling and built by `/lazy-python.knowledge-sweep` when a repo adopts markers without that tooling. Don't mistake it for a fifth overlay stub; it shares the directory, not the mechanism.
 
 The practical workflow: fill in the overlay stub for the topic you care about, add any matching `[tool.pcf]` declaration to `pyproject.toml` if the rule is mechanical, then dispatch the relevant writer or reviewer agent (see the agents block article for their full dispatch discipline). The agent picks up your additions immediately — no flag, no re-install, no changes to the prompt. If you later tighten or extend a rule, re-run the agent against the affected files; it re-reads the overlay on every dispatch and its output will reflect the updated spec.
 
@@ -94,4 +99,4 @@ This follows the same File-sync policy `/lazy-python.install` applies to every a
 
 ## Where this fits
 
-The overlay files are scaffolded by the `install-and-audit` block's `/lazy-python.install` Step 5. The canon they extend lives in the `discipline` block — the five reference guidelines (`coding-guidelines`, `documenting-guidelines`, `testing-guidelines`, `checking-guidelines`, `guidelines-index`) that writer and reviewer agents load before reading your overlay. The `agents` block is where the docstring-writer, test-writer, and code-reviewer agents live; their full dispatch discipline — including exactly how each one reads canon and overlay together — is described in that block's article. The `add-project-overlay` walkthrough covers the end-to-end flow: scaffold stubs, fill them in, and confirm the delta appears in the next writer-agent dispatch.
+The overlay files are scaffolded by the `install-and-audit` block's `/lazy-python.install` Step 5. The canon they extend lives in the `discipline` block — the six reference guidelines (`coding-guidelines`, `documenting-guidelines`, `comment-guidelines`, `testing-guidelines`, `checking-guidelines`, `guidelines-index`) that writer and reviewer agents load before reading your overlay. The `agents` block is where the docstring-writer, test-writer, domain-writer, contract-writer, and code-reviewer agents live; their full dispatch discipline — including exactly how each one reads canon and overlay together — is described in that block's article. The `add-project-overlay` walkthrough covers the end-to-end flow: scaffold stubs, fill them in, and confirm the delta appears in the next writer-agent dispatch.

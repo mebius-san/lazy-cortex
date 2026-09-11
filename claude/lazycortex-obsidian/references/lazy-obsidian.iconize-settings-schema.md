@@ -38,7 +38,7 @@ Settings UI labels are defined in the `FrontmatterOptions` class (line 5058):
 
 The template at `claude/lazycortex-obsidian/templates/obsidian/plugin-settings.json` already encodes the three required values shown in the table above (`iconInFrontmatterEnabled: true`, `iconInFrontmatterFieldName: "iconize_icon"`, `iconColorInFrontmatterFieldName: "iconize_color"`) under its `obsidian-icon-folder.settings` key.
 
-`/lazy-obsidian.update-plugin obsidian-icon-folder` is the applier — it deep-merges that override block onto the vault's `obsidian-icon-folder/data.json` after every binary sync. `lazy-obsidian.audit` Phase 2.5 re-verifies those three keys against this reference file, to catch drift if a future Iconize release renames them.
+`/lazy-obsidian.update-plugin obsidian-icon-folder` is the applier — it deep-merges that override block onto the vault's `obsidian-icon-folder/data.json` after every binary sync. The plugin maintainer's own audit tooling re-verifies those three keys against this reference file, to catch drift if a future Iconize release renames them; `/lazy-obsidian.audit` does not — it is scoped to vault-manifest drift alone.
 
 ## Icon-map key: `paint_roots`
 

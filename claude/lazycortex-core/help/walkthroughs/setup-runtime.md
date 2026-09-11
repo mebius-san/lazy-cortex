@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
-summary: Bootstrap the per-repo runtime daemon and know how to recover it with /lazy-runtime.recover from any of its halt reasons — dirty tree, remote sync, bad routine config, or a closed rate-limit window.
-last_regen: 2026-09-09
+summary: Bootstrap the per-repo runtime daemon and know how to recover it with /lazy-runtime.recover from any of its halt reasons — dirty tree, remote sync, a repeating bot commit, a shared inbox, bad routine config, or a closed rate-limit window.
+last_regen: 2026-09-11
 diagram_spec:
   anchor: "How setup and recovery connect"
   request: "Sequence diagram showing three phases: (1) User runs /lazy-core.install, answers yes to the runtime-daemon wizard, wizard writes .claude/bin/lazy.runtime.sh + lazy.settings.json[experts] + flat daemon and routines sections; (2) User runs .claude/bin/lazy.runtime.sh, daemon starts and polls .experts/.jobs/ on interval, user checks .runtime/state.json for a recent last_run; (3) Working tree goes dirty, daemon writes daemon_halted to .runtime/state.json, user runs /lazy-runtime.recover, skill shows halt context, user picks a cleanup mode (commit/stash/discard), skill clears daemon_halted, daemon resumes on next iteration."
@@ -9,11 +9,11 @@ diagram_spec:
 source_skills:
   - lazy-core.install
   - lazy-runtime.recover
-source_sha: d4ce013c331568c5c4815b553aaf9382f01eae69
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # How do I bootstrap the runtime daemon and recover it if it halts?
 
-The expert runtime gives you a serial, per-repo daemon that drains a job queue and runs registered plugin routines. Getting from zero to a daemon that runs in the background is a short journey: install the runtime layer, confirm every registered expert is actually launchable, confirm the daemon is polling, then know how to unblock it if it halts — from a dirty working tree, a failed remote sync or local git failure, a routine config gone invalid, or a closed subscription rate-limit window.
+The expert runtime gives you a serial, per-repo daemon that drains a job queue and runs registered plugin routines. Getting from zero to a daemon that runs in the background is a short journey: install the runtime layer, confirm every registered expert is actually launchable, confirm the daemon is polling, then know how to unblock it if it halts — from a dirty working tree, a failed remote sync or local git failure, a repeating bot commit, two checkouts sharing one inbox, a routine config gone invalid, a settings value a routine's own CLI rejects, or a closed subscription rate-limit window.
 
 ## Outcome
 
@@ -39,8 +39,10 @@ With the runtime layer in place, decide how you want it driven:
 - **A background daemon that polls on its own** — set `daemon.enabled: true` in `<repo-root>/.claude/lazy.settings.json` and re-run `/lazy-core.install`. With the flag true, install asks which host and checkout should drive the project (`daemon.run_here`) — the only place a daemon question is ever asked — and installs the supervisor unit once you confirm. Or skip the supervisor and start the daemon directly from the repo root:
 
 ```
-.claude/bin/lazy.runtime.sh
+bash .claude/bin/lazy.runtime.sh
 ```
+
+Run it through `bash` explicitly rather than executing the file directly — install no longer sets an executable bit on the shim (a cloud-sync client or a Windows checkout used to strip it anyway), and the shim itself execs its runner through the Python interpreter rather than relying on its own exec bit, so the file never needs one.
 
 Before the daemon will actually start, it needs its own OAuth token: set `daemon.token_env` in `<repo-root>/.claude/lazy.settings.json` to the name of an environment variable holding this daemon's token — the value itself lives in the environment or in `~/.claude/.env`, never in settings. The daemon resolves that variable at startup and exports it as `CLAUDE_CODE_OAUTH_TOKEN` to every job and routine it spawns; without it the daemon refuses to start rather than run silently on whatever account the machine happens to be logged into.
 
@@ -60,7 +62,7 @@ If an expert fails, the skill walks you through one fix at a time — dropping a
 
 ### Step 3 — Verify the daemon is polling (verification gate)
 
-After one polling interval, open `.runtime/state.json` and confirm the `last_run` timestamp is recent. If the timestamp is absent or stale, check that the shim is executable (`ls -l .claude/bin/lazy.runtime.sh`) and that Python 3.12+ is on your `$PATH`.
+After one polling interval, open `.runtime/state.json` and confirm the `last_run` timestamp is recent. If the timestamp is absent or stale, confirm you started the shim with `bash .claude/bin/lazy.runtime.sh` (not by executing the file directly — its own exec bit no longer matters, so a permission error there points elsewhere) and that Python 3.12+ resolves on your `$PATH`.
 
 ### Step 4 — Recover if the daemon halts
 
@@ -83,11 +85,17 @@ The skill reads the halt context and shows you `triggered_by` (which routine or 
 
 **Local git halt (`git_local_failed`)** — a pre- or post-tick git operation failed without a recognised transport marker in its stderr — a lock file held past the retry backoff, a bad ref, a checkout permission problem, or a network failure the classifier missed. When the halt came from a sync step (`_git_pre` / `_git_post`), the hourly doctor tick clears it by itself once the remote answers again; otherwise inspect the checkout by hand, then confirm **resume** the same way as the remote-sync halts above.
 
+**Routine-loop halt (`suspected_loop`)** — the daemon's loop detector noticed one identical diff (by `git patch-id --stable`) committed by the same registered bot author several times in a row within a recent window of commits — a routine or expert stuck re-producing the same output tick after tick. The skill shows you the offending patch-id, the bot's email, and the repeated commit subjects; match the email against an entry's `git_author.email` in `lazy.settings.json` to find which routine or expert produced it, then read its recent commits (`git log --oneline --author=<email>`). What to do about it is your call — fix whatever keeps regenerating the same diff, unregister the routine with `/lazy-routine.unregister <name>`, or decide the pattern is expected and raise the detector's threshold. Confirming **resume** alone will not hold: the detector re-tallies the same commit window on the very next tick, so unless the repeated commits actually leave that window, the daemon halts again with the same reason within seconds.
+
+**Inbox-collision halt (`inbox_collision`)** — another checkout on this host registers an inbox routine whose directory resolves to the very same physical path as one of this repo's, so two daemons would drain one inbox and dispatch every file twice. The skill names both routines and both checkouts. The fix is to stop the sharing: point one side at its own inbox by editing that routine's directory setting in the other checkout, resolve the symlink that collapsed the two paths into one, or retire that checkout's background daemon. Either side can yield — both stay halted until someone clears each one separately. This check runs only once, at daemon startup, so confirming **resume** before the inboxes are actually separated puts a duplicating daemon back to work silently, with no second halt to catch it — restart the daemon after separating them so the check runs again.
+
 **Routine-config halt (`routine_config_invalid`)** — a `routines.<name>` entry in `lazy.settings.json` (or its gitignored `.local.json` overlay) no longer matches its type's schema, so the daemon dropped the routine and stopped rather than silently running on a config it can't trust. The daemon never auto-corrects a rejected entry — an unknown field may be a typo, a leftover of an older schema, or intent the schema hasn't grown to cover yet, and only you know which. The skill points you at the schema error (`lazycortex-core error-list`, or the newest `.logs/lazy-core/runtime/<date>.jsonl` record whose `name` matches the routine) so you can fix the entry by hand or re-register it with `/lazy-routine.register --force`. Confirm **resume** once the entry is valid again.
+
+**Config-violation halt (`config_violation`)** — a routine's tick exited with output the daemon read as a rejected settings invariant, typically raised by the same plugin's own CLI the routine drives. The daemon escalates this to a halt because a setting a CLI rejects once will keep being rejected on every future tick. The skill shows you the rejection text from the routine's own incident; fix whatever it names — since the rejection comes from the owning plugin, the setting at fault often lives wherever that plugin reads its own config, not necessarily in the routine entry itself. Re-run the routine's command by hand to confirm the fix, then confirm **resume**.
 
 **Rate-limit halt (`rate_limit`)** — the host-local subscription rate-limit window closed, and the daemon paused rather than burn a spawn against it. Nothing is broken here and no git repair is needed — the daemon lifts this halt itself the moment the window reopens (the skill shows you `resets_at`, the epoch second that happens). Confirm **resume** only if you want the queue moving again before then; the pump's pre-spawn check still refuses to spawn while the shared rate-limit flag holds a live record, so resuming early burns no tokens.
 
-Once cleanup or manual repair succeeds and the tree is clean, the skill atomically clears the `daemon_halted` block from `state.json`. The daemon resumes scheduling on its next iteration with no restart required.
+Once cleanup or manual repair succeeds and the tree is clean, the skill atomically clears the `daemon_halted` block from `state.json`. The daemon resumes scheduling on its next iteration with no restart required — except after an `inbox_collision` repair, which needs the daemon itself restarted so its once-at-startup collision check runs again.
 
 If the tree is still dirty after cleanup (e.g., a submodule left additional changes), the skill reports `still-dirty` and leaves the halt block in place. Run `git status` to inspect, resolve the remaining changes, and re-run `/lazy-runtime.recover`.
 

@@ -293,8 +293,8 @@ def _resolve_core_cli() -> Path | None:
   Find the `lazycortex-core` CLI binary.
 
   Returns:
-    Absolute path to the resolved binary, preferring `$LAZYCORTEX_PLUGIN_DIRS` over the
-    plugin cache, or `None` when neither lookup finds one.
+    Absolute path to the resolved binary, taking `$LAZYCORTEX_PLUGIN_DIRS` over the dev-vault
+    sibling tree and that over the plugin cache, or `None` when no lookup finds one.
   """
   # waiver: matches dispatcher.py's own literal — not a keys.py-promoted constant there either
   dirs = os.environ.get("LAZYCORTEX_PLUGIN_DIRS", "").split(os.pathsep)
@@ -305,6 +305,12 @@ def _resolve_core_cli() -> Path | None:
     cli = Path(d) / Paths.BIN_DIR / Plugin.CORE
     if cli.is_file():
       return cli
+  # dev-vault stage — this file sits at claude/lazycortex-review/bin/, so core's own bin/ is two
+  # levels up and back down the sibling tree; it must precede the cache (§ 2b) so a checkout runs
+  # the sources at hand rather than whatever version happens to be installed
+  sibling = Path(__file__).resolve().parents[2] / Plugin.CORE / Paths.BIN_DIR / Plugin.CORE
+  if sibling.is_file():
+    return sibling
   cache = Path.home() / Paths.PLUGIN_CACHE
   # guard: no plugin cache on this machine — nothing further to try
   if not cache.is_dir():
@@ -342,7 +348,7 @@ def _consume_job(repo: Path, jdir: Path) -> None:
     env[EnvVar.LAZY_REPO_ROOT] = str(repo)
     try:
       proc = subprocess.run(
-          [str(cli), CoreCommand.CONSUME_JOB],
+          [sys.executable, str(cli), CoreCommand.CONSUME_JOB],
           input=json.dumps({JobKey.EXPERT: jdir.parent.name, JobKey.JOB_ID: jdir.name}),
           capture_output=True, text=True, env=env, check=False,
       )

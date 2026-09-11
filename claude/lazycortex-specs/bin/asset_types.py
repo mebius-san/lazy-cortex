@@ -2,8 +2,11 @@
 Asset-type declarations for the spec catalog — the `asset-type` CLI's resolver half.
 
 An asset's kind is the `spec_asset_type` frontmatter key on its status folder-note, and the set
-of legal values is open: this plugin ships five declarations in
-`references/lazy-spec.asset-types.json`, and a product declares its own under
+of legal values is open: this plugin ships five spawnable declarations in
+`references/lazy-spec.asset-types.json` (`feature`, `change`, `bug`, `content`, `research`),
+which also holds the two level entries `catalog` and `product` — those carry no `default_path`,
+name no folder a request can spawn into, and exist only to give a level note its icon and
+playbook. A product declares its own under
 `products[<key>].asset_types.<name>` in `.claude/lazy.settings.json`.
 
 A declaration carries the icon (and optional colour) the folder is painted with, the playbook

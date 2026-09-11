@@ -15,7 +15,7 @@ The `spec` section of `.claude/lazy.settings.json` carries plugin-owned settings
 |-----|---------|-------------|
 | `spec.vault_root` | `specs` | Path of the spec content-root relative to the settings-dir (the directory holding `.claude/lazy.settings.json`, i.e. the repo root). All spec content — the operator's product trees and the `requests/` inbox — lives under `<settings-dir>/<spec.vault_root>`. Use `.` to place content directly at the settings-dir (content-root = settings-dir). Vault-relative paths (`spec_path`, wikilinks, tags) are relative to this content-root. See [layout](./lazy-spec.layout-protocol.md) Part 1 § Spec content-root. |
 | `spec.language` | none (optional) | ISO 639-1 language code for spec prose across the vault. When absent the top-level `language` key applies, then the floor `en` — see Part 3 |
-| `spec.coordination_rules` | none (optional) | Repo-relative path to the vault-wide operator doc of coordinator rules — the second of the six rule layers `spec.coordinator` reads before every decision (playbook → this doc → product guidelines → product folder-note rules → container folder-note rules → asset folder-note rules; see `lazy-spec.coordination-playbook.md` § 2). States what the coordinator may run automatically across the whole vault, and any vault-wide override of the playbook's defaults. When set, its content is injected into every `spec.coordinator` job's context; `lazy-spec.doctor` flags a configured path that doesn't resolve to a file. |
+| `spec.coordination_rules` | none (optional) | Repo-relative path to the vault-wide operator doc of coordinator rules — the second of the six rule layers `spec.coordinator` reads before every decision (playbook → this doc → product guidelines → product folder-note rules → container folder-note rules → asset folder-note rules; see `lazy-spec.coordination-playbook.md` § 3). States what the coordinator may run automatically across the whole vault, and any vault-wide override of the playbook's defaults. When set, its content is injected into every `spec.coordinator` job's context; `lazy-spec.audit` flags a configured path that doesn't resolve to a file. |
 
 ## Part 1 — Config files (products + repos)
 
@@ -36,10 +36,10 @@ There is no `spec.cfg-<product>.md` rule file any more — that form is removed.
 | `icon` | no (default `LiPackage`) | Iconize identifier (Lucide name or emoji) painted on the product folder; mirrored into the product folder-note's managed `iconize_icon`. The wizard writes the default when the operator declines — every product folder-note carries an icon |
 | `color` | no (default `#64748b`) | Iconize colour of the product folder, mirrored into the managed `iconize_color`. A product root is the one ordinary container that carries a colour — the neutral one — so the products stand out from the group folders beneath them; the key exists to override that for one product. See § Container colour below |
 | `dependencies` | no | List of upstream deps (other products, repos, or external) — see [sources](./lazy-spec.sources-protocol.md) Part 3 |
-| `asset_types` | no | Per-type declarations, merged **key-by-key** over the plugin's shipped set (`references/lazy-spec.asset-types.json` — `feature`, `change`, `bug`, `content`, `research`), so a product may replace one field of a shipped type without restating the rest, or declare a type of its own. Written by `/lazy-spec.add-asset-type`. See below and [layout](./lazy-spec.layout-protocol.md) § Asset types |
+| `asset_types` | no | Per-type declarations, merged **key-by-key** over the plugin's shipped spawnable set (`feature`, `change`, `bug`, `content`, `research`; `references/lazy-spec.asset-types.json` also carries the `catalog` and `product` level entries, which have no `default_path` and spawn nothing), so a product may replace one field of a shipped type without restating the rest, or declare a type of its own. Written by `/lazy-spec.add-asset-type`. See below and [layout](./lazy-spec.layout-protocol.md) § Asset types |
 | `tool_types` | no | Per-tool declarations, merged key-by-key over the plugin's shipped set (`references/lazy-spec.tool-types.json` — `code`, `data`, `test`, `docs`). See below |
 | `guidelines` | no | Extra context files folded into launch-checkbox job dispatch, keyed by dispatched role token plus the wildcard `"*"`. See below |
-| `mode` | no (default full) | `"spec-only"` activates the designer-only ladder (`lazy-spec.coordination-playbook.md` Chapter 14) for every asset under this product — design.md → review → approve → `spec_design_done`, no architecture/plan/implementation/test steps. Absence means the ordinary full ladder. Written by `/lazy-spec.product-config`'s wizard. `_build_bundle` folds the owning product's whole record — `mode` included — into every coordinator job's `payload["product"]` unconditionally, so no separate settings read is needed to detect the profile. |
+| `mode` | no (default full) | `"spec-only"` activates the designer-only ladder (`lazy-spec.coordination-playbook.md` Chapter 17, extracted as `lazy-spec.spec-only-playbook.md`) for every asset under this product — design.md → review → approve → `spec_design_done`, no architecture/plan/implementation/test steps. Absence means the ordinary full ladder. Written by `/lazy-spec.product-config`'s wizard. `_build_bundle` folds the owning product's whole record — `mode` included — into every coordinator job's `payload["product"]` unconditionally, so no separate settings read is needed to detect the profile. |
 
 Example product record:
 
@@ -65,7 +65,9 @@ Example product record:
 
 ### Icon and colour — what each axis carries
 
-The **icon** is the type. It says what a note IS — its asset type, its document type, its role — and it is written once, by whoever scaffolds the note, from the type's own declaration. **No state ever repaints it.** Every state this catalog tracks — `spec_stage`, `spec_state`, `spec_halted`, `spec_cancelled`, an upstream status, a level gate, a request status — moves the **colour** and nothing else. Accordingly every state matcher in `references/lazy-spec.iconize-registry.json` resolves its icon as `"{{frontmatter.iconize_icon}}"`, borrowing whatever the note already carries; the three `spec_role: request` matchers are the sole literal, and they all carry the same `LiMail` because that IS the request type's icon — one icon, three status colours. The full rule, and what the worker does when a matcher fires before anything wrote the note's icon, is `lazycortex-obsidian:lazy-obsidian.iconize-registry-contract.md` § 3a.
+The **icon** is the type. It says what a note IS — its asset type, its document type, its role — and it comes from that type's own declaration: the `icon` field of `references/lazy-spec.doc-types.json`, of the asset-type registry, or of a product's settings record. **No state ever repaints it.** Every state this catalog tracks — `spec_stage`, `spec_state`, `spec_halted`, `spec_cancelled`, an upstream status, a level gate, a request status — moves the **colour** and nothing else. Accordingly every state matcher in `references/lazy-spec.iconize-registry.json` resolves its icon as `"{{frontmatter.iconize_icon}}"`; the three `spec_role: request` matchers are the sole literal, and they all carry the same `LiMail` because that IS the request type's icon — one icon, three status colours.
+
+**The declaration stays authoritative after scaffolding.** The scaffolding writer puts the icon on the note first, but it is not frozen there: the borrow token names no icon, so the walk always reaches the registry's base band (priorities 147–150), which resolves the pair afresh through the `spec-type-icon` callback. A note whose `iconize_icon` disagrees with what its type declares — because the declaration changed after the note was written — is therefore **corrected on the next reconcile**, keeping the colour its current state deserves. Change a type's `icon` and every existing note of that type follows on the next `iconize-sync reconcile`; a note the callback declines to claim keeps whatever it carries. The full rule is `lazycortex-obsidian:lazy-obsidian.iconize-registry-contract.md` § 3a.
 
 ### Container colour
 
@@ -134,7 +136,7 @@ A product record MAY carry a `guidelines` dict supplying extra context to the jo
 | `planner` | Guideline paths folded into the `Write code-plan` checkbox's job. |
 | `tester` | Guideline paths folded into both the `Write test-plan` and `Start testing` checkboxes' jobs — both dispatch under the `tester` role. |
 | `developer` | Guideline paths folded into the `Start implementation` checkbox's job. |
-| `coordinator` | Guideline paths folded into every `spec.coordinator` job dispatched for this product's assets — the third of the six rule layers the coordinator reads before deciding (see `lazy-spec.coordination-playbook.md` § 2). Distinct from a product, container, or asset folder-note's `# Coordinator rules` section: this key names files, the folder-note sections carry operator-authored prose directly. |
+| `coordinator` | Guideline paths folded into every `spec.coordinator` job dispatched for this product's assets — the third of the six rule layers the coordinator reads before deciding (see `lazy-spec.coordination-playbook.md` § 3). Distinct from a product, container, or asset folder-note's `# Coordinator rules` section: this key names files, the folder-note sections carry operator-authored prose directly. |
 | `*` | Guideline paths folded into every launch-checkbox job for this product, regardless of role. |
 
 Values are lists of repo-relative file paths, read literally — no glob expansion. Each path that resolves to a file has its contents folded into the dispatched job's context bundle, keyed by basename; a declared path that does not resolve to a file is never silently skipped — it is recorded as a warning in the dispatch result and appended to the asset's `# History` section. The key is entirely optional: a product record with no `guidelines` key dispatches launch-checkbox jobs with no extra context.
@@ -165,7 +167,7 @@ Each key is a type name — the value a document's `spec_doc_type` carries. Each
 
 **`icon` / `color` are the document's kind half of the paint contract.** The seed says what kind of document this is; the iconize registry's matchers say what state it is in and own the colour from the first `lazy-spec.set-stage` onward. A stage-less type — a journal, the decisions registry — is never claimed by any matcher, so its seed is the only paint it will ever carry; a stage-bearing type shows the seed only until its first stage lands. This is why the registry enumerates no document kinds at all: a project type declares its own paint here and needs no registry edit.
 
-The key is entirely optional: a product with no `doc_types` sees exactly the nine shipped types. `lazycortex-specs doc-type list --product <key>` prints the merged set, `doc-type resolve <type> --product <key>` one merged declaration.
+The key is entirely optional: a product with no `doc_types` sees exactly the shipped set, whatever `references/lazy-spec.doc-types.json` currently declares — the file is the count, never a number repeated in prose that a later type silently invalidates. `lazycortex-specs doc-type list --product <key>` prints the merged set, `doc-type resolve <type> --product <key>` one merged declaration.
 
 ### Repo records — `lazy.settings.json[repos]`
 
@@ -252,8 +254,12 @@ Skills that write or edit spec content MUST honour the resolved language (ISO 63
 
 ## Part 4 — Upstream sources (`spec.upstream`)
 
-`upstream/` mirrors one or more foreign git repos' design content into this vault, outside the
-product hierarchy. Configuration lives in the plugin-owned `spec` settings section, under
+`upstream/` mirrors one or more foreign git repos' design content into this repository at the
+**repository root** — a sibling of the content-root, never a subtree of it, and so outside the
+product hierarchy entirely (see [file-roles](./lazy-spec.file-roles-protocol.md) § Upstream unit notes: a
+mirrored source is not vault content until Phase C's request accepts it in). Every `upstream/…`
+path in this Part is therefore repo-root-relative, unlike the vault-relative paths the rest of
+this protocol uses. Configuration lives in the plugin-owned `spec` settings section, under
 `spec.upstream`:
 
 ```json
@@ -282,7 +288,7 @@ product hierarchy. Configuration lives in the plugin-owned `spec` settings secti
 | `max_units_per_tick` | whole `upstream` section | no (default `7`) | Ceiling on units the `lazy-spec.upstream-tick` routine does actual work on in one tick, shared across every configured source — not per-mount. A unit that needed no work (already `processed`, unchanged) is free and does not spend the budget. |
 | `max_text_file_bytes` | whole `upstream` section | no (default `1048576`) | Per-file size ceiling above which a source file mirrors as skipped (`too-large`), passed straight through to the `remote-mirror` core primitive's `max_bytes`. |
 | `fetch_failure_threshold` | whole `upstream` section | no (default `5`) | Consecutive tick failures a source may accumulate before its fetch state reads as failing (source-note bookkeeping; not consumed by the Task 4 fetch/detect phase — see `upstream_tick.py`'s module docstring). |
-| `<repo-key>` | one entry per source | — | Any key not in the reserved set above (`max_units_per_tick`, `max_text_file_bytes`, `fetch_failure_threshold`) names one upstream source. Renaming a `<repo-key>` or a mount is a manual operation — the key is encoded into the vault path (`upstream/<repo-key>/<mount>/...`). |
+| `<repo-key>` | one entry per source | — | Any key not in the reserved set above (`max_units_per_tick`, `max_text_file_bytes`, `fetch_failure_threshold`) names one upstream source. Renaming a `<repo-key>` or a mount is a manual operation — the key is encoded into the mirror path at the repository root (`<repo-root>/upstream/<repo-key>/<mount>/...`). |
 | `<repo-key>.url` | per source | yes | Git URL (or local path) `remote-mirror` clones/fetches. |
 | `<repo-key>.branch` | per source | no | Branch to track; absent follows the remote default. |
 | `<repo-key>.mounts.<mount>.source_path` | per mount | yes | Path inside the source repo this mount roots at. |
@@ -313,8 +319,8 @@ either side — merging it would reach into a sibling plugin's own ignore semant
 
 Each tick's unit list is the union of two trees, not the source tree alone: every directory the
 configured `<mount>.units` globs currently match in the freshly-fetched source, plus every unit
-directory that already exists under the vault's `upstream/<repo-key>/<mount>/` path from a prior
-tick. Deduplicated by unit identity `(repo-key, mount, unit-path)` and sorted for tick-to-tick
+directory that already exists under the repository root's `upstream/<repo-key>/<mount>/` path from
+a prior tick. Deduplicated by unit identity `(repo-key, mount, unit-path)` and sorted for tick-to-tick
 stability.
 
 The union is what lets the fetch/detect phase tell `excluded` and `orphaned` apart, both of which

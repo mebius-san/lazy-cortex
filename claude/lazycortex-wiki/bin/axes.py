@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 from typing import TYPE_CHECKING
@@ -187,7 +188,7 @@ def _settings_get(repo: Path, section: str) -> dict:
   """
   cli = _resolve_core_cli()
   proc = subprocess.run(
-    [ str(cli), _K.SUB_SETTINGS_GET, section, _K.ARG_CWD, str(repo) ],
+    [ sys.executable, str(cli), _K.SUB_SETTINGS_GET, section, _K.ARG_CWD, str(repo) ],
     capture_output = True, text = True, check = False,
   )
   # guard: non-zero exit — surface stdout+stderr for diagnosis rather than a bare JSON parse error
@@ -213,7 +214,7 @@ def _settings_set(repo: Path, section: str, value: dict) -> None:
   """
   cli = _resolve_core_cli()
   proc = subprocess.run(
-    [ str(cli), _K.SUB_SETTINGS_SET, section, _K.ARG_CWD, str(repo) ],
+    [ sys.executable, str(cli), _K.SUB_SETTINGS_SET, section, _K.ARG_CWD, str(repo) ],
     input = json.dumps(value), capture_output = True, text = True, check = False,
   )
   # guard: non-zero exit — surface stdout+stderr for diagnosis

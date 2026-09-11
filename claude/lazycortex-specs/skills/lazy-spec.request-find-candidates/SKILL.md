@@ -29,7 +29,7 @@ Per the class → routing table in `lazy-spec.request-protocol.md`:
 | `plan` | `<product>/{features,changes}/<slug>/<slug>.md` |
 | `feedback` | `<product>/{features,changes,bugs}/<slug>/<slug>.md` |
 
-The folder-note filename matches its parent folder basename (per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md` — `features/csv-export/csv-export.md`, not `features/csv-export/folder-note.md`). To enumerate candidates, walk each `<product>/<kind>/` directory; for each subdir `<slug>/`, the folder-note is the file `<slug>/<slug>.md` if present.
+The folder-note filename matches its parent folder basename (per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md` — `features/csv-export/csv-export.md`, not `features/csv-export/folder-note.md`). To enumerate candidates, walk each `<product>/<kind>/` directory; for each subdir `<slug>/`, the folder-note is the file `<slug>/<slug>.md` if present.
 
 If `product` is None, expand `<product>` to `*` (across-product search). The vault layout is `<vault-root>/<product>/{features,changes,bugs}/<slug>/<slug>.md` per the canonical convention.
 

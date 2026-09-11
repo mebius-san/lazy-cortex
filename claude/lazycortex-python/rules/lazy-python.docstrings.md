@@ -5,7 +5,7 @@ paths:
 ---
 # Python docstrings (LLM-read)
 
-Critical docstring-discipline reminders for any `.py` file. Read the full canon at `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.documenting-guidelines.md` before writing or editing any docstring; project-specific deltas live at `${CLAUDE_PROJECT_DIR}/docs/guidelines/documenting_guidelines.md` (overlay — read after canon, overrides on conflict).
+Critical docstring-discipline reminders for any `.py` file. Read the full canon at `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.documenting-guidelines.md` before writing or editing any docstring; project-specific deltas live at `${CLAUDE_PROJECT_DIR}/docs/guidelines/documenting_guidelines.md` (overlay — read after canon, overrides on conflict). The comment side of the canon — the `Domain(...)`, `Contract:`, and marker-comment rules the clauses below lean on — lives in the sibling `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.comment-guidelines.md`.
 
 ## Top docstring rules
 

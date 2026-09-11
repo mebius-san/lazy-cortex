@@ -322,7 +322,7 @@ def _submit_stuck_draft(asset_dir: Path, doc_name: str) -> bool:
     return False
   try:
     proc = subprocess.run(
-        [str(cli), PlanReview.SUBMIT_VERB, str((asset_dir / doc_name).resolve())],
+        [sys.executable, str(cli), PlanReview.SUBMIT_VERB, str((asset_dir / doc_name).resolve())],
         capture_output = True, text = True, timeout = PlanReview.START_TIMEOUT_S, check = False,
     )
   # waiver: fire-and-forget backstop — ANY review-open failure (CLI crash, timeout, bad path)
@@ -486,7 +486,7 @@ def _run_note_check(asset_note: Path) -> list[dict]:
     return []
   try:
     proc = subprocess.run(
-        [str(cli), _NOTE_CHECK_SUBVERB, str(asset_note)],
+        [sys.executable, str(cli), _NOTE_CHECK_SUBVERB, str(asset_note)],
         capture_output = True, text = True, check = False,
     )
   # waiver: best-effort follow-up — a broken subprocess must degrade to "nothing to report",

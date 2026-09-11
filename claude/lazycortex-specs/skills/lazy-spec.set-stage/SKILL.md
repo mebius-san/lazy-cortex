@@ -68,7 +68,7 @@ tags:
   - spec/approved                # was: spec/draft
 ```
 
-The mirror is required, not optional. `lazy-spec.doctor` flags any mismatch as a finding.
+The mirror is required, not optional. `lazy-spec.audit` flags any mismatch as a finding.
 
 ### 2b. Cascade the stage to the doc's markdown attachments
 

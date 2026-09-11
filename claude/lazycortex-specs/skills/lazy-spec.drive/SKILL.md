@@ -9,7 +9,7 @@ The no-daemon session orchestrator for the spec system (taskdoc `lazycortex-spec
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 4 ordered phases. The executing agent MUST NOT skip, merge, reorder, or silently omit any phase. To make dropped phases structurally impossible:
+This skill has 5 ordered phases. The executing agent MUST NOT skip, merge, reorder, or silently omit any phase. To make dropped phases structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per phase below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 1 — Resolve asset + preflight`
@@ -133,7 +133,7 @@ AskUserQuestion: header "Next gesture", question "What should happen next on <pr
 
 Final `Bash(git status --porcelain -- <spec content root>)`. Non-empty → warn plainly: this checkout must not run the daemon (or have `daemon.run_here` point at it) until everything here is committed — its clean-tree invariant would halt on exactly this state. Print the final `# Status brief`. Outcome: `closed-clean` or `closed-dirty`.
 
-**Branch check.** This session's manual `expert-pump-once` calls (the drive loop, step 4) run with none of the daemon's own per-iteration `_git_pre` safety net — an interrupted pump mid-`workspace: branch` job can leave this checkout on the job's branch with nothing to restore it (`lazy-core.runtime-schema.md`'s "Safety net for a claimant killed mid-job" describes the daemon-only case; this session has no equivalent). `Bash(git rev-parse --abbrev-ref HEAD)`; compare against `daemon.git.base_branch` in `.claude/lazy.settings.json` when configured. Match (or `base_branch` unset) → outcome `branch-clean`. Mismatch → `Bash(git checkout <base_branch>)`; success → outcome `branch-restored`; failure → warn plainly that the checkout is stranded on the job branch and must be resolved by hand before the daemon (or another drive session) touches it, outcome `branch-stranded`.
+**Branch check.** This session's manual `expert-pump-once` calls (the drive loop, step 4) run with none of the daemon's own per-iteration `_git_pre` safety net — an interrupted pump mid-`workspace: branch` job can leave this checkout on the job's branch with nothing to restore it (`lazy-core.expert-runtime-schema.md` § Workspace, "A claimant killed mid-job leaves only an orphan directory", describes the daemon-only case; this session has no equivalent). `Bash(git rev-parse --abbrev-ref HEAD)`; compare against `daemon.git.base_branch` in `.claude/lazy.settings.json` when configured. Match (or `base_branch` unset) → outcome `branch-clean`. Mismatch → `Bash(git checkout <base_branch>)`; success → outcome `branch-restored`; failure → warn plainly that the checkout is stranded on the job branch and must be resolved by hand before the daemon (or another drive session) touches it, outcome `branch-stranded`.
 
 ## Log the run
 

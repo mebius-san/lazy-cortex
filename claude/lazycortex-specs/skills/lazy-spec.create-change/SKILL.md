@@ -2,6 +2,7 @@
 name: lazy-spec.create-change
 description: "Use when requesting a change to an existing product spec — the atomic modification unit, peer to a feature. Built-in wrapper: pins `<category>` to `change` and delegates — all clarification, scaffolding, prose, and diagrams are owned by `lazy-spec.create-asset`."
 execution-discipline-waiver: "Thin wrapper — pins the category to `change` and delegates to lazy-spec.create-asset via the Skill tool; the multi-phase orchestration where step-skip can hide lives entirely in the delegate."
+logging-waiver: "pure delegator — lazy-spec.create-asset owns the log"
 ---
 # Create Change
 

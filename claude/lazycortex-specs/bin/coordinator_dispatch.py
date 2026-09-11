@@ -22,8 +22,8 @@ outside the note, neither stamping nor clearing it costs a commit, and no hand-e
 note can break the mutex; a wake itself writes and commits the note only when a frontmatter
 stamp or a warning line actually changed it.
 
-The routine's `filter.any_of` also matches sibling authored docs by basename (`design.md`,
-`code-plan.md`, ...) — an item naming one of those is resolved to its OWNING asset's status
+The routine's `filter.any_of` also matches every authored doc carrying a non-null
+`spec_doc_type` — an item naming one of those is resolved to its OWNING asset's status
 folder-note, and dispatched on a `review_result` transition against a content-shaped marker
 recorded on that note (`spec_coordinator_doc_state`), independent of the sibling commit's own
 author (`CoordinatorTrigger.DOC_TRANSITION` — see `_resolve_doc_transition`).
@@ -77,6 +77,8 @@ import note_ops  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import resolve_product  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import spec_doc_types  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_job_markers  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_paths  # noqa: E402
@@ -89,7 +91,6 @@ from spec_keys import (  # noqa: E402
     JobMarker,
     LevelDoc,
     Section,
-    SiblingDoc,
     SpecCoordinatorDocStateKey,
     SpecCoordinatorReadyStateKey,
     SpecDependsOnKey,
@@ -206,15 +207,6 @@ _SPEC_ROLE_STATUS = "status"
 # Bounded lookback window for `_has_operator_authored_recently`'s bot-buried-operator-commit
 # rescue (N3) — see that function's docstring for why this is a fixed window, not a range scan.
 _AUTHOR_LOOKBACK_COMMITS = 10
-
-# Sibling-doc basenames the `lazy-spec.coordinator-watch` routine's `filter.any_of` also matches
-# (Task 1's basename sub-filter) — an item naming one of these is a doc-transition candidate,
-# never a status folder-note. `architecture.md` arrived with the `architecture` review class
-# (plan 4b Task 7); its basename is listed here alongside every other sibling doc kind.
-_SIBLING_BASENAMES = frozenset({
-    SiblingDoc.DESIGN, SiblingDoc.ARCHITECTURE, SiblingDoc.CODE_PLAN, SiblingDoc.TEST_PLAN,
-    SiblingDoc.TECH, SiblingDoc.BUG, SiblingDoc.CODE_REPORT, SiblingDoc.TEST_REPORT,
-})
 
 # The two frontmatter keys the busy-guard used to stamp before the sidecar-declined migration —
 # their bare string values, duplicated here per this bin/ tree's own per-file small-constant
@@ -551,6 +543,46 @@ def _read_doc_state(fm: dict) -> dict:
   return _read_marker_dict(fm, SpecCoordinatorDocStateKey.STATE)
 
 
+def _is_tracked_document(path: Path, basenames: frozenset[str] | None = None) -> bool:
+  """
+  Check whether one changed path is a document the woken note's own ladder tracks.
+
+  The level ladder owns a closed set of four filenames, so a level caller names it. The asset
+  ladder owns none: `lazy-spec.layout-protocol.md` gives an authored document's basename no
+  semantics, and the `lazy-spec.coordinator-watch` routine's own second `filter.any_of` member
+  selects on the PRESENCE of a non-null `spec_doc_type` rather than on any filename list.
+  Mirroring that predicate here is what lets an asset's freely-named typed document reach
+  `_resolve_doc_transition`; a typed document with nothing to transition is harmless there, so
+  the predicate never needs to know which kinds are review-tracked.
+
+  Args:
+    path: The changed path to classify.
+    basenames: The level ladder's closed document set, on a level note; None on an asset, where
+      the `spec_doc_type` predicate decides instead.
+
+  Returns:
+    True when `path` is a file this ladder tracks as one of its documents; False when the path
+    is gone between scan and dispatch, is its own folder's note, or carries no document type.
+  """
+  # guard: a path gone between scan and dispatch is no document on either ladder
+  if not path.is_file():
+    return False
+
+  # the level ladder's membership is the closed set and nothing else
+  if basenames is not None:
+    return path.name in basenames
+
+  # guard: an expert's non-markdown attachment carries no frontmatter to read, and a folder's own
+  # note is the coordination object rather than one of its documents
+  # waiver: markdown-suffix literal, single-source alongside every other ".md" folder-note
+  # literal in this module
+  if path.suffix != ".md" or path.name == f"{path.parent.name}.md":
+    return False
+
+  # the asset ladder's membership is the routine's own predicate, read off the file
+  return bool(spec_doc_types.doc_type_of(path))
+
+
 def _resolve_doc_transition(sibling_doc: Path, fm: dict) -> tuple[str, str] | None:
   """
   Detect a `review_result` transition on one sibling doc against the asset note's own marker.
@@ -755,9 +787,9 @@ def _resolve_group_trigger(
   # one pass over every member — every transition found is kept, not just the first
   transitions: dict[str, str] = {}
   for member in members:
-    # guard: a member gone between scan and dispatch, or not a tracked sibling kind, is skipped
+    # guard: a member gone between scan and dispatch, or carrying no document type, is skipped
     # silently rather than failing the whole group resolution
-    if not member.is_file() or member.name not in _SIBLING_BASENAMES:
+    if not _is_tracked_document(member):
       continue
     resolved = _resolve_doc_transition(member, fm)
     if resolved is not None:
@@ -1397,7 +1429,7 @@ def _commit(asset_dir: Path, asset_note: Path, subject: str) -> None:
 
 def _group_carries_wake(
     fm: dict, body: str, item: dict, members: list[Path], *, note_changed: bool = True,
-    basenames: frozenset[str] = _SIBLING_BASENAMES,
+    basenames: frozenset[str] | None = None,
 ) -> bool:
   """
   Check whether a tick the busy-job guard is about to decline actually carries a wake-worthy
@@ -1424,8 +1456,9 @@ def _group_carries_wake(
       item tick shapes; the grouped-tick caller passes the real `_has_group_note_changed` result, so
       a siblings-only group needs at least one member NOT under active review
       (`_is_member_signal_eligible`) before the author check even runs (operator 2026-08-15).
-    basenames: The document basenames a member must carry to be scanned for a transition — the
-      asset ladder's sibling docs by default, the level ladder's documents on a level note.
+    basenames: The level ladder's closed document set, on a level note; None on an asset, where
+      a member is scanned for a transition when it carries a `spec_doc_type`
+      (`_is_tracked_document`).
 
   Returns:
     True when a `# Coordinator commands` section is non-empty, a coordinator-attributed ticked
@@ -1440,7 +1473,7 @@ def _group_carries_wake(
     if fm.get(AnsweredQuestionKey.FINGERPRINT) != _compute_answer_fingerprint(ticked_block):
       return True
   for member in members:
-    if member.is_file() and member.name in basenames and _resolve_doc_transition(member, fm) is not None:
+    if _is_tracked_document(member, basenames) and _resolve_doc_transition(member, fm) is not None:
       return True
   # guard: a siblings-only tick (note itself unchanged) with every member under active review
   # carries no operator-edit signal to check the author against
@@ -1541,8 +1574,8 @@ def coordinator_dispatch(
       shape (`dir`, `paths`, `sha`, `author_name`, `author_email`) naming the asset directory and
       the last commit that touched it.
     today: Optional ISO date forwarded into the `# History` line.
-    sibling_doc: The sibling doc's own path, when this tick's item is a sibling-doc basename
-      match rather than the status folder-note itself. None for the ordinary status-note tick;
+    sibling_doc: The sibling doc's own path, when this tick's item is one of the asset's typed
+      documents rather than the status folder-note itself. None for the ordinary status-note tick;
       mutually exclusive with `group_members`.
     dependency_wake: The `<category>/<slug>` token of a dependency asset that just woke, when
       this call is the one-hop reverse-dependency dispatch a wake on that asset triggers (C2)
@@ -1611,7 +1644,7 @@ def coordinator_dispatch(
   role = str(fm.get(SpecKey.ROLE) or "")
   is_level = role in LEVEL_ROLES
   expert = _CATALOG_EXPERT if is_level else _COORDINATOR_EXPERT
-  doc_basenames = LevelDoc.BASENAMES if is_level else _SIBLING_BASENAMES
+  doc_basenames = LevelDoc.BASENAMES if is_level else None
 
   # one active coordinator job per asset — unconditional, no halt/command exception
   note_dirty = False
@@ -1732,7 +1765,7 @@ def coordinator_dispatch(
   # declined wake was riding along on whichever trigger actually won
   redeemed_wake = markers.get(JobMarker.PENDING_WAKE)
   if trigger is None and (redeemed_wake in (JobMarker.JOB_DONE, JobMarker.DECLINED) or legacy_pending):
-    redeem_members = sorted(p for p in asset_dir.iterdir() if p.is_file() and p.name in doc_basenames)
+    redeem_members = sorted(p for p in asset_dir.iterdir() if _is_tracked_document(p, doc_basenames))
     if is_level:
       trigger, group_transitions = _resolve_level_trigger(
           repo_root, fm, body, item, redeem_members, cursor,
@@ -2006,8 +2039,8 @@ def main(argv: list[str]) -> int:
   its changed members at once and is resolved straight to that directory's own status
   folder-note (a group without one — a bare category folder, or a race with a deletion — is
   skipped); otherwise the routine's `filter.any_of` matches a single changed file, either a
-  status folder-note (`spec_role: status`) OR a sibling-doc basename (`_SIBLING_BASENAMES`) —
-  `item["path"]` names whichever one matched. A sibling-doc item is resolved to its OWNING
+  status folder-note (`spec_role: status`) OR an authored document carrying a non-null
+  `spec_doc_type` — `item["path"]` names whichever one matched. A sibling-doc item is resolved to its OWNING
   asset's status folder-note (the Obsidian folder-note convention, `<dir>/<dir>.md`) before
   dispatch; a sibling living outside an asset folder (a product-root `tech.md` / loose
   `design.md` — no coordinator-job tracking exists at that level) resolves the same convention
@@ -2089,7 +2122,7 @@ def main(argv: list[str]) -> int:
   # a document basename resolves to the folder-note that owns it, by where the document lies;
   # every other match IS the folder-note the routine's own `any_of` member selected
   repo_root = flip_gate._repo_root(changed.parent)
-  is_document = changed.name in _SIBLING_BASENAMES or changed.name in LevelDoc.BASENAMES
+  is_document = _is_tracked_document(changed) or changed.name in LevelDoc.BASENAMES
   owner = _resolve_owner_note(repo_root, changed) if is_document else changed
 
   # guard: no folder-note owns this path (a bare folder, or a race with a deletion) — nothing
@@ -2102,16 +2135,17 @@ def main(argv: list[str]) -> int:
   # or the catalog root's level note the level one, and a note carrying neither is nobody's object
   fm, _ = flip_gate._parse_frontmatter(owner.read_text())
   role = fm.get(SpecKey.ROLE)
-  own_basenames = (
-      _SIBLING_BASENAMES if role == _SPEC_ROLE_STATUS
-      else LevelDoc.BASENAMES if role in LEVEL_ROLES
-      else frozenset()
-  )
 
-  # guard: a note carrying no coordination role is nobody's object, and a document whose
-  # basename belongs to the OTHER ladder is not one this note tracks — the two sets overlap on
-  # `design.md` / `tech.md`, so the union that found the owner must be narrowed by role here
-  if not own_basenames or (is_document and changed.name not in own_basenames):
+  # guard: a note carrying no coordination role is nobody's object
+  if role != _SPEC_ROLE_STATUS and role not in LEVEL_ROLES:
+    print(json.dumps({ TickAction.ACTION: TickAction.NOOP }))
+    return 0
+
+  # guard: a document belonging to the OTHER ladder is not one this note tracks — the level set
+  # and the asset predicate overlap on `design.md` / `tech.md`, so the union that found the owner
+  # must be narrowed by the owner's own role here
+  own_basenames = LevelDoc.BASENAMES if role in LEVEL_ROLES else None
+  if is_document and not _is_tracked_document(changed, own_basenames):
     print(json.dumps({ TickAction.ACTION: TickAction.NOOP }))
     return 0
 

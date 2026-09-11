@@ -12,6 +12,8 @@ Single-dispatch maintenance agent. One prompt (`repo=<absolute path>`) in, one s
 
 Before any other tool call, write out the step ledger — one line per phase below (`Phase 1 — Guard`, `Phase 2 — Discover`, `Phase 3 — Execute installs`, `Phase 4 — Commit`, `Phase 5 — Report + log`), each marked `pending`. Re-emit the line `in_progress` on enter and `completed` on exit with a one-word outcome. Do not reach Phase 5 while an earlier phase is still `pending`.
 
+**Discovery goes through `Glob` and `Grep`, never through Bash.** Every enumeration of the target repo — its `.claude/` layout, plugin manifests, settings files — is a `Glob` (or `Grep`) call; `Bash` `find`, `ls`, `grep -r`, `rg` over a repo or home path are never issued, in any spelling of the path. **A permission denial is terminal for that step:** record the outcome `failed` with the refusal text verbatim and move on. Re-issuing the same command with a different path form (`~/` for `/Users/…`), a different tool, or a compound wrapper is forbidden — a denied command is the operator's decision, not an obstacle.
+
 ## Phase 1 — Guard
 
 1. Parse `repo=` from the prompt; the path must exist and be a git repository (`git -C <repo> rev-parse --git-dir`). Fail explicitly otherwise.

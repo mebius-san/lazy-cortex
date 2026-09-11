@@ -60,7 +60,7 @@ Grep the vault for markdown files whose frontmatter contains `spec_source_branch
 - In **explicit mode**, filter to entries whose branch matches the user's argument.
 - In **auto mode**, keep all entries.
 
-**Role filter**: per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`, only `tech` docs and asset-level `code-plan` / `test-plan` docs may carry `spec_source_branches`. Identify role via the file's `spec_role:` frontmatter (not by filename — filenames are role-only). Any pin found in another file (design, status, code-report, test-report) is a rule violation — log a warning with the file path and skip reconciling it (don't silently "fix" a file that shouldn't contain URLs in the first place). Suggest running `/lazy-spec.doctor` to clean it up.
+**Role filter**: per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md`, only `tech` docs and asset-level `code-plan` / `test-plan` docs may carry `spec_source_branches`. Identify role via the file's `spec_role:` frontmatter (not by filename — filenames are role-only). Any pin found in another file (design, status, code-report, test-report) is a rule violation — log a warning with the file path and skip reconciling it (don't silently "fix" a file that shouldn't contain URLs in the first place). Suggest running `/lazy-spec.audit` to clean it up.
 
 ## Step 4 — Reconcile
 
@@ -90,7 +90,7 @@ Print a summary grouped by action:
 - <repo-key>: error message
 
 ### Warnings — pin on disallowed-role file (N)
-- <file>: pin found in a file whose role forbids source URLs — run /lazy-spec.doctor to clean up
+- <file>: pin found in a file whose role forbids source URLs — run /lazy-spec.audit to clean up
 ```
 
 ## Step 6 — Propose `spec_released` for affected assets
@@ -149,5 +149,5 @@ Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/lazy
 - **Auto-fetch each run** — abort on fetch failure, never use stale refs.
 - **Never overwrite a spec the skill did not pin itself** — rewrites only happen when a branch is provably merged or deleted.
 - **No cross-repo propagation** — if a spec pins `<repo-a-key>: <branch-a>` and also carries `<repo-b-key>: <branch-b>`, each entry is reconciled independently against its own repo config.
-- **Respect file roles** — per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`, only `tech` docs and asset-level `code-plan` / `test-plan` docs may carry pins. Pins found elsewhere are warned and skipped, not silently rewritten.
+- **Respect file roles** — per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md`, only `tech` docs and asset-level `code-plan` / `test-plan` docs may carry pins. Pins found elsewhere are warned and skipped, not silently rewritten.
 - **Proposes `spec_released`, never derives it** — after a successful rebase, proposes the `spec_released` flip (operator-confirmed) via `/lazy-spec.flip-gate` for each affected asset whose `spec_tests_passing` already reads `true`. The release readiness check is this skill's own now (Step 6) — `flip_gate` no longer re-checks it. The rebase is applied regardless of whether an asset gets a proposal at all.

@@ -1,13 +1,13 @@
 ---
 name: lazy-wiki.curator-protocol
-version: 5
+version: 6
 description: Curation protocol for the wiki.curator expert — payload/result contract for per-node classify and link jobs, dispatched via lazycortex-core's expert runtime queue. The scope-level normalize-tags job is owned by lazy-wiki.tag-curator-protocol.
 ---
-# lazy-wiki.curator-protocol v5
+# lazy-wiki.curator-protocol v6
 
 Canonical contract for jobs dispatched to `wiki.curator` by `lazycortex-wiki`'s dispatcher (or any consumer producing curator-shaped jobs). The dispatcher builds the bundle and queues it via `dispatch-job`; the curator (C-hybrid, has Bash) applies results by running a deterministic `lazycortex-wiki` primitive (`apply-node` for per-node kinds, `retag` for `normalize-tags`) and then commits. Consumer-side state machine, routine triggering, and `topics.md` aggregation are out of scope for this wire contract.
 
-**Version 2** replaced the single `curate` kind with two kinds: `classify` and `link`. **Version 3** is a backward-compatible additive extension: the `classify` result gains an optional `connectors` array, and the `link` request gains an optional `context/candidates.json` input. **Version 4** is also additive: it adds the scope-level `normalize-tags` kind (judge a canonical axis-value set, emit an alias map, self-apply via `retag`), and an optional `context/existing_tags.json` input to `classify` (the values already in use per axis, so the curator reuses an existing value instead of coining a synonym). All defaults are empty — a v2/v3 dispatcher's bundles still validate, and a v2/v3 curator's outputs still apply. **Version 5** hands the `normalize-tags` kind to its own expert: it is defined by `lazy-wiki.tag-curator-protocol.md`, which extends it from a scope to any tag surface and adds the advisory-dictionary duty. The v4 text below is left intact — a `normalize-tags` bundle already queued against this protocol still validates and still applies — but new dispatches of that kind go to `wiki.tag-curator`, and the per-node kinds are what `wiki.curator` is dispatched for.
+**Version 2** replaced the single `curate` kind with two kinds: `classify` and `link`. **Version 3** is a backward-compatible additive extension: the `classify` result gains an optional `connectors` array, and the `link` request gains an optional candidate-shortlist input — declared there, but left unsent by every dispatcher until v6. **Version 4** is also additive: it adds the scope-level `normalize-tags` kind (judge a canonical axis-value set, emit an alias map, self-apply via `retag`), and an optional `existing_tags` field on the `classify` request (the values already in use per axis, so the curator reuses an existing value instead of coining a synonym). All defaults are empty — a v2/v3 dispatcher's bundles still validate, and a v2/v3 curator's outputs still apply. **Version 5** hands the `normalize-tags` kind to its own expert: it is defined by `lazy-wiki.tag-curator-protocol.md`, which extends it from a scope to any tag surface and adds the advisory-dictionary duty. The v4 text below is left intact — a `normalize-tags` bundle already queued against this protocol still validates and still applies — but new dispatches of that kind go to `wiki.tag-curator`, and the per-node kinds are what `wiki.curator` is dispatched for. **Version 6** finally fills the channel v3 declared: the `link` request carries a `candidates` array — the dispatcher's ranked shortlist of repo-relative target paths. It is additive and optional; a v3/v4/v5 curator that ignores the field still works, and a dispatcher that omits it still validates.
 
 ## Request shape (`request.json`)
 
@@ -15,40 +15,39 @@ Canonical contract for jobs dispatched to `wiki.curator` by `lazycortex-wiki`'s 
 
 ```json
 {
-  "kind":     "classify",
-  "role":     "curator",
-  "source":   [{"path": "source/<node-filename>", "description": "the node being classified, copied under its own filename"}],
-  "context":  [
-    {"path": "context/tag_axes.json",      "description": "closed list of tag axis names: the vault's vocabulary narrowed to this scope"},
-    {"path": "context/existing_tags.json", "description": "optional: values already in use per axis (anchor); empty/absent on cold-start"},
-    {"path": "context/pins.json",          "description": "operator pin declarations for this node"}
-  ],
-  "result":   [{"path": "result/curation.json", "description": "curator output: wiki_summary and topics"}]
+  "kind":          "classify",
+  "node_path":     "<path to the node being classified>",
+  "scope_id":      "<wiki scope the node belongs to>",
+  "tag_axes":      ["<axis name>", "..."],
+  "existing_tags": {"<axis>": ["<value>", "..."]},
+  "pins":          {"pinned_topics": [], "unrelated_topics": [], "pinned_links": [], "unrelated_links": []}
 }
 ```
+
+Staged beside it: `source/<node-filename>` — the node being classified, copied under its own filename. The curator writes `result/curation.json` (`wiki_summary`, `topics`, `connectors`).
 
 ### `link` request
 
 ```json
 {
-  "kind":     "link",
-  "role":     "curator",
-  "source":   [{"path": "source/<node-filename>", "description": "the node being linked, copied under its own filename"}],
-  "context":  [
-    {"path": "context/topics.md",       "description": "scope topics index (wiki_role: topics-index); lists all classified nodes by topic"},
-    {"path": "context/candidates.json", "description": "optional pre-filtered candidate link targets to verify; empty = none"},
-    {"path": "context/pins.json",       "description": "operator pin declarations for this node"}
-  ],
-  "result":   [{"path": "result/curation.json", "description": "curator output: see_also lines"}]
+  "kind":                 "link",
+  "node_path":            "<path to the node being linked>",
+  "scope_id":             "<wiki scope the node belongs to>",
+  "topics_index_content": "<the scope's whole topics.md as one string>",
+  "candidates":           ["<repo-relative path of a ranked candidate target>", "..."],
+  "pins":                 {"pinned_topics": [], "unrelated_topics": [], "pinned_links": [], "unrelated_links": []}
 }
 ```
+
+Staged beside it: `source/<node-filename>` — the node being linked, copied under its own filename. The curator writes `result/curation.json` (`see_also`).
+
+**The per-node kinds stage no `context/` directory.** Every judgement input above — the axis vocabulary, the anchor, the pins, the topics catalog, the candidate shortlist — travels inline inside `request.json`; none of it is a file the curator can open. `normalize-tags` (below) is the one kind that does stage `context/`.
 
 ### `normalize-tags` request
 
 ```json
 {
   "kind":     "normalize-tags",
-  "role":     "curator",
   "context":  [
     {"path": "context/collected_tags.json", "description": "per-axis distinct values with counts and example summaries (collect-tags output)"}
   ],
@@ -61,14 +60,20 @@ Canonical contract for jobs dispatched to `wiki.curator` by `lazycortex-wiki`'s 
 Field notes:
 
 - `kind` — `classify` or `link`; see `## Kind enum` below.
-- `role` — always `curator`; see `## Role vocabulary` below.
-- `source/<node-filename>` — the node being processed, the single file staged in `source/` under its own basename. For markdown nodes this is the raw file text (frontmatter + body).
-- `context/tag_axes.json` — (`classify` only) JSON array of axis name strings, e.g. `["domain", "kind", "layer"]`: the vault's axis vocabulary (`wiki.tag_axes`) narrowed to the axes this scope uses (`wiki.scopes[<id>].tag_axes`, a narrowing whose absence or emptiness means the whole vocabulary). How the effective list is resolved is the dispatcher's concern, out of scope for this wire contract; what reaches the curator is a closed list either way, and it must only assign topics whose axis appears in it.
-- `context/existing_tags.json` — (`classify` only, optional) the values already in use per axis across the scope, as a JSON object `{<axis>: ["<value>", ...]}` (or the richer `collect-tags` shape, from which the curator reads the value lists). The curator treats it as an **anchor**: when an existing value fits the node, reuse it verbatim rather than coining a synonym. Empty / absent on cold-start (nothing classified yet), in which case the curator chooses freely and a later `normalize-tags` pass consolidates. How it gets populated is the dispatcher's concern, out of scope for this wire contract.
-- `context/collected_tags.json` — (`normalize-tags` only) the per-axis distinct values currently in use, each with its node count and a couple of example summaries (the `collect-tags` output). The judgement input the curator consolidates into an alias map.
-- `context/topics.md` — (`link` only) the scope's `topics.md` file; gives the curator a full catalog of classified nodes and their summaries, organized by topic axis. The curator uses this to select See-also candidates and copy their summaries as glosses. Exists only after at least one `classify` pass has completed and `build-index` has run.
-- `context/candidates.json` — (`link` only, optional) JSON array of repo-relative candidate link-target paths the curator should verify and judge for relevance. When the array is **non-empty**, the curator prioritizes verifying those candidates (still glossing each from `topics.md`); when **empty** (`[]`) or absent, the curator falls back to selecting candidates from `context/topics.md` by content judgment — the v2 behavior. How candidates get populated is the dispatcher's concern, out of scope for this wire contract.
-- `context/pins.json` — JSON object with four optional arrays: `pinned_topics`, `unrelated_topics`, `pinned_links`, `unrelated_links`. Values are the raw strings from `wiki_pinned_topics` / `wiki_unrelated_topics` / `wiki_pinned_links` / `wiki_unrelated_links` frontmatter. For `classify`, only `pinned_topics` and `unrelated_topics` are relevant. For `link`, only `pinned_links` and `unrelated_links` are relevant. Empty arrays when no pins are set.
+- `node_path` — the node this job curates, as the dispatcher wrote it (absolute, or repo-relative on the `process-file` path). It names the same node the `source/` copy holds; the copy is what the curator reads, `node_path` is what it hands to `apply-node`.
+- `scope_id` — the wiki scope the node belongs to; the curator needs it to run `build-index`.
+- `source/<node-filename>` — the node being processed, the single file staged in `source/` under its own basename. For markdown nodes this is the raw file text (frontmatter + body). The only file the per-node kinds stage.
+- `tag_axes` — (`classify` only) JSON array of axis name strings, e.g. `["domain", "kind", "layer"]`: the vault's axis vocabulary (`wiki.tag_axes`) narrowed to the axes this scope uses (`wiki.scopes[<id>].tag_axes`, a narrowing whose absence or emptiness means the whole vocabulary). How the effective list is resolved is the dispatcher's concern, out of scope for this wire contract; what reaches the curator is a closed list either way, and it must only assign topics whose axis appears in it.
+- `existing_tags` — (`classify` only, optional) the values already in use per axis across the scope, as a JSON object `{<axis>: ["<value>", ...]}` (or the richer `collect-tags` shape, from which the curator reads the value lists). The curator treats it as an **anchor**: when an existing value fits the node, reuse it verbatim rather than coining a synonym. Empty / absent on cold-start (nothing classified yet), in which case the curator chooses freely and a later `normalize-tags` pass consolidates. How it gets populated is the dispatcher's concern, out of scope for this wire contract.
+- `context/collected_tags.json` — (`normalize-tags` only) the per-axis distinct values currently in use, each with its node count and a couple of example summaries (the `collect-tags` output). The judgement input the curator consolidates into an alias map, and the one input any kind of this protocol receives as a staged file.
+- `topics_index_content` — (`link` only) the scope's `topics.md` inline as a single string; gives the curator a full catalog of classified nodes and their summaries, organized by topic axis. The curator uses this to select See-also candidates and copy their summaries as glosses. It is non-empty only after at least one `classify` pass has completed and `build-index` has run; the dispatcher sends `""` when the index file is not on disk.
+- `candidates` — (`link` only, optional) the dispatcher's ranked shortlist of likely See-also targets, as a JSON array of repo-relative POSIX path strings ordered best-first. It rides inline like every other `link` input; no `context/candidates.json` is staged. The curator treats it as a **ranking to weigh first**, never as a closed set: a target the shortlist omits but `topics_index_content` justifies is still a legitimate choice, and the pin arrays override it in both directions. Three states, all meaningful and all distinct:
+  - **non-empty** — judge these targets before scanning the rest of the catalog.
+  - **`[]`** — the shortlist ran and nothing scored: on a scope where nothing is close enough yet (or nothing is classified yet), this is the honest answer. Fall back to catalog judgment.
+  - **absent** — no shortlist was computed at all (the dispatcher's recall was unavailable). Indistinguishable, for the curator, from a dispatcher that predates v6: judge from the catalog exactly as v5 did. An empty shortlist is NEVER expressed by omitting the field.
+
+  How the ranking is computed is the dispatcher's concern, out of scope for this wire contract.
+- `pins` — JSON object with four optional arrays: `pinned_topics`, `unrelated_topics`, `pinned_links`, `unrelated_links`. Values are the raw strings from `wiki_pinned_topics` / `wiki_unrelated_topics` / `wiki_pinned_links` / `wiki_unrelated_links` frontmatter. For `classify`, only `pinned_topics` and `unrelated_topics` are relevant. For `link`, only `pinned_links` and `unrelated_links` are relevant. Empty arrays when no pins are set.
 
 ## Response shape (`response.json`)
 
@@ -90,10 +95,6 @@ No extra protocol-specific response fields.
 - `link` — build the See-also section for a node using the scope's topics catalog. Does NOT modify summary or topics (those are locked by `classify`).
 - `normalize-tags` — scope-level: judge a canonical axis-value set from the values currently in use and emit an alias map that merges synonyms / nests subtypes; self-applied via `retag`. Does NOT touch summaries or See-also. Per-node, not run.
 
-## Role vocabulary
-
-- `curator` — the expert acts as wiki curator for the node: reads the node content and scope context, applies judgment to produce curation output, respects operator pins as vetoes.
-
 ## Outcome by kind
 
 | kind | valid outcomes |
@@ -112,17 +113,18 @@ Outcome semantics:
 
 ### `classify`
 
-- **source/<node-filename>** — full raw text of the node (markdown), the only file in `source/`.
-- **context/tag_axes.json** — JSON array of axis name strings: the vault's vocabulary narrowed to this scope.
-- **context/pins.json** — JSON object with four arrays: `pinned_topics`, `unrelated_topics`, `pinned_links`, `unrelated_links`. Only `pinned_topics` and `unrelated_topics` are relevant for classify.
+- **source/<node-filename>** — full raw text of the node (markdown), the only file staged for this kind.
+- **`request.json["tag_axes"]`** — JSON array of axis name strings: the vault's vocabulary narrowed to this scope.
+- **`request.json["existing_tags"]`** — optional anchor object; empty or absent on cold-start.
+- **`request.json["pins"]`** — JSON object with four arrays: `pinned_topics`, `unrelated_topics`, `pinned_links`, `unrelated_links`. Only `pinned_topics` and `unrelated_topics` are relevant for classify.
 - **result/curation.json** — output the curator writes; see `## Result format` below.
 
 ### `link`
 
-- **source/<node-filename>** — full raw text of the node (markdown), the only file in `source/`.
-- **context/topics.md** — scope topics index; lists all classified nodes with their summaries organized by topic axis.
-- **context/candidates.json** — optional JSON array of repo-relative candidate target paths to verify; empty (`[]`) means none, in which case the curator selects from `topics.md` by judgment.
-- **context/pins.json** — JSON object with four arrays. Only `pinned_links` and `unrelated_links` are relevant for link.
+- **source/<node-filename>** — full raw text of the node (markdown), the only file staged for this kind.
+- **`request.json["topics_index_content"]`** — the scope topics index inline as one string; lists all classified nodes with their summaries organized by topic axis. `""` when the index file does not exist yet.
+- **`request.json["candidates"]`** — optional ranked shortlist of repo-relative target paths, best-first. Non-empty narrows the search; `[]` says the recall found nothing; an absent field says no recall ran. In every case the catalog stays the authority on what may be linked.
+- **`request.json["pins"]`** — JSON object with four arrays. Only `pinned_links` and `unrelated_links` are relevant for link.
 - **result/curation.json** — output the curator writes; see `## Result format` below.
 
 ### `normalize-tags`
@@ -147,7 +149,7 @@ The result shape differs by kind.
 Fields:
 
 - `wiki_summary` — one-line string, no newlines. The single authoritative description of the node; used verbatim as the gloss when another node links to this one in See-also.
-- `topics` — array of tag strings each in the form `wiki/<axis>/<value>` where `<axis>` must be one of the values in `context/tag_axes.json`. One topic per applicable axis (not all axes are mandatory — the curator assigns only axes that apply to this node). `pinned_topics` from `pins.json` must appear; `unrelated_topics` must not appear even if the curator would otherwise include them.
+- `topics` — array of tag strings each in the form `wiki/<axis>/<value>` where `<axis>` must be one of the values in the request's `tag_axes`. One topic per applicable axis (not all axes are mandatory — the curator assigns only axes that apply to this node). `pinned_topics` from the request's `pins` must appear; `unrelated_topics` must not appear even if the curator would otherwise include them.
 - `connectors` — (optional, default empty) array of short free-text phrases generated from the node's content that expose linkable facets BEYOND the one-line `wiki_summary` — key concepts, entities, or relationships a related node might match on. They are *not* axis-constrained like `topics` and *not* a second summary: where the summary answers "what is this node", a connector answers "what could a reader arrive here FROM". May be empty (`[]`) when the node has no facets worth surfacing beyond its summary. `apply-node` writes them to the `wiki_connectors` frontmatter block (markdown) or the `connectors:` line of the `<wiki>` block (code).
 
 `see_also` MUST NOT appear in a `classify` result.
@@ -162,7 +164,7 @@ Fields:
 
 Fields:
 
-- `see_also` — array of ready-to-graft markdown list-item strings. Each string is a complete, valid markdown list item of the form `- [<link-text>](<path>) — <gloss>`. `<path>` is copied verbatim from the target's entry in `context/topics.md`; the path base is not the curator's concern, because `apply-node` rewrites every target to the canonical base (relative to the directory of the node being written) before it reaches the file. All targets are local relative paths — there is no cross-repo link form. The gloss is the target node's `wiki_summary` as listed in `context/topics.md` (copy verbatim — do not paraphrase). `pinned_links` from `pins.json` must appear; `unrelated_links` must not appear. An empty array is valid when no related nodes are found.
+- `see_also` — array of ready-to-graft markdown list-item strings. Each string is a complete, valid markdown list item of the form `- [<link-text>](<path>) — <gloss>`. `<path>` is copied verbatim from the target's entry in `topics_index_content`; the path base is not the curator's concern, because `apply-node` rewrites every target to the canonical base (relative to the directory of the node being written) before it reaches the file. All targets are local relative paths — there is no cross-repo link form. The gloss is the target node's `wiki_summary` as listed in `topics_index_content` (copy verbatim — do not paraphrase). `pinned_links` from the request's `pins` must appear; `unrelated_links` must not appear. An empty array is valid when no related nodes are found.
 
 `wiki_summary` and `topics` MUST NOT appear in a `link` result.
 
@@ -196,6 +198,6 @@ The expert MUST NOT hand-edit the node file directly — the `apply-node` call (
 
 | Category | Used when |
 |---|---|
-| `logical` | Input is malformed: `tag_axes.json` is not a JSON array, `pins.json` is not a JSON object, the staged node file is empty, or the node content is not recognizable as markdown. For `link`: `topics.md` is absent or empty. |
+| `logical` | Input is malformed: `tag_axes` is not a JSON array, `pins` is not a JSON object, the staged node file is empty, or the node content is not recognizable as markdown. For `link`: `topics_index_content` is absent or empty, or `candidates` is present but not a JSON array of strings. An absent `candidates` is never malformed input. |
 | `transient` | Claude subprocess crashed or timed out — the runner should retry. |
 | `technical` | Schema violation in the curator's own output (e.g. `topics` contains an entry whose axis is not in `tag_axes`, or a `link` result contains `wiki_summary`). Log and skip; do not retry. |

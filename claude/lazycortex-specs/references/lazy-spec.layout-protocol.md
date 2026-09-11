@@ -1,11 +1,13 @@
 ---
 name: lazy-spec.layout-protocol
 version: 5
-description: Physical disk layout for spec assets — folder kinds, the closed set of file roles, naming conventions, and the asset status folder-note body shape.
+description: Physical disk layout for spec assets — folder kinds, the open asset-type set, folder-notes, template storage and its five-layer resolution, the sibling topology an author-doc sees, and the canonical writer of every managed key and section.
 ---
-# Layout protocol — folder structure, file roles, naming, status-file shape
+# Layout protocol — folder structure, asset types, templates, sibling topology
 
-Physical disk layout, the closed set of file roles, naming conventions, and the asset status folder-note's body shape — one contract because they're inseparable in practice (a doc's path determines its role determines its allowed content determines its body header). The abstraction height each design level holds — what the content may elaborate and what it delegates down — is the [doc-height protocol](./lazy-spec.doc-height-protocol.md)'s contract, delivered to review experts through the class's `protocols` list.
+Physical disk layout: where every kind of folder and file sits, which asset types may exist and how they are declared, where doc templates come from and in what order they resolve, the relative paths an author-doc's siblings are found at, and who is allowed to write each managed key and body section.
+
+Two neighbours carry what this contract used to hold inline, split out at 75 KB and each keeping its original Part numbers (Parts 2–3, and Parts 4–4b respectively) so existing `Part N` citations still resolve: what a document IS — its type, its role, its filename, its header, its link form — is the [file-roles protocol](./lazy-spec.file-roles-protocol.md); what an asset's status folder-note and a level note look like inside is the [status-note protocol](./lazy-spec.status-note-protocol.md). The three stay inseparable in practice (a doc's path determines its role determines its allowed content determines its body header), and the stubs below point each moved Part at its new home. The abstraction height each design level holds — what the content may elaborate and what it delegates down — is the [doc-height protocol](./lazy-spec.doc-height-protocol.md)'s contract, delivered to review experts through the class's `protocols` list.
 
 ## Part 1 — Folder structure
 
@@ -17,8 +19,8 @@ Two kinds of folders exist under the content-root:
 
 1. **Organizational folders** — everything above a product folder. Their names, nesting, and depth are the operator's own: the plugin dictates no form and derives no meaning from a path segment — a product's identity lives in its `products[<key>]` record and its files' frontmatter, never in where it sits. A product folder may also sit directly at the content-root, with no organizational folders above it.
 2. **Product folders** — the folder a registered product's `spec_path` points at (lowercase-with-hyphens recommended for the folder name). A product folder owns the category subdirectories below; the only loose files at the product folder level are the product folder-note (see "Folder-notes" below), the product-level docs `vision.md` + `design.md` + `tech.md`, and the opt-in `use-cases.md` + `decisions.md`:
-   - `vision.md` + `design.md` + `tech.md` — the product-level docs, loose at the product root (NOT in a subfolder), typed `system-vision` / `system-design` / `system-tech` (`spec_role` stays `vision` / `design` / `tech`). `vision.md` is seeded by `lazy-spec.product-config` create mode — the seeding is its whole obligation; a pre-existing product with `design.md` and no vision is a legal pre-vision state. `design.md` and `tech.md` stay optional. There is no per-product `docs/` or `spec/` subfolder — the system itself is called "spec", so product-level reference material sits directly at the product root alongside the folder-note. Because the folder-note basename is `<product>.md`, a product slug of `design` or `tech` would collide with these docs and is therefore forbidden (see Part 3 naming).
-   - `decisions.md` — the product-level decisions registry, loose at the product root. Opt-in and lazily created: it exists only once the `decide` primitive writes a product-level record into it. Its absence is never a defect. No `spec_stage`, no review — see Part 2.
+   - `vision.md` + `design.md` + `tech.md` — the product-level docs, loose at the product root (NOT in a subfolder), typed `system-vision` / `system-design` / `system-tech` (`spec_role` stays `vision` / `design` / `tech`). `vision.md` is seeded by `lazy-spec.product-config` create mode — the seeding is its whole obligation; a pre-existing product with `design.md` and no vision is a legal pre-vision state. `design.md` and `tech.md` stay optional. There is no per-product `docs/` or `spec/` subfolder — the system itself is called "spec", so product-level reference material sits directly at the product root alongside the folder-note. Because the folder-note basename is `<product>.md`, a product slug of `design` or `tech` would collide with these docs and is therefore forbidden (see [file-roles](./lazy-spec.file-roles-protocol.md) Part 3 naming).
+   - `decisions.md` — the product-level decisions registry, loose at the product root. Opt-in and lazily created: it exists only once the `decide` primitive writes a product-level record into it. Its absence is never a defect. No `spec_stage`, no review — see [file-roles](./lazy-spec.file-roles-protocol.md) Part 2.
    - `use-cases.md` — the product-level use cases, loose at the product root: the product's actors and cross-feature scenarios. Opt-in, authored by the operator (no checkbox exists above the asset level); absence is never a defect. Stage-bearing and reviewed like its asset-level sibling — the same `use-cases` review class covers it.
    - **group folders** — one per asset type whose assets exist, named by the type's `default_path`: the shipped `features/` / `changes/` / `bugs/` and every operator-declared type's folder (e.g. `characters/`, `scenes/`) follow ONE rule. The folder is a place, not a fact: an asset's kind is the `spec_asset_type` key on its own status folder-note, and the folder is created lazily by the first `scaffold-asset` call that lands an asset in it — nothing pre-creates an empty group folder, and a product using no changes has no `changes/`. On that first landing the scaffold also seeds the group folder-note `<folder>/<folder>.md` when none exists: an operator-zone note (protected `# Summary` skeleton plus an empty protected `# Coordinator rules` section — the group-scoped rules layer of `lazy-spec.coordination-playbook.md` § 2 — `iconize_icon` from the type's declaration and no `iconize_color` at all — an ordinary container is colourless per [config](./lazy-spec.config-protocol.md) § Container colour, NO `spec_role`) whose body below the skeleton is the operator's; an already-present note is never touched, and an asset scaffolded inside another asset's folder seeds nothing (the enclosing folder's own status note is its folder-note). A bug folder carries `bug.md` (the report: summary, repro steps, observed vs expected) plus the opt-in `code-plan.md` / `code-report.md` / `test-plan.md` / `test-report.md` quartet; it has NO `design.md`, NO `tech.md`, and NO `architecture.md` — a bug fix is never judged code-bearing enough to need one (`lazy-spec.coordination-playbook.md` Chapter 3).
 
@@ -32,7 +34,7 @@ There is **no `backlog/` folder** (removed), **no `human-tasks.md` loose file** 
 
 Asset types are an **open set**, declared rather than enumerated. Two layers declare:
 
-- **Shipped**: the plugin, in `references/lazy-spec.asset-types.json` — `feature`, `change`, `bug`, `content`, `research`, with default paths `features/` / `changes/` / `bugs/` / `content/` / `research/`.
+- **Shipped**: the plugin, in `references/lazy-spec.asset-types.json` — five spawnable types, `feature`, `change`, `bug`, `content`, `research`, with default paths `features/` / `changes/` / `bugs/` / `content/` / `research/`. The same file also carries the `catalog` and `product` level entries: they have no `default_path`, nothing spawns into them, and they exist only to give a level note its icon and its playbook.
 - **Operator-defined**: a product, under `products[<key>].asset_types` in `.claude/lazy.settings.json` — merged over the shipped set key-by-key, so a product may replace one field of a shipped type without restating the rest.
 
 A declaration carries `{ icon, color?, playbook, alias_of?, default_path?, start_doc, default_tools?, vision? }`. `vision` is the asset-level vision contract — `mandatory` (the coordinator seeds and starts `vision.md` itself on a fresh asset, before the start document), `opt-in` (a `Write vision` launch checkbox), or `none` (the doc is illegal on the type); shipped defaults: `feature` mandatory, `change` opt-in, `bug` none, `content` and `research` opt-in; an undeclared field reads as `opt-in`. `start_doc` is the `"<file>:<doc_type>"` token naming the one document a fresh asset of the type is seeded with; `playbook` is the reference `spec.coordinator` loads on every wake of an asset of the type; `alias_of` names a base type whose playbook this one borrows when it declares none of its own — the folder, icon, colour, start document and tools stay the alias's own, and aliases never chain.
@@ -41,7 +43,7 @@ A type declared via `/lazy-spec.add-asset-type` is recognised by `lazy-spec.crea
 
 An asset folder is `<spec_path>/<folder>/<slug>/`, where `<folder>` is the type's `default_path` unless the caller named another location. Assets may nest: an asset's boundary is the folder whose folder-note carries `spec_role: status`, so a folder sitting inside another asset's folder is its own asset all the same. It holds:
 
-- the status folder-note `<slug>.md` (`spec_role: status`, flat gates, `spec_asset_type` — see Part 4 and [lifecycle](./lazy-spec.lifecycle-protocol.md));
+- the status folder-note `<slug>.md` (`spec_role: status`, flat gates, `spec_asset_type` — see [status-note](./lazy-spec.status-note-protocol.md) Part 4 and [lifecycle](./lazy-spec.lifecycle-protocol.md));
 - the document named by the type's `start_doc` — `design.md` for the shipped `feature` / `change` / `content` / `research` types, `bug.md` for `bug`. There is no default layout: a type with no `start_doc` cannot be scaffolded at all;
 - optionally `architecture.md` — feature/change layout only, NEVER on a bug; opt-in on disk the same way as `code-plan.md` / `test-plan.md`, but its existence tracks a coordinator judgment (code-bearing asset) rather than free operator choice — see [coordination-playbook](./lazy-spec.coordination-playbook.md) Chapter 3 and Chapter 8;
 - `vision.md` per the asset type's `vision` contract — mandatory on a feature (the coordinator seeds and starts it before `design.md`; the `Write design` row waits for its approve), opt-in on a change (`Write vision` checkbox, window closes with `spec_design_done`), never on a bug;
@@ -82,47 +84,56 @@ Doc templates come from a **linear per-doc-type base** plus **per-asset-type spe
 ```
 .claude/templates/
 ├── spec.docs/                                   ← LINEAR BASE: one template per shipped doc type, serves every asset type
+│   ├── vision.md
+│   ├── use-cases.md
 │   ├── design.md
+│   ├── ui-design.md
 │   ├── architecture.md
 │   ├── code-plan.md
 │   ├── test-plan.md
 │   ├── code-report.md
 │   ├── test-report.md
 │   ├── bug.md
+│   ├── system-vision.md                         ← product-level <product>/vision.md
+│   ├── system-design.md                         ← product-level <product>/design.md
 │   ├── system-tech.md                           ← product-level <product>/tech.md
+│   ├── vault-vision.md                          ← content-root vision.md
+│   ├── vault-design.md                          ← content-root design.md
 │   └── vault-tech.md                            ← content-root tech.md
-├── spec.product/                                ← product-level docs (at the product root)
+├── spec.product/                                ← product-level docs (at the product root) + the level folder-note
 │   ├── design.md                                ← specialisation: <product>/design.md diverges from the base
-│   └── group-note.md                            ← <product>.md operator folder-note (product is the "group" of its asset types)
+│   ├── level-note.md                            ← <product>.md level folder-note; `catalog-note backfill` renders it, at a product root and at the catalog root alike
+│   └── group-note.md                            ← group folder-note skeleton (product is the "group" of its asset types)
 ├── spec.feature/                                ← shipped feature type — no doc specialisations, rides the base
 │   ├── asset-note.md                            ← <slug>/<slug>.md asset status folder-note (gates + # History)
 │   └── group-note.md                            ← features/features.md type folder-note (operator-zone)
 ├── spec.change/                                 ← shipped change type
 │   ├── design.md                                ← specialisation
 │   ├── architecture.md                          ← specialisation
-│   ├── code-plan.md                              ← specialisation
+│   ├── code-plan.md                             ← specialisation
 │   ├── asset-note.md
 │   └── group-note.md                            ← changes/changes.md type folder-note
 ├── spec.bug/                                    ← shipped bug type (its `start_doc` seeds `bug.md`, not `design.md`)
-│   ├── code-plan.md                              ← specialisation
+│   ├── code-plan.md                             ← specialisation
 │   ├── asset-note.md
 │   └── group-note.md                            ← bugs/bugs.md type folder-note
-├── spec.request/                                ← content-root intake inbox
-│   ├── request.md                               ← <slug>.md request file (single-file, NOT a folder-note)
+├── spec.request/                                ← content-root intake inbox (the request file itself has no template — `lazy-spec.create-request` writes its body inline)
 │   └── group-note.md                            ← <content-root>/requests/requests.md inbox folder-note
 └── spec.asset/                                  ← TYPE-AGNOSTIC BASE: what a type with no folder of its own falls back on
-    └── asset-note.md                            ← <slug>/<slug>.md asset status folder-note (gates + # History)
+    ├── asset-note.md                            ← <slug>/<slug>.md asset status folder-note (gates + # History)
+    └── group-note.md                            ← <folder>/<folder>.md type folder-note (operator-zone)
 ```
 
 Naming convention inside an asset-type template folder:
 
 - **`group-note.md`** — the folder-note for the type's COLLECTION folder (the `<folder>/` itself, e.g. `features/features.md`). Operator-zone — plugin writes only the managed `iconize_*` keys.
 - **`asset-note.md`** — the folder-note for each individual ASSET folder (`<slug>/<slug>.md`). Carries `spec_role: status`, gates, `# Gates`, `# History`. Plugin-managed.
+- **`level-note.md`** (`spec.product/` only) — the folder-note for a LEVEL: a product root (`<product>.md`) or the catalog root. Carries `spec_role: product` / `catalog`, the four level gates, `# Gates`, `# Status brief`, `# History`. Plugin-managed, and never instantiated by a scaffold — the `catalog-note backfill` verb owns it ([status-note](./lazy-spec.status-note-protocol.md) Part 4b).
 - The named docs (`design.md`, `bug.md`, `tech.md`, `code-plan.md`, `test-plan.md`, `code-report.md`, `test-report.md`) — authored content the operator + lazy-review experts fill in.
 
 **An operator-defined type ships no template folder, and none is seeded for it.** `/lazy-spec.add-asset-type` writes the type's declaration and stops — it copies no files into `.claude/templates/spec.<name>/`. A type with no folder of its own resolves every document from the plugin's linear base (`spec.docs/`) and its status folder-note from the type-agnostic base (`spec.asset/`), which is why a type needs no template to be scaffoldable. An operator who wants a specialisation creates `.claude/templates/spec.<name>/` by hand and drops in the files to override — the resolver picks them up on the next scaffold, with no registration step.
 
-Diagram exemplars are owned by the `lazycortex-diagram:lazy-diagram.draw` engine (shipped by the lazycortex-diagram plugin). Per-product diagram-exemplar overrides live under whatever directory a caller passes to the drawer via `exemplar_override_dir`.
+Diagram exemplars are owned by the `lazycortex-diagram:lazy-diagram.draw` engine (shipped by the lazycortex-diagram plugin), and this template tree has no say in them. There is **no per-product diagram-exemplar override**: the drawer's input list carries no override key, and its mermaid writer resolves each kind's exemplar from the diagram plugin's own template directory. A product that needs a different diagram house style changes the exemplar the diagram plugin ships; nothing under `.claude/templates/` is consulted for it.
 
 **Template resolution (5-layer fallback).** When `lazy-spec.create-asset` scaffolds an asset, it resolves each template file in this order, first hit wins:
 
@@ -212,362 +223,23 @@ All products follow this shape. No concrete names appear in this rule — skills
 
 The request inbox is a direct child of the content-root — never inside any product or operator folder.
 
-An asset folder of any category may additionally hold **attachments** — files an expert created beside the document it was writing (a mockup, a diagram, a data file, an extra prose chapter). They are not drawn in the tree above because they carry no fixed names, and they sit **flat in the asset folder**, beside the documents. There is no attachments subfolder, and no other legal location. See Part 2 § Attachments for what an attachment is and which keys it carries.
+An asset folder of any category may additionally hold **attachments** — files an expert created beside the document it was writing (a mockup, a diagram, a data file, an extra prose chapter). They are not drawn in the tree above because they carry no fixed names, and they sit **flat in the asset folder**, beside the documents. There is no attachments subfolder, and no other legal location. See [file-roles](./lazy-spec.file-roles-protocol.md) Part 2 § Attachments for what an attachment is and which keys it carries.
 
 ## Part 2 — File roles
 
-### Document type
-
-A document's **type** is the `spec_doc_type` frontmatter key, and the set of legal values is **open**, declared rather than enumerated. Two layers declare:
-
-- the plugin, in `references/lazy-spec.doc-types.json` — nine shipped types;
-- a product, under `products[<key>].doc_types` in `.claude/lazy.settings.json` — merged over the shipped set key-by-key, so a product may flip one flag of a shipped type without restating the rest.
-
-A declaration carries three independent boolean flags, each defaulting to `false`, plus an optional `template`:
-
-- `stages` — the document carries `spec_stage`, and is the only kind `lazy-spec.set-stage` accepts;
-- `review` — the document goes through the review loop under a class of the same name;
-- `append_only` — the file is only ever appended to, never rewritten;
-- `template` — filename of the type's linear template under `templates/spec.docs/`.
-
-Validation everywhere is "a declaration for this type exists", never "this name is in the enum". `lazycortex-specs doc-type` is the one reader: `of <file>`, `resolve <type> --product <key>`, `list --product <key>`, `backfill`.
-
-Three consequences worth stating outright:
-
-- **The basename of an authored document carries no semantics.** `races.md` with `spec_doc_type: design` is a design document; the filename is free.
-- **Two documents of the same type in one asset are legal.** Nothing keys off uniqueness of a name.
-- **`spec_role` is not replaced by this.** It remains the role/placement key — the status folder-note is `spec_role: status` and has no type at all, and the pins, decisions, and path checks still read it. A document carrying both keys must have them agree; agreement is by family, not literal equality — role `vision` agrees with types `vision` AND `system-vision`, role `design` agrees with types `design` AND `system-design`, role `tech` agrees with type `system-tech`, every other shipped type agrees only with the role of its own name.
-
-### Roles
-
-The `spec_role` frontmatter key is a **closed set** of fifteen values: `vision`, `use-cases`, `design`, `architecture`, `ui-design`, `code-plan`, `test-plan`, `code-report`, `test-report`, `bug`, `tech`, `status`, `decisions`, `product`, `catalog`. A plugin-owned spec doc carries exactly one of these. Role determines what content is allowed.
-
-The last three are folder-note roles rather than document roles — `status` marks an asset's folder-note, and `product` / `catalog` mark the two LEVEL notes (Part 4b below). None of the three carries a per-file `spec_stage`; each carries gates instead.
-
-The last column records today's defaults only — the authority on whether a document carries `spec_stage` is the `stages` flag of its type's declaration, not this table.
-
-| `spec_role` | Purpose | May contain source URLs? | May carry `spec_source_branches`? | Per-file `spec_stage`? (see the type's `stages` flag) |
-|------|---------|--------------------------|------------------------------|-------------------|
-| `vision` | Goals, value, one-screen "what this is and for whom" — sections Overview / Goals / Value Proposition / Design Concept / Risks. Goals live ONLY here; the sibling design opens with a reference to it. Three levels: content-root (`vision.md`, the mandatory vault spec, typed `system-vision`), product root (`<spec_path>/vision.md`, seeded at product creation, typed `system-vision`), and asset folders per the type's `vision` contract (typed `vision`) — never on a bug | **No** | No | **Yes** |
-| `use-cases` | Opt-in requirements scenarios written before the behavior settles: actors, goals, preconditions, main and alternative flows, postconditions — WHO needs what of the system, in the actor's own language, with no system internals. Three levels: content-root (`use-cases.md` — the system's actors and cross-product scenarios), product root (`<spec_path>/use-cases.md` — cross-feature scenarios), and feature/change asset folders; never on a bug | **No** | No | **Yes** |
-| `design` | Behavior, requirements, user flow — WHAT the system does (feature/change/operator-defined-asset doc) | **No** | No | **Yes** |
-| `architecture` | Opt-in code-structure design: module boundaries, dependency direction, public contract versus internals, data migration, cost to existing callers — the SHAPE of the code, not the behavior. Feature/change asset-level only, never on a bug. Mandatory once the coordinator judges the asset code-bearing (`lazy-spec.coordination-playbook.md` Chapter 3/8), same as `design` is mandatory once the category needs it | **No** | No | **Yes** |
-| `ui-design` | Opt-in interface design: the screens the asset introduces or changes, their per-screen states, the navigation between them, and the interaction decisions behind them — with the HTML mockups filed flat beside it as attachments. Feature/change asset-level only, never on a bug | **No** | No | **Yes** |
-| `tech` | Technical specification: architecture, source file map, components, data structures, reuse notes. System-level only (`tech.md` at a product root, or loose at the content-root as the project-wide spec; type `system-tech`) — no per-asset `tech.md` | **Yes** | **Yes** | **Yes** |
-| `code-plan` | Opt-in development plan: scope, sequence, implementation notes for the developer. Populated once `design.md` is approved | **Yes** | **Yes** | **Yes** |
-| `test-plan` | Opt-in functional test plan: verifies behavior against the design. Populated by the tester expert from the approved design; unit tests belong to the developer, not here | **Yes** | **Yes** | **Yes** |
-| `code-report` | Opt-in append-only working journal written during execution, never after the fact. Carries no `spec_source_branches` and no per-file stage — it is not reviewed or approved | No | No | **No** |
-| `test-report` | Opt-in append-only working journal written during execution, never after the fact. Same no-stage, no-review contract as `code-report` | No | No | **No** |
-| `bug` | Report doc for a bug: what's broken, repro steps, observed vs expected, environment, links to affected code / logs. No companion `design` or `tech` — a bug folder ships only `bug.md` plus whichever quartet members are opt-in-authored | **Yes** (only in the `## Related code / logs` section) | No | **Yes** |
-| `status` | Asset folder-note: lifecycle state as flat gate booleans (`spec_design_done`…`spec_released` + `spec_cancelled`), `# Gates` callouts (H1), `# History` log (H1). See [lifecycle](./lazy-spec.lifecycle-protocol.md) | **No** | No | No — carries **gates**, not a per-file stage |
-| `product` | Product-root LEVEL note (`<spec_path>/<leaf>.md`): the four level gates plus `spec_halted`, and the coordinator's own body sections. Owns the four system documents loose at that product root. See Part 4b | **No** | No | No — carries **level gates** |
-| `catalog` | Catalog-root LEVEL note (`<content-root>/<basename>.md`): the same four level gates and the same sections, owning the four system documents loose at the content root, plus the split into products. Exactly one per vault. See Part 4b | **No** | No | No — carries **level gates** |
-| `decisions` | Opt-in append-only registry of accepted decisions — project-level (`<content-root>/decisions.md`), product-level (`<spec_path>/decisions.md`), or asset-level (`<spec_path>/<category>/<slug>/decisions.md`). Never scaffolded; created lazily by the `decide` primitive on its first record. Carries no `spec_stage`, no `review_active` — it never enters review | **No** | No | No — not stage-bearing, not gated |
-
-A file that violates its role (e.g., source URL in a `design` file) is a hard violation caught by `lazy-spec.doctor`.
-
-**Per-file stage vs gates.** A document carries a per-file `spec_stage` when its type's declaration says `stages: true`; among the shipped types that flag is set on `vision`, `system-vision`, `use-cases`, `design`, `system-design`, `bug`, `architecture`, `ui-design`, `system-tech`, `code-plan`, and `test-plan`, which therefore carry `spec_stage` (`empty | draft | approved | rejected | cancelled | deferred`; see [lifecycle](./lazy-spec.lifecycle-protocol.md) and `lazy-spec.set-stage`). `code-report` and `test-report` are authored docs too, but carry **no** `spec_stage` — they are append-only journals, never opted into review, and play no role in any gate precondition. `decisions` carries no `spec_stage` either, for the same reason — it is an append-only registry, never opted into review, and plays no role in any gate. The `status` role carries the asset's **flat gate booleans** instead (it is a folder marker, not an authored doc) — see [lifecycle](./lazy-spec.lifecycle-protocol.md).
-
-**Path constraints.** `status` files are only permitted at an asset folder-note path (`<spec_path>/<category>/<slug>/<slug>.md`) — never at the product root. `bug` files are only permitted under `<spec_path>/bugs/<slug>/`. `architecture` and `ui-design` files are only permitted under a `features/<slug>/` or `changes/<slug>/` asset folder — NEVER under `bugs/<slug>/`; `use-cases` files are additionally permitted loose at the product root and at the content-root, and still NEVER under `bugs/<slug>/`; `vision` files follow the same three levels — asset folders per the type's `vision` contract, the product root, and the content-root — and are NEVER under `bugs/<slug>/`. `design.md`, and the opt-in `use-cases.md` / `architecture.md` / `ui-design.md` / `code-plan.md` / `code-report.md` / `test-plan.md` / `test-report.md` / `decisions.md`, live in an asset folder; the product-level `vision.md` + `design.md` + `tech.md` + opt-in `use-cases.md` + `decisions.md` are loose at the product root; the project-wide `vision.md` + `design.md` + `tech.md` + opt-in `use-cases.md` + `decisions.md` are loose at the content-root and are the ONLY spec docs legal there — an asset-typed doc at the content-root is a defect.
-
-### Removed roles
-
-The following roles no longer exist — do not author them, do not reference them:
-
-- **`layout`** — there is no Excalidraw layout doc/role.
-- **`human-tasks`** — there is no plugin-managed human-attention dashboard.
-- **`*-index`** (`spec-index`, `features-index`, `changes-index`, `bugs-index`, `requests-index`, `backlog-index`) — container index dataview is **operator-zone**, not a plugin role. The plugin defines no `*-index` role.
-
-### Operator-zone folder-notes carry no `spec_role`
-
-Category and group folder-notes (`features/features.md`, `<spec_path>/<category>/<category>.md`, …) are **operator-zone** — same-name-as-folder folder-notes the plugin does not own. They carry **NO `spec_role`** key. The plugin writes only the managed `iconize_icon` / `iconize_color` keys (and reads a category folder-note's `description`); their bodies are operator-owned. See Part 1 above.
-
-Three same-name-as-folder folder-notes DO carry a `spec_role`: the asset status folder-note (`spec_role: status`), the product-root level note (`spec_role: product`), and the catalog-root level note (`spec_role: catalog`). The product root was operator-zone before the level coordinator existed; it is now a plugin-owned note whose `# Coordinator rules` and `# Summary` stay operator-authored inside a plugin-owned shape — `lazycortex-specs catalog-note backfill` is what brings an older one across, adding what it lacks and rewriting nothing.
-
-### Request files
-
-A request file (`<content-root>/requests/<slug>.md`) is free-form user intake captured before classification. It is governed by [request-format](./lazy-spec.request-protocol.md) (its own `request_*` frontmatter and lifecycle); it is not part of the `spec_role` closed set.
-
-### Upstream unit notes
-
-A unit note (`<repo-root>/upstream/<repo-key>/<mount>/<unit-path>/<unit-slug>.md`) carries `spec_role: upstream-unit` — declared the same way `request` is above: a recognised `spec_role` value living outside the closed twelve in § Roles, with its own frontmatter and lifecycle documented in [config-protocol](./lazy-spec.config-protocol.md) Part 5, not the quartet-role table above. Unlike every other folder documented here, the `upstream/` mirror tree is a sibling of the content-root at the repository root, not a subtree of it — a mirrored external source is not vault content until Phase C's request accepts it in.
-
-### Attachments
-
-An **attachment** is any file in an asset folder that is neither one of the canonical authored docs nor the status folder-note — a mockup, a diagram, a stylesheet, a data file, an additional prose chapter. It is created by the expert writing the document it belongs to, directly in the worktree, and it rides on that job's own commit. Like `request` and `upstream-unit` above, it lives outside the closed twelve `spec_role` values and carries no `spec_role` of its own.
-
-**Placement.** Flat in the asset folder (`<spec_path>/<category>/<slug>/`), beside the documents — see Part 1.
-
-**Naming.** Free. Nothing keys off an attachment's basename.
-
-**A markdown attachment carries two authored frontmatter keys**, both written by the creating expert at creation time, plus one derived key nobody authors:
-
-| Key | Value | What it decides |
-|-----|-------|-----------------|
-| `spec_owner_doc` | basename of a sibling document, e.g. `design.md` | Who owns the file: only the job whose own result document is that owner may write to it. It also marks the file as not participating in the asset's gates. |
-| `spec_doc_type` | a declared type name — see § Document type | What kind of document the file is: its review class and its stage rules, resolved exactly as for any other typed document. |
-| `spec_stage` | mirror of the owner's `spec_stage` | Derived, never authored: an attachment has no lifecycle of its own, so its stage (and the `spec/<stage>` mirror tag) always copies the owner's. Written by `lazy-spec.set-stage`'s cascade on every owner stage change and by the coordinator's reconciliation; the one exception is an attachment in its own review (`review_active: true`), which nobody writes until the review finalizes — the coordinator re-stamps it on the wake that finalize raises. The attachment's own review verdict lives only in `review_result` and never feeds its stage. |
-
-The authored two record different facts and are not one fact under two names. A document with a type and no owner is an ordinary asset document; a document with both is an attachment; a document with an owner and no type is a defect the coordinator escalates. `lazy-spec.set-stage` refuses an attachment as a direct target — the mirror has exactly two writers, the cascade and the coordinator.
-
-**A non-markdown attachment carries no frontmatter at all**, so there is nowhere in the file to record who owns it. Its ownership is recorded instead by the coordinator, in the status folder-note's `# Attachments` section — see Part 4.
+**Moved out — read `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md`** for what a document IS: the open `spec_doc_type` set and its two declaring layers, the closed fifteen-value `spec_role` set with its per-role content and stage rules, the path constraints each role is legal under, the removed roles, the operator-zone folder-notes that carry no role at all, and the three file kinds that live outside the closed set — request files, upstream unit notes, and attachments with their `spec_owner_doc` / `spec_doc_type` pair. That file keeps this Part's number.
 
 ## Part 3 — File naming, header section, wikilinks
 
-### File naming
-
-Filenames are **role-only** — a plugin-owned spec doc's basename is its role, nothing else — with two folder-note exceptions (status + operator folder-notes carry the parent folder's name) and the request slug exception:
-
-| Role | Filename | Allowed under |
-|------|----------|---------------|
-| `vision` | `vision.md` | content-root (mandatory vault spec), product root `<spec_path>/` (seeded at product creation), or an asset folder per the type's `vision` contract — never on a bug |
-| `use-cases` | `use-cases.md` | content-root, product root `<spec_path>/`, `<spec_path>/features/<slug>/`, or `<spec_path>/changes/<slug>/` — opt-in requirements-scenario doc at every level, never on a bug |
-| `design` | `design.md` | content-root (project-wide, type `system-design`), product root `<spec_path>/` (product-level, type `system-design`), `<spec_path>/<category>/<slug>/` (any category except `bugs`; type `design`) |
-| `architecture` | `architecture.md` | `<spec_path>/features/<slug>/` or `<spec_path>/changes/<slug>/` ONLY — opt-in code-structure doc, never on a bug |
-| `ui-design` | `ui-design.md` | `<spec_path>/features/<slug>/` or `<spec_path>/changes/<slug>/` ONLY — opt-in interface doc, never on a bug |
-| `tech` | `tech.md` | content-root (project-wide) or product root `<spec_path>/` — always type `system-tech` |
-| `bug` | `bug.md` | `bugs/<slug>/` (bug-report doc; bugs omit design/tech/architecture) |
-| `code-plan` | `code-plan.md` | `<spec_path>/<category>/<slug>/` (opt-in asset-level implementation plan) |
-| `test-plan` | `test-plan.md` | `<spec_path>/<category>/<slug>/` (opt-in asset-level functional test plan) |
-| `code-report` | `code-report.md` | `<spec_path>/<category>/<slug>/` (opt-in append-only execution journal) |
-| `test-report` | `test-report.md` | `<spec_path>/<category>/<slug>/` (opt-in append-only execution journal) |
-| `status` | `<slug>.md` (matches parent asset folder name) | `<spec_path>/<category>/<slug>/` |
-| `decisions` | `decisions.md` | content-root (project-level), product root `<spec_path>/` (product-level), `<spec_path>/<category>/<slug>/` (asset-level) — opt-in, never scaffolded, lazily created by the `decide` primitive |
-| operator folder-note | `<product>.md` / `<category>.md` (matches parent folder name) | product root / category folder root |
-| request | `<slug>.md` | `<content-root>/requests/` (vault-wide inbox) |
-
-- No scope suffix, no name prefix, no underscores. `design.md` is just `design.md` everywhere.
-- **Exception: the `status` role uses a filename matching its parent asset folder** — `features/chapter-log/chapter-log.md`, `changes/rename-chapter-log/rename-chapter-log.md`. This is the Obsidian folder-note convention: clicking the folder opens this file, and the file itself is hidden in the file tree. An asset folder without its status folder-note has no lifecycle state — `lazy-spec.doctor` flags it.
-- **Exception: operator folder-notes also use the folder-note convention** — `<spec_path>/<product>.md`, `features/features.md`, `<spec_path>/<category>/<category>.md`. The filename matches the parent folder. These carry NO `spec_role` (operator-zone) and only the managed `iconize_*` keys (plus `description` on category folder-notes) — see Part 2.
-- **Exception: an attachment's filename is free.** An attachment is not a role-bearing document — it carries `spec_owner_doc` and `spec_doc_type` instead of a `spec_role`, and nothing reads its basename. See Part 2 § Attachments.
-- **Exception: the `request` role uses a user-controlled `<slug>.md` filename.** Requests have no per-folder identity, so the slug IS the identity. Slugs are lowercase-with-hyphens, globally unique across the content-root `requests/` inbox. See [request-format](./lazy-spec.request-protocol.md).
-- Folder names carry identity: category folders and asset folders use lowercase-with-hyphens; the same is recommended for product folders (the plugin reads no meaning from folder names above `spec_path`).
-- **Reserved product slugs.** A product folder MUST NOT be named `vision`, `design`, `tech`, `use-cases`, or `decisions`: its folder-note (`<product>.md`) would then collide with the product-level docs of those names that sit loose at the product root. `lazy-spec.doctor` flags a product slug in this reserved set.
-- Basenames intentionally collide across the vault (every feature and every change has a `design.md`). Collisions are disambiguated by path (in file references) and by the in-file header section (when reading).
-
-### Header section (mandatory in every authored spec doc)
-
-Because filenames are role-only, every authored spec doc carries a structured body header identifying its product / asset and role. Skills generate this header when they create a file; `lazy-spec.doctor` enforces it.
-
-**Frontmatter fields** (the keys the plugin reads / writes):
-
-| Field | Applies to | Value |
-|-------|-----------|-------|
-| `tags` | every file | list of tag paths (includes the product tag + the `spec/<stage>` mirror for stage-bearing docs) |
-| `spec_role` | every plugin-owned spec doc | one of the closed set: `vision`, `use-cases`, `design`, `architecture`, `ui-design`, `code-plan`, `test-plan`, `code-report`, `test-report`, `bug`, `tech`, `status`, `decisions`. Operator-zone folder-notes carry NO `spec_role` — see Part 2 |
-| `spec_stage` | stage-bearing authored docs (`vision`, `system-vision`, `use-cases`, `design`, `system-design`, `architecture`, `ui-design`, `code-plan`, `test-plan`, `bug`, `system-tech`) | per-file lifecycle stage, one of `empty | draft | approved | rejected | cancelled | deferred`; mirrored to a `spec/<stage>` tag. See [lifecycle](./lazy-spec.lifecycle-protocol.md). `code-report` / `test-report` / `decisions` carry NO `spec_stage` |
-| `spec_design_done` | `status` files only | bool gate — see [lifecycle](./lazy-spec.lifecycle-protocol.md) |
-| `spec_plan_done` | `status` files only | bool gate |
-| `spec_develop_done` | `status` files only | bool gate |
-| `spec_tests_passing` | `status` files only | bool gate |
-| `spec_released` | `status` files only | bool gate |
-| `spec_cancelled` | `status` files only | bool — terminal overlay freezing all gates |
-| `spec_source_requests` | every stage-bearing authored doc (`vision`, `system-vision`, `use-cases`, `design`, `system-design`, `architecture`, `ui-design`, `code-plan`, `test-plan`, `bug`, `system-tech`) AND `status` folder-notes | per-doc subset on authored docs / asset-wide union on the folder-note. List of path-qualified wikilinks to request files that contributed (`[]` when created directly). Forward-only; the reverse link lives in the request body. The body's `# Sources` section is a projection of this key — see [sources](./lazy-spec.sources-protocol.md) Part 1. `code-report` / `test-report` carry neither key — they are execution journals, not sourced deliverables |
-| `spec_source_docs` | every stage-bearing authored doc | per-doc list of path-qualified wikilinks to companion reference documents. See [sources](./lazy-spec.sources-protocol.md) Part 1 |
-| `spec_source_branches` | `system-tech`, `code-plan`, and `test-plan` only (when applicable) | per-repo branch pins — see [sources](./lazy-spec.sources-protocol.md) Part 2 |
-| `iconize_icon` | every folder-note (product / category / asset status) | managed iconize identifier the plugin writes from config — see Part 1 |
-| `iconize_color` | product roots, intake shelves, and asset status folder-notes — never an ordinary group folder-note | managed iconize color the plugin writes from config — see [config](./lazy-spec.config-protocol.md) § Container colour |
-| `description` | category folder-notes only | operator-authored prose explaining the category; the plugin only READS it |
-| `wiki_pinned_topics` | files written by a template-rendering site (`scaffold_asset.py`, `lazy-spec.create-from-code`, `lazy-spec.sync-with-code`), the `pins` verb, and `decisions.md` (written by the `decide` primitive at creation) | list of `wiki/<axis>/<value>` tag paths pinning the file's `doc-kind` (and, on asset-level files, `product` / `category`) axis values so the wiki curator's classification never overrides them. Wiki reads this key only — it never writes it |
-
-Request files carry their own `request_*` frontmatter (see [request-format](./lazy-spec.request-protocol.md)), not the keys above.
-
-**Body header**: immediately after frontmatter, every authored doc starts with:
-
-```markdown
-# <Title> — <role>
-```
-
-- `<Title>` is the display name — the product name, asset slug, or status name depending on role.
-- There is NO breadcrumb line — that form is removed. Ancestry is carried by the file's path and frontmatter, not by a body line.
-- Body content follows.
-
-Example for `Server/Tester/chapter/features/chapter-log/design.md`:
-
-```markdown
----
-tags:
-  - tester/chapter
-  - spec/draft
-spec_role: design
-spec_stage: draft
-spec_source_requests: []
----
-
-# chapter-log — design
-
-## Summary
-…
-```
-
-### Wikilinks
-
-All inter-doc references MUST use **path-qualified** wikilinks with explicit display text:
-
-```
-[[<path/relative/to/vault/root/without/.md>|<display text>]]
-```
-
-- Paths are relative to the vault root. No leading slash.
-- Display text is required — it's what the reader sees.
-- Bare wikilinks like `[[design]]` or `[[code-plan]]` are FORBIDDEN because role-only basenames collide by design (every feature has a `design.md`). `lazy-spec.doctor` flags any bare wikilink that resolves ambiguously.
-
-Examples:
-
-- `[[Server/Tester/chapter/design|chapter design]]`
-- `[[Server/Tester/chapter/features/chapter-log/design|chapter-log design]]`
-- `[[Server/Tester/chapter/features/chapter-log/code-plan|chapter-log code-plan]]`
-- `[[Server/Tester/chapter/changes/rename-chapter-log/design|rename-chapter-log design]]`
-
-Asset folder names are NOT required to be globally unique across products — the wikilink path disambiguates them. Request slugs, by contrast, are globally unique across the single content-root `requests/` inbox.
+**Moved out — read `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md`** for role-only filenames and their four exceptions, the reserved product slugs, the frontmatter-field table every authored doc is written against, the mandatory `# <Title> — <role>` body header, and the path-qualified wikilink form bare links are forbidden in favour of. That file keeps this Part's number.
 
 ## Part 4 — Status file (folder-note) shape
 
-Every asset folder (`features/<feat>/`, `changes/<change-name>/`, `bugs/<bug-name>/`) MUST contain exactly one folder-note — a file whose basename matches the parent folder (e.g., `features/chapter-log/chapter-log.md`, `changes/Rename Chapter Log/Rename Chapter Log.md`, `bugs/login-accepts-empty-password/login-accepts-empty-password.md`). It carries the asset's progression in a machine-consumable form for `spec.*` skills. The folder-note is identified by `spec_role: status` in frontmatter; `lazy-spec.doctor` also enforces the basename-matches-parent invariant.
-
-The status file owns the asset's **gates** — five flat top-level booleans plus a `spec_cancelled` overlay. There is no `gates:` dict, no `stage:`, no `awaits_human:`, and no `## Workflow` section: the gate booleans are the entire progression model. The authoritative gate semantics — the linear S0..S5 ladder, the precondition table, derived-vs-human-signal mechanics, and the single mutation channel — live in [lifecycle](./lazy-spec.lifecycle-protocol.md). This section covers only the file's frontmatter shape and body layout; it does NOT restate the gate rules.
-
-### Status frontmatter schema
-
-The status folder-note carries the asset's type, five flat boolean gates and one overlay flag — no nesting, no `gates:` dict. This matches the shipped template `${CLAUDE_PLUGIN_ROOT}/templates/spec.<type>/asset-note.md` (or `spec.asset/asset-note.md` for a type with no folder of its own):
-
-```yaml
----
-tags:
-  - <product_tag>
-  - spec/status
-spec_role: status
-spec_asset_type: <the asset's type>
-spec_design_done: false
-spec_plan_done: false
-spec_develop_done: false
-spec_tests_passing: false
-spec_released: false
-spec_cancelled: false
-iconize_icon: <inherited from the asset's type declaration>
-iconize_color: <inherited from the asset's type declaration>
----
-```
-
-- `spec_asset_type` is what makes the asset an asset OF a type — the folder it sits in is a place, not a fact, and everything that resolves the asset's law (the coordinator, the playbook lookup) reads this key, never the path. Written at scaffold time alongside `spec_tools`, the list of tools the asset is realised and checked with when its type declares any.
-- The five gate booleans (`spec_design_done`, `spec_plan_done`, `spec_develop_done`, `spec_tests_passing`, `spec_released`) and the `spec_cancelled` overlay are the asset's whole progression state. Their ladder, preconditions, and flip rules are owned by [lifecycle](./lazy-spec.lifecycle-protocol.md).
-- `iconize_icon` / `iconize_color` are managed keys, inherited from the asset's type declaration (`asset_types[<type>]`, the product's own merged over the shipped set); they paint the folder icon in the Obsidian file explorer. Not authored by hand.
-- This is distinct from the per-file `spec_stage` on sibling authored docs (`design.md` / `bug.md` / `code-plan.md` / `test-plan.md`) — see [lifecycle](./lazy-spec.lifecycle-protocol.md). The folder-note carries gates, not a stage. The sibling `code-report.md` / `test-report.md` journals carry neither gates nor a stage.
-
-### Status body format
-
-The status folder-note body carries seven H1 sections, in order, matching the shipped `asset-note.md` template byte-for-byte. All seven are plugin-owned and protected — each seeds EMPTY (no placeholder HTML comment; prose explanations live in this doc and the playbook, not in the scaffolded note itself). There is no title H1, no `## Current`, no `## Workflow`, no `## Log`, no H2-level Gates or History.
-
-Each protected section's **first content line** is the ownership tag `#protected/spec/<region>`. This tag tells every other plugin (reviewer, wiki, etc.) that the section is owned by the spec plugin and must be preserved byte-for-byte across any edit those plugins make to the note. Ownership by the `spec` plugin domain is not the same as a single writer — the protected-sections obligation binds every OTHER plugin to leave the section alone; within the spec domain, who actually writes each section still varies (below).
-
-1. **`# Summary`** (protected, `#protected/spec/summary`) — a one-line précis of the asset (written by `lazy-spec.create-asset` / `lazy-spec.product-config` at scaffold time; on container notes it carries `<!-- spec:precis:* -->` and `<!-- spec:stats:* -->` markers filled by `summary_render`).
-2. **`# Gates`** (protected, `#protected/spec/gates`) — the launch checkboxes `spec.coordinator` hangs and reconciles, as `[!gate]` blocks. Nothing else lives here: `bin/flip_gate.py` writes no callout, a gate's state is its frontmatter boolean.
-3. **`# Attachments`** (protected, `#protected/spec/attachments`) — the coordinator's registry of the asset's non-markdown attachments, one line per file: a link to the file and the document that owns it. **The one optional section**: the shipped templates seed it, so every freshly scaffolded note carries it empty, but a note created before it existed does not have it — `note-check` reports its absence as nothing at all, and only validates the owner tag when the heading is present. A markdown attachment is never listed here; its ownership lives in its own `spec_owner_doc` frontmatter, and duplicating it would create two sources of truth that can disagree.
-4. **`# Status brief`** (protected, `#protected/spec/status-brief`) — `spec.coordinator`'s own prose, rewritten (not appended) on every invocation: what's happening on the asset, why it's stalled (if it is), what happens next. Placeholder before the coordinator's first pass: `_Not yet assessed by the coordinator._`.
-5. **`# Coordinator rules`** (protected, `#protected/spec/coordinator-rules`) — operator-authored, persistent constraints scoped to this asset; `spec.coordinator` reads it before every decision but never writes it. The operator writes it by hand — the protected-section contract binds every other PLUGIN to preserve it byte-for-byte, not the operator. Seeded empty.
-6. **`# Coordinator commands`** (protected, `#protected/spec/coordinator-commands`) — operator-authored one-shot instructions; the coordinator, as this section's owning persona, unfolds a command into a numbered mini-plan written into this same section, locks progress marks into it while the command runs, then moves the finished block into `# History` on completion (`lazy-spec.coordination-playbook.md` Chapter 5). Seeded empty.
-7. **`# History`** (protected, `#protected/spec/history`) — one line per gate or stage transition, appended chronologically. Earlier lines are never rewritten.
-
-```markdown
-# Summary
-#protected/spec/summary
-
-<one-line précis of the asset>
-
-# Gates
-#protected/spec/gates
-
-> [!gate] Review design.md
-> - [ ] Review design.md
->
-> tick to open review: `design.md` re-enters the loop at the reviewer round
-
-# Attachments
-#protected/spec/attachments
-
-- [mockup.html](mockup.html) — design.md
-- [palette.svg](palette.svg) — design.md
-
-# Status brief
-#protected/spec/status-brief
-
-<the coordinator's current narration>
-
-# Coordinator rules
-#protected/spec/coordinator-rules
-
-<operator-authored constraints scoped to this asset, once written>
-
-# Coordinator commands
-#protected/spec/coordinator-commands
-
-# History
-#protected/spec/history
-
-- 2026-05-01 — lazy-spec.flip-gate · spec_design_done → true
-- 2026-05-02 — lazy-spec.flip-gate · spec_plan_done → true
-```
-
-**Rules**:
-
-- `# Gates` carries the launch checkboxes `spec.coordinator` hangs and reconciles (`lazy-spec.coordination-playbook.md` Chapter 5) and nothing else. `bin/flip_gate.py` writes no callout here: a gate's state is its frontmatter boolean, its transition is the `# History` line, and the flip's reason is in the run log.
-  - **Launch checkbox** — head line with the label, the `- [ ] <label>` line directly under it, then a blank quoted line (`>`) before any hint text. The blank line is structural, not style: a line glued to a checklist item is that item's continuation, and Obsidian's task renderer shows an item's first line only, so a glued hint is invisible in reading view. The same shape binds every checkbox-carrying callout in a note, `[!question]` options and their attribution included.
-  - There is no `[!ready]` / `[!info]` readiness callout anymore — `bin/gate_tick.py` no longer evaluates gate readiness or drops one. Readiness reasoning now lives in `spec.coordinator`'s own narration, in `# Status brief`, per `lazy-spec.coordination-playbook.md`.
-- `# Attachments` is `spec.coordinator`'s own registry, one line per non-markdown attachment in the form `- [<file>](<file>) — <owner>.md`. It stays absent or empty on an asset that has none, and a line whose file no longer exists is removed on the next reconciliation. `note-check` treats the section as optional — no finding when the heading is absent, a `missing-marker` finding when the heading is present without `#protected/spec/attachments` as its very next line.
-- `# Status brief`, `# Coordinator rules`, and `# Coordinator commands` are `spec.coordinator`'s own sections to reason from (write-once-per-invocation for the brief; read-only / lock-and-clear for the other two) — see `lazy-spec.coordination-playbook.md` §§ 1, 5, 9 for the full contract. `note-check` (`bin/note_ops.py`) validates all three are present, in order, and that each carries its own protected marker as the line immediately following its heading; `lazy-spec.doctor` delegates to it rather than re-deriving the check.
-- `# History` is one line per gate (or stage) transition, appended chronologically. `flip_gate` writes `- <date> — lazy-spec.flip-gate · <gate> → <true|false>`; `lazy-spec.set-stage` writes its own per-file stage-transition lines here too. Earlier lines are never rewritten.
-
-### Shared primitives — pointers
-
-Skills touching status files or authored-doc stages use these named primitives rather than restating the mechanics:
-
-- **`lazy-spec.flip-gate`** (`bin/flip_gate.py`) — the only writer of gate booleans. Flips unconditionally on call (refusing only a cancelled asset), rewrites the gate in frontmatter and appends a `# History` line. Deciding WHEN a gate is ready is `spec.coordinator`'s call, not this primitive's. See [lifecycle](./lazy-spec.lifecycle-protocol.md) → "The single mutation channel".
-- **`lazy-spec.gate-tick`** (`bin/gate_tick.py`) — a pure poller now: clears a finished expert job's `active_job` marker in the runtime sidecar and runs a structural `note-check` on the folder-note. It no longer flips gates, evaluates readiness, or drops any callout. See [lifecycle](./lazy-spec.lifecycle-protocol.md) → "The `gate-tick` md-scan worker".
-- **`lazy-spec.set-stage`** — change a per-file stage on an authored doc; see [lifecycle](./lazy-spec.lifecycle-protocol.md). Every per-file stage change in the system MUST go through this primitive.
-- **`lazy-spec.resolve-dependency`** — resolve a dep entry to `{kind, spec_link, dev_link, local_spec_path?}`; see [sources](./lazy-spec.sources-protocol.md) Part 3.
-- **`lazy-spec.resolve-repo`** — turn a repo-config key into `{local_path, branch, remote_url, host, owner, repo, forge, base_url}` by inspecting the local checkout's git remote and applying the known-forges table; see [sources](./lazy-spec.sources-protocol.md) Part 2.
-- **`lazy-spec.source-url`** — build a forge-correct source URL for `(repo_key, path, kind, branch?)` via the known-forges table. EVERY source URL emitted by any skill or agent MUST go through this primitive; see [sources](./lazy-spec.sources-protocol.md) Part 2.
-
-Skills MUST reference these primitive names rather than restate the mechanics.
+**Moved out — read `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.status-note-protocol.md`** for the asset status folder-note: its flat-gate frontmatter schema, the seven protected H1 sections in order with their `#protected/spec/<region>` owner tags, the launch-checkbox and `# Attachments` line shapes, and the shared-primitive pointers (`lazy-spec.flip-gate`, `lazy-spec.gate-tick`, `lazy-spec.set-stage`, the source-resolution trio). That file keeps this Part's number.
 
 ## Part 4b — Level note (product root and catalog root) shape
 
-Two folder-notes carry a LEVEL role instead of `status`, and `spec.catalog-coordinator` owns both in full (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.catalog-playbook.md`):
-
-- **Product level note** — `<spec_path>/<leaf>.md`, where `<leaf>` is the final segment of the product's `spec_path`. `spec_role: product`. One per registered product.
-- **Catalog level note** — `<content-root>/<basename of content-root>.md` (`specs/specs.md` under the default `spec.vault_root`). `spec_role: catalog`. Exactly one per vault.
-
-Both are created and brought to schema by one verb, `lazycortex-specs catalog-note backfill <product>` / `--root`, from the shipped template `${CLAUDE_PLUGIN_ROOT}/templates/spec.product/level-note.md`. Neither is ever hand-written: the verb adds what a note lacks and rewrites nothing, so an operator's `# Coordinator rules` and the rendered `# Summary` survive every run byte-for-byte.
-
-### Level frontmatter schema
-
-```yaml
----
-spec_role: product            # or `catalog` on the vault's one root note
-spec_vision_done: false
-spec_design_done: false
-spec_ui_design_done: false
-spec_tech_done: false
-spec_halted: false
-iconize_icon: <from the level's registry entry>
-iconize_color: <from the level's registry entry, or the product's own colour>
----
-```
-
-- The four gate booleans are the level's whole progression state. Every one is derived from the stage of one system document beside the note; their semantics live in [lifecycle](./lazy-spec.lifecycle-protocol.md) Part 2b.
-- A level note carries **no** `spec_asset_type` and **no** `spec_tools`: the level's type IS its role, and the ladder comes from the level playbook, not from a per-type declaration. It carries no `spec_cancelled` and no `spec_released` either — a level is not abandoned and not shipped; `spec_halted` is its only overlay.
-- `spec_design_done` shares its name with the asset gate of the same name. They are different objects on different notes, and nothing that reads asset gates ever reads a level note.
-- The coordinator's recorded review state of the level's documents lives here too, under the same closed-schema marker key a status note uses; `note-check` validates it.
-
-### Level body format
-
-Seven plugin-owned H1 sections, each with its `#protected/spec/<region>` tag as its first content line, in this order: `# Summary`, `# Gates`, `# Status brief`, `# Coordinator rules`, `# Coordinator commands`, `# History`, `# Attachments`. `# Summary` carries the same `<!-- spec:precis:* -->` and `<!-- spec:stats:* -->` marker pairs every container note has, filled by `summary_render`.
-
-**What `note-check` requires differs from what the template seeds, and the level roster is the stricter one.** On a status note, five sections are required — `# Gates`, `# Status brief`, `# Coordinator rules`, `# Coordinator commands`, `# History` — with `# Attachments` optional (a note predating the section is not a finding) and `# Summary` outside the check. On a LEVEL note `# Attachments` joins the required five, because every level note is brought to shape by `catalog-note backfill`: an absent section there means the backfill was never run, which is exactly what the check should say.
-
-What each section is for is identical to the status note's (Part 4 above), read at the level's altitude: `# Gates` holds the level's launch checkboxes, `# History` takes the level documents' own stage transitions (`lazy-spec.set-stage` writes them here — a system document's nearest folder-note is its level note, not an absent status note), and `# Attachments` registers the level's non-markdown attachments.
-
-The level's four system documents — `vision.md`, `design.md`, `ui-design.md`, `tech.md` — sit loose beside the note, exactly as Part 2's path constraints already describe, and are the only documents the level note coordinates.
+**Moved out — read `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.status-note-protocol.md`** for the two LEVEL notes: the `catalog-note backfill` verb that brings both to schema, the four-gate frontmatter, and the seven-section body whose required roster is stricter than a status note's. That file keeps this Part's number.
 
 ## Part 5 — Asset sibling topology (from an author-doc's POV)
 
@@ -592,7 +264,7 @@ When an agent works over a specific author-doc, the canonical references it need
 
 ## Part 6 — Canonical writer per artifact (sanity check)
 
-Every plugin-managed frontmatter key and body section has exactly one writer. Any other agent / skill / human writing to a key or section it does not own is a contract violation; `lazy-spec.doctor` and `lazy-core.audit` flag this.
+Every plugin-managed frontmatter key and body section has exactly one writer. Any other agent / skill / human writing to a key or section it does not own is a contract violation; `lazy-spec.audit` and `lazy-core.audit` flag this.
 
 | Artifact | Canonical writer |
 |----------|------------------|

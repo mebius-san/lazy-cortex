@@ -1,10 +1,10 @@
 ---
-name: lazy-observe.doctor
-description: "Run when metrics stopped reaching the observer, a dashboard went flat, an alert says the shipper is down, or the operator asks whether metrics shipping is healthy on this host. Read-only end-to-end check of the service unit, agent process, local `/metrics` endpoints, remote_write success, observer reachability, and WAL size — it reports fixes with PASS / WARN / FAIL, never applies them."
-allowed-tools: Read, Glob, Bash(launchctl *), Bash(systemctl *), Bash(curl *), Bash(test *), Bash(date *), Bash(ps *), Bash(du *), Bash(uname *), Bash(python3 *), Agent
+name: lazy-observe.audit
+description: "Run when metrics stopped reaching the observer, a dashboard went flat, an alert says the shipper is down, or the operator asks whether metrics shipping is healthy on this host. Delegated from `lazy-core.doctor` Phase 3. Read-only end-to-end check of the service unit, agent process, local `/metrics` endpoints, remote_write success, observer reachability, and WAL size — it reports fixes with PASS / WARN / FAIL, never applies them."
+allowed-tools: Read, Glob, Bash(launchctl *), Bash(systemctl *), Bash(curl *), Bash(test *), Bash(date *), Bash(ps *), Bash(du *), Bash(uname *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
 logging-waiver: "read-only check — nothing to record"
 ---
-# Doctor lazy-observe
+# Audit lazy-observe
 
 Confirm the metrics shipping pipeline is healthy end-to-end. The skill is intentionally read-only — it returns findings and suggested fixes, but never restarts services, never edits configs, never wipes WAL directories. Mutating fixes are the operator's call.
 
@@ -105,8 +105,8 @@ Outcome: `reported`.
 - **WARN covered-unconfigured** → a collector already scrapes this host but `observe.toml` is absent → run `/lazy-observe.install`; it detects the coverage and records integrate mode without questions.
 - **FAIL inactive (Step 2)** → `launchctl kickstart -k gui/$UID com.lazycortex.observe` (darwin) or `systemctl --user restart lazycortex-observe.service` (linux). Check journal/Console for crash reason first.
 - **FAIL no-pid (Step 3)** → service unit thinks it's running but the process exited; check the agent's stderr in `~/Library/Logs/lazycortex-observe/` (darwin) or via `journalctl --user -u lazycortex-observe.service` (linux).
-- **FAIL endpoint-down (Step 4)** → lazycortex-core daemon is down OR `metrics.enabled: false`. Check `references/lazy-core.runtime-schema.md § 12`.
-- **FAIL no-lazycortex-series (Step 4)** → endpoint is up but serving no samples; daemon hasn't dispatched a routine yet → wait for the first tick and re-run doctor.
+- **FAIL endpoint-down (Step 4)** → lazycortex-core daemon is down OR `metrics.enabled: false`. Check `references/lazy-core.metrics-schema.md`.
+- **FAIL no-lazycortex-series (Step 4)** → endpoint is up but serving no samples; daemon hasn't dispatched a routine yet → wait for the first tick and re-run `/lazy-observe.audit`.
 - **WARN zero-rate (Step 5)** → agent is up but not delivering. Common causes: token expired (`/lazy-observe.install` Step 5), observer unreachable (Step 6 will catch), agent's WAL still recovering from outage.
 - **FAIL self-metrics-down (Step 5)** → agent is up but its self-metrics endpoint isn't bound; usually a config typo. Re-render via `/lazy-observe.install` (writes are idempotent).
 - **FAIL unreachable (Step 6)** → wrong URL, observer down, or DNS / firewall issue. The fix is on the operator's network, not in this plugin.

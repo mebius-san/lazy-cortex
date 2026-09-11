@@ -7,6 +7,7 @@ against the consumer repo. Phases are idempotent; safe to re-run.
 Phases:
   phase1 — mirror plugin rules into <consumer>/.claude/rules/
   phase2 — deploy chk-py and tst-py wrappers into <consumer>/cli/
+  phase2b — deploy chk-py and tst-py human wrappers into $HOME/.local/bin
   phase3 — bootstrap consumer pyproject.toml with checker sections
   phase4 — probe for PyCharm inspect.sh CLI (pch prereq)
   phase5 — scaffold project overlay guidelines under docs/guidelines/
@@ -177,7 +178,6 @@ class Phase2Wrappers:
       content = (PLUGIN_ROOT / "templates" / template_name).read_text()
       target = self.target_dir / target_name
       target.write_text(content)
-      target.chmod(target.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     self._ensure_venv_gitignored()
     return 0
 
@@ -194,6 +194,54 @@ class Phase2Wrappers:
     prefix = existing if existing == "" or existing.endswith("\n") else existing + "\n"
     self.gitignore.write_text(prefix + ".venv/\n")
     print("gitignore-ensured")
+
+
+# ----------------------------------------------------------------------------------------
+class HomeWrappersPhase:
+  """
+  Install phase that writes `chk-py` and `tst-py` into `$HOME/.local/bin`.
+
+  These are the only files this plugin ever marks executable: they live outside every
+  vault, so no mode-blind git client can strip the bit, and they find the repo's own
+  `cli/` wrapper by walking up from the caller's directory.
+  """
+
+  TEMPLATES: tuple = (
+    ("chk-home-wrapper.sh", "chk-py"),
+    ("tst-home-wrapper.sh", "tst-py"),
+  )
+
+  def __init__(self, *, consumer_dir: Path) -> None:
+    # consumer_dir is unused — the home wrappers install to a fixed, repo-independent target
+    self.consumer_dir: Path = consumer_dir
+    self.plugin_root: Path = PLUGIN_ROOT
+    # `HOME` is honoured so tests can redirect the target
+    self.target_dir: Path = Path(os.environ.get("HOME") or Path.home()) / ".local" / "bin"
+
+  def run(self) -> int:
+    """
+    Write both wrappers, byte-verified, and set the exec bit on the written copies.
+
+    Returns:
+      0 on success.
+    """
+    self.target_dir.mkdir(parents = True, exist_ok = True)
+    receipt: dict = {}
+    for template, name in self.TEMPLATES:
+      src = self.plugin_root / "templates" / template
+      dst = self.target_dir / name
+      body = src.read_bytes()
+      state = "unchanged"
+      if not dst.exists():
+        state = "installed"
+      elif dst.read_bytes() != body:
+        state = "refreshed"
+      if state != "unchanged":
+        dst.write_bytes(body)
+      dst.chmod(dst.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+      receipt[name] = state
+    print(json.dumps({ "phase": "phase2b", "wrappers": receipt }, indent = 2))
+    return 0
 
 
 # ----------------------------------------------------------------------------------------
@@ -672,6 +720,7 @@ def main() -> int:
   phases: dict[str, type[_InstallPhase]] = {
     "phase1": Phase1MirrorRules,
     "phase2": Phase2Wrappers,
+    "phase2b": HomeWrappersPhase,
     "phase3": Phase3Pyproject,
     "phase4": Phase4Pch,
     "phase5": Phase5Overlay,

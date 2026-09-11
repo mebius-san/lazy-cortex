@@ -1,7 +1,7 @@
 ---
 name: lazy-obsidian.capture
 description: "Run when the operator changed this vault's Obsidian configuration and wants it recorded — new plugin installed, settings tweaked, snippet added, theme or palette changed — or asks to snapshot / capture the vault config. Writes the whole `.obsidian/` surface into the tracked `.obsidian.manifest.json` and commits it, so the config reaches other checkouts as one reviewed file. The sibling `/lazy-obsidian.deploy` rebuilds `.obsidian/` from what this skill wrote."
-allowed-tools: Read, Bash(python3 *), Bash(git rev-parse*), Bash(git status*), Bash(git diff*), Bash(git add -N *), Bash(git commit *), Bash(mkdir -p *), Bash(date *), Write, AskUserQuestion, Agent
+allowed-tools: Read, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(git rev-parse*), Bash(git status*), Bash(git diff*), Bash(git add -N *), Bash(git commit *), Bash(mkdir -p *), Bash(date *), Write, AskUserQuestion, Agent
 argument-hint: "[<repo-root>]"
 ---
 # Capture the vault config into its manifest
@@ -38,7 +38,7 @@ Outcome: `vault: <repo_root>`.
 ## Step 2 — Run the capture worker
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/vault_manifest.py" capture <repo_root>
+"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/vault_manifest.py" capture <repo_root>
 ```
 
 The worker prints a JSON report and writes `<repo_root>/.obsidian.manifest.json`. A non-zero exit means the report's `errors` list is non-empty.

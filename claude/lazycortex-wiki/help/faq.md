@@ -1,19 +1,19 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about setting up scopes, running relinks, mirroring foreign repos, querying the wiki, the terms dictionary, the structure map, the domain-spec tree, and the tag-values canon.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 no_diagram: true
 source_skills:
   - lazy-wiki.install
   - lazy-wiki.configure
-  - lazy-wiki.doctor
+  - lazy-wiki.audit
   - lazy-wiki.query
   - lazy-wiki.relink
   - lazy-wiki.structure
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: 8c88b306fa93ef776a16cdaadec55e16bbe0120a
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Frequently asked questions
 
@@ -29,7 +29,7 @@ After install, run `/lazy-wiki.configure` to define at least one scope (the set 
 
 A scope is a named slice of your repository that the wiki tracks independently. Each scope has its own `topics.md` index, its own tag-axis narrowing, and its own anchor tracking which commit has been fully linked. You configure scopes via `/lazy-wiki.configure`.
 
-Create one scope per coherent body of content that you want to navigate independently — for example a `docs` scope over `docs/**/*.md` and a `codebase` scope over `src/**/*.py`. Scopes can coexist in the same repo; `/lazy-wiki.doctor` can check all of them in a single run. If your whole project is one unified body of knowledge, a single scope is fine.
+Create one scope per coherent body of content that you want to navigate independently — for example a `docs` scope over `docs/**/*.md` and a `codebase` scope over `src/**/*.py`. Scopes can coexist in the same repo; `/lazy-wiki.audit` can check all of them in a single run. If your whole project is one unified body of knowledge, a single scope is fine.
 
 ---
 
@@ -107,21 +107,21 @@ There are two common causes. First, the topics index for the relevant scope may 
 
 ---
 
-## What does `/lazy-wiki.doctor` check, and which findings can it fix automatically?
+## What does `/lazy-wiki.audit` check, and which findings can it fix automatically?
 
-`/lazy-wiki.doctor [<scope-id>]` runs a read-only audit first and groups findings by severity (`FAIL`, `WARN`, `INFO`). Fixable findings — `orphan-topic`, `index-desync`, `see-also-path-base`, `broken-see-also`, and `stale-gloss` — are repaired by rebuilding the topic index, rewriting See-also links onto the canonical path base, dropping broken See-also lines, or refreshing stale glosses. The skill asks for confirmation before applying any fix.
+`/lazy-wiki.audit [<scope-id>]` runs a read-only audit first and groups findings by severity (`FAIL`, `WARN`, `INFO`). Fixable findings — `orphan-topic`, `index-desync`, `see-also-path-base`, `broken-see-also`, and `stale-gloss` — are repaired by rebuilding the topic index, rewriting See-also links onto the canonical path base, dropping broken See-also lines, or refreshing stale glosses. The skill applies none of them — run `lazycortex-wiki doctor <scope-id> --apply` for that repair set, or let the daily `lazy-wiki.doctor-apply` routine do it.
 
 `see-also-path-base` catches a See-also link written against the wrong path form for the target node (for example, a relative link that no longer matches how the node's canonical path is tracked in the index) — the fix rewrites the link's target to the canonical path without touching its gloss.
 
-Report-only findings (`dangling-at-prefix`, `missing-summary`, `unknown-axis`, `dup-branch`, `broken-wiki-block`, `scope-overlap`, `domain-output-in-scope`, and — for any scope carrying a `mirror` block — `mirror-clone-orphaned`, `mirror-dir-missing`, `mirror-paths-uncovered`, `mirror-stale-fetch`, `mirror-local-edit`) identify structural issues that require a curator relink, a scope reconfiguration, or a mirror sync to resolve — the doctor surfaces them but does not modify nodes for those checks. `dangling-at-prefix` catches a See-also link still written in the old `@<repo-key>/<path>` cross-repo notation whose target now belongs to a mirrored scope and should point at the mirrored node's local path instead.
+Report-only findings (`dangling-at-prefix`, `missing-summary`, `unknown-axis`, `dup-branch`, `broken-wiki-block`, `scope-overlap`, `domain-output-in-scope`, and — for any scope carrying a `mirror` block — `mirror-clone-orphaned`, `mirror-dir-missing`, `mirror-paths-uncovered`, `mirror-stale-fetch`, `mirror-local-edit`) identify structural issues that require a curator relink, a scope reconfiguration, or a mirror sync to resolve — the audit surfaces them but modifies nothing. `dangling-at-prefix` catches a See-also link still written in the old `@<repo-key>/<path>` cross-repo notation whose target now belongs to a mirrored scope and should point at the mirrored node's local path instead.
 
-The same run also audits the terms dictionary (when any terms scope is configured) and the project-structure map (when it is configured or already built) — see the dedicated questions below for what each of those sections reports.
+The same run also audits the terms dictionary (when any terms scope is configured) and the project-structure map (when it is configured or already built), and — when `wiki.domains` is configured — a repo-level `domains` section covering the generated doc tree; see the dedicated questions below for what each of those sections reports.
 
 ---
 
-## `/lazy-wiki.doctor` says "unknown scope" — how do I fix it?
+## `/lazy-wiki.audit` says "unknown scope" — how do I fix it?
 
-The scope id you passed is not present in `lazy.settings.json[wiki.scopes]`. Either run `/lazy-wiki.configure` to create it, or re-invoke `/lazy-wiki.doctor` without a scope argument to audit every configured scope. You can list existing scopes by running `/lazy-wiki.configure`, which displays them in edit mode.
+The scope id you passed is not present in `lazy.settings.json[wiki.scopes]`. Either run `/lazy-wiki.configure` to create it, or re-invoke `/lazy-wiki.audit` without a scope argument to audit every configured scope. You can list existing scopes by running `/lazy-wiki.configure`, which displays them in edit mode.
 
 ---
 
@@ -131,7 +131,7 @@ The axis vocabulary itself — `wiki.tag_axes` — is repository-wide, not per s
 
 To narrow one scope's axes, run `/lazy-wiki.configure` for that scope and answer Phase 5 with the subset it should use. To grow or shrink the vocabulary itself for every scope at once, run `/lazy-wiki.configure vault` instead — `/lazy-wiki.configure` for a single scope offers only what `wiki.tag_axes` already contains and cannot add a new axis to it. Removing an axis at the vault level is a destructive write: the wizard names how many tagged nodes and narrowing scopes would be orphaned before you confirm it.
 
-Either way, expect a normalization pass on the next relink or on the weekly `lazy-wiki.tag-normalize` routine. On the next `/lazy-wiki.relink` run, Step 2 resolves each scope's effective axis list (vault vocabulary narrowed by the scope), and the tag-canon step dispatches the `wiki.tag-curator` expert to judge a canonical axis-value set for the scope and apply it via the deterministic `retag` primitive, consolidating any values that drifted into near-synonyms. Findings of `unknown-axis` from `/lazy-wiki.doctor` indicate nodes that carry axis keys not in the current effective set — a relink clears them.
+Either way, expect a normalization pass on the next relink or on the weekly `lazy-wiki.tag-normalize` routine. On the next `/lazy-wiki.relink` run, Step 2 resolves each scope's effective axis list (vault vocabulary narrowed by the scope), and the tag-canon step dispatches the `wiki.tag-curator` expert to judge a canonical axis-value set for the scope and apply it via the deterministic `retag` primitive, consolidating any values that drifted into near-synonyms. Findings of `unknown-axis` from `/lazy-wiki.audit` indicate nodes that carry axis keys not in the current effective set — a relink clears them.
 
 ---
 
@@ -153,9 +153,15 @@ The regular scope branch of `/lazy-wiki.configure` still collects an `exclude_pa
 
 ---
 
-## `/lazy-wiki.doctor` reports `domain-output-in-scope` — is a file being written twice?
+## `/lazy-wiki.audit` reports `domain-output-in-scope` — is a file being written twice?
 
 No. It means a scope's `paths` glob reaches the generated domain-spec tree, but the tree is excluded from every scope structurally (derived from `wiki.domains.output`, not declared anywhere) — no file actually has two writers. The finding is about the glob claiming coverage it doesn't have: narrow the scope's `paths` via `/lazy-wiki.configure` so what the scope declares matches what it actually curates.
+
+---
+
+## What do the other findings in `/lazy-wiki.audit`'s `domains` section mean?
+
+When `wiki.domains` is configured, the audit adds a repo-level `domains` section reporting on the generated doc tree independently of any wiki scope's findings. `domain-group-unknown` means code carries a `Domain(<group>)` marker whose group is not in the dictionary — edit the dictionary by hand to add it, or run `/lazy-python.knowledge-sweep`, which grows the dictionary together with the operator and refiles the markers under the accepted groups; the sweep is the better route whenever several groups surface at once or markers sit parked under `Domain(unfiled):`. `domain-dictionary-missing` means the file `wiki.domains.dictionary` names doesn't exist — seed an empty skeleton via `/lazy-wiki.configure domains`, or build a populated one with `/lazy-python.knowledge-sweep` when the code already carries domain knowledge to draw from. `domain-doc-unknown` means a doc under the output tree belongs to a group the dictionary no longer lists (typically a rename that stranded it) — the next `/lazy-wiki.domain-sync` or domain routine drops it as an unlisted removal automatically; restore the group key in the dictionary instead if you want the doc back. `domain-gloss-missing` means a group's `## <group>` heading in the dictionary has no one-line gloss underneath — add one; without it the writer has only the code's `Domain(…)` blocks to synthesise the doc's overview from. `domain-hash-stale` means the generated tree is out of date with the code that feeds it — run `/lazy-wiki.domain-sync` or wait for the routine. `domain-routine-mismatch` means the registered domain routines don't match what `/lazy-wiki.install` would register — re-run it. `domain-tag-axis-unknown` means a generated doc carries a `wiki/<axis>/…` tag whose axis `wiki.tag_axes` doesn't declare — the same fix as a wiki scope's `unknown-axis` finding: declare the axis via `/lazy-wiki.configure vault`, or regenerate the doc via `/lazy-wiki.domain-sync` so it drops the stale tag (the doc is always regenerated, never hand-edited for this).
 
 ---
 
@@ -171,7 +177,7 @@ Run `/lazy-wiki.configure mirror` against an existing scope — the `mirror` blo
 
 The sync itself — `Bash(lazycortex-wiki mirror-sync <scope-id>)` run by hand, or the `lazy-wiki.mirror-sync.<scope-id>` schedule routine registered by re-running `/lazy-wiki.install` afterwards — clones the source into a gitignored runtime directory, copies the matched files under `mirror_path`, and commits. The git-watch `lazy-wiki.scan` routine then picks up the changed files for curation exactly like any other node; there is no second curation channel.
 
-Mirror bodies are overwritten on every sync, so a hand-edit to a mirrored node's content does not survive the next run — only the pin keys (operator-authored node state) carry over. `/lazy-wiki.doctor` reports drift on a mirrored scope separately — see the doctor question above for the `mirror-*` findings — and a See-also link still written in the old `@<repo-key>/<path>` cross-repo notation for content that is now mirrored locally shows up there as `dangling-at-prefix`.
+Mirror bodies are overwritten on every sync, so a hand-edit to a mirrored node's content does not survive the next run — only the pin keys (operator-authored node state) carry over. `/lazy-wiki.audit` reports drift on a mirrored scope separately — see the audit question above for the `mirror-*` findings — and a See-also link still written in the old `@<repo-key>/<path>` cross-repo notation for content that is now mirrored locally shows up there as `dangling-at-prefix`.
 
 ---
 
@@ -203,9 +209,11 @@ Run `/lazy-wiki.terms` from inside a document you are writing — it matches the
 
 ---
 
-## `/lazy-wiki.doctor` flags `divergence` or `dead` findings for a terms scope — what do they mean?
+## `/lazy-wiki.audit` flags `divergence` or `dead` findings for a terms scope — what do they mean?
 
-These come from the terms section of `/lazy-wiki.doctor`, which dispatches the terms curator in report mode to compare the dictionary against the documents it serves. `divergence` means a document uses a different word than the dictionary's canonical one for a concept the curator recognises; `duplicate` means two dictionary entries describe the same concept and should be merged under the name the corpus actually uses; `dead` means a defined term no longer occurs anywhere in the served documents. `missing` covers a concept the corpus uses that the dictionary has not captured yet. Every finding is presented and decided one at a time, never applied in a batch — a `format` or `config` finding (a malformed dictionary, or a scope whose `file` no longer exists) routes back to `/lazy-wiki.configure terms` instead.
+These come from the terms section of `/lazy-wiki.audit`, which dispatches the terms curator in report mode to compare the dictionary against the documents it serves. `divergence` means a document uses a different word than the dictionary's canonical one for a concept the curator recognises; `duplicate` means two dictionary entries describe the same concept and should be merged under the name the corpus actually uses; `dead` means a defined term no longer occurs anywhere in the served documents. `missing` covers a concept the corpus uses that the dictionary has not captured yet. Every finding is presented and decided one at a time, never applied in a batch — a `format` or `config` finding (a malformed dictionary, or a scope whose `file` no longer exists) routes back to `/lazy-wiki.configure terms` instead.
+
+Once you've decided a `divergence` in the dictionary's favour, one CLI verb performs that half mechanically: `Bash(lazycortex-wiki terms-apply <document> --from "<the document's word>" --to "<the dictionary's term>")` does a whole-word substitution in the document's prose only, leaving frontmatter, code fences, inline code, link targets, and the `# See also` block untouched. It refuses outright on a document currently under review (`review_active: true`) or inside an upstream mirror tree, since editing either breaks what that mechanism exists to protect. Every other repair — the other side of a `divergence` (rename or widen the dictionary's term instead), `missing`, `duplicate`, `dead`, `format`, `config` — is still a hand edit; the audit itself writes neither the dictionary nor the document.
 
 ---
 
@@ -221,7 +229,7 @@ Any agent that needs to know where something lives (an architect deciding where 
 
 `/lazy-wiki.configure structure` registers three git-watch routines — one for new files, one for deletions, and one for renames — that dispatch the structure curator to update just the affected entries as commits land, when your project runs the background daemon. The scan routine deliberately does not watch content edits to existing files: the map describes the shape of the tree, not what's inside each file, so rewriting a file in place never removes it from the map — the file's own line just goes stale, which is what the `divergence` finding below exists to catch (dispatching an expert job on every content edit used to queue dozens of no-op jobs per commit wave).
 
-Without the daemon, the map only updates when you run `/lazy-wiki.structure rebuild` yourself; the structure section of `/lazy-wiki.doctor` also flags drift (`missing-dir`, `missing-file`, `dead-entry`, `divergence`, `depth`) you can act on by hand or by rebuilding. A `config` finding there that says the map is reachable by the wiki is fixed once for the whole vault via `/lazy-wiki.configure vault` (putting `docs/structure.md` back into `wiki.exclude`), not by editing any one scope; the same section also flags a `config` finding when the three routines are registered but `docs/structure.md` itself is missing — every incremental dispatch would fail until you run `/lazy-wiki.structure rebuild` once, though `/lazy-wiki.configure structure`'s own last step already prevents this from happening on a fresh setup.
+Without the daemon, the map only updates when you run `/lazy-wiki.structure rebuild` yourself; the structure section of `/lazy-wiki.audit` also flags drift (`missing-dir`, `missing-file`, `dead-entry`, `divergence`, `depth`) you can act on by hand or by rebuilding. A `config` finding there that says the map is reachable by the wiki is fixed once for the whole vault via `/lazy-wiki.configure vault` (putting `docs/structure.md` back into `wiki.exclude`), not by editing any one scope; the same section also flags a `config` finding when the three routines are registered but `docs/structure.md` itself is missing — every incremental dispatch would fail until you run `/lazy-wiki.structure rebuild` once, though `/lazy-wiki.configure structure`'s own last step already prevents this from happening on a fresh setup.
 
 ---
 
@@ -245,7 +253,7 @@ Run `/lazy-wiki.domain-sync` — it works entirely inside your current session, 
 
 Yes. The generated domain-doc tree is treated as its own reserved tag surface — `domains` — alongside every configured wiki scope. A relink's tag-canon step (and the weekly `lazy-wiki.tag-normalize` routine) passes over every surface including `domains` when `wiki.domains` is configured, so the `wiki.tag-curator` expert judges and consolidates the domain docs' axis values into the same `docs/tags.md` dictionary a wiki scope's values land in — a value settled on one surface is available for the other to reuse, though each surface is still judged on its own, since two surfaces may legitimately spell the same idea differently. The one difference from a wiki scope: the `domains` surface has no topics index, so its canon pass never rebuilds one.
 
-If a generated doc carries a `wiki/<axis>/…` tag whose axis is not declared in `wiki.tag_axes`, `/lazy-wiki.doctor`'s domains section reports it as a report-only `WARN` finding naming the axis and the first doc carrying it — the fix is the same as for a wiki scope's `unknown-axis` finding: either declare the axis via `/lazy-wiki.configure vault`, or regenerate the doc via `/lazy-wiki.domain-sync` so it drops the stale tag.
+If a generated doc carries a `wiki/<axis>/…` tag whose axis is not declared in `wiki.tag_axes`, `/lazy-wiki.audit`'s domains section reports it as a report-only `WARN` finding naming the axis and the first doc carrying it — the fix is the same as for a wiki scope's `unknown-axis` finding: either declare the axis via `/lazy-wiki.configure vault`, or regenerate the doc via `/lazy-wiki.domain-sync` so it drops the stale tag.
 
 ---
 

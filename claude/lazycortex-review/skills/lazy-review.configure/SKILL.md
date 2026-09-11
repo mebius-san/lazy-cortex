@@ -1,7 +1,7 @@
 ---
 name: lazy-review.configure
 description: "Run when the operator wants a new kind of document to go through review, wants to change which paths a review class matches, or wants to reassign who writes / validates / closes out / narrates it. Wizard over `review.classes` in `.claude/lazy.settings.json`, one question per turn via AskUserQuestion; read-first, so an already-configured class is re-validated without a single prompt. Requires `/lazy-review.install` to have run."
-allowed-tools: Read, Edit, Write, AskUserQuestion, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Agent
+allowed-tools: Read, Edit, Write, AskUserQuestion, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Agent
 ---
 # lazy-review.configure
 
@@ -11,7 +11,7 @@ Prerequisite: `/lazy-review.install` has run (the settings file exists).
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 6 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step.
+This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step.
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. Canonical titles:
    - `Phase 1 — Verify install + load settings`
@@ -20,6 +20,7 @@ This skill has 6 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Phase 4 — Pick edit_marker_style`
    - `Phase 5 — Write back + run /lazy-review.audit`
    - `Report`
+   - `Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** Outcomes: `verified` / `collected` / `read-from-record` / `picked` / `written` / `audited` / `report-emitted`.
 3. **Do not reach the Report step until every prior task is `completed`.**
 
@@ -186,6 +187,15 @@ Outcome: `written`.
 ## Report
 
 One line per task with its outcome word, followed by `configured: <paths>; experts={main: <count>, validation: <count>, terminal: <count>}; style=<style>; watch_root=<root>; audit=<level>`.
+
+## Logging
+
+Log the run to `./.logs/claude/lazy-review.configure/YYYY-MM-DD_HH-MM-SS.md` per `lazy-log.logging`.
+
+1. `Bash(mkdir -p ./.logs/claude/lazy-review.configure)` — a separate step from the `Write`, never chained.
+2. `Bash(date -u +%Y-%m-%d_%H-%M-%S)` for the filename; `Bash(git rev-parse HEAD)` and `Bash(git rev-parse --abbrev-ref HEAD)` for `git_sha` / `git_branch` (`no-git` when either fails).
+3. `Write` the file. Frontmatter: `git_sha`, `git_branch`, `date` (UTC), `input` (the arguments passed, or `none`).
+4. Body: `# lazy-review.configure` heading, then `## Actions` — one line per Phase with its outcome word, naming the class token configured and every value the operator chose against every value honoured from the file without a prompt — and `## Result` carrying the § Report line.
 
 ## Failure modes
 

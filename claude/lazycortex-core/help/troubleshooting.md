@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, generic iteration loops, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys, seed data gaps), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models, plugin-path resolution, stale source paths at claim time), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources, worker import errors), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
@@ -38,7 +38,7 @@ source_skills:
   - lazy-runtime.preflight
   - lazy-runtime.recover
   - lazy-runtime.tick
-source_sha: d4ce013c331568c5c4815b553aaf9382f01eae69
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Troubleshooting
 
@@ -49,6 +49,16 @@ source_sha: d4ce013c331568c5c4815b553aaf9382f01eae69
 **Likely cause**: The `python3` binary on the current machine is either absent or reports a version below 3.12. Every LazyCortex plugin requires Python 3.12 as a single floor — hook scripts, runtime helpers, and install tooling all depend on it.
 
 **Fix**: Install or upgrade Python 3.12 using the route that matches your machine — `brew install python@3.12 && brew link python@3.12 --force` on macOS, or `pyenv install 3.12 && pyenv global 3.12` on Linux. Run the install command in your own terminal (the skill prints the correct command but never runs system package managers on your behalf). Once the upgrade is in place, re-run `/lazy-core.install`.
+
+---
+
+## A skill or hook fails to run Python after upgrading `lazycortex-core`
+
+**Symptom**: After upgrading `lazycortex-core`, a skill that previously worked fine — installing, dispatching or collecting an expert job, writing or reflecting memory, registering a routine, ticking the runtime, or almost anything else that shells out to Python — fails with a shell error naming a Python path that does not exist, instead of running normally.
+
+**Likely cause**: Every lazycortex skill and hook now runs its Python helpers as `"${LAZYCORTEX_PYTHON:-python3}" <script>` instead of relying on the script's own executable bit — that bit means nothing once a git client that is blind to file modes (obsidian-git on Android, a mode-blind Windows checkout) strips it on clone or pull. `/lazy-core.install` Step 13d resolves the actual interpreter once per machine (`sys.executable`) and records it as `LAZYCORTEX_PYTHON` in this checkout's gitignored `.claude/settings.local.json`; every later skill or hook invocation reads that recorded value. If the recorded path stops resolving — the Python installation behind it was upgraded or removed, or the settings file was copied in from a different machine — every invocation that shells out to Python fails the same way, not just the one you happened to run first.
+
+**Fix**: Re-run `/lazy-core.install` — Step 13d re-derives the interpreter from the current environment and rewrites the `LAZYCORTEX_PYTHON` entry (reporting `python-recorded` or `python-unchanged`) in `.claude/settings.local.json`. If the entry was copied or synced in from a different machine — the value is deliberately kept out of tracked settings for exactly this reason — delete the `env.LAZYCORTEX_PYTHON` entry from this checkout's `.claude/settings.local.json` and re-run `/lazy-core.install` to have it re-derived for this machine.
 
 ---
 
@@ -326,6 +336,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Fix**: Run `/lazy-core.setup --dry-run` first to preview the full plan before committing to it. If a specific plugin should be skipped going forward, disable that plugin, then re-run `/lazy-core.setup` — every child is idempotent, so re-running after a partial or unwanted pass is safe.
 
+## `/lazy-core.setup` reports a plugin `skipped: plugin not installed on this machine`
+
+**Symptom**: `/lazy-core.setup`'s discovery step lists one of your enabled plugins with `skipped: plugin not installed on this machine` instead of running its install.
+
+**Likely cause**: `/lazy-core.setup` now derives the enabled-plugin set purely from the `enabledPlugins` maps in `.claude/settings.json` and `.claude/settings.local.json` — never from the machine-wide `~/.claude/plugins/installed_plugins.json` registry, which spans every project on the host and is no longer trusted as an enablement signal. A plugin can be enabled in this repo's tracked settings (synced from another machine, or another checkout) while this particular host's plugin cache has never actually downloaded it.
+
+**Fix**: Run `/plugin install <plugin>@lazycortex` (or `/plugin update`) on this host to populate the cache, then re-run `/lazy-core.setup` — the skipped plugin's install runs on the next pass. This is not a hard failure; every other enabled plugin's install still completes in the same run.
+
+---
+
 ## `/lazy-core.iterate` loops without converging, stalls at its cap, or aborts with no target
 
 **Symptom**: A `/lazy-core.iterate` run either keeps cycling without visibly improving anything, stops after hitting its cycle cap while issues remain, makes things visibly worse round over round, or refuses immediately with `aborted-no-target`.
@@ -448,6 +468,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ---
 
+## `/lazy-core.audit` flags a reference file as over its size budget
+
+**Symptom**: `/lazy-core.audit` reports a finding like "reference `<N>` KB over the 25|50 KB budget — split per lazy-core.reference-writing § 4.1, or declare `size-waiver:` when the file is genuinely read whole" against a file under `.claude/references/*.md`, `$HOME/.claude/references/*.md`, or `claude/*/references/*.md`.
+
+**Likely cause**: Reference docs (protocols, schemas, contracts under `references/`) carry the same size discipline as rules — over 25 KB is a WARN, over 50 KB is a FAIL. A reference that grew past the threshold without anyone noticing is the usual cause; the audit measures every reference's byte size on every run, whether or not it changed recently.
+
+**Fix**: Split the file along a natural section boundary — move the material no single reader needs together into a sibling reference, leaving a short numbered pointer behind, per `lazy-core.reference-writing § 4.1`. If the file is genuinely read whole by its one consumer and splitting would only fragment that reading, add `size-waiver: "<reason naming the reader>"` to its frontmatter instead — a boolean or empty value (`size-waiver: true`, `size-waiver: ""`) is itself flagged as an invalid-waiver finding and does not suppress the size finding, so the reason must be a real string. `/lazy-core.audit` only reports; it does not split or waive the file for you.
+
+---
+
 ## `/lazy-core.doctor` Fix L1 fails: systemd unit not found
 
 **Symptom**: `/lazy-core.doctor` offers to restart the daemon via `systemctl --user restart`, but the fix fails with "Unit not found".
@@ -486,7 +516,7 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Symptom**: Running `/lazy-core.doctor` skips its expert-runtime health section entirely, even though `lazy.settings.json` clearly has experts configured.
 
-**Likely cause**: The skip guard for this section only fires when it finds none of an `experts` section, a `lazy-core.runtime` section, or a non-empty `external_dirs.paths` list — if your settings file stores this configuration somewhere non-standard, the guard misses it.
+**Likely cause**: The skip guard for this section only clears when it finds a non-empty `experts` section or a non-empty `external_dirs.paths` list — if your settings file stores this configuration somewhere non-standard, the guard misses it.
 
 **Fix**: Run `/lazy-core.audit` directly — Agent D surfaces the same expert-runtime findings without the skip guard, so you can confirm what doctor missed.
 
@@ -527,6 +557,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: The tier value stored in `lazy.settings.json` is not one of the three recognised strings (`haiku`, `sonnet`, `opus`). A typo (e.g. `"sonnet-3-7"`, `"claude-opus"`) causes the hook to treat the entry as unset and fall through to the default model. The hook emits a warning to stderr but never blocks the dispatch.
 
 **Fix**: Run `/lazy-core.agent-models` to review and correct the entries. The skill fills only missing entries by default — to replace an incorrect value, remove the bad entry from `lazy.settings.json` first (the skill will then detect it as missing and prompt you to fill it in), or run `/lazy-core.doctor` which flags unrecognised tier values as a configuration error and offers to fix them.
+
+---
+
+## An agent's model tier changes on its own after upgrading a plugin
+
+**Symptom**: You never touched an agent's tier in `agent_models`, but after `/plugin update` and a re-run of that plugin's install (or `/lazy-core.setup`), the tier recorded for one of its agents now differs from what it was before.
+
+**Likely cause**: Every tier a plugin's install seeds is written as an object — `{"tier": <value>, "seeded_from": <value>}` — never a bare string, where `seeded_from` records the shipped default in force at the moment it was written. As long as `tier` still equals `seeded_from` (nobody has edited that entry since it was seeded), a reseed silently rewrites both fields to whatever `lazycortex-core`'s `default-tiers.json` now recommends — a stale shipped default is not treated as the operator's choice, so this is expected behaviour, not a bug. The moment `tier` and `seeded_from` diverge — because you, or the `/lazy-core.agent-models` wizard, changed the value by hand — the entry becomes a pin, and every future reseed leaves it untouched (`kept-local`) regardless of what the shipped default says.
+
+**Fix**: No action needed if you want the current shipped recommendation — this is intended. If you want to keep a specific tier permanently regardless of future plugin updates, pin it explicitly with `/lazy-core.agent-models`; the wizard's write makes `tier` diverge from `seeded_from`, and the entry stops moving on every later reseed.
 
 ---
 
@@ -900,7 +940,7 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Likely cause (name format)**: The `name` argument does not contain exactly one dot, or one of the two parts is empty.
 
-**Likely cause (already registered)**: A routine with the same name is already present in the `lazy-core.runtime` section of `.claude/lazy.settings.json`. The skill refuses to silently overwrite.
+**Likely cause (already registered)**: A routine with the same name is already present in the `routines` section of `.claude/lazy.settings.json`. The skill refuses to silently overwrite.
 
 **Likely cause (unknown type)**: The `type` field is not one of `subprocess`, `inbox`, `schedule`, `git`, or `md-scan`.
 
@@ -1015,6 +1055,26 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: The daemon now tells apart a purely local git failure during its pre- or post-tick sync from a genuine remote-reachability problem, instead of folding every non-network git failure into `git_remote_unavailable` and sending the operator to chase a network issue that was never the cause. A held `.git/index.lock` that outlasted the daemon's own short retry backoff, a bad ref, or a checkout-permission error now surfaces honestly as `git_local_failed`. A transient lock contention -- racing an expert job's own commit, for instance -- is retried in place first and never reaches a halt at all; only a lock still held past that backoff halts.
 
 **Fix**: Often none needed: when the halt's `triggered_by` is a sync step (`_git_pre` / `_git_post`), the hourly doctor tick probes the remote once the halt is an hour old and resumes the daemon by itself if git answers — this covers the common case of a network failure whose stderr the transport classifier didn't recognise. If it persists past that, inspect the checkout directly with `git status`. If `.git/index.lock` is present and you've confirmed no other process actually holds it, remove it by hand. Resolve whatever the local failure was -- a bad ref, a checkout permission problem -- then run `/lazy-runtime.recover` to clear the halt.
+
+---
+
+## `/lazy-runtime.recover` reports a `suspected_loop` halt
+
+**Symptom**: `/lazy-runtime.recover` (or the daemon's state file) reports a halt with reason `suspected_loop`, and resuming the daemon halts it again with the same reason almost immediately.
+
+**Likely cause**: The daemon's loop detector found one identical diff (matched by `git patch-id --stable`) committed `daemon.loop_detect_threshold` times (default 5) by the same registered-bot author within the last `daemon.loop_detect_window` commits (default threshold × 4) — a sign that a routine or expert is re-committing the same change over and over instead of making progress. The offending patch-id, the bot's email, and the repeated commit subjects are recorded in the halt's incident.
+
+**Fix**: Read the incident with `lazycortex-core error-list --kind daemon_halt`, or the newest `.logs/lazy-core/runtime/<date>.jsonl` record named `_loop_detect`. Match the bot email against `experts.<name>.git_author.email` and `routines.<name>.git_author.email` in `.claude/lazy.settings.json` to identify the producer, then inspect its recent commits (`git log --oneline --author=<email>`). What to do next is a judgment call: fix the bug in whatever produces the repeated diff, unregister the routine with `/lazy-routine.unregister <name>`, or accept the pattern and raise `daemon.loop_detect_threshold` / narrow `daemon.loop_detect_window` so it stops tripping. Resuming alone does not hold — the detector re-tallies the same commit window on the very next iteration, so unless the repeated commits actually leave that window, the daemon halts again with the same reason within seconds. Confirm your fix actually changed the pattern before running `/lazy-runtime.recover` again.
+
+---
+
+## `/lazy-runtime.recover` reports a `config_violation` halt
+
+**Symptom**: `/lazy-runtime.recover` reports a halt with reason `config_violation`, naming a routine whose `command` is driven by another plugin's CLI.
+
+**Likely cause**: A routine tick exited with output the daemon recognised as a settings-invariant violation — the routine's `command` (a subprocess driven by the plugin that owns it) printed `config_violation` or `compute_inputs_failed` instead of completing normally. The daemon escalates this straight to a halt rather than retrying, because config a CLI rejects once will be rejected identically on every future tick.
+
+**Fix**: Read the rejection text from the routine's own `routine:<triggered_by>` incident, or the halt detail, via `lazycortex-core error-list` — the newest `.logs/lazy-core/runtime/<date>.jsonl` record named after the routine carries the raw tick output too. Fix whatever the text names: since the CLI belongs to the plugin the routine drives, the setting at fault usually lives in that plugin's own settings section rather than the routine entry itself — re-registering the routine with `/lazy-routine.register --force` only helps when the message points at the routine entry directly. Reproduce the routine's `command` by hand to confirm the fix before resuming with `/lazy-runtime.recover`.
 
 ---
 

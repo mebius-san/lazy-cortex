@@ -57,7 +57,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 
 | Agent | Description |
 |---|---|
-| `lazy-diagram.draw-ascii` | Dispatched by /lazy-diagram.draw or /lazy-diagram.fix once kind and format are settled; dispatch it directly only when you have ALREADY chosen format=ascii and kind=<one of: flow, fs-tree, layout> — it never infers either. Single-pass writer: its whole response is the ASCII diagram body, without the surrounding triple-backticks. |
+| `lazy-diagram.draw-ascii` | Dispatched by /lazy-diagram.draw or /lazy-diagram.fix once kind and format are settled; dispatch it directly only when you have ALREADY chosen format=ascii and kind=<one of: controls-scheme, decision-tree, flow, fs-tree, layout, tree> — it never infers either. Single-pass writer: its whole response is the ASCII diagram body, without the surrounding triple-backticks. |
 | `lazy-diagram.draw-mermaid` | Dispatched by /lazy-diagram.draw or /lazy-diagram.fix once kind and format are settled; dispatch it directly only when you have ALREADY chosen format=mermaid and kind=<one of: flow, sequence, state, erd, class, architecture, layout, nav, tree, controls-scheme, decision-tree, screen-scheme, journey, mindmap, gantt, timeline> — it never infers either. Single-pass writer: its whole response is the mermaid fence body, without the surrounding triple-backticks. |
 
 ## Commands

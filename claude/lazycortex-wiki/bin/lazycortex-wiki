@@ -48,6 +48,8 @@ import scope as _scope        # noqa: E402
 # waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
 import tags as _tags          # noqa: E402
 # waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
+import terms as _terms        # noqa: E402
+# waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
 import axes as _axes          # noqa: E402
 # pylint: enable=wrong-import-position
 
@@ -74,6 +76,7 @@ _SUBCOMMANDS = {
   "domain-plan":    "Compute the domain-spec plan (changed/orphaned/unknown groups, index state) as JSON.",
   "domain-apply-index": "Rebuild the domains.md index from the dictionary and the docs on disk.",
   "domain-tick":    "Consume one git item: drop orphaned domain docs, dispatch writer jobs for changed groups.",
+  "terms-apply":    "Apply a decided term replacement to one document's prose (the operator picks the direction).",
   "mirror-plan":    "Fetch a mirror scope's source and print the sync plan as JSON (dry-run, mirror untouched).",
   "mirror-sync":    "Fetch a mirror scope's source, sync the mirror tree, and commit the touched files.",
 }
@@ -120,6 +123,7 @@ class Cli:
   _CMD_DOMAIN_PLAN    = "domain-plan"
   _CMD_DOMAIN_APPLY_INDEX = "domain-apply-index"
   _CMD_DOMAIN_TICK    = "domain-tick"
+  _CMD_TERMS_APPLY    = "terms-apply"
   _CMD_MIRROR_PLAN    = "mirror-plan"
   _CMD_MIRROR_SYNC    = "mirror-sync"
 
@@ -171,11 +175,26 @@ class Cli:
   _ARG_NO_COMMIT_HELP      = "Mutate files only; skip the git commit (caller owns the commit)."
   _ARG_PRUNE_PATH_HELP     = "Git-item JSON string or bare path of the deleted node."
 
+  # argparse strings for the terms-apply subcommand.
+  _ARG_TERMS_PATH_HELP     = "Absolute or repo-relative path to the document to rewrite."
+  _ARG_TERM_FROM           = "--from"
+  _ARG_TERM_FROM_DEST      = "old_term"
+  _ARG_TERM_FROM_HELP      = "The term being replaced, as the document writes it."
+  _ARG_TERM_TO             = "--to"
+  _ARG_TERM_TO_DEST        = "new_term"
+  _ARG_TERM_TO_HELP        = "The term replacing it, as the dictionary writes it."
+
   # Curation result JSON field names.
   _FIELD_WIKI_SUMMARY = "wiki_summary"
   _FIELD_TOPICS       = "topics"
   _FIELD_CONNECTORS   = "connectors"
   _FIELD_SEE_ALSO     = "see_also"
+
+  # Terms-apply result field names (mirrors terms.apply_term result keys).
+  _FIELD_TERMS_STATUS       = "status"
+  _FIELD_TERMS_FILE         = "file"
+  _FIELD_TERMS_REPLACEMENTS = "replacements"
+  _FIELD_TERMS_REASON       = "reason"
 
   # Prune result JSON field names (mirrors prune.NodePruner result keys).
   _FIELD_PRUNED_NODES = "pruned_nodes"
@@ -194,6 +213,7 @@ class Cli:
   _PAYLOAD_PINS              = "pins"
   _PAYLOAD_EXISTING_TAGS     = "existing_tags"
   _PAYLOAD_TOPICS_INDEX_CONT = "topics_index_content"
+  _PAYLOAD_CANDIDATES        = "candidates"
 
   # Payload field names for the tag-curator dispatch bundle.
   _PAYLOAD_SURFACE        = "surface"
@@ -323,6 +343,8 @@ class Cli:
       return self._cmd_domain_apply_index(args)
     if cmd == self._CMD_DOMAIN_TICK:
       return self._cmd_domain_tick(args)
+    if cmd == self._CMD_TERMS_APPLY:
+      return self._cmd_terms_apply(args)
     if cmd == self._CMD_MIRROR_PLAN:
       return self._cmd_mirror_plan(args)
     if cmd == self._CMD_MIRROR_SYNC:
@@ -486,6 +508,21 @@ class Cli:
           action = self._ACTION_STORE_TRUE,
           help = self._ARG_FULL_HELP,
         )
+      elif name == self._CMD_TERMS_APPLY:
+        p.add_argument(self._ARG_PATH, help = self._ARG_TERMS_PATH_HELP)
+        p.add_argument(
+          self._ARG_TERM_FROM,
+          dest = self._ARG_TERM_FROM_DEST,
+          required = True,
+          help = self._ARG_TERM_FROM_HELP,
+        )
+        p.add_argument(
+          self._ARG_TERM_TO,
+          dest = self._ARG_TERM_TO_DEST,
+          required = True,
+          help = self._ARG_TERM_TO_HELP,
+        )
+        p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
       elif name in (self._CMD_MIRROR_PLAN, self._CMD_MIRROR_SYNC):
         p.add_argument(self._ARG_SCOPE_ID, help = self._ARG_SCOPE_ID_HELP)
         p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
@@ -1500,14 +1537,74 @@ class Cli:
       return 1
     return 0
 
+  def _attach_candidates(
+    self,
+    payload: dict,
+    repo: Path,
+    cfg: dict,
+    scope_id: str,
+    node: Path,
+  ) -> None:
+    """
+    Add the node's ranked link shortlist to a `link` payload, when one can be computed.
+
+    Runs the same deterministic recall the `find-candidates` subcommand exposes, so a
+    daemon-dispatched link job judges against the same narrowed set the in-session path
+    hands the curator.
+
+    Guarantees:
+      - An empty shortlist is written as an empty list, never as an absent field.
+      - A failed recall leaves the field absent rather than aborting the dispatch.
+
+    Args:
+      payload: The `link` payload to extend; mutated in place.
+      repo: Absolute path to the repository root.
+      cfg: Scope-config dict (the value side of a `wiki.scopes` entry).
+      scope_id: Scope identifier the node belongs to.
+      node: Absolute path of the node the shortlist is computed for.
+    """
+
+    # Contract:
+    # A computed-but-empty shortlist is ALWAYS written as an empty list, and the field is
+    # absent ONLY when the recall could not run — the two states stay distinguishable.
+
+    # Contract:
+    # A failed recall NEVER aborts the dispatch: the job is queued without the field and
+    # the curator falls back to judging the whole catalog.
+
+    # Domain(wiki.graph):
+    # # A pre-selection is advice, not a boundary
+    # The cheap pre-selection is handed to the judge as a ranking to weigh first, never as the only
+    # material it may draw on: the catalog stays open, and a target the catalog justifies is allowed even
+    # when the pre-selection missed it. Two answers must therefore not be confused — that the
+    # pre-selection ran and found nothing, and that it could not run at all. The first is a genuine
+    # verdict on a scope where nothing is close enough yet; the second says only that the cheap stage
+    # was unavailable, and the judge falls back to the whole catalog as though the stage did not exist.
+    # Failure of the cheap stage never cancels the judging: advice that could not be produced costs the
+    # judging its shortcut, never its result.
+
+    try:
+      finder = _candidates.CandidateFinder.with_default_sources(repo, cfg, scope_id)
+      payload[self._PAYLOAD_CANDIDATES] = finder.find(node)
+    except (OSError, ValueError) as err:
+      # leave the field unwritten so the curator reads "not computed" rather than "empty",
+      # and say so on stderr — the dispatch itself carries on without the shortlist
+      print(
+        f"dispatch-link: warning — candidate recall failed for {node}: {err}; "
+        "dispatching without a shortlist",
+        file = sys.stderr,
+      )
+
   def _cmd_dispatch_link(self, args: argparse.Namespace) -> int:
     """
     Resolve a node to its scope and dispatch a link curation job.
 
     Mirrors `process-file`'s dispatch path but builds a `link` payload:
-    `kind=link`, plus the scope's current `topics.md` content as the
-    candidate catalog.  Called by the classify curator (via Bash) to
-    chain phase 2 after classify+build-index complete.
+    `kind=link`, the scope's current `topics.md` content as the candidate
+    catalog, and the node's own ranked link shortlist.  Called by the
+    classify curator (via Bash) to chain phase 2 after classify+build-index
+    complete.  Every job the command queues — the node's own and each
+    back-link fan-out job — carries the shortlist of the node it names.
 
     When the node belongs to no scope → skip (exit 0).  When the scope's
     `topics.md` is missing or empty → prints a warning and dispatches
@@ -1574,6 +1671,7 @@ class Cli:
       self._PAYLOAD_PINS:              pins,
       self._PAYLOAD_SCOPE_ID:          scope_id,
     }
+    self._attach_candidates(payload, repo, cfg, scope_id, abs_path)
 
     dispatcher = _dispatch.CoreDispatch()
     dispatcher.dispatch_curator(
@@ -1639,6 +1737,10 @@ class Cli:
         self._PAYLOAD_PINS:              y_pins,
         self._PAYLOAD_SCOPE_ID:          scope_id,
       }
+      # limit: the attractor's own shortlist is recomputed here, after the back-finder
+      # already scored it once internally — a second O(N) pass over an O(N²) fan-out;
+      # have BackCandidateFinder return each attractor's ranking if the cost ever shows
+      self._attach_candidates(y_payload, repo, cfg, scope_id, y_abs)
       dispatcher.dispatch_curator(
         repo = repo,
         node_path = y_abs,
@@ -1809,6 +1911,46 @@ class Cli:
       "orphans_removed": len(orphans),
       "index":           "updated" if (orphans or plan[_domains.PLAN_INDEX_STALE]) else "unchanged",
     }))
+    return 0
+
+  def _cmd_terms_apply(self, args: argparse.Namespace) -> int:
+    """
+    Apply one settled terms decision to a single document.
+
+    Which side of a reported terminology divergence wins is the operator's decision; this verb
+    performs that substitution in prose and decides nothing itself. Prints a one-line outcome to
+    stdout, or the refusal reason to stderr.
+
+    Guarantees:
+      - A refused document is reported on stderr with exit 1 and is never written.
+
+    Args:
+      args: Parsed argument namespace; must carry `.path`, `.old_term`, `.new_term`, and `.repo`.
+
+    Returns:
+      Integer exit code (0 when the replacement ran or found nothing to do, 1 on a refusal).
+    """
+
+    # Contract:
+    # A refused document is reported on stderr with exit 1 and is NEVER written.
+
+    repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
+    result = _terms.apply_term(Path(repo_raw).resolve(), args.path, args.old_term, args.new_term)
+
+    # guard: the verb declined to touch the document — the reason is the whole output
+    if result[self._FIELD_TERMS_STATUS] == _terms.STATUS_REFUSED:
+      print(
+        f"{self._CMD_TERMS_APPLY}: refused {result[self._FIELD_TERMS_FILE]} — "
+        f"{result[self._FIELD_TERMS_REASON]}",
+        file = sys.stderr,
+      )
+      return 1
+
+    # a performed pass and an already-applied one differ only in the count they report
+    print(
+      f"{self._CMD_TERMS_APPLY}: {result[self._FIELD_TERMS_STATUS]} "
+      f"{result[self._FIELD_TERMS_FILE]} ({result[self._FIELD_TERMS_REPLACEMENTS]} replacements)"
+    )
     return 0
 
   def _cmd_mirror_plan(self, args: argparse.Namespace) -> int:

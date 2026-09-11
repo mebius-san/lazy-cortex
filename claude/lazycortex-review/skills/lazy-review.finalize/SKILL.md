@@ -1,19 +1,19 @@
 ---
 name: lazy-review.finalize
 description: "Use when a document is already approved but still looks like a review artefact — banner, approve checkbox, edit markers, system callouts — and the operator wants it closed out by hand: 'finalize this', 'clean up the review markup', or the dispatcher's automatic finalize never fired. Leaves an ordinary markdown file with `approved: true` and its `# History`. Not for an unapproved doc — that is `/lazy-review.stop`."
-allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Agent
+allowed-tools: Read, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Agent
 execution-discipline-waiver: "thin dispatcher — work lives in bin/finalize.py (finalize_text + atomic git commit), this SKILL.md is a single subprocess call with no decision logic"
 ---
 # lazy-review.finalize
 
-The finalize-commit is the audit-trail terminator: after it, the document looks like an ordinary markdown file again, with `approved: true` and a `# History` log to prove the lifecycle.
+The finalize-commit is the audit-trail terminator: after it, the document looks like an ordinary markdown file again, with `review_result: approved` — the one `review_*` key the strip leaves standing — and a `# History` log to prove the lifecycle.
 
 Normally the dispatcher fires this branch automatically once every final writer has confirmed; this skill is the operator's hand-crank for the rare case where they want to close out a doc manually.
 
 ## Steps
 
 1. **Resolve the file** — argument is the markdown path.
-2. **Apply + commit** — `python3 "${CLAUDE_PLUGIN_ROOT}/bin/finalize.py" <file>`. The bin script reads `lazycortex-review.edit_marker_style` from `lazy.settings.json` (default `simple`), folds the markup via `bin/edit_markup.py:strip_markers`, strips review-loop scaffolding, sets `review_active: false`, and commits with the `Doc-Review-Phase: finalize` trailer under the bot identity. For `diff` style, folding resolves cross-fence `+`/`-` cancellation as one pass over the whole document: each `-` line cancels the first surviving `+` (or `!`) emission from an earlier fence whose content matches byte-for-byte (context `  ` lines are never cancellable), matching is one-shot per `-` line, and a `-` with no matching prior `+` is dropped from its own fence without cancelling anything.
+2. **Apply + commit** — `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/finalize.py" <file>`. The bin script resolves the edit-marker style from the document's own `review_marker_style` frontmatter pin, falling back to `review.edit_marker_style` in `lazy.settings.json` (default `simple`) when the pin is absent or names an unsupported style, folds the markup via `bin/edit_markup.py:strip_markers`, strips review-loop scaffolding, sets `review_active: false`, and commits with the `Doc-Review-Phase: finalize` trailer under the bot identity. For `diff` style, folding resolves cross-fence `+`/`-` cancellation as one pass over the whole document: each `-` line cancels the first surviving `+` (or `!`) emission from an earlier fence whose content matches byte-for-byte (context `  ` lines are never cancellable), matching is one-shot per `-` line, and a `-` with no matching prior `+` is dropped from its own fence without cancelling anything.
 3. **Run-log** — `./.logs/claude/lazy-review.finalize/<UTC ts>.md`.
 
 ## Report

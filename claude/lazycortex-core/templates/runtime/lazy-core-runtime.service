@@ -7,7 +7,9 @@ Type=simple
 WorkingDirectory={REPO_ROOT}
 # tells _restart_in_place to clean-exit (code 0) on own-code change instead of os.execv
 Environment=LAZYCORTEX_SUPERVISED=1
-ExecStart={REPO_ROOT}/.claude/bin/lazy.runtime.sh {REPO_ROOT}
+# absolute interpreter recorded by lazy-core.install; the shim execs the runner with it
+Environment=LAZYCORTEX_PYTHON={PYTHON}
+ExecStart=/bin/bash {REPO_ROOT}/.claude/bin/lazy.runtime.sh {REPO_ROOT}
 # Restart=always (not on-failure) so the clean exit-0 self-restart relaunches the daemon with fresh code
 Restart=always
 RestartSec=5

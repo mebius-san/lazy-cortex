@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, causes, and fixes for lazycortex-python install, audit, style checks, the guideline-review gate, and writer agents.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision-tree routing install/audit/check-style/review/writer failures: top-level branch on skill invoked (install vs audit vs check-style vs review vs docstring-writer vs test-writer); install branch splits on phase (source-not-found, rule-read-only, wrapper-template-missing, pyproject-absent, pch-no-inspect-sh, scaffold-sync-fails, env-source-multiple-candidates, wrapper-cannot-resolve-active-install); audit branch splits on check number (check-crash, check1 drift, check2 broken-pointer, check3 artifact-missing, check4 placeholder, check10 invalid-json, check11 venv-degraded, check12 domain-groups-dictionary-missing); check-style branch splits on step (step3-manual-vs-chk, step5-test-gate, step6-violations-persist); pcf branch splits on new-violations-after-upgrade: (a) D2/D5/D7/D9 firing on previously-passing docstrings because project-neutral defaults dropped a project's implicit Generation Rules / Value Ranges / _field_filters conventions, needing [tool.pcf] extra_docstring_sections / d2_exempt_marker_attrs / private_name_allowlist declared; (b) check_language flagging comments/docstrings written outside [tool.pcf] allowed_languages (default english-only), needing translation, allowed_languages, or a # waiver:; (c) project_package autodetection resolving to nothing on an ambiguous src/ + root layout, misclassifying first-party imports, needing [tool.pcf] project_package declared explicitly; review branch splits on: chk-py-all-no-longer-runs-review (review left chk-py all as of 4.0.0 and needs its own chk-py review dispatch, mandatory at the end of a planned-work cycle) vs chk-py-review-base-ref-unresolvable (typo'd or unfetched --base ref, fetch or use git merge-base) vs chk-py-review-render-still-fails-with-FAIL-finding (fix the code, re-run — new scope key re-manifests); docstring-writer branch (step6-chk-violations); test-writer branch (step6-fails-flag, step7-tst-py-fails); each leaf names the fix action"
@@ -19,7 +19,7 @@ source_skills:
   - lazy-python.knowledge-sweep
   - lazy-python.domain-writer
   - lazy-python.contract-writer
-source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Troubleshooting
 
@@ -57,9 +57,39 @@ source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
 
 **Symptom**: Running `chk-py` or `tst-py` from the terminal (or via `/lazy-python.check-style`) fails immediately with a message like "cannot locate the lazycortex-python plugin" — even though the wrappers are present in `cli/`.
 
-**Likely cause**: The wrapper scripts deployed in `cli/` are self-resolving, path-agnostic scripts — `/lazy-python.install` Phase 2 copies the template verbatim (no path substitution), and each wrapper resolves the active `lazycortex-python` install at the moment it runs: first a dev-vault sibling checkout, then `$LAZYCORTEX_PLUGIN_DIRS` (for daemon-spawned processes), then Claude Code's own `installed_plugins.json`. This error fires only when none of those three resolve — most often because the plugin genuinely is not installed or not enabled for the current session, or `installed_plugins.json` is missing or unreadable. A wrapper deployed by an older, pre-redesign version of the plugin instead baked in an absolute, version-pinned path that went stale on every `/plugin update`; that failure mode does not occur for wrappers deployed by the current install.
+**Likely cause**: The wrapper scripts deployed in `cli/` are self-resolving, path-agnostic scripts — `/lazy-python.install` Phase 2 copies the template verbatim (no path substitution), and each wrapper resolves the active `lazycortex-python` install at the moment it runs: first a dev-vault sibling checkout, then `$LAZYCORTEX_PLUGIN_DIRS` (for daemon-spawned processes), then Claude Code's own `installed_plugins.json`. Every stage now checks only that the candidate `bin/chk` file exists, then launches it by reading its own shebang line — none of them check for an executable bit, since a mode-blind git client (Obsidian-git on Android, a Windows checkout) can strip it at any commit. This error fires only when none of the three stages finds the file at all — most often because the plugin genuinely is not installed or not enabled for the current session, or `installed_plugins.json` is missing or unreadable.
 
-**Fix**: Confirm `lazycortex-python@lazycortex` is installed and enabled (`enabledPlugins` in `~/.claude/settings.json`), then retry. If the plugin is enabled and the error persists, re-run `/lazy-python.install` — Phase 2 redeploys both wrappers unconditionally from the current template, which also replaces any leftover pre-redesign wrapper still carrying a stale baked-in path.
+**Fix**: Confirm `lazycortex-python@lazycortex` is installed and enabled (`enabledPlugins` in `~/.claude/settings.json`), then retry. If the plugin is enabled and the error persists, re-run `/lazy-python.install` — Phase 2 redeploys both wrappers unconditionally from the current template.
+
+---
+
+## `./cli/chk-py` fails with "Permission denied" when run directly
+
+**Symptom**: Running `./cli/chk-py` or `./cli/tst-py` directly from the repo root (`./cli/chk-py all -q`) fails with a shell permission error, even right after a fresh `/lazy-python.install`.
+
+**Likely cause**: `/lazy-python.install` Step 2 deploys the wrapper without ever setting an executable bit on it — the exec bit is deliberately not part of the contract for any file tracked in the repo, because a mode-blind git client (Obsidian-git on Android is the motivating case) resets every tracked file to `100644` on commit, silently stripping any bit the install had set. The wrapper is designed to be launched through a shell rather than executed directly.
+
+**Fix**: Run it through `sh` instead of directly: `sh ./cli/chk-py` / `sh ./cli/tst-py`. For a bare `chk-py` / `tst-py` command that works the same way from any directory, use the human-facing copies `/lazy-python.install` Step 2b deploys to `~/.local/bin/chk-py` and `~/.local/bin/tst-py` — those two files are the only ones this plugin ever marks executable, since `~/.local/bin` lives outside any git-tracked vault and nothing can strip their bit. Re-run `/lazy-python.install` if they are not there yet.
+
+---
+
+## `chk-py` / `tst-py` not found in a fresh shell
+
+**Symptom**: Typing `chk-py` or `tst-py` bare in a new terminal reports "command not found", even though `/lazy-python.install` has already run and `cli/chk-py` exists in the repo.
+
+**Likely cause**: Step 2b deploys the human-facing wrappers to `~/.local/bin/chk-py` and `~/.local/bin/tst-py`, but it never edits shell rc files — it only writes the two files. If `~/.local/bin` is not already on `$PATH`, the shell has no way to find them. The install step itself checks for this: right after Step 2b it runs `command -v chk-py`, and reports `path-warning` in its own output when that check fails, without attempting a fix.
+
+**Fix**: Add `~/.local/bin` to `$PATH` in your shell profile (`~/.zshrc`, `~/.bashrc`, or equivalent) yourself — this is the one thing `/lazy-python.install` deliberately leaves to you. Open a new shell (or re-source the profile) and confirm with `command -v chk-py`. Until then, run `sh ./cli/chk-py` (or `tst-py`) from inside the repo directly.
+
+---
+
+## `chk-py: no cli/chk-py found between $PWD and /`
+
+**Symptom**: The `~/.local/bin/chk-py` command is on `$PATH` and runs, but immediately exits 1 with a message that no `cli/chk-py` was found between the current directory and `/`.
+
+**Likely cause**: The home wrapper deployed by Step 2b walks up from the current working directory looking for the nearest `<repo>/cli/chk-py`, and gives up at the filesystem root when it never finds one. This fires whenever the current directory is outside any repo that has completed `/lazy-python.install` Step 2 (the step that plants `cli/chk-py`) — including a repo where `cli/` was later deleted, renamed, or never committed.
+
+**Fix**: `cd` into (or below) a repo where `/lazy-python.install` has already run, or run `/lazy-python.install` in the current repo to deploy `cli/chk-py` there first.
 
 ---
 
@@ -225,7 +255,7 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 
 **Likely cause**: The current wrapper template is self-resolving and path-agnostic — `/lazy-python.install` Phase 2 now copies it verbatim, with no substitution step at all, so a wrapper it deploys can never contain a `{{..._BIN_PATH}}` literal. This finding only fires against a wrapper deployed by an older, pre-redesign version of the plugin (one whose Phase 2 did substitute a path into the template) whose install was interrupted after the copy but before the substitution completed, and the repo has not re-run install since upgrading past that redesign.
 
-**Fix**: Re-run `/lazy-python.install`. Phase 2 redeploys both wrappers unconditionally from the current, path-agnostic template, replacing any stale pre-redesign copy outright — no substitution step to complete.
+**Fix**: Re-run `/lazy-python.install`. Phase 2 redeploys both wrappers unconditionally from the current, path-agnostic template, replacing any stale pre-redesign copy outright — no substitution step to complete. Check 4 also confirms each wrapper opens with a shebang line rather than checking for an executable bit — the wrappers no longer carry one on purpose (see the "Permission denied" entry above), so `WARN`, not `FAIL`, is what fires if a wrapper is simply missing.
 
 ---
 

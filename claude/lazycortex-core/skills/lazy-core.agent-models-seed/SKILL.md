@@ -49,17 +49,27 @@ Read and parse the SOT JSON. Select every key under `defaults` whose string begi
 
 Read the target settings file. If missing or unparseable, treat it as `{"version": 1, "agent_models": {}}`. Ensure `agent_models.lazycortex` exists as an object (create empty `{}` if absent — never overwrite existing content, never touch other groups such as `_project` or `_user`).
 
-For each `(dispatch, tier)` in the seed set:
+**Every entry this skill writes is a seed, never a bare string.** A seed is the object
+`{"tier": <SOT tier>, "seeded_from": <SOT tier>}` — the shape `lazy-core.install` Step 6 defines,
+where `seeded_from` records the shipped default in force when the entry was written. A bare tier
+string is the operator's pin (hand-written, or written by the `/lazy-core.agent-models` wizard),
+and this skill never writes one and never rewrites one. Writing the seed form is what makes a
+later re-run able to tell an untouched seed from a decision: presence is not currency, so a
+plugin-owned value must stay refreshable when the shipped default moves.
 
-- **absent** in `agent_models.lazycortex` → add with the SOT's tier. State `added`.
-- **equal** → leave untouched. State `unchanged`.
-- **different** → leave the consumer's value untouched (never clobber an operator override). State `kept-local` — report the consumer's value alongside the SOT's.
+For each `(dispatch, tier)` in the seed set, read what is on record and compare:
+
+- **absent** in `agent_models.lazycortex` → write `{"tier": <SOT tier>, "seeded_from": <SOT tier>}`. State `added`.
+- **seed object, untouched (`tier == seeded_from`), equal to the SOT** → leave untouched. State `unchanged`.
+- **seed object, untouched (`tier == seeded_from`), SOT has moved** → rewrite BOTH fields to the SOT's tier, silently. State `refreshed` — report the old tier alongside the new. A stale shipped default is not the operator's choice.
+- **seed object, edited (`tier != seeded_from`)** → leave untouched. State `kept-local` — the operator changed a seeded entry, so it is a pin from that moment on.
+- **bare tier string** → leave untouched, whatever its value. State `kept-local` — report the consumer's value alongside the SOT's.
 
 Never touch any `lazycortex` entry outside this prefix.
 
 ### Write back
 
-If any mutation happened, `Write` the whole settings object back with `version: 1` at the top. If nothing changed, do not write. Outcome: `seeded-N` (N entries added), `unchanged`, or `no-entries`.
+If any mutation happened, `Write` the whole settings object back with `version: 1` at the top. If nothing changed, do not write. Outcome: `seeded-N` (N entries `added` or `refreshed`), `unchanged`, or `no-entries`.
 
 ## Report
 

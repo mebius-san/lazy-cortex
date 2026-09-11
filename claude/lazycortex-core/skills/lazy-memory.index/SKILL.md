@@ -1,7 +1,7 @@
 ---
 name: lazy-memory.index
 description: "Run when memory tag files have drifted — an audit reports a note carrying `memory/<topic>` that its tag file does not list, a global tag file points at a missing local one, or notes were hand-edited or moved. Also offered by `/lazy-core.slim-context`. Recovery only: `/lazy-memory.write` keeps `.tags/` in sync on every normal write."
-allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Bash(test *), Write, Agent
+allowed-tools: Read, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date -u *), Bash(test *), Write, Agent
 ---
 # Memory reindex
 
@@ -31,7 +31,7 @@ If `absent`, state outcome `absent` and skip Step 2 (Report still runs).
 ## Step 2 — Rebuild tag index via worker
 
 ```
-Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-memory.index/bin/reindex.py --repo .)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-memory.index/bin/reindex.py" --repo .)
 ```
 
 Parse the JSON summary `{experts, notes, tags}`.

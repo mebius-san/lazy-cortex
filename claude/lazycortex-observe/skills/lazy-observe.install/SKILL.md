@@ -1,7 +1,7 @@
 ---
 name: lazy-observe.install
-description: "Run when the operator asks to start shipping lazycortex runtime metrics off this host, to point the local daemons at their Prometheus / Mimir, or after `/lazy-observe.doctor` reports `not-installed` or `covered-unconfigured`. Pre-flights for an existing collection stack: a foreign collector already covering the host flips the run into integrate mode automatically — scrape targets regenerated, no questions asked; pass `--integrate-only` to force that mode explicitly, `--force-standalone` to install the shipper anyway. URL, auth, and agent kind are asked only when a shipper is actually installed, once, and never re-asked; idempotent and quiet on re-run."
-allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(chmod *), Bash(launchctl *), Bash(systemctl *), Bash(test *), Bash(date *), Bash(brew *), Bash(which *), Bash(curl *), Bash(uname *), Bash(python3 *), AskUserQuestion, Agent
+description: "Run when the operator asks to start shipping lazycortex runtime metrics off this host, to point the local daemons at their Prometheus / Mimir, or after `/lazy-observe.audit` reports `not-installed` or `covered-unconfigured`. Pre-flights for an existing collection stack: a foreign collector already covering the host flips the run into integrate mode automatically — scrape targets regenerated, no questions asked; pass `--integrate-only` to force that mode explicitly, `--force-standalone` to install the shipper anyway. URL, auth, and agent kind are asked only when a shipper is actually installed, once, and never re-asked; idempotent and quiet on re-run."
+allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(chmod *), Bash(launchctl *), Bash(systemctl *), Bash(test *), Bash(date *), Bash(brew *), Bash(which *), Bash(curl *), Bash(uname *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), AskUserQuestion, Agent
 ---
 # Install lazy-observe
 

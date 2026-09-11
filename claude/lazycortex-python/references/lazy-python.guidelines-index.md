@@ -12,7 +12,8 @@ into topic-focused files.
 | File | Purpose |
 |---|---|
 | `lazy-python.coding-guidelines.md` | Code style, formatting, naming, imports, class/method design, error handling, debug logging, and module-specific patterns. |
-| `lazy-python.documenting-guidelines.md` | Docstring rules (class, method, property), comments, marker comments, contract comments, and Domain comments. |
+| `lazy-python.documenting-guidelines.md` | Docstring rules (class, method, property) with their pattern galleries. |
+| `lazy-python.comment-guidelines.md` | Purpose comments and guard clauses, marker comments, contract comments, and Domain comments. |
 | `lazy-python.testing-guidelines.md` | Test structure, naming, assertions, coverage. |
 | `lazy-python.checking-guidelines.md` | CLI tools, verification order, formatter/type-checker/linter configurations. |
 
@@ -20,9 +21,10 @@ into topic-focused files.
 
 - **Writing or modifying code**: read `lazy-python.coding-guidelines.md`.
 - **Writing or fixing docstrings**: read `lazy-python.documenting-guidelines.md`.
+- **Writing comments, or a `Contract:` / `Domain(…):` / other marker block**: read `lazy-python.comment-guidelines.md`.
 - **Writing or running tests**: read `lazy-python.testing-guidelines.md`.
 - **Running checks and QA tools**: read `lazy-python.checking-guidelines.md`.
-- **Reviewing code style**: read `lazy-python.coding-guidelines.md` and `lazy-python.documenting-guidelines.md`.
+- **Reviewing code style**: read `lazy-python.coding-guidelines.md`, `lazy-python.documenting-guidelines.md`, and `lazy-python.comment-guidelines.md`.
 
 ## Portability notes
 

@@ -11,27 +11,27 @@ The plugin is **observer-server-blind**: every shipped file (templates, dashboar
 
 ## Blocks
 
-- **install-and-audit** — Bootstrap, verify, repair, and tear down the metrics shipper on this host. Members: lazy-observe.install, lazy-observe.uninstall, lazy-observe.doctor.
+- **install-and-audit** — Bootstrap, verify, repair, and tear down the metrics shipper on this host. Members: lazy-observe.install, lazy-observe.uninstall, lazy-observe.audit.
 
 ## Walkthroughs
 
-- **ship-metrics-end-to-end** — Ship your first runtime metric to a self-hosted Prometheus stack. From a clean checkout to charts in your observer — bring up the runtime daemon, enable the metrics endpoint in `lazy.settings.json`, install the shipper, dispatch a first expert job to produce traffic, verify the pipeline. Path: lazy-core.install → /lazy-expert.dispatch-job → /lazy-observe.install → /lazy-observe.doctor.
+- **ship-metrics-end-to-end** — Ship your first runtime metric to a self-hosted Prometheus stack. From a clean checkout to charts in your observer — bring up the runtime daemon, enable the metrics endpoint in `lazy.settings.json`, install the shipper, dispatch a first expert job to produce traffic, verify the pipeline. Path: lazy-core.install → /lazy-expert.dispatch-job → /lazy-observe.install → /lazy-observe.audit.
 
 ## Requirements
 
 - **Claude Code** with plugin support.
-- **lazycortex-core ≥ 1.2.0** with `daemon.metrics.enabled: true` in `lazy.settings.json` — see `claude/lazycortex-core/references/lazy-core.runtime-schema.md § 12` for the full settings reference.
-- **One of**: `grafana-alloy` or `otelcol-contrib` on PATH (operator installs via `brew` / distro package — install skill prints the right command if missing).
-- **A Prometheus-compatible `remote_write` endpoint** the operator already runs — this plugin does not stand up the observer side.
+- **lazycortex-core ≥ 1.2.0** with `daemon.metrics.enabled: true` in `lazy.settings.json` — see `claude/lazycortex-core/references/lazy-core.metrics-schema.md` for the full settings reference.
+- **One of**: `grafana-alloy` or `otelcol-contrib` on PATH — required only when the installer actually installs a shipper (operator installs via `brew` / distro package; the install skill prints the right command if missing). A host whose pre-flight finds a foreign collector already covering it switches to integrate mode, installs no shipper, and needs neither binary.
+- **A Prometheus-compatible `remote_write` endpoint** the operator already runs — same condition as above; this plugin does not stand up the observer side.
 
 ## Quick start
 
-1. Enable metrics in lazycortex-core: add `"metrics": {"enabled": true}` to the `lazy-core.runtime` block in `.claude/lazy.settings.json`, then restart the daemon supervisor.
+1. Enable metrics in lazycortex-core: add `"metrics": {"enabled": true}` to the flat `daemon` block in `.claude/lazy.settings.json` (i.e. `daemon.metrics`), then restart the daemon supervisor.
 2. Verify locally: `curl -fsS http://127.0.0.1:9464/metrics | head` should show `lazycortex_runtime_*` series.
 3. Run `/lazy-observe.install` — answer the wizard prompts (agent kind, remote_write URL, auth kind, token).
 4. Import `claude/lazycortex-observe/dashboards/lazycortex-runtime.json` into Grafana (or your observer's equivalent).
 5. Add `claude/lazycortex-observe/alerts/lazycortex-runtime.rules.yml` to your Prometheus rule_files glob.
-6. `/lazy-observe.doctor` to verify the pipeline is healthy.
+6. `/lazy-observe.audit` to verify the pipeline is healthy.
 
 ## Scenarios
 
@@ -39,6 +39,6 @@ The plugin is **observer-server-blind**: every shipped file (templates, dashboar
 
 - *"Ship runtime metrics from a developer laptop to a self-hosted Prometheus + Grafana"* — `/lazy-observe.install` walks through agent kind (Alloy vs otelcol), remote_write URL, bearer token storage, then renders the agent config + a launchd plist, loads the service, and smoke-tests the pipeline end-to-end.
 - *"Run on a headless Linux server (systemd) with no GUI"* — same install skill detects the platform automatically and installs a systemd user unit with `ProtectSystem=strict` + `ProtectHome=read-only` hardening. Token sourced from a 0600 file or `LAZYCORTEX_OBSERVE_TOKEN` env var — no Keychain or GUI dependency.
-- *"Recover after the observer endpoint was offline overnight"* — the agent's WAL (12h max-age default for Alloy) buffers samples while the observer is down; once it's back, samples drain automatically. `/lazy-observe.doctor` reports `WARN oversized` if WAL grew unusually large during the outage.
+- *"Recover after the observer endpoint was offline overnight"* — the agent's WAL (12h max-age default for Alloy) buffers samples while the observer is down; once it's back, samples drain automatically. `/lazy-observe.audit` reports `WARN oversized` if WAL grew unusually large during the outage.
 - *"Run in a container that injects `LAZYCORTEX_OBSERVE_TOKEN` from a secret manager"* — install accepts `auth_kind=bearer-env`, in which case the agent reads the token from its environment at process start. Token never lands on disk in the container; secret manager handles rotation.
 - *"Switch from Alloy to otelcol without losing metric continuity"* — re-run `/lazy-observe.install` and pick the new agent. The skill rewrites the rendered config and reloads the service. The two agents emit identical metric series shape, so dashboards and alerts continue working unchanged.

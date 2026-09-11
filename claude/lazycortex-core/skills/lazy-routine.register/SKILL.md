@@ -1,7 +1,7 @@
 ---
 name: lazy-routine.register
 description: "Run when the daemon should start doing something on its own — the operator asks to schedule recurring work, watch an inbox directory, react to local git HEAD, or scan markdown files by frontmatter. Also dispatched by plugin install skills (`lazy-spec.install`) to wire their own routines instead of hand-writing settings JSON. Type-aware wizard; refuses to overwrite an existing routine without `--force`."
-allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Bash(git check-ignore *), Write, AskUserQuestion, Agent
+allowed-tools: Read, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date -u *), Bash(git check-ignore *), Write, AskUserQuestion, Agent
 dirty-tree-waiver: "registers a routine in lazy.settings.json — operator commits explicitly to coordinate with sibling routines / install steps"
 ---
 # Routine Register

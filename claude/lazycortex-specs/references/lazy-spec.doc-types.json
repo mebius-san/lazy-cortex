@@ -20,7 +20,7 @@
       "stages": true,
       "review": true,
       "append_only": false,
-      "icon": "LiFile",
+      "icon": "LiPencilRuler",
       "color": "#94a3b8",
       "template": "design.md"
     },
@@ -28,7 +28,7 @@
       "stages": true,
       "review": true,
       "append_only": false,
-      "icon": "LiFile",
+      "icon": "LiPencilRuler",
       "color": "#94a3b8",
       "template": "system-design.md"
     },
@@ -36,7 +36,7 @@
       "stages": true,
       "review": true,
       "append_only": false,
-      "icon": "LiFile",
+      "icon": "LiNetwork",
       "color": "#94a3b8",
       "template": "architecture.md"
     },
@@ -44,7 +44,7 @@
       "stages": true,
       "review": true,
       "append_only": false,
-      "icon": "LiFile",
+      "icon": "LiGitBranchPlus",
       "color": "#94a3b8",
       "template": "code-plan.md"
     },
@@ -52,7 +52,7 @@
       "stages": true,
       "review": true,
       "append_only": false,
-      "icon": "LiFile",
+      "icon": "LiTestTubes",
       "color": "#94a3b8",
       "template": "test-plan.md"
     },
@@ -60,7 +60,7 @@
       "stages": true,
       "review": true,
       "append_only": false,
-      "icon": "LiFile",
+      "icon": "LiBug",
       "color": "#94a3b8",
       "template": "bug.md"
     },
@@ -68,7 +68,7 @@
       "stages": true,
       "review": true,
       "append_only": false,
-      "icon": "LiFile",
+      "icon": "LiCog",
       "color": "#94a3b8",
       "template": "system-tech.md"
     },

@@ -4,6 +4,17 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 9.3.0 — 2026-09-11 UTC
+
+- New hooks now scaffold from the shipped template — the scaffold registry never listed the two hook templates it copies, so authoring one started from a blank file instead of the intended starting point.
+- Installer-seeded model tiers can be corrected by a later release again — seeding used to write a bare string that the ownership rule read as a permanent operator pin, freezing every tier on the day it was seeded.
+- The runtime schema reference no longer contradicts the validator — a stray routine field it rejects is gone, and the provider subsystem, rate-limit guard, daemon enable flag, and loop-detection threshold are documented for the first time.
+- `/lazy-core.audit` and two sibling skills now actually write the run log their own step ledger promised; three thin delegators got the waiver that defers to the skill they call.
+- The 91 KB runtime schema reference is split into five focused files (expert-runtime, metrics, routine-types, state, plus a trimmed core doc) — every existing citation still resolves via numbered stubs.
+- A reference genuinely meant to be read whole can now declare a `size-waiver:` in its own frontmatter instead of silently breaking the size budget with no honest way to say so; `/lazy-core.audit` enforces that budget for the first time.
+- `/lazy-core.doctor` now delegates to all nine plugins instead of five of eight, so "check everything" actually checks everything again.
+- The runtime daemon no longer needs a file's execute bit to start — launchd and systemd units launch the shim through `/bin/bash`, so a git client that strips file mode (mobile Obsidian sync, for one) no longer leaves the daemon dead at launch.
+
 ### 9.2.2 — 2026-09-09 UTC
 
 - Service directories created during bootstrap now carry their own `.gitignore`, and the runtime pump ignores bootstrap artifacts instead of queuing them as jobs.
@@ -623,6 +634,17 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 8.0.0 — 2026-09-11 UTC
+
+- **Breaking.** `/lazy-spec.doctor` is now `/lazy-spec.audit` — no compatibility stub, and it no longer repairs. It only reports read-only findings for the marketplace's single core doctor to act on; the one repair that had no other home became `lazycortex-specs upstream-doctor --apply`, releasing an upstream unit frozen behind a since-closed request.
+- The catalog coordinator now recognises an asset's document by its declared type instead of a fixed list of eight filenames — a freely-named `vision`, `use-cases`, `ui-design`, or any other typed document now reliably wakes it instead of being silently dropped.
+- The wiki-pin backfill now covers every role whose template carries a pin, including `vision`, `use-cases`, and `ui-design`, which it previously skipped.
+- Request routing is now correctly attributed to the catalog coordinator rather than the asset coordinator in both docs and code, closing a gap where a pre-launch rollback's document list could go missing.
+- The gate that blocks an out-of-order forward flip is enforced again — the coordinator's own invariant list had drifted to describe a precondition check the code no longer performed.
+- Each of the sixteen shipped document types now has its own icon in the file tree, instead of seven types sharing one generic glyph.
+- The layout protocol was split into three focused protocols (file roles, status-note structure, layout proper), and the lifecycle protocol shed its narrated example and pre-launch rollback chapter into their own docs — existing `Part N` references still resolve.
+- Several stale counts and cross-references were corrected across the docs: the document-type count, the spawnable asset types, the upstream mirror location, and misdirected chapter pointers.
+
 ### 7.6.0 — 2026-09-09 UTC
 
 - Typed documents (design, vision, tech, etc.) are now icon-painted correctly in Obsidian — previously only the three folder-marking notes had a matching rule, leaving every other document type unpainted.
@@ -864,6 +886,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 5.2.1 — 2026-09-11 UTC
+
+- Iconize callbacks now run by their own shebang instead of relying on the file's execute bit, so a callback stripped of exec permission by mobile sync (or any mode-blind git client) produces its icon again instead of failing silently; a callback with no shebang is now refused out loud instead of failing dark.
+- Notes get type-specific icons instead of a generic fallback (design, architecture, code-plan, test-plan, bug, and system-tech previously all showed the same icon), and the reconcile step no longer gets stuck re-applying a note's own stale icon when it should be correcting it.
+- The iconize installer can now actually finish installing — it was missing permission to dispatch the skill that registers the repaint routine, so that step always failed silently.
+- Iconize-sync skill docs now match its real behaviour: previously-undocumented subcommands and exit codes are listed, the false claim that it clears icons on unmatched notes is corrected, and the personal icon-map's version key is now documented where the file format is specified.
+
 ### 5.2.0 — 2026-09-09 UTC
 
 - Fixed icon-status rules with no icon name (colour-only) swallowing the whole match — colour now falls through to the first rule that actually names an icon, instead of leaving the note stuck with a null icon.
@@ -1053,6 +1082,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-diagram
 
+### 1.2.1 — 2026-09-11 UTC
+
+- The ASCII drawer now covers all six diagram kinds the plugin ships templates for (it previously handled only three) — a `tree`, `decision-tree`, or `controls-scheme` request now reaches a drawer built for it instead of one whose contract excluded it.
+- Fixing an existing ASCII diagram no longer mistakes its kind — six ordered shape rules replace the old three-shape guess, and a fence matching none or two of them now fails and asks for an explicit `kind=` instead of being silently redrawn wrong.
+- Drawing or fixing a diagram no longer dies on a permission denial mid-run — template and scheme lookups now go through the file-search tool instead of a shell check against an already-expanded plugin path.
+
 ### 1.2.0 — 2026-09-07 UTC
 
 - New context block printed before every question `lazy-diagram.audit`, `lazy-diagram.draw`, and `lazy-diagram.install` ask — states what's being decided, why, and what each answer does.
@@ -1115,6 +1150,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
 
 ## lazycortex-review
+
+### 6.4.3 — 2026-09-11 UTC
+
+- Cross-plugin CLI resolution grew a dev-checkout stage ahead of the plugin cache, and subprocess calls to sibling-plugin binaries now launch via the Python interpreter instead of relying on the script's exec bit — job dispatch and commit-time icon repaint no longer silently run against a stale installed version, or break outright when a sync tool strips executable permissions.
+- The coordination playbook now matches the postman's real behaviour — a job reporting an `empty` result is treated as an ordinary finished wake, not as an inherited stuck marker that needs re-dispatching or escalating to the operator.
+- `finalize` truly unsets every review key instead of writing `review_active: false`, and resuming a stopped document preserves its round rather than resetting to 1; troubleshooting and the playbook now describe both correctly instead of pointing at a manual frontmatter fix that was never needed.
+- Several coordinator-facing contract references — the job payload field name, the marker-style settings key, the frontmatter schema size, and the history-explainer format — now match what the code actually reads and writes.
 
 ### 6.4.2 — 2026-09-09 UTC
 
@@ -1262,6 +1304,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-observe
 
+### 2.0.0 — 2026-09-11 UTC
+
+- **Breaking.** `/lazy-observe.doctor` is now `/lazy-observe.audit`, with no compatibility stub — re-run `/plugin update` and use the new name; the check itself is unchanged.
+- Quick-start docs now name the settings block metrics actually live in — three places pointed at a section that does not exist, two lines from the correct one.
+- The prerequisite list no longer demands an agent binary or a `remote_write` URL on the integrate-mode path — a host with a foreign collector already scraping it switches into integrate mode automatically and needs neither.
+
 ### 1.2.0 — 2026-09-09 UTC
 
 - Fixed the Open jobs dashboard legend showing a stale "last known" value for series that stopped reporting mid-window (e.g. a cancelled queue still reading as active) — it now reflects that the series has gone quiet.
@@ -1377,6 +1425,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.
 
 ## lazycortex-experts
+
+### 1.5.0 — 2026-09-11 UTC
+
+- New `lazy-experts.audit` skill — the plugin's first health check. Verifies every role the class map assigns resolves to a shipped agent, every aspect reference exists, and the mandatory cross-cutting aspects are present or absent as the expert's class requires; reports PASS/WARN/FAIL/INFO without writing. Delegated from `/lazy-core.doctor`.
+- Fixed the seeded-role count in `/lazy-experts.install`'s class-selection prompt and docs — it said "twelve" engineering roles for technical classes when the class map actually seeds thirteen, including in the context shown to the operator at the moment they pick classes.
+- Fixed operator-copyable `lazy.settings.json[experts]` examples (README, overview, help command, aspects doc) that used the non-canonical hyphenated key form — a consumer copying one verbatim got an entry `/lazy-core.doctor` flags as off-canon. Examples now use the required dot form (`claude-plugin.designer`, `sci-fi.fiction-writer`).
 
 ### 1.4.1 — 2026-09-09 UTC
 
@@ -1502,6 +1556,15 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 4.4.0 — 2026-09-11 UTC
+
+- `chk-py` and `tst-py` no longer depend on a file's execute bit — they launch via their shebang interpreter, so a mode-blind sync client stripping the bit no longer breaks the checks, and install now drops human-runnable copies under `~/.local/bin`.
+- Fixed the checking canon to mandate running everything through `chk-py` and `tst-py` — it previously told readers to call the linters, the type checker, and pytest directly, which skips phases the wrappers run and can miss findings.
+- Clarified that `chk-py review` is a separate command from `chk-py all` — a pending review only fails its own command (and any CI step built on it), never the six-step gate.
+- Documented that the `CHK_REVIEW=skip` escape hatch no longer exists — only `CHK_REVIEW=headless` is read; a caller unable to dispatch the reviewer now has to ask rather than silently skip.
+- Split the documenting canon into separate docstring and comment reference files, so the contract-writer and domain-writer agents no longer load one combined 60 KB file to reach two pages about comment markers.
+- Corrected the plugin's shipped-surface listing to include all five agents and the knowledge-sweep skill — README, help chapters, and the audit's artifact count now match what actually ships.
 
 ### 4.3.1 — 2026-09-09 UTC
 
@@ -1671,6 +1734,14 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 3.0.0 — 2026-09-11 UTC
+
+- **Breaking.** `/lazy-wiki.doctor` is now `/lazy-wiki.audit`, with no compatibility stub, and it no longer applies repairs. The marketplace holds one doctor — core's — and every plugin contributes read-only findings to it. The index and See-also repairs were always the CLI's work and are unaffected: run `lazycortex-wiki doctor <scope> --apply` yourself, or let the daily routine that already does it. The terms repair that had no other owner became `lazycortex-wiki terms-apply`, which performs a replacement you have decided on and refuses to touch a document under review or inside a mirror.
+- Background link curation stopped working blind — the unattended daemon path now gets the same ranked shortlist of likely link targets that a manual `/lazy-wiki.relink` run always had, instead of judging the whole topic catalog unaided.
+- Fixed the curator agent's own input contract, which described files it was never actually given — it was pointed at a `context/` directory the dispatcher never sends.
+- `/lazy-wiki.audit`'s domain checks are complete again, and the one finding it could report but say nothing about now has a repair route.
+- Fixed a stale install-flow description, and two dead see-also links in the install and audit help.
 
 ### 2.3.2 — 2026-09-09 UTC
 

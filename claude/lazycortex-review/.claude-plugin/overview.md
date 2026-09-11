@@ -14,9 +14,9 @@ The split is deliberate: judgement in prose, mechanics in Python. The verbs neve
 
 ## How the loop turns
 
-Nothing polls the document. The coordinator wakes on exactly five triggers, resolved by the `lazy-review.coordinator-watch` git-watch routine from the commit that just landed: a commit turning `review_active` true (review entry, from any author — another plugin's bot opening a doc counts), an expert job's payload landing (the postman raises the wake in the runtime marker sidecar), a commit by an identity outside the review system's own (an operator edit), a non-empty `> [!todo] #review/command` callout, and a ticked option under a `[!question] #review/question` callout.
+Nothing polls the document. The coordinator wakes on exactly four triggers: a commit turning `review_active` true (review entry, from any author — another plugin's bot opening a doc counts), an expert job finishing, a non-empty `> [!todo] #review/command` callout, and a commit by an identity outside the review system's own (an operator edit — a ticked option under a `[!question] #review/question` callout arrives exactly this way, and is not a trigger of its own). Three of the four are resolved by the `lazy-review.coordinator-watch` git-watch routine from the commit that just landed; the job-done wake is raised in the runtime marker sidecar and queues the coordinator directly.
 
-The second routine, `lazy-review.collect`, is the postman: on its own interval it sweeps finished expert jobs, lands each payload into its target document, clears the runtime `active_job` marker while raising the job-done wake in its place, and commits the batch. That commit is what carries the job-done wake back to the coordinator. It carries no scheduling judgement of its own — a dead or empty job is left exactly as found for the coordinator to decide about.
+The second routine, `lazy-review.collect`, is the postman: on its own interval it sweeps finished expert jobs, and it lands nothing and commits nothing. For a job whose outcome `collect-job` consumes it clears the runtime `active_job` marker, raises the job-done wake in its place, and dispatches the coordinator — the payload is still sitting in the job queue when the wake arrives, so the coordinator's own first move is `collect-job --no-commit`, and one commit carries the landed payload together with everything else the wake wrote. The postman carries no scheduling judgement of its own — a dead job, or one reporting an error, is left exactly as found for the coordinator to decide about. The third, `lazy-review.sanitize`, is a daily deterministic sweep that repairs the loop's stuck-state cases: a lost writer wake, an orphaned review, markers left behind on a document that no longer exists.
 
 ## Scenarios
 
@@ -39,14 +39,14 @@ The second routine, `lazy-review.collect`, is the postman: on its own interval i
 
 - **Claude Code** with plugin support.
 - **`lazycortex-core`** installed and configured — the expert runtime, the job queue, the routine daemon, and the `lazy.settings.json` schema all live there. Hard dependency, declared in `plugin.json`.
-- **A running core daemon** — both routines are daemon-driven; with the daemon off the loop never wakes.
+- **A running core daemon** — all three routines are daemon-driven; with the daemon off the loop never wakes.
 - **git** — every transition is one commit, and a commit is how each wake reaches the coordinator.
 - **Python 3.12+** — the verbs are pure Python and follow the marketplace's tech-stack floor.
 
 ## Quick start
 
 1. Install and configure `lazycortex-core` first (`/lazy-core.install`), and make sure its runtime daemon is running.
-2. Run `/lazy-review.install` inside the repo. Seeds the `review` settings block, the coordinator's own expert identity, and the `lazy-review.collect` + `lazy-review.coordinator-watch` routine pair; creates `.experts/.jobs/` and the log tree; installs the review callout styling into the vault when there is one.
+2. Run `/lazy-review.install` inside the repo. Seeds the `review` settings block, the coordinator's own expert identity, and the `lazy-review.collect` + `lazy-review.coordinator-watch` + `lazy-review.sanitize` routine trio; creates `.experts/.jobs/` and the log tree; installs the review callout styling into the vault when there is one.
 3. Run `/lazy-review.configure` to define your first review class — the paths glob, the main-writer chain, any validation or terminal section owners, and the edit-marker style.
 4. Run `/lazy-review.start <file>` to opt one doc in. The entry commit wakes the coordinator on the next watch tick.
 5. Read what the writers propose, answer questions by ticking an option, tick approve when the document is right. When the post-approve barriers have run, `/lazy-review.finalize` seals it.

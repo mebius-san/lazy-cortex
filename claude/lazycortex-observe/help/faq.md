@@ -1,19 +1,23 @@
 ---
 chapter_type: faq
 summary: Common operator questions about installing, running, and maintaining the lazycortex-observe metrics shipper.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 no_diagram: true
 source_skills:
   - lazy-observe.install
   - lazy-observe.uninstall
-  - lazy-observe.doctor
-source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
+  - lazy-observe.audit
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Frequently asked questions
 
 ## What do I need before running the installer?
 
-Three things must be in place. First, `lazycortex-core` version 1.2.0 or later must be running with `metrics.enabled: true` in the `lazy-core.runtime` block of your `lazy.settings.json` — the installer will check `http://127.0.0.1:9464/metrics` and abort if that endpoint isn't up. Second, either `grafana-alloy` or `otelcol-contrib` must be on your PATH; if it isn't, the installer prints the right install command for your platform and stops so you can install it yourself. Third, you need a Prometheus-compatible `remote_write` URL pointing at an observer you already run (Grafana Cloud, self-hosted Mimir, VictoriaMetrics, etc.) — the plugin does not stand up the observer side.
+One thing unconditionally: `lazycortex-core` version 1.2.0 or later must be running with `metrics.enabled: true` in the flat `daemon` block of your `lazy.settings.json` (`daemon.metrics.enabled`) — the installer will check `http://127.0.0.1:9464/metrics` and abort if that endpoint isn't up.
+
+Two more, but only on the path where the installer actually installs a shipper. Either `grafana-alloy` or `otelcol-contrib` must be on your PATH; if neither is, the installer prints the right install command for your platform and stops so you can install it yourself. And you need a Prometheus-compatible `remote_write` URL pointing at an observer you already run (Grafana Cloud, self-hosted Mimir, VictoriaMetrics, etc.) — the plugin does not stand up the observer side.
+
+A host where the pre-flight finds a *foreign* collector already scraping your daemons never installs a shipper: it switches into integrate mode, publishes a scrape-targets file for the stack you already run, and asks nothing — so it needs neither an agent binary nor a `remote_write` URL of its own.
 
 ---
 
@@ -28,7 +32,7 @@ Three things must be in place. First, `lazycortex-core` version 1.2.0 or later m
 
 ## I run lazycortex-core in more than one repo on this host. Does one install cover all of them?
 
-Yes. `/lazy-observe.install` renders the agent config with scrape targets for every metrics-enabled lazycortex-core daemon it finds on the host, not just the one in the repo you ran it from — a single shipper service covers all of them. Enable metrics for a new repo's daemon later via that repo's `/lazy-core.install`, then a plain `/lazy-observe.install` re-run (or a `/lazy-observe.doctor` check) picks it up automatically — no per-repo reinstall.
+Yes. `/lazy-observe.install` renders the agent config with scrape targets for every metrics-enabled lazycortex-core daemon it finds on the host, not just the one in the repo you ran it from — a single shipper service covers all of them. Enable metrics for a new repo's daemon later via that repo's `/lazy-core.install`, then a plain `/lazy-observe.install` re-run (or a `/lazy-observe.audit` check) picks it up automatically — no per-repo reinstall.
 
 ---
 
@@ -73,7 +77,7 @@ The lazycortex-core daemon reads settings at startup. Setting `metrics.enabled: 
 
 ## My observer was offline overnight. Will I lose those metrics?
 
-No, as long as the agent's WAL (write-ahead log) is within its configured max-age (12 hours by default). The agent buffers unsent samples in the WAL directory at `~/.local/share/lazycortex/observe/wal/`. Once the observer is back online, the agent drains the WAL automatically — no intervention needed. Run `/lazy-observe.doctor` afterwards; if it reports `WARN oversized` on the WAL step, that's informational — it means the backlog was large but the drain is already under way. Do not delete the WAL directory manually unless you are willing to discard those samples.
+No, as long as the agent's WAL (write-ahead log) is within its configured max-age (12 hours by default). The agent buffers unsent samples in the WAL directory at `~/.local/share/lazycortex/observe/wal/`. Once the observer is back online, the agent drains the WAL automatically — no intervention needed. Run `/lazy-observe.audit` afterwards; if it reports `WARN oversized` on the WAL step, that's informational — it means the backlog was large but the drain is already under way. Do not delete the WAL directory manually unless you are willing to discard those samples.
 
 ---
 
@@ -97,19 +101,19 @@ Nothing breaks. Every step treats an already-absent target as a silent no-op, ne
 
 ## How do I check whether the pipeline is working end-to-end?
 
-Run `/lazy-observe.doctor`. It performs eight checks in sequence without touching any file or service state: reads your answer file (or, if that file is absent, checks whether collection is already working on this host anyway — see the next question), confirms the service unit is loaded and the agent process is up, verifies every local lazycortex-core daemon's `/metrics` endpoint contains `lazycortex_runtime_*` series, checks the agent's own self-metrics for a non-zero remote_write success rate (or, in integrate mode, that the scrape-targets file exists and matches the daemon count), reaches out to your observer URL to confirm it's reachable, and reports the WAL directory size. Each check resolves to `PASS`, `WARN`, or `FAIL` with a one-line suggested fix. It is safe to run at any time.
+Run `/lazy-observe.audit`. It performs eight checks in sequence without touching any file or service state: reads your answer file (or, if that file is absent, checks whether collection is already working on this host anyway — see the next question), confirms the service unit is loaded and the agent process is up, verifies every local lazycortex-core daemon's `/metrics` endpoint contains `lazycortex_runtime_*` series, checks the agent's own self-metrics for a non-zero remote_write success rate (or, in integrate mode, that the scrape-targets file exists and matches the daemon count), reaches out to your observer URL to confirm it's reachable, and reports the WAL directory size. Each check resolves to `PASS`, `WARN`, or `FAIL` with a one-line suggested fix. It is safe to run at any time.
 
 ---
 
-## Doctor reports `WARN covered-unconfigured` instead of `FAIL not-installed`. What's the difference?
+## The audit reports `WARN covered-unconfigured` instead of `FAIL not-installed`. What's the difference?
 
-`FAIL not-installed` means nothing is collecting this host's metrics at all — no shipper, no foreign collector, no scrape-targets file. `WARN covered-unconfigured` is a narrower, less urgent finding: when doctor can't find an `observe.toml` answer file, it doesn't stop there — it checks whether metrics are being collected anyway, the same way the installer's pre-flight does. If a foreign collector (Prometheus, otelcol, Alloy, or grafana-agent) is already scraping this host but observe has never recorded that fact, doctor reports `WARN` rather than `FAIL`, because your metrics are, in fact, flowing. The fix in both cases is `/lazy-observe.install` — on a `covered-unconfigured` host it detects the existing coverage and records integrate mode automatically, with no questions asked.
+`FAIL not-installed` means nothing is collecting this host's metrics at all — no shipper, no foreign collector, no scrape-targets file. `WARN covered-unconfigured` is a narrower, less urgent finding: when the audit can't find an `observe.toml` answer file, it doesn't stop there — it checks whether metrics are being collected anyway, the same way the installer's pre-flight does. If a foreign collector (Prometheus, otelcol, Alloy, or grafana-agent) is already scraping this host but observe has never recorded that fact, the audit reports `WARN` rather than `FAIL`, because your metrics are, in fact, flowing. The fix in both cases is `/lazy-observe.install` — on a `covered-unconfigured` host it detects the existing coverage and records integrate mode automatically, with no questions asked.
 
 ---
 
-## Doctor reports `FAIL no-lazycortex-series` even though the endpoint is up. What's happening?
+## The audit reports `FAIL no-lazycortex-series` even though the endpoint is up. What's happening?
 
-The `/metrics` endpoint is serving data from the lazycortex-core daemon, but no routine has dispatched yet in this session, so the daemon hasn't produced any `lazycortex_runtime_*` samples. Wait for the first tick — once Claude Code runs a skill or the daemon's own heartbeat fires, samples will appear. Re-run `/lazy-observe.doctor` after the first activity and Step 4 should clear to `PASS`.
+The `/metrics` endpoint is serving data from the lazycortex-core daemon, but no routine has dispatched yet in this session, so the daemon hasn't produced any `lazycortex_runtime_*` samples. Wait for the first tick — once Claude Code runs a skill or the daemon's own heartbeat fires, samples will appear. Re-run `/lazy-observe.audit` after the first activity and Step 4 should clear to `PASS`.
 
 ---
 
@@ -125,4 +129,4 @@ Three alerts in `claude/lazycortex-observe/alerts/lazycortex-runtime.rules.yml` 
 
 ## I already have a shipper loaded under the same launchctl label. What do I do?
 
-Run `/lazy-observe.uninstall` first. The uninstaller will call `launchctl bootout` (or `systemctl --user disable` on Linux) to remove the existing service cleanly, then you can re-run `/lazy-observe.install`. If you skipped uninstall and the installer failed with "already loaded", the service may still be running normally — check with `/lazy-observe.doctor` before uninstalling to decide whether the existing config is worth keeping.
+Run `/lazy-observe.uninstall` first. The uninstaller will call `launchctl bootout` (or `systemctl --user disable` on Linux) to remove the existing service cleanly, then you can re-run `/lazy-observe.install`. If you skipped uninstall and the installer failed with "already loaded", the service may still be running normally — check with `/lazy-observe.audit` before uninstalling to decide whether the existing config is worth keeping.

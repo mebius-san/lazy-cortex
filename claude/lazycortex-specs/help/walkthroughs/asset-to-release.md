@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Take one spec asset from a blank slate through all five readiness gates to a confirmed release.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 diagram_spec:
   anchor: "How the journey flows"
   request: "Sequence diagram showing the five-skill lifecycle of one asset: lazy-spec.create-asset scaffolds and authors the asset, lazy-spec.set-stage marks the design approved and then the plan approved, lazy-spec.flip-gate advances each gate (spec_design_done through spec_tests_passing), lazy-spec.sync-with-code reconciles code reality and proposes spec_develop_done, lazy-spec.rebase-pins rebases branch pins and proposes spec_released."
@@ -11,7 +11,7 @@ source_skills:
   - lazy-spec.flip-gate
   - lazy-spec.sync-with-code
   - lazy-spec.rebase-pins
-source_sha: 7e8b1eed5949e8418301d3ad5bb66ac772782f32
+source_sha: 3f4c00192599a38cbb9db4308367d5db80ec2dfd
 ---
 # How do I take an asset from creation all the way to release?
 
@@ -150,7 +150,7 @@ The asset is now fully released. Its folder-note carries five `true` gates and a
 
 To revisit a decision — for instance if a test passes retroactively or a design is revised — use `/lazy-spec.flip-gate <asset> <gate> --off` to regress a gate, or `/lazy-spec.set-stage <doc> draft` to re-open a doc for editing. A doc parked with `/lazy-spec.set-stage <doc> deferred` comes back the same way — `draft` is its only exit. Each operation appends a history line so the audit trail stays complete.
 
-Run `/lazy-spec.doctor <product>` periodically to catch drift: missing stage mirrors, stale links, gate inconsistencies, or docs that gained new content without a stage transition.
+Run `/lazy-spec.audit <product>` periodically to catch drift: missing stage mirrors, stale links, gate inconsistencies, or docs that gained new content without a stage transition.
 
 ## How the journey flows
 

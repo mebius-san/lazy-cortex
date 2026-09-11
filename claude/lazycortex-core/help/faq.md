@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Non-obvious answers on install, LLM providers, the runtime daemon and experts, routines, scaffolding, git staging, and MCP permissions.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -32,7 +32,7 @@ source_skills:
   - lazy-expert.cancel-job
   - lazy-expert.list-jobs
   - lazy-memory.write
-source_sha: d4ce013c331568c5c4815b553aaf9382f01eae69
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # FAQ
 
@@ -86,9 +86,9 @@ A **patch bump** (e.g. `1.0.0` → `1.0.1`) is safe to drop in with no action �
 
 ## What's the difference between `/lazy-core.audit`, `/lazy-core.doctor`, and `/lazy-core.slim-context`?
 
-`/lazy-core.audit` is a read-only startup-context and compliance scan: it shows what actually loads into context (rule sizes, loading behavior), checks skill/agent/rule authoring compliance (Execution-Discipline preamble, no-Optional headings, narrative padding, and — for skills, agents, and commands alike — whether each `description:` states an invocation trigger rather than just a mechanism), checks help-doc coverage and staleness against each plugin's README scenarios, and reports the expert-runtime config across fourteen sub-checks. It makes no changes.
+`/lazy-core.audit` is a read-only startup-context and compliance scan: it shows what actually loads into context (rule sizes, loading behavior), checks skill/agent/rule authoring compliance (Execution-Discipline preamble, no-Optional headings, narrative padding, and — for skills, agents, and commands alike — whether each `description:` states an invocation trigger rather than just a mechanism), checks help-doc coverage and staleness against each plugin's README scenarios, and reports the expert-runtime config across sixteen sub-checks. It makes no changes.
 
-`/lazy-core.doctor` is the broader health check: it verifies consistency across rules, agents, skills, commands, settings, memory, hooks, and CLAUDE.md files, confirms every installed plugin is at the latest marketplace version, and delegates to sibling audit skills — `lazy-guard.check-public`, plus each installed plugin's own audit skill when it ships one, including `lazycortex-obsidian` and `lazycortex-python` — when they apply. Unlike audit, it offers targeted fixes you can accept interactively, plus a per-warning waive loop.
+`/lazy-core.doctor` is the broader health check: it verifies consistency across rules, agents, skills, commands, settings, memory, hooks, and CLAUDE.md files, confirms every installed plugin is at the latest marketplace version, and delegates to sibling audit skills — `lazy-guard.check-public`, plus each installed plugin's own `<namespace>.audit` skill, when that plugin is enabled and its own opt-in condition (an answer file, a configured scope, a non-empty settings section) is met. `lazycortex-core` is the only plugin in the marketplace that ships its own doctor; every other plugin — including `lazycortex-diagram`, `lazycortex-experts`, `lazycortex-observe`, `lazycortex-obsidian`, `lazycortex-python`, `lazycortex-review`, `lazycortex-specs`, and `lazycortex-wiki` — ships exactly one `<namespace>.audit` skill that `/lazy-core.doctor` folds into its own report, so this is the single health-check entry point across the whole marketplace rather than one doctor per plugin. Unlike audit, it offers targeted fixes you can accept interactively, plus a per-warning waive loop.
 
 `/lazy-core.slim-context` is action-oriented: it slims oversized rule files (moving reference material into agent definitions) and audits global `settings.json` for project-specific entries that should move to local settings. Run it when startup feels slow or after adding new rules/agents — audit and doctor tell you something is off, optimize is one of the skills that fixes it.
 
@@ -184,6 +184,16 @@ Edit the map by hand — add or remove a `"<hostname>": "<path>"` entry — then
 
 ---
 
+## Why does `/lazy-core.install` now write a `LAZYCORTEX_PYTHON` entry, and what breaks if it doesn't?
+
+Only on a checkout that reaches the supervisor install (`daemon.enabled: true` and this machine/checkout named in the `run_here` map — see the two questions above). Once the launchd/systemd unit is installed, install runs one more step: it resolves the absolute interpreter with `python3 -c 'import sys; print(sys.executable)'` — captured under your own interactive environment, where `python3` reliably resolves to the right binary — and merges `{"env": {"LAZYCORTEX_PYTHON": "<path>"}}` into the checkout's gitignored `.claude/settings.local.json`, deep-merging so no other key is touched. The supervisor unit's `{PYTHON}` placeholder is substituted with the same absolute path.
+
+This closes a gap specific to headless supervision: launchd and systemd start the shim with a minimal environment that doesn't source your shell profile (unless `--login-shell` is set), so a bare `python3` inside the unit isn't guaranteed to resolve to the same interpreter — or to any interpreter — that resolves interactively. Every lazycortex skill and hook now shells out as `"${LAZYCORTEX_PYTHON:-python3}" ${CLAUDE_PLUGIN_ROOT}/bin/<file>` instead of a bare `python3 ...`, so once the variable is recorded, the daemon's spawns and your own interactive sessions run the identical interpreter; with the variable unset (a non-supervised checkout, or a session running by hand), every call falls back to plain `python3` exactly as before.
+
+The step is idempotent and reports **python-recorded** the first time it writes the value, or **python-unchanged** on a re-run that finds it already matches — re-running `/lazy-core.install` after moving to a different Python installation (a pyenv version bump, for instance) picks up the new interpreter automatically.
+
+---
+
 ## What payload fields does `/lazy-expert.dispatch-job` require?
 
 Every job payload must contain three fields: `kind` (the job type, e.g. `"doc-review"`), `role` (the expert role to handle it, e.g. `"designer"`), and `request` (the task description string). These are the minimum the protocol contract enforces; if any field is missing, dispatch aborts with "payload missing required field(s): `<list>`."
@@ -245,11 +255,21 @@ A confined spawn is only as strong as what happens when the sandbox actually blo
 
 ## When does the runtime daemon halt, and how do I recover it?
 
-The daemon halts in three distinct situations. A **working-tree halt** (`uncommitted_changes`) happens when a routine or expert job leaves the repo in a dirty state — the daemon stops rather than proceeding with uncommitted changes in the tree. A **remote-sync halt** (`git_pull_diverged`, `git_push_failed`, `git_remote_unavailable`) happens when the daemon's pre- or post-tick git sync fails against the actual remote — a genuine divergence between local and origin, exhausted push retries, or stderr that names an unreachable network or host. A **local-sync halt** (`git_local_failed`) happens when that same git sync fails for a purely local reason instead — a held `index.lock` past its retry backoff, a bad ref, or a checkout-permission problem; a transient `index.lock` race (an expert job committing at the same moment, say) is retried in place with backoff before it is ever allowed to halt, so this reason only fires once that retry is exhausted.
+The daemon writes one of nine `reason` values into `.runtime/state.json[daemon_halted]`, and `/lazy-runtime.recover` branches on every one of them — there is no halt reason it leaves unhandled.
 
-Run `/lazy-runtime.recover` to unblock it. For working-tree halts the skill walks you through four options: commit the dirty files (you supply the message), stash them, discard them, or abort and leave the halt in place. For remote- and local-sync halts the skill surfaces reason-specific guidance (the exact git commands to inspect and fix the divergence, push failure, or local git problem) and waits for you to confirm you have resolved the situation before clearing the halt block. Once the halt block is cleared from `.runtime/state.json`, the daemon resumes on its next iteration.
+**`uncommitted_changes`** is its own family: a routine or expert job left the working tree dirty, and the daemon stops rather than proceeding on top of it. Here the skill walks you through four options: commit the dirty files (you supply the message), stash them, discard them, or abort and leave the halt in place. If the cleanup does not produce a clean tree, it reports "working tree still dirty; refusing to resume" and leaves the halt intact — inspect with `git status` and re-run the skill.
 
-If the cleanup does not produce a clean tree, the skill reports "working tree still dirty; refusing to resume" and leaves the halt intact — inspect with `git status` and re-run the skill.
+Every other reason routes through the same manual-fix path: the skill prints reason-specific guidance, then waits for you to confirm the underlying cause is actually repaired before it clears the halt.
+
+- **`git_pull_diverged` / `git_push_failed` / `git_remote_unavailable`** — the daemon's pre- or post-tick git sync failed against the actual remote: a genuine divergence between local and origin, exhausted push retries, or stderr naming an unreachable network or host.
+- **`git_local_failed`** — that same sync failed for a purely local reason instead: a held `index.lock` past its retry backoff, a bad ref, or a checkout-permission problem. A transient `index.lock` race (an expert job committing at the same moment, say) is retried in place with backoff before it is ever allowed to halt, so this reason only fires once that retry is exhausted. If the detail actually reads as a transport failure after all, you don't have to do anything by hand: the hourly doctor tick probes `git ls-remote` once a `git_local_failed` halt is an hour old and clears it on its own when the remote answers.
+- **`routine_config_invalid`** — a `routines.<name>` entry in `.claude/lazy.settings.json` (or its `.local.json` overlay) no longer matches its type's schema, so the daemon dropped the entry and stopped rather than guess at your intent. Fix the entry by hand, or re-register it with `/lazy-routine.register --force`.
+- **`config_violation`** — a routine's own tick exited with output the daemon reads as a settings-invariant violation, typically raised by the plugin CLI that routine's `command` drives. It escalates to a halt because config a CLI rejects once will be rejected identically every future tick — the rejection text names what to fix, usually a setting in whatever plugin section that CLI reads rather than the routine entry itself.
+- **`suspected_loop`** — one registered bot identity has committed the same diff enough times inside a recent commit window (`daemon.loop_detect_threshold` / `daemon.loop_detect_window`) to look like a stuck cycle. Resuming alone will not make this one hold: the detector re-tallies the same window on the very next iteration, so the repeated commits actually have to leave the window — land other commits, rewrite or drop the offending ones, or widen the thresholds — before a resume sticks.
+- **`inbox_collision`** — two checkouts on the same host register inbox routines that resolve to the same physical directory, so both daemons would drain, and duplicate, the same files. This check runs only at daemon startup, so resuming without separating the two `inbox_dir` paths (or retiring one checkout's supervisor) puts a duplicating daemon back to work silently — it will not re-detect the collision until the daemon restarts.
+- **`rate_limit`** — the subscription rate-limit window is closed. Nothing is broken and no repair is needed: the daemon lifts this halt itself once the window reopens (the halt block's `resets_at`, in epoch seconds, says when); resume early only if you want the queue moving again right away — the pump's own pre-spawn check still refuses to spawn while the window stays closed, so an early resume burns no tokens either way.
+
+For any reason beyond `uncommitted_changes`, the halt block itself carries no free-text detail — the skill reads the extra context (git stderr, the offending patch-id, the colliding routines and checkouts) from the halt's own incident (`Bash(lazycortex-core error-list --kind daemon_halt)`) or the newest matching record in the runtime journal at `.logs/lazy-core/runtime/<date>.jsonl`.
 
 ---
 

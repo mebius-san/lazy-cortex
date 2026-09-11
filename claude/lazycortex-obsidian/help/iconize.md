@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Scaffold, configure, and run the iconize-sync system to keep Obsidian file and folder icons in sync with your vault's frontmatter-driven icon registry.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 diagram_spec:
   anchor: "How the three skills fit together"
   request: "Flow diagram showing the three-skill iconize block: iconize-install scaffolds plugins + icon-map + hooks; iconize-config edits the icon-map registry; iconize-sync runs the worker to write iconize_icon/iconize_color into note frontmatter; Iconize plugin and iconize-reloader plugin then paint icons on screen from frontmatter and data.json respectively."
@@ -10,7 +10,7 @@ source_skills:
   - lazy-obsidian.iconize-install
   - lazy-obsidian.iconize-config
   - lazy-obsidian.iconize-sync
-source_sha: 74f5515593a4aa6587f57c7df78a2fa5a85ee56f
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Iconize — frontmatter-driven icon management for Obsidian vaults
 
@@ -41,12 +41,12 @@ Once the system is scaffolded, `/lazy-obsidian.iconize-config` is how you grow t
 
 `/lazy-obsidian.iconize-sync` is the worker dispatcher. Its most-used subcommands are:
 
-- `reconcile` — walks all `.md` files (or a `--prefix` subtree) and rewrites `iconize_icon` / `iconize_color` everywhere the registry has an opinion. Files that no longer match any rule have those keys cleared.
+- `reconcile` — walks all `.md` files (or a `--prefix` subtree) and rewrites `iconize_icon` / `iconize_color` everywhere the registry has an opinion. A file no rule claims is left untouched: the worker never strips icon keys, so anything another tool wrote survives.
 - `sync <path>` — resolves and rewrites a single file; this is what the PostToolUse hook calls after every Write or Edit to keep things current without a full sweep.
 - `reconcile-dirty` — safety net for files written via Bash or bulk renames that bypass the PostToolUse hook; run it yourself after such a batch.
 - `check-versions` — confirms the icon-map's `schema_version` is compatible with the installed worker.
 
-The PostToolUse hook (on Write/Edit) plus the `lazy-obsidian.repaint` daemon routine (repaints after each commit, when a daemon runs) mean you rarely need to call `iconize-sync` directly — icons stay current as you work. The only time you call it explicitly is after a registry change (`reconcile`) or a bulk operation that bypassed the hook (`reconcile-dirty`). Nothing stages into the git index on your behalf — you stage whatever a sync reports as touched.
+The PostToolUse hook (on Write/Edit) plus the `lazy-obsidian.repaint` daemon routine (repaints after each commit via `reconcile-commit`, when a daemon runs) mean you rarely need to call `iconize-sync` directly — icons stay current as you work. The only time you call it explicitly is after a registry change (`reconcile`) or a bulk operation that bypassed the hook (`reconcile-dirty`). Nothing stages into the git index on your behalf — you stage whatever a sync reports as touched.
 
 ## Common adjustments
 

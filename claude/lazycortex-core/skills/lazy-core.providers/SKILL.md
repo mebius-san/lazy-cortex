@@ -2,7 +2,7 @@
 name: lazy-core.providers
 description: "Run when the operator asks to add, change, remove, or list the LLM providers the expert-job runtime can spawn against — an expert's `provider` field in `experts{}` points at a name registered here. Interactive wizard over the machine-local `providers` block in `.claude/lazy.settings.local.json`; validates each entry against the same rules the runtime's dispatch-time resolver enforces before it ever writes."
 argument-hint: "[list|add|update|remove] [<provider-name>]"
-allowed-tools: Read, Write, AskUserQuestion, Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Bash(git check-ignore *), Bash(python3 *), Bash(curl *), Agent
+allowed-tools: Read, Write, AskUserQuestion, Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Bash(git check-ignore *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(curl *), Agent
 ---
 # Provider Registry
 

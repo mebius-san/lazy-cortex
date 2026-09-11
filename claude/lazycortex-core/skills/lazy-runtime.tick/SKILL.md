@@ -37,7 +37,7 @@ Outcome: `single`, `drain`, or `named:<routine>`.
 Everything — the live-daemon refusal, the unknown-routine refusal, the iteration loop, the pump drain — is owned by the CLI; the skill only invokes it:
 
 ```
-Bash(LAZY_REPO_ROOT="$PWD" ${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core runtime-tick [<routine-name>] [--drain])
+Bash(LAZY_REPO_ROOT="$PWD" "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" runtime-tick [<routine-name>] [--drain])
 ```
 
 Exit 2 with a `refused:` line on stderr means exactly what it says — surface the line verbatim to the operator and stop; do NOT stop the daemon yourself or retry. Exit 0 prints a JSON summary: `ticks`, `routine`, `dispatched` (named mode only), `ready_left`, `stopped` (`halted` / `dirty_tree` / `rate_limited` / `no_progress` / null), `halted`.

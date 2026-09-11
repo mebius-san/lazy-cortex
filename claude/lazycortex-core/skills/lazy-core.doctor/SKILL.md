@@ -1,7 +1,7 @@
 ---
 name: lazy-core.doctor
 description: "Run when the operator asks whether the project config is healthy, or when something feels off — a rule or skill is not firing, plugins may be behind the marketplace, settings / agents / memory / hooks / CLAUDE.md have drifted apart. Merges its own cross-artifact scan with the installed plugins' audits, applies the repairs that follow mechanically from what it read, and asks per finding about the rest; the sibling `/lazy-core.audit` only measures context weight and authoring compliance and never fixes."
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash(wc *), Bash(mkdir -p *), Bash(python3 *), Bash(claude plugin update *), mcp__*__recall, mcp__*__retain, AskUserQuestion, Agent
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash(wc *), Bash(mkdir -p *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(claude plugin update *), mcp__*__recall, mcp__*__retain, AskUserQuestion, Agent
 ---
 # Project Health Check
 
@@ -461,7 +461,7 @@ Each delegation follows four steps:
 1. **Availability probe** — is the sibling skill reachable?
 2. **Run condition** — is the opt-in gate satisfied?
 3. **On skip** — if either fails, skip silently; no entry in the report.
-4. **On invoke** — fold the sibling's summary into a named subsection; direct the user to run the sibling for interactive fixes. Do NOT re-run its fix flow.
+4. **On invoke** — fold the sibling's summary into a named subsection, then name the repair route: the sibling's own interactive fix flow where it has one, and where it has none (`lazy-spec.audit` and `lazy-wiki.audit` are read-only in every invocation) the route that delegation names below. Never promise an interactive fix a read-only sibling cannot run, and do NOT re-run any fix flow yourself.
 
 **Availability probe — canonical signal set.** A sibling plugin counts as available if **any** of these signals is true (not just the first):
 
@@ -486,6 +486,11 @@ Any one signal is sufficient — doctor should not skip a delegated audit just b
 - *Run condition*: same as availability — plugin installation / enablement is the opt-in.
 - *On invoke*: fold audit findings into a **Diagram** subsection.
 
+**11d. Expert composition** → `lazy-experts.audit`
+- *Availability*: `lazycortex-experts` meets the canonical signal set above.
+- *Run condition*: same as availability — plugin installation / enablement is the opt-in. The audit reports `INFO no-experts-configured` on a project with no entries yet and checks the shipped surface alone, so there is nothing to gate on beyond the plugin being present.
+- *On invoke*: fold audit findings into an **Expert composition** subsection. Scope is the plugin's own shipped agents and aspect references against the `experts` entries this project seeded — the runtime state of queued jobs is 11f's, not this one's.
+
 **11e. Review coverage** → `lazy-review.audit`
 - *Availability*: `lazycortex-review` meets the canonical signal set above.
 - *Run condition*: same as availability — plugin installation / enablement is the opt-in.
@@ -493,7 +498,7 @@ Any one signal is sufficient — doctor should not skip a delegated audit just b
 
 **11f. Expert runtime** — inline, via `lazy-core.audit` Agent D findings
 - *Availability*: always (expert-runtime checks are part of `lazycortex-core` itself — no separate plugin probe needed).
-- *Run condition*: `.claude/lazy.settings.json` contains a non-empty `experts` section, a `lazy-core.runtime` section, **or a non-empty `external_dirs.paths` list**. Skip if none is present (no expert runtime configured — silent skip, no report entry). Test the `paths` list, never the section: a settings migration stamps a `{"_version": 1}` stub for every known section into every repo, so "non-empty section" would match everywhere and defeat the skip.
+- *Run condition*: `.claude/lazy.settings.json` contains a non-empty `experts` section **or a non-empty `external_dirs.paths` list**. Skip if neither is present (no expert runtime configured — silent skip, no report entry). Test the `paths` list, never the section: a settings migration stamps a `{"_version": 1}` stub for every known section into every repo, so "non-empty section" would match everywhere and defeat the skip.
 - *On invoke*: run the Agent D sub-checks from `lazy-core.audit` inline (do NOT dispatch a separate skill — just execute the same D1–D16 logic described in `lazy-core.audit`'s Agent D section). Fold findings into a **Loop runtime** subsection. Retain all D-findings for Phase 4 fix-offer matching (see "Loop runtime fix offers" in Phase 4).
 
 **11g. Obsidian coverage** → `lazy-obsidian.audit`
@@ -515,6 +520,21 @@ Any one signal is sufficient — doctor should not skip a delegated audit just b
 - *Availability*: always — the contract lives in `lazycortex-core` itself.
 - *Run condition*: at least one file in `.claude/skills/*/SKILL.md` or `claude/*/skills/*/SKILL.md`. No local skills → silent skip.
 - *On invoke*: judge each skill's description/body against the research-marker convention per `lazy-core.skill-writing § 10` (do NOT dispatch a separate skill); flag `[WARN]` per missing-marker or marker-without-query-contract finding. Fold into a **Research markers** subsection.
+
+**11k. Metrics pipeline** → `lazy-observe.audit`
+- *Availability*: `lazycortex-observe` meets the canonical signal set above.
+- *Run condition*: the answer file at `${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.toml` exists. A host that merely has the plugin enabled but never ran `/lazy-observe.install` would otherwise report `FAIL not-installed` on every doctor run — the answer file is the opt-in.
+- *On invoke*: fold audit findings into a **Metrics** subsection. Host-scoped, not repo-scoped: the checks cover every metrics-enabled daemon on this machine, so the same findings surface from any repo.
+
+**11l. Spec catalog** → `lazy-spec.audit`
+- *Availability*: `lazycortex-specs` meets the canonical signal set above.
+- *Run condition*: `.claude/lazy.settings.json[products]` holds at least one key besides `_version`. No registered product → silent skip.
+- *On invoke*: run it in all-products mode over the registered keys — doctor never raises the audit's own product question. Fold findings into a **Spec** subsection. The audit is read-only and has no fix mode: carry each finding's repair route from the audit's own `## Repair routes` table, which the operator runs.
+
+**11m. Wiki coverage** → `lazy-wiki.audit`
+- *Availability*: `lazycortex-wiki` meets the canonical signal set above.
+- *Run condition*: `.claude/lazy.settings.json[wiki.scopes]` holds at least one scope. No configured scope → silent skip.
+- *On invoke*: run it over every configured scope (no `<scope-id>` argument). Fold findings into a **Wiki** subsection. The audit is read-only and has no fix mode: findings it tags `(fixable)` — the index and See-also ones (`orphan-topic`, `index-desync`, `see-also-path-base`, `broken-see-also`, `stale-gloss`) — are repaired by `Bash(lazycortex-wiki doctor <scope-id> --apply)`; every other finding carries the hand-repair route the audit names with it.
 
 ## Phase 4 — Present + fix + waive
 
@@ -790,7 +810,7 @@ On confirmation, resolve the backend via the Phase 2.7a priority ladder using th
 - **Fix L2 fails with "Permission denied" on rmtree** — the job directory has restricted permissions (e.g. created by a different user or process). Doctor surfaces the error; the user must remove the directory manually.
 - **Fix L3 "unregister_routine" raises "settings file not writable"** — `.claude/lazy.settings.json` is read-only or the process lacks write permission → fix file permissions, then re-run `/lazy-core.doctor`.
 - **Fix L3 offered but routine reappears on next doctor run** — the settings write completed but the installed plugin's default-routines bootstrap re-added the entry. Re-run `/lazy-core.install` with the `skip expert-pump routine` option, or add the routine to a local exclusion list in `lazy.settings.json`.
-- **Phase 3 § 11f skipped unexpectedly** — none of an `experts` section, a `lazy-core.runtime` section, or a non-empty `external_dirs.paths` list was found in `lazy.settings.json`. If expert runtime is configured but the file is in a non-standard location, run `/lazy-core.audit` directly to surface Agent D findings without the skip guard.
+- **Phase 3 § 11f skipped unexpectedly** — neither a non-empty `experts` section nor a non-empty `external_dirs.paths` list was found in `lazy.settings.json`. If expert runtime is configured but the file is in a non-standard location, run `/lazy-core.audit` directly to surface Agent D findings without the skip guard.
 
 ## Logging
 

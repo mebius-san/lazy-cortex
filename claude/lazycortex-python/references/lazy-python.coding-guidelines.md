@@ -1,5 +1,6 @@
 ---
 description: Code style, formatting, naming, imports, class/method design, error handling, debug logging, and module-specific patterns for Python projects that adopt these conventions.
+size-waiver: "loaded whole by every consumer before writing Python — `lazy-python.docstring-writer`, `lazy-python.code-reviewer`, `lazy-python.test-writer` and `/lazy-python.check-style` each read the full canon, and it has no chapter a writer can skip"
 ---
 # Coding Guidelines
 
@@ -36,7 +37,7 @@ conventions.
 - **Mark knowledge as you write it.** Knowledge markers are written by the author at writing time, not backfilled by a later sweep:
   - Code that implements a **caller-visible guarantee** — behavior callers may rely on that must survive refactoring — gets a `Contract:` block at the load-bearing spot, and the owning docstring's **Guarantees** section is synced in the same pass.
   - Code that implements **domain knowledge** — a mechanic, formula, or rule of the modeled subject area — gets a `Domain(<group>):` block. The group comes from the project's domain-groups dictionary; when no listed group fits, park the block under `Domain(unfiled):` — never invent a permanent group.
-  - Block shapes and boundaries: the documenting canon's Contract Comments / Domain Comments / Marker Comments sections. Whether an unmarked guarantee or mechanic slipped through is a review-phase finding.
+  - Block shapes and boundaries: the comment canon's Contract Comments / Domain Comments / Marker Comments sections (`lazy-python.comment-guidelines.md`). Whether an unmarked guarantee or mechanic slipped through is a review-phase finding.
 
 ### Communication Rules
 - **Always answer "why" questions before making any edits.** When the user asks "why did you do X?", explain first, then wait for approval before changing code.
@@ -112,7 +113,7 @@ conventions.
 - Always use exactly 2 blank lines between any top-level function and other code.
 - Always use exactly 2 blank lines between any class method and other code (explicit override of PEP 8).
 - Use 1 blank line between import groups and within methods/functions.
-- Use exactly 1 blank line between consecutive logical blocks inside a method or function body. A block is a comment-led group of statements — a guard, a resolution step, a build/emit step; each is separated from the next by a blank line, never packed together. This applies to a block added inside an existing method, not only to a method written from scratch. See `## Comments` in `lazy-python.documenting-guidelines.md` for the purpose comment every block carries.
+- Use exactly 1 blank line between consecutive logical blocks inside a method or function body. A block is a comment-led group of statements — a guard, a resolution step, a build/emit step; each is separated from the next by a blank line, never packed together. This applies to a block added inside an existing method, not only to a method written from scratch. See `## Comments` in `lazy-python.comment-guidelines.md` for the purpose comment every block carries.
 - Exception (nested definitions only): Inside the body of a class or a method, place exactly 1 blank line between the parent's docstring and the immediately following nested def/class definition. This exception applies only within the same enclosing block to separate the parent docstring from the nested definition. It does not apply to top‑level method boundaries, where the "exactly 2 blank lines between methods" rule remains in force.
 - Non-cumulative rule: These blank line rules are mutually exclusive for any single boundary. Do not apply multiple rules to the same code fragment in sequence. For example, the "2 blank lines between methods" rule and the "1 blank line between a parent docstring and a nested definition" rule must never be combined to create 3 blank lines. Always choose the single applicable rule for the given context.
 - Overload stubs: Use exactly 1 blank line between consecutive `@overload` decorated function stubs, and exactly 1 blank line between the last `@overload` stub and the actual implementation. This rule applies regardless of the "2 blank lines between methods" rule. See the Overload Stubs Pattern section below.

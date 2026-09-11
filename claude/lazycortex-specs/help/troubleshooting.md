@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 no_diagram: true
 source_skills:
   - lazy-spec.add-asset-type
@@ -24,8 +24,8 @@ source_skills:
   - lazy-spec.set-stage
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
-  - lazy-spec.doctor
-source_sha: 729234b05d4141810d184b143e30745bfb03d131
+  - lazy-spec.audit
+source_sha: 3f4c00192599a38cbb9db4308367d5db80ec2dfd
 ---
 # Troubleshooting
 
@@ -79,13 +79,13 @@ source_sha: 729234b05d4141810d184b143e30745bfb03d131
 
 ---
 
-## `/lazy-spec.product-config` refuses because the compound-key already exists
+## `/lazy-spec.product-config` refuses because the product key already exists
 
-**Symptom**: The wizard aborts saying the derived `<subsystem>[-<namespace>]-<leaf>` key is already present in `products`.
+**Symptom**: The wizard aborts saying the chosen key is already present in `products`.
 
-**Likely cause**: A product with the same subsystem/namespace/leaf combination was registered previously.
+**Likely cause**: The product key is an arbitrary string the operator types (lowercase-with-hyphens recommended) — it is not derived from the product's `spec_path` or folder layout — and a product is already registered under that exact key.
 
-**Fix**: If you want to edit the existing product, re-invoke `/lazy-spec.product-config` with that product's key or path — the skill enters edit mode. If you genuinely need a new sibling product, pick a different leaf or namespace so the compound-key is unique.
+**Fix**: If you want to edit the existing product, re-invoke `/lazy-spec.product-config` with that product's key or path — the skill enters edit mode. If you genuinely need a new sibling product, pick a different key.
 
 ---
 
@@ -119,67 +119,67 @@ source_sha: 729234b05d4141810d184b143e30745bfb03d131
 
 ---
 
-## `/lazy-spec.doctor` refuses to check a product
+## `/lazy-spec.audit` refuses to check a product
 
-**Symptom**: The doctor run stops immediately at Check 0, reporting the product key is not in `lazy.settings.json[products]`.
+**Symptom**: The audit run stops immediately at Check 0, reporting the product key is not in `lazy.settings.json[products]`.
 
 **Likely cause**: The product key you passed (or resolved from a path) has no registration — it was never created, or the key was mistyped.
 
-**Fix**: Run `/lazy-spec.product-config` to register the product, then re-invoke `/lazy-spec.doctor <product>`.
+**Fix**: Run `/lazy-spec.product-config` to register the product, then re-invoke `/lazy-spec.audit <product>`.
 
 ---
 
-## `/lazy-spec.doctor` reports a reserved product slug with no fix offered
+## `/lazy-spec.audit` reports a reserved product slug with no fix offered
 
-**Symptom**: Check 0 fails, naming the product folder leaf as `design`, `tech`, or `decisions`, and even `--apply` offers no auto-fix for it.
+**Symptom**: Check 0 fails, naming the product folder leaf as `vision`, `design`, `tech`, `use-cases`, or `decisions`, and the report names no repair verb for it.
 
-**Likely cause**: The product folder's basename collides with the product-level `design.md` / `tech.md` / `decisions.md` files that live at the product root — a structural naming conflict the skill deliberately refuses to resolve on its own.
+**Likely cause**: The product folder's basename collides with the product-level `vision.md` / `design.md` / `tech.md` / `use-cases.md` / `decisions.md` files that live at the product root — a structural naming conflict no verb resolves.
 
-**Fix**: Rename the product's folder (and its `spec_path` entry via `/lazy-spec.product-config` edit mode) to a leaf that isn't `design`, `tech`, or `decisions`, then re-run `/lazy-spec.doctor`.
+**Fix**: Rename the product's folder (and its `spec_path` entry via `/lazy-spec.product-config` edit mode) to a leaf that isn't `vision`, `design`, `tech`, `use-cases`, or `decisions`, then re-run `/lazy-spec.audit`.
 
 ---
 
-## `/lazy-spec.doctor` FAILs a product's or the catalog root's level note with `unknown-key: spec_doc_type`
+## `/lazy-spec.audit` FAILs a product's or the catalog root's level note with `unknown-key: spec_doc_type`
 
 **Symptom**: Agent D's `note-check` delegation reports a FAIL naming `unknown-key` on `spec_doc_type` for the product folder-note (`<spec_path>/<leaf>.md`) or the catalog root's own note — even though nothing was hand-edited.
 
 **Likely cause**: An older `lazycortex-specs doc-type backfill` run derived a type from the level note's own `product` / `catalog` role and wrote `spec_doc_type: <role>` onto it — a key no level-note schema has ever declared room for. Only the asset status note and the operator-zone group/category notes were excluded from typing before this was fixed; a level note slipped through and picked up a stray key that `note-check` now rejects.
 
-**Fix**: Two verbs clear this, and the finding names whichever fits. For the whole catalog in one pass, re-run `lazycortex-specs doc-type backfill` (or re-run `/lazy-spec.install`, whose Step 7c calls it) — reporting the count under a `cleaned` counter alongside `touched` / `skipped`. For a single note, run `lazycortex-specs note-drop-key <note_dir> spec_doc_type` directly — the same verb the coordinators reach for to clean up a stray key on their own wake, so a level note under an active coordinator usually self-heals before this doctor pass ever reports it. Re-run `/lazy-spec.doctor` afterward to confirm the FAIL clears.
+**Fix**: Two verbs clear this, and the finding names whichever fits. For the whole catalog in one pass, re-run `lazycortex-specs doc-type backfill` (or re-run `/lazy-spec.install`, whose Step 7c calls it) — reporting the count under a `cleaned` counter alongside `touched` / `skipped`. For a single note, run `lazycortex-specs note-drop-key <note_dir> spec_doc_type` directly — the same verb the coordinators reach for to clean up a stray key on their own wake, so a level note under an active coordinator usually self-heals before this audit pass ever reports it. Re-run `/lazy-spec.audit` afterward to confirm the FAIL clears.
 
 ---
 
-## `/lazy-spec.doctor` runs clean but never fixes anything
+## `/lazy-spec.audit` runs clean but never fixes anything
 
 **Symptom**: The report lists warnings and errors, but re-checking the product afterward shows nothing changed.
 
-**Likely cause**: `/lazy-spec.doctor` is read-only by default — every run stops after the Report step. The fix loop that actually writes changes only runs when you pass `--apply`.
+**Likely cause**: `/lazy-spec.audit` is read-only in every invocation — it reports and stops, and it has no apply mode at all. Repair is a separate move you make.
 
-**Fix**: Re-run `/lazy-spec.doctor <product> --apply` and answer the `AskUserQuestion` the fix loop raises for each finding you want resolved.
-
----
-
-## `/lazy-spec.doctor --apply` still leaves a finding after I confirmed a fix
-
-**Symptom**: You ran `--apply`, confirmed the proposed fix for some other finding, but a layout or body-shape finding (a stray `docs/` subfolder, an old-shape note body, content outside the vault root) is still reported on the next run.
-
-**Likely cause**: Layout and body-shape findings are report-only by design — the skill never auto-migrates or moves existing content, even under `--apply`. Only frontmatter-level and reference fixes (wikilinks, stage/tag sync, icon drift, gate booleans) are ever written automatically.
-
-**Fix**: Resolve the finding by hand — move the files, rewrite the section — following the instruction the report gives for that specific finding, then re-run `/lazy-spec.doctor` to confirm it clears.
+**Fix**: Run the route the report names beside each finding — `/lazy-spec.set-stage` for a stage/tag drift, `/lazy-spec.flip-gate` for a gate, `lazycortex-specs note-set-key` / `note-drop-key` for a frontmatter key, `lazycortex-specs doc-type backfill` / `asset-type backfill` / `pins` for a missing key across the catalog, `lazycortex-specs upstream-doctor --apply` for a `dangling-request-link` finding on a mirrored upstream unit, `/lazy-spec.sync-with-code` for a stale tech doc, `/lazy-spec.product-config` for a product or repo record. Findings with no named verb are hand edits. `/lazy-core.doctor` runs this audit as one of its delegated checks and drives a fix/waive loop over the merged findings if you want one place to work through them.
 
 ---
 
-## `/lazy-spec.doctor` keeps warning that a container folder-note has no `# Coordinator rules` section
+## A layout or body-shape finding never clears
 
-**Symptom**: Every doctor run reports a WARN naming a container folder-note (e.g. `features/features.md`) as missing its `# Coordinator rules` section, alongside the same warning for the product folder-note.
+**Symptom**: You resolved several findings, but a layout or body-shape one (a stray `docs/` subfolder, an old-shape note body, content outside the vault root) is still reported on the next run.
+
+**Likely cause**: Nothing in the plugin moves or rewrites existing spec content — no skill, no CLI verb. These findings exist to tell you what to move; they are never repaired for you.
+
+**Fix**: Resolve the finding by hand — move the files, rewrite the section — following the instruction the report gives for that specific finding, then re-run `/lazy-spec.audit` to confirm it clears.
+
+---
+
+## `/lazy-spec.audit` keeps warning that a container folder-note has no `# Coordinator rules` section
+
+**Symptom**: Every audit run reports a WARN naming a container folder-note (e.g. `features/features.md`) as missing its `# Coordinator rules` section, alongside the same warning for the product folder-note.
 
 **Likely cause**: The rule-chain the coordinator reads before deciding anything on any asset (playbook → vault doc → product note → container notes top-down → asset note) now spans container-level notes too, not just the product root — a container folder-note that has never needed group-wide constraints simply has nothing written yet, which is expected rather than broken.
 
-**Fix**: Nothing is required — this is a WARN, not a FAIL, and an empty section is not owed. If you do want group-scoped constraints for that container, re-run `/lazy-spec.doctor <product> --apply` and confirm the fix that adds the empty `# Coordinator rules` section (carrying the `#protected/spec/coordinator-rules` tag); the operator authors the actual constraints afterward.
+**Fix**: Nothing is required — this is a WARN, not a FAIL, and an empty section is not owed. If you do want group-scoped constraints for that container, add the empty `# Coordinator rules` section yourself, carrying the `#protected/spec/coordinator-rules` tag the templates use, then author the constraints under it.
 
 ---
 
-## `/lazy-spec.doctor` reports `vault-spec-missing`
+## `/lazy-spec.audit` reports `vault-spec-missing`
 
 **Symptom**: A doctor run's Check 11 reports `[WARN] vault-spec-missing` — neither the content-root `vision.md` nor a pre-vision `design.md` exists.
 
@@ -513,7 +513,7 @@ source_sha: 729234b05d4141810d184b143e30745bfb03d131
 
 **Symptom**: Asset mode consistently reports `no-anchors` and never surfaces a drift finding for this asset.
 
-**Likely cause**: This is a valid outcome, not a failure — the asset has no `code-plan.md` / `test-plan.md` to anchor source-links against, no `wiki.domains` configured for domain-group anchors, and no `docs/structure.md` for structure anchors. The doc still gets `lazy-spec.doctor`'s structural pass regardless.
+**Likely cause**: This is a valid outcome, not a failure — the asset has no `code-plan.md` / `test-plan.md` to anchor source-links against, no `wiki.domains` configured for domain-group anchors, and no `docs/structure.md` for structure anchors. The doc still gets `lazy-spec.audit`'s structural pass regardless.
 
 **Fix**: Nothing is broken. To sharpen future runs, configure domains via `/lazy-wiki.configure domains` and run `lazy-wiki.domain-sync`, run `lazy-wiki.structure rebuild`, or author a `code-plan.md` for the asset — any one of the three gives asset mode an anchor to reconcile against.
 
@@ -679,6 +679,16 @@ source_sha: 729234b05d4141810d184b143e30745bfb03d131
 
 ---
 
+## `/lazy-spec.lookup` refuses: anchor not found
+
+**Symptom**: A lookup call refuses, naming the anchor you passed and listing the registered product keys instead of returning matches.
+
+**Likely cause**: The anchor you gave isn't a key in `lazy.settings.json[products]`, or a vault-relative path you gave doesn't resolve to a folder or file under the vault root — a typo, or a product that hasn't been registered yet.
+
+**Fix**: Correct the product key or path, or register the product first via `/lazy-spec.product-config`, then re-invoke `/lazy-spec.lookup` with the corrected anchor. A query with no anchor at all always succeeds — it just searches the whole vault instead of a scoped subtree.
+
+---
+
 ## `/lazy-spec.request-find-candidates` refuses when the request's class is unknown
 
 **Symptom**: The candidate search refuses, saying the request hasn't been classified yet.
@@ -686,6 +696,16 @@ source_sha: 729234b05d4141810d184b143e30745bfb03d131
 **Likely cause**: Classification runs before candidate search in the request-routing flow — an `unknown` class means that step hasn't settled.
 
 **Fix**: Let the routing pass classify the request first, then let candidate search run again on the classified request.
+
+---
+
+## `/lazy-spec.request-find-candidates` refuses naming an unregistered product
+
+**Symptom**: The candidate search refuses, naming a product key that isn't registered, alongside the list of products that are.
+
+**Likely cause**: The request names (or was tagged with) a product compound-key that has no record in `lazy.settings.json[products]` — a typo, or a product nobody has registered yet.
+
+**Fix**: Register the product via `/lazy-spec.product-config` if it genuinely doesn't exist yet, or correct the product reference on the request, then let the routing pass search candidates again.
 
 ---
 

@@ -4,7 +4,7 @@ Emits a single-line JSON record summarising:
 
 - `review_active` (bool)
 - `review_round` (int)
-- `approved` (bool)
+- `review_approved` (bool)
 - `banner` (current banner state or `null`)
 - `owners` (list of `{section, owner}` pairs for the doc's H1
   sections that carry an `#expert/<flat-name>` tag)

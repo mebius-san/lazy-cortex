@@ -82,7 +82,10 @@ SCHEMAS = {
   },
   "md-scan": {
     "required": { "paths", "interval_sec" },
-    "optional": { "command", "expert", "request", "timeout_sec", "filter" },
+    "optional": {
+      "command", "expert", "request", "timeout_sec", "filter",
+      JobConfigKey.CAN_COMMIT_IN_REPO,
+    },
   },
 }
 
@@ -1670,7 +1673,8 @@ def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str,
   Enumerate per-watch items between two SHAs.
 
   Returns a list of dicts whose keys are the templating variables documented in
-  `references/lazy-core.runtime-schema.md` for the corresponding `watch` value.
+  `references/lazy-core.routine-types-schema.md` for the corresponding `watch`
+  value.
 
   Args:
     work_dir: Path-like reference to the git working tree.

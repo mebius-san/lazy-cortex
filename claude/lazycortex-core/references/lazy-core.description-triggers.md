@@ -1,3 +1,6 @@
+---
+description: How to write and judge a skill's or agent's `description:` — the field as routing table, the trigger phrasing that earns an invocation, and what to rule on when auditing a batch of them.
+---
 # Description triggers — how to write and judge a `description:`
 
 Companion to `lazy-core.skill-writing § 8` and `lazy-core.agent-writing § 1`. Read before authoring a skill or agent description, and before ruling on a batch of them in `lazy-core.audit`.

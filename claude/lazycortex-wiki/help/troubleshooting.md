@@ -1,19 +1,19 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-wiki skills — symptoms, likely causes, and fixes.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 no_diagram: true
 source_skills:
   - lazy-wiki.install
   - lazy-wiki.configure
-  - lazy-wiki.doctor
+  - lazy-wiki.audit
   - lazy-wiki.query
   - lazy-wiki.relink
   - lazy-wiki.structure
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: 8c88b306fa93ef776a16cdaadec55e16bbe0120a
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Troubleshooting
 
@@ -51,7 +51,7 @@ source_sha: 8c88b306fa93ef776a16cdaadec55e16bbe0120a
 
 **Symptom**: `/lazy-wiki.install` completes, but nodes never get curated on their own after a commit — the wiki only updates when you run `/lazy-wiki.relink` by hand.
 
-**Likely cause**: Install registers five wiki routines unconditionally, exactly like the curator experts themselves: one that reacts to changed files, one that prunes links to deleted files, one that does a weekly full rescan, one that runs a daily deterministic sanitizer over the doctor's fixable findings, and one that consolidates tag values weekly. What's actually missing is a daemon to fire them: a registered routine only ticks on its own once the project's background daemon is running and supervising this checkout.
+**Likely cause**: Install registers five wiki routines unconditionally, exactly like the curator experts themselves: one that reacts to changed files, one that prunes links to deleted files, one that does a weekly full rescan, one that runs a daily deterministic sanitizer over the wiki CLI's fixable findings, and one that consolidates tag values weekly. What's actually missing is a daemon to fire them: a registered routine only ticks on its own once the project's background daemon is running and supervising this checkout.
 
 **Fix**: Tick the routines by hand right away with `/lazy-runtime.tick`, or make it durable by setting `daemon.enabled` and `daemon.run_here` in the tracked `lazy.settings.json` and re-running `/lazy-core.install` to install a supervisor. Until then, `/lazy-wiki.relink <scope-id>` still brings one scope fully up to date on demand.
 
@@ -153,7 +153,7 @@ source_sha: 8c88b306fa93ef776a16cdaadec55e16bbe0120a
 
 **Likely cause**: Terms 6 registers the scan routine unconditionally, the same as any other wiki routine — `registered`/`re-registered`/`unregistered` describes only whether the registration step itself changed anything. What's actually missing is a daemon: like every wiki routine, the scan routine only fires on its own once the project's background daemon is supervising this checkout.
 
-**Fix**: `/lazy-wiki.terms` still answers lookups against whatever the dictionary already holds — reading is unaffected. To keep the dictionary itself current without a daemon, run the terms section of `/lazy-wiki.doctor` by hand after documents change, or set `daemon.enabled` and `daemon.run_here` in `lazy.settings.json` and re-run `/lazy-core.install` so the already-registered routine actually ticks.
+**Fix**: `/lazy-wiki.terms` still answers lookups against whatever the dictionary already holds — reading is unaffected. To keep the dictionary itself current without a daemon, run the terms section of `/lazy-wiki.audit` by hand after documents change, or set `daemon.enabled` and `daemon.run_here` in `lazy.settings.json` and re-run `/lazy-core.install` so the already-registered routine actually ticks.
 
 ---
 
@@ -177,29 +177,29 @@ source_sha: 8c88b306fa93ef776a16cdaadec55e16bbe0120a
 
 ---
 
-## `/lazy-wiki.doctor` reports "no wiki scopes configured"
+## `/lazy-wiki.audit` reports "no wiki scopes configured"
 
-**Symptom**: Running `/lazy-wiki.doctor` (without a scope id) outputs "no wiki scopes configured" and stops.
+**Symptom**: Running `/lazy-wiki.audit` (without a scope id) outputs "no wiki scopes configured" and stops.
 
 **Likely cause**: No scopes have been created yet — `/lazy-wiki.install` ran but `/lazy-wiki.configure` was skipped, so `lazy.settings.json[wiki.scopes]` is empty.
 
-**Fix**: Run `/lazy-wiki.configure` to create at least one scope, then re-run `/lazy-wiki.doctor`.
+**Fix**: Run `/lazy-wiki.configure` to create at least one scope, then re-run `/lazy-wiki.audit`.
 
 ---
 
-## `/lazy-wiki.doctor` reports "unknown scope '<id>'"
+## `/lazy-wiki.audit` reports "unknown scope '<id>'"
 
-**Symptom**: Running `/lazy-wiki.doctor <id>` outputs "unknown scope '<id>'" and stops.
+**Symptom**: Running `/lazy-wiki.audit <id>` outputs "unknown scope '<id>'" and stops.
 
-**Likely cause**: The scope id passed to `/lazy-wiki.doctor` does not match any key in `lazy.settings.json[wiki.scopes]` — it was misspelled, or the scope has not been created yet.
+**Likely cause**: The scope id passed to `/lazy-wiki.audit` does not match any key in `lazy.settings.json[wiki.scopes]` — it was misspelled, or the scope has not been created yet.
 
-**Fix**: Run `/lazy-wiki.configure` to create a scope with the intended id, or re-invoke `/lazy-wiki.doctor` with a scope id that already exists. The configured scope ids are visible by re-running `/lazy-wiki.configure`, which lists them in edit mode.
+**Fix**: Run `/lazy-wiki.configure` to create a scope with the intended id, or re-invoke `/lazy-wiki.audit` with a scope id that already exists. The configured scope ids are visible by re-running `/lazy-wiki.configure`, which lists them in edit mode.
 
 ---
 
-## `/lazy-wiki.doctor` reports `domain-output-in-scope`
+## `/lazy-wiki.audit` reports `domain-output-in-scope`
 
-**Symptom**: `/lazy-wiki.doctor` flags a finding named `domain-output-in-scope` for a scope.
+**Symptom**: `/lazy-wiki.audit` flags a finding named `domain-output-in-scope` for a scope.
 
 **Likely cause**: The scope's `paths` glob reaches into the generated domain-spec tree (`docs/domains/` by default). That tree is excluded from every wiki scope structurally — it's `/lazy-wiki.domain-sync`'s output, not a wiki-curated node — so the glob claims coverage over files nothing there ever populates, and no file ends up with two writers only because the check catches the overlap first.
 
@@ -233,7 +233,7 @@ source_sha: 8c88b306fa93ef776a16cdaadec55e16bbe0120a
 
 **Likely cause**: The curator subagent encountered a problem applying curation to a specific node — for example, a malformed `apply-node` input, a schema violation in the node's existing wiki frontmatter, or a file the curator could not read.
 
-**Fix**: The remaining nodes in the run are unaffected. The skipped node will be picked up automatically on the next `/lazy-wiki.relink` run (it will appear in the plan's `classify[]` or `link[]` set again). If the same node is skipped repeatedly, inspect that node's wiki frontmatter for unexpected values and run `/lazy-wiki.doctor` to surface any `broken-wiki-block` findings.
+**Fix**: The remaining nodes in the run are unaffected. The skipped node will be picked up automatically on the next `/lazy-wiki.relink` run (it will appear in the plan's `classify[]` or `link[]` set again). If the same node is skipped repeatedly, inspect that node's wiki frontmatter for unexpected values and run `/lazy-wiki.audit` to surface any `broken-wiki-block` findings.
 
 ---
 
@@ -253,7 +253,7 @@ source_sha: 8c88b306fa93ef776a16cdaadec55e16bbe0120a
 
 **Likely cause**: Nothing has pruned the dangling link yet. When the background daemon is running, deletions are picked up automatically — a dedicated routine watches for deleted files and, on its next poll, drops the dangling See-also lines and rebuilds `topics.md`. Without the daemon, or before its next poll, no automatic pass has happened.
 
-**Fix**: With a running daemon, wait for the next poll (roughly a minute) — the deletion is pruned and committed on its own. Without a daemon, run `/lazy-wiki.relink <scope-id>`, whose pruning step drops links to any deleted nodes as part of the normal relink pass. You can also run `/lazy-wiki.doctor <scope-id>` and confirm the fixable "broken See-also" finding, which drops the dangling lines directly.
+**Fix**: With a running daemon, wait for the next poll (roughly a minute) — the deletion is pruned and committed on its own. Without a daemon, run `/lazy-wiki.relink <scope-id>`, whose pruning step drops links to any deleted nodes as part of the normal relink pass. You can also run `/lazy-wiki.audit <scope-id>` to confirm the "broken See-also" finding and then `lazycortex-wiki doctor <scope-id> --apply`, which drops the dangling lines directly.
 
 ---
 
@@ -343,7 +343,7 @@ source_sha: 8c88b306fa93ef776a16cdaadec55e16bbe0120a
 
 **Likely cause**: Code carries `Domain(<group>)` markers whose group name isn't in the dictionary yet — a genuinely new group, a block still filed under `Domain(unfiled):`, or a dictionary rename that left the old group name behind in code.
 
-**Fix**: For one or two groups, add the group to the dictionary by hand and re-run `/lazy-wiki.domain-sync`. When several groups are reported at once, or the blocks sit under `unfiled`, run `/lazy-python.knowledge-sweep` instead — it grows the dictionary with you and refiles the code's blocks under the accepted group names before the next sync. `/lazy-wiki.doctor` also flags this condition.
+**Fix**: For one or two groups, add the group to the dictionary by hand and re-run `/lazy-wiki.domain-sync`. When several groups are reported at once, or the blocks sit under `unfiled`, run `/lazy-python.knowledge-sweep` instead — it grows the dictionary with you and refiles the code's blocks under the accepted group names before the next sync. `/lazy-wiki.audit` also flags this condition.
 
 ---
 

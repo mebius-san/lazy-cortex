@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Adopt lazycortex-python in a repo with pre-existing Python, run chk-py all to surface every drift violation (including pcf's language and project-package checks), then backfill Domain/Contract markers with knowledge-sweep.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 diagram_spec:
   anchor: "Migration flow"
   request: "Sequence diagram: user invokes /lazy-python.install in a repo with pre-existing Python → install runs its ordered steps fully automatically (mirror rules, deploy chk-py/tst-py wrappers, detect PyCharm, bootstrap pyproject.toml, scaffold overlay, sync scaffold template, record python.env_source with a one-time disambiguation prompt only when multiple bootstrap-script candidates exist, seed agent-model tiers, register the code-reviewer expert, log) → user runs chk-py all -q → the six-step gate (pcf, toi, cmp, mypy, ruff, pylint) surfaces existing violations, including pcf's language and project-package findings → user fixes violations in chunks and commits iteratively until chk-py all exits clean → user dispatches lazy-python.knowledge-sweep to grow the domain-groups dictionary from any parked Domain(unfiled) blocks the fixes surfaced and file them under real groups"
@@ -11,7 +11,7 @@ source_skills:
   - chk
   - pcf.py
   - lazy-python.knowledge-sweep
-source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Adopt the plugin in a repo with pre-existing Python that drifted from the canon
 
@@ -21,7 +21,7 @@ This walkthrough is for anyone bringing `lazycortex-python` into a repo that alr
 
 After this walkthrough you have:
 
-- The full plugin wired: rule mirrors, `cli/chk-py` / `cli/tst-py` wrappers, `pyproject.toml` checker sections, overlay stubs, scaffold template, and PostToolUse hook live.
+- The full plugin wired: rule mirrors, `cli/chk-py` / `cli/tst-py` wrappers (no exec bit needed — they launch through `sh`), matching human-facing `~/.local/bin/chk-py` / `tst-py` copies, `pyproject.toml` checker sections, overlay stubs, scaffold template, and PostToolUse hook live.
 - A baseline `chk-py all` run with every pre-existing violation captured in its output — nothing hidden, nothing auto-fixed.
 - A `[tool.pcf]` section in `pyproject.toml` that actually matches this repo — `allowed_languages` declared if the existing comments/docstrings aren't English, `project_package` pinned if autodetection picked the wrong first-party package.
 - Each violation batch committed as a separate, passing checkpoint so `git log` reflects coherent units of remediation work.
@@ -49,6 +49,8 @@ In your Claude Code session, with the repo open, invoke:
 
 The install runs its ordered steps automatically and asks you almost nothing. Install scope doesn't need resolving — lazycortex-python always targets your project's `${CLAUDE_PROJECT_DIR}`, regardless of where the plugin is enabled. PyCharm support (`pch`) is derived from whether `inspect.sh` is present on the machine — the install probes for it and deploys `[tool.pch]` in `pyproject.toml` only when PyCharm is actually available. It records `python.env_source` in `.claude/lazy.settings.json` when your repo ships a recognised bootstrap script (`cli/env`, `.env.sh`, `scripts/env.sh`) — zero or one candidate is handled silently, and more than one triggers a one-time disambiguation prompt naming each candidate. That prompt, plus a genuine file-sync conflict, are the only two questions this install ever raises — and both now open with a short context block (which step raised it, what the install found, why it can't decide alone) printed before the question itself, so you see the reasoning before picking an answer. The install never touches `CLAUDE.md` (the plugin rules load from `.claude/rules/` automatically once the plugin is enabled).
 
+The `cli/chk-py` and `cli/tst-py` wrappers need no execute bit. Right after deploying them, the install also drops matching human-facing copies at `~/.local/bin/chk-py` and `~/.local/bin/tst-py`, so once that directory is on your `$PATH` a bare `chk-py` / `tst-py` works from anywhere under the repo. Both forms launch their target through the interpreter named on its own shebang line rather than by direct execution — so a mode-blind git client (a mobile sync app is the common case) stripping the exec bit from the tracked `cli/` copies no longer breaks the checker stack.
+
 One step matters specifically for a migration: the install scaffolds `docs/guidelines/*.md` overlay stubs but deliberately does **not** seed `docs/guidelines/domain-groups.md` — that dictionary is a language-neutral registry the install leaves for Step 4 of this walkthrough to build from what your repo actually contains, rather than guessing at empty groups up front.
 
 Every step is idempotent — safe to re-run if interrupted.
@@ -57,17 +59,17 @@ Every step is idempotent — safe to re-run if interrupted.
 
 **Migrating past the 3.0 marker rename.** Release 3.0 renamed three marker comments to fit a name-register scheme (the register a marker's name uses now encodes its category): `REF:` became `ref:` (lowercase, one-line annotation), `# DOC(...):` became `# Domain(...):` (Capitalized, opens a standalone knowledge block), and `# Contract!` became `# Contract:` (also Capitalized, also standalone — no text after the colon on the marker line itself). `pcf` also enforces a blank-line boundary around every Capitalized block marker (`Domain(...):`, `Contract:`, `Decision:`) — a marker glued to a statement, or a block whose last line touches the code that follows, is a violation in its own right, independent of the rename. If this repo's Python predates 3.0, expect leftover `REF:` / `DOC(...):` / `Contract!` occurrences and un-separated `Domain(...):` / `Contract:` / `Decision:` blocks to surface as `pcf` findings in Step 2's inventory — rename the markers and insert the separating blank lines as part of remediation.
 
-**Verification gate**: the install ends with a one-line-per-step report. Confirm each step shows an outcome word: `mirrored-3`, `wrappers-deployed-2 + gitignore-ensured`, `pch-ready` or `pch-missing-inspect-sh`, `pyproject-bootstrapped`, an `env-source-*` outcome, a `seeded` or `unchanged` tier-seed outcome, an `expert-registered`, `expert-refreshed`, or `expert-already-registered` outcome, and so on. If any line shows `ERROR` or is missing, see the troubleshooting doc before proceeding.
+**Verification gate**: the install ends with a one-line-per-step report. Confirm each step shows an outcome word: `mirrored-3`, `wrappers-deployed-2 + gitignore-ensured`, the human-facing wrapper install's per-copy state (`installed` / `unchanged` / `refreshed`) for `~/.local/bin/chk-py` and `tst-py` — plus a `path-warning` note if `~/.local/bin` isn't on your `$PATH` — `pch-ready` or `pch-missing-inspect-sh`, `pyproject-bootstrapped`, an `env-source-*` outcome, a `seeded` or `unchanged` tier-seed outcome, an `expert-registered`, `expert-refreshed`, or `expert-already-registered` outcome, and so on. If any line shows `ERROR` or is missing, see the troubleshooting doc before proceeding.
 
 ### Step 2 — Take a full violation inventory
 
 Run the checker stack against the entire tree:
 
 ```bash
-./cli/chk-py all -q
+sh ./cli/chk-py all -q
 ```
 
-On first run the venv resolver creates `.venv/` at the repo root and installs `mypy`, `pylint`, `pytest`, `ruff`, `pytest-clarity`, and `pytest-sugar` — this takes 30–60 seconds. Subsequent runs are fast.
+The wrapper launches through `sh` rather than relying on an execute bit; once `~/.local/bin` is on your `$PATH` (Step 1 put it there), the same run is just `chk-py all -q` typed from anywhere under the repo. On first run the venv resolver creates `.venv/` at the repo root and installs `mypy`, `pylint`, `pytest`, `ruff`, `pytest-clarity`, and `pytest-sugar` — this takes 30–60 seconds. Subsequent runs are fast.
 
 `chk-py all` runs the six-step gate in order: `pcf` (style critical-fail) → `toi` (type-only imports) → `cmp` (py_compile syntax check) → `mypy` → `ruff` → `pylint`. The `-q` flag suppresses per-file progress and shows only violations and the final summary.
 
@@ -83,10 +85,10 @@ If Step 1's pre-2.0 migration note applies to your repo and you skipped uncommen
 Also run the existing test suite once, before any remediation, so you know its starting state:
 
 ```bash
-./cli/tst-py -q
+sh ./cli/tst-py -q
 ```
 
-Called without a module argument, `tst-py` runs every module's tests. Note any pre-existing failures now — those are not something this walkthrough introduces, and you don't want to chase them down mid-remediation thinking you caused them.
+Called without a module argument, `tst-py` runs every module's tests (or bare `tst-py -q` once `~/.local/bin` is on your `$PATH`). Note any pre-existing failures now — those are not something this walkthrough introduces, and you don't want to chase them down mid-remediation thinking you caused them.
 
 ### Step 3 — Fix violations in chunks, committing as you go
 
@@ -101,8 +103,8 @@ Work through the violation queue in logical batches rather than one enormous com
 After each batch:
 
 ```bash
-./cli/chk-py all -q
-./cli/tst-py -q
+sh ./cli/chk-py all -q
+sh ./cli/tst-py -q
 ```
 
 Confirm the batch clears the targeted checker without introducing new violations elsewhere, and that `tst-py` still reports the same (or better) pass/fail state as your Step 2 baseline — a batch that turns `chk-py` green while breaking a previously-passing test is not done. Then commit:
@@ -140,8 +142,8 @@ You do not configure the hook. It auto-registers from the plugin's `hooks/hooks.
 Once all violation batches are committed and the knowledge sweep has run:
 
 ```bash
-./cli/chk-py all -q
-./cli/tst-py -q
+sh ./cli/chk-py all -q
+sh ./cli/tst-py -q
 ```
 
 Confirm all six checker steps report clean and `tst-py` shows every test passing (no new failures relative to your Step 2 baseline).
@@ -150,7 +152,7 @@ Confirm all six checker steps report clean and `tst-py` shows every test passing
 
 The install is idempotent — re-running `/lazy-python.install` after any future plugin update overwrites only what changed (rule mirrors, wrapper scripts, any missing `pyproject.toml` sections) and leaves your consumer sections and overlay stubs untouched. Re-running is the recommended upgrade path, not a manual diff.
 
-`chk-py all` (paired with `tst-py` for the test layer) is the routine pre-commit gate going forward. The PostToolUse hook covers the inner loop — every `.py` edit surfaces `pcf.py` violations (style, imports, language, project-package boundary) inline so drift is caught at the moment it is introduced rather than at commit time.
+`sh ./cli/chk-py all` (or bare `chk-py all` once `~/.local/bin` is on your `$PATH`), paired with `sh ./cli/tst-py` (or bare `tst-py`) for the test layer, is the routine pre-commit gate going forward. The PostToolUse hook covers the inner loop — every `.py` edit surfaces `pcf.py` violations (style, imports, language, project-package boundary) inline so drift is caught at the moment it is introduced rather than at commit time.
 
 `lazy-python.knowledge-sweep` isn't a one-time migration step — run it again whenever parked `Domain(unfiled):` findings pile up, or when the dictionary needs new groups for a subject area the codebase has grown into.
 

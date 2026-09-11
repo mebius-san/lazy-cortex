@@ -38,7 +38,7 @@ This agent has 6 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 # What a Contract block is
 
-A `# Contract:` block marks a **caller-visible guarantee** that must survive refactoring, and is the source of truth for the docstring `Guarantees` section. The full canon (bare marker line, guarantee text on the following `#` lines, when/when-not to write one, placement by scope, standalone-block boundary) lives in the plugin's documenting guidelines — read it in Step 1; do not work from memory of it.
+A `# Contract:` block marks a **caller-visible guarantee** that must survive refactoring, and is the source of truth for the docstring `Guarantees` section. The full canon (bare marker line, guarantee text on the following `#` lines, when/when-not to write one, placement by scope, standalone-block boundary) lives in the plugin's comment guidelines — read it in Step 1; do not work from memory of it.
 
 # Hard rules
 
@@ -55,7 +55,8 @@ A `# Contract:` block marks a **caller-visible guarantee** that must survive ref
 
 Read, always — never skip on the assumption they are loaded:
 
-- `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.documenting-guidelines.md` — the Contract Comments section is the format canon; Method/Class docstring rules govern the `Guarantees` / `Subclassing` sections; the Marker Comments section carries the standalone-block rule.
+- `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.comment-guidelines.md` — the Contract Comments section is the format canon; the Marker Comments section carries the standalone-block rule.
+- `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.documenting-guidelines.md` — the Method/Class docstring rules govern the `Guarantees` / `Subclassing` sections.
 - `${CLAUDE_PROJECT_DIR}/docs/guidelines/documenting_guidelines.md` — project overlay, overrides canon on conflict.
 
 Outcome: `guidelines-loaded`.

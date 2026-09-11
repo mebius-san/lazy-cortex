@@ -186,6 +186,12 @@ AskUserQuestion: header "<label>", question "<self-contained question naming the
 
 A policy paragraph that describes a class of question (the File-sync "genuine conflict" prompt, a destructive-delete confirmation) names the same four items instead of a literal block; the site that raises the question fills them from the run.
 
+## 12. Interpreter, never the exec bit
+
+A skill, hook, or command never runs a plugin file as `argv[0]`. Python runs as `"${LAZYCORTEX_PYTHON:-python3}" ${CLAUDE_PLUGIN_ROOT}/bin/<file>` (the variable is the absolute interpreter `lazy-core.install` records in `.claude/settings.local.json[env]`; `python3` from PATH is only the pre-install fallback); a shell script runs as `sh "${CLAUDE_PLUGIN_ROOT}/hooks/<file>.sh"`. The exec bit is not part of any contract: a git client that cannot store modes strips it silently, and a skill that needs it fails on the first such checkout.
+
+`${CLAUDE_PLUGIN_ROOT}` reaches a loaded skill already expanded to an absolute path. Never pass that literal to `Bash` to check whether a template or scheme exists — `ls`, `test -f`, and `;`-chained compound commands are denied by the permission layer. Existence checks go through `Glob` or `Read`.
+
 ## Cross-referenced contracts (not copied here)
 
 - `lazy-core.agent-writing` — agent-specific authoring (single-response model, tool allowlist, structured-report contract).

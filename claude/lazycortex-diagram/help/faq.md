@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about kind/format selection, scheme palettes, draw vs fix, ASCII vs mermaid, density bounds, split behaviour, direct agent invocation, and install.
-last_regen: 2026-09-07
+last_regen: 2026-09-11
 no_diagram: true
 source_skills:
   - lazy-diagram.draw
@@ -9,7 +9,7 @@ source_skills:
   - lazy-diagram.draw-mermaid
   - lazy-diagram.draw-ascii
   - lazy-diagram.install
-source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Frequently asked questions
 
@@ -21,7 +21,7 @@ source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
 
 ## How does the dispatcher choose mermaid vs ASCII?
 
-The dispatcher defaults to mermaid. ASCII is chosen only when the kind is one that the ASCII writer supports (`flow`, `fs-tree`, `layout`) AND your request explicitly uses a signal word like "ASCII", "plain text", "terminal", or asks for a directory tree (`kind=fs-tree`). If the kind exists in only one format's template library, that format wins regardless of any hint.
+The dispatcher defaults to mermaid. ASCII is chosen only when the kind is one that the ASCII writer supports (`controls-scheme`, `decision-tree`, `flow`, `fs-tree`, `layout`, `tree`) AND your request explicitly uses a signal word like "ASCII", "plain text", "terminal", or asks for a directory tree (`kind=fs-tree`). If the kind exists in only one format's template library, that format wins regardless of any hint.
 
 ---
 
@@ -53,13 +53,19 @@ It means the request is too thin for the chosen kind's minimum requirements. Eac
 
 ## The drawer returned "failed:format-not-supported-for-kind". What does that mean?
 
-Not every kind is available in both formats. Mermaid supports a wide set of kinds (`flow`, `sequence`, `state`, `erd`, `class`, `architecture`, `layout`, `nav`, `tree`, `controls-scheme`, `decision-tree`, `screen-scheme`, `journey`, `mindmap`, `gantt`, `timeline`). ASCII supports only `flow`, `fs-tree`, and `layout`. If you pin a combination that has no template file — for example `kind=sequence format=ascii` — the dispatcher fails fast at Step 5 before dispatching any agent. Switch to a supported format for the kind, or omit `format=` and let the dispatcher choose.
+Not every kind is available in both formats. Mermaid supports a wide set of kinds (`flow`, `sequence`, `state`, `erd`, `class`, `architecture`, `layout`, `nav`, `tree`, `controls-scheme`, `decision-tree`, `screen-scheme`, `journey`, `mindmap`, `gantt`, `timeline`). ASCII supports `controls-scheme`, `decision-tree`, `flow`, `fs-tree`, `layout`, and `tree`. If you pin a combination that has no template file — for example `kind=sequence format=ascii` — the dispatcher fails fast at Step 5 before dispatching any agent. Switch to a supported format for the kind, or omit `format=` and let the dispatcher choose.
 
 ---
 
 ## Why did `/lazy-diagram.fix` abort with "cannot infer kind from fence syntax"?
 
-Several mermaid syntax markers are ambiguous. A `flowchart` body could represent a `flow`, `nav`, `tree`, `decision-tree`, `controls-scheme`, or `screen-scheme` diagram — the syntax is the same; only the intent differs. When fix cannot disambiguate, it lists the candidate kinds and stops. Re-run with `kind=<one>` pinned to the correct value from that list.
+The cause differs by format, because fix reads the fence's own body to guess `(kind, format)` and some shapes are genuinely ambiguous.
+
+For a **mermaid** fence, several syntax markers are ambiguous. A `flowchart` body could represent a `flow`, `nav`, `tree`, `decision-tree`, `controls-scheme`, or `screen-scheme` diagram — the syntax is the same; only the intent differs.
+
+For an **ASCII** (`` ```text ``) fence, fix tests six shape rules in a fixed order — the most specific shape first, since a decision tree is a flow with extra structure and a controls scheme is a layout with extra structure: `fs-tree` (tree characters plus a trailing `/` or a ` ← <note>` annotation), `tree` (tree characters, no trailing `/`, no annotation), `controls-scheme` (boxes with no connectors, one outer wrapper holding sub-boxes of chrome samples like `[ Primary button ]`), `layout` (boxes with no connectors that tile one surface), `decision-tree` (connectors where every multi-branch box is a diamond-style question with labelled answers), and `flow` (the general case — connectors present and at least one plain rectangle with more than one outgoing connector). A body that matches none of the six rules, or that mixes features of two families (tree characters alongside box connectors, or chrome samples alongside labelled connectors), fails the same way rather than guessing.
+
+Either way, when fix cannot disambiguate it lists the candidate kinds and stops. Re-run with `kind=<one>` pinned to the correct value from that list — a wrong redraw would silently rewrite the diagram as the wrong kind, so fix asks instead.
 
 ---
 

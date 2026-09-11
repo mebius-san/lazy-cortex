@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Answer one question against the spec tree without loading whole documents into your context.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 no_diagram: true
 source_skills:
   - lazy-spec.lookup
@@ -29,7 +29,7 @@ Because the skill only ever calls `Read` / `Glob` / `Grep` directly — it never
 
 ## Where this fits
 
-Lookups only make sense once a product is registered and has assets to search — see the `install-and-audit` block for registering a product, and the `authoring` block for creating the assets this skill later finds. `lazy-spec.doctor` and `lazy-spec.sync-with-code` do their own deeper structural scans; reach for `/lazy-spec.lookup` instead when you want a fast, bounded answer to one question rather than a full audit.
+Lookups only make sense once a product is registered and has assets to search — see the `install-and-audit` block for registering a product, and the `authoring` block for creating the assets this skill later finds. `lazy-spec.audit` and `lazy-spec.sync-with-code` do their own deeper structural scans; reach for `/lazy-spec.lookup` instead when you want a fast, bounded answer to one question rather than a full audit.
 
 ## See also
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Bootstrap lazycortex-review in a repo, define document review classes, and validate configuration with a read-only audit.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 diagram_spec:
   anchor: "How install, configure, and audit fit together"
   request: "Show the three-step setup flow: /lazy-review.install seeds settings, dirs, and the routine trio (registered unconditionally, independent of daemon.enabled); /lazy-review.configure adds review classes via wizard; /lazy-review.audit validates the result."
@@ -9,7 +9,7 @@ source_skills:
   - lazy-review.install
   - lazy-review.configure
   - lazy-review.audit
-source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Install and configure lazycortex-review
 

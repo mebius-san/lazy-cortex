@@ -1,24 +1,25 @@
 ---
 chapter_type: block
-summary: Bootstrap lazycortex-experts by seeding agent-model tiers and class-mapped composed expert entries into lazy.settings.json.
-last_regen: 2026-09-09
+summary: Bootstrap lazycortex-experts via seeded tiers and composed experts, then verify with the plugin's own read-only audit skill.
+last_regen: 2026-09-11
 no_diagram: true
 source_skills:
   - lazy-experts.install
-source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
+  - lazy-experts.audit
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
-# Installing lazycortex-experts
+# Installing and auditing lazycortex-experts
 
-`lazycortex-experts` ships thirteen generic agents spanning the full development lifecycle plus fiction and documentation — interpreter, designer, architect, planner, use-case-writer, ui-designer, implementer, data-implementer, docs-writer, debugger, reviewer, tester, and fiction-writer — plus a set of domain aspects and five cross-cutting aspects (discipline, research, tech-writing, terms, structure) that compose expertise onto those agents. Before the expert runtime in `lazycortex-core` can route jobs to them, two things must land in your `lazy.settings.json`: the agent-model tier for each generic agent (so dispatch knows which Claude tier to use), and a composed expert entry for every class × role pair the class map prescribes (so each specialist is addressable by name with the right aspect stack). `/lazy-experts.install` handles both in a single idempotent run.
-
-Health checks after install route through `/lazy-core.doctor`, not through a plugin-local audit skill.
+`lazycortex-experts` ships thirteen generic agents spanning the full development lifecycle plus fiction and documentation — interpreter, designer, architect, planner, use-case-writer, ui-designer, implementer, data-implementer, docs-writer, debugger, reviewer, tester, and fiction-writer — plus a set of domain aspects and five cross-cutting aspects (discipline, research, tech-writing, terms, structure) that compose expertise onto those agents. Before the expert runtime in `lazycortex-core` can route jobs to them, two things must land in your `lazy.settings.json`: the agent-model tier for each generic agent (so dispatch knows which Claude tier to use), and a composed expert entry for every class × role pair the class map prescribes (so each specialist is addressable by name with the right aspect stack). `/lazy-experts.install` handles both in a single idempotent run, and `/lazy-experts.audit` is the plugin's own read-only counterpart — it verifies the shipped roles and aspects still resolve and that your seeded entries still point at real files, without ever writing anything.
 
 ## When you'd use this
 
 - You've just enabled `lazycortex-experts` from the marketplace and want your chosen domain classes fully composed and ready to use.
-- You've updated the plugin and a new release shipped additional domain aspects, revised tier entries, a new role agent, or a newly-mandatory field — re-running picks up everything new without disturbing your existing config.
+- You've updated the plugin and a new release shipped additional domain aspects, revised tier entries, a new role agent, or a newly-mandatory field — re-running install picks up everything new without disturbing your existing config.
 - You're setting up a fresh project-scoped environment and want agent-model tiers and expert entries isolated from your global config.
 - You added a new agent or domain aspect to the plugin cache and want the class-map entries seeded without writing them by hand.
+- Dispatching an expert fails in a way that smells like config — a job aborts saying the agent ref does not resolve, an expert writes to a contract it should not have, a role the class map prescribes turns out to have no entry — and you want to know exactly what's wrong before re-running install.
+- You want a periodic sanity check that your composed experts still match what the plugin actually ships, without risking any write to `lazy.settings.json`.
 
 ## How it fits together
 
@@ -88,9 +89,16 @@ On a re-run against a project that already has domain-class expert entries, the 
 
 After both seeding passes, the skill reads the file back to confirm every entry is present and parseable. For each seeded expert it also verifies the `agent` ref resolves to an actual agent file in the plugin cache — catching a stale or mistyped agent reference before you ever dispatch a job against it — then logs the run.
 
+**Checking it afterwards.** `/lazy-experts.audit` is the read-only counterpart — it never seeds, edits, or removes anything in `lazy.settings.json`, it only reports. Run it any time you want to confirm your composition is still sound, whether or not you've made hand edits since the last install. It runs two passes:
+
+- **The shipped surface** — every role the class map assigns resolves to a real agent file under the plugin's `agents/` directory, and every aspect the class map assigns (domain and cross-cutting alike) resolves to a real reference file. A gap here means the plugin cache itself is incomplete, not your settings — the fix is `/plugin update lazycortex-experts@lazycortex`, not a re-run of install.
+- **Your seeded expert entries** — for every composed entry in `experts`, it confirms the `agent` ref resolves, every `lazycortex-experts:` aspect ref resolves, the mandatory cross-cutting aspects for the entry's class kind are present (technical entries need `discipline`, `research`, `tech-writing`, `terms`, `structure`; fiction entries need only `discipline` and `research`, and carrying any of the other three on a fiction entry is itself flagged), and that `can_commit_in_repo` / `workspace` are present on the roles that need them. System entries seeded by sibling plugins are listed but not judged — that's the owning plugin's business.
+
+Each finding comes back as `PASS`, `WARN`, `FAIL`, or `INFO`, grouped by severity with the fix named alongside every `WARN` and `FAIL`. For nearly everything the audit finds, the fix is simply re-running `/lazy-experts.install` — it seeds a missing entry, appends a missing mandatory aspect, and backfills an absent `can_commit_in_repo` or `workspace` key. The two exceptions (`agent-missing`, `aspect-missing`) mean the plugin's own shipped files are incomplete, so the fix is `/plugin update lazycortex-experts@lazycortex` instead. `/lazy-core.doctor` also runs this audit for you as part of its own cross-plugin sweep, so you don't have to remember to invoke it directly unless you want the plugin-scoped result on its own.
+
 ## Common adjustments
 
-**Re-running after a plugin update.** `/plugin update` refreshes the plugin cache but does not re-sync settings. If a new release of `lazycortex-experts` ships additional domain aspects, revised `lazycortex-experts:*` tier entries in `default-tiers.json`, a new role agent, a newly-mandatory cross-cutting aspect, or a newly-mandatory `can_commit_in_repo` / `workspace` value, re-run `/lazy-experts.install` to pick it up. The class map re-runs and adds any new (class × role) pairs it prescribes for your existing classes, and the completion pass appends any missing mandatory cross-cutting aspect, `can_commit_in_repo` key, or `workspace: "branch"` backfill to entries that predate it; existing entries are otherwise left alone.
+**Re-running after a plugin update.** `/plugin update` refreshes the plugin cache but does not re-sync settings. If a new release of `lazycortex-experts` ships additional domain aspects, revised `lazycortex-experts:*` tier entries in `default-tiers.json`, a new role agent, a newly-mandatory cross-cutting aspect, or a newly-mandatory `can_commit_in_repo` / `workspace` value, re-run `/lazy-experts.install` to pick it up. The class map re-runs and adds any new (class × role) pairs it prescribes for your existing classes, and the completion pass appends any missing mandatory cross-cutting aspect, `can_commit_in_repo` key, or `workspace: "branch"` backfill to entries that predate it; existing entries are otherwise left alone. Run `/lazy-experts.audit` afterwards (or just check `/lazy-core.doctor`'s next sweep) to confirm nothing from the new release is still unresolved.
 
 **Adding a new class to an existing project.** Because the skill derives its class set from your current domain-class `experts` entries, it won't add a class you haven't registered yet. To introduce a new domain, add one expert of the new class by hand (for a technical class, any of the thirteen roles will do — `data-writer` included, since it now seeds with every technical class; for a fiction class it must be `fiction-writer` — that's the only role the class map seeds), then re-run `/lazy-experts.install`. The skill derives the expanded class set and fills in the remaining entries the class map prescribes for the new class.
 
@@ -106,4 +114,6 @@ After both seeding passes, the skill reads the file back to confirm every entry 
 
 **A sibling plugin's system expert is reported missing.** This isn't something `/lazy-experts.install` fixes — it only detects the gap by reading each installed plugin's `provides_experts` manifest entry. Run the owning plugin's own install skill instead — for the system experts shipped today: `/lazy-core.install` for `runtime.doctor` / `core.autocheckup`, `/lazy-review.install` for `review.coordinator` / `review.doc_doctor`, `/lazy-spec.install` for `spec.coordinator` / `spec.catalog-coordinator`, `/lazy-wiki.install` for `wiki.curator` / `wiki.terms-curator` / `wiki.structure-curator` / `wiki.tag-curator` / `wiki.domain-writer`.
 
-**Verifying the install.** Run `/lazy-core.doctor` to check the health of your full LazyCortex setup, including whether the experts' agent-model entries and composed expert entries are present, well-formed, and pointing at agent files that actually exist.
+**A job aborts saying an agent ref or aspect ref doesn't resolve.** Run `/lazy-experts.audit` first to pin down exactly which expert key and which ref are broken (it distinguishes a bad `agent` ref on your entry from a missing shipped file), then apply the fix it names — a re-run of `/lazy-experts.install`, a hand-correction of a stray `agent` ref, or `/plugin update lazycortex-experts@lazycortex` if the plugin's own files are incomplete.
+
+**Verifying the install.** Run `/lazy-experts.audit` directly for a plugin-scoped, read-only report of your composed experts and the shipped surface they depend on, or run `/lazy-core.doctor` to check the health of your full LazyCortex setup — it delegates to this same audit as part of its cross-plugin sweep, alongside every other plugin's check.

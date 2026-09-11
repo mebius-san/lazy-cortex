@@ -13,11 +13,11 @@ LazyCortex experts run as queued jobs through `lazycortex-core`'s expert runtime
 
 ## Blocks
 
-- **install-and-audit** — Bootstrap `lazycortex-experts` in your project. `/lazy-experts.install` seeds agent-model tiers for the generic agents from `lazycortex-core`'s defaults and composes experts per the class map — technical classes seed twelve roles with the mandatory cross-cutting aspects (discipline, research, tech-writing, terms, structure), fiction classes (sci-fi, fantasy) seed fiction-writer with discipline + research only; a re-run appends any mandatory cross-cutting aspect an existing entry lacks. It asks for classes only when no domain-class experts exist yet (system experts seeded by sibling plugins don't count), and checks system-expert completeness against the sibling-plugin registry, reporting gaps without seeding them. No health-audit skill — health verification routes through `/lazy-core.doctor`. Members: lazy-experts.install.
+- **install-and-audit** — Bootstrap `lazycortex-experts` in your project. `/lazy-experts.install` seeds agent-model tiers for the generic agents from `lazycortex-core`'s defaults and composes experts per the class map — technical classes seed thirteen roles with the mandatory cross-cutting aspects (discipline, research, tech-writing, terms, structure), fiction classes (sci-fi, fantasy) seed fiction-writer with discipline + research only; a re-run appends any mandatory cross-cutting aspect an existing entry lacks. It asks for classes only when no domain-class experts exist yet (system experts seeded by sibling plugins don't count), and checks system-expert completeness against the sibling-plugin registry, reporting gaps without seeding them. `/lazy-experts.audit` is the read-only counterpart: it checks that the class map's roles still resolve to shipped agents, that the aspect references exist, and that every seeded entry still points at an agent and a set of aspects this plugin ships — reporting findings and never writing. `/lazy-core.doctor` runs it as part of its cross-plugin sweep. Members: lazy-experts.install, lazy-experts.audit.
 - **design-time-agents** — Six agents that run before any code is written. Each is persona-only; the protocol comes from whichever routine dispatches the job. `lazy-experts.interpreter` turns a free-form request into a gap-free brief, `lazy-experts.use-case-writer` writes formal use cases from it, `lazy-experts.designer` states what is being built and why, `lazy-experts.ui-designer` settles the interface with HTML mockups beside the document, `lazy-experts.architect` designs the code structure the design implies, and `lazy-experts.planner` breaks that into an ordered implementation plan. Members: lazy-experts.interpreter, lazy-experts.use-case-writer, lazy-experts.designer, lazy-experts.ui-designer, lazy-experts.architect, lazy-experts.planner.
 - **execution-stage-agents** — Seven agents that carry approved work into deliverables. `lazy-experts.implementer` follows a plan test-first, `lazy-experts.data-implementer` writes data files straight from a content design, `lazy-experts.docs-writer` writes user-facing documentation from the design, `lazy-experts.debugger` explains a failure before fixing it, `lazy-experts.reviewer` judges a change without editing it, `lazy-experts.tester` exercises what actually runs, and `lazy-experts.fiction-writer` produces literary prose from an outline. Members: lazy-experts.implementer, lazy-experts.data-implementer, lazy-experts.docs-writer, lazy-experts.debugger, lazy-experts.reviewer, lazy-experts.tester, lazy-experts.fiction-writer.
 - **aspects** — Domain aspect files plus five cross-cutting aspects, composed into the generic agents via `lazy.settings.json[experts][<expert>].aspects[]`. Domain members (operator picks per project): lazy-experts.claude-plugin-aspect, lazy-experts.game-dev-aspect, lazy-experts.dotfiles-aspect, lazy-experts.obsidian-plugin-aspect, lazy-experts.data-pipeline-aspect, lazy-experts.software-product-aspect, lazy-experts.sci-fi-aspect, lazy-experts.fantasy-aspect. Cross-cutting: lazy-experts.discipline-aspect and lazy-experts.research-aspect (auto-composed onto every seeded expert), lazy-experts.tech-writing-aspect, lazy-experts.terms-aspect, and lazy-experts.structure-aspect (auto-composed onto technical-class experts only; fiction classes never carry them).
-- **composition** — How to assemble a concrete specialist (e.g. `game-designer`, `claude-plugin-planner`) by pairing one agent with one or more aspects in `lazy.settings.json[experts]`. No skills in this block — it's documentation only.
+- **composition** — How to assemble a concrete specialist (e.g. `game.designer`, `claude-plugin.planner`) by pairing one agent with one or more aspects in `lazy.settings.json[experts]`. No skills in this block — it's documentation only.
 
 ## Requirements
 
@@ -32,7 +32,7 @@ LazyCortex experts run as queued jobs through `lazycortex-core`'s expert runtime
    ```jsonc
    "experts": {
      "_version": 1,
-     "claude-plugin-designer": {
+     "claude-plugin.designer": {
        "agent": "lazycortex-experts:lazy-experts.designer",
        "aspects": ["lazycortex-experts:lazy-experts.claude-plugin-aspect"]
      }
@@ -50,6 +50,7 @@ Requires these plugins from the same marketplace:
 
 | Skill | Description |
 |---|---|
+| `lazy-experts.audit` | Run when the operator asks whether this project's expert composition is still sound, or when dispatching an expert fails in a way that smells like config — a job aborts saying the agent ref does not resolve, an expert writes to a contract it should not have, a role the class map prescribes turns out to have no entry. Delegated from `lazy-core.doctor` Phase 3. Read-only check of the plugin's shipped agents and aspect references against the `experts` entries in `.claude/lazy.settings.json`; reports PASS / WARN / FAIL / INFO and never writes — the fix is `/lazy-experts.install`. |
 | `lazy-experts.install` | Run when the operator asks to set up lazycortex-experts in a repo, to add or complete an expert class (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, `sci-fi`, `fantasy`), or when dispatching an expert fails because `lazy.settings.json` has no matching `experts` entry or no model tier for a generic agent. Unlike the sibling install skills, it syncs no rules — it only seeds composed expert entries per the class map plus agent-model tiers, asks for classes only on a project that has none yet, and never overwrites what an operator chose — the one thing it completes on an existing entry is a missing mandatory cross-cutting aspect. Idempotent and quiet on re-run; install scope is detected. |
 
 ## Documentation
@@ -57,7 +58,7 @@ Requires these plugins from the same marketplace:
 Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenarios above:
 
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/troubleshooting.md) — Common failure modes during lazycortex-experts setup — symptoms, likely causes, and fixes.
-- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/faq.md) — Common questions about installing lazycortex-experts, the class map, composing specialists, and the thirteen generic agents' lane boundaries.
+- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/faq.md) — Common questions about installing lazycortex-experts, the class map, composing specialists, auditing the composition, and the thirteen generic agents' lane boundaries.
 
 (`mebius-san` resolves from `.guard-public.json` `public_author` block — fall back to repo name from `git remote get-url origin` if absent.)
 
@@ -102,5 +103,6 @@ Skills appear as `lazycortex-experts:<skill.name>`.
 Invoke skills with slash commands:
 
 ```
+/lazy-experts.audit
 /lazy-experts.install
 ```

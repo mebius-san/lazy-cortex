@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import tags as _tags
@@ -449,7 +450,7 @@ class CoreDispatch:
     env = os.environ.copy()
     env[self._ENV_REPO_ROOT] = str(repo)
     proc = subprocess.run(
-      [ str(self._cli), subcommand ],
+      [ sys.executable, str(self._cli), subcommand ],
       input = json.dumps(body),
       capture_output = True,
       text = True,

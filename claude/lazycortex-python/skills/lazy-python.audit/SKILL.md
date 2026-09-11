@@ -37,7 +37,7 @@ Verify the three plugin rule files (`lazy-python.style.md`, `lazy-python.docstri
 Run:
 
 ```
-Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py check1 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py" check1 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `PASS` / `WARN` (any rule missing) / `FAIL` (any rule drifted).
@@ -49,31 +49,31 @@ Verify every `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.*.md` path cited from
 Run:
 
 ```
-Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py check2 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py" check2 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `PASS` / `WARN` (no consumer rules to scan) / `FAIL` (any cited path missing).
 
 ## Check 3: Artifacts present
 
-Verify the plugin tree at `${CLAUDE_PLUGIN_ROOT}` carries every required artifact — manifest + overview, 3 rules, 5 references, 6 binaries, the PostToolUse hook script + its `hooks.json` manifest, the check-style skill, both authoring agents, and the 5 templates. Missing artifact means the plugin install is incomplete on this machine.
+Verify the plugin tree at `${CLAUDE_PLUGIN_ROOT}` carries every required artifact — manifest + overview, 3 rules, 5 references, 6 binaries, the PostToolUse hook script + its `hooks.json` manifest, the check-style skill, every agent under `agents/`, and the 6 templates. Missing artifact means the plugin install is incomplete on this machine.
 
 Run:
 
 ```
-Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py check3 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py" check3 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `PASS` / `FAIL` (any artifact missing).
 
 ## Check 4: Wrappers deployed
 
-Verify `<consumer>/cli/chk-py` and `<consumer>/cli/tst-py` exist, carry the executable bit, and contain no unsubstituted `{{CHK_BIN_PATH}}` / `{{TST_BIN_PATH}}` placeholders. Missing wrappers mean install Phase 2 never ran; unsubstituted placeholders mean the install completed with a corrupted template.
+Verify `<consumer>/cli/chk-py` and `<consumer>/cli/tst-py` exist, open with a shebang, and contain no unsubstituted `{{CHK_BIN_PATH}}` / `{{TST_BIN_PATH}}` placeholders. Missing wrappers mean install Phase 2 never ran; unsubstituted placeholders mean the install completed with a corrupted template.
 
 Run:
 
 ```
-Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py check4 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py" check4 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `PASS` (both wrappers deployed and substituted) / `WARN` (one or both wrappers missing) / `FAIL` (placeholder still present — install was interrupted).
@@ -85,7 +85,7 @@ Verify `<consumer>/pyproject.toml` carries the six always-on checker sections (`
 Run:
 
 ```
-Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py check5 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py" check5 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `PASS` (all six always-on sections present) / `WARN` (1-2 sections missing) / `FAIL` (3+ sections missing, or `pyproject.toml` itself absent).
@@ -97,7 +97,7 @@ Probe for the PyCharm `inspect.sh` script on `$PATH`. The check is informational
 Run:
 
 ```
-Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py check6 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py" check6 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `PASS` (`inspect.sh` found) / `WARN` (not on `$PATH` — `pch.py` will be skipped).
@@ -109,7 +109,7 @@ Verify each of the four overlay files (`coding_guidelines.md`, `documenting_guid
 Run:
 
 ```
-Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py check7 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py" check7 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `PASS` (all four headers correct) / `WARN` (1-2 missing or wrong header) / `FAIL` (3+ missing or wrong).
@@ -121,7 +121,7 @@ Verify `<consumer>/.claude/rules/lazy-core.scaffold.md` mentions the `python-tem
 Run:
 
 ```
-Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py check8 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py" check8 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `PASS` (entry present) / `WARN` (file missing or entry absent).
@@ -133,7 +133,7 @@ Report whether `<consumer>/CLAUDE.md` carries a `lazy-python` pointer. This is *
 Run:
 
 ```
-Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py check9 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py" check9 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `PASS` (pointer present) / `INFO` (CLAUDE.md absent, or no `lazy-python` mention — optional, never a finding).
@@ -145,7 +145,7 @@ Verify the plugin ships a well-formed PostToolUse hook manifest at `${CLAUDE_PLU
 Run:
 
 ```
-Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py check10 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py" check10 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `PASS` (manifest present + declares the hook) / `WARN` (manifest missing or no matching PostToolUse entry) / `FAIL` (hooks.json is invalid JSON).
@@ -157,7 +157,7 @@ Mirror the probe-then-fallback logic of `_ensure_venv.sh`, read-only. A venv is 
 Run:
 
 ```
-Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py check11 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py" check11 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `PASS` (probe satisfied or fallback bootstrappable) / `WARN` (recoverable degradation — re-run `/lazy-python.install` or configure a venv manually).
@@ -169,7 +169,7 @@ Verify a domain-groups dictionary exists once the sources carry `Domain(…)` bl
 Run:
 
 ```
-Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py check12 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py" check12 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `PASS` (dictionary present, or no `Domain(…)` blocks in the sources yet) / `WARN` (blocks without a dictionary — run `/lazy-python.knowledge-sweep`).

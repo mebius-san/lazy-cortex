@@ -27,13 +27,14 @@ from icon_keys import (
   CallbackKey, FrontmatterKey, IconKey, InterpToken, MapKey,
   ResultKey, VersionStatus, WhenKey, YamlScalar,
 )
+from shebang_launch import ShebangError, argv_for
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   from typing import NoReturn
 
 
-PROTOCOL_VERSION = "2.3.0"
+PROTOCOL_VERSION = "2.3.1"
 HOOK_VERSION = "4.0.0"
 
 # Schema versioning for icon-map.json (bilateral handshake).
@@ -97,6 +98,9 @@ _MATCHER_CB_ROOT = "_callback_root"
 # The note-side frontmatter key holding the icon a state rule borrows through
 # `{{frontmatter.iconize_icon}}`. Read only as the fallback for a colour-only resolution.
 _NOTE_ICON_KEY = "iconize_icon"
+# The self-referential name token a state rule writes to say "whatever icon this note's type gives
+# it". A rule carrying it names no icon of its own, however the note is currently painted.
+_SELF_BORROW_TOKEN = f"{{{{frontmatter.{_NOTE_ICON_KEY}}}}}"
 # waiver: module-level mutable — ambient callback-root of the matcher being evaluated; threading it
 # through eval_when → _build_entry → _invoke_callback would widen four signatures for one read
 _ACTIVE_CB_ROOT: Path | None = None
@@ -614,8 +618,8 @@ def _resolve_icon_pair(icon_map: dict, vault: Path, rel: str) -> tuple[str | Non
     return None
   _, entry = entries[0]
 
-  # a colour-only entry is a state rule that borrowed an icon this note does not carry yet: hand
-  # back whatever the note itself declares, so the key the TYPE owns is left exactly as it stands
+  # a colour-only entry means every rule that claimed the note only painted it and none named a
+  # look: hand back whatever the note itself declares, so the key the TYPE owns stands as it is
   return entry.get(IconKey.NAME) or frontmatter.get(_NOTE_ICON_KEY), entry.get(IconKey.COLOR)
 
 
@@ -2216,11 +2220,11 @@ def _invoke_callback(callback_id: str, payload: dict) -> dict | None:
   Invoke an external callback script and return its parsed JSON response.
 
   The callback resolves from the vault's own callback directory first, so an operator override
-  always wins; when the vault copy is missing or not executable, resolution falls back to the
-  callback's shipping plugin's own tree, letting a registry-shipped matcher's callback work with
-  zero vault setup. The resolved script must be executable and emit valid JSON on stdout. Any
-  failure mode — missing executable, timeout, non-zero exit, non-JSON output — is reported on
-  stderr and surfaced to the caller as None.
+  always wins; when the vault copy is missing, resolution falls back to the callback's shipping
+  plugin's own tree, letting a registry-shipped matcher's callback work with zero vault setup.
+  The resolved script is launched through the interpreter its own first line names and must
+  emit valid JSON on stdout. Any failure mode — no shebang, timeout, non-zero exit, non-JSON
+  output — is reported on stderr and surfaced to the caller as None.
 
   Args:
     callback_id: Filename of the callback script under the callback directory.
@@ -2234,8 +2238,8 @@ def _invoke_callback(callback_id: str, payload: dict) -> dict | None:
   # # An external check is answered by the vault first, its shipping plugin second
   # A rule may hand its condition or its resolution to an external check rather than deciding it inline.
   # That check is looked up first in the vault's own, operator-editable location, exactly the way a
-  # personal rule already outranks a plugin's; only when no vault copy exists, or the vault copy cannot be
-  # run, does the lookup fall back to the copy the check's own shipping plugin carries. This lets a
+  # personal rule already outranks a plugin's; only when the vault copy is missing does the lookup
+  # fall back to the copy the check's own shipping plugin carries. This lets a
   # shipped rule's external check work out of the box with no vault setup at all, while still leaving the
   # operator free to override its behavior locally.
 
@@ -2243,15 +2247,20 @@ def _invoke_callback(callback_id: str, payload: dict) -> dict | None:
   # way an operator matcher beats a plugin matcher; the shipping plugin's own tree is
   # the fallback that makes registry callbacks work with zero vault setup
   cb_path = _callback_dir() / callback_id
-  if (not cb_path.is_file() or not os.access(cb_path, os.X_OK)) and _ACTIVE_CB_ROOT is not None:
+  if not cb_path.is_file() and _ACTIVE_CB_ROOT is not None:
     # waiver: filesystem path idiom (callbacks/)
     cb_path = _ACTIVE_CB_ROOT / "callbacks" / callback_id
-  # guard: callback must exist and be executable
-  if not cb_path.is_file() or not os.access(cb_path, os.X_OK):
+  # guard: callback must exist; how it runs is its own first line's business
+  if not cb_path.is_file():
+    return None
+  try:
+    argv = argv_for(cb_path)
+  except ShebangError as e:
+    sys.stderr.write(f"callback {callback_id!r} unusable: {e}\n")
     return None
   try:
     # waiver: inline numeric literal
-    r = subprocess.run([ str(cb_path) ], input = json.dumps(payload),
+    r = subprocess.run(argv, input = json.dumps(payload),
                        capture_output = True, text = True, timeout = 10, check = False)
   except subprocess.TimeoutExpired as e:
     out = "".join(
@@ -2356,19 +2365,32 @@ def _build_entry(resolve_spec: dict, icon_map: dict, frontmatter: dict, basename
     path: Full vault-relative POSIX path of the candidate file.
 
   Returns:
-    Resolved icon entry as `{"iconName": ..., "iconColor"?: ...}`, or None when no name
-    could be resolved.
+    Resolved icon entry as `{"iconName": ..., "iconColor"?: ...}` when the resolve block
+    names an icon. Returns a colour-only entry (`{"iconColor": ...}`, no name) when the
+    block's `iconName` is the self-referential borrow token, which never names an icon of
+    its own, or when any other template `iconName` resolves to nothing while a colour did
+    resolve — this shape signals the caller to keep walking to the matcher that owns the
+    icon. Returns None when nothing could be resolved.
   """
   if IconKey.NAME in resolve_spec or IconKey.COLOR in resolve_spec:
     name = _resolve_field(resolve_spec.get(IconKey.NAME), icon_map, frontmatter, basename)
     color = _resolve_field(resolve_spec.get(IconKey.COLOR), icon_map, frontmatter, basename)
-    # guard: a state rule paints the colour and borrows the note's own icon through a token; on a
-    # note carrying no icon yet that token comes back empty, and dropping the entry there would
-    # silently skip the repaint the rule exists for. A lookup spec that resolves nothing keeps the
-    # old behaviour — an unresolved registry key is a broken rule, not a borrowed icon.
+
+    # guard: a state rule paints the colour and borrows its name through the self-referential
+    # token, which says "whatever this note's type gives it" rather than "whatever this note
+    # currently carries". Such a rule names no icon at any time, so it hands back the colour alone
+    # and the walk goes on to the rule that owns the icon, which re-resolves it from the type.
+    if isinstance(resolve_spec.get(IconKey.NAME), str) and _SELF_BORROW_TOKEN in resolve_spec[IconKey.NAME]:
+      return { IconKey.COLOR: color } if color else None
+
+    # guard: any other template resolving to nothing still yields its colour, while a lookup spec
+    # resolving to nothing yields no entry at all — an unresolved registry key is a broken rule,
+    # not a borrowed icon, and a broken rule leaves the note unclaimed
     if not name:
       spec = resolve_spec.get(IconKey.NAME)
       return { IconKey.COLOR: color } if color and isinstance(spec, str) and "{{" in spec else None
+
+    # the rule named a look of its own, optionally carrying a colour to go with it
     entry = { IconKey.NAME: name }
     if color:
       entry[IconKey.COLOR] = color
@@ -2437,9 +2459,13 @@ def resolve_matchers(icon_map: dict, path: str, frontmatter: dict) -> list:
   """
   Apply the icon-map matchers to a single file and return the resulting emission list.
 
-  Walks the matchers in order; the first matcher whose `when` predicate holds drives the
-  resolution. Under schema 2 the result is either `[]` (no match or empty resolution) or
-  a single-element list `[(self_path, entry)]`.
+  Matchers are tried in descending priority order. The first matcher that both matches and names
+  an icon decides the note; a matcher that matches but resolves only a colour carries that colour
+  forward to whichever matcher later names the icon, outranking the colour that naming matcher
+  carries on its own. When every matching matcher only supplied a colour, that colour applies
+  alone. A matcher that matches and resolves nothing at all leaves the note unclaimed. Under
+  schema 2 the result is either `[]` (no match or empty resolution) or a single-element list
+  `[(self_path, entry)]`.
 
   Args:
     icon_map: Parsed icon-map dict.
@@ -2480,8 +2506,8 @@ def resolve_matchers(icon_map: dict, path: str, frontmatter: dict) -> list:
       # guard: matcher matched but resolution failed → return [] (no further matchers attempted)
       if not entry:
         return []
-      # guard: a state matcher that borrowed an icon this note does not carry yet resolved a colour
-      # and no name — it keeps the colour, and the walk goes on to the rule that owns the icon
+      # guard: a state matcher that borrows its name resolved a colour and no name — it keeps the
+      # colour, and the walk goes on to the rule that owns the icon, whatever the note carries now
       if IconKey.NAME not in entry:
         borrowed_color = borrowed_color or entry.get(IconKey.COLOR, "")
         continue

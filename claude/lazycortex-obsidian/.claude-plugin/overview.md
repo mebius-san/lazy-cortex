@@ -13,7 +13,7 @@ Obsidian vaults accumulate configuration over time — plugins, icons, themes, h
 
 ## Scenarios
 
-- *"Fresh repo, new vault."* — `/lazy-obsidian.install` is the one-stop entry point: syncs plugin rules and the tag-page template, installs Dataview for tag-page rendering, and offers to chain into `/lazy-obsidian.iconize-install` so the vault reaches a usable state in a single pass.
+- *"Fresh repo, new vault."* — `/lazy-obsidian.install` is the one-stop entry point: syncs plugin rules and the tag-page template, installs Dataview for tag-page rendering, and chains into `/lazy-obsidian.iconize-install` unconditionally — no opt-in prompt — so the vault reaches a usable state in a single pass.
 - *"I need a single Obsidian plugin installed or refreshed."* — `/lazy-obsidian.update-plugin <id>` resolves the plugin via the Obsidian community registry, fetches `manifest.json` / `main.js` / `styles.css` from the latest GitHub release, deep-merges the opinionated override block for `<id>` onto the vault's `data.json`, and registers the id in `community-plugins.json`. Version-aware; no-ops when the vault is current. Bundled plugins (today: `iconize-reloader`) install with `--bundled` from `templates/obsidian/plugins/<id>/`.
 - *"I want Iconize set up in this vault from scratch."* — `/lazy-obsidian.iconize-install` installs all three iconize-sync hard-dependency plugins via `/lazy-obsidian.update-plugin` (`obsidian-icon-folder`, `folder-notes`, `iconize-reloader --bundled`), then scaffolds the icon-map registry and repaint routine into the vault.
 - *"I need to edit which folders get which icons."* — `/lazy-obsidian.iconize-config` is a wizard for editing the Iconize registry (the declarative mapping of paths to icons).
@@ -48,7 +48,7 @@ Obsidian vaults accumulate configuration over time — plugins, icons, themes, h
 
 1. Enable the plugin at **project scope** — `.obsidian/` and `.mcp.json` are repo-specific.
 2. Restart Claude Code.
-3. Run `/lazy-obsidian.install` once per project. It syncs plugin rules and the tag-page template, installs Dataview, and offers to chain into `/lazy-obsidian.iconize-install` — a single entry point for the whole vault bootstrap. Re-run any time; idempotent.
-4. If you skipped the iconize chain, run `/lazy-obsidian.iconize-install` later to scaffold the Iconize registry and repaint routine.
+3. Run `/lazy-obsidian.install` once per project. It syncs plugin rules and the tag-page template, installs Dataview, and chains into `/lazy-obsidian.iconize-install` and `/lazy-obsidian.diagram-install` unconditionally — a single entry point for the whole vault bootstrap, with no per-chain opt-in. Re-run any time; idempotent.
+4. Run `/lazy-obsidian.iconize-install` directly only when you want the Iconize registry and repaint routine refreshed on their own, without the rest of the bootstrap.
 5. Edit the registry via `/lazy-obsidian.iconize-config`, then apply it with `/lazy-obsidian.iconize-sync` whenever you need to reconcile icons into note frontmatter (Iconize + the bundled `iconize-reloader` repaint from there).
 6. Need to install or refresh a single vault plugin out-of-band? Use `/lazy-obsidian.update-plugin <id>` (`--bundled` for plugins shipped inside this LazyCortex plugin).

@@ -109,7 +109,7 @@ One `AskUserQuestion` per field:
    AskUserQuestion: header "Icon colour", question "Colour for `<registry path>.<key>`, or `none` for monochrome?", options `none` — "monochrome; no iconColor key", plus free text via an "Other" answer.
    ```
 
-Validate with the worker's validators (shell out to `python3 ${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py --validate-entry ...` — see Task 11b below for this helper flag).
+Validate with the worker's validators (shell out to `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py" --validate-entry ...` — see Task 11b below for this helper flag).
 
 ### Step 4b — Edit
 

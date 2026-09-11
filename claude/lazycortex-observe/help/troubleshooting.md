@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
-summary: Common failure modes across lazycortex-observe install, uninstall, and doctor — symptoms, likely causes, and fixes.
-last_regen: 2026-09-09
+summary: Common failure modes across lazycortex-observe install, uninstall, and audit — symptoms, likely causes, and fixes.
+last_regen: 2026-09-11
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree rooted at the operator's situation: top-level branch on whether the shipper is installed at all (answer file present?); if not-installed, branch further on whether the Step 0 pre-flight found an already-covered host (routes to --integrate-only or --force-standalone guidance) versus a genuinely clear host (routes to plain install); if installed, branch on whether the host runs in integrate mode (scrape-targets file present and current vs missing/stale) or standalone mode — standalone then branches on whether the service is active, whether local /metrics is reachable, whether agent self-metrics show successful remote_write (token vs observer-reachability vs WAL-recovery sub-branches), and whether WAL is oversized. Separate top-level branch for uninstall failures (launchctl error 5 vs systemctl unit-not-found). Each leaf cites the troubleshooting entry that resolves it."
@@ -9,8 +9,8 @@ diagram_spec:
 source_skills:
   - lazy-observe.install
   - lazy-observe.uninstall
-  - lazy-observe.doctor
-source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
+  - lazy-observe.audit
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Troubleshooting
 
@@ -34,29 +34,29 @@ source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
 
 ---
 
-## Doctor reports "not-installed"
+## The audit reports "not-installed"
 
-**Symptom**: `/lazy-observe.doctor` immediately returns `FAIL not-installed` and skips all subsequent checks.
+**Symptom**: `/lazy-observe.audit` immediately returns `FAIL not-installed` and skips all subsequent checks.
 
-**Likely cause**: The answer file at `${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.toml` is absent, and doctor's own coverage probe (the same one install runs) found nothing collecting this host's metrics either. The shipper has never been installed on this host, no foreign collector covers it, or the answer file was deleted during a previous uninstall.
+**Likely cause**: The answer file at `${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.toml` is absent, and the audit's own coverage probe (the same one install runs) found nothing collecting this host's metrics either. The shipper has never been installed on this host, no foreign collector covers it, or the answer file was deleted during a previous uninstall.
 
 **Fix**: Run `/lazy-observe.install`. It walks through all setup steps and writes the answer file before loading the service.
 
 ---
 
-## Doctor reports "covered-unconfigured"
+## The audit reports "covered-unconfigured"
 
-**Symptom**: `/lazy-observe.doctor` reports `WARN covered-unconfigured` on Step 1 and skips all subsequent checks.
+**Symptom**: `/lazy-observe.audit` reports `WARN covered-unconfigured` on Step 1 and skips all subsequent checks.
 
-**Likely cause**: The answer file is absent, but doctor's coverage probe found this host is already covered by a foreign collector — collection is working, doctor just has no record of it because install was never run here.
+**Likely cause**: The answer file is absent, but the audit's coverage probe found this host is already covered by a foreign collector — collection is working, the audit just has no record of it because install was never run here.
 
 **Fix**: Run `/lazy-observe.install`. It re-detects the same coverage and records integrate mode automatically, without asking any questions.
 
 ---
 
-## Doctor reports a missing or stale scrape-targets file (integrate mode)
+## The audit reports a missing or stale scrape-targets file (integrate mode)
 
-**Symptom**: On a host installed with `/lazy-observe.install --integrate-only`, `/lazy-observe.doctor` reports `FAIL scrape-file-missing` or `WARN scrape-file-stale` on Step 5.
+**Symptom**: On a host installed with `/lazy-observe.install --integrate-only`, `/lazy-observe.audit` reports `FAIL scrape-file-missing` or `WARN scrape-file-stale` on Step 5.
 
 **Likely cause**: In integrate mode there is no local shipper — instead the operator's existing Prometheus reads a file_sd scrape-targets file at `${XDG_CONFIG_HOME:-~/.config}/lazycortex/scrape-targets.json`. That file is either missing, or its entry count no longer matches the daemons currently registered on this host (one was added or removed since the file was last generated).
 
@@ -66,7 +66,7 @@ source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
 
 ## Service unit shows as inactive
 
-**Symptom**: `/lazy-observe.doctor` reports `FAIL inactive` on the service-unit check (Step 2). On macOS `launchctl print gui/$UID/com.lazycortex.observe` shows a state other than `running`; on Linux `systemctl --user is-active lazycortex-observe.service` returns `inactive` or `failed`.
+**Symptom**: `/lazy-observe.audit` reports `FAIL inactive` on the service-unit check (Step 2). On macOS `launchctl print gui/$UID/com.lazycortex.observe` shows a state other than `running`; on Linux `systemctl --user is-active lazycortex-observe.service` returns `inactive` or `failed`.
 
 **Likely cause**: The agent process crashed at startup or was stopped externally. The service unit is registered but not running.
 
@@ -76,7 +76,7 @@ source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
 
 ## Agent process is gone but service thinks it's running
 
-**Symptom**: `/lazy-observe.doctor` reports `FAIL no-pid` on the agent-process check (Step 3). The service unit is loaded and shows an active state, but the actual process has exited.
+**Symptom**: `/lazy-observe.audit` reports `FAIL no-pid` on the agent-process check (Step 3). The service unit is loaded and shows an active state, but the actual process has exited.
 
 **Likely cause**: The agent binary crashed after startup — the supervisor has not yet restarted it, or it is crash-looping and the supervisor gave up.
 
@@ -86,21 +86,21 @@ source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
 
 ## Local /metrics endpoint is unreachable
 
-**Symptom**: `/lazy-observe.doctor` reports `FAIL endpoint-down` on the local-metrics check (Step 4). `curl http://127.0.0.1:9464/metrics` (or whichever port this host's daemon was allocated) hangs or returns a connection-refused error.
+**Symptom**: `/lazy-observe.audit` reports `FAIL endpoint-down` on the local-metrics check (Step 4). `curl http://127.0.0.1:9464/metrics` (or whichever port this host's daemon was allocated) hangs or returns a connection-refused error.
 
-**Likely cause**: The lazycortex-core daemon for that checkout is not running, or runtime metrics are disabled for it. On a host running several lazycortex-core daemons, each gets its own port allocated sequentially from 9464 — check which `repo_label` the doctor report flags before restarting the wrong daemon.
+**Likely cause**: The lazycortex-core daemon for that checkout is not running, or runtime metrics are disabled for it. On a host running several lazycortex-core daemons, each gets its own port allocated sequentially from 9464 — check which `repo_label` the audit report flags before restarting the wrong daemon.
 
-**Fix**: Run `/lazy-core.install` for the affected checkout and answer "Yes" at its metrics prompt if you haven't already (see `references/lazy-core.runtime-schema.md § 12` for what the setting controls) — then restart that checkout's daemon supervisor. On macOS: `launchctl kickstart -k gui/$UID com.lazycortex.runtime`. On Linux: `systemctl --user restart lazycortex-runtime.service`.
+**Fix**: Run `/lazy-core.install` for the affected checkout and answer "Yes" at its metrics prompt if you haven't already (see `references/lazy-core.metrics-schema.md` for what the setting controls) — then restart that checkout's daemon supervisor. On macOS: `launchctl kickstart -k gui/$UID com.lazycortex.runtime`. On Linux: `systemctl --user restart lazycortex-runtime.service`.
 
 ---
 
 ## Metrics endpoint is up but shows no lazycortex series
 
-**Symptom**: `/lazy-observe.doctor` reports `FAIL no-lazycortex-series`. The endpoint responds, but the body contains no `lazycortex_runtime_*` series.
+**Symptom**: `/lazy-observe.audit` reports `FAIL no-lazycortex-series`. The endpoint responds, but the body contains no `lazycortex_runtime_*` series.
 
 **Likely cause**: The lazycortex-core daemon is running but has not yet dispatched a routine. Metrics are only emitted after the first routine tick.
 
-**Fix**: Wait for the first routine tick — usually a few seconds after the daemon starts — then re-run `/lazy-observe.doctor`. No config change is needed.
+**Fix**: Wait for the first routine tick — usually a few seconds after the daemon starts — then re-run `/lazy-observe.audit`. No config change is needed.
 
 ---
 
@@ -116,17 +116,17 @@ source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
 
 ## Agent is up but delivery rate is zero
 
-**Symptom**: `/lazy-observe.doctor` reports `WARN zero-rate` on the agent self-metrics check (Step 5). The agent is running and its self-metrics endpoint is reachable, but `prometheus_remote_storage_succeeded_samples_total` (Alloy) or `otelcol_exporter_sent_metric_points` (otelcol) shows a zero rate.
+**Symptom**: `/lazy-observe.audit` reports `WARN zero-rate` on the agent self-metrics check (Step 5). The agent is running and its self-metrics endpoint is reachable, but `prometheus_remote_storage_succeeded_samples_total` (Alloy) or `otelcol_exporter_sent_metric_points` (otelcol) shows a zero rate.
 
-**Likely cause**: Three common causes in order of likelihood: the auth token is wrong or expired; the observer URL is unreachable (Step 6 of doctor will also flag this); or the agent's WAL is still draining from a previous outage.
+**Likely cause**: Three common causes in order of likelihood: the auth token is wrong or expired; the observer URL is unreachable (Step 6 of the audit will also flag this); or the agent's WAL is still draining from a previous outage.
 
-**Fix**: Check Step 6 of the doctor report first — if the observer URL is unreachable, that is the root cause. If the URL is reachable, rotate the token by re-running `/lazy-observe.install` Step 5 (which rewrites the token file and reloads the service). If the token is valid and the observer is up, the WAL is recovering on its own — wait and recheck.
+**Fix**: Check Step 6 of the audit report first — if the observer URL is unreachable, that is the root cause. If the URL is reachable, rotate the token by re-running `/lazy-observe.install` Step 5 (which rewrites the token file and reloads the service). If the token is valid and the observer is up, the WAL is recovering on its own — wait and recheck.
 
 ---
 
 ## Agent self-metrics endpoint is not bound
 
-**Symptom**: `/lazy-observe.doctor` reports `FAIL self-metrics-down` on the agent self-metrics check (Step 5). The agent process is running but `curl http://127.0.0.1:12345/-/ready` (Alloy) or `curl http://127.0.0.1:8888/metrics` (otelcol) returns a connection error.
+**Symptom**: `/lazy-observe.audit` reports `FAIL self-metrics-down` on the agent self-metrics check (Step 5). The agent process is running but `curl http://127.0.0.1:12345/-/ready` (Alloy) or `curl http://127.0.0.1:8888/metrics` (otelcol) returns a connection error.
 
 **Likely cause**: The rendered agent config has a typo in the self-metrics listener address or port.
 
@@ -136,7 +136,7 @@ source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
 
 ## Observer URL is unreachable
 
-**Symptom**: `/lazy-observe.doctor` reports `FAIL unreachable` on the observer-URL check (Step 6). `curl -I <remote_write_url>` returns a network error rather than any HTTP response.
+**Symptom**: `/lazy-observe.audit` reports `FAIL unreachable` on the observer-URL check (Step 6). `curl -I <remote_write_url>` returns a network error rather than any HTTP response.
 
 **Likely cause**: The observer URL is wrong, the observer is down, or a firewall or DNS change is blocking the connection. The fix is on the operator's infrastructure, not in this plugin.
 
@@ -146,11 +146,11 @@ source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
 
 ## WAL directory is unusually large
 
-**Symptom**: `/lazy-observe.doctor` reports `WARN oversized` on the WAL-bounds check (Step 7). The WAL directory at `${XDG_DATA_HOME:-~/.local/share}/lazycortex/observe/wal/` is larger than expected for the configured `wal_max_age`.
+**Symptom**: `/lazy-observe.audit` reports `WARN oversized` on the WAL-bounds check (Step 7). The WAL directory at `${XDG_DATA_HOME:-~/.local/share}/lazycortex/observe/wal/` is larger than expected for the configured `wal_max_age`.
 
 **Likely cause**: The observer was offline long enough for the WAL to accumulate more samples than a normal window. Once the observer is back, the agent drains the WAL automatically.
 
-**Fix**: Confirm the observer is reachable (Step 6 of the doctor report) and leave the agent running. The WAL drains on its own — do not truncate it manually, as that would drop the buffered samples permanently. Re-run `/lazy-observe.doctor` after a few minutes to confirm the size is decreasing.
+**Fix**: Confirm the observer is reachable (Step 6 of the audit report) and leave the agent running. The WAL drains on its own — do not truncate it manually, as that would drop the buffered samples permanently. Re-run `/lazy-observe.audit` after a few minutes to confirm the size is decreasing.
 
 ---
 
@@ -220,7 +220,7 @@ source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
 
 **Likely cause**: `claude/lazycortex-observe/alerts/lazycortex-runtime.rules.yml` picked up three new alert rules and `claude/lazycortex-observe/dashboards/lazycortex-runtime.json` gained a Deferred column in this release, but Prometheus only reads its rule files at startup or on an explicit reload, and Grafana only reflects a dashboard JSON change after you re-import it. An operator who upgrades the plugin but doesn't touch either the Prometheus process or the Grafana dashboard keeps running the old rule set and the old panel layout — nothing looks broken, it's just stale.
 
-**Fix**: Reload the rule file into your running Prometheus (`kill -HUP <pid>`, the `/-/reload` HTTP endpoint if `--web.enable-lifecycle` is set, or a service restart — whichever your Prometheus install uses), then confirm the three new alerts appear under Prometheus's Alerts/Rules page. Re-import `claude/lazycortex-observe/dashboards/lazycortex-runtime.json` into Grafana to pick up the Deferred column. Neither step is something `/lazy-observe.doctor` checks — it verifies the shipper, not your Prometheus/Grafana configuration.
+**Fix**: Reload the rule file into your running Prometheus (`kill -HUP <pid>`, the `/-/reload` HTTP endpoint if `--web.enable-lifecycle` is set, or a service restart — whichever your Prometheus install uses), then confirm the three new alerts appear under Prometheus's Alerts/Rules page. Re-import `claude/lazycortex-observe/dashboards/lazycortex-runtime.json` into Grafana to pick up the Deferred column. Neither step is something `/lazy-observe.audit` checks — it verifies the shipper, not your Prometheus/Grafana configuration.
 
 ---
 

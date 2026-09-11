@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Query a generated reference tree built from code's Domain(…) comments — one section or one term at a time, never the whole tree.
-last_regen: 2026-09-07
+last_regen: 2026-09-11
 diagram_spec:
   anchor: "How the domain tree stays current"
   request: "Flow diagram: code Domain(…)/Contract: comments feed domain-plan detection, which dispatches the domain-spec writer per changed group to (re)write docs/domains/<group>.md, then rebuilds the domains.md index; /lazy-wiki.domains reads that generated tree to answer group and term queries."
@@ -10,7 +10,7 @@ source_skills:
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
   - lazy-wiki.domain-spec-writer
-source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
+source_sha: 3f4c00192599a38cbb9db4308367d5db80ec2dfd
 ---
 # Domain knowledge lookup
 
@@ -43,7 +43,7 @@ Source comments stay English regardless of the project's documentation language 
 - **Forcing an immediate refresh** — run `/lazy-wiki.domain-sync` instead of waiting for the background routines, e.g. right after a batch of `Domain(…)` edits or a terminology sweep.
 - **A group reports "not in the domain tree"** — the group key is new, misspelled, or not yet generated; check the group list `/lazy-wiki.domains group` returns for a doc, or the `domains.md` index directly.
 - **New groups show up as "unknown"** during a sync — the dictionary doesn't list them yet. Add the group to the dictionary via `/lazy-wiki.configure domains`, or run a knowledge sweep to have code markers refiled under accepted groups automatically.
-- **`/lazy-wiki.doctor` reports a domain doc using an axis your project never declared** — a generated doc's `tags:` frontmatter carries a `wiki/<axis>/…` tag whose axis isn't in `wiki.tag_axes`. That's not fixed by re-running the sync; extend the axis vocabulary via `/lazy-wiki.configure vault`, or treat it as a typo and let the next regeneration replace the tag once the doc's coverage genuinely changes.
+- **`/lazy-wiki.audit` reports a domain doc using an axis your project never declared** — a generated doc's `tags:` frontmatter carries a `wiki/<axis>/…` tag whose axis isn't in `wiki.tag_axes`. That's not fixed by re-running the sync; extend the axis vocabulary via `/lazy-wiki.configure vault`, or treat it as a typo and let the next regeneration replace the tag once the doc's coverage genuinely changes.
 
 ## How the domain tree stays current
 

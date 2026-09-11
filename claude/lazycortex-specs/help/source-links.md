@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Resolve repos, dependencies, and build forge-correct source URLs so every spec link stays accurate regardless of where code is hosted.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 diagram_spec:
   anchor: "How the three skills compose"
   request: "Show how lazy-spec.resolve-repo, lazy-spec.resolve-dependency, and lazy-spec.source-url call each other: lazy-spec.source-url calls lazy-spec.resolve-repo to get RepoInfo; lazy-spec.resolve-dependency calls lazy-spec.resolve-repo internally for internal-product and internal-repo entries; lazy-spec.resolve-repo reads lazy.settings.json[repos] and inspects the git remote. Output is a URL or a dep record."
@@ -9,7 +9,7 @@ source_skills:
   - lazy-spec.resolve-repo
   - lazy-spec.resolve-dependency
   - lazy-spec.source-url
-source_sha: d2e8e59bcbf33a3e6c7cd82a7e43b4d3f9143fd6
+source_sha: 3f4c00192599a38cbb9db4308367d5db80ec2dfd
 ---
 # Source links — repos, dependencies, and forge-correct URLs
 

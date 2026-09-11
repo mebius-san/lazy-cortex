@@ -1,13 +1,13 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-diagram skills — symptoms, likely causes, and fixes.
-last_regen: 2026-09-07
+last_regen: 2026-09-11
 no_diagram: true
 source_skills:
   - lazy-diagram.draw
   - lazy-diagram.fix
   - lazy-diagram.install
-source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Troubleshooting
 
@@ -155,6 +155,6 @@ source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
 
 **Symptom**: `/lazy-diagram.fix` fails at Step 2 with `[FAIL] cannot infer kind from fence syntax` and lists candidate kinds.
 
-**Likely cause**: The fence's syntax marker (e.g. `flowchart`) matches multiple kinds — `flow`, `nav`, `tree`, `decision-tree`, `controls-scheme`, or `screen-scheme` all use `flowchart` syntax. The skill refuses to guess.
+**Likely cause**: For a mermaid fence, the syntax marker matches multiple kinds — `flow`, `nav`, `tree`, `decision-tree`, `controls-scheme`, or `screen-scheme` all use `flowchart` syntax. For an ASCII (`` ```text ``) fence, the kind is inferred from the body's shape by testing six ordered rules (`fs-tree`, `tree`, `controls-scheme`, `layout`, `decision-tree`, `flow`, most specific first); the fence is ambiguous when its body matches none of the six, or carries features of two families at once — tree characters alongside box connectors, or chrome samples alongside labelled connectors. Either way the skill refuses to guess.
 
 **Fix**: Pin `kind=<one>` from the candidate list shown in the failure message and re-run `/lazy-diagram.fix`.

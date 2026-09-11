@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-review skills — symptoms, likely causes, and fixes.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree routing on observed symptom. Top-level branches: install/bootstrap failures (settings missing, permission error, malformed JSON), configure failures (audit FAIL after wizard, section-id loop), start/submit problems (file not opted in, no-op on re-run when unexpected), status reporting nothing useful, stop/resume confusion, finalize blocked or partial, audit FAIL findings. Each leaf names the troubleshooting entry that resolves it."
@@ -15,7 +15,7 @@ source_skills:
   - lazy-review.stop
   - lazy-review.finalize
   - lazy-review.audit
-source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Troubleshooting
 
@@ -109,13 +109,13 @@ source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
 
 ---
 
-## `/lazy-review.submit` does not land on the reviewer — it lands on the main writer
+## `/lazy-review.submit` doesn't skip straight to the operator — a main writer fires anyway
 
-**Symptom**: After `/lazy-review.submit <file>`, the first round that fires goes to the main writer instead of skipping ahead to a reviewer.
+**Symptom**: After `/lazy-review.submit <file>`, instead of landing directly on the operator's Ready banner, a main-writer round fires on the next wake.
 
-**Likely cause**: `submit` pre-seeds `review_main_done` so the coordinator skips the opening writer pass, but the coordinator reads the effective class config on each wake. If the configured class has no reviewer assigned after the main writer, there is nothing further in the chain to advance to.
+**Likely cause**: `submit` pre-fills `review_main_done` with the class's `experts.main` list as it stood at submit time, then advances the document straight to the operator's turn. Every wake, though, re-evaluates who is still pending against the class's *current* `experts.main` order minus the names already recorded in `review_main_done`. If the class was reconfigured after this document was submitted — a main writer added, or the chain extended with a new name — that added writer isn't in the stale seed, so it counts as pending and its round fires.
 
-**Fix**: Run `/lazy-review.status <file>` and check `owners[]`. If the reviewer slots are empty, run `/lazy-review.configure` to add the required expert assignments for this document's class. Then run `/lazy-review.stop <file>` and `/lazy-review.submit <file>` again to reset the skip-seed.
+**Fix**: Run `/lazy-review.status <file>` to see which owner is currently active. If a class change is what caused this, either let the newly-added writer's round complete — the document lands on the operator's Ready banner once its payload is in — or run `/lazy-review.configure` to remove that writer from the class if it shouldn't apply to documents already in flight.
 
 ---
 
@@ -129,13 +129,13 @@ source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
 
 ---
 
-## `/lazy-review.stop` stops the document but a later `/lazy-review.start` resets the round
+## `/lazy-review.stop` stops the document but a later `/lazy-review.start` shows round 1
 
-**Symptom**: After stopping and restarting a document, `review_round` is back at 1 instead of continuing from where it was.
+**Symptom**: After stopping and restarting a document, `review_round` reads 1 instead of continuing from where it was.
 
-**Likely cause**: `stop` preserves `review_round` and `approved` as it found them. `start` always writes `review_round: 1` and `approved: false` on first open — it is not a resume operation; it is a fresh open. This is expected behaviour.
+**Likely cause**: Not a reset — `start` seeds `review_round` and `review_approved` **absent-only**, and `stop` flips `review_active` alone, leaving both keys standing. A stopped document therefore resumes at its preserved round. Reading 1 means the keys were genuinely gone when `start` ran: the document had been finalized (finalize unsets every `review_*` key but `review_result`), or the frontmatter was hand-edited between the two calls.
 
-**Fix**: If you need to resume mid-round without resetting state, edit the document's frontmatter manually before restarting — set `review_round` to the round you want to resume from. Alternatively, use `/lazy-review.submit <file>` which also opens the document but lands it straight on the review round instead of the opening writer pass.
+**Fix**: Nothing, when the document was only stopped — it already resumed. After a finalize, round 1 is correct: the previous cycle closed and this is a new one. If you deliberately want to re-enter at a later round, set `review_round` in the frontmatter before running `start`; the absent-only seeding will honour it.
 
 ---
 
@@ -143,7 +143,7 @@ source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
 
 **Symptom**: Running `/lazy-review.finalize <file>` prints `already finalized: <file>` and makes no commit.
 
-**Likely cause**: The document is already in finalized shape — its frontmatter has `review_active: false` and all review-loop scaffolding (banner, approve checkbox, system callouts) has already been stripped in a previous finalize run.
+**Likely cause**: The document is already in finalized shape — its frontmatter carries no `review_*` key but `review_result` (finalize unsets them rather than writing them false), and all review-loop scaffolding (banner, approve checkbox, system callouts) has already been stripped in a previous finalize run.
 
 **Fix**: No action is needed. If you believe the document was not fully finalized, run `/lazy-review.status <file>` to check the current frontmatter state. If `review_active` is still `true`, the file is still in the loop and `/lazy-review.finalize` should proceed normally — re-run it.
 

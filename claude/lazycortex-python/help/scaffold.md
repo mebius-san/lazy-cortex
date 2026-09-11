@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Canonical Python file skeletons — python-template.py for regular files, init-template.py for __init__.py — installed once via /lazy-python.install Step 6.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 diagram_spec:
   anchor: "How the templates reach your project"
   request: "Flow showing python-template.py, init-template.py, and scaffold.entries.json shipping from the plugin, scaffold-sync copying both templates into .claude/templates/python/ in the consumer project, and the lazy-core.scaffold rule matching a new *.py file against python-template.py or, when the file is an __init__.py, against init-template.py instead (the more specific glob wins)"
@@ -10,15 +10,15 @@ source_skills:
   - python/init-template.py
   - python/scaffold.entries.json
   - lazy-python.install
-source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Python file scaffold
 
-Every Python file Claude composes starts from the same canonical skeleton rather than from the model's session memory. The scaffold block ships two template files and a manifest that `/lazy-python.install` copies into your project during Step 6 and registers with `lazy-core.scaffold`. From that point on, any new `*.py` file Claude creates begins from the project-local copy of the matching template — a regular module gets the correct import order and `TYPE_CHECKING` guard, with a module docstring only when the file defines no classes, while a new `__init__.py` gets the package-docstring shape instead. The scaffold rule always picks the more specific template when both globs could match.
+Every Python file Claude composes starts from the same canonical skeleton rather than from the model's session memory. The scaffold block ships two template files and a manifest that `/lazy-python.install` copies into your project during Step 6 and registers with `lazy-core.scaffold`. From that point on, any new `*.py` file Claude creates begins from the project-local copy of the matching template — a regular module gets the correct import order and `TYPE_CHECKING` guard, with the module-docstring slot left open for a file that defines no classes, while a new `__init__.py` gets the package-docstring shape instead. The scaffold rule always picks the more specific template when both globs could match.
 
 ## What's in this block
 
-**`python-template.py`** is the canonical module skeleton for regular source files. It encodes the conventions from `lazy-python.coding-guidelines.md` sections "Module Structure" and "Import Organization" directly into a starting shape: a `from __future__ import annotations` declaration, the import blocks in canonical order (typing, stdlib, third-party, local project, and the `TYPE_CHECKING`-guarded block for deferred annotations), a comment slot for module-level constants and TypeVars, and a separator-commented example class stub. The authoring note at the top states the canon's rule precisely: a file that defines classes carries no module docstring because each class documents itself, while a file that defines none — a CLI entry point, a worker script — may open with one in the same spot; `__init__.py` always carries one, scaffolded separately from `init-template.py`. The same note instructs Claude to replace all placeholder markers and strip the scaffolding comment before adding real content.
+**`python-template.py`** is the canonical module skeleton for regular source files. It encodes the conventions from `lazy-python.coding-guidelines.md` sections "Module Structure" and "Import Organization" directly into a starting shape: a `from __future__ import annotations` declaration, the import blocks in canonical order (typing, stdlib, third-party, local project, and the `TYPE_CHECKING`-guarded block for deferred annotations), a comment slot for module-level constants and TypeVars, and a separator-commented example class stub. The authoring note at the top states the template's own shape: a file that defines classes opens without a module docstring because each class documents itself, while a file that defines none — a CLI entry point, a worker script — may open with one in the same spot; `__init__.py` always carries one, scaffolded separately from `init-template.py`. That note is stricter than the canon, which requires a module docstring in `__init__.py` and permits one in any other module — and per the canon's own rule that scaffold templates may lag the guides and lose on conflict, the guideline wins where the two disagree. The same note instructs Claude to replace all placeholder markers and strip the scaffolding comment before adding real content.
 
 **`init-template.py`** is the dedicated skeleton for `__init__.py` files. It encodes the canon's `__init__.py` File Patterns section: a module-level package docstring with a one-sentence summary, an optional extended description, a `Subpackages:` list, and `Dependencies:` / `Dependents:` sections — each omitted entirely when empty — followed by `from __future__ import annotations` and the `from .submodule import *` wildcard-export pattern that must lead the import block.
 

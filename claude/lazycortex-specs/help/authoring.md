@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Create spec assets of any type — features, changes, bugs, and operator-declared kinds — record the decisions behind them, and capture raw ideas into the requests inbox.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 diagram_spec:
   anchor: "How the pieces fit together"
   request: "Flow diagram showing the authoring block's two entry paths: (1) lazy-spec.create-asset as the central scaffold hub, fed by lazy-spec.create-feature / lazy-spec.create-change / lazy-spec.create-bug as thin wrappers and by lazy-spec.create-from-code as a parallel code-scanning path that delegates to it; lazy-spec.add-asset-type as a prerequisite for operator-declared asset types; output is a scaffolded asset folder. (2) lazy-spec.create-request as a separate intake path feeding the vault-wide requests inbox. Use distinct shapes for the wrappers, the code-scan path, the type-declaration prerequisite, the request path, and the two output stores."
@@ -14,7 +14,7 @@ source_skills:
   - lazy-spec.create-from-code
   - lazy-spec.create-request
   - lazy-spec.record-decision
-source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
+source_sha: 3f4c00192599a38cbb9db4308367d5db80ec2dfd
 ---
 # Authoring spec assets and capturing requests
 

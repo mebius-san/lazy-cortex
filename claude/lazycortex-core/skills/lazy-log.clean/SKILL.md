@@ -1,7 +1,7 @@
 ---
 name: lazy-log.clean
 description: "Run when the operator asks to tidy `./.logs/claude/` — stray or misnamed run-log folders, clusters of anonymous `task-N` dirs, logs left behind by skills that no longer exist. Read-first and interactive: classifies every folder against the live artifact names and offers merge / distill-to-memory / delete / leave before anything is touched."
-allowed-tools: Read, Glob, Grep, Bash(mkdir -p *), Bash(date *), Bash(python3 *), Bash(ls *), Bash(stat *), Bash(find *), Bash(mv *), Bash(rmdir *), Bash(rm -rf .logs/claude/*), Bash(git rev-parse*), AskUserQuestion, Agent
+allowed-tools: Read, Write, Glob, Grep, Bash(mkdir -p *), Bash(date *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(ls *), Bash(stat *), Bash(find *), Bash(mv *), Bash(rmdir *), Bash(rm -rf .logs/claude/*), Bash(git rev-parse*), AskUserQuestion, Agent
 ---
 # Run-Log Housekeeping
 
@@ -37,7 +37,7 @@ This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reord
 Run the helper script and parse its JSON output:
 
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-log.clean/scripts/resolve-canonical.py
+"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-log.clean/scripts/resolve-canonical.py"
 ```
 
 The script returns `{ "canonical": [...], "by_kind": {...}, "sources": {...} }`. Read the `canonical` array into a set called `CANONICAL`.

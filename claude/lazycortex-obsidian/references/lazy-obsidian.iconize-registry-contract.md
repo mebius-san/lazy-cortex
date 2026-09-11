@@ -53,7 +53,9 @@ A note's **icon** says what the note IS — its asset type, its document type, i
 
 The reason is that a folder full of notes reads as a shape first and a colour second. Repainting the icon by state destroys the only stable signal a reader has for what each note is, and it destroys it exactly when the folder is busiest. Colour carries state perfectly well and costs nothing.
 
-A note claimed by a state matcher before anything has written its `iconize_icon` interpolates the token to nothing. The worker treats that as "this rule has no icon of its own", keeps the note's existing key exactly as it stands, and still paints the colour — the repaint is never skipped and the key is never blanked (`iconize_sync._build_entry` / `_resolve_icon_pair`). Which icon a note gets in the first place is the scaffolding writer's business, not a matcher's.
+**The borrow token means "whatever this note's type gives it", never "whatever this note currently carries".** A matcher resolving `iconName` through `{{frontmatter.iconize_icon}}` names no icon at any time, however the note happens to be painted: the worker keeps its colour and carries the walk on to the lower-priority matcher that does own an icon, which re-resolves it from the type's own declaration (`iconize_sync._build_entry` / `resolve_matchers`). So a note whose `iconize_icon` is stale — the type's declared icon changed after the note was scaffolded — or absent is **corrected on the next reconcile**, and the state's colour is painted over the corrected icon. A type icon is repairable from its declaration, not written once and frozen.
+
+When no matcher below the state one names an icon either, the note's existing key is kept exactly as it stands and only the colour lands — the repaint is never skipped and the key is never blanked (`iconize_sync._resolve_icon_pair`). Which icon a note gets *in the first place* is still the scaffolding writer's business; what a reconcile does is bring it back in line with the declaration whenever one claims the note.
 
 ## 4. Layer composition and ordering
 
@@ -69,13 +71,13 @@ The worker never strips icon keys from a note no matcher claims: sibling plugins
 
 ## 5. Shipped callbacks
 
-A registry matcher's `callback: <id>` resolves against the vault's `.claude/callbacks/<id>` first — the operator overrides a shipped callback the same way an operator matcher beats a plugin matcher — falling back to the shipping plugin's own `claude/<plugin>/callbacks/<id>` (executable, stdin/stdout JSON per the iconize protocol), which is what makes registry callbacks work with zero vault setup. Personal-map matchers resolve from the vault directory only.
+A registry matcher's `callback: <id>` resolves against the vault's `.claude/callbacks/<id>` first — the operator overrides a shipped callback the same way an operator matcher beats a plugin matcher — falling back to the shipping plugin's own `claude/<plugin>/callbacks/<id>` (any language — its first line is a shebang and the worker launches it through that interpreter; the exec bit is never required — stdin/stdout JSON per the iconize protocol), which is what makes registry callbacks work with zero vault setup. Personal-map matchers resolve from the vault directory only.
 
 Both callback ops carry the candidate's vault-relative `path`. A `when` callback receives `{op, path, frontmatter}` and answers `{"match": <bool>}`; a `resolve` callback receives `{op, path, frontmatter, icon_map}` and answers `{"iconName", "iconColor"?}` — or `{}` to decline, which leaves the note unclaimed exactly as an empty resolution does. The `path` is what lets a resolve callback answer from where the note sits (which product owns it, which content root it falls under) rather than from frontmatter alone.
 
 ## 6. Registry review checklist
 
-Reviewing a registry (in code review or `lazy-obsidian.audit`) means checking:
+Reviewing a registry (in code review, or in the plugin maintainer's own audit tooling) means checking:
 
 - every matcher's `priority` sits inside the band its signal class belongs to (table above) — a transient process at 550 or a blocker at 250 is a finding;
 - no state matcher resolves a literal `iconName` (§ 3a) — a literal is legal only as a type's own icon, carried identically by every matcher of that type;

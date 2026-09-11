@@ -17,6 +17,7 @@ This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reord
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Mirror plugin rules into .claude/rules/`
    - `Step 2 — Deploy chk-py and tst-py wrappers into cli/ and ensure .venv/ gitignored`
+   - `Step 2b — Install ~/.local/bin/chk-py and tst-py`
    - `Step 3 — Detect PyCharm inspect.sh prerequisite`
    - `Step 4 — Bootstrap pyproject.toml checker sections (pch gated on PyCharm presence)`
    - `Step 5 — Scaffold project overlay guidelines under docs/guidelines/`
@@ -56,7 +57,7 @@ The rules are install-managed mirrors, so the **File-sync policy** applies: abse
 `phase1` is the whole step — it enumerates the shipped rules itself, byte-compares each against its target, overwrites the stale ones, and re-reads every write to confirm it landed. Run it unconditionally; there is nothing here to judge and nothing to hand-merge:
 
 ```
-Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py phase1 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase1 ${CLAUDE_PROJECT_DIR})
 ```
 
 It prints a JSON receipt mapping each rule to its state and exits non-zero when any write failed to verify. Quote the receipt in the report — an `already-current` claim with no receipt behind it is a reporting defect.
@@ -65,19 +66,33 @@ Outcome per rule: `installed` (absent → copied) / `unchanged` (byte-identical)
 
 ## Step 2: Deploy chk-py and tst-py wrappers into `cli/` and ensure `.venv/` gitignored
 
-Copy `${CLAUDE_PLUGIN_ROOT}/templates/chk-wrapper.sh` and `tst-wrapper.sh` verbatim to `<consumer>/cli/chk-py` and `<consumer>/cli/tst-py`, and `chmod +x` each. **Substitute nothing.** The templates are path-agnostic by design: they resolve the active plugin install at exec time, so the wrapper keeps working after the next `/plugin update`. Baking an absolute path — which necessarily carries a plugin version — into the consumer's tracked `cli/` pins them to a directory that the next update deletes. Then ensure the consumer's `.gitignore` contains a `.venv/` line — the fallback venv (`_ensure_venv.sh` probe 4) is created in the repo root at `<consumer>/.venv`, so it must be ignored. The phase reads `<consumer>/.gitignore` (creating it if absent) and appends `.venv/` only when no `.venv` / `.venv/` line is already present — idempotent.
+Copy `${CLAUDE_PLUGIN_ROOT}/templates/chk-wrapper.sh` and `tst-wrapper.sh` verbatim to `<consumer>/cli/chk-py` and `<consumer>/cli/tst-py`. **Substitute nothing.** The templates are path-agnostic by design: they resolve the active plugin install at exec time, so the wrapper keeps working after the next `/plugin update`. Baking an absolute path — which necessarily carries a plugin version — into the consumer's tracked `cli/` pins them to a directory that the next update deletes. Then ensure the consumer's `.gitignore` contains a `.venv/` line — the fallback venv (`_ensure_venv.sh` probe 4) is created in the repo root at `<consumer>/.venv`, so it must be ignored. The phase reads `<consumer>/.gitignore` (creating it if absent) and appends `.venv/` only when no `.venv` / `.venv/` line is already present — idempotent.
 
-After this step `./cli/chk-py` and `./cli/tst-py` are callable from the terminal. The `-py` suffix is fixed — it lets per-language wrappers from other plugins coexist without name collisions. Adding `cli` to `$PATH` is the consumer's call.
+After this step `sh ./cli/chk-py` and `sh ./cli/tst-py` work from the repo root; the wrappers carry no exec bit on purpose (see `lazy-core.skill-writing § 12`).
 
 Run:
 
 ```
-Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py phase2 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase2 ${CLAUDE_PROJECT_DIR})
 ```
 
 The wrappers are rendered plugin artifacts (substituted absolute paths, not consumer-authored). They are install-managed mirrors — `phase2` writes the current render unconditionally, so a re-run with an unchanged render is a no-op rewrite and a stale wrapper is replaced. The `.gitignore` append is consumer-owned config and idempotent: the `.venv/` line is added only when absent.
 
 Outcome: `wrappers-deployed-2 + gitignore-ensured` when `.venv/` was added to the consumer's `.gitignore`; `wrappers-deployed-2 + gitignore-already-present` when the `.venv/` line was already there (idempotent re-run).
+
+## Step 2b: Install `~/.local/bin/chk-py` and `tst-py`
+
+Deploys the human-facing wrappers — the only files this plugin ever marks executable, since they live outside every vault and no mode-blind git client can strip the bit on them. Each walks up from the caller's `$PWD` to the nearest `<repo>/cli/chk-py` (or `tst-py`) and runs it through `sh`, so typing `chk-py` / `tst-py` works from anywhere under a repo that has run Step 2, once `~/.local/bin` is on `$PATH`.
+
+Run:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase2b ${CLAUDE_PROJECT_DIR})
+```
+
+Quote the printed receipt in the report. Then check `command -v chk-py` — if it fails, `~/.local/bin` is not on the operator's `$PATH`; report **path-warning** and note that they need to add it themselves (this skill never edits shell rc files).
+
+Outcome: the receipt's per-wrapper state (`installed` / `unchanged` / `refreshed`), plus `path-warning` when `command -v chk-py` fails after install.
 
 ## Step 3: Detect PyCharm inspect.sh prerequisite
 
@@ -86,7 +101,7 @@ Outcome: `wrappers-deployed-2 + gitignore-ensured` when `.venv/` was added to th
 Run:
 
 ```
-Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py phase4 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase4 ${CLAUDE_PROJECT_DIR})
 ```
 
 Hold the result as `<pycharm_present>`: `pch-ready` → `True` (`inspect.sh` located); `pch-missing-inspect-sh` → `False` (no PyCharm on this machine).
@@ -106,9 +121,9 @@ Run phase3, setting `LAZY_PYTHON_ENABLE_PCH` only when `<pycharm_present>` is `T
 
 ```
 # PyCharm present — also deploy [tool.pch]:
-Bash(LAZY_PYTHON_ENABLE_PCH=1 python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py phase3 ${CLAUDE_PROJECT_DIR})
+Bash(LAZY_PYTHON_ENABLE_PCH=1 "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase3 ${CLAUDE_PROJECT_DIR})
 # no PyCharm on this machine — leave pch out:
-Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py phase3 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase3 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `pyproject-bootstrapped` when at least one missing section was appended; `pyproject-already-complete` when every required section was already present — suffixed `+pch-enabled` (PyCharm present) / `+pch-skipped-no-pycharm` (no PyCharm here).
@@ -120,7 +135,7 @@ Creates stub overlay files (`coding_guidelines.md`, `documenting_guidelines.md`,
 Run:
 
 ```
-Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py phase5 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase5 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `overlay-created-N` (where `N` is the count of newly-created files) when at least one was scaffolded; `overlay-already-present` when all four files already existed.
@@ -146,7 +161,7 @@ Outcome: the `scaffold-sync` report — per-template copy state (`installed` / `
 Run phase6:
 
 ```
-Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py phase6 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase6 ${CLAUDE_PROJECT_DIR})
 ```
 
 The phase reads the current value and probes the candidate scripts (`cli/env`, `.env.sh`, `scripts/env.sh`), then emits one outcome:
@@ -168,7 +183,7 @@ The phase reads the current value and probes the candidate scripts (`cli/env`, `
   On a chosen candidate, re-run phase6 with it so the value is recorded:
 
   ```
-  Bash(LAZY_PYTHON_ENV_SOURCE=<chosen> python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py phase6 ${CLAUDE_PROJECT_DIR})
+  Bash(LAZY_PYTHON_ENV_SOURCE=<chosen> "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase6 ${CLAUDE_PROJECT_DIR})
   ```
 
   On `skip`, write nothing.
@@ -203,7 +218,7 @@ The entry never overwrites a value the operator set, and it completes the instal
 Run:
 
 ```
-Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py phase7 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase7 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `expert-registered: python.code-reviewer` (added), `expert-refreshed: python.code-reviewer` (install-managed field completed or corrected), or `expert-already-registered` (entry whole, left untouched).

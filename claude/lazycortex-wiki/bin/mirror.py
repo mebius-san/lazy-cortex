@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import nodes as _nodes
@@ -215,7 +216,7 @@ def _run_remote_mirror(payload: dict) -> dict:
   """
   # the CLI always prints a JSON body — {"error": ...} on failure, the response shape otherwise
   return json.loads(subprocess.run(
-    [ str(_resolve_core_cli()), "remote-mirror" ], input = json.dumps(payload),
+    [ sys.executable, str(_resolve_core_cli()), "remote-mirror" ], input = json.dumps(payload),
     capture_output = True, text = True, check = False,
   ).stdout)
 

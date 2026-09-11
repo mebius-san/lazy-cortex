@@ -114,27 +114,27 @@ if [ "$cmd" = "all" ]; then
   export CHK_BATCH_MODE=1
 
   echo ">>> [1/6] pcf - Python code format check"
-  "$script_dir/chk" pcf "${mods[@]}"
+  zsh "$script_dir/chk" pcf "${mods[@]}"
   echo
 
   echo ">>> [2/6] toi - type-only imports check"
-  "$script_dir/chk" toi "${mods[@]}"
+  zsh "$script_dir/chk" toi "${mods[@]}"
   echo
 
   echo ">>> [3/6] cmp - py_compile check"
-  "$script_dir/chk" cmp "${mods[@]}"
+  zsh "$script_dir/chk" cmp "${mods[@]}"
   echo
 
   echo ">>> [4/6] mypy - mypy type check"
-  "$script_dir/chk" mypy "${mods[@]}"
+  zsh "$script_dir/chk" mypy "${mods[@]}"
   echo
 
   echo ">>> [5/6] rf - ruff check"
-  "$script_dir/chk" rf "${mods[@]}"
+  zsh "$script_dir/chk" rf "${mods[@]}"
   echo
 
   echo ">>> [6/6] pylint - pylint check"
-  "$script_dir/chk" pylint "${mods[@]}"
+  zsh "$script_dir/chk" pylint "${mods[@]}"
   echo
 
 # mypy type checks (excludes read from pyproject.toml)

@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Take one document through a full review cycle from opt-in to finalize.
-last_regen: 2026-09-07
+last_regen: 2026-09-11
 diagram_spec:
   anchor: "How the review loop flows"
   request: "Sequence diagram showing: operator runs /lazy-review.start → banner inserted + commit → daemon dispatches expert jobs per section → operator reads suggestions and ticks approve → operator checks status via /lazy-review.status → all sections approved → operator runs /lazy-review.finalize → finalized commit with Doc-Review-Phase: finalize trailer"
@@ -10,7 +10,7 @@ source_skills:
   - lazy-review.start
   - lazy-review.status
   - lazy-review.finalize
-source_sha: bf704574aa25dc7697e00bebb805686ae6ca145e
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Run a document through the review loop
 
@@ -27,7 +27,7 @@ You have a markdown document — a spec, RFC, or design doc — that needs struc
 
 ### Step 1 — Opt the document in
 
-Run `/lazy-review.start <file>` with the path to your markdown document. The skill atomically writes `review_active: true`, `review_round: 1`, and `approved: false` into the document's frontmatter, inserts a Waiting banner above the first H1, and produces a single commit under your git identity.
+Run `/lazy-review.start <file>` with the path to your markdown document. The skill sets `review_active: true` unconditionally into the document's frontmatter, then seeds the rest of the loop's keys — `review_round: 1`, `review_approved: false`, and a couple of internal bookkeeping fields — only where they are not already present. It also seats an empty `# History` section at the end of the body (or reconciles its explainer line if the section is already there) and clears any `review_result` left behind by an earlier finalize. It then inserts a Waiting banner above the first H1 and produces a single commit under your git identity.
 
 It also pins the review cycle's edit-marker style into a `review_marker_style` frontmatter field — read from your repo's configured `edit_marker_style` review setting (falling back to `simple` when unset). Every later step in the cycle reads that pin off the document itself rather than re-reading settings, so changing the setting mid-cycle never reaches a review that is already open.
 
@@ -47,7 +47,7 @@ Run `/lazy-review.status <file>` at any point. The skill returns a one-line JSON
 
 - `review_active` — whether the loop is running.
 - `review_round` — the current round number.
-- `approved` — overall approval state.
+- `review_approved` — overall approval state.
 - `banner` — the current banner text visible in the document.
 - `owners[]` — each section with its assigned expert.
 
@@ -72,7 +72,7 @@ Once every section in the final round is approved, run `/lazy-review.finalize <f
 - Folds all edit-annotation markers into the final document text, using the edit-marker style pinned into `review_marker_style` at Step 1 — the document's own pin wins over the current repo setting, so a setting change made mid-cycle never changes how an already-open review gets folded.
 - Strips the Waiting banner, approve checkboxes, and system callouts.
 - Preserves the `# History` section the coordinator built up across rounds.
-- Sets `review_active: false` in frontmatter.
+- Unsets every `review_*` key in frontmatter except `review_result` — a finalized document carries no `review_active` at all, unlike a stopped one, which keeps `review_active: false`.
 - Commits with the `Doc-Review-Phase: finalize` trailer.
 
 After this commit the document looks like an ordinary markdown file with no review scaffolding. The `# History` section remains as a human-readable summary of what changed across rounds.

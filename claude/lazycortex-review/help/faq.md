@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, configuring, and running the lazycortex-review document-review loop.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 no_diagram: true
 source_skills:
   - lazy-review.install
@@ -12,7 +12,7 @@ source_skills:
   - lazy-review.stop
   - lazy-review.finalize
   - lazy-review.audit
-source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Frequently asked questions
 
@@ -63,7 +63,7 @@ The wizard collects the things the plugin cannot derive on its own: which file g
 
 `/lazy-review.start` opens the document and sends it through the full loop beginning with the main-writer round. Use it when you want the expert to draft the first pass.
 
-`/lazy-review.submit` opens the document and skips the main-writer round, landing directly on the reviewer. Use it when the document already has your edits in place and you want reviewers to assess the current text rather than re-draft it. The optional `--expert` flag pins a per-document main-writer override for the submit path.
+`/lazy-review.submit` opens the document and skips the main-writer round, landing it directly on the operator's Ready banner. Use it when the document already has your edits in place and you want the review to assess the current text rather than re-draft it. The optional `--expert` flag pins a per-document main-writer override for the submit path.
 
 Both operations are idempotent — re-running on an already-opted-in document is a no-op.
 
@@ -77,19 +77,25 @@ Because the style is pinned to the document, not read live from settings. The fi
 
 ## Can I pause review on a document without losing my progress?
 
-Yes. Run `/lazy-review.stop <file>`. This sets `review_active` to false but preserves `review_round`, `approved`, and the `# History` section. When you are ready to resume, run `/lazy-review.start <file>` again and the daemon picks up from the same round — the document keeps whatever `review_marker_style` it was pinned with at entry.
+Yes. Run `/lazy-review.stop <file>`. This sets `review_active` to false but preserves `review_round`, `review_approved`, and the `# History` section. When you are ready to resume, run `/lazy-review.start <file>` again and the daemon picks up from the same round — the document keeps whatever `review_marker_style` it was pinned with at entry.
 
 ---
 
 ## How do I check where a document is in the review cycle?
 
-Run `/lazy-review.status <file>`. It prints one-line JSON with `review_active`, `review_round`, `approved`, the current banner state, and the list of owned sections with their assigned experts. The call is read-only and never modifies the document.
+Run `/lazy-review.status <file>`. It prints one-line JSON with `review_active`, `review_round`, `review_approved`, the current banner state, and the list of owned sections with their assigned experts. The call is read-only and never modifies the document.
+
+---
+
+## Can I drop a free-text instruction into a document under review?
+
+Yes. Write it into a `> [!todo] #review/command` callout and commit — this is the operator's channel for redoing a round, asking for something out of band, or nudging a document that looks stuck. The coordinator treats a pending command as first business on its very next wake, whatever trigger caused that wake, and it runs even on a document with a turn in flight or a barrier held. It unfolds the instruction into a small numbered plan inside the same callout so you can see progress before it lands; when the whole chain finishes (or fails partway), the callout is cleared and one line is added to `# History` describing what changed.
 
 ---
 
 ## The daemon finalized my document automatically. Can I also finalize manually?
 
-Yes. `/lazy-review.finalize <file>` is the operator's hand-crank. It folds all edit-annotation markers into final text, strips the review banner and approve checkbox, removes system callouts (the `# History` section survives), sets `review_active` to false, and commits with a `Doc-Review-Phase: finalize` trailer. If the document is already in finalized shape the call is a no-op.
+Yes. `/lazy-review.finalize <file>` is the operator's hand-crank. It folds all edit-annotation markers into final text, strips the review banner and approve checkbox, removes system callouts (the `# History` section survives), sets `review_active: false`, and leaves `review_result: approved` standing as the one `review_*` key the strip does not remove — the record that the document cleared review. The commit carries a `Doc-Review-Phase: finalize` trailer. If the document is already in finalized shape the call is a no-op.
 
 ---
 

@@ -41,17 +41,25 @@ Each plugin declares its registry entries in a per-group manifest `claude/<plugi
 
 ## The primitive
 
-The `## Registry` block is owned exclusively by the `lazycortex-core scaffold` CLI (`bin/scaffold_registry.py`), a dependency-free parser/serializer (no PyYAML). Subcommands: `upsert --plugin <n> --entries <@file|json>`, `remove --plugin <n>`, `list`, `validate`. Writes are **surgical** — only the target key's line-region is rewritten; every other top-level key (`_local`, sibling plugins) and all bytes outside the fence stay byte-for-byte. `upsert` of identical entries is `unchanged`; a missing registry file is created from a minimal template. `_local` is an ordinary key to the primitive — no special-casing.
+The `## Registry` block is owned exclusively by the `lazycortex-core scaffold` CLI (`bin/scaffold_registry.py`), a dependency-free parser/serializer (no PyYAML). Five subcommands, each of which takes `--registry <path>` naming the registry markdown file to operate on — argparse marks the flag required on all five, so an invocation that omits it exits 2 without touching anything:
+
+- `scaffold upsert --registry <path> --plugin <n> --entries <@file|json>`
+- `scaffold remove --registry <path> --plugin <n>`
+- `scaffold list --registry <path>`
+- `scaffold validate --registry <path>`
+- `scaffold sync-rule --registry <path> --src <shipped rule file>` — the whole-file refresh, not a per-key write: it replaces the plugin-owned prose and frontmatter of the rule file from `--src` while carrying the consumer's `## Registry` block across, and `--registry` names the consumer's target copy rather than a bare registry. Status is `installed`, `unchanged`, `refreshed`, `failed`, or `error` (the consumer's block does not parse — the file is left alone). This is the invocation `lazy-core.install` Step 3 §5a makes for `lazy-core.scaffold.md`.
+
+Registry writes (`upsert` / `remove`) are **surgical** — only the target key's line-region is rewritten; every other top-level key (`_local`, sibling plugins) and all bytes outside the fence stay byte-for-byte. `upsert` of identical entries is `unchanged`; a missing registry file is created from a minimal template. `_local` is an ordinary key to the primitive — no special-casing.
 
 ## Install-skill responsibilities
 
 Every plugin that contributes templates to the registry MUST invoke `lazy-core.scaffold-sync` from its install skill: `Skill(skill: "lazycortex-core:lazy-core.scaffold-sync", args: "plugin=<name> installPath=<path> scope=<project|user>")`. That one shipped skill does the whole job:
 
 1. **Copy templates** — `<installPath>/templates/<group>/*` (excluding `scaffold.entries.json`) → `<consumerScope>/.claude/templates/<group>/`. Idempotent; prompts on drift the same way the rule sync does.
-2. **Upsert the plugin's key** — reads the plugin's `scaffold.entries.json` manifest(s), unions them across groups, and calls `scaffold upsert --plugin <name>`, which surgically replaces only `data[<name>]` and creates a minimal registry file if absent.
+2. **Upsert the plugin's key** — reads the plugin's `scaffold.entries.json` manifest(s), unions them across groups, and calls `scaffold upsert --registry <consumer registry> --plugin <name> --entries <@file>`, which surgically replaces only `data[<name>]` and creates a minimal registry file if absent.
 3. **Touches no other key** — `_local` and sibling-plugin keys are out of bounds, enforced by the primitive's surgical write (not by convention).
 
-Install skills MUST NOT hand-roll the YAML upsert (parse / replace / serialize) — that logic lives once, in the primitive. Uninstall skills (when they exist) drop their own key via `scaffold remove --plugin <name>` and delete the template files the manifest referenced.
+Install skills MUST NOT hand-roll the YAML upsert (parse / replace / serialize) — that logic lives once, in the primitive. Uninstall skills (when they exist) drop their own key via `scaffold remove --registry <consumer registry> --plugin <name>` and delete the template files the manifest referenced.
 
 ## Customer-authored entries
 

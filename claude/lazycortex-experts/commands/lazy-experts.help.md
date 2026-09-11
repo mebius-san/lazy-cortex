@@ -43,7 +43,8 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 
 **Skills** (invoke as `/<name>` or via Skill tool):
 
-- `lazy-experts.install` — bootstrap the plugin for the current project (or globally). Seeds agent-model tiers from `lazycortex-core`'s defaults into `lazy.settings.json[agent_models].lazycortex` and composes expert entries per the class map (technical classes: twelve roles, discipline + tech-writing; sci-fi/fantasy: fiction-writer, discipline only). Also checks system-expert completeness against sibling plugins' registrations and reports gaps. Idempotent.
+- `lazy-experts.install` — bootstrap the plugin for the current project (or globally). Seeds agent-model tiers from `lazycortex-core`'s defaults into `lazy.settings.json[agent_models].lazycortex` and composes expert entries per the class map (technical classes: thirteen roles, discipline + research + tech-writing + terms + structure; sci-fi/fantasy: fiction-writer, discipline + research only). Also checks system-expert completeness against sibling plugins' registrations and reports gaps. Idempotent.
+- `lazy-experts.audit` — read-only check of the expert composition in this project. Verifies that every role the class map prescribes resolves to a shipped agent file, that every class and cross-cutting aspect reference exists, and that each seeded `experts` entry still points at an agent and an aspect set this plugin ships and carries the mandatory cross-cutting aspects for its class kind. Reports PASS / WARN / FAIL / INFO with the fix per finding; never writes to `lazy.settings.json`. Delegated from `/lazy-core.doctor`.
 
 **Commands**:
 
@@ -54,11 +55,11 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 ```jsonc
 "experts": {
   "_version": 1,
-  "claude-plugin-designer": {
+  "claude-plugin.designer": {
     "agent": "lazycortex-experts:lazy-experts.designer",
     "aspects": ["lazycortex-experts:lazy-experts.claude-plugin-aspect"]
   },
-  "game-designer": {
+  "game.designer": {
     "agent": "lazycortex-experts:lazy-experts.designer",
     "aspects": ["lazycortex-experts:lazy-experts.game-dev-aspect"]
   }
@@ -71,7 +72,7 @@ The expert never runs until a routine elsewhere dispatches a job to it — by de
 **Documentation:**
 
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/troubleshooting.md) — Common failure modes during lazycortex-experts setup — symptoms, likely causes, and fixes.
-- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/faq.md) — Common questions about installing lazycortex-experts, the class map, composing specialists, and the thirteen generic agents' lane boundaries.
+- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/faq.md) — Common questions about installing lazycortex-experts, the class map, composing specialists, auditing the composition, and the thirteen generic agents' lane boundaries.
 
 Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-experts/help/`.
 <!-- help-block:end -->

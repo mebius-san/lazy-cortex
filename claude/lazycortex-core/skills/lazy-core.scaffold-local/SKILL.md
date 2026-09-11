@@ -1,7 +1,7 @@
 ---
 name: lazy-core.scaffold-local
 description: "Run when the operator asks to add or drop a repo-specific template type — a `_local` scaffold entry with its own group, kind, and path globs, so new files matching those globs start from that template. Use instead of hand-editing the registry in `.claude/rules/lazy-core.scaffold.md`; plugin-shipped entries belong to `/lazy-core.scaffold-sync`."
-allowed-tools: Read, Write, Glob, Bash(find *), Bash(ls *), Bash(test *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Bash(python3 *), AskUserQuestion, Agent
+allowed-tools: Read, Write, Glob, Bash(find *), Bash(ls *), Bash(test *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), AskUserQuestion, Agent
 ---
 # Manage Local Scaffold Entries
 
@@ -13,7 +13,7 @@ Note: `_local` is just another top-level key to the `lazycortex-core scaffold` p
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 6 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Resolve inputs and registry path`
@@ -254,6 +254,20 @@ Parse the JSON output. Surface any `WARN` findings (e.g. `glob_overlap`) to the 
 `FAIL`-level findings are hard errors; surface them and stop.
 
 If no findings → state outcome `clean`. If warnings only → state outcome `warned`. If hard errors → FAIL.
+
+## Step 6 — Report
+
+Emit the mode, the template file's state (Step 4), the registry outcome (Step 4), and the validation verdict (Step 5):
+
+```
+Mode: <add|remove>
+Entry: .claude/templates/<group>/<kind>-template.md
+  Template file: <state>
+  Registry: <status>
+  Validation: <verdict>
+```
+
+Template file state is one of: `created`, `kept`, `overwritten`, `deleted`, `absent`. Registry status is the value returned by the core CLI (`registered`, `unchanged`, `created-and-registered`, `removed-plugin`, `removed`, `absent`). Validation verdict is one of: `clean`, `warned`.
 
 ## Failure modes
 

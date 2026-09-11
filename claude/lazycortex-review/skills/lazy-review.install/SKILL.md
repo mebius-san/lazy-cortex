@@ -1,8 +1,7 @@
 ---
 name: lazy-review.install
 description: "Run when the operator asks to set up document review in this repo, after a lazycortex-review update, or when review skills fail because `lazy.settings.json` has no `review` section, the `.experts/.jobs/` queue is missing, or the coordinator routines were never registered. Per-repo bootstrap only — wiring the first document class is `/lazy-review.configure`. Idempotent and quiet on re-run."
-allowed-tools: Read, Write, AskUserQuestion, Skill, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Bash(cp *), Bash(test *), Bash(diff *), Bash(git rev-parse*), Bash(lazycortex-core *), Agent
-lazy_setup_phase: install
+allowed-tools: Read, Write, AskUserQuestion, Skill, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Bash(cp *), Bash(test *), Bash(diff *), Bash(git rev-parse*), Bash(lazycortex-core *), Agent
 ---
 # lazy-review.install
 
@@ -10,7 +9,7 @@ Per-repo bootstrap: gets a clean checkout to the point where the review loop can
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step.
+This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step.
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. Canonical titles:
    - `Step 1 — Bootstrap settings + dirs`
@@ -21,6 +20,7 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 5.6 — Install the review-callouts CSS snippet`
    - `Step 6 — Point user at /lazy-review.configure`
    - `Report`
+   - `Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** Each step emits a one-word outcome (`installed` / `already-installed` / `registered` / `already-present` / `attached` / `surfaced` / `cli-allow-added` / `cli-allow-already-present` / `seeded` / `unchanged` / `merged` / `kept-local` / `enabled` / `already-enabled` / `deferred` / `no-vault` / `pointed` / `report-emitted`).
 3. **Do not reach the Report step until every prior task is `completed`.**
 
@@ -45,7 +45,7 @@ Every file this skill creates or updates follows three cases — no per-file "in
 
 ## Step 1 — Bootstrap settings + dirs
 
-Run `python3 "${CLAUDE_PLUGIN_ROOT}/bin/install.py" --cwd .`. The script applies the File-sync policy at the section level:
+Run `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/install.py" --cwd .`. The script applies the File-sync policy at the section level:
 
 - Creates `.claude/lazy.settings.json` if missing, or merges the defaults in for absent top-level keys and absent nested keys only — existing values are never overwritten (cases 1–2; the bin contains no contradicting-region path, so case 3 never arises here).
 - Creates `.experts/.jobs/` and `.logs/lazy-review/runs/` if missing.
@@ -152,6 +152,15 @@ Outcome: `pointed`.
 ## Report
 
 One line per task in the canonical list with its outcome word.
+
+## Logging
+
+Log the run to `./.logs/claude/lazy-review.install/YYYY-MM-DD_HH-MM-SS.md` per `lazy-log.logging`.
+
+1. `Bash(mkdir -p ./.logs/claude/lazy-review.install)` — a separate step from the `Write`, never chained.
+2. `Bash(date -u +%Y-%m-%d_%H-%M-%S)` for the filename; `Bash(git rev-parse HEAD)` and `Bash(git rev-parse --abbrev-ref HEAD)` for `git_sha` / `git_branch` (`no-git` when either fails).
+3. `Write` the file. Frontmatter: `git_sha`, `git_branch`, `date` (UTC), `input` (the arguments passed, or `none`).
+4. Body: `# lazy-review.install` heading, then `## Actions` — one line per Step in the canonical list with its outcome word — and `## Result` with the outcome word and a one-sentence summary.
 
 ## Failure modes
 

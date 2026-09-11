@@ -1,10 +1,10 @@
 ---
 name: lazy-python.check-style
 description: "Use when the user asks to review, check, or clean up Python code they just changed — 'check my style', 'review these files against our guidelines', 'is this ready to commit'. Run it after a batch of edits and before committing: it pairs manual guideline inspection (the things `chk-py` cannot see, read fresh from the canon plus the project overlay) with the full `chk-py` + `tst-py` gate and a re-verify pass."
-allowed-tools: Bash, Read, Edit, Glob, Grep, AskUserQuestion, Agent
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion, Agent
 user-invocable: true
 ---
-# Python check-style — six-step review
+# Python check-style — seven-step review
 
 Deep style + docstring review for modified Python files in the current change set. Invoke after a meaningful edit batch and before committing — the run pairs manual inspection (categories the automated checkers cannot see) with the full `chk-py` + `tst-py` gate, and ends with a re-verify pass. Reads canonical guidelines from `${CLAUDE_PLUGIN_ROOT}/references/` and the project overlay from `${CLAUDE_PROJECT_DIR}/docs/guidelines/` on every run — neither is cached across invocations.
 
@@ -30,6 +30,7 @@ Read the canonical guidelines from the plugin (always — never skip on the assu
 
 - `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.coding-guidelines.md`
 - `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.documenting-guidelines.md`
+- `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.comment-guidelines.md`
 
 Then read the project overlay if it exists (overlay overrides canon on conflict):
 
@@ -59,7 +60,7 @@ Outcome: `<N>-files-identified`.
 
 ## Step 3 — Manual review
 
-For each modified file, walk every category below. The categories cover rules the automated checkers (Step 4) cannot fully verify; the canon for each lives in `lazy-python.coding-guidelines.md` and `lazy-python.documenting-guidelines.md`.
+For each modified file, walk every category below. The categories cover rules the automated checkers (Step 4) cannot fully verify; the canon for each lives in `lazy-python.coding-guidelines.md`, `lazy-python.documenting-guidelines.md`, and `lazy-python.comment-guidelines.md`.
 
 - **Docstring quality** — opening `"""` and closing `"""` each on their own line; `Summary` / `Scope` describe external behaviour only (no implementation details, no algorithm narration, no private-internal references); `TODO:` / `TMP:` / `DBG:` / `ref:` / `opt:` / `guard:` / `limit:` / `Decision:` / `Domain(...)` markers preserved verbatim.
 - **Contract consistency** — public method / property signatures match the docstring's `Args:` / `Returns:` / `Raises:` sections; type hints accurately reflect declared behaviour; no drift between what the docstring promises and what the signature accepts.

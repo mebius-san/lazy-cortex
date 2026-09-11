@@ -1,7 +1,7 @@
 ---
 name: lazy-core.install
 description: "Run when the operator asks to set up lazycortex-core in a repo (or globally), or when core artifacts are missing — the plugin's rules are not in `.claude/rules/`, `lazy.settings.json` has no runtime section, `.experts/` is not initialised, or the daemon was never wired. Installs this plugin only; `/lazy-core.setup` is the one that runs every plugin's install. Idempotent and quiet on re-run — decisions are persisted and never re-asked."
-allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git init*), Bash(cp *), Bash(rm *), Bash(test *), Bash(find *), Bash(date *), Bash(diff *), Bash(chmod *), Bash(launchctl *), Bash(systemctl *), Bash(python3 *), Agent
+allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git init*), Bash(cp *), Bash(rm *), Bash(test *), Bash(find *), Bash(date *), Bash(diff *), Bash(chmod *), Bash(launchctl *), Bash(systemctl *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
 ---
 # Install lazycortex-core
 
@@ -9,7 +9,7 @@ Bootstrap the plugin in the right scope: copy every rule template shipped by the
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 21 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 23 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 0 — Verify Python ≥ 3.12 (floor)`
@@ -27,7 +27,7 @@ This skill has 21 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 10.5 — Bootstrap .memory/ directory`
    - `Step 10.7 — Install lazy-claude wrapper`
    - `Step 11 — Register expert candidates`
-   - `Step 11.5 — Seed providers (optional)`
+   - `Step 11.5 — Seed providers`
    - `Step 12 — Bootstrap built-in routines (expert pump, doctor tick, index guard, weekly autocheckup)`
    - `Step 12.5 — Restore externally-sourced working directories`
    - `Step 13 — Daemon gate (enabled + run_here) + supervisor install`
@@ -160,7 +160,7 @@ Owned namespaces: the plugin name minus the `lazycortex-` prefix (so `lazycortex
 The mirror is script-driven end to end: byte comparison decides, the script writes, and it verifies each write. There is nothing here for you to judge. Run (one `--owned-glob` per owned namespace):
 
 ```
-Bash(python3 ${CLAUDE_PLUGIN_ROOT}/bin/file_sync.py --src <installPath>/rules --dst <targetRulesDir> --copy-diverged --exclude lazy-core.scaffold.md --owned-glob 'lazy-core.*.md' --owned-glob 'lazy-guard.*.md')
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/file_sync.py" --src <installPath>/rules --dst <targetRulesDir> --copy-diverged --exclude lazy-core.scaffold.md --owned-glob 'lazy-core.*.md' --owned-glob 'lazy-guard.*.md')
 ```
 
 The script creates the destination directory, copies absent targets (**installed**), byte-compares the rest (**unchanged**), overwrites every stale target from the shipped source (**refreshed**), and reports owned targets with no source as **kept-orphan** (left in place). Exit code 3 with a non-empty `failed` array means a write did not verify — report it as `failed: <path>`, never as applied.
@@ -430,10 +430,10 @@ Otherwise, perform the following three idempotent operations:
 
 The shim is content-tracked so consumers pick up new shim features (e.g. the `--dev-mode` flag added in lazy-core 0.18) on re-install without manual cleanup.
 
-The shim is install-managed (never locally edited) — sync it with the deterministic triage script, which copies on absence, refreshes on any byte difference, sets the executable bit, and reports the state:
+The shim is install-managed (never locally edited) — sync it with the deterministic triage script, which copies on absence, refreshes on any byte difference, and reports the state:
 
 ```
-Bash(python3 ${CLAUDE_PLUGIN_ROOT}/bin/file_sync.py --src ${CLAUDE_PLUGIN_ROOT}/templates/runtime/lazy.runtime.sh --dst <repo-root>/.claude/bin/lazy.runtime.sh --copy-diverged --chmod-x)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/file_sync.py" --src ${CLAUDE_PLUGIN_ROOT}/templates/runtime/lazy.runtime.sh --dst <repo-root>/.claude/bin/lazy.runtime.sh --copy-diverged)
 ```
 
 State = the receipt's state verbatim: **installed** (was absent), **refreshed** (differed, overwritten), or **unchanged**.
@@ -478,7 +478,7 @@ Host-scoped and unconditional — runs at every install scope, with or without a
 The wrapper is install-managed (never locally edited) — sync it with the same deterministic triage script as the runtime shim, which copies on absence, refreshes on any byte difference, sets the executable bit, and reports the state:
 
 ```
-Bash(python3 ${CLAUDE_PLUGIN_ROOT}/bin/file_sync.py --src ${CLAUDE_PLUGIN_ROOT}/bin/lazy_claude.py --dst $HOME/.local/bin/lazy-claude --copy-diverged --chmod-x)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/file_sync.py" --src ${CLAUDE_PLUGIN_ROOT}/bin/lazy_claude.py --dst $HOME/.local/bin/lazy-claude --copy-diverged --chmod-x)
 ```
 
 State = the receipt's state verbatim: **installed** (was absent), **refreshed** (differed, overwritten), or **unchanged**. Re-copying on drift is safe — the wrapper is self-contained (stdlib only, no plugin imports) and its interface is the `claude` CLI's own.
@@ -579,7 +579,7 @@ The two names differ on purpose: the key is the § 3 `<domain>.<role>` form, the
 
 State one line per candidate: `<expert_key>: registered`.
 
-## Step 11.5: Seed providers (optional)
+## Step 11.5: Seed providers
 
 If Step 9 resolved no repo (outcome `skipped-not-in-git-repo`), inherit that outcome and skip this step (there is no settings file to write).
 
@@ -603,7 +603,7 @@ Otherwise ask **once**:
 
 ```
 Context (print before asking):
-- Where: /lazy-core.install · Step 11.5 — Seed providers (optional); target <repo-root>/.claude/lazy.settings.local.json (`providers`)
+- Where: /lazy-core.install · Step 11.5 — Seed providers; target <repo-root>/.claude/lazy.settings.local.json (`providers`)
 - Found: no `providers` key besides `_version` in the tracked `lazy.settings.json` or the local overlay (probe output: <json>)
 - Why asking: a provider entry lets an expert's `provider` field spawn against a non-Anthropic endpoint (base URL, token variable, four-tier model map) instead of the Anthropic default; which endpoints exist on this host is config nobody can derive
 - Answers: `Yes — name the provider(s)` — a follow-up collects the name(s), each is added now via `/lazy-core.providers add` into the gitignored local overlay, never tracked settings; `No` — nothing written, not persisted, asked again on the next run while the block stays empty (or run `/lazy-core.providers add` any time later)
@@ -827,8 +827,8 @@ else:
 ```
 
 - Output `run-here` → this machine and this checkout are the pair on record; proceed to 13a and install the supervisor. Do NOT ask.
-- Output `not-this-host` → the map is on record and this machine is not in it; go to **13d** (teardown), state **not-this-host**, then skip the supervisor install. Do NOT ask.
-- Output `not-this-checkout` → this machine is on record but drives a different checkout of the project; go to **13d** (teardown), state **not-this-checkout**, print the path the map names, then skip the supervisor install. Do NOT ask — which checkout drives the project is already answered, and re-pointing it is a deliberate edit, not an install-time default.
+- Output `not-this-host` → the map is on record and this machine is not in it; go to **13e** (teardown), state **not-this-host**, then skip the supervisor install. Do NOT ask.
+- Output `not-this-checkout` → this machine is on record but drives a different checkout of the project; go to **13e** (teardown), state **not-this-checkout**, print the path the map names, then skip the supervisor install. Do NOT ask — which checkout drives the project is already answered, and re-pointing it is a deliberate edit, not an install-time default.
 - Output `invalid-shape` → `run_here` is on record as a boolean or a bare host list, left by an install that predates the map. State **run-here-invalid**, print the offending value, and ask the question below — the answer replaces it. The daemon refuses to start until it is replaced, so never leave it as found.
 - Output `unset` → ask once:
 
@@ -886,7 +886,7 @@ print(os.path.basename(root) + '-' + hashlib.sha256(root.encode()).hexdigest()[:
 ```
 
   Hold the printed value as `<REPO_ID>` for 13b/13c. `<REPO_NAME>` (bare basename) is still used only for the human-readable systemd `Description`.
-- **dev-mode** = whether this repo IS a plugin-authoring vault. It is True when `Bash(find <repo-root>/claude -maxdepth 3 -path '*/.claude-plugin/plugin.json' -print -quit)` returns a path, else False. In dev-mode the shim prefers in-repo plugin sources under `<repo-root>/claude/*/` over the cache. Persist the derived value under the flat `daemon` section:
+- **dev-mode** = whether this repo IS a plugin-authoring vault. It is True when `Glob: <repo-root>/claude/*/.claude-plugin/plugin.json` returns at least one path, else False (never `Bash find` — the deny seed in Step 13.5c blocks `find` over repo and home paths). In dev-mode the shim prefers in-repo plugin sources under `<repo-root>/claude/*/` over the cache. Persist the derived value under the flat `daemon` section:
 
 ```bash
 PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
@@ -900,6 +900,8 @@ save_section(p, 'daemon', sec)
 ```
 
 Hold the derived boolean as `<dev_mode>` for 13b/13c.
+
+- **python** = the absolute interpreter the supervisor will hand to the shim. Derive it once: `Bash(python3 -c 'import sys; print(sys.executable)')`. Hold it as `<PYTHON>` for 13b/13c/13d. It is machine-specific and is never written into the tracked `lazy.settings.json`.
 
 - **login-shell / env-files** = operator-provided supervisor options (NOT derived — read verbatim from the `daemon.supervisor` block, alongside `dev_mode`). They give the daemon a login-equivalent environment on headless hosts where launchd/systemd exec the shim without a login shell, so `claude -p` otherwise fails "Not logged in" and `claude` may not resolve in PATH. Both default off → byte-identical behaviour when absent.
 
@@ -921,8 +923,8 @@ for ef in sup.get('env_files', []) or []:
 When the platform is macOS (`darwin`):
 1. **Migrate a legacy basename-only unit (if present).** Older installs named the unit by bare basename. If `~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_NAME>.plist` exists AND its body contains `<string><repo-root></string>` (its `WorkingDirectory` points at THIS checkout — confirm with `Bash(grep -F "<repo-root>" ~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_NAME>.plist)`), it is this checkout's old-scheme unit → `Bash(launchctl unload ~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_NAME>.plist)` then `Bash(rm ~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_NAME>.plist)` before installing the new one. If the legacy file is absent, or exists but points at a DIFFERENT checkout (a same-basename sibling), leave it untouched. State **legacy-unit-migrated** or **no-legacy-unit**.
 2. Read `${CLAUDE_PLUGIN_ROOT}/templates/runtime/com.lazycortex.runtime.plist`.
-3. Substitute `{REPO_ROOT}` → absolute path of `<repo-root>`, `{REPO_ID}` → the per-checkout id from 13a (the shim path is built into the template as `{REPO_ROOT}/.claude/bin/lazy.runtime.sh` — no separate runner-path substitution needed).
-4. **Inject the shim flags** into `ProgramArguments`, between the `lazy.runtime.sh` line and the `{REPO_ROOT}` line, in this order (each is its own `<string>` element; indent matches the surrounding `<string>` lines — 8 spaces). Omit any whose source value is unset:
+3. Substitute `{REPO_ROOT}` → absolute path of `<repo-root>`, `{REPO_ID}` → the per-checkout id from 13a, `{PYTHON}` → `<PYTHON>` (the shim path is built into the template as `{REPO_ROOT}/.claude/bin/lazy.runtime.sh` — no separate runner-path substitution needed).
+4. **Inject the shim flags** into `ProgramArguments`, between the `lazy.runtime.sh` line and the `{REPO_ROOT}` line (the leading `/bin/bash` element is not an anchor), in this order (each is its own `<string>` element; indent matches the surrounding `<string>` lines — 8 spaces). Omit any whose source value is unset:
    - **If `<login_shell>` is True**: a `<string>--login-shell</string>` line.
    - **For each `<env_files>` entry** (in order): a `<string>--env-file</string>` line immediately followed by a `<string><path></string>` line carrying the verbatim path (`--env-file` and its value are two separate array elements).
    - **If `<dev_mode>` is True**: a `<string>--dev-mode</string>` line.
@@ -936,15 +938,32 @@ When the platform is macOS (`darwin`):
 When the platform is Linux:
 1. **Migrate a legacy basename-only unit (if present).** If `~/.config/systemd/user/lazy-core-runtime-<REPO_NAME>.service` exists AND its `ExecStart=` references THIS checkout (confirm with `Bash(grep -F "<repo-root>" ~/.config/systemd/user/lazy-core-runtime-<REPO_NAME>.service)`) → `Bash(systemctl --user disable --now lazy-core-runtime-<REPO_NAME>.service)` then `Bash(rm ~/.config/systemd/user/lazy-core-runtime-<REPO_NAME>.service)` before installing the new one. If absent, or pointing at a different checkout, leave it. State **legacy-unit-migrated** or **no-legacy-unit**.
 2. Read `${CLAUDE_PLUGIN_ROOT}/templates/runtime/lazy-core-runtime.service`.
-3. Substitute `{REPO_ROOT}` → absolute path of `<repo-root>`, `{REPO_NAME}` → basename (used only in the human-readable `Description=`).
-4. **Inject the shim flags** into the `ExecStart=` line (after step 3's substitution). Build a flag prefix and splice it between `lazy.runtime.sh` and `{REPO_ROOT}`, in order: `--login-shell` (if `<login_shell>` is True), then `--env-file <path>` per `<env_files>` entry (quote a path containing spaces), then `--dev-mode` (if `<dev_mode>` is True). With no flags the line is unchanged. Example with all three: `lazy.runtime.sh --login-shell --env-file ~/.claude/.env --dev-mode {REPO_ROOT}`.
+3. Substitute `{REPO_ROOT}` → absolute path of `<repo-root>`, `{REPO_NAME}` → basename (used only in the human-readable `Description=`), `{PYTHON}` → `<PYTHON>`.
+4. **Inject the shim flags** into the `ExecStart=` line (after step 3's substitution; the leading `/bin/bash` element is not an anchor). Build a flag prefix and splice it between `lazy.runtime.sh` and `{REPO_ROOT}`, in order: `--login-shell` (if `<login_shell>` is True), then `--env-file <path>` per `<env_files>` entry (quote a path containing spaces), then `--dev-mode` (if `<dev_mode>` is True). With no flags the line is unchanged. Example with all three: `lazy.runtime.sh --login-shell --env-file ~/.claude/.env --dev-mode {REPO_ROOT}`.
 5. `Bash(mkdir -p ~/.config/systemd/user/)`
 6. Write the rendered unit to `~/.config/systemd/user/lazy-core-runtime-<REPO_ID>.service`.
 7. `Bash(systemctl --user enable --now lazy-core-runtime-<REPO_ID>.service)`
 8. State **systemd-installed** (or **systemd-installed-dev-mode** when `<dev_mode>` is True).
 7. State **systemd-installed** (or **systemd-installed-dev-mode** when `<dev_mode>` is True).
 
-### 13d. Teardown when a host list excludes this host
+### 13d. Record the interpreter for skills and hooks
+
+Skills and hooks shipped by every lazycortex plugin run Python as `"${LAZYCORTEX_PYTHON:-python3}" ${CLAUDE_PLUGIN_ROOT}/bin/<file>`. Make the recorded interpreter reach them: merge `{"env": {"LAZYCORTEX_PYTHON": "<PYTHON>"}}` into `<repo-root>/.claude/settings.local.json` (create the file as `{}` when absent; deep-merge, never overwrite other keys; the file is gitignored — a machine-specific absolute path never enters tracked settings):
+
+```bash
+python3 - "<repo-root>/.claude/settings.local.json" "<PYTHON>" <<'PY'
+import json, sys
+from pathlib import Path
+p, py = Path(sys.argv[1]), sys.argv[2]
+data = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
+data.setdefault("env", {})["LAZYCORTEX_PYTHON"] = py
+p.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+PY
+```
+
+State **python-recorded** (or **python-unchanged** when the value already matched).
+
+### 13e. Teardown when a host list excludes this host
 
 Reached only from the `not-this-host` branch of the gate. Compute `<REPO_ID>` with the 13a snippet (same formula, same inputs), then remove this checkout's supervisor unit **on this host only** — the unit for a checkout that must not run here is either a leak from a synced overlay or a stale install, and leaving it loaded keeps a duplicate daemon alive.
 
@@ -992,7 +1011,7 @@ Block 2 — `<repo-root>/.claude/settings.local.json` (permission scope; loaded 
   "permissions": {
     "additionalDirectories": ["~/.claude/plugins/cache/lazycortex"],
     "allow": ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Skill", "Bash(lazycortex-core *)"],
-    "deny":  ["Bash(find /*)", "Bash(find /Users/*)", "Bash(grep -r /*)", "Bash(grep -R /*)", "Bash(rg /*)", "Bash(rg --files /*)", "Bash(ls /Users/*)"]
+    "deny":  ["Bash(find /*)", "Bash(find /Users/*)", "Bash(find ~/*)", "Bash(grep -r /*)", "Bash(grep -R /*)", "Bash(grep -r ~/*)", "Bash(grep -R ~/*)", "Bash(rg /*)", "Bash(rg --files /*)", "Bash(rg ~/*)", "Bash(rg --files ~/*)", "Bash(ls /Users/*)", "Bash(ls ~/*)"]
   }
 }
 ```
@@ -1074,7 +1093,7 @@ AskUserQuestion:
 1. **Allocate the port** (sequential from 9464; the repo's own recorded port is reused unless a second registered daemon records the same one, in which case this checkout is moved off it):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" metrics-alloc-port --repo-root <repo-root>
+"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" metrics-alloc-port --repo-root <repo-root>
 ```
 
 2. **Persist the split**: design intent (shared across machines) into the tracked file, the per-host port into this checkout's gitignored overlay — a port chosen on one machine may be taken on another, so it must never travel through git/Dropbox:
@@ -1102,7 +1121,7 @@ save_local_section(p, 'daemon', local)
 3. **Regenerate the host scrape-targets file** so an external Prometheus with a `file_sd_configs` pointer picks the daemon up with zero manual edits:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" metrics-scrape-file
+"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" metrics-scrape-file
 ```
 
 ### Outcome

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Curate wiki nodes via /lazy-wiki.relink or daemon routines — curator classifies/links; tag-curator consolidates axis vocabulary via retag.
-last_regen: 2026-09-07
+last_regen: 2026-09-11
 diagram_spec:
   anchor: "How the pieces fit together"
   request: "Flow diagram showing /lazy-wiki.relink driving the curation block: (1) relink-plan produces classify[], link[], drop[] lists; (2) curator agent runs classify per node via apply-node; (3) normalize-tags consolidates the tag vocabulary via retag — dispatched to the tag-curator agent, once per configured surface; (4) build-index rebuilds topics.md; (5) curator agent runs link per node via apply-node; (6) prune-node drops dangling See-also lines for each path in drop[]; (7) relink commits all touched files (including the tag-values dictionary) and records the wiki_synced_sha anchor. Show that the curator agent is dispatched twice (classify phase, link phase) and is distinct from the tag-curator agent dispatched for normalize-tags, that prune-node is a deterministic primitive with no agent dispatch, and that the skill owns the single commit."
@@ -9,7 +9,7 @@ source_skills:
   - lazy-wiki.relink
   - lazy-wiki.curator
   - lazy-wiki.tag-curator
-source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
+source_sha: 3f4c00192599a38cbb9db4308367d5db80ec2dfd
 ---
 # Curation
 
@@ -44,7 +44,7 @@ The skill starts by running `relink-plan`, which inspects the `wiki_synced_sha` 
 
 **Index rebuild.** The skill rebuilds `topics.md` once for the relinked scope, after the normalise pass and before linking — this produces the freshly populated catalog the link phase reads. It also rebuilds the index for any *other* configured scope whose normalise pass changed something, so a scope this run only retagged (not classified or linked) isn't left with a stale catalog; the `domains` surface has no topics index and is never rebuilt. The scope's own topics-index file — the path you set for `topics_index` in `/lazy-wiki.configure`, or any file carrying `wiki_role: topics-index` in its frontmatter — is recognised as the index and never treated as a curatable node, so a relink can never write a summary and See-also section into the file the next index rebuild is about to overwrite wholesale.
 
-**Link phase.** For each node in the link list, the skill first computes a ranked shortlist of topic-overlapping candidates, then dispatches the curator to verify those candidates against the node's content, select the genuinely related ones, gloss each from their `topics.md` entry (verbatim summary — no paraphrase), and apply the `see_also` section via `apply-node`. When the candidate list is empty, the curator selects targets from the full `topics.md` by judgment.
+**Link phase.** For each node in the link list, the skill first computes a ranked shortlist of topic-overlapping candidates, then dispatches the curator to judge them against the node's content. The shortlist is a starting point, never a closed set: the curator verifies those candidates first, but keeps scanning the rest of the `topics.md` catalog for anything the ranking missed — a target the shortlist under-ranked but the node's content plainly justifies is still eligible for See-also, and one the shortlist favored but the content doesn't support gets dropped. Every kept target is glossed from its `topics.md` entry (verbatim summary — no paraphrase) before the `see_also` section is applied via `apply-node`. An empty shortlist means the overlap scorer found nothing close enough for this node yet, not that no related nodes exist — the curator falls back to selecting targets from the full `topics.md` by judgment, the same fallback it uses when no shortlist was computed at all.
 
 **Prune phase.** For each path in the drop list, the skill runs `prune-node` — a deterministic primitive, no curator involved — which drops any dangling See-also line elsewhere in the scope that still points at the now-deleted node. The index rebuild already dropped the node from `topics.md` itself; this phase cleans up the links pointing *at* it.
 

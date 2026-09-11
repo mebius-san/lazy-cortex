@@ -1,7 +1,7 @@
 ---
 name: lazy-runtime.preflight
 description: "Run before wiring a new expert or MCP server into a live routine, and when a routine's expert spawns keep timing out, die instantly, or never produce a response. Emulates each expert launch with a trivial prompt (no real work) to expose the unresolvable agent, missing aspect/protocol, bad `mcp_config` path, or MCP server that hangs at init, then proposes a concrete fix and applies it only after the operator confirms."
-allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(git rev-parse *), Bash(date -u *), Write, Edit, AskUserQuestion, Agent
+allowed-tools: Read, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(git rev-parse *), Bash(date -u *), Write, Edit, AskUserQuestion, Agent
 ---
 # Runtime Preflight
 
@@ -28,7 +28,7 @@ This skill has 5 ordered steps. The executing agent MUST NOT skip, merge, reorde
 Run the bin from the repo root, passing through an optional single-expert argument. When the operator invoked `/lazy-runtime.preflight <name>`, forward `--expert <name>`; otherwise run over every target expert:
 
 ```
-Bash(LAZY_REPO_ROOT="$PWD" python3 "${CLAUDE_PLUGIN_ROOT}/bin/expert_preflight.py" [--expert <name>])
+Bash(LAZY_REPO_ROOT="$PWD" "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/expert_preflight.py" [--expert <name>])
 ```
 
 Parse the JSON on stdout. Its shape:

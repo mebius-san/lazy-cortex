@@ -23,7 +23,7 @@ This file is the law of the wake on which `spec.coordinator` works an asset whos
 | `spec_plan_done` | ready by absence: nothing to plan, no tools. |
 | `spec_develop_done` | ready by absence: an AND over non-`test` tools is true over an empty set. |
 | `spec_tests_passing` | ready by absence: the `test` tool is not in the set. |
-| `spec_released` | an external "the conclusions were handed on" signal — as a rule, a `Publish` tick. |
+| `spec_released` | an external "the conclusions were handed on" signal, reaching the coordinator as an operator word — a ticked `[!question]` option or a `# Coordinator commands` entry. Never a checkbox completing: the type's one checkbox hangs only after this gate has already closed. |
 
 In practice this means the approval of the single document carries the asset from `S0` to `S4` within one coordinator wake: it flips `spec_design_done` on the approval, then the next three in turn, since each of them waits on work the asset does not have. Not one job is dispatched along the way.
 

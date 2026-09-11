@@ -1,7 +1,7 @@
 ---
 name: lazy-experts.install
 description: "Run when the operator asks to set up lazycortex-experts in a repo, to add or complete an expert class (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, `sci-fi`, `fantasy`), or when dispatching an expert fails because `lazy.settings.json` has no matching `experts` entry or no model tier for a generic agent. Unlike the sibling install skills, it syncs no rules — it only seeds composed expert entries per the class map plus agent-model tiers, asks for classes only on a project that has none yet, and never overwrites what an operator chose — the one thing it completes on an existing entry is a missing mandatory cross-cutting aspect. Idempotent and quiet on re-run; install scope is detected."
-allowed-tools: Read, Write, Edit, Glob, Skill, AskUserQuestion, Bash(mkdir -p *), Bash(git rev-parse*), Bash(test *), Bash(date *), Bash(ls *), Bash(python3 *), Bash(lazycortex-core *), Agent
+allowed-tools: Read, Write, Edit, Glob, Skill, AskUserQuestion, Bash(mkdir -p *), Bash(git rev-parse*), Bash(test *), Bash(date *), Bash(ls *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(lazycortex-core *), Agent
 ---
 # Install lazycortex-experts
 
@@ -92,7 +92,7 @@ Context (print before asking):
 - Where: /lazy-experts.install · Step 3 — Determine expert classes; target <lazy.settings.json path from Step 2>
 - Found: experts section <absent | holds only system entries: <keys>>; no domain-class entry on record; available classes <list from the references glob>
 - Why asking: which domains this project works in is project config nothing on disk derives
-- Answers: each selected class — Step 5 seeds one expert per role the class map assigns (technical classes: all twelve engineering roles; sci-fi / fantasy: fiction-writer) into experts now; the set is sticky — later runs derive it from the entries and never re-ask; a class added later is registered by hand (see Notes)
+- Answers: each selected class — Step 5 seeds one expert per role the class map assigns (technical classes: all thirteen engineering roles; sci-fi / fantasy: fiction-writer) into experts now; the set is sticky — later runs derive it from the entries and never re-ask; a class added later is registered by hand (see Notes)
 AskUserQuestion: header "Expert classes", question "Which expert classes should <lazy.settings.json path> register for this project?", multiSelect, one option per available class (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, `sci-fi`, `fantasy`), each described as the domain aspect the generic experts load for it.
 ```
 
@@ -182,7 +182,7 @@ The composed entry's shape:
 
 The `git_author.name` is the expert key with the `.` separator and any `-` replaced by spaces, title-cased (e.g. `claude-plugin.designer` → `Claude Plugin Designer`, `game.interpreter` → `Game Interpreter`). The email pins the canonical local domain so commits attributed to the expert are visibly distinct from operator commits.
 
-`workspace: branch` is seeded ONLY when `<role>` is `developer`, `data-writer`, `docs-writer`, or `tester` — the acceptance-cycle classes `lazycortex-specs.optional-plan-and-auto-implementation.md` describes run their launch-checkbox job and every continuation on a job-scoped branch (`lazy-core.runtime-schema.md` § Workspace). Every other role stays on `workspace: main`, which the schema expresses as the field being absent; the literal `"main"` is never written.
+`workspace: branch` is seeded ONLY when `<role>` is `developer`, `data-writer`, `docs-writer`, or `tester` — the acceptance-cycle classes `lazycortex-specs.optional-plan-and-auto-implementation.md` describes run their launch-checkbox job and every continuation on a job-scoped branch (`lazy-core.expert-runtime-schema.md` § Workspace). Every other role stays on `workspace: main`, which the schema expresses as the field being absent; the literal `"main"` is never written.
 
 **The four roles get the key on every run, not only at creation.** An existing entry for one of those roles with no `workspace` is missing an install-managed value, not carrying an operator's choice — absence is indistinguishable from the default, so there is nothing of the operator's to preserve. Write `workspace: "branch"` in and state `refreshed`. An entry that already carries the key keeps whatever value it holds, in either direction: `"main"` written by hand is a deliberate opt-out and stays. Without this backfill the role set that runs isolated drifts per repository, which is the state ten consumer repos are in — three roles in five of them, four in one, one role in four.
 

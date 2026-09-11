@@ -62,6 +62,21 @@ References are **not always-loaded**; they are read on demand by the resolver, a
 
 Large fenced data blocks (yaml / json / toml that ARE the reference's primary content) are exempt from per-block size caps, matching `lazy-core.rule-writing § 3`.
 
+### 4.1 Splitting is the default remedy
+
+A reference over budget usually carries several subjects no single reader needs together. Extract each into a sibling reference, leave a one-paragraph stub in the parent that keeps the extracted section's original number — so every existing `§ N` citation still resolves to something — and have each sibling name its origin in its opening line. Repoint section-anchored citations at the sibling that now owns them. `lazy-core.runtime-schema.md` and the four siblings its stubs name are the worked example.
+
+### 4.2 `size-waiver:` — the per-file exception
+
+Splitting does nothing for a reference that is genuinely read WHOLE: when every chapter fires on every read, extracting one only moves the same bytes behind a second `Read`. Such a file declares the exception in its own frontmatter:
+
+`size-waiver: "<why the file is read whole, naming the reader it protects>"`
+
+- The value must be a concrete one-line reason **and** name the reader — an agent, a skill, a class of consumer — that loads the file whole. `true` / `yes` / `""` → `FAIL` (invalid waiver), exactly as `lazy-log.logging` treats `logging-waiver`.
+- **Per file, never a moved threshold.** 25 KB and 50 KB stand unchanged for every other reference, and a waived file's real size still appears in the audit's measurement row.
+- It waives the size budget and **nothing else** — every other clause in this rule still applies to a waived file.
+- It lives in frontmatter rather than in a repo-root registry because a reference ships inside its plugin to consumers who have no such registry, and because the audit already parses every reference's frontmatter for `description:` — the waiver costs no extra read and cannot drift away from the file it excuses.
+
 ## 5. Cross-references must resolve
 
 Filenames, paths, slash-commands, and code references mentioned in the body must exist on disk. Broken reference → `WARN`. Same predicate as `lazy-core.rule-writing § 5`.

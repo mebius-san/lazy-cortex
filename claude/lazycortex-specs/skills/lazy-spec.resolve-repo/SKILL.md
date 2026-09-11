@@ -1,6 +1,6 @@
 ---
 name: lazy-spec.resolve-repo
-description: "Dispatched by `lazy-spec.source-url` and by any `spec.*` skill that must turn a repo key from `lazy.settings.json[repos]` into a checkout path, branch, and forge — `lazy-spec.create-from-code`, `lazy-spec.sync-with-code`, `lazy-spec.doctor`, `lazy-spec.product-config`, `lazy-spec.rebase-pins`. Not for direct use: callers never inspect git remotes themselves, they call this once per repo per run and cache the record."
+description: "Dispatched by `lazy-spec.source-url` and by any `spec.*` skill that must turn a repo key from `lazy.settings.json[repos]` into a checkout path, branch, and forge — `lazy-spec.create-from-code`, `lazy-spec.sync-with-code`, `lazy-spec.audit`, `lazy-spec.product-config`, `lazy-spec.rebase-pins`. Not for direct use: callers never inspect git remotes themselves, they call this once per repo per run and cache the record."
 execution-discipline-waiver: "Single-purpose primitive — resolves one repo key against repo-config + known-forges; no multi-phase orchestration where step-skip can hide."
 ---
 # Resolve Repo

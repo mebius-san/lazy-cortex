@@ -2,6 +2,7 @@
 name: lazy-spec.create-feature
 description: "Use when adding a new feature to a product that already has a spec. Built-in wrapper: pins `<category>` to `feature` and delegates — all clarification, scaffolding, prose, and diagrams are owned by `lazy-spec.create-asset`."
 execution-discipline-waiver: "Thin wrapper — pins the category to `feature` and delegates to lazy-spec.create-asset via the Skill tool; the multi-phase orchestration where step-skip can hide lives entirely in the delegate."
+logging-waiver: "pure delegator — lazy-spec.create-asset owns the log"
 ---
 # Create Feature
 

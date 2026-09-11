@@ -5,7 +5,7 @@ description: Multi-step commands — unfolding an operator instruction from # Co
 
 Extracted chapter 7 of `lazy-spec.coordination-playbook.md`, loaded on demand: read this file on a Command wake — a non-empty `# Coordinator commands` section. Every "Chapter N" cross-reference below names a chapter of that common playbook.
 
-An operator instruction dropped into an asset's `# Coordinator commands` section is NOT a checkbox — Markdown canon reserves `- [ ]` for an ask-the-operator gesture, and a command is the reverse: the operator telling the coordinator to act. A non-empty commands section is one of the eight wake triggers (Chapter 1); an empty section is silence.
+An operator instruction dropped into an asset's `# Coordinator commands` section is NOT a checkbox — Markdown canon reserves `- [ ]` for an ask-the-operator gesture, and a command is the reverse: the operator telling the coordinator to act. A non-empty commands section is trigger 3 of the seven live wake triggers (Chapter 1 — eight numbered slots, of which 2 is retired to `spec.catalog-coordinator` and kept only so the others keep their names); an empty section is silence.
 
 **Unfolding into a mini-plan.** On waking to a command, the coordinator expands it into a numbered mini-plan written directly into the SAME section, so the operator sees the plan before execution starts and can intervene between steps. Progress is tracked with a prefix mark at the start of each line — unicode symbols, never markdown checkboxes:
 

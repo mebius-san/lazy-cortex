@@ -4,6 +4,7 @@ description: "Dispatched by the review.coordinator as the repair step when a doc
 tools: Read, Write, Edit, Glob, Grep, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response specialist; no multi-phase orchestration"
+logging-waiver: "pure delegate of the review coordinator — the repair it made rides the coordinator's own wake and its commit"
 ---
 # lazy-review.doc_doctor
 

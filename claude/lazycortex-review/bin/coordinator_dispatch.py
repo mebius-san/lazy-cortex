@@ -510,8 +510,8 @@ def _resolve_core_cli() -> Path | None:
   bin/ worker resolves it independently rather than importing a sibling plugin's Python.
 
   Returns:
-    Absolute path to the resolved binary, preferring `$LAZYCORTEX_PLUGIN_DIRS` over the plugin
-    cache, or None when neither lookup finds one.
+    Absolute path to the resolved binary, taking `$LAZYCORTEX_PLUGIN_DIRS` over the dev-vault
+    sibling tree and that over the plugin cache, or None when no lookup finds one.
   """
   dirs = os.environ.get("LAZYCORTEX_PLUGIN_DIRS", "").split(os.pathsep)
   for d in dirs:
@@ -521,6 +521,12 @@ def _resolve_core_cli() -> Path | None:
     cli = Path(d) / Paths.BIN_DIR / Plugin.CORE
     if cli.is_file():
       return cli
+  # dev-vault stage — this file sits at claude/lazycortex-review/bin/, so core's own bin/ is two
+  # levels up and back down the sibling tree; it must precede the cache (§ 2b) so a checkout runs
+  # the sources at hand rather than whatever version happens to be installed
+  sibling = Path(__file__).resolve().parents[2] / Plugin.CORE / Paths.BIN_DIR / Plugin.CORE
+  if sibling.is_file():
+    return sibling
   cache = Path.home() / Paths.PLUGIN_CACHE
   # guard: no plugin cache on this machine — nothing further to try
   if not cache.is_dir():
@@ -557,16 +563,17 @@ def _core_dispatch_job(repo: Path, bundle: dict) -> dict:
     RuntimeError: When the CLI can't be resolved or exits non-zero.
   """
   cli = _resolve_core_cli()
-  # guard: neither lookup stage found a binary
+  # guard: no lookup stage found a binary
   if cli is None:
     raise RuntimeError(
-        "lazycortex-core CLI not resolvable: $LAZYCORTEX_PLUGIN_DIRS yields no match and the "
-        "plugin cache has no lazycortex-core version with a bin/lazycortex-core entry."
+        "lazycortex-core CLI not resolvable: $LAZYCORTEX_PLUGIN_DIRS yields no match, no "
+        "dev-vault sibling tree carries bin/lazycortex-core, and the plugin cache has no "
+        "lazycortex-core version with a bin/lazycortex-core entry."
     )
   env = os.environ.copy()
   env[EnvVar.LAZY_REPO_ROOT] = str(repo)
   proc = subprocess.run(
-      [str(cli), CoreCommand.DISPATCH_JOB],
+      [sys.executable, str(cli), CoreCommand.DISPATCH_JOB],
       input = json.dumps(bundle), capture_output = True, text = True, env = env, check = False,
   )
   # guard: the CLI call itself failed — surface stdout/stderr for diagnosis

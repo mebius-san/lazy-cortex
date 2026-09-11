@@ -44,9 +44,9 @@ Authors product / feature / change / bug (and operator-defined) specs as Markdow
 
 - `lazy-spec.sync-with-code` — Diff source-repo commits against the last synced commit and propagate relevant changes into a product spec; propose gate flips.
 - `lazy-spec.upstream-run` — Manual, no-daemon counterpart of the `lazy-spec.upstream-tick` routine: mirrors every configured external design source, derives each unit's status, opens a request for a ticked unit, and unfreezes an `in-review` unit whose linked request concluded.
-- `lazy-spec.doctor` — Audit a product spec for staleness, broken links, role/gate/stage inconsistencies; offer targeted fixes.
+- `lazy-spec.audit` — Audit a product spec for staleness, broken links, role/gate/stage inconsistencies; report-only, naming the repair route per finding.
 - `lazy-spec.coverage` — Gap-scan a product's structure map and domain groups against its spec-asset tree; report uncovered capabilities with a proposed category + slug for a retro-spec.
-- `lazycortex-specs pins` (CLI, no skill wrapper) — One-shot backfill: add `wiki_pinned_topics` to every role-bearing spec doc missing it (pre-dates the pin landing in its template, or was scaffolded from an unrefreshed per-product/per-category override). Idempotent, repeatable — `lazy-spec.doctor` reports missing pins but never writes them.
+- `lazycortex-specs pins` (CLI, no skill wrapper) — One-shot backfill: add `wiki_pinned_topics` to every role-bearing spec doc missing it (pre-dates the pin landing in its template, or was scaffolded from an unrefreshed per-product/per-category override). Idempotent, repeatable — `lazy-spec.audit` reports missing pins but never writes them.
 
 ## Primitives (called by other skills)
 

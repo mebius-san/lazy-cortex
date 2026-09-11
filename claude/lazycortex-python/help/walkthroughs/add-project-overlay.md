@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a documentation-guideline clause in the project overlay, then confirm lazy-python.docstring-writer honors it in the generated docstring.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 diagram_spec:
   anchor: "How the overlay and pyproject.toml layers combine"
   request: "Sequence diagram of one flow: the user registers an extra_docstring_sections entry (name/style/anchor/ref_exempt) plus optional d2_exempt_marker_attrs / private_name_allowlist in pyproject.toml [tool.pcf], writes the section's content rules in docs/guidelines/documenting_guidelines.md, and dispatches lazy-python.docstring-writer. The agent reads the plugin's documenting-guidelines canon, then the project overlay (override-on-conflict), then CLAUDE.md's Documenting section if present, applies the merged ruleset plus the pyproject.toml registrations to the target file, then runs chk-py against the changed file to verify. Show the overlay directory and pyproject.toml [tool.pcf] block as the two inputs feeding one agent and one verification command."
@@ -9,7 +9,7 @@ source_skills:
   - lazy-python.install
   - lazy-python.docstring-writer
   - lazy-python.coding-guidelines
-source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Add a project-specific documentation-guideline clause and confirm the docstring writer honors it
 
@@ -34,7 +34,7 @@ After completing this walkthrough you have:
 
 ### Step 1 — Confirm the overlay stub is scaffolded
 
-`/lazy-python.install` Phase 5 is what creates the four overlay stubs under `docs/guidelines/`, including `documenting_guidelines.md`, the one this walkthrough edits. If you already ran `/lazy-python.install` when you first set up the plugin, it's already in place — check that `docs/guidelines/documenting_guidelines.md` exists.
+`/lazy-python.install` Step 5 is what creates the four overlay stubs under `docs/guidelines/`, including `documenting_guidelines.md`, the one this walkthrough edits. If you already ran `/lazy-python.install` when you first set up the plugin, it's already in place — check that `docs/guidelines/documenting_guidelines.md` exists.
 
 If it's missing, re-run:
 
@@ -42,7 +42,7 @@ If it's missing, re-run:
 /lazy-python.install
 ```
 
-The install is idempotent and quiet: Phase 5 creates only the missing stub files and never touches an overlay you've already started editing — safe to re-run mid-project without losing prior work.
+The install is idempotent and quiet: Step 5 creates only the missing stub files and never touches an overlay you've already started editing — safe to re-run mid-project without losing prior work.
 
 ### Step 2 — Understand what lazy-python.docstring-writer reads
 

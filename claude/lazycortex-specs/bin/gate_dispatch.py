@@ -283,7 +283,7 @@ def _core_dispatch_job(repo: Path, bundle: dict) -> dict:
   # `check=False` so a non-zero exit is reported with the actual stdout/stderr below, rather
   # than losing that detail to a bare CalledProcessError
   proc = subprocess.run(
-      [str(cli), _DISPATCH_VERB],
+      [sys.executable, str(cli), _DISPATCH_VERB],
       input = json.dumps(bundle),
       capture_output = True,
       text = True,
@@ -331,7 +331,7 @@ def consume_stale_job(repo: Path, expert: str, job_id: str) -> None:
   # subprocess in this plugin uses — a hung retirement must not stall the serial daemon loop
   try:
     subprocess.run(
-        [str(cli), _CONSUME_VERB],
+        [sys.executable, str(cli), _CONSUME_VERB],
         input = request,
         capture_output = True,
         text = True,

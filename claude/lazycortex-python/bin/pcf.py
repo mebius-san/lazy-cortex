@@ -3433,7 +3433,6 @@ DOCSTRING_SECTIONS_ORDER = [
   'Guarantees',
   'Subclassing',
   'Overriding',
-  'Methods',
   'Notes',
   'Type Parameters',
   'Attributes',
@@ -3445,7 +3444,7 @@ DOCSTRING_SECTIONS_ORDER = [
 
 # sections that must use bulleted lists
 BULLETED_SECTIONS = {
-  'Responsibilities', 'Guarantees', 'Subclassing', 'Overriding', 'Methods', 'Notes',
+  'Responsibilities', 'Guarantees', 'Subclassing', 'Overriding', 'Notes',
 }
 
 # sections that must use definition lists (name: description)

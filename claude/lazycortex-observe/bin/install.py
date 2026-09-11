@@ -665,7 +665,7 @@ def local_scrape_targets() -> list[dict]:
   cli = resolve_core_cli()
   # waiver: external core-CLI subcommand and flag, not internal keys
   proc = subprocess.run(
-    [str(cli), "daemon-list", "--json"],
+    [sys.executable, str(cli), "daemon-list", "--json"],
     capture_output = True, text = True, check = False, timeout = _CORE_CLI_TIMEOUT_SEC,
   )
   # guard: a failing registry call must abort loudly, not render an empty shipper config
@@ -843,7 +843,7 @@ def write_scrape_file_via_core(out: Path | None = None) -> dict:
   import json
   cli = resolve_core_cli()
   # waiver: external core-CLI subcommand and flag, not internal keys
-  argv = [str(cli), "metrics-scrape-file"] + (["--out", str(out)] if out else [])
+  argv = [sys.executable, str(cli), "metrics-scrape-file"] + (["--out", str(out)] if out else [])
   proc = subprocess.run(argv, capture_output = True, text = True, check = False, timeout = _CORE_CLI_TIMEOUT_SEC)
   # guard: a failing scrape-file write must surface, not pass silently
   if proc.returncode != 0:

@@ -2,7 +2,7 @@
 Document-type declarations for the spec catalog — the `doc-type` CLI's resolver half.
 
 A spec document's type is the `spec_doc_type` frontmatter key, and the set of legal values is
-open: this plugin ships nine declarations in `references/lazy-spec.doc-types.json`, and a
+open: this plugin ships its own declarations in `references/lazy-spec.doc-types.json`, and a
 product declares its own under `products[<key>].doc_types.<type>` in `.claude/lazy.settings.json`.
 A declaration carries three independent flags — `stages` (the document carries `spec_stage` and
 is the only kind `lazy-spec.set-stage` accepts), `review` (the document goes through the review

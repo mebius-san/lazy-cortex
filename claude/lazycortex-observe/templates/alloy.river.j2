@@ -34,7 +34,7 @@ prometheus.remote_write "observer" {
   }
 }
 
-// Alloy's own self-metrics endpoint — useful for /lazy-observe.doctor.
+// Alloy's own self-metrics endpoint — useful for /lazy-observe.audit.
 prometheus.exporter.self "agent" {}
 
 prometheus.scrape "agent_self" {

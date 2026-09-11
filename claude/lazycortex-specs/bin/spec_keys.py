@@ -324,8 +324,8 @@ class SiblingDoc:
     DECISIONS: The append-only decisions-registry sibling doc (asset-level; also
       product-level, loose at the product root). Opt-in and lazily created by the `decide`
       primitive — never scaffolded, never opted into review, and carries no `spec_stage`.
-      Deliberately absent from `_SIBLING_BASENAMES` in `coordinator_dispatch.py`: it is not
-      a review-tracked sibling, and no git-watch filter should wake on it.
+      Never a review-tracked sibling: carrying no `review_result`, it transitions nothing and
+      wakes no coordinator, whatever the git-watch filter delivers.
   """
 
   DESIGN = "design.md"

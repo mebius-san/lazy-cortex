@@ -2,7 +2,7 @@
 name: lazy-obsidian.iconize-protocol
 version: 2
 description: Vault-local Iconize protocol — how the Python worker, the bundled `iconize-reloader` Obsidian plugin, and Iconize itself cooperate to compute file/folder icons from frontmatter and apply them at the live `data.json`.
-protocol_version: 2.3.0
+protocol_version: 2.3.1
 hook_version: 4.0.0
 owner_skill: lazy-obsidian.iconize-sync
 ---
@@ -20,6 +20,8 @@ This file describes MECHANICS (resolver inputs/outputs, frontmatter shape, folde
 
 Protocol 2.x — frontmatter-as-source-of-truth. 1.x wrote file-keyed entries into `data.json`; incompatible, migrate via `lazy-obsidian.iconize-install`.
 
+The icon-map states which generation it was written for in its top-level `schema_version`, an integer. The worker accepts `2` and nothing else. The key is effectively mandatory: a map that omits it reads as `1` — the pre-handshake shape — and is refused exactly like any other unsupported value, because a generation is never guessed forward. On refusal the worker writes a one-line stderr diagnostic and goes inert for the run rather than painting under an assumption that may be wrong; `lazy-obsidian.iconize-install` owns the 1 → 2 migration, and re-running it is the fix that diagnostic names. This is the personal icon-map's own key — a plugin-shipped registry carries a `schema_version` of its own, versioned separately under `lazy-obsidian.iconize-registry-contract.md`.
+
 Both `protocol_version` and `hook_version` use SemVer `MAJOR.MINOR.PATCH`. The icon-map's optional `min_hook_version` is checked against the worker's `hook_version` on every run; an unsatisfied requirement sends the hooks inert until the plugin is updated. MINOR/PATCH drift is compatible.
 
 ## Data model
@@ -35,7 +37,7 @@ iconize_color: "#fde68a"
 
 - `iconize_icon` — icon id (required when the resolver fires for the note). Unquoted — icon ids are bare identifiers.
 - `iconize_color` — hex color (optional). **Always double-quoted** because `#` opens a YAML comment when unquoted.
-- Worker adds these keys when the resolver fires and updates them when the resolver's output changes. A note no matcher claims is left untouched — removing an icon is a manual (or owning-manager's) act, never the worker's.
+- Worker adds these keys when the resolver fires and updates them when the resolver's output changes — including `iconize_icon` itself: a note whose icon disagrees with what its type now resolves to is corrected on the next reconcile (see "A state matcher borrows, it does not freeze" below). A note no matcher claims is left untouched — removing an icon is a manual (or owning-manager's) act, never the worker's.
 
 **`data.json` writers — exhaustive:**
 
@@ -63,6 +65,8 @@ Narrowing `paint_roots` therefore leaves icons standing in the areas it closes; 
 
 Paint roots are independent of the reconcile walk's own scope: the walk still skips the infrastructure directories `.obsidian`, `.git`, `.claude`, `.githooks` and never enumerates a template tree at all. The template exemption also outranks the paint roots — a template tree resolves to no match even when it sits inside a listed prefix.
 
+**A state matcher borrows, it does not freeze.** A matcher that resolves `iconName` as `"{{frontmatter.iconize_icon}}"` is saying "whatever icon this note's type gives it" — never "whatever this note is painted right now". It therefore names no icon of its own even on a note that already carries one: the worker keeps that matcher's colour and continues the walk to the lower-priority matcher that owns the icon, which re-resolves it from the type's declaration. The consequence is that **a wrong or missing type icon is repaired on reconcile** — ship a new icon for a document type and existing notes of that type pick it up, wearing whatever colour their current state deserves. Only when nothing below names an icon either does the note's existing key stand as it is, with the colour alone repainted. Full rule: `lazy-obsidian.iconize-registry-contract.md` § 3a.
+
 **No-match keeps, never strips.** Inside a paint root, a note no matcher claims is left untouched: sibling plugins (e.g. lazycortex-specs) write managed `iconize_icon` / `iconize_color` keys of their own, and the absence of a rule is not an instruction to remove them. The worker rewrites the keys only when a matcher resolves a value.
 
 **Templates are never painted.** Every path under a scaffolding-template tree — a plugin's own `claude/<plugin>/templates/**` and the consumer's `.claude/templates/**` override tree — resolves to no match regardless of frontmatter, and the reconcile walk never enumerates it. A template carries the frontmatter of the notes it scaffolds, so a frontmatter-keyed rule would otherwise fire on the template itself: painting it dirties a shipped source file on every reconcile and bakes a stale icon into every note scaffolded from it afterwards.
@@ -77,7 +81,7 @@ Paint roots are independent of the reconcile walk's own scope: the walk still sk
 
 - Plain: `{iconName, iconColor?}`, each value either literal or `{from, key, field?}`.
 - Base + overlays: `{base: {...}, overlays: [{when, iconName, iconColor, priority}]}`.
-- Callback: `{callback: <id>}` — subprocess at `.claude/callbacks/<id>`; for a plugin-registry matcher the vault dir still wins (operator override), the shipping plugin's own `callbacks/<id>` is the fallback.
+- Callback: `{callback: <id>}` — subprocess at `.claude/callbacks/<id>`, launched through the interpreter its shebang names (a file with no shebang is reported on stderr and yields no answer); the exec bit plays no part; for a plugin-registry matcher the vault dir still wins (operator override), the shipping plugin's own `callbacks/<id>` is the fallback.
 
 ## Folder Notes routing
 

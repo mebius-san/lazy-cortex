@@ -87,7 +87,7 @@ def _enum_values(cls: type[object]) -> frozenset[str]:
 
 # Sub-schema per dict-valued field — `(required keys, {field: closed-value-set})`. Moved here with
 # the markers themselves from `note_ops.note_set_key`, which validated the same two shapes while
-# they were frontmatter keys; `lazy-spec.doctor`'s own deep-shape checks read this store. The key
+# they were frontmatter keys; `lazy-spec.audit`'s own deep-shape checks read this store. The key
 # set is closed in both entries; only the coordinator's `trigger` closes its VALUE set too — a
 # launch checkbox's label is playbook vocabulary, including labels a playbook parameterises by
 # tool, so it is validated for shape alone rather than against a list this worker would have to

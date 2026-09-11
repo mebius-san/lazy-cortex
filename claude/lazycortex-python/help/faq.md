@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, knowledge markers, tests, and the checker stack.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -21,7 +21,7 @@ source_skills:
   - review.py
   - lazy-python.coding-guidelines
   - lazy-python.checking-guidelines
-source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Frequently asked questions
 
@@ -65,6 +65,14 @@ Every `chk-py` and `tst-py` invocation resolves the venv chain first, in order: 
 
 ---
 
+## How do I actually run `chk-py` and `tst-py` — bare, or through `sh`?
+
+Two ways, and both are wired up by `/lazy-python.install`. Step 2b deploys `chk-py` and `tst-py` into `~/.local/bin` — the only two files this plugin ever marks executable, since they live outside every repo and no mode-blind git sync can strip the bit off them. Each one walks up from your current directory to the nearest `<repo>/cli/chk-py` (or `tst-py`) and runs it, so once `~/.local/bin` is on your `$PATH`, the bare `chk-py all -q` / `tst-py <module> -q` commands work from anywhere under a repo that has also run Step 2.
+
+If `~/.local/bin` isn't on your `$PATH` yet, use the repo-local copy directly with an explicit interpreter: `sh ./cli/chk-py all -q` / `sh ./cli/tst-py <module> -q` from the repo root. The repo-local `cli/chk-py` / `cli/tst-py` wrappers Step 2 deploys deliberately carry no executable bit — they used to, but a mode-blind git client (obsidian-git on Android, some Windows checkouts) silently strips the bit on pull, which broke the wrapper outright. Running it through `sh` sidesteps that failure mode for good, at the cost of typing `sh` in front of the command when the home wrapper isn't reachable.
+
+---
+
 ## When should I use `/lazy-python.check-style` versus the PostToolUse hook?
 
 The PostToolUse hook runs `pcf.py` automatically on every `.py` edit and surfaces violations inline in the next turn — it is your fast inner loop. `/lazy-python.check-style` is the deeper seven-step review you invoke before committing: it adds a manual pass over semantic issues the automated checkers cannot see (docstring quality, contract consistency, guard-clause coverage, special-comment preservation), then dispatches the full `chk-py all` sweep (which itself ends with the `review` phase) plus `tst-py` to gate the change. Use the hook continuously and `/lazy-python.check-style` at the end of a meaningful edit batch.
@@ -73,19 +81,19 @@ The PostToolUse hook runs `pcf.py` automatically on every `.py` edit and surface
 
 ## Can I run `mypy`, `pylint`, or `ruff` directly instead of `chk-py`?
 
-No. The plugin enforces running all style and type validation through `chk-py`. The aggregator runs `pcf`, `toi`, `cmp`, `mypy`, `ruff`, `pylint`, and `review` in the correct order with shared config from `pyproject.toml`; calling any one tool directly skips earlier phases and can produce misleading results. Similarly, use `tst-py` rather than raw `pytest` — the wrapper applies project-wide pytest args and uses the correct venv.
+No. The plugin enforces running all style and type validation through `chk-py`. The aggregator runs `pcf`, `toi`, `cmp`, `mypy`, `ruff`, `pylint`, and `review` in the correct order with shared config from `pyproject.toml`; calling any one tool directly skips earlier phases and can produce misleading results. Similarly, use `tst-py` rather than raw `pytest` — the wrapper applies project-wide pytest args and uses the correct venv, and it takes the bare module name (`tst-py core -q`, `tst-py rpg -q`), never a file path or a `.py` filename.
 
 ---
 
 ## `chk-py all` finished but printed a "review" step at the end. What is that?
 
-That is the guideline-review phase, the seventh and final step of `chk-py all`. Unlike the other six checks, `review.py` does not run a deterministic tool against your code — it resolves the scope (your current working-tree diff plus untracked files, or explicit paths you pass), collects every applicable canon and overlay layer, and writes a manifest under `.runtime/lazy-python/review/` in your project. It then prints that manifest path and names the `lazy-python.code-reviewer` agent to dispatch against it — a judgement pass over clauses no checker AST-walk can prove (comment purpose and density, `# guard:` semantics, naming-prefix correctness, useless intermediate variables, docstring-vs-code contract drift, suppression hygiene). Dispatch the agent against that manifest; it writes a findings document (FAIL / WARN / INFO) and never edits your code itself. `chk-py review --render <findings.json>` renders the findings the agent already produced, and is what actually clears the gate.
+That is the guideline-review phase, `chk-py review` — its own command, deliberately not a step of `chk-py all`, which runs six deterministic checkers and stops. Unlike those six, `review.py` does not run a deterministic tool against your code — it resolves the scope (your current working-tree diff plus untracked files, or explicit paths you pass), collects every applicable canon and overlay layer, and writes a manifest under `.runtime/lazy-python/review/` in your project. It then prints that manifest path and names the `lazy-python.code-reviewer` agent to dispatch against it — a judgement pass over clauses no checker AST-walk can prove (comment purpose and density, `# guard:` semantics, naming-prefix correctness, useless intermediate variables, docstring-vs-code contract drift, suppression hygiene). Dispatch the agent against that manifest; it writes a findings document (FAIL / WARN / INFO) and never edits your code itself. `chk-py review --render <findings.json>` renders the findings the agent already produced, and is what actually clears the gate.
 
 ---
 
 ## `chk-py all` is failing with `review: PENDING` even though every other check is clean. How do I clear it?
 
-A pending review now fails the gate instead of passing silently past it: `review.py` exits a distinct `PENDING` code (2) whenever the scope has changed since its last review and nobody has decided it yet. Dispatch the `lazy-python.code-reviewer` agent against the manifest path printed just above the `PENDING` line, then run `chk-py review --render <findings.json>` — that render step is what actually clears the gate, and it exits non-zero itself if the agent found a `FAIL`. `review.py` also takes a `--base <ref>` flag to resolve the scope against a landed range (a unit of work that shipped intermediate commits) instead of the current diff plus untracked files. If you genuinely cannot dispatch an agent in that context — a nested writer agent, a scripted sweep — set `CHK_REVIEW=skip` for that single invocation; it exits 0 but records no decision, so the same scope is still pending the next time anyone runs `chk-py all` against it. For CI or automation where the `claude` CLI is installed but no one is present to dispatch manually, set `CHK_REVIEW=headless` instead — `review.py` dispatches the reviewer agent itself through the CLI and renders its findings in the same run. Neither flag is a substitute for an actual review decision; a scope that has not changed since its last real review reuses those findings rather than re-manifesting.
+A pending review now fails the gate instead of passing silently past it: `review.py` exits a distinct `PENDING` code (2) whenever the scope has changed since its last review and nobody has decided it yet. Dispatch the `lazy-python.code-reviewer` agent against the manifest path printed just above the `PENDING` line, then run `chk-py review --render <findings.json>` — that render step is what actually clears the gate, and it exits non-zero itself if the agent found a `FAIL`. `review.py` also takes a `--base <ref>` flag to resolve the scope against a landed range (a unit of work that shipped intermediate commits) instead of the current diff plus untracked files. For CI or automation where the `claude` CLI is installed but no one is present to dispatch manually, set `CHK_REVIEW=headless` — `review.py` dispatches the reviewer agent itself through the CLI and renders its findings in the same run. That is the only `CHK_REVIEW` value the script reads; there is no `skip`, and a context that cannot dispatch asks the operator rather than exiting 0 with nothing decided. A scope that has not changed since its last real review reuses those findings rather than re-manifesting.
 
 ---
 
@@ -140,6 +148,12 @@ Registering the section only tells `chk-py` where it belongs, its list style, an
 ## My classes used to get "Generation Rules" / "Value Ranges" docstring sections automatically. Now `chk-py` flags them as missing. What happened?
 
 As of the 2.0.0 release, `pcf`'s docstring-section and field-name defaults are project-neutral: those two sections, and the hardcoded `_field_filters` private-name escape hatch, no longer ship built in. If your repo relied on them, re-run `/lazy-python.install` to pick up the current `pyproject-defaults.toml` template, then find the commented-out `extra_docstring_sections`, `d2_exempt_marker_attrs`, and `private_name_allowlist` examples under `[tool.pcf]` in your `pyproject.toml` — uncomment and adapt them to your project's actual section names and field names. The install's merge step only appends checker sections that are missing; it never overwrites or removes a `[tool.pcf]` block you've already customised, so this migration is opt-in per repo and safe to run at any time.
+
+---
+
+## `chk-py` used to recognize a built-in `Methods` docstring section. Now it's flagged as unregistered. What happened?
+
+`pcf`'s recognized section set dropped `Methods` — it is no longer a checker-recognized docstring section name, following the same project-neutral cleanup that removed the "Generation Rules" / "Value Ranges" defaults (see the previous question). If your project relies on a `Methods` section, register it explicitly via `[[tool.pcf.extra_docstring_sections]]` in `pyproject.toml` — declare its `style` as `bulleted` to match the section's previous behaviour, and add the section's content rules to `docs/guidelines/documenting_guidelines.md`.
 
 ---
 
@@ -247,9 +261,13 @@ Check that each overlay file still opens with its canonical `# Project additions
 
 ---
 
-## The `chk-py` wrapper is missing or not executable after install.
+## The `chk-py` wrapper is missing after install, or the bare `chk-py` command isn't found.
 
-Re-run `/lazy-python.install` — Phase 2 deploys `cli/chk-py` and `cli/tst-py` and sets the executable bit. If the phase reports `wrappers-deployed-2` but the files are still absent, check that `cli/` exists in your project root; the phase creates it if missing. If the problem persists, run `/lazy-python.audit` (Check 4) to see whether unsubstituted `{{CHK_BIN_PATH}}` placeholders are present, which would indicate an interrupted or partial install.
+Re-run `/lazy-python.install`. Step 2 deploys `cli/chk-py` and `cli/tst-py` into your project root — deliberately with no executable bit, since a mode-blind git client (obsidian-git on Android, some Windows checkouts) can strip the bit on pull and used to break the wrapper outright. Run it explicitly instead: `sh ./cli/chk-py all -q`. If the phase reports `wrappers-deployed-2` but the files are still absent, check that `cli/` exists in your project root; the phase creates it if missing.
+
+Step 2b is the separate step that gives you the bare `chk-py` / `tst-py` command from any directory: it deploys `~/.local/bin/chk-py` and `~/.local/bin/tst-py`, the only files this plugin ever marks executable, since they live outside every repo and no mode-blind client can reach them. Each walks up from your current directory to the nearest `<repo>/cli/chk-py` (or `tst-py`) and runs it through `sh`. If `command -v chk-py` fails after Step 2b runs, `~/.local/bin` is not on your `$PATH` — the install reports this as `path-warning` and never edits your shell rc files itself; add the directory to your `$PATH` by hand, or keep using `sh ./cli/chk-py`.
+
+If the problem persists, run `/lazy-python.audit` (Check 4) to see whether the deployed wrappers open with a leading shebang and whether unsubstituted `{{CHK_BIN_PATH}}` placeholders remain, either of which would indicate an interrupted or partial install.
 
 ---
 
@@ -261,7 +279,7 @@ Run `/lazy-python.audit` Check 5 to confirm which of the six always-on sections 
 
 ## `/lazy-python.install` mentions registering a "code-reviewer expert". What is that for?
 
-Step 7.6 registers `lazy-python.code-reviewer` as an expert in `.claude/lazy.settings.json`. This makes the review phase dispatchable two ways: directly (as `chk-py review` already names the agent) and through the expert runtime, the same dispatch path other plugins use for background or queued work.
+Step 7 registers `lazy-python.code-reviewer` as an expert in `.claude/lazy.settings.json`. This makes the review phase dispatchable two ways: directly (as `chk-py review` already names the agent) and through the expert runtime, the same dispatch path other plugins use for background or queued work.
 
 The entry never overwrites a value you configured yourself, but it does complete or correct the two install-managed fields — `agent` and `aspects` — when a previous install left them out or an update changed the agent this plugin ships. A key merely being present on record is not proof the entry is whole: an entry that is `{}`, or one whose `agent` name has gone stale, resolves to nothing at dispatch time, so a re-run repairs exactly those two fields rather than treating "already on record" as "already correct". Everything else you set on the entry — anything beyond `agent` / `aspects` — is left untouched either way. The outcome you see is `expert-registered` (added from scratch), `expert-refreshed` (an install-managed field was completed or corrected), or `expert-already-registered` (the entry was already whole).
 

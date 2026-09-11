@@ -1,7 +1,7 @@
 ---
 name: lazy-wiki.install
 description: "Run when the operator asks to set up the wiki in a repo, after a lazycortex-wiki update, or when wiki skills fail because the `lazy-wiki.navigation` rule, the `wiki`, `structure`, or `terms` settings section, or the `wiki.curator` / `wiki.terms-curator` / `wiki.structure-curator` / `wiki.tag-curator` expert is missing from the project. Bootstrap only — defining what the wiki covers is `/lazy-wiki.configure`, what the terms dictionary covers is `/lazy-wiki.configure terms`, and the structure map's profiles and routines are `/lazy-wiki.configure structure`. Idempotent and quiet on re-run; install scope is detected, never asked."
-allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *), Bash(ls *), Bash(python3 *), Bash(lazycortex-core *), Bash(lazycortex-wiki *), Agent
+allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *), Bash(ls *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(lazycortex-core *), Bash(lazycortex-wiki *), Agent
 ---
 # Install lazycortex-wiki
 
@@ -149,7 +149,7 @@ Ensure the `structure` key exists. If absent, add:
 }
 ```
 
-`exclude` seeds with `docs/structure.md` itself and nothing else — the one mandatory entry (`lazy-wiki.structure`'s `rebuild` mode would otherwise describe the map inside the map). `depth_profiles` seeds empty; classes are per-repo and there is no configure wizard yet, so an operator adds them by hand-editing this key.
+`exclude` seeds with `docs/structure.md` itself and nothing else — the one mandatory entry (`lazy-wiki.structure`'s `rebuild` mode would otherwise describe the map inside the map). `depth_profiles` seeds empty; classes are per-repo, and `/lazy-wiki.configure structure` is the wizard that collects and writes them.
 
 `exclude` is mandatory and is completed on a present section exactly as the `wiki` keys above are: a `structure` section holding only `_version` is the stub `settings-get` returns for an unwritten section, and accepting it leaves the map describing itself.
 
@@ -206,7 +206,7 @@ Outcome: `agent-models: <seeded-N|unchanged|no-entries>`.
 
 ## Step 8: Register curator experts + routines
 
-The `wiki.curator` and `wiki.terms-curator` **experts** are dispatch-routing config — the entries that resolve which agent + aspects run when each curator is dispatched. Both are registered **unconditionally**, exactly like any other expert (not daemon-gated). The three wiki **routines** (`lazy-wiki.scan`, `lazy-wiki.scan-deletes`, `lazy-wiki.relink-weekly`) are registered unconditionally too: `/lazy-runtime.tick` fires them on a checkout with no daemon, so `daemon.enabled` gates nothing here. The non-daemon parts of this install (rule, settings section, doc-kind axis, `agent_models`, template dir, CLI allow-pattern) are done by Steps 3–7 and Step 9.
+The `wiki.curator` and `wiki.terms-curator` **experts** are dispatch-routing config — the entries that resolve which agent + aspects run when each curator is dispatched. Both are registered **unconditionally**, exactly like any other expert (not daemon-gated). The five wiki **routines** (`lazy-wiki.scan`, `lazy-wiki.scan-deletes`, `lazy-wiki.relink-weekly`, `lazy-wiki.doctor-apply`, `lazy-wiki.tag-normalize`) are registered unconditionally too: `/lazy-runtime.tick` fires them on a checkout with no daemon, so `daemon.enabled` gates nothing here. The non-daemon parts of this install (rule, settings section, doc-kind axis, `agent_models`, template dir, CLI allow-pattern) are done by Steps 3–7 and Step 9.
 
 ### Expert (always registered)
 
@@ -331,7 +331,7 @@ Same `<current-branch>` substitution as `lazy-wiki.scan`. No `filter` block — 
 }
 ```
 
-**`lazy-wiki.doctor-apply`** — daily deterministic sanitizer; applies only the doctor's fixable finding set (`orphan-topic`, `index-desync`, `see-also-path-base`, `broken-see-also`, `stale-gloss` — pure index/link derivations, never mirror or content findings) across every scope and commits what it repaired:
+**`lazy-wiki.doctor-apply`** — daily deterministic sanitizer; applies only the `lazycortex-wiki doctor --apply` CLI's fixable finding set (`orphan-topic`, `index-desync`, `see-also-path-base`, `broken-see-also`, `stale-gloss` — pure index/link derivations, never mirror or content findings) across every scope and commits what it repaired:
 
 ```json
 "lazy-wiki.doctor-apply": {

@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about vault setup, Iconize, diagram render glue, the vault manifest, plugin updates, and tag pages for lazycortex-obsidian.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 no_diagram: true
 source_skills:
   - lazy-obsidian.install
@@ -14,7 +14,7 @@ source_skills:
   - lazy-obsidian.audit
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: 74f5515593a4aa6587f57c7df78a2fa5a85ee56f
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Frequently asked questions
 
@@ -69,6 +69,12 @@ Yes, intentionally. Versions of `lazy-obsidian.iconize-install` up to 2.x instal
 ## How do I add a new icon rule for a folder or file type?
 
 Run `/lazy-obsidian.iconize-config`. The wizard walks you through picking a registry, then adding a key with an icon name (Lucide PascalCase with `Li` prefix, or an emoji) and an optional color. After saving, run `/lazy-obsidian.iconize-sync reconcile` so the new rule is applied across all notes.
+
+---
+
+## Why didn't a note's icon go away after I removed its matching rule?
+
+That's expected: `reconcile` and `sync` only rewrite a note when its resolved icon actually changes to a new value. A note that no matcher claims any more keeps whatever `iconize_icon` / `iconize_color` it already carries — no subcommand strips those keys automatically, because another manager could have written them and a blind clear would destroy that. If you want the icon gone, remove the two keys from the note's frontmatter by hand.
 
 ---
 

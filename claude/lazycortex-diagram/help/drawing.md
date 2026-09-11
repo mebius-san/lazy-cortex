@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Insert new diagrams and refresh existing ones — dispatcher picks kind and format from your prose, writer agents render against shipped templates and style schemes.
-last_regen: 2026-09-07
+last_regen: 2026-09-11
 diagram_spec:
   anchor: "How draw and fix route a request"
   request: "Flow showing the dispatch path: user invokes draw or fix → dispatcher validates inputs and resolves kind/format → format-compatibility check → writer agent selected (mermaid or ASCII) → byte-compare → fence written or skipped. Include the split-into-N and skipped-below-threshold outcomes as exit branches."
@@ -10,7 +10,7 @@ source_skills:
   - lazy-diagram.fix
   - lazy-diagram.draw-mermaid
   - lazy-diagram.draw-ascii
-source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Insert and refresh diagrams in your documentation
 
@@ -36,9 +36,9 @@ You can pin `kind=`, `format=`, or `scheme=` to override any part of the resolut
 
 ### `/lazy-diagram.fix` — in-place re-conformer
 
-`/lazy-diagram.fix` targets a heading that already has a fence. It infers kind and format from the fence's own syntax marker — `flowchart` maps to `flow`, `sequenceDiagram` to `sequence`, `architecture-beta` to `architecture`, a top-level directory path in a `text` fence to `fs-tree`, and so on — so you do not need to know what kind the fence was drawn as. It then reads the surrounding prose in the host section as the request and re-dispatches the same writer agent pipeline used by `/lazy-diagram.draw`.
+`/lazy-diagram.fix` targets a heading that already has a fence. For a Mermaid fence it infers kind and format from the syntax marker — `flowchart` maps to `flow`, `sequenceDiagram` to `sequence`, `architecture-beta` to `architecture`, and so on — so you do not need to know what kind the fence was drawn as. A `text` (ASCII) fence carries no such marker, so fix reads the body's shape instead, testing six ordered rules from most specific to most general: tree characters with a trailing `/` or a ` ← <note>` annotation mean `fs-tree`; tree characters without either mean `tree` (a taxonomy); boxes with no connectors and a chrome-sample inventory (`[ Primary button ]`, `( Spinner ... )`) mean `controls-scheme`; boxes with no connectors that tile one surface mean `layout`; connectors where every multi-exit box is a labelled `<Question?>` diamond mean `decision-tree`; anything else with connectors is `flow`. It then reads the surrounding prose in the host section as the request and re-dispatches the same writer agent pipeline used by `/lazy-diagram.draw`.
 
-Use fix when a diagram has drifted: the palette changed when a new scheme shipped, the init directive format evolved, or the terminology in the host prose was renamed after the fence was first drawn. Fix brings the fence back to the current contract in place. If fix cannot disambiguate kind from a plain `flowchart` marker, it surfaces the candidate list and asks you to pin `kind=` for that call.
+Use fix when a diagram has drifted: the palette changed when a new scheme shipped, the init directive format evolved, or the terminology in the host prose was renamed after the fence was first drawn. Fix brings the fence back to the current contract in place. If fix cannot disambiguate kind — a plain `flowchart` marker that could be several Mermaid kinds, or an ASCII body that matches none of the six shape rules or mixes features from two of them — it surfaces the candidate list and asks you to pin `kind=` for that call rather than guess and redraw the wrong shape.
 
 If there is no fence under the anchor yet, fix fails — it does not create new fences. Use `/lazy-diagram.draw` for that.
 
@@ -48,7 +48,7 @@ If there is no fence under the anchor yet, fix fails — it does not create new 
 
 Each agent reads two sources: the kind's template file (structure, roles, idioms, and a style-only exemplar) and, for Mermaid, the named scheme file (`styles-<scheme>.json`). The scheme supplies the init directive, hex values per role, and text constants. The agent substitutes roles with scheme hex, emits the init directive byte-for-byte from the scheme, and returns the fence body — no surrounding backticks, no prose, no narration. The dispatcher wraps and writes.
 
-The Mermaid agent covers flow, sequence, state, ERD, class, architecture, layout, nav, tree, controls-scheme, decision-tree, screen-scheme, journey, mindmap, Gantt, and timeline. The ASCII agent covers flow, fs-tree, and layout — kinds where character-art communicates structure more directly than a rendered graph would.
+The Mermaid agent covers flow, sequence, state, ERD, class, architecture, layout, nav, tree, controls-scheme, decision-tree, screen-scheme, journey, mindmap, Gantt, and timeline. The ASCII agent covers controls-scheme, decision-tree, flow, fs-tree, layout, and tree — kinds where character-art communicates structure more directly than a rendered graph would.
 
 Every node label the Mermaid agent emits in a `flowchart` or `graph` diagram is quoted — `id["text"]` — even when the label looks plain. This closes a real rendering bug: Mermaid reads the character right after the opening bracket as a shape modifier, so a label starting with a slash (natural when a node is named after a slash-command, e.g. `/lazy-wiki.install`) used to produce `[/lazy-wiki.install …]`, an unterminated parallelogram that never renders. Quoting also means a label can carry parentheses, brackets, `#`, and `-` without you escaping anything. Practically: you can name a flow/architecture node after any slash-command and trust it to render.
 

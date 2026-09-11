@@ -10,7 +10,7 @@ Checks:
   check1 — rules mirror integrity (consumer .claude/rules/ matches plugin canon)
   check2 — references cited from rules resolve to plugin reference files
   check3 — plugin tree has all required artifacts
-  check4 — wrappers deployed (consumer cli/{chk,tst}-py executable + substituted)
+  check4 — wrappers deployed (consumer cli/{chk,tst}-py shebang-led + substituted)
   check5 — pyproject.toml contains the six always-on checker sections ([tool.pch] is optional)
   check6 — PyCharm inspect.sh is available on $PATH (probe)
   check7 — overlay scaffolding files carry the canonical header
@@ -158,6 +158,7 @@ class Check3ArtifactsPresent:
     ("rules/lazy-python.tests.md", "tests rule"),
     ("references/lazy-python.coding-guidelines.md", "coding canon"),
     ("references/lazy-python.documenting-guidelines.md", "documenting canon"),
+    ("references/lazy-python.comment-guidelines.md", "comment canon"),
     ("references/lazy-python.testing-guidelines.md", "testing canon"),
     ("references/lazy-python.checking-guidelines.md", "checking canon"),
     ("references/lazy-python.guidelines-index.md", "index"),
@@ -203,7 +204,8 @@ class Check3ArtifactsPresent:
 # ----------------------------------------------------------------------------------------
 class Check4Wrappers:
   """
-  Verify consumer `cli/chk-py` and `cli/tst-py` are deployed, executable, and have substituted bin paths.
+  Verify consumer `cli/chk-py` and `cli/tst-py` are deployed, open with a shebang, and have
+  substituted bin paths.
 
   Attributes:
     consumer_dir: Absolute path to the consumer repository root.
@@ -217,7 +219,7 @@ class Check4Wrappers:
 
   def run(self) -> dict:
     """
-    Check both wrappers for presence, executable bit, and placeholder substitution.
+    Check both wrappers for presence, a leading shebang, and placeholder substitution.
 
     Returns:
       Finding dict with `severity` (PASS, WARN, or FAIL) and a `message` string.
@@ -230,16 +232,16 @@ class Check4Wrappers:
       if not wrapper.exists():
         missing.append(name)
         continue
-      if not os.access(wrapper, os.X_OK):
-        missing.append(f"{name} (not executable)")
+      if not wrapper.read_text(encoding = "utf-8").startswith("#!"):
+        missing.append(f"{name} (no shebang)")
         continue
       if self.PLACEHOLDER.search(wrapper.read_text()):
         broken.append(name)
     if broken:
       return {"severity": "FAIL", "message": f"wrappers contain unsubstituted placeholders: {broken}"}
     if missing:
-      return {"severity": "WARN", "message": f"wrappers missing or not executable: {missing}"}
-    return {"severity": "PASS", "message": "both wrappers deployed, executable, and substituted"}
+      return {"severity": "WARN", "message": f"wrappers missing or no shebang: {missing}"}
+    return {"severity": "PASS", "message": "both wrappers deployed, shebang-led, and substituted"}
 
 
 # ----------------------------------------------------------------------------------------

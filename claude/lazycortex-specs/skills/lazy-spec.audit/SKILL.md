@@ -1,34 +1,37 @@
 ---
-name: lazy-spec.doctor
-description: Use when checking a product spec for staleness, broken links, missing sections, role/header violations, or inconsistencies with the actual source code — audits a product's folder tree, status folder-notes (flat gate booleans), per-file stages, source links, and wikilinks, then reports issues grouped by severity and offers targeted fixes. Read-only by default; pass `--apply` to write fixes.
+name: lazy-spec.audit
+description: Use when checking a product spec for staleness, broken links, missing sections, role/header violations, or inconsistencies with the actual source code — audits a product's folder tree, status folder-notes (flat gate booleans), per-file stages, source links, and wikilinks, then reports issues grouped by severity with the repair route named per finding. Read-only always: it writes nothing, and the repairs are the operator's to run.
 ---
-# Spec Doctor
+# Spec Audit
 
-Audit a product specification for validity, consistency, and staleness. Reports issues and offers fixes. Naming, folder structure, header section, wikilink format, gate model, per-file stages, and file-role rules are owned by `${CLAUDE_PLUGIN_ROOT}/references/` — this skill enforces them but never inlines the patterns.
+Audit a product specification for validity, consistency, and staleness. Reports issues and names each one's repair route; it never applies one. Naming, folder structure, header section, wikilink format, gate model, per-file stages, and file-role rules are owned by `${CLAUDE_PLUGIN_ROOT}/references/` — this skill enforces them but never inlines the patterns.
 
-`lazy-spec.doctor` validates STATE only — frontmatter, body structure, cross-links, and source references. It never changes product config or runs migrations: there are no existing customers and no legacy model to migrate from. It validates the current flat-gate model and ignores any artifact from an older model (legacy product `spec.cfg-<product>.md` files, `## Workflow` sections, `gates:` dicts) rather than detecting or migrating them.
+`lazy-spec.audit` validates STATE only — frontmatter, body structure, cross-links, and source references. It never writes a spec file, never changes product config, and never runs migrations: there are no existing customers and no legacy model to migrate from. It validates the current flat-gate model and ignores any artifact from an older model (legacy product `spec.cfg-<product>.md` files, `## Workflow` sections, `gates:` dicts) rather than detecting or migrating them.
+
+Fix/waive orchestration over these findings belongs to `/lazy-core.doctor`, which delegates to this audit and drives whatever loop the operator wants; this skill only measures.
 
 ## Execution discipline (MANDATORY — read before any action)
 
 This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
-   - `Step 0 — Resolve product`
-   - `Step 1 — Dispatch parallel scan agents A/B/C/D`
-   - `Step 2 — Cross-reference + upstream + wiki-companion + vault-spec checks (inline)`
-   - `Step 3 — Merge findings by severity`
-   - `Step 4 — Report`
-   - `Step 5 — Fix loop (per-finding AskUserQuestion, apply on --apply)`
-   - `Step 6 — Log the run`
-2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `clean`, `no-source-binding`, `skipped-per-user-choice`, `read-only`).
+   - `Step 0 — Resolve product (Check 0)`
+   - `Step 1 — Parallel scanning`
+   - `Step 2 — Cross-reference check (Check 8, inline in coordinator)`
+   - `Step 3 — Upstream sources check (Check 9, inline in coordinator)`
+   - `Step 4 — Wiki companion check (Check 10, inline in coordinator)`
+   - `Step 5 — Vault-spec check (Check 11, inline in coordinator)`
+   - `Step 6 — Output (Report)`
+   - `Step 7 — Log the run`
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `clean`, `no-source-binding`, `read-only`).
 3. **Do not reach the Report step until the ledger shows the prior tasks `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
-4. **The Report step is a structural verifier.** Its output MUST contain one line per Agent (A/B/C/D) plus Check 0, Check 8, Check 9, and Check 10. A missing line is a bug; do not render the report with gaps.
+4. **The Report step is a structural verifier.** Its output MUST contain one line per Agent (A/B/C/D) plus Check 0, Check 8, Check 9, Check 10, and Check 11. A missing line is a bug; do not render the report with gaps.
 
 ## Input
 
-The user provides the product key (the operator-chosen `products` key) or a path under a product's `spec_path`. If omitted, ask which product to check — context first: where (`/lazy-spec.doctor · Input`), found (the keys under `lazy.settings.json[products]`, each code-bound or design-only), why asking (no product or path was named), answers (one option per key — that product is checked; `all products` — every key is iterated; nothing persisted); `AskUserQuestion` header "Product", question "Which registered product should the doctor check?", one option per key plus `all products`, each with a description. Can also run on all products: iterate `lazy.settings.json[products]`.
+The user provides the product key (the operator-chosen `products` key) or a path under a product's `spec_path`. If omitted, ask which product to check — context first: where (`/lazy-spec.audit · Input`), found (the keys under `lazy.settings.json[products]`, each code-bound or design-only), why asking (no product or path was named), answers (one option per key — that product is checked; `all products` — every key is iterated; nothing persisted); `AskUserQuestion` header "Product", question "Which registered product should the audit check?", one option per key plus `all products`, each with a description. Can also run on all products: iterate `lazy.settings.json[products]`.
 
-Accepts an optional `--apply` flag. Without it, the skill is **read-only** — it reports findings and stops at the Report step (the fix loop only previews what it would do). With `--apply`, the per-finding fix loop offers to write each fix via `AskUserQuestion`.
+There is no apply flag and no fix mode. The skill is **read-only in every invocation** — it reports findings and stops at the Report step. Each finding carries the route that repairs it (§ Repair routes); running that route is the operator's move.
 
 ## Step 0 — Resolve product (Check 0)
 
@@ -38,10 +41,10 @@ Resolve the product record from `lazy.settings.json[products]` — there is NO `
 2. **`record` null** — the product is not registered. Report as an error and stop: "product `<key>` is not in `lazy.settings.json[products]`; register it via `/lazy-spec.product-config`." Do NOT proceed.
 3. **`record` present** — capture `spec_path` (required, vault-relative), optional `source` (`{ repo, paths }`), optional `language` (default `en`), `icon` (optional), and the two declaration blocks `asset_types` / `tool_types` (default `{}` each — the product's own declarations merge key-by-key over the plugin's shipped ones at `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.asset-types.json` and `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.tool-types.json`). The merged pair is what every type / tool check below resolves against; carry it into the Agent C and Agent D prompts.
    - Verify `spec_path` exists as a directory. Missing → error.
-   - Verify the product folder leaf (basename of `spec_path`) is not a reserved name (`vision`, `design`, `tech`, `use-cases`, or `decisions`): such a slug makes the product folder-note (`<leaf>.md`) collide with the product-level docs of those names at the root (FAIL, per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md` Part 3). No auto-fix — the operator must rename the product.
+   - Verify the product folder leaf (basename of `spec_path`) is not a reserved name (`vision`, `design`, `tech`, `use-cases`, or `decisions`): such a slug makes the product folder-note (`<leaf>.md`) collide with the product-level docs of those names at the root (FAIL, per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md` Part 3). No auto-fix — the operator must rename the product.
    - **Code-bound** (`source` block present) — resolve `source.repo` via the `lazy-spec.resolve-repo` primitive to get `{ local_path, branch, host, owner, repo, forge, base_url, … }`. Resolution failure (repo key not registered in `lazy.settings.json[repos]`, missing `local_path`, no git remote, unknown host with no `forge:` override on the repo record) is an error — report the underlying cause. Code-bound products run the full check set (A + B + C + D).
    - **Design-only** (no `source` block) — there is no code to diff. Run structural-only checks: A (link health, minus source-URL host matching), C (role/header), D (status/gates/folders). Skip Agent B (source staleness) entirely with outcome `no-source-binding`.
-   - **Repo records** — repos live in the `lazy.settings.json[repos]` section (read via `lazycortex-core settings-get repos`); `lazy-spec.resolve-repo` reads them. Verify each referenced repo record's `branch` matches the checkout's actual default branch; a mismatch breaks every source link (error, offer to rewrite in `--apply`).
+   - **Repo records** — repos live in the `lazy.settings.json[repos]` section (read via `lazycortex-core settings-get repos`); `lazy-spec.resolve-repo` reads them. Verify each referenced repo record's `branch` matches the checkout's actual default branch; a mismatch breaks every source link (error; the repair is the operator's edit to the `repos` record, via `/lazy-spec.product-config` or by hand).
 4. **All products** — iterate every key in `lazy.settings.json[products]` (skip the `_version` schema marker) and run the check set per product.
 
 Outcome: `code-bound` / `design-only` / `unregistered` / `all-products(<N>)`.
@@ -56,11 +59,11 @@ Severity vocabulary: `PASS` / `WARN` / `FAIL`. Budget per agent: "Report under 6
 2. The relevant per-check rules from the agent slice below — the coordinator copies the right slice into each prompt rather than asking the agent to discover them.
 3. The structured-report contract.
 
-The coordinator (the main session) does NOT scan files itself — it dispatches the four agents, awaits their structured reports, merges findings by severity, and drives the interactive fix loop. The cross-reference scan (Check 8) runs inline in the coordinator because it is small and one-shot.
+The coordinator (the main session) does NOT scan files itself — it dispatches the four agents, awaits their structured reports, and merges findings by severity. The cross-reference scan (Check 8) runs inline in the coordinator because it is small and one-shot.
 
 ### Agent A — link health
 
-Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md` (Wikilinks) and `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.sources-protocol.md`.
+Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md` (Wikilinks) and `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.sources-protocol.md`.
 
 - **Wikilinks** — extract every `[[wikilink]]` from every `.md` under `<spec_path>`:
   - **Bare wikilink (FAIL)** — any target without a `/`. Role-only basenames collide by design; the path-qualified form is required. Propose `[[<path>|<display>]]`.
@@ -94,7 +97,7 @@ Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.sources-protocol.md`. Diff the d
 
 ### Agent C — role & header violations
 
-Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`, `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`, and `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.lifecycle-protocol.md`.
+Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md` and `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.lifecycle-protocol.md`.
 
 - **`spec_role` closed set** — every role-bearing spec doc carries `spec_role` in one of the closed set `{vision, use-cases, design, architecture, ui-design, code-plan, test-plan, code-report, test-report, bug, tech, status, decisions, product, catalog}`. Any other value (including the removed `layout`, `human-tasks`, `changelog`, `plan`, and any `*-index` role) is a FAIL. The last two are the LEVEL roles and belong only on a level note — a product's folder-note (`product`) or the catalog root's (`catalog`); on any other document a level role is a FAIL. Group and category folder-notes remain operator-zone and carry NO `spec_role` at all (validated by Agent D) — finding one on a group container is a FAIL.
 - **Level document links in `spec_source_docs` (FAIL)** — an entry in any document's `spec_source_docs` whose target is a system document of a level: `vision` / `design` / `ui-design` / `tech` loose at the content root or at a product root. A level document is read by rule, not by reference (`lazy-experts.research-aspect` names them as the mandatory opening read), so `spec_source_docs` carries only what the layout does not already imply — requests and cross-links between assets and products. Name the document and the offending entries; the fix is a hand cleanup — drop each offending entry from the key and its bullet from the `## Docs` projection in the same edit. There is no verb for this: the sweep was a one-shot migration, not a maintained primitive. **A request file is exempt** — a request under `<content-root>/requests/` cites the document that raised it (a `request-draft` candidate names its `--source` there), which is the cross-link the key still carries, not a level document read by rule.
@@ -105,8 +108,8 @@ Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`, `${CLAUDE_P
   - An `architecture` document is legal exactly where the owning asset's type playbook (`asset_types.<type>.playbook`) provides for one. Presence under an asset whose type playbook describes no architecture step → FAIL, naming the doc and the playbook. The symmetric direction — the type playbook names an architecture step and the asset carries no such document — is judged only against the asset's gate state (§ Gate/stage coupling below), never as a standalone finding: an asset that has not reached that step yet has nothing missing.
   - The asset status folder-note (basename matches its own folder) → `spec_role: status`. That note is what makes the folder an asset; nothing else does.
   - `decisions.md` lives ONLY at the product root (`<spec_path>/decisions.md`) or directly under an asset folder (beside that folder's status note) — never anywhere else. Opt-in and lazily created by the `decide` primitive — absence is never a finding on its own.
-  - Source URLs / `source_branches:` are permitted ONLY on documents of type `tech`, `code-plan`, and `test-plan`. A source URL or `source_branches:` on any other type (including `code-report` / `test-report` / `decisions`) is a FAIL (propose to move into the tech file / strip the frontmatter).
-- **Header section** — every role-bearing authored doc must start with the expected H1 (`# <title> — <role>`) per `lazy-spec.layout-protocol.md`; a leftover breadcrumb line (`> **…** · **…** — <role>`) is a finding too — that form is removed. Mismatch is a FAIL — the header is the file's identity under role-only filenames. (The status folder-note carries NO `# <slug> — status` title H1; that form is removed.)
+  - Source URLs / `source_branches:` are permitted ONLY on documents of type `system-tech`, `code-plan`, and `test-plan` — `tech` is a `spec_role` value, never a declared `spec_doc_type`, so `doc-type resolve tech` finds nothing. A source URL or `source_branches:` on any other type (including `code-report` / `test-report` / `decisions`) is a FAIL (propose to move into the tech file / strip the frontmatter).
+- **Header section** — every role-bearing authored doc must start with the expected H1 (`# <title> — <role>`) per `lazy-spec.file-roles-protocol.md`; a leftover breadcrumb line (`> **…** · **…** — <role>`) is a finding too — that form is removed. Mismatch is a FAIL — the header is the file's identity under role-only filenames. (The status folder-note carries NO `# <slug> — status` title H1; that form is removed.)
 - **Status note protected sections** — the status folder-note (the note whose basename matches its own folder and whose frontmatter carries `spec_role: status`) MUST carry six plugin-owned H1 sections, each tagged as its first content line: `# Summary` (`#protected/spec/summary`), `# Gates` (`#protected/spec/gates`), `# Status brief` (`#protected/spec/status-brief`), `# Coordinator rules` (`#protected/spec/coordinator-rules`), `# Coordinator commands` (`#protected/spec/coordinator-commands`), and `# History` (`#protected/spec/history`). A missing section or a duplicate → FAIL. These tags are the ownership markers; no other H1 in the status note may carry a `#protected/spec/*` tag. `# Coordinator rules` and `# Coordinator commands` are owned by the `spec` plugin domain like every other protected section here (the protected-sections contract behind those tags binds other PLUGINS to preserve them byte-for-byte, never the operator) — but the plugin's own writer inside that domain differs per section: the operator writes `# Coordinator rules` by hand, and `spec.coordinator` locks progress marks into `# Coordinator commands` and clears it on completion. This agent checks `# Summary`, `# Gates`, and `# History` directly (above); `# Status brief`, `# Coordinator rules`, and `# Coordinator commands` — the three markers `note-check` validates — are checked by Agent D via `note-check` below rather than re-derived here.
 - **Required sections** — keyed on the document's TYPE, never on the folder it sits in: a `design` document carries non-empty `## Overview` and `## Behavior` sections (the live design template's identity and substance sections — Overview / Goals / Design / Behavior / Known Limitations / Boundaries; the older Requirements/Changes roster is gone); a `bug` document carries non-empty `## Way to reproduce`, `## Observed behavior`, `## Expected behavior`; a present `architecture` document carries non-empty `## Overview` and `## Module boundaries` sections, mirroring the `design` type's own requirement — an architecture doc that exists but is still template placeholder prose is a doc that never should have promoted past `draft`. Missing/empty → FAIL.
 - **`spec_stage` closed set + tag mirror** — which documents carry a stage is decided by the `stages` flag of their type's declaration, never by a list of names here. Four FAILs:
@@ -114,7 +117,7 @@ Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`, `${CLAUDE_P
   - the type carries `stages: false` and the document has a `spec_stage` — FAIL (the shipped `code-report` / `test-report` / `data-report` / `docs-report` / `decisions` are the standing instances of this, not the rule itself);
   - the value falls outside the closed set `{empty, draft, approved, rejected, cancelled, deferred}` (including the removed `review` / `done` / `wtr`) — FAIL;
   - the **tag mirror is broken** — the `spec/<stage>` entry in `tags:` must track `spec_stage` in lock-step (per `lazy-spec.lifecycle-protocol.md` → status mirror tag; `lazy-spec.set-stage` is the only writer of both); a missing, stale, or duplicated `spec/*` tag is a FAIL.
-  - the **attachment mirror is broken** — a markdown attachment (`spec_owner_doc` present) whose `spec_stage` differs from its owner's, while the attachment does NOT carry `review_active: true`, is a FAIL: the key is a derived mirror (`lazy-spec.layout-protocol.md` § Attachments) and the cascade or the coordinator's reconciliation should have caught it up. An attachment in its own review is skipped — the catch-up lands on the finalize wake.
+  - the **attachment mirror is broken** — a markdown attachment (`spec_owner_doc` present) whose `spec_stage` differs from its owner's, while the attachment does NOT carry `review_active: true`, is a FAIL: the key is a derived mirror (`lazy-spec.file-roles-protocol.md` § Attachments) and the cascade or the coordinator's reconciliation should have caught it up. An attachment in its own review is skipped — the catch-up lands on the finalize wake.
 
   The fix is `lazy-spec.set-stage <doc> <current-stage>` (re-syncs the tag), or `lazy-spec.set-stage <doc> draft|approved` to map a removed value.
 - **Cancellability** — `spec_stage: cancelled` is FAIL, always, on the asset's start document (the type declaration's `start_doc`, e.g. `design.md:design` for a feature, `bug.md:bug` for a bug) and on a present `architecture` document: an asset is abandoned as a whole through `spec_cancelled`, never through the document that defines it. A `tech` document and a tool's plan document (`tool_types.<tool>.plan_doc` — the shipped `code-plan` / `test-plan`) may be `cancelled`.
@@ -123,14 +126,14 @@ Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`, `${CLAUDE_P
   - **Missing `Status:` line (FAIL)** — a `## D-NNN — <thesis>` heading whose following metadata block carries no `Status:` line.
   - **Header mismatch (FAIL)** — the file's leading `# <title> — decisions` H1 does not match its own path + role, same rule as every other role-bearing doc's header check above.
   - **Duplicate `D-NNN` (FAIL)** — two `## D-NNN — …` headings in the same file share a number. The primitive's own file-lock prevents this under normal operation; a duplicate here means the lock was bypassed (a hand-edit, or a lock broken mid-write) — no auto-fix, the operator resolves which record keeps the number.
-  - **Missing `wiki_pinned_topics` doc-kind pin (WARN, report-only)** — only when a spec-scope is configured in `wiki.scopes` (skip entirely otherwise — an unconfigured wiki has nothing to be wrong, same honesty rule as Check 10). A `decisions.md`, or any other role-bearing doc, whose `wiki_pinned_topics` lacks its expected `wiki/doc-kind/<role>` entry. **The doctor never backfills a missing pin itself** — it has a standing "no migration, ever" rule and a vault-wide pin sweep is exactly that; the fix is the dedicated `lazycortex-specs pins` CLI verb (a separate, later addition), run once and re-run after any bulk content import.
+  - **Missing `wiki_pinned_topics` doc-kind pin (WARN, report-only)** — only when a spec-scope is configured in `wiki.scopes` (skip entirely otherwise — an unconfigured wiki has nothing to be wrong, same honesty rule as Check 10). A `decisions.md`, or any other role-bearing doc, whose `wiki_pinned_topics` lacks its expected `wiki/doc-kind/<role>` entry. **The audit never backfills a missing pin itself** — it has a standing "no migration, ever" rule and a vault-wide pin sweep is exactly that; the fix is the dedicated `lazycortex-specs pins` CLI verb (a separate, later addition), run once and re-run after any bulk content import.
 - **Decision statement in the wrong document (WARN)** — a `[!decision] … #spec/decision` block (a full decision statement, not a candidate) found in a document that is not a living doc, i.e. whose type does NOT carry both `stages: true` and `append_only: false`. Two examples of what the predicate cuts off:
   - **A plan** (a tool's `plan_doc` — the shipped `code-plan` / `test-plan`; `stages: true`, but a plan is a decomposition of already-accepted decisions, never their source): propose raising the block into the asset's design (or tech / architecture) document instead.
   - **A report** (a tool's `report_doc` — the shipped `code-report` / `test-report` / `data-report` / `docs-report`; `append_only: true`): a report only ever holds a decision-*candidate*; propose rewriting the block as one, or raising it into the living doc through the normal review round.
 
 ### Agent D — status folder-notes + gates + per-file stages + folders + intake
 
-Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.lifecycle-protocol.md`, `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`, and `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.request-protocol.md`.
+Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.lifecycle-protocol.md`, `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.status-note-protocol.md`, `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`, and `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.request-protocol.md`.
 
 **Asset enumeration — the status note is the boundary**
 
@@ -139,7 +142,7 @@ Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.lifecycle-protocol.md`, `${CLAUD
 
 **Top-level folders**
 
-- Folder layout under `<spec_path>` is free — a folder the operator invented is never a finding, and there is no expected folder roster to be a subset of. One placement rule survives: a top-level `docs/` folder is the **removed product-docs subfolder** (FAIL) — product-level `design.md` / `tech.md` now live loose at the product root; in `--apply` offer to move them up and delete `docs/`.
+- Folder layout under `<spec_path>` is free — a folder the operator invented is never a finding, and there is no expected folder roster to be a subset of. One placement rule survives: a top-level `docs/` folder is the **removed product-docs subfolder** (FAIL) — product-level `design.md` / `tech.md` now live loose at the product root. Report-only: name the move (files up to the product root, `docs/` deleted) and leave it to the operator — this skill never relocates content.
 
 **Status folder-notes**
 
@@ -155,7 +158,7 @@ Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.lifecycle-protocol.md`, `${CLAUD
 - **`coordinator_job` deep shape** — when the `job_markers` block carries one, it MUST have exactly the three keys `trigger`, `expert`, `job_id`, and `trigger` MUST be one of the closed set `{operator-edit, command, answer, job-done, doc-transition, dependency-ready, asset-released}` (`lazy-spec.coordination-playbook.md` § 1's wake triggers plus the level coordinator's own upward one, minus the two that never persist a job record — routing and the drive-hook). A missing key or a `trigger` value outside the closed set → FAIL.
 - **Launch-checkbox labels** — every `[!gate] <label>` block found in `# Gates` (a block carrying a `- [ ]`/`- [x]` line) MUST carry a non-empty `<label>`; the wire shape is `lazy-spec.lifecycle-protocol.md` Part 3. **There is no closed label set to check against, and this skill MUST NOT reintroduce one.** Which labels exist on an asset is declared by its type playbook and the playbooks of the tools in its `spec_tools`, including labels a playbook parameterises by tool (`Start implementation (code)`, `Start implementation (data)`); `spec.coordinator` reconciles exactly that declared set (`lazy-spec.coordination-playbook.md` Chapter 5). A label that no playbook of this asset's type or tools accounts for is a WARN, not a FAIL — the playbooks are prose and this reading is a judgment, so report it and let the operator decide. A malformed block (no label at all, or a checkbox line outside any `[!gate]` callout) → FAIL.
 - Managed `iconize_icon` (and `iconize_color` when the type declaration carries a color) — see Icon drift below.
-- Old-style `## Gates` / `## History` H2 sections without a plugin-owned H1 wrapper are an old-shape artifact — flag as FAIL but do NOT auto-rewrite (report-only, no `--apply`). The canonical shape (all six protected H1s, including `# Coordinator rules` and `# Coordinator commands`) is Agent C's own check, above.
+- Old-style `## Gates` / `## History` H2 sections without a plugin-owned H1 wrapper are an old-shape artifact — flag as FAIL but never rewrite (report-only). The canonical shape is the shipped `asset-note.md` roster — seven protected H1s in order (`# Summary`, `# Gates`, `# Attachments`, `# Status brief`, `# Coordinator rules`, `# Coordinator commands`, `# History`), per `lazy-spec.status-note-protocol.md` § Status body format. That roster is the TEMPLATE, not the check scope: `note-check` requires five of them on a status note (`# Gates`, `# Status brief`, `# Coordinator rules`, `# Coordinator commands`, `# History`) — `# Summary` is plugin-rendered (`summary_render`) and outside its concern, and `# Attachments` is optional on a status note, required only on a level note. Presence and order against that required roster is Agent C's own check, above, delegated to `note-check` rather than re-derived here.
 
 **Level notes — the catalog root and each product root**
 
@@ -168,7 +171,7 @@ The two folder-notes `spec.catalog-coordinator` owns (`${CLAUDE_PLUGIN_ROOT}/ref
 
 **Linear gate precedence (S0..S5)**
 
-- The five gates are a strict ladder (`lazy-spec.lifecycle-protocol.md` → Linear map): each true gate requires every earlier gate true. Order: `spec_design_done` → `spec_plan_done` → `spec_develop_done` → `spec_tests_passing` → `spec_released`. A later gate true while an earlier gate is false is a **precedence violation** (FAIL) — name the offending pair. In `--apply`, the fix loop offers two resolutions and the operator picks one: turn the orphaned later gate off (the `--off` direction), or halt the asset instead via `lazycortex-specs flip-gate <asset> --halt "later gate true while an earlier gate is false"` (the `HaltReason.GATE_PRECEDENCE` phrase) when the break looks like more than a stray flip.
+- The five gates are a strict ladder (`lazy-spec.lifecycle-protocol.md` → Linear map): each true gate requires every earlier gate true. Order: `spec_design_done` → `spec_plan_done` → `spec_develop_done` → `spec_tests_passing` → `spec_released`. A later gate true while an earlier gate is false is a **precedence violation** (FAIL) — name the offending pair. Name both repair routes with the finding and let the operator pick: `/lazy-spec.flip-gate <asset> <gate> --off` to turn the orphaned later gate off, or `lazycortex-specs flip-gate <asset> --halt "later gate true while an earlier gate is false"` (the `HaltReason.GATE_PRECEDENCE` phrase) to halt the asset instead when the break looks like more than a stray flip.
 - **`spec_cancelled` overlay** — `spec_cancelled: true` freezes the gates (no flips). It is orthogonal to the ladder; a cancelled asset with any gate state is sane (no precedence enforcement while cancelled). `spec_cancelled` must be a boolean.
 
 **Gate ⇔ per-file stage coupling**
@@ -200,20 +203,20 @@ The two folder-notes `spec.catalog-coordinator` owns (`${CLAUDE_PLUGIN_ROOT}/ref
 **Dependency graph field**
 
 - **`spec_depends_on`** — optional; on any asset, naming the assets it needs (`lazy-spec.coordination-playbook.md` § 8's dependency graph, and a decomposer's own children). When present it MUST parse as a list; each element is a **path relative to the product's `spec_path`**, resolved exactly like a `spec_targets` token: it must land on a directory under `spec_path` whose folder-note carries `spec_role: status`. It is a path, not a `<kind>/<slug>` pair — no segment is matched against a type name or a declaration. An unresolvable token → WARN (name the asset and the offending token), same severity as an unresolvable `spec_targets` entry.
-- **Self-dependency and direct cycles → FAIL.** An asset naming itself in its own `spec_depends_on` → FAIL. A direct two-node cycle (asset A's `spec_depends_on` names B, and B's `spec_depends_on` names A) → FAIL, name both assets. This check is cheap — only the asset under scan plus its immediate dependencies' own `spec_depends_on` lists, no further graph walk. A longer cycle (A → B → C → A) is NOT this check's job: walking the full dependency graph on every scan is the coordinator's own judgment call when it proposes a working order (playbook § 8's "leaves of the graph outward"), not a mechanical doctor pass — the split is deliberate, not a gap.
+- **Self-dependency and direct cycles → FAIL.** An asset naming itself in its own `spec_depends_on` → FAIL. A direct two-node cycle (asset A's `spec_depends_on` names B, and B's `spec_depends_on` names A) → FAIL, name both assets. This check is cheap — only the asset under scan plus its immediate dependencies' own `spec_depends_on` lists, no further graph walk. A longer cycle (A → B → C → A) is NOT this check's job: walking the full dependency graph on every scan is the coordinator's own judgment call when it proposes a working order (playbook § 8's "leaves of the graph outward"), not a mechanical audit pass — the split is deliberate, not a gap.
 - **Decomposer `spec_develop_done` coupling → FAIL.** `spec_develop_done: true` on an asset with a non-empty `spec_depends_on` AND no report document of its own (the decomposer shape — Chapter 8: its own "implementation" IS its children, so it authors no tool report) implies EVERY named child's own `spec_develop_done` reads `true` — any child false or unresolved → FAIL, naming the decomposer and the offending child. An asset that DOES carry a tool's report document is an ordinary tool-driven asset that merely happens to declare dependencies (Chapter 8's bottom-up order) — this coupling does not apply to it.
 
 **Operator-zone folder-notes + container-note protected section + icon drift**
 
 - The product folder-note (`<spec_path>/<leaf>.md`) and each container folder-note (any other folder-note under `<spec_path>` whose own folder carries no `spec_role: status` — the `features/` / `changes/` / `bugs/` / `requests/` folders the product scaffold creates, and any folder the operator adds) are operator-zone folder-notes: they carry NO `spec_role`, NO `*-index` role, NO dataviewjs. Finding `spec_role` on one → FAIL. Container folder-notes additionally carry a `description` frontmatter key (operator-authored prose; the plugin only reads it) — absent on a container folder-note is a WARN.
-- **Product and container folder-note `# Coordinator rules` section (WARN)** — the product folder-note (`<spec_path>/<leaf>.md`) and every container folder-note under it SHOULD each carry a `# Coordinator rules` H1 section — the product- and group-scoped layers of `lazy-spec.coordination-playbook.md` § 2's rule chain (playbook → vault doc → product note → container notes top-down → asset note), read by `spec.coordinator` on every asset the layer covers before it decides anything. Missing → WARN, not FAIL: an operator who has not yet needed product- or group-wide constraints has nothing wrong, just nothing written. In `--apply`, offer to add an empty section carrying the same `#protected/spec/coordinator-rules` tag the asset-note and group-note templates carry.
-- **Container-note `#protected/spec/summary` section** — the product root folder-note and every container folder-note MUST each carry a `# Summary` section whose first content line is `#protected/spec/summary`. That section body MUST contain both a `<!-- spec:precis:* -->` marker and a `<!-- spec:stats:* -->` marker (used by the plugin to inject generated precis text and aggregate stats). Missing `# Summary` section → FAIL. Missing either marker inside the section → FAIL. Stats-marker content staleness is NOT a doctor finding — stats are kept fresh by event-driven writes and do not require periodic validation. Asset status folder-notes carry a `# Summary` section with a precis marker only — no stats marker required on assets; apply that narrower check only to asset notes. (The vault-root `requests/` inbox note is validated separately in Check 8, which is the only check that runs outside any product's `spec_path`.)
+- **Product and container folder-note `# Coordinator rules` section (WARN)** — the product folder-note (`<spec_path>/<leaf>.md`) and every container folder-note under it SHOULD each carry a `# Coordinator rules` H1 section — the product- and group-scoped layers of `lazy-spec.coordination-playbook.md` § 2's rule chain (playbook → vault doc → product note → container notes top-down → asset note), read by `spec.coordinator` on every asset the layer covers before it decides anything. Missing → WARN, not FAIL: an operator who has not yet needed product- or group-wide constraints has nothing wrong, just nothing written. The repair is the operator adding an empty section carrying the same `#protected/spec/coordinator-rules` tag the asset-note and group-note templates carry — name it with the finding; this skill never writes the scaffold.
+- **Container-note `#protected/spec/summary` section** — the product root folder-note and every container folder-note MUST each carry a `# Summary` section whose first content line is `#protected/spec/summary`. That section body MUST contain both a `<!-- spec:precis:* -->` marker and a `<!-- spec:stats:* -->` marker (used by the plugin to inject generated precis text and aggregate stats). Missing `# Summary` section → FAIL. Missing either marker inside the section → FAIL. Stats-marker content staleness is NOT an audit finding — stats are kept fresh by event-driven writes and do not require periodic validation. Asset status folder-notes carry a `# Summary` section with a precis marker only — no stats marker required on assets; apply that narrower check only to asset notes. (The vault-root `requests/` inbox note is validated separately in Check 8, which is the only check that runs outside any product's `spec_path`.)
 - **`iconize_icon` drift (WARN)** — the managed `iconize_icon` on each operator-zone folder-note must match its config source of truth. Resolve the expected value:
   - Product folder-note → `products[<key>].icon` (absent in config ⇒ no `iconize_icon` expected; a stray one is the drift).
   - Container folder-note → the `icon` of the asset type whose merged declaration names that folder as its `default_path` (shipped: `features` → `LiRocket`, `changes` → `LiRefreshCcw`, `bugs` → `LiBug`), plus the vault-shaped `requests` → `LiInbox` for the inbox container. A container no declaration points at has no expected icon — neither its presence nor its absence is drift.
   - The asset status folder-note's `iconize_icon` mirrors the icon of its OWN type's declaration (`asset_types[<spec_asset_type>].icon`), never the folder it sits in and never the base an `alias_of` names — an alias borrows only its base's playbook, its paint stays its own. Drift → WARN. An asset at `spec_asset_type: unknown` (or missing the key — already a FAIL above) has no resolvable icon: skip the check rather than propose one.
   - A typed document's `iconize_icon` mirrors its own `spec_doc_type` declaration's `icon` (`products[<key>].doc_types` over the shipped `references/lazy-spec.doc-types.json`) — the seed the scaffold wrote at creation. Drift → WARN. A document whose type declares no `icon` has none expected.
-  - `iconize_color` on a CONTAINER folder-note mirrors the same declaration's `color` when it carries one; a stray `iconize_color` with no declared color, or a mismatch, is a WARN. In `--apply`, offer to rewrite the managed `iconize_*` keys to the declared value.
+  - `iconize_color` on a CONTAINER folder-note mirrors the same declaration's `color` when it carries one; a stray `iconize_color` with no declared color, or a mismatch, is a WARN. The repair is rewriting the managed `iconize_*` keys to the declared value — name the declared value in the finding so the operator can apply it.
   - **`iconize_color` on an asset status folder-note is NEVER checked.** Its colour is owned by the iconize registry (`references/lazy-spec.iconize-registry.json`), which paints the folder from `spec_state`, `spec_halted`, and `spec_cancelled` — a render-time DERIVED value that the worker writes back into frontmatter on every run. The type declaration's `color` reaches a status note only as the seed before the first paint. Comparing the two would report drift on every healthy asset, and proposing a rewrite would fight the matcher until the next run undid it. Skip `iconize_color` on every note carrying `spec_role: status`; the same holds for a typed document, whose colour the stage matchers own once it has a stage.
   - **Document colour is checked only before the first stage.** A document carrying no `spec_stage` is still on its seed, so its `iconize_color` must match the declaration's; one that has a stage is the stage matchers' and is skipped.
 
@@ -237,7 +240,7 @@ This check runs once, vault-wide — not scoped to any single product's `spec_pa
 
 - Verify the product is referenced in any relevant index pages.
 - A loose `<spec_path>/changelog.md` is a FAIL: the role is removed from the model. The fix is to delete the file (its history has migrated into per-doc `# History` H1 sections maintained by the review system, and the status folder-note's `# History` H1 section of each asset).
-- **Requests-inbox `#protected/spec/summary` section** — the vault-root `requests/requests.md` inbox note (at `<content-root>/requests/requests.md`, outside any product's `spec_path`) MUST carry a `# Summary` section whose first content line is `#protected/spec/summary`. That section body MUST contain both a `<!-- spec:precis:* -->` marker and a `<!-- spec:stats:* -->` marker. Missing `# Summary` section → FAIL. Missing either marker → FAIL. This check is report-only — no `--apply` auto-rewrite.
+- **Requests-inbox `#protected/spec/summary` section** — the vault-root `requests/requests.md` inbox note (at `<content-root>/requests/requests.md`, outside any product's `spec_path`) MUST carry a `# Summary` section whose first content line is `#protected/spec/summary`. That section body MUST contain both a `<!-- spec:precis:* -->` marker and a `<!-- spec:stats:* -->` marker. Missing `# Summary` section → FAIL. Missing either marker → FAIL. The repair is the operator's edit to the inbox note.
 
 ## Upstream sources check (Check 9, inline in coordinator)
 
@@ -250,7 +253,7 @@ Run `Bash(lazycortex-specs upstream-doctor)`. It prints one JSON object: `{confi
   - `missing-note` — a unit directory carries `source/` or `processed/` but no own note file.
   - `tag-status-mismatch` — a unit note's `tags:` list does not mirror its own `spec_upstream_status`.
   - `processed-without-snapshot` — a unit note reads `processed` but `processed/` is missing or empty.
-  - `dangling-request-link` — a `in-review` unit's request link is missing or no longer resolves (§ 8's own doctor-visible mutex — this worker never fixes it itself; the fix loop offers the reset, above).
+  - `dangling-request-link` — a `in-review` unit's request link is missing or no longer resolves (§ 8's own audit-visible mutex — the tick never fixes it itself). Repair route: `Bash(lazycortex-specs upstream-doctor --apply)`, which releases every such unit through the tick's own writer — `spec_upstream_status` back to `drifted` when `processed/` exists, else `new`, the stale `spec_upstream_request` line gone, `source/` / `processed/` untouched, one atomic bot commit per unit. It prints `{configured, reset, skipped}`; a unit whose `processed/` exists but is empty classifies as neither status and comes back under `skipped` for the operator to resolve by hand. Never run it from this skill — the audit only measures.
   - `unknown-action-label` — a unit note's `# Actions` section carries a checkbox label outside the closed `UpstreamAction` set (`Take into work`, `Process update`, `Postpone`).
   - `clone-origin-mismatch` — a configured source's working clone points at a different remote than its current `url` (Task 4's own guard, named here for the operator).
   - `unconfigured-source` / `unconfigured-mount` — a `upstream/<repo-key>/` or `upstream/<repo-key>/<mount>/` subtree exists on disk with no matching config entry (§ 12: "the subtree exists, the config entry does not") — report only; `lazy-spec.upstream-tick` never deletes an unconfigured subtree itself, and neither does this skill.
@@ -277,7 +280,7 @@ Runs once, vault-wide, like Checks 8–10. The content-root `vision.md` (the vau
 Merge the four agents' findings plus Check 0, Check 8, Check 9, Check 10, and Check 11, then print a report grouped by severity. The report MUST contain one line per Agent (A/B/C/D) plus Check 0, Check 8, Check 9, Check 10, and Check 11 — a missing line is a bug. Checks 9–11 run exactly once per invocation (not once per product, even under "all products") — render each scan line once, at the end.
 
 ```
-## <Product Name> — Spec Doctor Report
+## <Product Name> — Spec Audit Report
 
 scan: Check 0 resolve-product — <code-bound|design-only|unregistered>
 scan: Agent A link-health — <PASS|WARN|FAIL> (<N> findings)
@@ -287,6 +290,7 @@ scan: Agent D status-gates-folders-intake — <PASS|WARN|FAIL> (<N> findings)
 scan: Check 8 cross-reference — <PASS|WARN> (<N> findings)
 scan: Check 9 upstream — <PASS|FAIL|skipped:not-configured> (<N> findings)
 scan: Check 10 wiki-companion — <clean|INFO> (<0|1> findings)
+scan: Check 11 vault-spec — <clean|INFO|WARN> (<0|1> findings)
 
 ### Errors (must fix)
 - [ ] Bare wikilink: `[[design]]` in `features/<feat>/code-plan.md:<line>` — use `[[<path>|<display>]]`
@@ -327,7 +331,7 @@ scan: Check 10 wiki-companion — <clean|INFO> (<0|1> findings)
 - [ ] Gate/stage coupling: `spec_design_done: true` but `design.md.spec_stage: draft` (must be approved)
 - [ ] Release coupling: `spec_released: true` but `code-plan.md.spec_stage: draft` (every present doc must resolve before release)
 - [ ] Old-shape H2 sections: `features/<feat>/<feat>.md` carries `## Gates`/`## History` H2 without a `#protected/spec/*` H1 wrapper — old-model artifact (report-only; no auto-rewrite)
-- [ ] Missing protected section: `features/<feat>/<feat>.md` has no `# Summary` (`#protected/spec/summary`) — status note must carry Summary, Gates, and History protected H1 sections
+- [ ] Missing protected section: `features/<feat>/<feat>.md` has no `# Summary` (`#protected/spec/summary`) — the section belongs to the seven-H1 template roster every status note is scaffolded with
 - [ ] Missing protected section: `features/<feat>/<feat>.md` has no `# Gates` (`#protected/spec/gates`)
 - [ ] Missing protected section: `features/<feat>/<feat>.md` has no `# History` (`#protected/spec/history`)
 - [ ] Duplicate protected section: `features/<feat>/<feat>.md` has two `# Summary` sections
@@ -380,47 +384,40 @@ scan: Check 10 wiki-companion — <clean|INFO> (<0|1> findings)
 - All gates precedence-consistent
 ```
 
-## Fix loop
+## Repair routes
 
-After the report, in **read-only mode (no `--apply`)** stop here — the report is the deliverable. State clearly that no files were changed and that re-running with `--apply` enables fixes.
+The report is the deliverable and the run ends with it. State clearly that no file was changed. Every finding carries its route so the operator can act on it without re-deriving the fix; naming the route is this skill's whole contribution to repair, and running it is never this skill's move.
 
-In **`--apply` mode**, walk the errors and warnings and, **per finding**, call `AskUserQuestion` (one question per fix) before writing — each iteration fills the block from that finding:
+For every finding, state the exact file, the specific issue, and the route:
 
-```
-Context (print before asking):
-- Where: /lazy-spec.doctor · Step 5 — Fix loop; target <file>:<line or section>
-- Found: [<SEVERITY>] <finding title> — <the offending value or line, quoted>
-- Why asking: no fix is written without per-finding confirmation, and some findings have two legal fixes
-- Answers: `<fix>` — exactly what the fix writes (e.g. rewrite the wikilink to `[[<path>|<display>]]`, run `lazy-spec.set-stage <doc> <stage>`), landing now in the named file; `<alternative>` when one exists (e.g. halt the asset instead of turning the gate off); `skip` — the finding stays in the report, re-raised on the next run
-AskUserQuestion: header "<check name>", question "<finding> in <file> — apply <fix>?", options with descriptions.
-```
+| Finding class | Route |
+|---|---|
+| Stage / tag mirror drift | `/lazy-spec.set-stage <doc> <current-stage>` — the only writer of both keys; never raw-edit the tag |
+| Precedence-orphaned gate | `/lazy-spec.flip-gate <asset> <gate> --off`, or `lazycortex-specs flip-gate <asset> --halt "later gate true while an earlier gate is false"` to halt instead |
+| Missing gate boolean, unrecognised `spec_*` key | `lazycortex-specs note-set-key <asset_dir> <key> <value>` / `note-drop-key <asset_dir> <key>` |
+| Missing `spec_doc_type` / `spec_asset_type` / `wiki_pinned_topics` | `lazycortex-specs doc-type backfill` / `asset-type backfill` / `lazycortex-specs pins` |
+| Level-note schema drift (product or catalog root) | `lazycortex-specs catalog-note backfill (<product> \| --root)` |
+| Tech-file routes / constants behind the code | `/lazy-spec.sync-with-code` |
+| Product or repo record wrong (`spec_path`, `branch`, declarations) | `/lazy-spec.product-config` |
 
-For every finding, state the exact file, the specific issue, and what the fix concretely does. Typical fixes:
+The rest have no owning skill or CLI verb — report the concrete edit and leave it to the operator:
 
 - Rewrite a bare wikilink to path-qualified form.
-- Strip a forbidden source URL / `source_branches:` from a role that may not carry it (move the URL into the tech file when the user confirms).
-- Re-sync a `spec/<stage>` tag to its `spec_stage` value (delegate to `lazy-spec.set-stage <doc> <current-stage>` — never raw-edit the tag).
-- Turn off a precedence-orphaned gate (`lazy-spec.flip-gate <asset> <gate> --off`), or, presented as the alternative option in the same question, halt the asset instead (`lazycortex-specs flip-gate <asset> --halt "later gate true while an earlier gate is false"`).
-- Add a missing gate boolean to a status folder-note.
-- Rewrite a drifted `iconize_icon` / `iconize_color` to the declared value.
-- Add missing routes/functions or update changed values in the tech file.
-- Add a missing `# Coordinator rules` / `# Coordinator commands` section to a status folder-note (empty except for the template's `#protected/spec/coordinator-rules` / `#protected/spec/coordinator-commands` tag), or a missing `# Coordinator rules` section to a product or container folder-note (same tag) — never write content into either, only the empty tagged scaffold; the operator authors the constraints.
-- On a `dangling-request-link` finding (Check 9, § 13), offer the doctor's own fix (§ 8: "the doctor catches it and offers the fix"): reset the unit note's `spec_upstream_status` to `drifted` when `processed/` exists, else `new`, and clear the stale `spec_upstream_request` line — the same fallback the tick's own release branch would have written had the request resolved. Never touch `source/` / `processed/` themselves.
-
-Never auto-fix without the per-finding confirmation. **Never** change product config in `lazy.settings.json`, run any migration, or touch a doc's content beyond the specific approved fix.
-
-When `--apply` writes fixes, the audit trail is the per-doc `# History` entries written by the canonical writers it delegates to (`lazy-spec.set-stage`, `lazy-spec.flip-gate`) plus this skill's own run log under `.logs/claude/lazy-spec.doctor/`. There is no product-wide changelog to update.
+- Strip a forbidden source URL / `source_branches:` from a role that may not carry it, moving the URL into the tech file.
+- Rewrite a drifted `iconize_icon` / `iconize_color` to the declared value (name the declared value).
+- Add a missing `# Coordinator rules` / `# Coordinator commands` section to a status folder-note (empty except for the template's `#protected/spec/coordinator-rules` / `#protected/spec/coordinator-commands` tag), or a missing `# Coordinator rules` section to a product or container folder-note (same tag) — the scaffold is empty; the operator authors the constraints.
+- Reset a `dangling-request-link` unit note (Check 9, § 13): `spec_upstream_status` to `drifted` when `processed/` exists, else `new`, and clear the stale `spec_upstream_request` line — the same fallback the tick's own release branch would have written had the request resolved. Never touch `source/` / `processed/` themselves.
 
 ## Key rules
 
-- **Read-only by default** — report first; fix only under `--apply` and only with per-finding approval.
-- **No migration, ever** — there are no existing customers; doctor validates the current flat-gate model and ignores old-model artifacts rather than detecting or migrating them. Never add a "stale spec.cfg / suggest migration" check. This binds `spec_doc_type` and `spec_asset_type` too: the doctor NEVER backfills either key itself, exactly as it never backfills a `wiki_pinned_topics` pin — the fix it proposes is always `lazycortex-specs doc-type backfill` / `lazycortex-specs asset-type backfill`, run by the operator.
+- **Read-only, always** — this skill reports; it never writes a spec file, a settings key, or a tag.
+- **No migration, ever** — there are no existing customers; the audit validates the current flat-gate model and ignores old-model artifacts rather than detecting or migrating them. Never add a "stale spec.cfg / suggest migration" check. This binds `spec_doc_type` and `spec_asset_type` too: the audit NEVER backfills either key itself, exactly as it never backfills a `wiki_pinned_topics` pin — the fix it proposes is always `lazycortex-specs doc-type backfill` / `lazycortex-specs asset-type backfill`, run by the operator.
 - **Open type set, closed stage set** — a `spec_doc_type`, `spec_asset_type`, or `spec_tools` value is valid because a declaration for it exists in the product's scope (shipped defaults merged under `products[<key>].asset_types` / `tool_types`), never because its name appears in a list here. Stages stay a closed five-value set.
 - **An asset is a status note, not a folder name** — enumeration scans for `spec_role: status`, nesting is legal, and the asset's boundary is its own note: a nested asset's files are never its parent's. No check resolves anything from a folder name, and none may be reintroduced that does.
 - **The playbooks own the workflow; this skill owns the state** — which document closes which gate, which launch checkboxes exist, which documents a type carries at all: all of it is read from the type playbook (`asset_types.<type>.playbook`) and the tool playbooks (`tool_types.<tool>.playbook`) of the asset under scan. `spec_develop_done` is an AND across the non-test tools' accepted reports; `spec_tests_passing` belongs to the `test` tool and is free by its absence. A hardcoded per-kind table here is a bug, not a shortcut.
 - **Never remove spec content** — flag items that may be stale; let the user decide.
 - **Concrete line references** — every finding points to the exact file and line/section.
-- **Delegate heavy reads to the four parallel Explore agents** — the coordinator only resolves the product, runs the small cross-reference check inline, merges findings, and drives the fix loop.
+- **Delegate heavy reads to the four parallel Explore agents** — the coordinator only resolves the product, runs the small cross-reference check inline, and merges findings.
 - **Gates are flat booleans on a strict ladder** — `spec_design_done` → `spec_plan_done` → `spec_develop_done` → `spec_tests_passing` → `spec_released`, plus the `spec_cancelled` overlay. There is no `gates:` dict, no `stage:` on the folder-note, no `awaits_human:`, no `## Workflow`. A later gate true while an earlier is false is a hard error.
 - **Launch-checkbox labels are playbook vocabulary, not a closed set** — which boxes an asset carries, and how a playbook parameterises one by tool (`Start implementation (code)`), is declared by its type and tool playbooks and reconciled by `spec.coordinator` (`lazy-spec.coordination-playbook.md` Chapter 5); no primitive holds a label dictionary and neither does this skill. Only the wire SHAPE is checked (`lazy-spec.lifecycle-protocol.md` Part 3). `spec_halted` (optional, boolean) is the supporting frontmatter key, and the dispatched job rides in the runtime sidecar's `active_job` marker (`{checkbox, expert, job_id}`) rather than in the note; a halted asset's rendered color is derived by an iconize matcher, never a stored `iconize_color` — never treat it as icon drift.
 - **`note-check` is the structural source of truth for a status folder-note's frontmatter schema and section roster** — Agent D delegates to it rather than re-deriving the same checks; see Agent D above for exactly what it covers and what still needs a deeper prose check on top.
@@ -430,10 +427,10 @@ When `--apply` writes fixes, the audit trail is the per-doc `# History` entries 
 - **Folder layout is free** — there is no expected folder roster under `spec_path` and no unknown-folder finding; only the removed `docs/` subfolder survives as a placement error.
 - **`iconize_*` is declaration-derived** — managed icon/color must match `products[<key>].icon` (product folder-note), the `icon` of the type whose `default_path` names the folder (container folder-note), or `asset_types[<spec_asset_type>].icon` (asset status note, read through the asset's own type and never through `alias_of`); drift is a warning.
 - **Naming, folder structure, header section, wikilink format, gates, per-file stages, and request schema** are owned by `${CLAUDE_PLUGIN_ROOT}/references/` — this skill enforces but never inlines them.
-- **Layout/body-shape findings are report-only — no `--apply` auto-migrate** — findings about stray repo-root `requests/`, content outside `vault_root`, or old-shape note bodies (missing protected sections, old title H1) are flagged but MUST NOT trigger an `--apply` action that moves, relocates, or rewrites existing content. The operator resolves these manually.
+- **Layout/body-shape findings name no automatable route** — findings about stray repo-root `requests/`, content outside `vault_root`, or old-shape note bodies (missing protected sections, old title H1) are flagged, and the report says outright that no skill or CLI verb moves, relocates, or rewrites the content. The operator resolves these by hand.
 - **Halt reasons are a closed four-item list** — every `lazycortex-specs flip-gate <asset> --halt <reason>` call, including this skill's own fix-loop escalation, draws `<reason>` verbatim from `HaltReason` in `${CLAUDE_PLUGIN_ROOT}/bin/spec_keys.py`. The full trigger table (which worker fires which reason, and when) is documented in `lazy-spec.lifecycle-protocol.md` Part 5 — this skill never invents a new reason string.
-- **Upstream sources (§ 13) are a separate, vault-wide scope** — `upstream/` sits outside every product's `spec_path` (like `requests/`); Check 9 covers it once per doctor run, never per-product, and stays silent when `spec.upstream` has no configured source (wiki.domains-style honesty — a scope the operator never set up has nothing to be wrong). It never reports on `orphaned` / `invalid` / `excluded` / `postponed` units or an active `in-review` freeze — those are the documented steady states, not findings.
+- **Upstream sources (§ 13) are a separate, vault-wide scope** — `upstream/` sits outside every product's `spec_path` (like `requests/`); Check 9 covers it once per audit run, never per-product, and stays silent when `spec.upstream` has no configured source (wiki.domains-style honesty — a scope the operator never set up has nothing to be wrong). It never reports on `orphaned` / `invalid` / `excluded` / `postponed` units or an active `in-review` freeze — those are the documented steady states, not findings.
 
 ## Logging
 
-Per `lazy-log.logging`, write a run log to `./.logs/claude/lazy-spec.doctor/YYYY-MM-DD_HH-MM-SS.md`: `mkdir -p` then the `Write` tool (never chain). Frontmatter `git_sha` / `git_branch` / `date` / `input`; body `## Actions` (products checked, findings by severity, fixes applied in `--apply`) and `## Result`.
+Per `lazy-log.logging`, write a run log to `./.logs/claude/lazy-spec.audit/YYYY-MM-DD_HH-MM-SS.md`: `mkdir -p` then the `Write` tool (never chain). Frontmatter `git_sha` / `git_branch` / `date` / `input`; body `## Actions` (products checked, findings by severity, routes named) and `## Result`.

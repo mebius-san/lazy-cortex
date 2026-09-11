@@ -27,7 +27,7 @@ Lives on:
 
 `[]` when the doc / asset was created directly (no request origin).
 
-`lazy-spec.doctor` validates the forward link: every wikilink resolves to an existing request file under the vault-root `requests/` inbox. Unresolvable wikilinks are a FAIL finding.
+`lazy-spec.audit` validates the forward link: every wikilink resolves to an existing request file under the vault-root `requests/` inbox. Unresolvable wikilinks are a FAIL finding.
 
 ### Frontmatter — `spec_source_docs`
 
@@ -41,9 +41,9 @@ Wikilinks MUST be **path-qualified** (e.g. `[[<spec_path>/<category>/<slug>/desi
 
 Consumers (read-only):
 - `lazycortex-review` dispatcher resolves each wikilink and ships the resolved file into the expert's `context/` payload (read-only) at dispatch time;
-- `lazy-wiki` curator and `lazy-spec.doctor` may read `spec_source_docs` for their own cross-referencing.
+- `lazy-wiki` curator and `lazy-spec.audit` may read `spec_source_docs` for their own cross-referencing.
 
-`lazy-spec.doctor` validates: every wikilink resolves to an existing file in the vault. Unresolvable wikilinks are a FAIL finding.
+`lazy-spec.audit` validates: every wikilink resolves to an existing file in the vault. Unresolvable wikilinks are a FAIL finding.
 
 ### Body — `# Sources` H1 section
 
@@ -123,7 +123,7 @@ Both shapes coexist freely under one `# Sources` container — the protected tag
 
 ### Attribution doctor checks
 
-`lazy-spec.doctor` enforces the contracts above:
+`lazy-spec.audit` enforces the contracts above:
 
 - `spec_source_requests` wikilinks resolve to existing request files (forward-link integrity);
 - `spec_source_docs` wikilinks resolve to existing files in the vault (forward-link integrity);
@@ -157,7 +157,7 @@ Source code is referenced by forge URL (GitHub / GitLab / Bitbucket / Gitea / Fo
 - The `<path>` is relative to the repo root, not relative to the product's `source.paths`
 - Skills **read** source from `<repo-config>.local_path/<path>` during generation; only the written links go through the forge
 
-**Where source URLs belong** — see [file-roles](./lazy-spec.layout-protocol.md). Source URLs are permitted in `tech` files (product-level `tech.md`), `code-plan` / `test-plan` files, and the `## Related code / logs` section of a `bug` file. They are FORBIDDEN in any `design` file, and — mirroring `design`'s own rule — FORBIDDEN in `architecture.md` too. Behavior/design docs describe WHAT, and the architecture doc describes the code's SHAPE (module boundaries, dependency direction) without pinning it to specific lines of already-written code; source references belong with the code-level `tech` / plan docs.
+**Where source URLs belong** — see [file-roles](./lazy-spec.file-roles-protocol.md). Source URLs are permitted in `tech` files (product-level `tech.md`), `code-plan` / `test-plan` files, and the `## Related code / logs` section of a `bug` file. They are FORBIDDEN in any `design` file, and — mirroring `design`'s own rule — FORBIDDEN in `architecture.md` too. Behavior/design docs describe WHAT, and the architecture doc describes the code's SHAPE (module boundaries, dependency direction) without pinning it to specific lines of already-written code; source references belong with the code-level `tech` / plan docs.
 
 ### Known-forges table
 
@@ -193,7 +193,7 @@ spec_source_branches:
 - **Key present**: source links for that repo use the named branch — `lazy-spec.source-url(<repo-key>, <path>, <kind>, branch=<branch-name>)`.
 - Dict shape — one spec can pin different branches per repo.
 
-**Which files may carry pins**: only files whose role permits source URLs and may pin — `code-plan` / `test-plan` files and the product-level `tech.md`. A `spec_source_branches` key on any other file is a bug; `lazy-spec.rebase-pins` and `lazy-spec.doctor` treat it as a violation.
+**Which files may carry pins**: only files whose role permits source URLs and may pin — `code-plan` / `test-plan` files and the product-level `tech.md`. A `spec_source_branches` key on any other file is a bug; `lazy-spec.rebase-pins` and `lazy-spec.audit` treat it as a violation.
 
 **When to pin**: content-generating skills auto-pin a file they are creating IF (a) the source repo is currently checked out on a non-default branch AND (b) the generated file body will contain at least one forge URL for that repo. Files with no source URLs get no pin.
 
@@ -201,7 +201,7 @@ spec_source_branches:
 
 ### Pin Reconciliation
 
-Shared primitive invoked by `lazy-spec.sync-with-code`, `lazy-spec.create-from-code` (regeneration path), `lazy-spec.doctor` (dry-run), and `lazy-spec.rebase-pins`.
+Shared primitive invoked by `lazy-spec.sync-with-code`, `lazy-spec.create-from-code` (regeneration path), `lazy-spec.audit` (dry-run), and `lazy-spec.rebase-pins`.
 
 **Inputs**: a spec file with a `spec_source_branches` dict.
 

@@ -1859,7 +1859,7 @@ class _Apply:
     if folder_note.exists():
       # idempotent — an earlier apply attempt already scaffolded this; no-op
       return folder_note, spec_path
-    argv = [ str(self.specs_cli), "scaffold-asset", product, kind, slug ]
+    argv = [ sys.executable, str(self.specs_cli), "scaffold-asset", product, kind, slug ]
     if path:
       argv += [ _K.SCAFFOLD_PATH_FLAG, path ]
     res = subprocess.run(
@@ -1908,7 +1908,7 @@ class _Apply:
     """
     cli = _resolve_sibling_cli(_K.CLI_LAZYCORTEX_CORE)
     res = subprocess.run(
-        [ str(cli), _K.CLI_SETTINGS_GET, section, _K.CLI_CWD_FLAG, str(self.repo) ],
+        [ sys.executable, str(cli), _K.CLI_SETTINGS_GET, section, _K.CLI_CWD_FLAG, str(self.repo) ],
         cwd = str(self.repo), capture_output = True, text = True, check = False,
     )
     # guard: the section is unreadable — abort rather than enact against guessed content
@@ -1932,7 +1932,7 @@ class _Apply:
     """
     cli = _resolve_sibling_cli(_K.CLI_LAZYCORTEX_CORE)
     res = subprocess.run(
-        [ str(cli), _K.CLI_SETTINGS_SET, section, _K.CLI_CWD_FLAG, str(self.repo) ],
+        [ sys.executable, str(cli), _K.CLI_SETTINGS_SET, section, _K.CLI_CWD_FLAG, str(self.repo) ],
         input = json.dumps(value), cwd = str(self.repo),
         capture_output = True, text = True, check = False,
     )
@@ -2142,8 +2142,9 @@ class _Apply:
     if vision.is_file():
       return vision
     res = subprocess.run(
-        [ str(self.specs_cli), _K.CLI_SEED_DOC, key, str(note.relative_to(self.repo)),
-          _K.SEED_DOC_FLAG, _K.VISION_DOC_TOKEN, _K.CLI_CWD_FLAG, str(self.repo) ],
+        [ sys.executable, str(self.specs_cli), _K.CLI_SEED_DOC, key,
+          str(note.relative_to(self.repo)), _K.SEED_DOC_FLAG, _K.VISION_DOC_TOKEN,
+          _K.CLI_CWD_FLAG, str(self.repo) ],
         cwd = str(self.repo), capture_output = True, text = True, check = False,
     )
     # guard: an unseeded vision leaves the product without the first rung of its ladder
@@ -2356,7 +2357,7 @@ class _Apply:
     env = os.environ.copy()
     env[_K.ENV_REPO_ROOT] = str(self.repo)
     res = subprocess.run(
-        [ str(cli), "cancel-job" ],
+        [ sys.executable, str(cli), "cancel-job" ],
         input = json.dumps({
             "expert": job_info.get(JobMarker.EXPERT),
             "job_id": job_info.get(JobMarker.JOB_ID),
@@ -2382,7 +2383,7 @@ class _Apply:
     """
     try:
       subprocess.run(
-          [ str(self.review_cli), "stop", str(doc_path.resolve()) ],
+          [ sys.executable, str(self.review_cli), "stop", str(doc_path.resolve()) ],
           capture_output = True, text = True, cwd = str(self.repo),
           timeout = _K.REVIEW_STOP_TIMEOUT_S, check = False,
       )
@@ -2538,7 +2539,7 @@ class _Apply:
         rollback re-opens an already-drafted `design.md`).
     """
     res = subprocess.run(
-        [ str(self.review_cli), verb, str(doc_path) ],
+        [ sys.executable, str(self.review_cli), verb, str(doc_path) ],
         cwd = str(self.repo),
         capture_output = True,
         text = True,

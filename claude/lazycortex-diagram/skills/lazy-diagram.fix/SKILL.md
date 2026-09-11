@@ -23,6 +23,7 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome line for it".
 3. **Do not reach Step 7 (Report) until the ledger shows every prior task `completed`.**
 4. **The Report step is a structural verifier.** Output one line per task — gaps are a bug.
+5. **`${CLAUDE_PLUGIN_ROOT}` arrives in this skill's text already expanded to an absolute path.** Never pass that literal to `Bash` — every template and scheme lookup goes through `Glob` or `Read`, never `ls` / `test -f`, and never as a `;`-chained compound command; the permission layer denies those and the skill dies before Step 5.
 
 ## Input
 
@@ -56,8 +57,15 @@ Outcome: `located fence at line <N>` or `[FAIL]`.
   - `mindmap` → `mindmap`.
   - `timeline` → `timeline`.
   - `architecture-beta` → `architecture`.
-  - For ASCII: top-level `<dir>/` line at column 0 → `fs-tree`; box-and-arrow → `flow`; box-only-no-arrow → `layout`.
+  - For ASCII the info-string carries no kind marker, so the kind is inferred from the body's shape. Test the six rules below **in this order and stop at the first match** — the specific shapes come before the general ones, because a decision tree is a flow with extra structure and a controls scheme is a layout with extra structure; testing the general rule first swallows the specific one.
+    1. **`fs-tree`** — tree characters (`├──` / `└──` / `│`, or their `+--` / `|` fallback) AND at least one entry carrying a trailing `/` or an ` ← <note>` annotation.
+    2. **`tree`** — tree characters, no trailing `/` anywhere, no ` ← ` annotation: a taxonomy, not a filesystem.
+    3. **`controls-scheme`** — boxes, no connector lines at all, and one outer wrapper box holding free-standing sub-boxes whose title row names a control family and whose content lines are chrome samples (`[ Primary button ]`, `[ Text input ______ ]`, `[Tab 1][Tab 2][Tab 3]`, `( Spinner ... )`).
+    4. **`layout`** — boxes, no connector lines, and the boxes tile one surface: separator rows carry interior `+` junctions where regions share borders, and each box's label names a region rather than a control family. A bracketed strip confined to one action-bar row is a layout button strip, not a control inventory.
+    5. **`decision-tree`** — connectors present, and every box with more than one outgoing connector is a diamond-style `<Question?>` box whose outgoing connectors each carry an answer label (`yes` / `no` / a short phrase). A plain rectangle with a single outgoing connector as the entry step does not break this.
+    6. **`flow`** — connectors present and at least one plain rectangle carries more than one outgoing connector, or a connector carrying an inline verb (`-- click submit -->`) leaves a non-diamond box. The general case, tested last.
 - Caller-pinned `kind` overrides inference. When inference cannot disambiguate (e.g. `flowchart` body that could be any of `flow|nav|tree|decision-tree|controls-scheme|screen-scheme`), `[FAIL] cannot infer kind from fence syntax — pin kind=<one>` with the candidate list.
+- **An ambiguous ASCII fence takes that same `[FAIL]` path** — never a guess. A body that matches none of the six rules, or that carries features of two families at once (tree characters alongside box connectors, chrome samples alongside labelled connectors), fails with the candidate list `fs-tree|tree|controls-scheme|layout|decision-tree|flow` so the caller pins `kind=`. A wrong redraw silently rewrites the diagram as the wrong kind; a question costs one round-trip.
 
 Outcome: `inferred kind=<kind> format=<format>` or `[FAIL]`.
 
@@ -70,7 +78,7 @@ Outcome: `extracted (<chars>)` or `warned`.
 
 ### Step 4: Resolve scheme path
 
-- For `format=mermaid`: resolve `${CLAUDE_PLUGIN_ROOT}/templates/diagram.mermaid/styles-<scheme|default>.json`. If the file does not exist → `failed:scheme-not-found:<name>`. Short-circuit.
+- For `format=mermaid`: Glob: `${CLAUDE_PLUGIN_ROOT}/templates/diagram.mermaid/styles-<scheme|default>.json`. An empty result → `failed:scheme-not-found:<name>`. Short-circuit.
 - For `format=ascii`: skip — ASCII drawers do not consume scheme files.
 
 Outcome: `resolved scheme=<name>` (mermaid) / `n/a (ascii)` / `failed:scheme-not-found:<name>`.
@@ -117,7 +125,7 @@ Outcome: `logged`.
 
 - **`/lazy-diagram.fix` aborts: "[FAIL] no fence under anchor"** — the anchor section exists in `target_file` but contains no `` ```mermaid `` or `` ```text `` fence → use `/lazy-diagram.draw` instead to create the initial diagram, then re-run fix if drift develops later.
 - **`/lazy-diagram.fix` aborts: "[FAIL] cannot infer format from info-string=<X>"** — the existing fence has an unrecognised info-string (not `mermaid` or `text`) → pin `format=mermaid` or `format=ascii` explicitly when calling fix.
-- **`/lazy-diagram.fix` aborts: "[FAIL] cannot infer kind from fence syntax"** — the fence's syntax marker matches multiple kinds (e.g. plain `flowchart` could be `flow`, `nav`, `tree`, etc.) → pin `kind=<one>` from the candidate list in the failure message.
+- **`/lazy-diagram.fix` aborts: "[FAIL] cannot infer kind from fence syntax"** — for a mermaid fence, the syntax marker matches multiple kinds (e.g. plain `flowchart` could be `flow`, `nav`, `tree`, etc.); for a `` ```text `` fence, the body matches none of the six ASCII shape rules or mixes two families (tree characters plus box connectors, chrome samples plus labelled connectors) → pin `kind=<one>` from the candidate list in the failure message.
 - **Step 4 aborts: "failed:scheme-not-found:<name>"** — the named scheme file (`styles-<name>.json`) does not exist → omit `scheme=` to use the default, or check `${CLAUDE_PLUGIN_ROOT}/templates/diagram.mermaid/styles-*.json` for valid names.
 - **Step 5 aborts: "failed:<reason>"** — the drawer agent returned a failure (e.g. request too sparse, `missing-in-style:<role>`, template malformed) → check the reason string; re-run with a richer host-section prose, or fix the named scheme/template field.
 - **Step 5 returns: "split-into-N"** — the host-section prose now spans multiple logical diagrams; fix does NOT split fences in v1 → manually split the section into sub-sections, each with its own fence, and re-run fix per sub-section.

@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Dispatch lazy-python.test-writer against a new class and get a test file that covers all seven Paranoid-Testing categories, verified by tst-py.
-last_regen: 2026-09-07
+last_regen: 2026-09-11
 diagram_spec:
   anchor: "How test-writer walks a class"
   request: "Sequence diagram showing: user invokes lazy-python.test-writer for a target class; agent reads plugin canon (testing-guidelines + checking-guidelines) then project overlay (testing_guidelines.md, checking_guidelines.md, CLAUDE.md ## Testing section); agent identifies test targets (init paths, public methods, properties, documented guarantees, exceptions, operator overloads); agent writes test file covering all 7 Paranoid-Testing categories; agent runs chk-py per file then chk-py all then tst-py on the module; agent logs the run. Show the guideline read order (canon first, overlay second, CLAUDE.md ## Testing third) and the three-step toolchain verification."
@@ -9,7 +9,7 @@ source_skills:
   - lazy-python.test-writer
   - lazy-python.testing-guidelines
   - tst
-source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Generate tests that cover all seven Paranoid-Testing categories for a new class
 
@@ -27,10 +27,10 @@ After completing this walkthrough you have:
 
 ## What you need
 
-- `lazycortex-python` installed in your repo (`/lazy-python.install` completed). This deploys `chk-py` and `tst-py` into `cli/`. Add `cli/` to your `$PATH` to invoke them without a prefix, or call `./cli/chk-py` and `./cli/tst-py` directly from the repo root.
+- `lazycortex-python` installed in your repo (`/lazy-python.install` completed). This deploys `chk-py` and `tst-py` into `cli/` — the tracked copies carry no executable bit on purpose, since a mode-blind git client (obsidian-git on Android, some Windows checkouts) can strip it silently on pull, so run them through the interpreter: `sh ./cli/chk-py` and `sh ./cli/tst-py` from the repo root. Install's Step 2b additionally deploys `~/.local/bin/chk-py` and `~/.local/bin/tst-py` — the only files this plugin ever marks executable, since they live outside any git-tracked tree and no mode-blind sync can touch their mode bit. Each one walks up from your current directory to the nearest `cli/chk-py` / `cli/tst-py` and runs it through `sh`, so once `~/.local/bin` is on your `$PATH`, the bare `chk-py` / `tst-py` commands used throughout this walkthrough work from anywhere under the repo.
 - A Python class whose public API has docstrings. The agent derives every testable claim from docstrings (Summary, Guarantees, Args, Returns, Raises) — a class without docstrings produces shallow tests. If the class has no docstrings yet, dispatch `lazy-python.docstring-writer` first.
 - Your source tree following the standard mirrored layout (`src/<module>/<file>.py` → `tests/<module>/<file>.py`). The agent uses this convention to place the generated test file. If your project uses a different layout, declare it in `docs/guidelines/testing_guidelines.md`.
-- `docs/guidelines/testing_guidelines.md` present (created by `/lazy-python.install` Phase 5). If it does not exist, re-run `/lazy-python.install` — Phase 5 is idempotent and creates the stub without touching other installation artifacts.
+- `docs/guidelines/testing_guidelines.md` present (created by `/lazy-python.install` Step 5). If it does not exist, re-run `/lazy-python.install` — Step 5 is idempotent and creates the stub without touching other installation artifacts.
 - If your project bootstraps secrets or provider credentials from its own shell script before tests can run, make sure `/lazy-python.install` has recorded it — the skill's Step 7 detects a bootstrap script (`cli/env`, `.env.sh`, or `scripts/env.sh`) and records it as `python.env_source` automatically. With that in place, `chk-py` and `tst-py` source the script before running, so the agent's own verification step and your later `tst-py` runs never execute against a half-configured environment.
 
 ## The journey

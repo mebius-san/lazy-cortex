@@ -1,7 +1,7 @@
 ---
 name: lazy-wiki.configure
 description: "Use when the user wants to add a wiki scope, change which paths the wiki covers, edit an existing scope's globs, axes, exclusions, or topics-index path — or set up domain-spec generation (`/lazy-wiki.configure domains`: code globs, dictionary, output tree, language) — or mirror a foreign repo's markdown into a scope (`/lazy-wiki.configure mirror`: source url/branch, source globs, excludes, mirror directory) — or set up a terms dictionary (`/lazy-wiki.configure terms`: which documents it serves, where the dictionary file lives, which documents are term sources) — or configure the project-structure map (`/lazy-wiki.configure structure`: depth profiles, exclusions, the three scan routines) — or edit the vault-wide wiki keys themselves (`/lazy-wiki.configure vault`: the `tag_axes` vocabulary every scope narrows from, the `exclude` globs every scope inherits). Wizard over .claude/lazy.settings.json[wiki.scopes] / [wiki.tag_axes] / [wiki.exclude] / [wiki.domains] / [terms.scopes] / [structure], one question per turn via AskUserQuestion; also refreshes the Coverage section of the installed navigation rule."
-allowed-tools: Read, Edit, Write, AskUserQuestion, Skill, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Bash(git ls-files *), Bash(git commit *), Bash(cp *), Bash(test *), Bash(rm *), Agent
+allowed-tools: Read, Edit, Write, AskUserQuestion, Skill, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Bash(git ls-files *), Bash(git commit *), Bash(cp *), Bash(test *), Bash(rm *), Agent
 ---
 # lazy-wiki.configure
 
@@ -343,7 +343,7 @@ Set `lazy.settings.json[wiki.scopes][<id>].mirror` to:
 }
 ```
 
-Then add the glob `<mirror_path>/**` to the same scope's `paths` array when it is not already there — the mirror files become nodes only through `paths`, and this wizard owns that wiring (`/lazy-wiki.doctor` flags the desync as `mirror-paths-uncovered`). Preserve all other keys; write with `Write`. Because `paths` changed, refresh the navigation rule's `## Coverage` per the Phase 9 recipe (same locate/replace/commit rules).
+Then add the glob `<mirror_path>/**` to the same scope's `paths` array when it is not already there — the mirror files become nodes only through `paths`, and this wizard owns that wiring (`/lazy-wiki.audit` flags the desync as `mirror-paths-uncovered`). Preserve all other keys; write with `Write`. Because `paths` changed, refresh the navigation rule's `## Coverage` per the Phase 9 recipe (same locate/replace/commit rules).
 
 Log to `./.logs/claude/lazy-wiki.configure/<UTC-timestamp>.md` per the Phase 8 recipe (`input: "mirror scope_id=<id>"`).
 
@@ -401,7 +401,7 @@ AskUserQuestion: header "Served documents", question — new mode: "Which docume
 
 Split on commas, trim, discard empties; at least one entry, re-ask if empty.
 
-**Refuse an overlap.** Compare the collected globs against every other `terms.scopes` entry's `paths`. When a document could match two scopes, the dictionary that owns it is ambiguous — say which scope collides and on which glob, and re-ask. This is the wizard's rubber; the doctor's `config` finding is the second one, for settings written by hand.
+**Refuse an overlap.** Compare the collected globs against every other `terms.scopes` entry's `paths`. When a document could match two scopes, the dictionary that owns it is ambiguous — say which scope collides and on which glob, and re-ask. This is the wizard's rubber; the audit's `config` finding is the second one, for settings written by hand.
 
 Outcome: `collected`.
 
@@ -431,7 +431,7 @@ Seed the array with the dictionary itself plus every tool-report glob, and show 
 - the dictionary itself (`<file>`) — without it every term trivially "occurs in a document of the scope" and the dead-term check can never fire once;
 - `**/code-report.md`, `**/data-report.md`, `**/docs-report.md`, `**/test-report.md` — the tool-type build journals, appended dozens of times per implementation, setting no terminology. An operator-declared tool type brings its own `report_doc`; when the repo declares one beyond the shipped four, offer its glob in the same seed.
 
-Add `<upstream-mirror-glob>/**` to the seed when the repo carries an upstream mirror tree whose files fall under the collected `paths` — mirrored foreign markdown would otherwise fill the dictionary with another studio's vocabulary, and the doctor would then propose edits to mirrors that must not be edited.
+Add `<upstream-mirror-glob>/**` to the seed when the repo carries an upstream mirror tree whose files fall under the collected `paths` — mirrored foreign markdown would otherwise fill the dictionary with another studio's vocabulary, and the audit would then report term repairs against mirrors that must not be edited.
 
 Context (print before asking):
 - Where: Terms 4 — Collect source_exclude; target `terms.scopes[<id>].source_exclude`
@@ -500,7 +500,7 @@ Log to `./.logs/claude/lazy-wiki.configure/<UTC-timestamp>.md` per the Phase 8 r
 
 Print two pointers (no questions):
 - *"A writing expert consults this dictionary through `/lazy-wiki.terms`; the curator fills it from finished documents on its own."*
-- *"The corpus written before this scope existed was never seen by the routine — run the terms section of `/lazy-wiki.doctor` for a full pass over it."*
+- *"The corpus written before this scope existed was never seen by the routine — run the terms section of `/lazy-wiki.audit` for a full pass over it."*
 
 Outcome: `logged`.
 
@@ -566,7 +566,7 @@ Outcome: `written`.
 
 Three git routines, one per event class, because one `watch` covers one status set: `new_files` passes only `A`, `deleted_files` only `D`, and a rename under git's default `diff.renames=true` arrives as `R`, which both of those drop — without the third routine a directory rename silently stales the map. (With `diff.renames=false` a rename decomposes into `D`+`A` and lands in the first two — the mechanism degrades to a correct result, not to a breakage.)
 
-The scan routine deliberately does NOT watch modifications (`changed_files` = `A`+`M`): the map describes the tree's shape — what exists where — and a content edit never changes that, so every `M` dispatch cost one expert job with nothing to apply, and a busy commit wave queued them by the dozen. The price is that a per-file description at `file` depth goes stale when its file is rewritten in place; that drift is `report`'s to find (`/lazy-wiki.doctor`, the `divergence` finding) and `/lazy-wiki.structure rebuild`'s to repair.
+The scan routine deliberately does NOT watch modifications (`changed_files` = `A`+`M`): the map describes the tree's shape — what exists where — and a content edit never changes that, so every `M` dispatch cost one expert job with nothing to apply, and a busy commit wave queued them by the dozen. The price is that a per-file description at `file` depth goes stale when its file is rewritten in place; that drift is `report`'s to find (`/lazy-wiki.audit`, the `divergence` finding) and `/lazy-wiki.structure rebuild`'s to repair.
 
 Resolve the watched branch with `Bash(git rev-parse --abbrev-ref HEAD)`. Register each through the registrar:
 
@@ -618,7 +618,7 @@ Context (print before asking):
 - Answers: comma-separated slugs — replaces `wiki.tag_axes` in Vault 4 (`doc-kind` kept whatever is typed), every scope without a narrowing speaks the new set at once; Enter — kept; removing an axis triggers the confirmation below; re-asked on every vault run
 AskUserQuestion: header "Vault tag axes", question "Tag axes — the closed vocabulary of classification dimensions for the whole vault (current: `<current tag_axes joined or "none">`; comma-separated, Enter to keep)?"; free text.
 
-Split on commas, trim, discard empties, lowercase-normalise each slug. Keep `doc-kind`: it is the mandatory axis `/lazy-wiki.install` unions in, and dropping it here is undone by the next install run. Before writing a set that removes any other axis, name what it costs — every `wiki/<axis>/…` tag already carried by a node on that axis becomes unknown (the doctor's `unknown-axis` finding), and every scope narrowing to it silently loses it — then ask whether to proceed.
+Split on commas, trim, discard empties, lowercase-normalise each slug. Keep `doc-kind`: it is the mandatory axis `/lazy-wiki.install` unions in, and dropping it here is undone by the next install run. Before writing a set that removes any other axis, name what it costs — every `wiki/<axis>/…` tag already carried by a node on that axis becomes unknown (the audit's `unknown-axis` finding), and every scope narrowing to it silently loses it — then ask whether to proceed.
 
 Context (print before asking):
 - Where: Vault 2 — Collect tag_axes; target `wiki.tag_axes`

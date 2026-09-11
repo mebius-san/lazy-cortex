@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Keep a product spec aligned with its source repo — surface in-flight behavior changes for the design doc, rebase branch pins after a merge, and gap-scan for capabilities the spec tree never documented.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 diagram_spec:
   anchor: "How the three skills relate"
   request: "Decision-tree showing when to reach for lazy-spec.sync-with-code vs lazy-spec.rebase-pins vs lazy-spec.coverage — inputs are 'code changed since last sync', 'branch just merged or deleted', and 'looking for capabilities the spec tree never documented'; outputs are design-doc behavior candidates, gate proposals, pin rewrites, spec_released proposals, and gap-candidate reports with proposed category+slug."
@@ -9,7 +9,7 @@ source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.rebase-pins
   - lazy-spec.coverage
-source_sha: 7e8b1eed5949e8418301d3ad5bb66ac772782f32
+source_sha: 3f4c00192599a38cbb9db4308367d5db80ec2dfd
 ---
 # Keeping specs aligned with source code
 
@@ -39,7 +39,7 @@ You can also run any of the three in isolation. Sync is for any moment source co
 
 **Squash-merges.** The ancestor check that `rebase-pins` uses returns false for squash-merged branches because the squashed commit is not an ancestor of the source branch tip. Pass `--force-merged` to skip the check: `/lazy-spec.rebase-pins <branch> --force-merged`. Alternatively, delete the branch after squash-merging — a branch gone locally and remotely after `fetch --prune` is treated as merged.
 
-**After sync, review doctor output.** `sync-with-code` runs `/lazy-spec.doctor` at the end of each sync and reports findings without auto-fixing. Review them as a follow-up step before the next commit.
+**After sync, review doctor output.** `sync-with-code` runs `/lazy-spec.audit` at the end of each sync and reports findings without auto-fixing. Review them as a follow-up step before the next commit.
 
 **Coverage needs a code-bound product too.** A design-only product has no code side to gap-scan — `coverage` reports "no code binding — nothing to gap-scan" and stops. Attach a repo via `/lazy-spec.product-config` first if the product does have code behind it.
 

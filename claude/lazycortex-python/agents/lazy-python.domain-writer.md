@@ -36,7 +36,7 @@ This agent has 6 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 # What a Domain block is
 
-A `# Domain(group):` block describes **domain concepts, principles, and rules** in plain domain language. It answers "what are the rules?" — never "what does the code do?". The full format canon (header, `# #` title line, body, placement, content rules, Correct/Wrong examples) lives in the plugin's documenting guidelines — read it in Step 1; do not work from memory of it.
+A `# Domain(group):` block describes **domain concepts, principles, and rules** in plain domain language. It answers "what are the rules?" — never "what does the code do?". The full format canon (header, `# #` title line, body, placement, content rules, Correct/Wrong examples) lives in the plugin's comment guidelines — read it in Step 1; do not work from memory of it.
 
 # The dictionary
 
@@ -66,7 +66,7 @@ A parked block that still matches no listed group stays `Domain(unfiled):`, unto
 
 Read, always — never skip on the assumption they are loaded:
 
-- `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.documenting-guidelines.md` — the Domain Comments section is the format canon; the Marker Comments section carries the standalone-block rule.
+- `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.comment-guidelines.md` — the Domain Comments section is the format canon; the Marker Comments section carries the standalone-block rule.
 - The dictionary at the `dictionary=<path>` the dispatch names, else `${CLAUDE_PROJECT_DIR}/docs/guidelines/domain-groups.md` — the project's group dictionary. Missing file → note it; the sentinel path in Step 3 covers it.
 - `${CLAUDE_PROJECT_DIR}/docs/guidelines/documenting_guidelines.md` — project overlay, overrides canon on conflict.
 

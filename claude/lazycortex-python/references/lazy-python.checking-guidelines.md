@@ -8,45 +8,39 @@ for Python projects that adopt these conventions.
 
 ## Toolchain
 
-| Tool   | Purpose                                  | Invocation                |
+| Tool   | Purpose                                  | Run by                    |
 |--------|------------------------------------------|---------------------------|
-| ruff   | Fast linter + style enforcement          | `ruff check <path>`       |
-| mypy   | Static type checking                     | `mypy <path>`             |
-| pylint | Deep static analysis                     | `pylint <package>`        |
-| pytest | Test runner                              | `pytest <tests-or-node>`  |
-| py_compile | Fast syntax / bytecode-compile check | `python -m py_compile <files>` |
+| ruff   | Fast linter + style enforcement          | `chk-py`                  |
+| mypy   | Static type checking                     | `chk-py`                  |
+| pylint | Deep static analysis                     | `chk-py`                  |
+| pytest | Test runner                              | `tst-py`                  |
+| py_compile | Fast syntax / bytecode-compile check | `chk-py` (the `cmp` phase) |
 
-Run from the project root with the project venv active. Tool configuration lives in `pyproject.toml` under `[tool.ruff]`, `[tool.ruff.lint]`, `[tool.mypy]`, `[tool.pylint]`, and `[tool.pytest.ini_options]`.
+These are the tools the wrappers drive, not commands to type: every one of them runs inside `chk-py` / `tst-py`, in pipeline order and with shared config. Run the wrappers from the project root; tool configuration lives in `pyproject.toml` under `[tool.ruff]`, `[tool.ruff.lint]`, `[tool.mypy]`, `[tool.pylint]`, and `[tool.pytest.ini_options]`.
 
 ## Verification order after changes (MANDATORY)
 
-After making code changes, **always** verify in this exact order:
+After making code changes, **always** verify in this exact order. Every step goes through the wrappers — `chk-py` orchestrates the canonical pipeline (`pcf` + `toi` + `cmp` + `mypy` + `ruff` + `pylint`) in order with shared config, and `tst-py` applies the project's pytest args and venv; calling the underlying tools directly skips earlier phases and produces misleading findings. `-q` is mandatory on every invocation.
 
 1. **Lint + type-check each changed file**:
    ```bash
-   ruff check <file>.py
-   mypy <file>.py
-   pylint <file>.py
+   sh ./cli/chk-py all <file>.py -q
    ```
-   If more than three files in the same module changed, target the module directory instead of one-by-one.
+   If more than three files in the same module changed, target the module directory instead of one-by-one — `sh ./cli/chk-py all <module-dir>/ -q`.
 2. **Full-project lint + type-check** before declaring done:
    ```bash
-   ruff check .
-   mypy .
-   pylint <top_level_packages>
+   sh ./cli/chk-py all -q
    ```
-3. **Tests**: run the relevant pytest selection only **after** all checks pass:
+3. **Tests**: run the relevant selection only **after** all checks pass, by bare module name — never a path, never a `.py` file:
    ```bash
-   pytest tests/<module>/
-   # or, scoped:
-   pytest tests/<module>/test_<file>.py::TestClass
+   sh ./cli/tst-py <module> -q
    ```
 
 Do not run tests before lint and type-check are clean — typing errors mask test failures and create wasted iteration.
 
 4. **Guideline review**: run the reviewer phase once the tests pass — it covers what no checker can (comment density, block structure, naming semantics, guideline conformance):
    ```bash
-   ./cli/chk-py review
+   sh ./cli/chk-py review
    ```
    Unlike steps 1-3, this one does not belong in the edit loop: it runs at the end of a logical piece of work, and is mandatory at the end of a full cycle of planned work. See `## Guideline review phase` below.
 

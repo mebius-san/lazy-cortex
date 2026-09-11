@@ -2,11 +2,13 @@
 One-shot `wiki_pinned_topics` backfill — the `pins` CLI subcommand.
 
 Templates write `wiki_pinned_topics` frontmatter on every freshly-scaffolded role-bearing
-document (`lazy-spec.layout-protocol`'s closed `spec_role` set minus `request`, which is never
-pinned — its frontmatter comes from a worker, not a template). Files created before the pin
-landed in a template — or created from a per-product / per-category override the plugin update
-never touches — carry no pin. This module walks the spec content-root once, adds the pin to
-every role-bearing document missing it, and reports the count touched. Idempotent: a document
+document (`lazy-spec.layout-protocol`'s closed `spec_role` set minus the two LEVEL-note roles
+`product` and `catalog`, whose shared `level-note.md` template ships no `wiki_pinned_topics`
+block; `request` sits outside the closed set entirely, its frontmatter worker-written rather
+than template-rendered). Files created before the pin landed in a template — or created from a
+per-product / per-category override the plugin update never touches — carry no pin. This module
+walks the spec content-root once, adds the pin to every role-bearing document missing it, and
+reports the count touched. Idempotent: a document
 that already carries `wiki_pinned_topics` is left alone. Never commits — the caller owns that,
 per `dev.plugin-boundaries.md`'s no-silent-side-effects convention for a one-shot primitive.
 """
@@ -68,13 +70,17 @@ class _K:
   ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 
 
-# The closed `spec_role` set (`lazy-spec.layout-protocol.md`) minus `request` — a request's
-# frontmatter is worker-written, never template-rendered, and never carries a wiki pin. The
-# doc-kind axis value is the role name itself, verbatim (spec-decisions-design.md § on the
-# doc-kind axis / how specs get their wiki pins) — no per-role remapping.
+# Every role of the closed `spec_role` set (`lazy-spec.layout-protocol.md`) whose document is
+# template-rendered with a `wiki_pinned_topics` block — the roles a lost pin can be restored to.
+# Excluded are the two LEVEL-note roles `product` and `catalog`: their shared `level-note.md`
+# template carries no pin block, so a level note has none to backfill. `request` is excluded for
+# a different reason — it is not in the closed set at all, and its frontmatter is worker-written
+# rather than template-rendered. The doc-kind axis value is the role name itself, verbatim
+# (spec-decisions-design.md § on the doc-kind axis / how specs get their wiki pins) — no
+# per-role remapping.
 _PIN_ROLES = frozenset({
-    "design", "architecture", "code-plan", "code-report", "test-plan", "test-report",
-    "bug", "tech", "status", "decisions",
+    "vision", "use-cases", "design", "architecture", "ui-design", "code-plan", "code-report",
+    "test-plan", "test-report", "bug", "tech", "status", "decisions",
 })
 
 _SPEC_ROLE_LINE_RE = re.compile(r"(?m)^spec_role:\s*(\S+)\s*$")
@@ -119,7 +125,7 @@ def _insert_pin(fm_text: str, role: str, product: str | None, category: str | No
 
   Returns:
     The updated frontmatter text, or `fm_text` unchanged when no `spec_role: <role>` line could
-    be located (a malformed document `lazy-spec.doctor` would already be flagging separately).
+    be located (a malformed document `lazy-spec.audit` would already be flagging separately).
   """
   block = _pin_block(role, product, category)
   new_text, count = _SPEC_ROLE_LINE_RE.subn(lambda m: m.group(0) + "\n" + block, fm_text, count = 1)

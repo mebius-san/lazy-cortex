@@ -5,6 +5,7 @@
     <key>Label</key><string>com.lazycortex.runtime.{REPO_ID}</string>
     <key>ProgramArguments</key>
     <array>
+        <string>/bin/bash</string>
         <string>{REPO_ROOT}/.claude/bin/lazy.runtime.sh</string>
         <string>{REPO_ROOT}</string>
     </array>
@@ -13,6 +14,8 @@
     <dict>
         <!-- tells _restart_in_place to clean-exit on own-code change; launchd KeepAlive relaunches -->
         <key>LAZYCORTEX_SUPERVISED</key><string>1</string>
+        <!-- absolute interpreter recorded by lazy-core.install; the shim execs the runner with it -->
+        <key>LAZYCORTEX_PYTHON</key><string>{PYTHON}</string>
     </dict>
     <key>KeepAlive</key><true/>
     <key>RunAtLoad</key><true/>

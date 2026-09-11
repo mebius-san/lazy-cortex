@@ -89,7 +89,7 @@ git -C <repo-config>.local_path rev-parse --abbrev-ref HEAD
 
 If `<current-branch>` differs from the repo config's default `branch` AND the doc body will emit any source URL for that repo, add `spec_source_branches: {<repo-key>: <current-branch>}` to the doc's frontmatter and emit URLs via `lazy-spec.source-url(<repo-key>, <path>, <kind>, branch=<current-branch>)`.
 
-Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`, pins belong only on docs that may carry source URLs — `tech` (and `code-plan` / `test-plan`) docs. The product `design.md` NEVER carries pins because it never contains source URLs.
+Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md`, pins belong only on docs that may carry source URLs — `tech` (and `code-plan` / `test-plan`) docs. The product `design.md` NEVER carries pins because it never contains source URLs.
 
 ### Reconcile existing pins (regeneration)
 
@@ -133,7 +133,7 @@ Expected report block:
 count: <n>
 ```
 
-`<candidate-slug>` is lowercase-with-hyphens per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`.
+`<candidate-slug>` is lowercase-with-hyphens per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md`.
 
 ## Product Mode Process
 
@@ -147,7 +147,7 @@ Launch the four parallel agents (A + B + C + D) per "Parallel code scanning", sc
 
 ### P3 — Create the doc structure
 
-Product docs live loose at the product root (no `docs/` subfolder). Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md` (filenames are role-only):
+Product docs live loose at the product root (no `docs/` subfolder — `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md` Part 1). Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md` (filenames are role-only):
 
 ```
 <spec_path>/
@@ -162,9 +162,9 @@ Group folders (`features/` and the rest) and their operator-zone folder-notes ap
 
 **Vision first.** Before the design, author `<spec_path>/vision.md` (doc type `system-vision`) when it does not exist yet: instantiate `${CLAUDE_PLUGIN_ROOT}/templates/spec.docs/system-vision.md` with the product key and fill its sections from the code evidence, following each section's own template comment. Then set its stage via `lazy-spec.set-stage` → `draft`. A pre-existing `vision.md` is left untouched.
 
-The product design doc describes WHAT the product is, who uses it, and what it does — behavior terms only. NO source URLs, file paths, or class/function names. Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md` this doc MUST NOT contain source URLs, and per "Branch handling" it never carries `spec_source_branches`.
+The product design doc describes WHAT the product is, who uses it, and what it does — behavior terms only. NO source URLs, file paths, or class/function names. Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md` this doc MUST NOT contain source URLs, and per "Branch handling" it never carries `spec_source_branches`.
 
-Emit the mandatory header section per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`, with the migrated `spec_role` key. The frontmatter MUST carry `spec_source_docs` and the body MUST end with the `# Sources` section (both authored inline here — `design.md` is not scaffolded from an asset template):
+Emit the mandatory header section per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md`, with the migrated `spec_role` key. The frontmatter MUST carry `spec_source_docs` and the body MUST end with the `# Sources` section (both authored inline here — `design.md` is not scaffolded from an asset template):
 
 ```markdown
 ---
@@ -276,7 +276,7 @@ One subsection per source file or logical unit. Include: purpose, key functions/
 Tables grouped by category. Columns: Method | Path | Handler | Description. The route table IS the artifact — no picture.
 
 ## Dependencies
-Table: Package | Usage. Path-qualified wikilinks to existing specs for internal dependencies (per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`); external dependencies use plain text.
+Table: Package | Usage. Path-qualified wikilinks to existing specs for internal dependencies (per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md`); external dependencies use plain text.
 
 # Sources
 ```
@@ -325,11 +325,11 @@ This step emits `no-candidates` if Agent D returned an empty `findings` list.
 - Product design doc contains zero source URLs (no `/blob/`, `/-/blob/`, `/src/`, `/tree/` for any forge) and no `spec_source_branches` frontmatter.
 - Both product docs carry the default `spec_source_docs` frontmatter array and a body `# Sources` section with the `#protected/spec/sources` tag and a `## Docs` sub-section whose bullets match the frontmatter list (per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.sources-protocol.md`).
 - Product tech doc source URLs are all produced by `lazy-spec.source-url` (never inlined forge path schemes) and carry no line-number fragments.
-- Both product docs carry the migrated `spec_role` + `spec_stage` frontmatter and the mandatory header (frontmatter + H1) per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`.
+- Both product docs carry the migrated `spec_role` + `spec_stage` frontmatter and the mandatory header (frontmatter + H1) per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md`.
 - Both product docs carry `wiki_pinned_topics` — `wiki/doc-kind/design` + `wiki/product/<product>` on `design.md`, `wiki/doc-kind/tech` + `wiki/product/<product>` on `tech.md` — no `wiki/category/...` line on either (product-level docs have no category).
 - No operator-zone folder-note, no `human-tasks.md`, no `spec_role: layout` doc, no `layout.excalidraw` file, and no `backlog/` were created (those are removed roles / product-config's territory).
 - No sub-product folders were created (scaffolded candidates are **features** under `<spec_path>/features/`, delegated to create-asset, never sibling products).
-- Wikilinks use path-qualified form per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md` and target existing pages.
+- Wikilinks use path-qualified form per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md` and target existing pages.
 
 ### P8 — Log the run
 
@@ -341,7 +341,7 @@ Feature mode scaffolds ONE feature-candidate from code by delegating to `lazy-sp
 
 ### F1 — Determine the feature slug
 
-If the slug is obvious from the user's input or the source path, use it (lowercase-with-hyphens per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`). Otherwise ask the user via `AskUserQuestion` — context first: where (`/lazy-spec.create-from-code · Step F1 — Determine the feature slug`, target `<spec_path>/features/<slug>/`), found (the source path or candidate the input named, and the slug(s) it suggests), why asking (the slug is the folder's permanent identity and the input fixed none), answers (each suggested slug — the folder is scaffolded under that name in F2, never re-asked; `other` — type one, lowercase-with-hyphens); header "Feature slug", question "Which slug should the feature scaffolded from `<source-path>` on `<product>` take?". If the parent product's `source` is needed for grounding, it was already captured in Step 0.
+If the slug is obvious from the user's input or the source path, use it (lowercase-with-hyphens per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md`). Otherwise ask the user via `AskUserQuestion` — context first: where (`/lazy-spec.create-from-code · Step F1 — Determine the feature slug`, target `<spec_path>/features/<slug>/`), found (the source path or candidate the input named, and the slug(s) it suggests), why asking (the slug is the folder's permanent identity and the input fixed none), answers (each suggested slug — the folder is scaffolded under that name in F2, never re-asked; `other` — type one, lowercase-with-hyphens); header "Feature slug", question "Which slug should the feature scaffolded from `<source-path>` on `<product>` take?". If the parent product's `source` is needed for grounding, it was already captured in Step 0.
 
 ### F2 — Delegate to lazy-spec.create-asset
 
@@ -373,7 +373,7 @@ One line per task in the active mode's canonical list, with its outcome word. A 
 
 - **Never invent behavior** — only document what the code actually does.
 - **This skill never registers products** — `/lazy-spec.product-config` owns the product record and the operator-zone folder tree. Requires a registered, code-bound product (has `source`); refuses an unregistered product, no-ops a design-only one.
-- **Strict file roles** — the product design doc NEVER contains source URLs; the product tech doc DOES (per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`).
+- **Strict file roles** — the product design doc NEVER contains source URLs; the product tech doc DOES (per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md`).
 - **No nested products** — sub-areas become `## Architectural Areas` subsections of the product tech doc, not separate product spec folders.
 - **Delegate heavy reads** — parallel Explore agents scan source; the main session synthesizes and decides.
 - **Feature mode delegates to create-asset** — it owns the asset scaffold and docs. No per-asset `tech.md` and no seeded workflow originate from this skill.

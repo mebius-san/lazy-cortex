@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Thirteen aspect files (eight domain, five cross-cutting) that layer knowledge and rigor onto experts via lazy.settings.json composition.
-last_regen: 2026-09-09
+last_regen: 2026-09-11
 diagram_spec:
   anchor: "Domain aspects feed the composition entry"
   request: "Flow diagram: the eight domain aspect files — claude-plugin-aspect, game-dev-aspect, dotfiles-aspect, obsidian-plugin-aspect, data-pipeline-aspect, software-product-aspect, sci-fi-aspect, fantasy-aspect — each feed into a single lazy.settings.json[experts] composition entry node. The six technical domain aspects carry the edge label 'technical class'; the two genre aspects sci-fi-aspect and fantasy-aspect carry the edge label 'fiction class'. No other nodes."
@@ -21,11 +21,11 @@ source_skills:
   - lazy-experts.terms-aspect
   - lazy-experts.structure-aspect
   - lazy-experts.install
-source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Domain aspects and the cross-cutting aspects
 
-The aspects block is a set of pure prompt layers — each one adds a body of knowledge or behavioral discipline to whichever generic expert (`interpreter`, `designer`, `architect`, `planner`, `implementer`, `debugger`, `reviewer`, `tester`, or `fiction-writer`) you pair it with. You declare the pairing in `lazy.settings.json[experts]` and the expert runtime merges the aspect bodies into the agent's system prompt at dispatch time. The result is a named specialist — for example a `claude-plugin-planner`, a `game-designer`, an `obsidian-plugin-implementer`, or a `sci-fi-writer` — without authoring a fresh agent for each domain.
+The aspects block is a set of pure prompt layers — each one adds a body of knowledge or behavioral discipline to whichever generic expert (`interpreter`, `designer`, `architect`, `planner`, `implementer`, `debugger`, `reviewer`, `tester`, or `fiction-writer`) you pair it with. You declare the pairing in `lazy.settings.json[experts]` and the expert runtime merges the aspect bodies into the agent's system prompt at dispatch time. The result is a named specialist — for example a `claude-plugin.planner`, a `game.designer`, an `obsidian-plugin.developer`, or a `sci-fi.fiction-writer` — without authoring a fresh agent for each domain.
 
 `lazycortex-experts` ships thirteen aspects across two categories. Eight are **domain aspects**: you pick the ones relevant to a project and wire them into the specialists you want. Five are **cross-cutting aspects** that compose automatically per class rather than by hand-pick: `discipline` and `research` onto every seeded expert, and `tech-writing`, `terms`, and `structure` onto every seeded expert in a technical class only. `/lazy-experts.install` handles all of it — it asks which classes to register (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, `sci-fi`, `fantasy`), then seeds the roles the class map assigns for each chosen class, wiring `lazycortex-experts:lazy-experts.discipline-aspect` and `lazycortex-experts:lazy-experts.research-aspect` onto every entry, and `lazycortex-experts:lazy-experts.tech-writing-aspect`, `lazycortex-experts:lazy-experts.terms-aspect`, and `lazycortex-experts:lazy-experts.structure-aspect` onto technical-class entries only. All thirteen aspects are public-marketplace-safe and composable with aspects your own plugins ship.
 
@@ -70,7 +70,7 @@ The `lazy.settings.json[experts]` entry is the composition point. A hand-authore
 ```jsonc
 "experts": {
   "_version": 1,
-  "claude-plugin-planner": {
+  "claude-plugin.planner": {
     "agent": "lazycortex-experts:lazy-experts.planner",
     "aspects": [
       "lazycortex-experts:lazy-experts.claude-plugin-aspect",
@@ -82,7 +82,7 @@ The `lazy.settings.json[experts]` entry is the composition point. A hand-authore
       "lazycortex-core:lazy-memory.persona-aspect"
     ]
   },
-  "sci-fi-writer": {
+  "sci-fi.fiction-writer": {
     "agent": "lazycortex-experts:lazy-experts.fiction-writer",
     "aspects": [
       "lazycortex-experts:lazy-experts.sci-fi-aspect",

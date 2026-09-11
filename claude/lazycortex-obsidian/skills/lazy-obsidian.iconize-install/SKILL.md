@@ -1,7 +1,7 @@
 ---
 name: lazy-obsidian.iconize-install
 description: "Run when the operator asks to set up folder and file icons in this Obsidian vault, or when `/lazy-obsidian.iconize-sync` refuses because the icon-map is missing, or the Iconize / folder-notes / iconize-reloader vault plugins aren't there. Scaffolds the vault-side pieces (icon-map, gitignore entry, schema migration, repaint routine) and installs those three plugins. Chained from `/lazy-obsidian.install`; idempotent, and must be run from the vault's git root."
-allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git ls-files*), Bash(git -C *), Bash(chmod *), Bash(python3 *), Bash(cp *), Bash(test *), Bash(date *), Bash(rm *), Bash(jq *), AskUserQuestion, Agent
+allowed-tools: Read, Write, Edit, Glob, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git ls-files*), Bash(git -C *), Bash(chmod *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(cp *), Bash(test *), Bash(date *), Bash(rm *), Bash(jq *), AskUserQuestion, Agent
 argument-hint: "[repo=<abs>] [--dry-run] — scaffolds into <repo-root>/.claude/ (repo= sets the target under headless dispatch)"
 ---
 # Install iconize-sync (Obsidian)
@@ -14,7 +14,7 @@ Project-local only. There is no global scope — iconize-sync is inherently per-
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 15 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 16 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Locate repo root and vault`
@@ -149,7 +149,7 @@ The icon-map uses a bilateral version handshake (`schema_version` + optional `mi
 
 This step is quiet by default: it writes, merges, and migrates the icon-map silently and prompts **only** on a genuine per-key value conflict (the same key carries different values in the authored file and the shipped template, and we can't tell which should survive). Adding shipped keys, keeping authored keys, and applying a schema transform are all non-contradicting operations done silently. "Conflict" ≠ "bytes differ".
 
-Retrieve `SCHEMA_VERSION`, `SUPPORTED_SCHEMA`, and `HOOK_VERSION` from the worker: `python3 ${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py --vault <vault> check-versions`.
+Retrieve `SCHEMA_VERSION`, `SUPPORTED_SCHEMA`, and `HOOK_VERSION` from the worker: `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py" --vault <vault> check-versions`.
 
 ### Decision matrix
 
@@ -264,7 +264,7 @@ tick and dispatches nothing for history, so every note committed before this mom
 whatever icon it has forever:
 
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py --vault <vault> reconcile
+"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py" --vault <vault> reconcile
 ```
 
 Commit the paths it reports. Outcome: **backfilled-<count>** / **backfill-clean**.
@@ -324,7 +324,7 @@ One bullet per step, in order — missing bullet = skipped step, back up and run
 - **Step 2.55** legacy pre-commit shim: **legacy-shim-removed** (+ **hooksPath-unset**) / **kept-foreign** / **not-present**.
 - **Step 2.6** Iconize frontmatter settings: **asserted** / **merged** / **kept-local** / **iconize-absent**.
 - **Step 2.7** icon-map: **installed** / **unchanged** / **merged** (with `additions=N conflicts-kept-authored=N conflicts-took-shipped=N`; append `paint-roots-seeded=<vault_root>` when the key was introduced this run) / **migrated-v`N`-to-v`SCHEMA_VERSION`** / **migration-path-missing** / **blocker-plugin-too-old**. Prepend **path-migrated** when the v1.0.0 legacy-path pre-flight moved the file; **kept-orphan** for the legacy path when both old and new paths exist.
-- **Step 3.5** repaint routine: **registered** / **already-present** / **no-daemon**, plus the identity (**identity-seeded** / **identity-present**) and backfill outcomes.
+- **Step 3.5** repaint routine: **registered** / **refreshed** / **already-present** / **no-daemon**, plus the legacy-identity prune (**identity-pruned** / **identity-absent**) and backfill outcomes.
 - **Step 4** callbacks dir: **created** / **already-present** / **.gitkeep-added**.
 - **Step 4.5** `.gitignore` (iconize data.json): **added** / **already-ignored** / **gitignore-created**; WARN if `git ls-files --error-unmatch` exits 0 (user runs `git rm --cached`, never auto).
 - **Step 4.6** plugin registries: **registries-visible-<count>** (one line per registry) / **no-registries**.

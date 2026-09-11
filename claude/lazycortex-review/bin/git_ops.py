@@ -49,6 +49,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -328,9 +329,10 @@ def repaint_inline(repo: Path, paths: list[str]) -> list[str]:
   Repaint icon frontmatter for `paths` via the obsidian plugin's `sync-paths` op.
 
   Resolves the `lazycortex-obsidian` CLI through `$LAZYCORTEX_PLUGIN_DIRS` (the blessed
-  cross-plugin contract), falling back to the plugin cache this plugin runs from, and asks it
-  to refresh the named repo-relative notes, so the caller can fold the repainted files into
-  the commit it is about to make — no separate icons commit, no operator-edit wake from one.
+  cross-plugin contract), falling back to the dev-vault sibling tree and then to the plugin
+  cache this plugin runs from, and asks it to refresh the named repo-relative notes, so the
+  caller can fold the repainted files into the commit it is about to make — no separate icons
+  commit, no operator-edit wake from one.
 
   Notes:
     - Best-effort by design: a consumer without the obsidian plugin, an unset environment,
@@ -359,6 +361,13 @@ def repaint_inline(repo: Path, paths: list[str]) -> list[str]:
     if candidate.is_file():
       cli = candidate
       break
+  # dev-vault fallback — a checkout runs the sources at hand, never an installed copy (§ 2b);
+  # this file sits at claude/lazycortex-review/bin/, so the sibling tree is two levels up
+  if cli is None:
+    # waiver: sibling plugin's on-disk CLI layout per dev.plugin-boundaries § 1c, not a domain key
+    sibling = Path(__file__).resolve().parents[2] / "lazycortex-obsidian/bin/lazycortex-obsidian"
+    if sibling.is_file():
+      cli = sibling
   # plugin-cache fallback — a session (hook, skill) has no daemon export to walk
   if cli is None:
     # waiver: sibling plugin's on-disk CLI layout per dev.plugin-boundaries § 1c, not a domain key
@@ -374,7 +383,7 @@ def repaint_inline(repo: Path, paths: list[str]) -> list[str]:
   try:
     proc = subprocess.run(
         # waiver: the obsidian CLI's subcommand vocabulary, owned by lazycortex-obsidian
-        [str(cli), "sync-paths", *paths],
+        [sys.executable, str(cli), "sync-paths", *paths],
         cwd=repo, capture_output=True, text=True, check=False,
     )
     # guard: a failing worker must never block the caller's commit

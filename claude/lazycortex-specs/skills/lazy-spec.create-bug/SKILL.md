@@ -2,6 +2,7 @@
 name: lazy-spec.create-bug
 description: "Use when filing a bug against a product spec. Built-in wrapper: pins the asset type to `bug` and delegates — all clarification, scaffolding, prose, and diagrams are owned by `lazy-spec.create-asset`. Which document the asset starts from is declared by the type declaration (`asset_types.bug.start_doc`) and read by the delegate, never by this wrapper."
 execution-discipline-waiver: "Thin wrapper — pins the category to `bug` and delegates to lazy-spec.create-asset via the Skill tool; the multi-phase orchestration where step-skip can hide lives entirely in the delegate."
+logging-waiver: "pure delegator — lazy-spec.create-asset owns the log"
 ---
 # Create Bug
 

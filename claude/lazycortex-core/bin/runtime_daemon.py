@@ -28,6 +28,7 @@ from lazy_settings import load_section
 import error_ledger
 import expert_runtime
 import runtime_state
+from shebang_exec import argv_for
 from routine_types import RoutineConfigError, dispatch_routine, validate_routine_entry
 from worktree_tasks import WorktreeTaskManager
 from code_fingerprint import CodeFingerprint
@@ -401,17 +402,16 @@ def _resolve_in_plugin_dir(plugin_dir: Path, plugin_name: str) -> Path | None:
   Resolve the bin entrypoint for a single plugin source directory.
 
   Reads the directory's `plugin.json` "name" field and returns its entrypoint when it matches the
-  requested plugin. Prefers `bin/<plugin-name>`; otherwise falls back to the single executable script
-  under `bin/`. Ambiguous directories with multiple executables are skipped so the caller can keep
-  searching.
+  requested plugin. The entrypoint is always `bin/<plugin-name>`, resolved by name alone — never by
+  the executable bit, which a git client that does not preserve file modes may silently drop.
 
   Args:
     plugin_dir: Plugin source root containing `.claude-plugin/` and `bin/`.
     plugin_name: Expected plugin identifier as declared in `plugin.json`.
 
   Returns:
-    Path to the resolved bin entrypoint, or `None` when the directory does not match or no
-    unambiguous executable is available.
+    Path to the resolved bin entrypoint, or `None` when the directory does not match or the
+    entrypoint file is absent.
   """
   manifest = plugin_dir / PluginFile.MANIFEST_DIR / PluginFile.MANIFEST
   try:
@@ -427,21 +427,10 @@ def _resolve_in_plugin_dir(plugin_dir: Path, plugin_name: str) -> Path | None:
   if not bin_dir.is_dir():
     return None
   primary = bin_dir / plugin_name
-  # guard: preferred entrypoint exists and is executable
-  if primary.is_file() and os.access(primary, os.X_OK):
-    return primary
-  execs = [
-    p for p in bin_dir.iterdir()
-    if p.is_file()
-    # waiver: filesystem path idiom, not a domain constant
-    and not p.name.endswith(".py")
-    and not p.name.startswith(".")
-    and os.access(p, os.X_OK)
-  ]
-  # guard: unique executable fallback only
-  if len(execs) == 1:
-    return execs[0]
-  return None
+  # the entry point is the file named after the plugin, full stop — no exec-bit
+  # probing, no "unique executable" guess: a git client that cannot store modes
+  # would silently unregister every plugin otherwise
+  return primary if primary.is_file() else None
 
 
 def _read_plugin_version() -> str:
@@ -1994,19 +1983,21 @@ def resolve_routine_command(cmd: list[str]) -> list[str]:
       passed through unchanged.
 
   Returns:
-    A new list where the first element is the resolved absolute path to the plugin's bin entrypoint
-    and the remaining elements are the original arguments.
+    A new list where the first element is the interpreter that runs the plugin's bin entrypoint, the
+    second element is the resolved absolute path to that entrypoint, and the remaining elements are
+    the original arguments.
 
   Raises:
     FileNotFoundError: When the plugin is not present in any registered source directory or in the
       plugin cache, or when the resolved version has no bin entrypoint.
+    ShebangError: When the resolved entrypoint's shebang line cannot be parsed into an interpreter.
   """
   plugin = cmd[0]
   # dev-plugin paths take precedence over the plugin cache
   for pd in _PLUGIN_DIRS:
     bin_path = _resolve_in_plugin_dir(pd, plugin)
     if bin_path is not None:
-      return [ str(bin_path), *cmd[1:] ]
+      return argv_for(bin_path, *cmd[1:])
   cache = Path.home() / PLUGIN_CACHE_REL
   # real layout: cache/<registry>/<plugin>/<version>/bin/<plugin>
   plugin_dirs: list[Path] = []
@@ -2035,9 +2026,9 @@ def resolve_routine_command(cmd: list[str]) -> list[str]:
   # waiver: filesystem path idiom, not a domain constant
   bin_path = latest / "bin" / plugin
   # guard: latest version has no bin entrypoint
-  if not bin_path.exists():
+  if not bin_path.is_file():
     raise FileNotFoundError(f"no bin for plugin: {bin_path}")
-  return [ str(bin_path), *cmd[1:] ]
+  return argv_for(bin_path, *cmd[1:])
 
 
 def _git_halt_reason(error: Exception) -> str:

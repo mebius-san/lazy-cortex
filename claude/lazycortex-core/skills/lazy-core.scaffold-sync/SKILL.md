@@ -1,7 +1,7 @@
 ---
 name: lazy-core.scaffold-sync
 description: "Dispatched by a plugin's install skill (`lazy-core.install` Step 4, `lazy-python.install` Step 6) to copy that plugin's authoring templates into the consumer and upsert its scaffold-registry entries; not for direct use. Repo-specific `_local` entries are `/lazy-core.scaffold-local`'s business, not this skill's."
-allowed-tools: Read, Write, Glob, Bash(find *), Bash(ls *), Bash(diff *), Bash(cp *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Bash(python3 *), Agent
+allowed-tools: Read, Write, Glob, Bash(find *), Bash(ls *), Bash(diff *), Bash(cp *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
 ---
 # Sync Scaffold Templates and Registry
 
@@ -11,7 +11,7 @@ Note: `lazy-core.install` Step 4 becomes an invocation of this skill for `lazyco
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Resolve inputs and registry path`
@@ -66,7 +66,7 @@ Otherwise state outcome `discovered-N` where N is the number of manifests found.
 For each `<group>` discovered in Step 2, sync the template files from `<installPath>/templates/<group>/` into the consumer's `.claude/templates/<group>/` directory (where "consumer" scope = `~/.claude/` for `user`, `<repo-root>/.claude/` for `project`) with the deterministic sync script — the current/not-current verdict comes from the receipt, never from impression:
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/bin/file_sync.py --src <installPath>/templates/<group> --dst <consumerScope>/.claude/templates/<group> --copy-diverged --exclude scaffold.entries.json
+"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/file_sync.py" --src <installPath>/templates/<group> --dst <consumerScope>/.claude/templates/<group> --copy-diverged --exclude scaffold.entries.json
 ```
 
 `scaffold.entries.json` is plugin-internal and must not land in the consumer tree. The script creates the target directory, copies absent targets (state **installed**), byte-compares the rest (**unchanged**), overwrites every stale target from the shipped source (**refreshed**), and re-compares each write before reporting it. Subdirectories are ignored — template groups are flat.

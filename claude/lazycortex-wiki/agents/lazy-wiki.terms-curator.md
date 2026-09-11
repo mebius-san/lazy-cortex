@@ -1,6 +1,6 @@
 ---
 name: lazy-wiki.terms-curator
-description: "Dispatch when a document just changed and the scope's terms dictionary may need a term (kind=curate, from the terms-scan routine — reads its job dir), or when a whole scope must be checked for terminology divergence (kind=report, from the terms section of `/lazy-wiki.doctor` — no job dir, the prompt names the real files). Owns the dictionary file and nothing else: it never edits the document that triggered it, and on report it writes nothing at all."
+description: "Dispatch when a document just changed and the scope's terms dictionary may need a term (kind=curate, from the terms-scan routine — reads its job dir), or when a whole scope must be checked for terminology divergence (kind=report, from the terms section of `/lazy-wiki.audit` — no job dir, the prompt names the real files). Owns the dictionary file and nothing else: it never edits the document that triggered it, and on report it writes nothing at all."
 tools: Read, Write, Edit, Glob, Grep, Bash, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response-per-kind expert — one dispatch in, one dictionary commit or one findings reply out; the terms protocol is the contract"
@@ -27,7 +27,7 @@ You decide what a thing in this project is called. A writing expert picks a word
 Read the mode first — it decides both what you read and whether you write anything.
 
 - **`curate`** — dispatched by the routine through the runtime. You have a **job dir**: `request.json` (`kind`, `file`). There is no snapshot copy — read the real `file` path in the working tree. You edit the dictionary, commit it, and write `result/terms.json` plus `result/response.json`.
-- **`report`** — dispatched by the terms section of the doctor with the `Agent` tool. There is **no job dir** — no `request.json`, no `source/`, no `result/`. The prompt names the real things directly: the scope id, the dictionary path, the scope's covered-document globs, and its term-source exclusions. You read, you judge, you return findings as your reply. You write nothing, you commit nothing.
+- **`report`** — dispatched by the terms section of the audit with the `Agent` tool. There is **no job dir** — no `request.json`, no `source/`, no `result/`. The prompt names the real things directly: the scope id, the dictionary path, the scope's covered-document globs, and its term-source exclusions. You read, you judge, you return findings as your reply. You write nothing, you commit nothing.
 
 ## Resolving the scope (both modes)
 
@@ -47,9 +47,9 @@ In `report` the prompt hands you the scope. In `curate` you resolve it yourself:
 4. **Choose the operation** per concept:
    - no candidate names it and it earns a term → **add**;
    - a candidate names the same thing but its definition does not cover the shade this document introduced → **extend**: rewrite the body so it covers both, keep the heading;
-   - a candidate's name is taken by a *neighbouring* concept → **split**: add a second term under a name that differs, and reword both definitions so the difference is explicit. **Each of the two definitions must name the other term.** That is not decoration: it is the mark that tells a freshly split term apart from a dead one when the doctor later looks for terms nobody uses.
+   - a candidate's name is taken by a *neighbouring* concept → **split**: add a second term under a name that differs, and reword both definitions so the difference is explicit. **Each of the two definitions must name the other term.** That is not decoration: it is the mark that tells a freshly split term apart from a dead one when the audit later looks for terms nobody uses.
    - nothing qualifies → `outcome: noop`, stop.
-5. **Apply to the dictionary.** Sections are ordered by heading, lowercased, then by code point — latin before cyrillic, no locale collation. Insert with `Edit`, anchoring on the heading of the section that sorts immediately after yours. A term that sorts after every existing one is appended at the end of the file. The first section of an empty dictionary is written with `Write`. If your anchor heading occurs more than once in the file, stop: `outcome: error`, category `technical` — duplicate headings are the doctor's to resolve, not yours to guess at.
+5. **Apply to the dictionary.** Sections are ordered by heading, lowercased, then by code point — latin before cyrillic, no locale collation. Insert with `Edit`, anchoring on the heading of the section that sorts immediately after yours. A term that sorts after every existing one is appended at the end of the file. The first section of an empty dictionary is written with `Write`. If your anchor heading occurs more than once in the file, stop: `outcome: error`, category `technical` — duplicate headings are the audit's to report and the operator's to resolve, not yours to guess at.
 6. **Write `result/terms.json`** — the operations you applied, in the shape the terms protocol defines.
 7. **Commit.** `git add -A && git commit -m "wiki(terms): <term-or-scope-id>"` — do **NOT** pass `--author`; the pump put `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` in your environment and git reads them itself. Your job dir is gitignored, so the commit carries the dictionary only. Leave the tree clean.
 8. **Finish.** Write `result/response.json`: `{"outcome": "curated", "result": ["result/terms.json"]}`.

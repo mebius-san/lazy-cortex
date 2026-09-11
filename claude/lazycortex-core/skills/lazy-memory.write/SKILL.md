@@ -1,7 +1,7 @@
 ---
 name: lazy-memory.write
 description: "Invoked by a persona-marked expert whenever it records or updates a memory note (per `lazy-memory.persona-aspect`), and by the operator when merging notes by hand — the only blessed writer of `.memory/`. Direct `Write` / `Edit` under `.memory/` silently desyncs the tag index; this skill writes the note, regenerates the touched `.tags/` files, and commits atomically under the memory-bot identity."
-allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Bash(test *), Bash(git *), Write, Agent
+allowed-tools: Read, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date -u *), Bash(test *), Bash(git *), Write, Agent
 ---
 # Memory write
 
@@ -37,7 +37,7 @@ Outcome: `validated` or `aborted`.
 Shell out to the worker:
 
 ```
-Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-memory.write/bin/write.py <expert> [--slug <slug>] [--consolidate <path>]... <<EOF
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-memory.write/bin/write.py" <expert> [--slug <slug>] [--consolidate <path>]... <<EOF
 <body>
 EOF
 )

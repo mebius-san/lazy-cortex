@@ -17,7 +17,7 @@ The plugin manages *structure* and *lifecycle*, not the prose — authoring stay
 - **upstream** — Mirror external design sources, route their changes through the request pipeline, and keep a spec doc's visible source list matching its frontmatter. Members: lazy-spec.upstream-run, lazy-spec.refresh-sources.
 - **source-links** — Resolve repos, dependencies, and forge-correct source URLs. Members: lazy-spec.resolve-repo, lazy-spec.resolve-dependency, lazy-spec.source-url.
 - **requests** — Ingest free-form requests and route them into the spec tree. Members: spec.coordinator, lazy-spec.request-classify, lazy-spec.request-find-candidates.
-- **install-and-audit** — Bootstrap, configure a product, and audit a spec in this repo. Members: lazy-spec.install, lazy-spec.product-config, lazy-spec.doctor, lazy-spec.help.
+- **install-and-audit** — Bootstrap, configure a product, and audit a spec in this repo. Members: lazy-spec.install, lazy-spec.product-config, lazy-spec.audit, lazy-spec.help.
 - **research** — Bounded lookups over the spec tree for agents and operators, without loading whole documents. Members: lazy-spec.lookup.
 
 ## Walkthroughs

@@ -29,4 +29,4 @@ The same bar applies to a decision-candidate marked in a report — a candidate 
 
 ## Enforcement
 
-The plugin maintainer's own audit tooling verifies this rule's invariants — the closed transfer-source set and the registry's wiring in `lazy-core.markdown-style` — still hold against the plugin's actual state. `lazy-spec.doctor` enforces the registry's structural shape (record format, header, numbering, links) file by file.
+The plugin maintainer's own audit tooling verifies this rule's invariants — the closed transfer-source set and the registry's wiring in `lazy-core.markdown-style` — still hold against the plugin's actual state. `lazy-spec.audit` enforces the registry's structural shape (record format, header, numbering, links) file by file.

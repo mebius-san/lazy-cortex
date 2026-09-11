@@ -1,10 +1,11 @@
 ---
 chapter_type: faq
-summary: Common questions about installing lazycortex-experts, the class map, composing specialists, and the thirteen generic agents' lane boundaries.
-last_regen: 2026-09-09
+summary: Common questions about installing lazycortex-experts, the class map, composing specialists, auditing the composition, and the thirteen generic agents' lane boundaries.
+last_regen: 2026-09-11
 no_diagram: true
 source_skills:
   - lazy-experts.install
+  - lazy-experts.audit
   - lazy-experts.interpreter
   - lazy-experts.designer
   - lazy-experts.architect
@@ -18,7 +19,7 @@ source_skills:
   - lazy-experts.reviewer
   - lazy-experts.tester
   - lazy-experts.fiction-writer
-source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Frequently asked questions
 
@@ -56,7 +57,7 @@ Because `lazy-experts.tech-writing-aspect` bans metaphor, figurative imagery, at
 
 Yes, if the update ships new agent-model tier entries, a new role agent, or a new domain aspect. `/plugin update` refreshes the plugin cache but does not re-sync your `lazy.settings.json`. Re-run `/lazy-experts.install` to pick up any new `lazycortex-experts:*` entries from `lazycortex-core`'s `default-tiers.json`, and to fill in any role the class map now prescribes for a class you've already registered — for example, a project that registered a technical class before the `architect` role shipped picks up the missing `<domain>.architect` entry on re-run, a technical-class project registered before `system-designer` shipped picks up the missing `<domain>.system-designer` entry, and a technical-class project registered before `use-case-writer` or `ui-designer` shipped picks up the missing `<domain>.use-case-writer` and `<domain>.ui-designer` entries. The same applies to `data-writer`: it now seeds with every technical class rather than `game-dev` alone, so any technical-class project registered before that change picks up the missing `<domain>.data-writer` entry on re-run. The same applies again to `docs-writer`: the class map now seeds `<domain>.docs-writer` for every technical class, so a technical-class project registered before this change picks up the missing entry on re-run too (see "What does the docs-writer do, and why does every technical class get it now?" below). A newly shipped class like `software-product` isn't retrofitted onto an existing project this way, though — re-running install only completes classes you've already registered; picking up a brand-new class still means registering one of its experts by hand (see "Class set is sticky once seeded" below).
 
-The skill is idempotent — re-running it is always safe. Beyond adding absent entries, it also backfills one specific gap on an existing entry: an existing `developer`, `data-writer`, `docs-writer`, or `tester` entry with no `workspace` key gets `workspace: "branch"` written in, reported as `refreshed` — a missing key on one of those four roles is a gap left by an older run, not a customisation, so there's nothing of yours to preserve. If you deliberately set one of those four to `workspace: "main"` by hand, that value stays; only an absent key gets backfilled. Every other field the skill leaves exactly as your `lazy.settings.json` already has it — it never overwrites a differing `agent` ref, `git_author`, domain aspect, or any other customised value.
+The skill is idempotent — re-running it is always safe. Beyond adding absent entries, it also backfills two specific gaps on an existing entry: an existing `developer`, `data-writer`, `docs-writer`, or `tester` entry with no `workspace` key gets `workspace: "branch"` written in, and any writing-role entry with no `can_commit_in_repo` key at all gets `can_commit_in_repo: true` written in — both reported as `refreshed` / `completed`. A missing key on one of those roles is a gap left by an older run, not a customisation, so there's nothing of yours to preserve. If you deliberately set `workspace` to `"main"` or `can_commit_in_repo` to `false` by hand, that value stays; only a totally absent key gets backfilled. Every other field the skill leaves exactly as your `lazy.settings.json` already has it — it never overwrites a differing `agent` ref, `git_author`, domain aspect, or any other customised value.
 
 ---
 
@@ -168,7 +169,13 @@ That depends on the expert runtime's resolution rules, which are governed by `la
 
 ## How do I verify my install is healthy after running /lazy-experts.install?
 
-Run `/lazy-core.doctor`. There is no plugin-local audit skill for `lazycortex-experts` — health checks for the full LazyCortex setup, including whether the experts' `agent_models` entries and seeded `experts` entries are present and well-formed, route through `lazycortex-core`'s doctor.
+Run `/lazy-experts.audit`. It's a read-only check: it confirms every role the class map assigns still resolves to a shipped agent file, every aspect reference the map assigns still resolves to a shipped reference file, and every domain entry already seeded in your `lazy.settings.json` still points at an agent and a set of aspects this plugin actually ships. Findings come back grouped by severity — FAIL first, then WARN, then INFO — each one naming its fix, closed with a summary line naming the worst severity seen. The audit never writes anything: for almost every finding the fix is re-running `/lazy-experts.install` (it seeds a missing entry, appends a missing mandatory aspect, backfills an absent `workspace` or `can_commit_in_repo` key); the two exceptions are a missing agent or aspect file in the plugin's own shipped tree, whose fix is `/plugin update lazycortex-experts@lazycortex` because the plugin's cache is incomplete, not your settings. `/lazy-core.doctor` runs this same audit as part of its cross-plugin sweep, so either entry point reaches the same checks — run `/lazy-experts.audit` directly when you only care about this one plugin.
+
+---
+
+## My seeded expert entries look fine but /lazy-experts.audit reports a WARN. Is that a real problem?
+
+Depends which one. `aspects-incomplete` means a technical-class entry is missing one of the five mandatory cross-cutting aspects (discipline, research, tech-writing, terms, structure) — re-run `/lazy-experts.install` and it appends whatever is missing without touching anything else on the entry. `aspect-not-for-fiction` means a `sci-fi` or `fantasy` entry is carrying `tech-writing`, `terms`, or `structure` — those three actively fight the fiction-writer's persona (see "Why doesn't my sci-fi or fantasy specialist carry the tech-writing aspect?" above), so remove them yourself; install never strips an aspect it finds already present. `key-absent` means a writing-role entry has no `can_commit_in_repo` key, or one of the four isolated roles (`developer`, `data-writer`, `docs-writer`, `tester`) has no `workspace` key — an entry seeded before those keys shipped; `/lazy-experts.install` backfills the missing key and leaves an explicit value you set by hand (even `false` or `"main"`) untouched. None of these three is a FAIL — a FAIL is reserved for a broken reference: `agent-ref-unresolved` or `aspect-ref-unresolved` mean an entry points at an agent or aspect basename this plugin no longer ships, usually a hand-edited `agent` field, and that one does need a manual correction or a fresh reseed rather than a routine re-run.
 
 ---
 

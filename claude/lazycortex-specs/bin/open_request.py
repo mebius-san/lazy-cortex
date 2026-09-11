@@ -313,7 +313,8 @@ def _bootstrap_review(file_path: Path) -> None:
   """
   try:
     res = subprocess.run(
-        [str(_resolve_review_cli()), PlanReview.START_VERB, _NO_COMMIT_FLAG, str(file_path)],
+        [sys.executable, str(_resolve_review_cli()), PlanReview.START_VERB, _NO_COMMIT_FLAG,
+         str(file_path)],
         cwd = str(file_path.parent), capture_output = True, text = True, check = False,
         timeout = _BOOTSTRAP_TIMEOUT_S,
     )

@@ -1,7 +1,7 @@
 ---
 name: lazy-obsidian.deploy
 description: "Run on a checkout whose vault config is missing or stale — a fresh clone of a vault repo, a machine that never opened this vault, a teammate setting up from the repo alone — or when the operator asks to deploy / restore / rebuild the Obsidian config. Rebuilds `.obsidian/` from the tracked `.obsidian.manifest.json`, fetching every plugin bundle at its latest release. The sibling `/lazy-obsidian.capture` is what wrote that manifest."
-allowed-tools: Read, Bash(python3 *), Bash(git rev-parse*), Bash(test *), Bash(mkdir -p *), Bash(date *), Write, AskUserQuestion, Agent
+allowed-tools: Read, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(git rev-parse*), Bash(test *), Bash(mkdir -p *), Bash(date *), Write, AskUserQuestion, Agent
 argument-hint: "[<repo-root>]"
 dirty-tree-waiver: "writes only into `.obsidian/`, which the manifest workflow keeps gitignored; on a vault that still tracks it, restoring the operator's own recorded config is theirs to commit"
 ---
@@ -58,7 +58,7 @@ Outcome: `fresh`, `overwrite-approved`, or `cancelled-by-operator`.
 ## Step 3 — Run the deploy worker
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/vault_manifest.py" deploy <repo_root>
+"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/vault_manifest.py" deploy <repo_root>
 ```
 
 The worker prints a JSON report. A non-zero exit means `errors` is non-empty; every error names one plugin, snippet, or theme that was skipped — the rest of the vault was still written.

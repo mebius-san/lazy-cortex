@@ -30,6 +30,9 @@
 # version directory while its subprocess routines resolve to the in-repo sources
 # (--plugin-dir) — split-brain — and the daemon's own-code fingerprint watches the
 # cache files, so a `git pull` of core never reaches the loop and never restarts it.
+#
+# The shim itself is started as /bin/bash <shim> by the supervisor unit; no file on
+# this path needs the exec bit.
 
 # Re-exec through a login shell before parsing, so the operator's .zprofile/.zshrc
 # populate the environment (token + PATH) for everything below. The guard variable
@@ -39,7 +42,7 @@ if [ -z "${LAZYCORTEX_LOGIN_REEXEC:-}" ]; then
   for arg in "$@"; do
     if [ "$arg" = "--login-shell" ]; then
       export LAZYCORTEX_LOGIN_REEXEC=1
-      exec "${SHELL:-/bin/zsh}" -lc 'exec "$@"' _ "$0" "$@"
+      exec "${SHELL:-/bin/zsh}" -lc 'exec /bin/bash "$@"' _ "$0" "$@"
     fi
   done
 fi
@@ -109,7 +112,7 @@ if [ "$DEV_MODE" = "1" ] && [ -n "$REPO" ] && [ -d "$REPO/claude" ]; then
   # imports the same sources its routines resolve to, and the own-code fingerprint
   # watches files a `git pull` actually rewrites. Falls through to the cache when the
   # repo carries no core plugin (dev-mode on a consumer repo of other plugins).
-  if [ -x "$REPO/claude/lazycortex-core/bin/runner" ]; then
+  if [ -f "$REPO/claude/lazycortex-core/bin/runner" ]; then
     DEV_RUNNER="$REPO/claude/lazycortex-core/bin/runner"
   fi
 fi
@@ -121,4 +124,7 @@ else
   RUNNER=$(ls -d ~/.claude/plugins/cache/*/lazycortex-core/*/bin/runner 2>/dev/null | sort -rV | head -1)
   [ -z "$RUNNER" ] && { echo "lazycortex-core/bin/runner not found in plugin cache" >&2; exit 1; }
 fi
-exec "$RUNNER" "${ARGS[@]}"
+# The runner is Python; run it under the interpreter install recorded rather than
+# whatever `python3` launchd/systemd happen to find — and never via the exec bit,
+# which a mode-blind git client strips.
+exec "${LAZYCORTEX_PYTHON:-python3}" "$RUNNER" "${ARGS[@]}"
