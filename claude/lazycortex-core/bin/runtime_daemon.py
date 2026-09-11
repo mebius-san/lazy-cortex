@@ -208,6 +208,10 @@ def set_plugin_dirs(dirs: list[Path], cache_root: Path | None = None) -> None:
   other plugin, so a consumer install with no `--plugin-dir` at all still resolves its siblings.
   Pins `EnvVar.MAX_SUBAGENT_SPAWN_DEPTH` for the same subprocesses.
 
+  Guarantees:
+    - `LAZYCORTEX_PLUGIN_DIRS` always lists every registered dev-plugin directory before any cached
+      plugin root, and never lists a cached root for a plugin a dev directory already shadows.
+
   Args:
     dirs: Plugin source directories to register, in caller-preferred order. Each entry should be the
       root of a plugin source tree containing `.claude-plugin/` and `bin/`.
@@ -222,6 +226,13 @@ def set_plugin_dirs(dirs: list[Path], cache_root: Path | None = None) -> None:
   cached = [] if cache_root is None else [
     root for root in cached_plugin_roots(cache_root) if _manifest_name(root) not in shadowed
   ]
+
+  # Contract:
+  # `LAZYCORTEX_PLUGIN_DIRS` always lists every registered dev-plugin directory before any
+  # cached plugin root, and never lists a cached root for a plugin a dev directory already
+  # shadows. Downstream resolvers that split the variable and take the first match rely on
+  # this ordering to prefer a dev source over an installed version.
+
   # arguments are not ref-resolved (pass-through JSON values), but flow through to <jdir>/config.json
   # the same way; daemon-internal `resolve_routine_command` uses `_PLUGIN_DIRS` directly, while this
   # env handle exists for everyone else
@@ -306,6 +317,18 @@ def _rebuild_hook_dir(repo_root: Path, allowed: list[str]) -> Path:
     subprocess.CalledProcessError: When git cannot answer for this path.
     OSError: When the directory cannot be rebuilt or a link cannot be created.
   """
+
+  # Domain(runtime.git-safety):
+  # # Only vetted operator git hooks run under the daemon
+  # Every git operation the autonomous runtime performs — its own and every routine's — reads
+  # hooks from a filtered directory the runtime controls, never from the operator's real hook
+  # directory directly. Only hook names the operator has explicitly named as safe for automated
+  # runs are linked into that filtered directory; every other hook the checkout carries, vetted
+  # or not for interactive use, simply does not exist as far as the automated runtime's git is
+  # concerned. The filtered directory is rebuilt from scratch before every run, so removing a
+  # name from the vetted list takes effect the next time the runtime starts, without anyone
+  # having to clean up a stale link by hand.
+
   # a from-scratch rebuild is what makes a dropped allow-list entry stop running
   # waiver: filesystem path idiom, not a domain constant
   hook_dir = _git_common_dir(repo_root) / "lazy-hooks"
@@ -516,6 +539,9 @@ def due_routines(now: float, registry: dict, last_run: dict,
   """
   Return routines that are eligible to run right now, sorted by ascending priority.
 
+  Guarantees:
+    - Routines tied on priority are returned in the registry's own insertion order.
+
   Args:
     now: Current wall-clock timestamp in seconds since the epoch.
     registry: Routine registry as loaded from `lazy.settings.json[routines]`, keyed by routine name.
@@ -524,9 +550,19 @@ def due_routines(now: float, registry: dict, last_run: dict,
       with `ignore_halt: true` survive the filter so recovery routines can still run.
 
   Returns:
-    A list of `(name, cfg)` pairs ordered by `priority` ascending. Ties on equal priority preserve
-    registry insertion order.
+    A list of `(name, cfg)` pairs ordered by `priority` ascending.
   """
+
+  # Domain(runtime.daemon-loop):
+  # # Ordering and filtering the work eligible to run right now
+  # Among every routine whose schedule has come due, the ones that run first are decided by an
+  # explicit priority ranking the operator assigns per routine, with ties broken by the order the
+  # routines were registered in — never by how urgently a routine is overdue. While the system is
+  # in trouble — halted, or sitting on an unreviewed dirty tree — the eligible set narrows
+  # sharply: only routines the operator has deliberately marked as safe to run through trouble
+  # survive, so a recovery routine can still triage the very condition that is blocking
+  # everything else, while ordinary work waits for the trouble to clear.
+
   out = []
   for name, cfg in registry.items():
     # filter out normal routines while system is stuck; recovery routines stay
@@ -541,6 +577,12 @@ def due_routines(now: float, registry: dict, last_run: dict,
     # waiver: inline numeric/default literal, not a domain constant
     elif now - last_run.get(name, 0) >= cfg.get(RoutineKey.INTERVAL_SEC, 5):
       out.append((name, cfg))
+
+  # Contract:
+  # Routines tied on priority are returned in the registry's own insertion order; how
+  # overdue a routine is never decides a priority tie.
+
+  # sort the eligible routines by ascending priority
   # waiver: inline numeric/default literal, not a domain constant
   out.sort(key = lambda item: item[1].get(RoutineKey.PRIORITY, 100))
   return out
@@ -621,6 +663,21 @@ def _loop_detect_check(
     state: In-memory copy of the daemon's persisted state, mutated in place when a halt is recorded.
     settings_path: Absolute path to `lazy.settings.json`.
   """
+
+  # Domain(runtime.daemon-loop):
+  # # Halting a routine that keeps repeating its own diff
+  # An autonomous routine that keeps committing exactly the same change over and over, under one
+  # of the runtime's own recognised identities, is not making progress — it is stuck in a loop a
+  # buggy state machine walked into, and left alone it would keep spending on itself forever. The
+  # signal is content, not volume: a routine that touches the same file many times with a
+  # different result each time is working normally, while the same diff landing repeatedly from
+  # the same identity is cycling by definition, however that identity is spread across several
+  # routines or experts. Once one identity's repeated diff crosses a configured count within a
+  # recent stretch of history, the whole runtime halts rather than letting the cycle continue,
+  # capping the damage at a handful of repeats before a human is pulled in. A commit that changes
+  # nothing at all is not counted toward the rule — idle noise costs nothing, and halting the
+  # runtime over it would cost more than it saves.
+
   daemon = load_section(settings_path, SettingsKey.DAEMON)
   threshold = int(daemon.get(DaemonKey.LOOP_DETECT_THRESHOLD, LOOP_DETECT_THRESHOLD))
   # guard: rule disabled via configuration
@@ -755,7 +812,7 @@ def _halt_daemon(
   trigger detail to the runtime log so the operator running `/lazy-runtime.recover` can correlate
   the halt with a routine result entry.
 
-  Notes:
+  Guarantees:
     - When a halt block already exists, the existing entry is preserved — earlier halts with more-
       specific attribution (e.g. expert + job_id) are never clobbered.
 
@@ -770,6 +827,12 @@ def _halt_daemon(
     TickResultKey.NAME: triggered_by, TickResultKey.EXIT: -1, TickResultKey.DURATION_SEC: 0.0,
     TickResultKey.ERROR: f"{reason}: {detail}",
   })
+
+  # Contract:
+  # Once a halt block exists in persisted state, this call never overwrites it — the first
+  # recorded halt's attribution (reason, trigger, and any more specific detail a caller
+  # already wrote) is preserved until an operator clears it via `/lazy-runtime.recover`.
+
   # guard: keep the earlier, more-specific halt attribution
   if StateKey.DAEMON_HALTED in state:
     return
@@ -884,13 +947,22 @@ def _routine_error_detail(result: dict) -> str:
   output, not in an `error` field — reading `error` alone leaves the incident blank for
   exactly the class of failure that needs reading (a plugin CLI rejecting its arguments).
 
+  Guarantees:
+    - The returned text is never empty.
+
   Args:
     result: Tick-result record produced by `dispatch_routine`.
 
   Returns:
     The error text when present, else the captured stderr, else the captured stdout, else
-    a description of the exit code. Never an empty string.
+    a description of the exit code.
   """
+
+  # Contract:
+  # The returned text is never empty: `error` is preferred, falling back to captured
+  # stderr, then captured stdout, then an `exit <code>` description when no other channel
+  # carries a diagnosis.
+
   # waiver: small internal subkeys, not reusable domain keys
   for key in (TickResultKey.ERROR, "stderr_tail", "stdout_tail"):
     text = str(result.get(key) or "").strip()
@@ -1077,10 +1149,20 @@ def _advance_last_run(repo_root: Path, name: str) -> None:
   Re-reads the state file and updates only `last_run[name]`, so an intervening write to
   another key by the routine just run (e.g. a git-watch baseline) is never clobbered.
 
+  Guarantees:
+    - Advancing `last_run[name]` never clobbers a concurrent write to any other state key made by
+      the routine whose run this call is recording.
+
   Args:
     repo_root: Repository root the daemon is driving.
     name: Routine name whose last-run timestamp to advance.
   """
+
+  # Contract:
+  # Advancing `last_run[name]` never clobbers a concurrent write to any other state key made
+  # by the routine whose run this call is recording.
+
+  # re-read state.json and update only this routine's own key
   runtime_state.update(repo_root, lambda s: s.setdefault(StateKey.LAST_RUN, {}).update({name: time.time()}))
 
 
@@ -1242,6 +1324,19 @@ def _run_iteration(repo_root: Path, *, push: bool = True, only: str | None = Non
       # waiver: daemon error/trigger token, not an internal key
       _halt_daemon(repo_root, state, _git_halt_reason(e), "_git_pre", str(e))
       return
+
+  # Domain(runtime.git-safety):
+  # # Clean working tree required around every tick
+  # The autonomous runtime never acts on a repository whose working tree already carries
+  # uncommitted changes at the start of a cycle of work — that dirt could belong to an operator
+  # mid-edit or another process in flight, and reading or committing over it would silently
+  # discard someone else's work. A tree already dirty when a cycle begins simply defers every
+  # routine that has not deliberately opted into running through trouble, with no halt recorded,
+  # so the cycle resumes cleanly the moment the tree settles on its own. A tree left dirty by a
+  # routine that started with a clean one is judged differently: that dirt is the routine's own
+  # unfinished output, and the runtime halts immediately rather than letting later work build on
+  # a half-committed, unreviewed state — unless the routine is itself one of the few trusted to
+  # triage trouble.
 
   # pre-iteration tree check — daemon does NOT run routines while the working tree has uncommitted
   # changes; the operator may be mid-edit, or another process (a manual git op, a hand-run consumer
@@ -1494,6 +1589,19 @@ def _newer_core_runner() -> Path | None:
     Path to the newer version's runner entrypoint, or `None` when this process runs from a source
     checkout (where the fingerprint is the live mechanism) or already runs the latest cached version.
   """
+
+  # Domain(runtime.daemon-loop):
+  # # Adopting a newer version without an operator restart
+  # The autonomous runtime is expected to pick up a newer version of its own core the moment one
+  # becomes available, without an operator having to notice and restart it by hand. It looks for
+  # that newer version among every already-installed copy sharing its identity and, once it finds
+  # one newer than the one it is currently running, restarts itself at the next safe boundary
+  # between cycles of work rather than mid-cycle. The check is skipped for as long as the runtime
+  # is halted over a condition that needs a human to look at it first — restarting would risk
+  # masking the very trouble the operator still needs to see — except for a halt that lifts
+  # itself on a timer, which would otherwise strand the runtime on stale code for as long as that
+  # timer runs.
+
   here = Path(__file__).resolve().parent
   # guard: not a plugin-cache install — the own-code fingerprint covers a source checkout
   if PLUGIN_CACHE_REL not in here.as_posix():
@@ -1598,6 +1706,16 @@ def resolve_daemon_token(settings_path: Path, *, env_file: Path | None = None) -
     SystemExit: When `daemon.token_env` is absent or blank, or the named variable resolves
       to no value in either source — the daemon must not run on the ambient login.
   """
+
+  # Domain(runtime.authorization):
+  # # Explicit credential required, ambient login refused
+  # The autonomous runtime must never spend under whichever account happens to be logged into
+  # the machine it runs on — that account is unpredictable and the usage it burns was never
+  # chosen for this repository. Instead, the operator names an explicit credential source once
+  # per repository, and every process the runtime spawns afterward inherits that same resolved
+  # credential. A repository with no credential source named, or one that resolves to nothing,
+  # refuses to run at all rather than falling back to the ambient login silently.
+
   var = load_section(settings_path, SettingsKey.DAEMON).get(DaemonKey.TOKEN_ENV)
   # guard: no named variable means the ambient login would be used — refuse loudly
   if not isinstance(var, str) or not var.strip():
@@ -1673,6 +1791,18 @@ def _gate_run_here(repo_root: Path) -> None:
     SystemExit: When `daemon.run_here` is missing, is not a mapping, does not include this
       machine's hostname, or maps it to a checkout other than `repo_root`.
   """
+
+  # Domain(runtime.authorization):
+  # # Single authorized host and checkout per repository
+  # Exactly one pairing of a machine and a checkout of it is authorized to drive a given
+  # repository's autonomous runtime at a time, named explicitly by the operator rather than
+  # inferred. Any other machine, or the right machine holding the wrong checkout of the same
+  # repository, is refused outright rather than allowed to run alongside the authorized pair —
+  # nothing in the runtime reconciles two drivers of one repository, so letting a second one
+  # start would duplicate every dispatch and let the two silently overwrite each other's
+  # schedule. The refusal is permanent for that process; there is no self-recovery, because the
+  # fix is always an operator decision about which pairing should actually own the repository.
+
   gate = load_section(repo_root / SettingsFile.REL, SettingsKey.DAEMON).get(DaemonKey.RUN_HERE)
   # neither of the two facts the gate is matched against is knowable from the settings alone: the
   # machine, and which of its checkouts of this project the process was actually started in
@@ -1978,6 +2108,12 @@ def resolve_routine_command(cmd: list[str]) -> list[str]:
   the Claude Code plugin cache. When the cache holds multiple versions of the plugin, the highest
   version wins, compared numerically.
 
+  Guarantees:
+    - A registered dev-plugin directory for the named plugin always takes precedence over any
+      cached installation of the same plugin.
+    - When resolution falls back to the cache, the highest version present is selected, compared
+      numerically component by component rather than as strings.
+
   Args:
     cmd: Routine command vector whose first element is the plugin name and the rest are arguments
       passed through unchanged.
@@ -1992,6 +2128,12 @@ def resolve_routine_command(cmd: list[str]) -> list[str]:
       plugin cache, or when the resolved version has no bin entrypoint.
     ShebangError: When the resolved entrypoint's shebang line cannot be parsed into an interpreter.
   """
+
+  # Contract:
+  # A registered dev-plugin directory for `cmd[0]` always takes precedence over any cached
+  # installation of the same plugin. When resolution falls back to the cache, the highest
+  # version present is the one resolved, compared numerically component by component.
+
   plugin = cmd[0]
   # dev-plugin paths take precedence over the plugin cache
   for pd in _PLUGIN_DIRS:
@@ -2043,6 +2185,19 @@ def _git_halt_reason(error: Exception) -> str:
     names an unreachable remote; `HaltReason.GIT_LOCAL_FAILED` for everything else — a halt over
     a local failure must not send recovery after a remote that was never involved.
   """
+
+  # Domain(runtime.git-safety):
+  # # Transport failure versus a computed answer
+  # A failed git command against the remote is read two different ways depending on what its
+  # error text actually says. When the failure carries a transport, DNS, or SSH marker, the
+  # remote itself never answered — the command is retried with backoff, because retrying can
+  # only help a connection that eventually comes back. Every other failure is an answer the
+  # remote computed on purpose — a non-fast-forward rejection, a missing ref, a permission
+  # refusal — and it surfaces immediately, since retrying a deliberate refusal only wastes the
+  # backoff window. A remote that stays unreachable through the whole backoff window escalates to
+  # a halt naming the remote as unavailable, kept apart from a halt over a local failure so
+  # recovery is never pointed at a transport that was never involved.
+
   if isinstance(error, subprocess.CalledProcessError) and _is_transport_failure(error):
     return HaltReason.GIT_REMOTE_UNAVAILABLE
   return HaltReason.GIT_LOCAL_FAILED
@@ -2446,6 +2601,19 @@ def _publish_branch(repo_root: Path, git_cfg: dict, branch: str) -> bool:
     # already rebased + pushed for us. Just fall through to "no work".
     if base == local:
       return True
+
+    # Domain(runtime.git-safety):
+    # # Operator conflict discards the daemon's own tick
+    # When publishing finds that an operator commit landed on the branch in the same window as
+    # the daemon's own commits, replaying the daemon's commits on top of the operator's is tried
+    # first and published if it goes cleanly. A conflict on real content is never resolved
+    # automatically — the daemon's whole tick is discarded, the branch is reset back to what the
+    # operator published, and every consequence that assumed the discarded commits had landed is
+    # unwound: the work items they consumed are marked unconsumed again, and any watch position
+    # they had advanced is wound back to the last point both sides agree on. Nothing about the
+    # discard touches the operator's own history — only the daemon's own untested rebase is
+    # thrown away — and the discarded work simply runs again on a later cycle against the
+    # now-current branch.
 
     # histories diverged within the tick (operator pushed a commit while the routine was running);
     # try to rebase our local commits onto the new origin tip

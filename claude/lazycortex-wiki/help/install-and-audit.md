@@ -3,13 +3,17 @@ chapter_type: block
 summary: Bootstrap and maintain lazycortex-wiki — install, configure scopes plus vault-wide axes/domains/mirror/terms/structure, and audit everything for integrity.
 last_regen: 2026-09-11
 diagram_spec:
-  anchor: "How the setup flow connects"
-  request: "Flow diagram showing the install-and-audit lifecycle: lazy-wiki.install seeds the wiki/structure/terms settings sections (wiki carries a repository-wide tag_axes vocabulary seeded empty and an exclude list seeded with docs/structure.md), unions the doc-kind axis into that repository-wide vocabulary, composes the wiki.curator, wiki.terms-curator, wiki.structure-curator, and wiki.tag-curator experts unconditionally, and registers lazy-wiki.scan, lazy-wiki.scan-deletes, lazy-wiki.relink-weekly, lazy-wiki.doctor-apply, and lazy-wiki.tag-normalize unconditionally too — no daemon gate withholds any of it — plus the wiki.domain-writer expert and its two domain routines when wiki.domains is configured, and one lazy-wiki.mirror-sync.<scope-id> routine per scope carrying a mirror block → lazy-wiki.configure's six branches (default scope branch, domains, mirror, terms, structure, vault) each collect their own config one question at a time and write it into lazy.settings.json — the scope branch only narrows the vault's tag_axes vocabulary and adds exclusions on top of the vault's own exclude list, both edited directly via the vault branch — refreshing the navigation rule's Coverage section wherever scope paths changed → lazy-wiki.audit is read-only: it audits the wiki scopes via the CLI, then (report-only) the terms scopes and the structure map by reading plus a curator dispatch in report mode, labels fixable wiki findings, and names `lazycortex-wiki doctor <scope-id> --apply` (run by hand, or applied daily by the scheduled lazy-wiki.doctor-apply routine) as their repair route — the skill itself writes nothing."
+  - anchor: "Install"
+    request: "Flow diagram of what lazy-wiki.install seeds. It writes the wiki, structure and terms settings sections (wiki carries a repository-wide tag_axes vocabulary seeded empty and an exclude list seeded with docs/structure.md) and unions the doc-kind axis into that repository-wide vocabulary; composes the wiki.curator, wiki.terms-curator, wiki.structure-curator and wiki.tag-curator experts unconditionally; registers lazy-wiki.scan, lazy-wiki.scan-deletes, lazy-wiki.relink-weekly, lazy-wiki.doctor-apply and lazy-wiki.tag-normalize unconditionally too — no daemon gate withholds any of it; adds the wiki.domain-writer expert and its two domain routines only when wiki.domains is configured, and one lazy-wiki.mirror-sync.<scope-id> routine per scope carrying a mirror block; overwrites every diverged rule mirror from the shipped source without prompting; then hands over to lazy-wiki.configure."
+  - anchor: "Configure"
+    request: "Flow diagram of lazy-wiki.configure's six branches: default scope, domains, mirror, terms, structure, vault. Each branch collects its own config one question at a time and writes it into lazy.settings.json. The scope branch only narrows the vault's tag_axes vocabulary and adds exclusions on top of the vault's own exclude list; both of those vault-wide lists are edited directly via the vault branch. Wherever scope paths changed, the navigation rule's Coverage section is refreshed and the rule committed if it is tracked; then the flow hands over to lazy-wiki.audit."
+  - anchor: "Audit"
+    request: "Flow diagram of lazy-wiki.audit, which is read-only. It audits the wiki scopes via the CLI, then reports on the terms scopes and the structure map by reading plus a curator dispatch in report mode; it labels fixable wiki findings and names `lazycortex-wiki doctor <scope-id> --apply` — run by hand, or applied daily by the scheduled lazy-wiki.doctor-apply routine — as their repair route. The skill itself writes nothing. /lazy-wiki.help is optional orientation at any point."
 source_skills:
   - lazy-wiki.install
   - lazy-wiki.configure
   - lazy-wiki.audit
-source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
+source_sha: fc47aeeb8c042b2968809c8cef31d078ec76efaf
 ---
 # Bootstrap and maintain lazycortex-wiki
 
@@ -63,45 +67,161 @@ Getting `lazycortex-wiki` running in a project takes three ordered moves: instal
 
 ## How the setup flow connects
 
+The three skills run in order; each part below is one of them.
+
+### Install
+
 <!-- /lazy-diagram.draw lands the fence here; do not author a code block manually. -->
 
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  wikiInstall["/lazy-wiki.install seeds wiki settings, composes wiki.curator, registers lazy-wiki.scan, lazy-wiki.scan-deletes, lazy-wiki.relink-weekly, lazy-wiki.doctor-apply, lazy-wiki.tag-normalize"]
-  syncRules["file-sync overwrites every diverged rule mirror from the shipped source, no prompt"]
-  wikiConfigureWizard["/lazy-wiki.configure wizard collects scope id, path globs, exclude_paths, tag_axes; derives topics_index and the review-skip filter"]
-  writeScope["Write scope into lazy.settings.json, new or edit mode"]
-  coverageGuard{"Navigation rule installed?"}
-  refreshCoverage["Refresh Coverage section from scope paths and exclude_paths, commit rule if tracked"]
-  wikiDoctor["/lazy-wiki.audit audits scope, reports FAIL, WARN, INFO findings"]
-  repairGuard{"Operator confirms repairs?"}
-  applyRepairs["Apply fixable repairs"]
-  wikiHelp["/lazy-wiki.help optional orientation"]
+  installRunsWikiInstall["lazy-wiki.install runs"]
+  writeSettingsSections["Write wiki, structure, terms settings sections"]
+  seedTagAxesAndExclude["Seed tag_axes empty, exclude docs/structure.md"]
+  unionDocKindAxis["Union doc-kind axis into vocabulary"]
+  composeCoreExperts["Compose wiki.curator, wiki.terms-curator, wiki.structure-curator, wiki.tag-curator"]
+  registerCoreRoutines["Register lazy-wiki.scan, scan-deletes, relink-weekly, doctor-apply, tag-normalize"]
+  domainsConfigured{"wiki.domains configured?"}
+  addDomainWriter["Add wiki.domain-writer expert plus two domain routines"]
+  registerMirrorSyncRoutines["Register one lazy-wiki.mirror-sync per mirror scope"]
+  overwriteDivergedMirrors["Overwrite every diverged rule mirror from shipped source"]
+  handOffToConfigure["Hand over to lazy-wiki.configure"]
 
-  wikiInstall -->|sync rule mirrors| syncRules
-  syncRules -->|rules current| wikiConfigureWizard
-  wikiConfigureWizard -->|submit scope| writeScope
-  writeScope -->|refresh coverage| coverageGuard
-  coverageGuard -->|absent| wikiInstall
-  coverageGuard -->|present| refreshCoverage
-  refreshCoverage -->|scope ready| wikiDoctor
-  wikiDoctor -->|findings reported| repairGuard
-  repairGuard -->|confirmed| applyRepairs
-  repairGuard -->|declined| wikiDoctor
-  wikiInstall -->|optional| wikiHelp
-  wikiConfigureWizard -->|optional| wikiHelp
-  wikiDoctor -->|optional| wikiHelp
+  installRunsWikiInstall -->|seeds settings| writeSettingsSections
+  writeSettingsSections -->|seeds vocabulary| seedTagAxesAndExclude
+  seedTagAxesAndExclude -->|unions axis| unionDocKindAxis
+  unionDocKindAxis -->|composes experts| composeCoreExperts
+  composeCoreExperts -->|registers routines| registerCoreRoutines
+  registerCoreRoutines -->|checks config| domainsConfigured
+  domainsConfigured -->|configured| addDomainWriter
+  domainsConfigured -->|not configured| registerMirrorSyncRoutines
+  addDomainWriter -->|continues| registerMirrorSyncRoutines
+  registerMirrorSyncRoutines -->|syncs rules| overwriteDivergedMirrors
+  overwriteDivergedMirrors -->|hands over| handOffToConfigure
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
 
-  class wikiInstall entry
-  class coverageGuard,repairGuard guard
-  class syncRules,wikiConfigureWizard,writeScope,refreshCoverage,wikiDoctor,wikiHelp action
-  class applyRepairs success
+  class installRunsWikiInstall entry
+  class writeSettingsSections action
+  class seedTagAxesAndExclude action
+  class unionDocKindAxis action
+  class composeCoreExperts action
+  class registerCoreRoutines action
+  class domainsConfigured guard
+  class addDomainWriter action
+  class registerMirrorSyncRoutines action
+  class overwriteDivergedMirrors action
+  class handOffToConfigure success
+```
+
+### Configure
+
+<!-- /lazy-diagram.draw lands the fence here; do not author a code block manually. -->
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
+flowchart LR
+  invokeConfigure["Operator runs /lazy-wiki.configure"]
+  selectBranch{"Which branch?"}
+  collectScope["Collect scope config, one question at a time - narrow tag_axes vocabulary, add exclusions"]
+  collectDomains["Collect domains config, one question at a time"]
+  collectMirror["Collect mirror config, one question at a time"]
+  collectTerms["Collect terms config, one question at a time"]
+  collectStructure["Collect structure config, one question at a time"]
+  editVault["Edit vault-wide tag_axes and exclude lists directly"]
+  didScopePathsChange{"Scope paths changed?"}
+  refreshCoverage["Refresh navigation rule Coverage section"]
+  commitRule["Commit rule if tracked"]
+  handoverAudit["Hand over to lazy-wiki.audit"]
+
+  invokeConfigure -->|pick branch| selectBranch
+  selectBranch -->|default scope| collectScope
+  selectBranch -->|domains| collectDomains
+  selectBranch -->|mirror| collectMirror
+  selectBranch -->|terms| collectTerms
+  selectBranch -->|structure| collectStructure
+  selectBranch -->|vault| editVault
+  collectScope -->|writes lazy.settings.json| didScopePathsChange
+  collectDomains -->|writes lazy.settings.json| didScopePathsChange
+  collectMirror -->|writes lazy.settings.json| didScopePathsChange
+  collectTerms -->|writes lazy.settings.json| didScopePathsChange
+  collectStructure -->|writes lazy.settings.json| didScopePathsChange
+  editVault -->|writes lazy.settings.json| didScopePathsChange
+  didScopePathsChange -->|yes| refreshCoverage
+  didScopePathsChange -->|no| handoverAudit
+  refreshCoverage -->|refreshed| commitRule
+  commitRule -->|committed| handoverAudit
+
+  classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
+  classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
+  classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
+  classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+
+  class invokeConfigure entry
+  class selectBranch guard
+  class collectScope action
+  class collectDomains action
+  class collectMirror action
+  class collectTerms action
+  class collectStructure action
+  class editVault action
+  class didScopePathsChange guard
+  class refreshCoverage action
+  class commitRule action
+  class handoverAudit success
+```
+
+### Audit
+
+<!-- /lazy-diagram.draw lands the fence here; do not author a code block manually. -->
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
+flowchart LR
+  invokeAudit["/lazy-wiki.audit invoked"]
+  runCliAudit["Run lazycortex-wiki doctor via CLI"]
+  scopeValid{"Scope known?"}
+  stopUnknownScope["Exit non-zero, stop"]
+  auditTermsAndStructure["Read terms scopes and structure map config, dispatch curators in report mode"]
+  presentFindings["Present findings by severity, label fixable ones"]
+  nameRepairRoute["Name lazycortex-wiki doctor scope-id --apply as repair route"]
+  reportOnly["Report delivered, skill writes nothing"]
+  handApply["Run by hand"]
+  dailyRoutine["Applied daily by lazy-wiki.doctor-apply routine"]
+  lazyWikiHelp["/lazy-wiki.help - optional orientation anytime"]
+
+  invokeAudit -->|runs| runCliAudit
+  runCliAudit -->|validates| scopeValid
+  scopeValid -->|unknown scope| stopUnknownScope
+  scopeValid -->|valid| auditTermsAndStructure
+  auditTermsAndStructure -->|reports| presentFindings
+  presentFindings -->|labels fixable findings| nameRepairRoute
+  nameRepairRoute -->|writes nothing| reportOnly
+  nameRepairRoute -->|run by hand| handApply
+  nameRepairRoute -->|scheduled daily| dailyRoutine
+  invokeAudit -->|optional anytime| lazyWikiHelp
+
+  classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
+  classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
+  classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
+  classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+  classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
+
+  class invokeAudit entry
+  class runCliAudit action
+  class scopeValid guard
+  class stopUnknownScope error
+  class auditTermsAndStructure action
+  class presentFindings action
+  class nameRepairRoute action
+  class reportOnly success
+  class handApply success
+  class dailyRoutine success
+  class lazyWikiHelp action
 ```
 
 ## See also

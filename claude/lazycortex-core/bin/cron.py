@@ -124,6 +124,10 @@ def parse(cron_str: str) -> CronSpec:
   """
   Parse a 5-field cron expression into per-field value sets.
 
+  Guarantees:
+    - The five sets in the returned tuple are always positioned minute, hour, day,
+      month, day-of-week, in that fixed order.
+
   Args:
     cron_str: Full cron expression with five whitespace-separated fields
       (minute, hour, day, month, day-of-week).
@@ -136,6 +140,12 @@ def parse(cron_str: str) -> CronSpec:
     CronError: If the expression does not contain exactly five fields, or if any
       individual field fails to parse.
   """
+
+  # Contract:
+  # The returned tuple's five sets are always positioned minute, hour, day, month,
+  # day-of-week, in that fixed order; every caller that destructures the tuple
+  # positionally relies on this order never changing.
+
   parts = cron_str.split()
   # guard: must have exactly five whitespace-separated fields
   # waiver: inline numeric literal (cron field count), not a domain constant
@@ -217,6 +227,10 @@ def due_since(spec: CronSpec, last_run: datetime, now: datetime) -> bool:
   Implements a skip-on-miss policy: multiple missed boundaries collapse to a single True,
   so the routine fires once on the next tick rather than once per missed boundary.
 
+  Guarantees:
+    - Any number of missed firing boundaries inside the checked interval collapses into
+      a single True verdict rather than one signal per missed boundary.
+
   Args:
     spec: Tuple of five value sets as returned by `parse`.
     last_run: Upper-exclusive lower bound of the interval — typically the previous fire time.
@@ -225,6 +239,20 @@ def due_since(spec: CronSpec, last_run: datetime, now: datetime) -> bool:
   Returns:
     True if at least one cron firing falls in `(last_run, now]`, false otherwise.
   """
+
+  # Contract:
+  # Any number of missed firing boundaries inside the checked interval collapses into a
+  # single True verdict; the interval is never reported as more than one due signal no
+  # matter how many boundaries it actually contains.
+
+  # Domain(runtime.daemon-loop):
+  # # Skip-on-miss due policy
+  # A schedule counts as due once at least one of its firing moments falls inside the window
+  # since it was last checked, no matter how many moments were actually missed while the
+  # daemon was stopped or busy. Every missed firing in that window collapses into the same
+  # single due signal rather than queuing one catch-up run per missed moment, so a routine
+  # that was offline for a long stretch resumes with one run instead of a growing backlog.
+
   # guard: degenerate interval — nothing can be due when the window is empty or inverted
   if last_run >= now:
     return False

@@ -32,12 +32,34 @@ def reindex(repo: Path) -> dict:
   Stale tag files that no longer have a backing note are removed; tag files for live notes
   are written in their canonical form.
 
+  Guarantees:
+    - After the call, the tag index exactly reflects current note frontmatter: every
+      referenced topic has a regenerated tag file, and every tag file with no backing
+      note is removed.
+
   Args:
     repo: Absolute path to the repository whose `.memory/` tree should be reindexed.
 
   Returns:
     A summary dict with `experts`, `notes`, and `tags` counts covered by the rebuild.
   """
+
+  # Contract:
+  # After the call, the tag index MUST exactly reflect current note frontmatter: every
+  # topic still referenced by a live note has a regenerated tag file, and every tag file
+  # with no such reference is removed.
+
+  # Domain(runtime.memory):
+  # # Memory tag index is a two-level derived projection of note tags
+  # A note's own frontmatter tags are the single source of truth for its topics; every tag
+  # file is a disposable projection that can always be rebuilt from them. Each topic a note
+  # carries is indexed twice: once in the tag file scoped to that note's own expert, and once
+  # in the tag file shared across every expert, so a topic is discoverable both from one
+  # expert's own memory and across the whole repository. A full rebuild must also read the
+  # topics already present in existing tag files, not only what live notes currently carry —
+  # otherwise a topic whose last reference vanished from every note would keep a stale tag
+  # file forever instead of being dropped.
+
   repo = Path(repo)
   # waiver: filesystem path/filename idiom, not a domain constant
   memory_root = repo / ".memory"

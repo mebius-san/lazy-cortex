@@ -21,7 +21,7 @@ source_skills:
   - review.py
   - lazy-python.coding-guidelines
   - lazy-python.checking-guidelines
-source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
+source_sha: f3dcc55c389b71a983c894ee1c0407d8311e931c
 ---
 # Frequently asked questions
 
@@ -85,6 +85,12 @@ No. The plugin enforces running all style and type validation through `chk-py`. 
 
 ---
 
+## I passed a directory to `chk-py mypy` and it didn't flag anything under `tests/`. Is `exclude` swallowing it?
+
+It used to, and that's now fixed. mypy applies its own config `exclude` pattern while it discovers files under a directory argument, but never to a file named directly on the command line — so `chk-py mypy tests/` was silently subject to the same exclude a bare recursive run would honor, even though you named `tests/` explicitly. `chk-py mypy` now expands an explicitly-named directory into its actual `.py` files before invoking mypy, so every file under it is checked regardless of `exclude`. A bare `chk-py mypy .` is unaffected — that recursive form is exactly where `exclude` is supposed to apply.
+
+---
+
 ## `chk-py all` finished but printed a "review" step at the end. What is that?
 
 That is the guideline-review phase, `chk-py review` — its own command, deliberately not a step of `chk-py all`, which runs six deterministic checkers and stops. Unlike those six, `review.py` does not run a deterministic tool against your code — it resolves the scope (your current working-tree diff plus untracked files, or explicit paths you pass), collects every applicable canon and overlay layer, and writes a manifest under `.runtime/lazy-python/review/` in your project. It then prints that manifest path and names the `lazy-python.code-reviewer` agent to dispatch against it — a judgement pass over clauses no checker AST-walk can prove (comment purpose and density, `# guard:` semantics, naming-prefix correctness, useless intermediate variables, docstring-vs-code contract drift, suppression hygiene). Dispatch the agent against that manifest; it writes a findings document (FAIL / WARN / INFO) and never edits your code itself. `chk-py review --render <findings.json>` renders the findings the agent already produced, and is what actually clears the gate.
@@ -122,6 +128,24 @@ To admit an additional language, set `[tool.pcf] allowed_languages = ["english",
 `pcf` classifies every import as stdlib, third-party, or project (first-party) to enforce import ordering and grouping — and it used to key that classification off a hardcoded package name. It now resolves the consumer's first-party package via `project_package`: an explicit `[tool.pcf] project_package = "<name>"` in `pyproject.toml` always wins; when that key is unset, `pcf` autodetects a single top-level package under the project root or `src/` and uses it. When neither the config key nor autodetection yields exactly one candidate, project-import classification is disabled — imports that would have been "project" findings are simply not flagged, since there is no root to anchor them on.
 
 If your repo has more than one top-level package (a monorepo, a `src/` layout with several packages) and you were relying on project-import findings, set `project_package` explicitly in `pyproject.toml`. A repo with exactly one top-level package needs no configuration — autodetection already covers it.
+
+---
+
+## `pcf` used to flag `assert` statements and numeric literals in my test files. Why doesn't it anymore?
+
+`pcf` now recognises a pytest test file by path — a filename starting with `test_` somewhere under a `tests` directory — and exempts it from `check_assert` and `check_magic_literal`. Under pytest the `assert` *is* the check itself, and a literal is the expected value the test is checking against, so both production-code rules would otherwise flag a test file for doing its job. The exemption is intrinsic to that path-based detection, not a `pyproject.toml` toggle; production code under any other path is still fully checked for both.
+
+---
+
+## Why did `pcf` stop reporting a `# noqa` (or similar suppression directive) that appears inside a string literal?
+
+The suppression-directive scan used to be line-based text search, so a directive-looking substring sitting inside a fixture string or test data could be misread as a real suppression comment. It now tokenizes the source with Python's own tokenizer and only inspects genuine `COMMENT` tokens — a lookalike inside a string literal or any other code token is inert data, never a directive. A real `# waiver: <reason>` comment on or above the directive's line still exempts it exactly as before.
+
+---
+
+## What does `--honor-excludes` do, and why does a manual `pcf.py <file>` behave differently than the PostToolUse hook?
+
+`pcf.py` checks a file you name explicitly on the command line even when it matches a `[tool.pcf] exclude` pattern — the same "an explicit target is checked" model `chk-py mypy` now applies to directories. The PostToolUse hook passes `--honor-excludes` on every invocation, so an edit under `.venv`, `~archive`, or a project-declared exclude path stays a clean no-op instead of forcing a scan on every keystroke. Running `pcf.py` by hand without that flag checks whatever file you name regardless of the exclude list — useful when you deliberately want findings for a file that is normally excluded.
 
 ---
 
@@ -222,6 +246,12 @@ Check 12 fires when your sources already carry `Domain(…):` blocks but no dict
 ## Should I write tests by hand, or always use the agent?
 
 Always use the `lazy-python.test-writer` agent. The agent applies the Paranoid Testing Strategy (7 mandatory test categories per class), selects the correct base test class from your project overlay, enforces 2-space indentation and the 117-character line limit, derives expected values from docstring contracts rather than implementation, and runs `chk-py` plus `tst-py` as a verification gate. Hand-writing tests from session memory reliably skips categories or picks the wrong base class.
+
+---
+
+## The test-writer agent's class and method docstrings look longer than a plain one-liner. Is that right?
+
+Yes. `Test unit for X.` and `Test that Y.` docstrings are written in the multi-line quote form the format checker requires — `"""` on its own line, the summary line, then `"""` on its own line — never collapsed to a single-line `"""Test unit for X."""`, which `pcf`'s docstring checker flags as a D1 finding. The agent also matches its own import layout to the Python scaffold template (`from __future__ import annotations`, stdlib imports, an `if TYPE_CHECKING:` block, two blank lines before code) and annotates every test method (`tmp_path: Path`, `-> None`), since once a test file's directory is checked, it is held to the same `pcf` format and typing rules as production code.
 
 ---
 

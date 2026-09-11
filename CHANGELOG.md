@@ -4,6 +4,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 9.3.1 — 2026-09-11 UTC
+
+- `lazy-core.install` now seeds bare `WebSearch` and `WebFetch` allow rules for headless expert spawns (enables the new researcher role to reach the web under `dontAsk`), and the curated agent-model tier table gains that role on the opus tier.
+- `/lazy-core.autosetup` and `/lazy-core.autocheckup` run the settings-migration ladder before installs, refuse every disguised retry of a denied command instead of working around it, and now run on the opus model tier — more reliable unattended repairs.
+- `lazy-core.install` records `LAZYCORTEX_PYTHON` unconditionally before the daemon gate, so a checkout the `run_here` map doesn't name still gets the interpreter set; plugin-cache discovery in `lazy-core.agent-models-seed` moved from `ls` to `Glob` to avoid permission denials.
+- Fixed the installer writing `ls`-deny rules broad enough to block a session from listing its own plugin cache — sessions can reach a plugin's help via shell again.
+
 ### 9.3.0 — 2026-09-11 UTC
 
 - New hooks now scaffold from the shipped template — the scaffold registry never listed the two hook templates it copies, so authoring one started from a blank file instead of the intended starting point.
@@ -633,6 +640,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-log.audit` verifies the logging rule is installed and coherent.
 
 ## lazycortex-specs
+
+### 8.1.0 — 2026-09-11 UTC
+
+- New `research` document type: a two-zone `research.md` (operator states the question and scope, researcher writes findings and conclusion) that starts life as `research-design` and graduates to a `research-report`, each with its own review class, stage tracking, and playbook.
+- Coordinators now catch a source document being re-approved after a document that depended on it was already approved — the dependent document reopens (approved → draft) instead of keeping a stale sign-off.
+- Fixed product- and catalog-level notes to seed through the same path as every other document, so they pick up the right product tokens, template layer, and icon instead of a hand-copied, generic template.
 
 ### 8.0.0 — 2026-09-11 UTC
 
@@ -1426,6 +1439,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+### 1.6.0 — 2026-09-11 UTC
+
+- **New `researcher` role.** The `lazy-experts.researcher` agent joins the technical class map as a persona-only, opus-tier role with `WebSearch`/`WebFetch` access — the fourteenth technical role, listed in `/lazy-experts.help`.
+- The researcher writes its findings as a tool job on the job branch and validates the research design (the `research.md` question, goals, and scope) before producing its report.
+
 ### 1.5.0 — 2026-09-11 UTC
 
 - New `lazy-experts.audit` skill — the plugin's first health check. Verifies every role the class map assigns resolves to a shipped agent, every aspect reference exists, and the mandatory cross-cutting aspects are present or absent as the expert's class requires; reports PASS/WARN/FAIL/INFO without writing. Delegated from `/lazy-core.doctor`.
@@ -1556,6 +1574,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 4.4.1 — 2026-09-11 UTC
+
+- `tst all` now runs the whole suite instead of erroring on a module literally named `all`, and an unrecognized module name is refused up front (with a listing of what's actually under `tests/`) instead of failing opaquely inside pytest.
+- `chk`'s mypy check no longer silently skips files under an explicitly named directory (e.g. `tests/`) that mypy's own config exclude would otherwise swallow; a bare `.` still recurses as before.
+- `pcf` now checks an explicitly named file the same way it checks a directory, exempts `tests/**/test_*.py` from the assert and magic-literal rules, and only honors suppression directives written as actual comments — not inside string literals; the test-writer agent's docstring template was updated to match the new format rule.
 
 ### 4.4.0 — 2026-09-11 UTC
 
@@ -1734,6 +1758,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 3.0.1 — 2026-09-11 UTC
+
+- The setup chapter's diagram is current again — a single diagram trying to cover install, configure, and audit had been rejected as too large on two consecutive publishes; it's now three diagrams, one per skill, drawn from current behavior.
+- The plugin's help index no longer points at the retired `wiki.doctor` skill — its audit and setup chapters now name `wiki.audit`.
+- A spec document the wiki curator has processed keeps its own type icon instead of the generic curated-copy icon; only an untyped wiki node still shows the generic icon.
+- The `/lazy-wiki.configure` exclusion-seed wizard no longer offers a stage-bearing tool report (e.g. a `research` tool's report) for journal exclusion — only append-only reports are offered, since a staged report is content, not a build journal.
 
 ### 3.0.0 — 2026-09-11 UTC
 

@@ -64,6 +64,10 @@ def ensure_permission_allow(settings_path: Path, pattern: str) -> str:
   when not already present. The file is rewritten atomically with two-space indentation
   and a trailing newline. Parent directories are created when missing.
 
+  Guarantees:
+    - An entry already present in `permissions.allow` is never removed, duplicated, or
+      reordered; `pattern` is appended at most once, only when not already a member.
+
   Args:
     settings_path: Path to the settings file (typically `<root>/.claude/settings.local.json`).
     pattern: Allow-pattern string, e.g. `Bash(lazycortex-specs *)`.
@@ -76,6 +80,12 @@ def ensure_permission_allow(settings_path: Path, pattern: str) -> str:
     json.JSONDecodeError: If the settings file exists but is not valid JSON.
     OSError: If the file or its parent directory cannot be written.
   """
+
+  # Contract:
+  # An entry already present in `permissions.allow` is never removed, duplicated, or
+  # reordered; `pattern` is appended at most once, only when not already a member.
+
+  # load the settings file, defaulting to an empty object when it doesn't yet exist
   data: dict = json.loads(settings_path.read_text()) if settings_path.exists() else {}
   perms = data.setdefault(_SettingsKey.PERMISSIONS, {})
   allow = perms.setdefault(_SettingsKey.ALLOW, [])

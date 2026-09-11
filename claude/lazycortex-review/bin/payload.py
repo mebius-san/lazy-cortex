@@ -181,6 +181,16 @@ def validate_response(response: Mapping, *, kind: str) -> None:
     PayloadError: If `outcome` is missing, not valid for the given `kind`, or required fields
       (`result`, `history_entry`) are absent or empty.
   """
+
+  # Domain(review.dispatch):
+  # # Outcome vocabulary is scoped to the dispatch kind
+  # What a writer may legitimately claim happened depends on what kind of work it was asked to
+  # do. An ordinary review round may report an edit, a deliberate no-change, or a failure; a
+  # repair round may only report a fix or a failure, since repair work has no legitimate
+  # "nothing to change" outcome; and a history round may report a summary, a metadata-only
+  # no-change, or a failure. An outcome outside its kind's own set is not a valid claim,
+  # whatever the outcome token itself means in another kind's context.
+
   outcome = response.get(JobKey.OUTCOME)
   if not isinstance(outcome, str):
     raise PayloadError("response missing 'outcome' (must be a string)")
@@ -281,6 +291,10 @@ def check_section_writer_response(
   regardless. The returned info exists so the dispatcher can log the violation, surface a UX
   warning, or quarantine the misbehaving expert without losing the agent's owned-section work.
 
+  Guarantees:
+    - Never raises on a content mismatch; every violation is reported through the return
+      value only.
+
   Args:
     operator_body: The authoritative document body from the operator.
     agent_body: The document body produced by the section-writer agent.
@@ -290,6 +304,11 @@ def check_section_writer_response(
     `OwnershipViolationInfo` describing the violation if the agent modified content outside its
     owned section, or `None` if the bodies agree on all non-owned content.
   """
+
+  # Contract:
+  # Never raises on a content mismatch; every violation is reported through the return
+  # value only.
+
   op_view = _strip_owned_section(operator_body, owned_expert)
   agent_view = _strip_owned_section(agent_body, owned_expert)
   if op_view != agent_view:

@@ -124,6 +124,16 @@ def _is_safe_consolidate_path(repo: Path, target: Path) -> bool:
   Returns:
     `True` if the target falls under one of the allowed roots, `False` otherwise.
   """
+
+  # Domain(runtime.memory):
+  # # Consolidating ephemeral sources once a fact is captured in memory
+  # Once a fact has been written into a permanent memory note, the ephemeral material it was
+  # distilled from — a run-log entry, or an older piece of memory state — may be deleted as
+  # part of the same write. That deletion is confined to the memory subsystem's own two
+  # trees, the run-log journal and the memory store itself; a consolidate target reaching
+  # anywhere else in the repository is refused, so writing a note can never be used to delete
+  # unrelated repository content.
+
   try:
     target_resolved = target.resolve()
   except (OSError, RuntimeError):
@@ -202,6 +212,20 @@ def _resolve_memory_bot_identity(repo: Path, expert: str) -> tuple[str, str]:
     A two-tuple of `(name, email)` with the `memory.` prefix applied, ready
     for use as git commit author credentials.
   """
+
+  # Domain(runtime.bot-identity):
+  # # Memory-bot identity is the expert's own identity under a `memory.` layer
+  # A memory-subsystem commit is authored by an identity derived from the expert whose
+  # memory changed, never by the expert's own base identity — every name and every email's
+  # local part carries a `memory.` prefix so the commit is unmistakably a memory-subsystem
+  # write rather than the expert's ordinary work. The base identity is resolved once, then
+  # the prefix is applied idempotently: if the base identity already carries the prefix (for
+  # example when the caller runs inside an already memory-attributed process) it is stripped
+  # first, so the layer is applied exactly once rather than compounding. Downstream tooling
+  # that classifies commits by author recognizes any email whose local part matches the
+  # expert's name preceded by zero or more `memory.` prefixes as belonging to that expert's
+  # memory-writing activity.
+
   env_name  = os.environ.get("GIT_AUTHOR_NAME",  "").strip()
   env_email = os.environ.get("GIT_AUTHOR_EMAIL", "").strip()
   if env_name and env_email:
@@ -315,6 +339,13 @@ def write_note(repo: Path, expert: str, body: str,
   is logged to stderr and does not abort the call). Git state is not touched here — the
   caller is responsible for committing the returned path set under the memory-bot identity.
 
+  Guarantees:
+    - Validation completes before any filesystem write; on failure, no note file is
+      written and no consolidate target is removed.
+    - Every tag file for a topic in the note's previous or current tags is regenerated.
+    - Git state is never touched; committing the returned paths under the memory-bot
+      identity is entirely the caller's responsibility.
+
   Args:
     repo: Absolute path to the repository root.
     expert: Expert identifier whose memory directory receives the note.
@@ -336,6 +367,11 @@ def write_note(repo: Path, expert: str, body: str,
       present.
   """
   repo = Path(repo)
+
+  # Contract:
+  # All validation — consolidate-path safety and frontmatter well-formedness — MUST
+  # complete before any filesystem write; on any validation failure, no note file is
+  # written and no consolidate target is removed.
 
   # Validate consolidate paths up front; refuse the whole op if any
   # would escape .logs/ or .memory/.
@@ -366,6 +402,11 @@ def write_note(repo: Path, expert: str, body: str,
   else:
     slug = resolve_slug(expert_dir, base)
   note_path = expert_dir / f"{slug}.md"
+
+  # Contract:
+  # Every tag file for a topic in either the note's previous tags or its current tags
+  # MUST be regenerated, so a topic dropped from the note never resolves through a stale
+  # tag file.
 
   # Capture old tags BEFORE overwriting so we can regenerate retagged files.
   old_tags: list[str] = []
@@ -402,6 +443,10 @@ def write_note(repo: Path, expert: str, body: str,
       sys.stderr.write(f"consolidate-target-missing: {c}\n")
     except OSError as e:
       raise WriteError(f"consolidate-io-error: {c}: {e}") from e
+
+  # Contract:
+  # `write_note` NEVER touches git state; committing the returned paths under the
+  # memory-bot identity is entirely the caller's responsibility.
 
   # Touched paths the caller must stage: the note + every regenerated tag
   # file (local + global, for the union of old and new tags) + every

@@ -603,12 +603,23 @@ class MirrorSync:
     normalises whitespace, so equal results mean the mirror body still
     matches the source.
 
+    Guarantees:
+      - Applying this to the mirror side and to the source side of the same
+        document, when no source-owned edit was made in the vault, returns
+        byte-identical text.
+
     Args:
       text: Full document text (mirror or source side).
 
     Returns:
       Normalised source-owned text.
     """
+
+    # Contract:
+    # Applying consumer_stripped() to the mirror side and to the source side of the same
+    # document MUST return byte-identical text when no source-owned edit was made in the
+    # vault. Callers rely on this equality as the sole signal that a mirror body has not
+    # drifted from its source.
 
     # Domain(wiki.integrity):
     # # When a mirrored document counts as drifted

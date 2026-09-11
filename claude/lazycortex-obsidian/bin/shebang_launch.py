@@ -71,6 +71,10 @@ def argv_for(path: Path, *args: str) -> list[str]:
   """
   Build the argv that runs `path` through its declared interpreter.
 
+  Guarantees:
+    - A Python-named interpreter always runs under `sys.executable`, never one resolved
+      from PATH.
+
   Args:
     path: File to run.
     *args: Arguments appended after the file.
@@ -82,6 +86,23 @@ def argv_for(path: Path, *args: str) -> list[str]:
   Raises:
     ShebangError: No usable shebang, or the interpreter is not on PATH.
   """
+
+  # Domain(plugin.boundaries):
+  # # Cross-machine safe script launch
+  # A script is launched through the interpreter named on its own first line, never through
+  # the operating system honouring an executable permission bit: a client that cannot
+  # preserve file modes when syncing a checkout across machines or platforms strips that bit
+  # silently, and a launcher that trusted it would fail on exactly the installs that most
+  # need it to work. A script that names itself as Python is always launched under the
+  # interpreter already running rather than one resolved from the search path, so a consumer
+  # with several Python versions installed never runs a sibling script under a version
+  # different from the one hosting it.
+
+  # Contract:
+  # For a file whose shebang names Python, the returned argv MUST launch it under
+  # `sys.executable`, the interpreter already running, and MUST NEVER use an interpreter
+  # resolved from PATH.
+
   tokens = read_shebang(path)
   interp, flags = tokens[0], tokens[1:]
   if _PYTHON_NAME.match(Path(interp).name):

@@ -385,12 +385,21 @@ def install(repo: Path) -> dict:
   """
   Bootstrap the lazy-review directory structure and default settings for a repository.
 
+  Guarantees:
+    - Never overwrites a settings key the repository's settings file already has, at any
+      nesting depth; only a missing key is added.
+
   Args:
     repo: Path to the repository root to install into.
 
   Returns:
     Dict with keys `repo`, `created_dirs`, `settings_path`, `added_keys`, and `migrated`.
   """
+
+  # Contract:
+  # Any settings key already present in the repository's settings file, at any nesting
+  # depth, is left exactly as recorded; only a missing key is added.
+
   repo = repo.resolve()
   dirs = _ensure_dirs(repo)
   settings_info = _ensure_settings(repo)

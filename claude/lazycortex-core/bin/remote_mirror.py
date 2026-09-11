@@ -223,6 +223,15 @@ class RemoteMirror:
     Returns:
       `None` on success, or a one-line error message on failure.
     """
+
+    # Domain(runtime.remote-mirror):
+    # # Mirrored source kept as a durable local clone
+    # A mirrored source repository is kept as a shallow local clone that is advanced in place
+    # onto the source's current state on every call, rather than being re-cloned from scratch
+    # each time. A failed step during that update is reported immediately and the destination
+    # tree is never touched by it, even though the clone itself may be left partway through
+    # the update.
+
     # an existing clone is updated in place; anything else is cloned fresh
     if (self._cache_dir / _GIT_DIR).is_dir():
       steps = [
@@ -285,6 +294,17 @@ class RemoteMirror:
       Plan items sorted by path, one per included or removed file. Each item carries the
       file's path and its classification token; a reason accompanies only skipped items.
     """
+
+    # Domain(runtime.remote-mirror):
+    # # Classification of a mirrored file subset
+    # Every source file selected by the include and exclude patterns is classified against the
+    # destination as added, updated, or unchanged, depending on whether it is missing, differs
+    # from, or is byte-identical to the destination's copy; a file the current selection no
+    # longer names is classified removed. A symlink, a file over the configured size ceiling,
+    # or a file that looks binary is classified skipped instead, so a mirror never dereferences
+    # a symlink, pulls in an oversized file, or drops binary content into a destination meant
+    # for text.
+
     filtered = self._filtered_source_files()
     items: list[dict] = []
 
@@ -336,6 +356,14 @@ class RemoteMirror:
     Returns:
       The applied plan, in the same shape as an unapplied plan.
     """
+
+    # Domain(runtime.remote-mirror):
+    # # Mirroring copies verbatim, never merges
+    # Applying a mirror plan never combines source and destination content: an added or
+    # updated file's destination bytes become an exact copy of the source file's bytes, and a
+    # removed file is deleted outright. Running the mirror again against an unchanged source
+    # always produces a plan with nothing left to apply.
+
     items = self.plan()
     # apply each classification: added/updated copy source bytes, removed deletes, the rest no-op
     for item in items:

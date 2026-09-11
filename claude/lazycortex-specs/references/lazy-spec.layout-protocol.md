@@ -44,9 +44,9 @@ A type declared via `/lazy-spec.add-asset-type` is recognised by `lazy-spec.crea
 An asset folder is `<spec_path>/<folder>/<slug>/`, where `<folder>` is the type's `default_path` unless the caller named another location. Assets may nest: an asset's boundary is the folder whose folder-note carries `spec_role: status`, so a folder sitting inside another asset's folder is its own asset all the same. It holds:
 
 - the status folder-note `<slug>.md` (`spec_role: status`, flat gates, `spec_asset_type` — see [status-note](./lazy-spec.status-note-protocol.md) Part 4 and [lifecycle](./lazy-spec.lifecycle-protocol.md));
-- the document named by the type's `start_doc` — `design.md` for the shipped `feature` / `change` / `content` / `research` types, `bug.md` for `bug`. There is no default layout: a type with no `start_doc` cannot be scaffolded at all;
+- the document named by the type's `start_doc` — `design.md` for the shipped `feature` / `change` / `content` types and for `research` (typed `research-design` there), `bug.md` for `bug`. There is no default layout: a type with no `start_doc` cannot be scaffolded at all;
 - optionally `architecture.md` — feature/change layout only, NEVER on a bug; opt-in on disk the same way as `code-plan.md` / `test-plan.md`, but its existence tracks a coordinator judgment (code-bearing asset) rather than free operator choice — see [coordination-playbook](./lazy-spec.coordination-playbook.md) Chapter 3 and Chapter 8;
-- `vision.md` per the asset type's `vision` contract — mandatory on a feature (the coordinator seeds and starts it before `design.md`; the `Write design` row waits for its approve), opt-in on a change (`Write vision` checkbox, window closes with `spec_design_done`), never on a bug;
+- `vision.md` per the asset type's `vision` contract — mandatory on a feature (the coordinator seeds and starts it before `design.md`; the `Write design` row waits for its approve), opt-in on a change, on `content`, and on `research` (`Write vision` checkbox, window closes with `spec_design_done`), never on a bug;
 - optionally `use-cases.md` and/or `ui-design.md` — feature/change layout only, NEVER on a bug; opt-in the same way as `code-plan.md` / `test-plan.md`, each created only once its launch checkbox is ticked or the product or asset declares it mandatory — see the [feature](./lazy-spec.feature-playbook.md) and [change](./lazy-spec.change-playbook.md) playbooks;
 - optionally `code-plan.md` and/or `test-plan.md` — opt-in, scaffolded only when explicitly authored, never seeded by `lazy-spec.create-asset`;
 - optionally `code-report.md` and/or `test-report.md` — opt-in append-only execution journals, carrying no `spec_stage` and no role in any gate;
@@ -94,6 +94,8 @@ Doc templates come from a **linear per-doc-type base** plus **per-asset-type spe
 │   ├── code-report.md
 │   ├── test-report.md
 │   ├── bug.md
+│   ├── research-design.md                       ← research asset start doc: <slug>/design.md typed research-design
+│   ├── research.md                              ← the research tool's report, typed research-report
 │   ├── system-vision.md                         ← product-level <product>/vision.md
 │   ├── system-design.md                         ← product-level <product>/design.md
 │   ├── system-tech.md                           ← product-level <product>/tech.md
@@ -227,7 +229,7 @@ An asset folder of any category may additionally hold **attachments** — files 
 
 ## Part 2 — File roles
 
-**Moved out — read `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md`** for what a document IS: the open `spec_doc_type` set and its two declaring layers, the closed fifteen-value `spec_role` set with its per-role content and stage rules, the path constraints each role is legal under, the removed roles, the operator-zone folder-notes that carry no role at all, and the three file kinds that live outside the closed set — request files, upstream unit notes, and attachments with their `spec_owner_doc` / `spec_doc_type` pair. That file keeps this Part's number.
+**Moved out — read `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md`** for what a document IS: the open `spec_doc_type` set and its two declaring layers, the closed sixteen-value `spec_role` set with its per-role content and stage rules, the path constraints each role is legal under, the removed roles, the operator-zone folder-notes that carry no role at all, and the three file kinds that live outside the closed set — request files, upstream unit notes, and attachments with their `spec_owner_doc` / `spec_doc_type` pair. That file keeps this Part's number.
 
 ## Part 3 — File naming, header section, wikilinks
 

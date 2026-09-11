@@ -1,5 +1,5 @@
 ---
-description: "Run when the operator asks what lazycortex-wiki can do, how the semantic wiki gets built, curated, or asked a question, or which verb sets up a scope — lists the wiki surface: install / configure / relink / query / doctor / domain-sync, plus the curator, seeker, gatherer, and domain-spec-writer agents those skills dispatch."
+description: "Run when the operator asks what lazycortex-wiki can do, how the semantic wiki gets built, curated, or asked a question, or which verb sets up a scope — lists the wiki surface: install / configure / relink / query / audit / domain-sync, plus the curator, seeker, gatherer, and domain-spec-writer agents those skills dispatch."
 execution-discipline-waiver: "static help text — no executable steps"
 logging-waiver: "static text — no executable steps"
 ---

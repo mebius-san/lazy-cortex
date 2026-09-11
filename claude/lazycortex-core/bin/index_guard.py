@@ -102,6 +102,25 @@ def guard_index(repo_root: Path) -> dict:
     A report dict: `restored` (bool), `removed` (count of copies deleted), and `skipped`
     (None, or the reason the heal did not run: `no-git`, `index-lock`, `ambiguous`).
   """
+
+  # Contract:
+  # This operation never modifies the worktree, `HEAD`, or refs — the only file it ever
+  # writes is `.git/index` (or its common-dir equivalent), and only per the replacement
+  # guarantee below.
+
+  # Domain(runtime.git-safety):
+  # # Trustworthy recovery of a sync-displaced git index
+  # A cloud-sync client can race a commit's rewrite of the shared index, resurrecting an older
+  # version under the real name while parking the newer write aside as a conflicted copy.
+  # Recovery never trusts file timestamps for this — an unrelated command like a status check
+  # freely rewrites the live index and would make a resurrected stale copy look newest again. The
+  # one trustworthy signal is agreement with the last commit: a conflicted copy that agrees with
+  # it, when the live index does not, is the version actually written last and is restored in its
+  # place. A copy that settles nothing new — agreeing with a live index that already matches, or
+  # agreeing with neither — is treated as litter and discarded; only two candidates that each
+  # disagree with the last commit in their own way are left untouched, since nothing here can
+  # rank one over the other.
+
   git_dir = _git_common_dir(repo_root)
   # guard: not a repository — nothing to heal
   if git_dir is None:
@@ -112,6 +131,11 @@ def guard_index(repo_root: Path) -> dict:
   # guard: no conflicted copies — the common case, exit without touching anything
   if not copies:
     return { "restored": False, "removed": 0, "skipped": None }
+
+  # Contract:
+  # The live index is replaced only by a conflicted copy that carries a valid index
+  # signature and agrees with `HEAD`, never on the basis of file timestamp, and never while
+  # `index.lock` is present.
 
   # guard: a git operation is mid-flight — retry on the next invocation
   if (git_dir / _INDEX_LOCK_NAME).exists():
@@ -141,6 +165,11 @@ def guard_index(repo_root: Path) -> dict:
       shutil.copy2(newest, staging)
       os.replace(staging, index)
       restored = True
+
+  # Contract:
+  # A conflicted copy is deleted only after it was either restored as the new live index or
+  # proved to be litter against `HEAD`; when neither candidate can be ranked against `HEAD`,
+  # every conflicted copy is left in place for the operator.
 
   # every copy is settled now — restored, or proved litter against HEAD
   removed = 0

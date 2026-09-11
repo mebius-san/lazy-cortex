@@ -141,6 +141,19 @@ def _repair_lost_wake(repo: Path, doc: Path, entry: dict) -> bool:
   Returns:
     True when a repair was applied; False on every skip.
   """
+
+  # Domain(review.jobs):
+  # # Lost writer wake
+  # A writer's job can reach an end state that never triggers the round it was supposed to
+  # advance — the runtime gave up on it, an operator cancelled it, its bundle disappeared, or
+  # it already finished but left nothing to hand back to the document. Every one of these
+  # endings is a wake the review loop would otherwise never receive, and each is treated the
+  # same way once discovered: the loop is told the writer's turn is over so the next step can
+  # be decided, even though nothing was actually collected from the writer. A job that
+  # finished with something to hand back is excluded on purpose — a separate, more frequent
+  # sweep already raises that wake, and doubling it here would just be a second path to the
+  # same result.
+
   job_id = entry.get(JobMarker.ACTIVE_JOB)
   # guard: no writer job tracked — nothing to lose a wake for
   if not isinstance(job_id, str) or not job_id:
@@ -181,6 +194,17 @@ def _is_orphaned(repo: Path, doc: Path) -> bool:
     True when no live coordinator job, no tracked writer job, and no pending wake can ever
     move the document, and the banner is not an operator-waiting state; False on any doubt.
   """
+
+  # Domain(review.jobs):
+  # # Orphaned review
+  # A document can be left marked as under review with nothing left anywhere that could ever
+  # move it forward again — no writer job in flight, no wake waiting to be acted on, and no
+  # coordinator currently deciding what happens next. Silence alone does not mean this: a
+  # document can also sit quietly because the loop deliberately handed the decision to the
+  # operator and is waiting on them, and that silence is never mistaken for the document being
+  # abandoned. Only the combination — nothing in flight, and the loop not currently waiting on
+  # the operator by design — marks a review as truly stranded.
+
   entry = _job_markers.read(repo, doc)
   # guard: a tracked writer job or a raised wake means the loop still has a next move
   if entry.get(JobMarker.ACTIVE_JOB) or entry.get(JobMarker.PENDING_WAKE):
@@ -233,6 +257,10 @@ def sanitize(repo: Path) -> dict:
   """
   Run the three stuck-state repairs across the repository and summarize what was applied.
 
+  Guarantees:
+    - A repair failure on one document never aborts the sweep; every other document is
+      still processed, and the failure is folded into the returned summary's `error` field.
+
   Args:
     repo: Repository root.
 
@@ -241,7 +269,20 @@ def sanitize(repo: Path) -> dict:
     vanished documents, lost writer wakes re-raised, and orphaned reviews re-dispatched;
     carries an additional `error` field when one or more documents failed to process.
   """
+
+  # Contract:
+  # A repair failure on one document never aborts the sweep; every other document is
+  # still processed, and the failure is folded into the returned summary's `error`
+  # field instead.
+
   failed: list[str] = []
+
+  # Domain(review.jobs):
+  # # Review without a document
+  # A sidecar entry can go on naming a document that is no longer there to review — deleted,
+  # renamed outside the tracked history, or never committed in the first place. Nothing about
+  # that entry describes a stuck review any more; it is simply stale bookkeeping, dropped
+  # outright rather than treated as a state to repair.
 
   # review-without-a-document first: an entry keying a vanished path is dropped before the
   # lost-wake pass below would try to dispatch a coordinator on it

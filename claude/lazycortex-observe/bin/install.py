@@ -483,6 +483,10 @@ def smoke_test_local_metrics(scrape_target: str, timeout: float = 5.0) -> bool:
   """
   Best-effort probe of the lazycortex-core `/metrics` endpoint on the given target.
 
+  Guarantees:
+    - Network failures against the target — connection errors, timeouts, and unreachable
+      hosts — never raise; the call always returns `False` for them instead.
+
   Args:
     scrape_target: Host-and-port string to probe, used directly in the
       constructed URL (e.g. `127.0.0.1:9464`).
@@ -493,6 +497,11 @@ def smoke_test_local_metrics(scrape_target: str, timeout: float = 5.0) -> bool:
     `lazycortex_runtime` marker, otherwise `False` (including connection
     errors, timeouts, and unreachable hosts).
   """
+
+  # Contract:
+  # Network failures against the target — connection errors, timeouts, and unreachable hosts —
+  # never raise; the call always returns False for them instead of propagating the exception.
+
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   import urllib.request
   try:
@@ -676,6 +685,16 @@ def local_scrape_targets() -> list[dict]:
     rows = json.loads(proc.stdout).get("daemons", [])
   except json.JSONDecodeError as e:
     raise RuntimeError(f"lazycortex-core daemon-list printed unparseable JSON: {e}") from e
+
+  # Domain(observe.coverage-detection):
+  # # Scrape targets are drawn only from daemons that opted into metrics
+  # A project's daemon can run perfectly well without ever turning on its metrics endpoint, so the
+  # registry this installer reads may list daemons that publish nothing to scrape. The set of scrape
+  # targets handed to a same-host collector only ever includes a daemon that has declared its metrics
+  # endpoint enabled; every other daemon in the registry is left out, so a collector is never pointed
+  # at a port that never intended to serve metrics.
+
+  # keep only the daemons that declared their metrics endpoint enabled
   # waiver: external JSON contract field name of the core daemon-list CLI
   return [row for row in rows if row.get("metrics_enabled")]
 

@@ -88,9 +88,10 @@ class CoreDispatch:
   single dispatch-level operation to queue curator jobs.
 
   Guarantees:
-    - `lazycortex-core` is reached only through its published CLI binary, located only among the
-      directories named by `$LAZYCORTEX_PLUGIN_DIRS`; no core Python module is imported and no
-      plugin-cache layout is walked.
+    - `lazycortex-core` is reached only through its published CLI binary, never by importing a
+      core Python module; the binary is located via `$LAZYCORTEX_PLUGIN_DIRS`, falling back to
+      the newest cached `lazycortex-core` install next to this plugin's own cache entry when the
+      environment names none.
 
   Attributes:
     EXPERT_NAME: Expert name as it appears in `lazy.settings.json[experts]`.
@@ -103,9 +104,10 @@ class CoreDispatch:
   """
 
   # Contract:
-  # `lazycortex-core` is reached ONLY through its published CLI binary, and that binary is located
-  # ONLY among the directories named by `$LAZYCORTEX_PLUGIN_DIRS`. Importing a core Python module or
-  # walking the plugin cache is NEVER a substitute.
+  # `lazycortex-core` is reached ONLY through its published CLI binary, NEVER by importing a core
+  # Python module. The binary is located by walking `$LAZYCORTEX_PLUGIN_DIRS` first, falling back
+  # to the newest cached `lazycortex-core` install next to this plugin's own cache entry when the
+  # environment names none.
 
   # Expert name as it appears in `lazy.settings.json[experts]`.
   EXPERT_NAME = "wiki.curator"

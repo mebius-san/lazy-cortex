@@ -375,6 +375,15 @@ def _parse_value(kind: str, raw: str, key: str) -> tuple[object, str | None]:
   # guard: not a list, or a list with a non-string member — neither is a legal `spec_targets`
   if not isinstance(parsed, list) or not all(isinstance(member, str) for member in parsed):
     return None, f"expected a JSON list of strings, got {raw!r}"
+
+  # Domain(spec.notes):
+  # # Cross-asset references are two-part category/slug tokens
+  # An asset points at another asset — as a cascade target or as a dependency — through a token
+  # naming the target's category and its own slug together, never a bare slug or a path. The
+  # pairing is what lets the token resolve to exactly one asset across a catalog where the same
+  # slug can legitimately recur under different categories, so a malformed token is refused here
+  # rather than accepted and silently failing to resolve later.
+
   # guard: `spec_targets` / `spec_depends_on` carry `<category>/<slug>` tokens — a member
   # missing that shape (empty, no slash, more than one slash) is refused here rather than
   # writing clean and only surfacing as a silent context-fold-in miss later (M8)
@@ -450,6 +459,14 @@ def _commit(asset_dir: Path, note: Path, key: str, value_str: str) -> None:
     return
   repo = Path(top)
 
+  # Domain(obsidian.icon-repaint):
+  # # Paint rides the same commit as the state it reflects
+  # An icon's colour is a read of the note's own state, so a change that could alter that read
+  # must never land in a commit of its own: repainting separately would leave a window where the
+  # folder shows a colour the note's actual state no longer matches, visible to anyone browsing
+  # the vault before the second commit catches up. The repaint is folded into the very commit
+  # that changed the state instead, so the two are never observably out of step.
+
   # fold the note's icon repaint into this same commit so no separate icons commit follows
   extra_paths = iconize_inline.repaint_paths(repo, [str(note.resolve().relative_to(repo.resolve()))])
 
@@ -483,6 +500,11 @@ def note_set_key(asset_dir: Path, key: str, raw_value: str, *, today: str | None
   rewritten, one `# History` line is appended, and the note is committed under the
   `lazy-spec.note-set-key` bot identity.
 
+  Guarantees:
+    - A key outside the coordinator's closed writable schema is always refused with no file
+      mutation.
+    - A value that already matches what is on disk is a no-op: no write and no commit occur.
+
   Args:
     asset_dir: The asset folder holding `<asset_dir.name>.md`.
     key: The `spec_*` frontmatter key to set.
@@ -499,6 +521,24 @@ def note_set_key(asset_dir: Path, key: str, raw_value: str, *, today: str | None
     subprocess.CalledProcessError: When the commit of the rewritten note fails — propagated
       from `_commit`.
   """
+
+  # Domain(spec.notes):
+  # # Closed vocabulary for coordinator-owned frontmatter
+  # An asset's status note carries state contributed by several independent workers sharing one
+  # file, and the coordinator's own share of it is a fixed, closed set of keys — the lifecycle
+  # gates, the halt flag, the cascade and dependency lists, the draft flag, the derived state
+  # token, and the tool verdict. A key outside that set is never the coordinator's to set,
+  # however plausible its name looks, because writing it would silently overwrite state another
+  # worker owns and relies on staying exactly as it left it.
+
+  # Contract:
+  # A key outside the coordinator's closed writable schema is always refused with no file
+  # mutation — this verb NEVER writes a key it does not itself own.
+
+  # Contract:
+  # A value that already matches what is on disk is treated as a no-op: no frontmatter write
+  # and no commit occur.
+
   kind = _WRITABLE_SCHEMA.get(key)
   # guard: key outside the coordinator's closed writable schema — clean refusal, no write
   if kind is None:
@@ -575,6 +615,10 @@ def note_drop_key(asset_dir: Path, key: str, *, today: str | None = None) -> dic
   removal the frontmatter is rewritten, one `# History` line is appended, and the note is
   committed under the `lazy-spec.note-set-key` bot identity.
 
+  Guarantees:
+    - A key recognized by the note schema, or one outside this plugin's own `spec_` namespace,
+      is always refused with no file mutation.
+
   Args:
     asset_dir: The folder holding `<asset_dir.name>.md` — an asset's folder or a level's.
     key: The frontmatter key to remove.
@@ -589,6 +633,20 @@ def note_drop_key(asset_dir: Path, key: str, *, today: str | None = None) -> dic
     subprocess.CalledProcessError: When the commit of the rewritten note fails — propagated
       from `_commit`.
   """
+
+  # Domain(spec.notes):
+  # # Litter is namespace-owned before it is recognized
+  # A note's frontmatter is shared by several independent workers, and only a key that both
+  # belongs to this worker's own namespace and is unrecognized by its schema counts as litter
+  # this worker may sweep. Ownership is judged before recognition: a key can be unrecognized here
+  # yet still belong to another worker, and removing it on that basis alone would delete state
+  # that worker still needs, rather than debris of this worker's own making.
+
+  # Contract:
+  # A key recognized by the note schema, or one outside this plugin's own `spec_` namespace, is
+  # always refused with no file mutation — this verb only ever removes unrecognized litter it
+  # itself owns.
+
   # guard: a key outside this plugin's namespace belongs to another worker — never ours to remove,
   # and this is asked FIRST because ownership outranks recognition: the schema recognizes several
   # foreign keys precisely so their presence reads as legitimate, and answering "recognized" there
@@ -720,6 +778,14 @@ def note_check(asset_note: Path) -> dict:
     if not _is_value_ok(raw, kind):
       violations.append({ _ResultKey.KIND: _Violation.BAD_TYPE, _ResultKey.KEY: key,
                           _ResultKey.EXPECTED: kind, _ResultKey.VALUE: raw })
+
+  # Domain(spec.notes):
+  # # A level note's section roster closes with an attachments registry
+  # A folder-note's required sections follow a fixed roster in a fixed order, and a note at the
+  # product or catalog level owes one section beyond an asset's own: an attachments registry that
+  # closes the body, because a level accumulates artifacts no single document tracks on its own.
+  # An asset's own status note has no such registry to require — its own optional attachments
+  # section is checked only when present, never demanded.
 
   # the note's own role picks the roster: a level note owes one section more than an asset's
   required = _LEVEL_REQUIRED_SECTIONS if fm.get(SpecKey.ROLE) in LEVEL_ROLES else _REQUIRED_SECTIONS

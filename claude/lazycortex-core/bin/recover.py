@@ -78,6 +78,11 @@ def is_clean(repo: Path) -> bool:
   """
   Report whether the working tree of the given repository has no pending changes.
 
+  Guarantees:
+    - An ambiguous condition — no git repository at the path, git unavailable, or a failed
+      invocation — resolves to clean rather than raising; only an actual pending modification
+      reports as dirty.
+
   Args:
     repo: Absolute path to the repository root.
 
@@ -86,6 +91,12 @@ def is_clean(repo: Path) -> bool:
     is not a git repository or git is unavailable. False when modifications are
     present.
   """
+
+  # Contract:
+  # An ambiguous condition — the path is not a git repository, git itself is unavailable, or
+  # the invocation fails — MUST resolve to clean, never raised as an exception; only an actual
+  # pending modification reports as dirty.
+
   try:
     rc = subprocess.run(
       [ "git", "--no-optional-locks", "-c", "color.status=never", "status", "--porcelain" ],
@@ -178,6 +189,17 @@ def resume(repo: Path) -> None:
       still has pending changes; the error message lists the offending paths in
       `git status --porcelain` form.
   """
+
+  # Domain(runtime.incidents):
+  # # Clean-tree gate is reason-specific
+  # A halted daemon divides by whether its own cause left the working tree dirty. Only the
+  # reason naming uncommitted changes ties clearing the halt to a clean tree, because that is
+  # the one halt whose root cause is the dirt itself — clearing it without a clean tree just
+  # re-halts on the same condition next tick. Every other halt reason describes trouble that
+  # lives outside the working tree — a diverged or rejected push, an unreachable remote, an
+  # invalid routine configuration, a closed rate-limit window — so clearing any of those never
+  # depends on the tree's state, whatever that state happens to be at the moment.
+
   halt = runtime_state.get_halted(repo)
   # guard: daemon is not halted — nothing to clear
   if halt is None:
@@ -251,12 +273,28 @@ def clear_dead_job(jdir: Path) -> None:
   """
   Prepare a failed job directory for retry by removing per-attempt artifacts.
 
-  The bundle is left armed and the cumulative attempt counter survives, so the next pump
-  tick re-picks the job with prior failure history intact.
+  The bundle is left armed so the next pump tick can re-pick the job.
+
+  Guarantees:
+    - The cumulative attempt counter survives the reset untouched, so a job that keeps
+      failing is still recognisable as having failed before.
 
   Args:
     jdir: Absolute path to the job directory to reset.
   """
+
+  # Contract:
+  # The job's cumulative attempt counter MUST survive this reset untouched; only the failed
+  # attempt's own artifacts are removed.
+
+  # Domain(runtime.job-execution):
+  # # Retry resets the attempt, not the history
+  # A dead job's retry throws away only what belongs to the failed attempt itself — its dead
+  # marker, its process id, its transcript, its recorded error, its response. The cumulative
+  # attempt counter belongs to the job as a whole rather than to any one attempt, and survives
+  # untouched, so a job that keeps failing is still recognisable as having failed before and a
+  # permanent-fail judgment can still act on its true attempt count.
+
   # iterate the fixed set of retry-resettable artifacts; missing files are expected
   for name in ( JobMarker.DEAD, JobArtifact.DEAD_JSON, JobMarker.PID,
                 JobArtifact.TRANSCRIPT, JobArtifact.ERROR_JSON, JobFile.RESPONSE ):

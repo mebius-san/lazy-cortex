@@ -149,12 +149,20 @@ def resolve_repo_language(vault: Path) -> str:
   The chain returns the first non-empty value among: the `spec` section's
   `language`, the top-level `language` key, and the floor `en`.
 
+  Guarantees:
+    - Never returns an empty value; an unconfigured repo resolves to the floor `en`.
+
   Args:
     vault: Vault root directory holding `.claude/lazy.settings.json`.
 
   Returns:
     The resolved language tag; never empty (falls back to `en`).
   """
+
+  # Contract:
+  # The resolved language tag is never empty; an unconfigured repo resolves to the floor `en`
+  # rather than an empty string or None.
+
   # one settings read serves both rungs of the chain
   settings = _read_settings(vault)
   return _spec_section_language(settings) or _clean(settings.get(_ROOT_LANGUAGE_KEY)) or _LANGUAGE_FLOOR
@@ -168,6 +176,9 @@ def resolve_spec_language(vault: Path, doc_path: str) -> str:
   `spec_language`, the owning product's `language`, the `spec` section's
   `language`, the top-level `language` key, and the floor `en`.
 
+  Guarantees:
+    - Never returns an empty value; an unconfigured repo resolves to the floor `en`.
+
   Args:
     vault: Vault root directory holding `.claude/lazy.settings.json`.
     doc_path: Doc path relative to `vault`.
@@ -175,6 +186,20 @@ def resolve_spec_language(vault: Path, doc_path: str) -> str:
   Returns:
     The resolved language tag; never empty (falls back to `en`).
   """
+
+  # Contract:
+  # The resolved language tag is never empty; an unconfigured repo resolves to the floor `en`
+  # rather than an empty string or None.
+
+  # Domain(spec.config):
+  # # Document language falls back through five rungs
+  # A spec document's language is never asked for directly; it is settled by the first rung
+  # that actually answers, in order: the document's own recorded language, the language its
+  # owning product declares, the catalog's own configured default, the repository's overall
+  # default, and a fixed floor when nothing above ever answered. The order lets one document
+  # diverge from its product, and one product diverge from the catalog, without forcing every
+  # other document or product to declare a language it is otherwise happy to inherit.
+
   # 1. Doc frontmatter wins.
   doc_file = vault / doc_path
   if doc_file.is_file():

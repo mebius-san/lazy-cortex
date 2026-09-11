@@ -62,7 +62,7 @@ A tool that lands in `spec_tools` with no declaration in `tool_types` is a findi
 
 The architecture clause adds no sixth boolean — it rides inside the same `spec_plan_done` precondition, between the design check and the plan checks.
 
-**Downward reconciliation.** A gate already true goes stale when its governing document reappears un-accepted. `spec_plan_done` goes back to `false` (`flip-gate --off`, auto) when a declared tool's plan exists at a stage outside `{approved, cancelled}` while the gate reads true. The downward flip commits atomically and the coordinator immediately re-runs its upward checks against the fresh state, so a dependent checkbox disappears the same cycle rather than lagging a tick.
+**Downward reconciliation.** A gate already true goes stale when its governing document reappears un-accepted. `spec_plan_done` goes back to `false` (`flip-gate --off`, auto) when a declared tool's plan exists at a stage outside `{approved, cancelled}` while the gate reads true. The downward flip commits atomically and the coordinator immediately re-runs its upward checks against the fresh state, so a dependent checkbox disappears the same cycle rather than lagging a tick. A dependent document whose source was re-approved after it goes stale — back to `draft` where it carries a stage — and its gate turns off by the source-staleness rule of `lazy-spec.coordination-playbook.md`; the table there names the source of every document of this type.
 
 ## The launch checkboxes of the definition half
 

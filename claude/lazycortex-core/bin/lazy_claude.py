@@ -75,9 +75,18 @@ def is_raised() -> bool:
   Fail-open: an unreadable or malformed record never blocks the call — it is reported on stderr
   and skipped, matching the guarantee `rate_limit_flag.live` gives every other reader.
 
+  Guarantees:
+    - Never raises: an unreadable or malformed record is reported on stderr and treated as
+      absent, and the call still returns a verdict.
+
   Returns:
     True while at least one record with an unexpired reset timestamp exists.
   """
+
+  # Contract:
+  # An unreadable or malformed record never blocks the call; it is reported on stderr
+  # and treated as absent instead of raising.
+
   base = flag_dir()
   # guard: no writer has ever raised the flag on this host
   if not base.is_dir():
@@ -154,6 +163,16 @@ def triggered(info: dict) -> str | None:
   Returns:
     The trigger token that fired, or None when the payload is benign.
   """
+
+  # Domain(runtime.job-execution):
+  # # Immediate trigger, no warning threshold
+  # A daemon with its own configuration can tolerate an early rate-limit warning up to a chosen
+  # share of the window before it actually stops. A standalone wrapper substituted for a
+  # third-party daemon's own launch command carries no such per-daemon configuration to read a
+  # threshold from, so it treats any warning or rejection frame as an immediate trigger instead —
+  # trading the daemon's graduated tolerance for a simpler rule that is safe for every caller
+  # regardless of what it knows about itself.
+
   # waiver: external Claude Code stream-json field name, not an internal key
   status = info.get("status")
   # guard: the two provider statuses that close a window
@@ -175,10 +194,19 @@ def record(info: dict, trigger: str) -> None:
   Best-effort: a write failure is reported on stderr and swallowed — the guard must never take
   down the daemon it protects.
 
+  Guarantees:
+    - Never raises: a write failure is reported on stderr and swallowed instead of
+      propagating to the caller.
+
   Args:
     info: The rate-limit payload that raised the flag.
     trigger: The trigger token that fired for this payload.
   """
+
+  # Contract:
+  # A write failure is reported on stderr and swallowed; this function never raises
+  # and never takes down the process that called it.
+
   now = time.time()
   # an overage trigger is bounded by the overage window, every other trigger by the plain one
   # waiver: external Claude Code stream-json field names, not internal keys
@@ -304,6 +332,10 @@ def run_streaming(real: str, argv: list[str]) -> int:
   Stdout lines are forwarded verbatim as they arrive, so the caller's own stream parsing is
   unaffected; each line is also offered to the frame reader, and any tripped trigger is recorded.
 
+  Guarantees:
+    - Every stdout line reaches the caller unmodified and as soon as it arrives, before
+      any rate-limit frame inspection runs on it.
+
   Args:
     real: Absolute path to the real `claude` executable.
     argv: The argument vector after the program name, forwarded unchanged.
@@ -311,6 +343,11 @@ def run_streaming(real: str, argv: list[str]) -> int:
   Returns:
     The child's exit code.
   """
+
+  # Contract:
+  # Every stdout line is written to the caller verbatim and immediately, unaffected by
+  # the frame inspection that runs after it.
+
   # stdin, stderr, and the exit code pass through untouched; only stdout is tapped
   with subprocess.Popen([ real, *argv ], stdout = subprocess.PIPE, text = True) as proc:
     # guard: PIPE above guarantees a stream; the check narrows the Optional for the reader loop
@@ -331,6 +368,10 @@ def main(argv: list[str]) -> int:
   """
   Dispatch one wrapper invocation: passthrough, refuse, or stream-and-record.
 
+  Guarantees:
+    - An interactive (non-headless) invocation always passes straight through with no
+      rate-limit check; only a headless call is ever subject to refusal.
+
   Args:
     argv: The argument vector after the program name.
 
@@ -343,6 +384,18 @@ def main(argv: list[str]) -> int:
     # waiver: one-off human-facing message
     sys.stderr.write("lazy-claude: no `claude` executable found on PATH\n")
     return EXIT_NO_CLAUDE
+
+  # Domain(runtime.job-execution):
+  # # Guard scope: headless calls only
+  # The rate-limit guard protects unattended, automated calls from burning tokens against a
+  # closed window — it was never meant to stand between an operator and their own interactive
+  # session. An interactive invocation always passes straight through with no check at all; only
+  # a headless, non-interactive call is ever subject to refusal, since that is the shape every
+  # unattended daemon actually uses to spend tokens on its own.
+
+  # Contract:
+  # An interactive (non-headless) invocation always passes straight through with no
+  # rate-limit check at all; only a headless call is ever subject to refusal.
 
   # Interactive session: replace this process outright — no pre-check, no pipe, no TTY breakage.
   # The guard never refuses the operator their own session.

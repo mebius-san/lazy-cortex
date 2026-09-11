@@ -80,6 +80,15 @@ def resolve_agent_model_tier(value: object) -> str | None:
     The tier string, or `None` when `value` is neither a string nor a
     seed object with a string `tier`.
   """
+
+  # Domain(settings.versioning):
+  # # An agent's model tier can be a personal choice or a recorded default
+  # A model tier assigned to one agent is recorded one of two ways: either as the tier name
+  # itself, meaning an operator picked it deliberately, or as a small record that also notes
+  # where the value was seeded from. The provenance note is bookkeeping about how the value got
+  # there, never a tier in its own right, so resolving an agent's effective tier always looks
+  # only at the tier itself and ignores where it came from.
+
   # guard: bare-string pin — the value is already the tier
   if isinstance(value, str):
     return value
@@ -169,6 +178,17 @@ def _deep_merge_claude(base: object, overlay: object) -> object:
   Returns:
     The merged value following the semantics described above.
   """
+
+  # Domain(settings.versioning):
+  # # Two-layer settings merge
+  # A project's settings are read from two layers: a shared, committed file and a personal,
+  # per-machine overlay sitting beside it. The overlay never rewrites a plain value outright —
+  # a scalar in the overlay replaces the shared one, a list keeps every shared entry in its
+  # original order and only appends overlay entries not already present, and a nested structure
+  # merges recursively so an overlay only has to state what it changes. Across every layer the
+  # section's own version marker always comes from the shared file; the personal overlay can
+  # never advance or shadow it.
+
   if isinstance(base, dict) and isinstance(overlay, dict):
     result = { **base }
     for k, v in overlay.items():
@@ -203,6 +223,10 @@ def load_tracked_section(path: Path | str, section_key: str) -> dict:
   Callers that perform a load → modify → save round-trip MUST use this entry point to
   avoid leaking local-overlay state into the tracked file on save.
 
+  Guarantees:
+    - Never writes to disk and never runs a migration ladder; this is a pure read of
+      whatever is already on disk.
+
   Args:
     path: Path to the tracked settings file. May be a string or `Path`.
     section_key: Name of the section to load.
@@ -213,6 +237,11 @@ def load_tracked_section(path: Path | str, section_key: str) -> dict:
   Raises:
     json.JSONDecodeError: If the tracked file is not valid JSON.
   """
+
+  # Contract:
+  # Never writes to disk and never runs a migration ladder; this function is a pure
+  # read of whatever is already on disk.
+
   path = Path(path)
   # guard: no tracked file yet — return a fresh section pinned to the current version
   if not path.exists():
@@ -234,6 +263,10 @@ def load_local_only_section(path: Path | str, section_key: str) -> dict:
   present in the personal overlay for a given section — typically audits, diagnostics, or
   wizards that surface effective configuration.
 
+  Guarantees:
+    - Never writes to disk and never runs a migration ladder; this is a pure read of
+      whatever is already on disk.
+
   Args:
     path: Path to the tracked settings file; the sibling `.local.json` is consulted.
     section_key: Name of the section to read from the overlay.
@@ -245,6 +278,11 @@ def load_local_only_section(path: Path | str, section_key: str) -> dict:
   Raises:
     json.JSONDecodeError: If the local overlay file is not valid JSON.
   """
+
+  # Contract:
+  # Never writes to disk and never runs a migration ladder; this function is a pure
+  # read of whatever is already on disk.
+
   local_path = _local_overlay_path(Path(path))
   # guard: no overlay file present — caller sees an empty view
   if not local_path.exists():
@@ -266,6 +304,10 @@ def load_section(path: Path | str, section_key: str) -> dict:
   `load_tracked_section` instead — saving a merged view would leak local-overlay entries
   into the tracked, shared file.
 
+  Guarantees:
+    - Never writes to disk and never runs a migration ladder; this is a pure read of
+      whatever is already on disk.
+
   Args:
     path: Path to the tracked settings file.
     section_key: Name of the section to load.
@@ -276,6 +318,11 @@ def load_section(path: Path | str, section_key: str) -> dict:
   Raises:
     json.JSONDecodeError: If either the tracked or overlay file is not valid JSON.
   """
+
+  # Contract:
+  # Never writes to disk and never runs a migration ladder; this function is a pure
+  # read of whatever is already on disk.
+
   path = Path(path)
   tracked = load_tracked_section(path, section_key)
   local_section = load_local_only_section(path, section_key)
@@ -313,6 +360,19 @@ def migrate_all(path: Path | str) -> dict[str, tuple[int, int]]:
     KeyError: If a section's ladder has no step for a version the file is sitting on, so the
       walk to the current version cannot complete.
   """
+
+  # Domain(settings.versioning):
+  # # Settings evolve one section at a time, only when explicitly asked
+  # Each top-level settings section carries its own version number rather than the file having
+  # one overall version, so an old section can be brought forward independently of its
+  # neighbours. A file written before per-section versioning existed carries one legacy version
+  # at the top instead; that value is pushed down into every section that has not yet recorded
+  # its own, and the legacy marker is then discarded. Bringing a section's version forward is
+  # never a side effect of simply reading the settings — it only happens when explicitly asked,
+  # so an ordinary run never rewrites a file the operator has not touched. A section with no
+  # documented path from its current version to the version the project expects is treated as
+  # broken rather than silently left behind.
+
   path = Path(path)
   result: dict[str, tuple[int, int]] = {}
   # guard: no file on disk → nothing to migrate; every section is implicitly at current
@@ -361,6 +421,9 @@ def save_section(path: Path | str, section_key: str, section: dict) -> None:
   migration is performed on the surrounding sections — schema-bridge work belongs in
   `migrate_all` (install / doctor-side), never as a side effect of save.
 
+  Guarantees:
+    - The sibling local-overlay file is never touched by this call.
+
   Args:
     path: Path to the tracked settings file.
     section_key: Name of the section to store under.
@@ -370,6 +433,11 @@ def save_section(path: Path | str, section_key: str, section: dict) -> None:
     OSError: If the tracked file or its parent directory cannot be written.
     json.JSONDecodeError: If the existing tracked file is not valid JSON.
   """
+
+  # Contract:
+  # The sibling local-overlay file is never touched by this call; only the tracked
+  # file is written.
+
   path = Path(path)
   # waiver: stdlib encoding idiom
   raw = json.loads(path.read_text(encoding = "utf-8") or "{}") if path.exists() else {}
@@ -387,6 +455,9 @@ def save_local_section(path: Path | str, section_key: str, section: dict) -> Non
   tracked file is never touched. Intended for per-machine, personal gates that must survive
   across runs without entering the shared, committed settings file.
 
+  Guarantees:
+    - The tracked settings file is never touched by this call.
+
   Args:
     path: Path to the tracked settings file; the sibling `.local.json` overlay is written.
     section_key: Name of the section to store under in the overlay.
@@ -396,6 +467,11 @@ def save_local_section(path: Path | str, section_key: str, section: dict) -> Non
     OSError: If the overlay file or its parent directory cannot be written.
     json.JSONDecodeError: If the existing overlay file is not valid JSON.
   """
+
+  # Contract:
+  # The tracked settings file is never touched by this call; only the sibling
+  # local-overlay file is written.
+
   local_path = _local_overlay_path(Path(path))
   # waiver: stdlib encoding idiom
   raw = json.loads(local_path.read_text(encoding = "utf-8") or "{}") if local_path.exists() else {}

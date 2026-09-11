@@ -19,7 +19,7 @@ source_skills:
   - lazy-python.knowledge-sweep
   - lazy-python.domain-writer
   - lazy-python.contract-writer
-source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
+source_sha: f3dcc55c389b71a983c894ee1c0407d8311e931c
 ---
 # Troubleshooting
 
@@ -149,6 +149,16 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 
 ---
 
+## `chk-py mypy` or `chk-py pcf` reports violations on a path listed in `[tool.pcf] exclude`
+
+**Symptom**: Running `chk-py mypy <dir>` or `chk-py pcf <file>` directly against a path that's listed in `[tool.pcf] exclude` in `pyproject.toml` now reports findings on it — the same command used to skip it silently.
+
+**Likely cause**: Both checkers now treat a path named explicitly on the command line as something you asked to check, not something to filter. `chk-py mypy <dir>` expands the directory to its individual `*.py` files before invoking `mypy`, so mypy's own `exclude` config — which only applies while mypy is discovering files under a directory, never to a file passed on the command line — no longer swallows it; `chk-py mypy .` still honors the exclude list, because a bare `.` is the recursive, discovery-driven run the exclude list is for. `pcf.py` follows the same rule for a single file: a `[tool.pcf] exclude` entry matching the named path is dropped when that path is named explicitly. Only the PostToolUse check-style hook still respects excludes on the file it's reacting to — it invokes `pcf.py --honor-excludes` specifically so an edit under `.venv`, an archive directory, or a project-declared exclude path stays a no-op there.
+
+**Fix**: This is intentional, not a regression — naming a path on the command line means you want it checked. If a path genuinely should never be checked (a vendored copy, generated code), keep or add it under `[tool.pcf] exclude`; that entry still governs the recursive `chk-py all` / `chk-py mypy .` run and the edit-loop hook. It just no longer silently swallows a target you named directly.
+
+---
+
 ## `chk-py pch` always skips: PyCharm `inspect.sh` not found
 
 **Symptom**: Running `chk-py pch <file>.py` exits immediately with a message that `inspect.sh` was not found. `/lazy-python.audit` reports `check6 WARN`.
@@ -176,6 +186,16 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 **Likely cause**: Two resolvers run back-to-back before every `chk-py` / `tst-py` invocation. `_ensure_venv.sh` picks the Python venv first (active `$VIRTUAL_ENV`, then `<repo>/.venv`, then a `pyproject.toml`-configured path, then a fallback bootstrap). Immediately after, `_ensure_env.sh` sources whichever script is on record as `python.env_source`. `/lazy-python.install` Step 7 records that key automatically when it finds exactly one candidate bootstrap script (`cli/env`, `.env.sh`, `scripts/env.sh`) — but when a repo ships more than one candidate and nothing is recorded yet, the value stays unset until you disambiguate, and any checker run in the meantime sources none of them (or picks up stray state from your shell instead).
 
 **Fix**: Re-run `/lazy-python.install`. If `python.env_source` has not been recorded yet, Step 7 detects the multiple candidates and asks — via `AskUserQuestion`, naming each script — which one your project actually uses (with a `skip` option). Pick the correct script; the install records it, and every subsequent `chk-py` / `tst-py` run sources it automatically alongside the resolved venv. A value already on record is never silently replaced — the disambiguation only fires when nothing is recorded yet, so if the repo's bootstrap script layout changed since the last recorded choice, confirm which script your project intends before re-running.
+
+---
+
+## `tst-py <module>` refuses with "no such module" instead of a pytest collection error
+
+**Symptom**: Running `tst-py <name>` for a name that has no `tests/<name>/` directory now exits immediately with `tst: no such module '<name>' — tests/<name>/ does not exist`, followed by a list of the modules that do exist, instead of pytest's own "file or directory not found" error.
+
+**Likely cause**: `tst` now checks that `tests/<module>/` exists before invoking pytest at all, so an unknown or mistyped module name is refused up front with the available module list rather than handed to pytest as a path it cannot find. `all` is also recognized explicitly as the whole-suite module name now — `tst-py all` and a bare `tst-py` (or `tst-py -q`) run the exact same suite.
+
+**Fix**: Check the module name against the list the error prints — a typo, or a module that was renamed or removed under `tests/`, is the usual cause. Run `tst-py` with no argument, or `tst-py all`, to run the whole suite instead of one module.
 
 ---
 

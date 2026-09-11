@@ -2262,40 +2262,38 @@ class CodeFormatAnalyzer:
     suppression_pattern = re.compile(
       r'#\s*(?:type:\s*ignore|noqa|pylint:\s*disable(?:-next)?)\b'
     )
-    in_docstring = False
-    docstring_delimiter = None
+    # the tokenizer separates comments from string literals that merely look like them --
+    # a fixture body carrying a directive inside a string is data, not a directive
+    source = '\n'.join(self.source_lines)
+    try:
+      tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+      return
 
-    # suppression directives are textual, so the scan is line-based rather than AST-based
-    for idx, line in enumerate(self.source_lines):
-      line_num = idx + 1
-      stripped = line.strip()
-
-      # track docstring state
-      if not in_docstring:
-        if stripped.startswith(('"""', "'''")):
-          docstring_delimiter = stripped[:3]
-          if not (len(stripped) > 3 and stripped.endswith(docstring_delimiter)):
-            in_docstring = True
-          continue
-      else:
-        if docstring_delimiter and stripped.endswith(docstring_delimiter):
-          in_docstring = False
-          docstring_delimiter = None
+    # every comment token is searched; string and code tokens never carry a directive
+    for tok in tokens:
+      # guard: only a real comment token can carry a directive
+      if tok.type != tokenize.COMMENT:
         continue
 
-      # search for suppression patterns in code lines
-      match = suppression_pattern.search(line)
-      if match:
-        # guard: waiver comment present — exemption granted
-        if _has_waiver(self.source_lines, line_num):
-          continue
+      # the directive, if any, lives in the comment's own text
+      match = suppression_pattern.search(tok.string)
+      # guard: no directive in this comment
+      if not match:
+        continue
 
-        # an unwaived suppression is reported with the directive text it carried
-        self.issues.append((
-          line_num,
-          f"error suppression comment found: '{match.group().strip()}'"
-          " -- fix root cause or add a '# waiver: <reason>' comment to exempt"
-        ))
+      # a waiver on or above the directive's line exempts it
+      line_num = tok.start[0]
+      # guard: waiver comment present -- exemption granted
+      if _has_waiver(self.source_lines, line_num):
+        continue
+
+      # an unwaived suppression is reported with the directive text it carried
+      self.issues.append((
+        line_num,
+        f"error suppression comment found: '{match.group().strip()}'"
+        " -- fix root cause or add a '# waiver: <reason>' comment to exempt"
+      ))
 
 
   def _check_double_backticks(self) -> None:
@@ -6095,6 +6093,13 @@ def analyze_file(path: str, config: dict | None = None) -> list[tuple[int, str]]
 
   # check if this is an __init__.py file
   is_init_file = os.path.basename(path) == '__init__.py'
+  # a pytest test file keeps its asserts and its expected-value literals: under pytest the
+  # `assert` is the check itself and a literal is the value being checked for, so the two
+  # production-code rules would flag every test for doing its job
+  is_test_file = (
+    os.path.basename(path).startswith('test_')
+    and 'tests' in Path(os.path.abspath(path)).parts
+  )
 
   # run import format checks if enabled
   if config.get('check_imports', True):
@@ -6146,7 +6151,7 @@ def analyze_file(path: str, config: dict | None = None) -> list[tuple[int, str]]
     all_issues.extend(docstring_analyzer.analyze())
 
   # run magic-literal checks if enabled
-  if bool(config.get('check_magic_literal', True)):
+  if bool(config.get('check_magic_literal', True)) and not is_test_file:
     project_root_raw = config.get('_project_root')
     project_root = project_root_raw if isinstance(project_root_raw, str) else None
     allowed_numbers_raw = config.get('allowed_magic_numbers', []) or []
@@ -6188,7 +6193,7 @@ def analyze_file(path: str, config: dict | None = None) -> list[tuple[int, str]]
       is_init_file = is_init_file,
       check_line_length = check_code_line_length,
       check_indentation = True,
-      check_assert = bool(config.get('check_assert', True)),
+      check_assert = bool(config.get('check_assert', True)) and not is_test_file,
       check_block_comments = bool(config.get('check_block_comments', True)),
       check_language = bool(config.get('check_language', True)),
       allowed_languages = allowed_languages,
@@ -6289,6 +6294,9 @@ def main() -> None:
                       help = 'root directory to scan')
   parser.add_argument('--exclude', action = 'append', metavar = 'SUBSTRING',
                       help = 'exclude files or directories containing this substring')
+  parser.add_argument('--honor-excludes', action = 'store_true',
+                      help = 'skip an explicitly-passed file that matches a [tool.pcf] exclude '
+                             '(the edit hook passes this; a plain CLI call checks what it names)')
   parser.add_argument('--no-imports', action = 'store_true',
                       help = 'disable import format checks')
   parser.add_argument('--no-docstrings', action = 'store_true',
@@ -6312,9 +6320,9 @@ def main() -> None:
   # get excludes from config, CLI args can extend the list
   config_excludes = list(config.get('exclude', []))
 
-  # raw (untrimmed) config excludes — used for the single-file exclude check below.
-  # the directory-mode trimming (next block) is about not silently skipping an explicitly
-  # requested directory; it must not weaken the exclude decision for a single file.
+  # raw (untrimmed) config excludes -- the single-file check below uses them only under
+  # `--honor-excludes`, the hook's mode: an edit under a project exclude path stays a no-op
+  # there, while a plain CLI call checks whatever file it names (same as directory mode).
   raw_config_excludes = list(config_excludes)
 
   # when a specific path is targeted, drop config exclusions that match the target
@@ -6347,13 +6355,12 @@ def main() -> None:
   # single-file or directory mode
   if os.path.isfile(base_path):
     # single-file mode
-    # honor the exclude list for an explicitly-passed file, same model as directory mode
-    # (walk_dir): a file matching a hardcoded or [tool.pcf] exclude substring is skipped.
-    # this makes a hook-invoked excluded file (e.g. under .venv / ~archive / a project
-    # exclude path) a clean no-op rather than a forced scan. Uses the untrimmed config
-    # excludes — a single file target should never weaken the exclude decision the way a
-    # directory target deliberately does.
-    single_file_excludes = list(raw_config_excludes)
+    # an explicitly named file is checked, same model as an explicitly named directory:
+    # config excludes lying on the file's own path are dropped (trimmed above), hardcoded
+    # and CLI excludes still apply. Under `--honor-excludes` (the edit hook's mode) the
+    # untrimmed config excludes apply too, so an edit under .venv / ~archive / a project
+    # exclude path stays a clean no-op rather than a forced scan.
+    single_file_excludes = list(raw_config_excludes if args.honor_excludes else config_excludes)
     if args.exclude:
       single_file_excludes.extend(args.exclude)
     all_excludes = HARDCODED_EXCLUDES + single_file_excludes

@@ -77,6 +77,10 @@ def main(argv: list[str]) -> int:
   """
   Run the `safe-pull` subcommand: a guarded fast-forward pull into another checkout.
 
+  Guarantees:
+    - Every guarded outcome (`pulled`, `noop`, `skipped`) exits `0`; a non-zero exit
+      happens only when the arguments themselves are unusable.
+
   Args:
     argv: CLI arguments after the subcommand token —
       `<repo-dir> <remote> <ref> [--timeout-sec N]`.
@@ -85,6 +89,12 @@ def main(argv: list[str]) -> int:
     `0` for every guarded outcome (`pulled`, `noop`, `skipped`); non-zero only when the
     arguments are unusable (missing directory, not a git checkout).
   """
+
+  # Contract:
+  # Every guarded outcome (pulled, noop, skipped) exits 0; a non-zero exit happens
+  # only when the arguments themselves are unusable. A caller may treat this call as
+  # best-effort and never needs to branch its own control flow on the exit code.
+
   parser = argparse.ArgumentParser(prog = _PROG)
   # waiver: argparse CLI signature — argument names and help copy, not domain keys
   parser.add_argument("repo_dir", help = "Absolute path of the checkout to pull into")
@@ -102,6 +112,16 @@ def main(argv: list[str]) -> int:
   if not (repo / _GIT_DIR).exists():
     _emit({ "outcome": _OUT_ERROR, "error": f"not a git checkout: {args.repo_dir}" })
     return 1
+
+  # Domain(runtime.git-safety):
+  # # A pull into another session's checkout only ever fast-forwards
+  # Pulling new commits into a checkout some other session might be using at the same moment
+  # is safe only when three conditions all hold: nothing is mid-write to that checkout's
+  # index, nothing is already staged there waiting for its own session to commit, and the
+  # incoming history is a strict continuation of what the checkout already has. Any one of
+  # those failing leaves the checkout untouched and reports the attempt as skipped rather
+  # than as an error, because the next push retries it and the working session's own state is
+  # never the one put at risk.
 
   # wait out a held index lock — someone is committing or staging; never pull through them
   lock = repo / _GIT_DIR / _INDEX_LOCK

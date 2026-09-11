@@ -207,8 +207,9 @@ def declared_types(repo: Path, product: str | None = None) -> dict[str, dict]:
   """
   Return every document type visible in one product's scope.
 
-  The product's own declarations are merged key-by-key over the shipped ones, so a product may
-  flip a single flag of a shipped type without restating the rest.
+  Guarantees:
+    - The product's own declaration for a type is merged flag-by-flag over the shipped one,
+      so flipping a single flag never requires restating the rest.
 
   Args:
     repo: Repository root holding `.claude/lazy.settings.json`.
@@ -217,6 +218,19 @@ def declared_types(repo: Path, product: str | None = None) -> dict[str, dict]:
   Returns:
     Mapping of type name to its merged declaration dict, every flag key present.
   """
+
+  # Domain(spec.declarations):
+  # # A document type's declaration is overridden one flag at a time
+  # A project customizing a shipped document type never replaces its declaration wholesale — the
+  # project's own declaration is layered over the shipped one, property by property. Turning on a
+  # single behavior, such as routing the type through review, never requires restating the type's
+  # icon, its starting template, or any other property the shipped declaration already settled.
+
+  # Contract:
+  # a product's own declaration for a type is merged flag-by-flag over the shipped one —
+  # setting one flag never requires the product to restate any other flag, icon, or template
+  # the shipped declaration already carries.
+
   merged = shipped_defaults()
   for name, decl in _product_types(repo, product).items():
     merged[name] = { **_FLAG_DEFAULTS, **merged.get(name, {}), **decl }
@@ -256,6 +270,15 @@ def icon_color(repo: Path, doc_type: str, product: str | None = None) -> tuple[s
     An `(icon, color)` pair with an empty colour when the declaration names none, or None
     when the type is undeclared or declares no icon.
   """
+
+  # Domain(spec.declarations):
+  # # A document's kind paint yields to its lifecycle paint once staged
+  # The paint assigned at declaration marks what kind of document a fresh file is, and stays its
+  # only paint for as long as the document carries no lifecycle stage — a journal, which never
+  # gains one, wears this paint for life. The moment a document is given its first stage, the
+  # kind paint stops mattering: what the document is painted with from then on is decided by
+  # which stage it is in, never by what kind it is.
+
   declaration = resolve(repo, doc_type, product)
   # guard: an undeclared type, or one naming no icon, has no seed to report
   if not declaration or not declaration.get(DocTypeFlag.ICON):
@@ -277,6 +300,14 @@ def _derive_type(path: Path, role: str) -> str:
     The derived type name, or the empty string when the document is not a typed document
     (a folder-note of any kind, or a stranger carrying neither a role nor a type-named basename).
   """
+
+  # Domain(spec.declarations):
+  # # A document type never applies to a structural note
+  # A type describes what a piece of content is. A note that only marks a place in the
+  # catalog's own structure — the status note of an asset, or the level note of a product or of
+  # the catalog root — is not content, so it is never eligible to carry a type: a legacy stamp
+  # found on one of these is corrected back off rather than kept.
+
   # guard: a folder-note is a folder marker, not a typed document — the status note of an asset
   # and the level note of a product or of the catalog root alike
   if role == _STATUS_ROLE or role in spec_keys.LEVEL_ROLES:
@@ -411,8 +442,9 @@ def doc_type_of(path: Path) -> str:
   """
   Read one document's `spec_doc_type` frontmatter value.
 
-  The basename is never consulted — a document named `races.md` carrying
-  `spec_doc_type: design` is a design document.
+  Guarantees:
+    - The basename is never consulted — a document named `races.md` carrying
+      `spec_doc_type: design` is a design document.
 
   Args:
     path: The markdown document to read.
@@ -420,6 +452,11 @@ def doc_type_of(path: Path) -> str:
   Returns:
     The declared type name, or the empty string when the key is absent.
   """
+
+  # Contract:
+  # the type is read only from the `spec_doc_type` frontmatter key — a document's basename is
+  # never consulted, even when it happens to match a type name.
+
   # waiver: sibling-module frontmatter parser -- the one parser every specs primitive shares
   fm_values, _fm_end = flip_gate._parse_frontmatter(path.read_text(encoding = _K.ENCODING))
   return fm_values.get(_K.DOC_TYPE, "")

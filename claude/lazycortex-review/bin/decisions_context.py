@@ -164,6 +164,16 @@ def collect(doc_path: Path) -> dict[str, str]:
     resolved to an existing file; `{}` when `doc_path` sits outside any spec asset folder AND
     outside any registered product's own root.
   """
+
+  # Domain(review.dispatch):
+  # # Decisions context for a review writer
+  # A document under review that lives inside a spec asset folder receives its own asset's
+  # decision registry and its owning product's decision registry together as writer context,
+  # so a writer proposing a change can see both what was already decided for this asset and
+  # what its product has already settled. A document that sits directly at a product's own
+  # root, with no enclosing asset, receives only the product's registry. A registry that has
+  # not yet had a decision recorded into it is absent by design, never an error condition.
+
   asset_dir = _resolve_asset_dir(doc_path)
   # an asset-level document: its own registry plus its owning product's, two levels up
   if asset_dir is not None:

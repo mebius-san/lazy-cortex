@@ -165,6 +165,16 @@ def _job_status(jdir: Path) -> str:
     job's payload must never be collected); a job carrying none of the markers classifies as
     `JobStatus.PENDING`.
   """
+
+  # Domain(review.jobs):
+  # # A job bundle's state is read from its own markers, most final first
+  # A job bundle carries its lifecycle as file markers beside it rather than in one field, and
+  # more than one marker can be present at once — a job can be judged dead after it has already
+  # finished, or cancelled after it has already finished. The bundle is read most-final-marker-
+  # first: once consumed, a job's state never regresses; a dead job's payload is never
+  # collected even if it also finished; a cancelled job's payload is never collected even if it
+  # also finished. Only a bundle carrying none of these markers is still in flight.
+
   if (jdir / Outcome.CONSUMED).exists():
     return Outcome.CONSUMED
   if (jdir / JobFile.DEAD).exists():
@@ -389,6 +399,14 @@ def collect_for_file(repo: Path, file_path: Path, *, commit: bool = True) -> dic
     `{"collected": N}` — the number of jobs consumed: `edited` payloads applied plus `empty`
     writers drained. The document and the job queue are left untouched when `N` is `0`.
   """
+
+  # Domain(review.jobs):
+  # # An empty verdict still closes the round
+  # A section writer that finds nothing to change is not a failure to land — its verdict is
+  # consumed exactly like a writer that produced an edit, only without touching the document.
+  # A batch made entirely of such empty verdicts must not force a commit of its own: the round
+  # still closes within the same sweep, but nothing new enters the document's history.
+
   # every DONE bundle targeting the document is a landing candidate
   candidates = [jdir for jdir in _job_dirs_for_file(repo, file_path) if _job_status(jdir) == JobStatus.DONE]
 
@@ -494,6 +512,15 @@ def collect_tick(repo: Path) -> dict:
   # guard: no job queue at all — nothing to sweep
   if not jobs_root.is_dir():
     return {"files": 0, "dispatched": 0}
+
+  # Domain(review.jobs):
+  # # Only a landable verdict earns a wake
+  # A sweep counts a document as having finished work only when at least one of its jobs
+  # reached a verdict the postman can actually land — an edit or a deliberate no-change. A job
+  # still being worked, one the runtime has already given up on, or one whose verdict the
+  # postman cannot interpret must never count toward that decision: counting it would raise the
+  # same wake every sweep forever, since nothing about the job's own state would ever change to
+  # make it stop qualifying.
 
   # walk every DONE-and-not-CONSUMED job once, collecting its target file and job ids. Only an
   # outcome `collect-job` will consume counts: an `edited` payload is landed, an `empty` writer

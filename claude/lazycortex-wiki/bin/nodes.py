@@ -198,6 +198,9 @@ def normalize_see_also_line(line: str, node_path: Path) -> str:
   Only markdown-link targets (`[text](path)`) are rewritten; a bare-path item carries
   no link syntax and is returned unchanged.
 
+  Guarantees:
+    - An item carrying no markdown-link syntax is returned unchanged.
+
   Args:
     line: One See-also item string, with or without its leading list bullet.
     node_path: Absolute path of the node file carrying the item.
@@ -205,6 +208,11 @@ def normalize_see_also_line(line: str, node_path: Path) -> str:
   Returns:
     The item with canonical link targets.
   """
+
+  # Contract:
+  # An item carrying no markdown-link syntax (a bare path) is returned completely unchanged;
+  # only `[text](path)` link targets inside the item are ever rewritten.
+
   def _rewrite(match: re.Match) -> str:
     raw = match.group(0)
     target = match.group(1).strip()
@@ -1053,7 +1061,16 @@ class MarkdownNode:
     are comparable. Unresolvable targets are kept verbatim. Empty
     when the See-also section is absent or empty. Used by `dispatch-link` to skip
     back-link dispatches for attractor nodes that already forward-link to the target.
+
+    Guarantees:
+      - Every returned target is in the shared repo-relative identity form, so the same target
+        file compares equal whichever node states the link to it.
     """
+
+    # Contract:
+    # Every target in the returned set is expressed in the shared repo-relative identity form,
+    # so the same target file compares equal whichever node states the link to it.
+
     inner = self.see_also_inner
     # guard: no See-also section — no outgoing edges
     if not inner:
@@ -1739,6 +1756,15 @@ def _code_source_for_hash(lines: list[str], prefix: str) -> str:
   Returns:
     Normalised operator-source string suitable for a stable hash.
   """
+
+  # Domain(wiki.graph):
+  # # When a code node counts as changed
+  # The same rule that decides a markdown node's fingerprint applies to a code file: only what the
+  # operator wrote counts as its content, so curation must never make the file look edited. For a
+  # code file the curated content is the single delimited block wiki owns, together with the one
+  # blank line the writer leaves after it — dropping that separator too keeps a freshly written
+  # block from making the code right after it look changed.
+
   span = _find_wiki_block(lines, prefix)
   if span is None:
     kept = lines
@@ -1900,7 +1926,16 @@ class CodeNode:
     kept verbatim. Empty when the `<wiki>` block has no see-also
     items. Used by `dispatch-link` to skip back-link dispatches for attractor
     nodes that already forward-link to the target.
+
+    Guarantees:
+      - Every returned target is in the shared repo-relative identity form, so the same target
+        file compares equal whichever node states the link to it.
     """
+
+    # Contract:
+    # Every target in the returned set is expressed in the shared repo-relative identity form,
+    # so the same target file compares equal whichever node states the link to it.
+
     out: set[str] = set()
     for item in self.see_also:
       for match in _SEE_ALSO_LINK_RE.finditer(item):

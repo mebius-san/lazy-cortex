@@ -198,6 +198,8 @@ _OVERRIDE_CLASSES = {
     "test-report": ( "tester", [ f"{_SPEC_PATH_TOKEN}/*/*/test-report.md" ] ),
     "data-report": ( "data-writer", [ f"{_SPEC_PATH_TOKEN}/*/*/data-report.md" ] ),
     "docs-report": ( "docs-writer", [ f"{_SPEC_PATH_TOKEN}/*/*/docs-report.md" ] ),
+    "research-design": ( "designer", [ f"{_SPEC_PATH_TOKEN}/*/*/design.md" ] ),
+    "research-report": ( "researcher", [ f"{_SPEC_PATH_TOKEN}/*/*/research.md" ] ),
 }
 
 
@@ -2004,7 +2006,7 @@ class _Apply:
     """
     # limit: overrides are cloned from the shared classes already on record, so a vault carrying
     # no shared set gets none; seeding a whole class table from nothing is `/lazy-spec.product-config`'s
-    # interactive job, which also settles the nine roles this line never sees
+    # interactive job, which also settles the ten roles this line never sees
     review = self._settings_section(_K.SETTINGS_REVIEW)
     classes = review.get(_K.REVIEW_CLASSES)
     # guard: no class list to clone from — nothing this worker can derive an override out of

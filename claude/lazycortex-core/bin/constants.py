@@ -246,6 +246,14 @@ class RateLimitTrigger:
     OVERAGE: The window was passed and spend continues as paid overage.
   """
 
+  # Domain(runtime.job-execution):
+  # # Rate-limit window signal classification
+  # A subscription usage window's state is classified into one of three triggers. Two of them
+  # are read directly off the billing provider's own status vocabulary, so no translation
+  # happens between what the provider reports and what this runtime records. The third — spend
+  # continuing past the window as paid overage — has no matching provider status; it is inferred
+  # instead from a separate overage indicator carried on the same signal.
+
   ALLOWED_WARNING = "allowed_warning"
   REJECTED = "rejected"
   OVERAGE = "overage"
@@ -904,6 +912,15 @@ class JobOutcome:
     DEFERRED: The outcome value marking work the expert deliberately left undone with its
       input untouched, so a consumer must neither drain the input nor treat it as failed.
   """
+
+  # Domain(runtime.protocols):
+  # # Deferred work outcome
+  # A finished unit of work may report its outcome as deferred instead of done or failed: the
+  # work was deliberately left undone for this round, and whatever it was asked to act on is
+  # left exactly as it found it. A deferred outcome is never a failure, and its input must never
+  # be treated as consumed — a caller that would otherwise drain or archive the input on
+  # completion must recognise deferred as a distinct case that keeps the input live for a later
+  # attempt.
 
   ERROR = "error"
   DEFERRED = "deferred"

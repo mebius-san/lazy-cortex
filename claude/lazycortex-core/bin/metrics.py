@@ -56,6 +56,17 @@ def _validate_label_value(label: str, value: str) -> None:
   Raises:
     ValueError: If `value` contains characters outside `[A-Za-z0-9._-]`.
   """
+
+  # Domain(runtime.metrics):
+  # # Closed-vocabulary metric label values
+  # Every metric label value must be drawn from a fixed, declared vocabulary rather than raw
+  # operator- or user-controlled text — a job id, a file path, a commit hash, a branch name, or
+  # free-form exception text would each multiply the number of distinct label combinations a metrics
+  # backend has to track, without bound. A hostname is refused for the same reason and for a second
+  # one besides: it would let the machine running a daemon leak into a stream meant to describe only
+  # the software's behavior. A value outside the allowed set is rejected outright, never sanitized,
+  # so a violation is caught at the call site instead of entering the metric stream in a mangled form.
+
   # guard: closed-vocabulary check rejects anything outside the allowed character set
   if not _LABEL_VALUE_RE.match(value):
     raise ValueError(
@@ -540,6 +551,17 @@ def _resolve_status(exit_code: int, error: str | None) -> tuple[str, str | None]
     A `(status, reason)` tuple. `status` is one of `"ok"`, `"timeout"`, `"error"`,
     `"crash"`; `reason` is None when status is `"ok"` and a closed-set string otherwise.
   """
+
+  # Domain(runtime.metrics):
+  # # Routine tick outcome classification
+  # Every completed routine tick is classified into exactly one of four outcomes: a clean run, a
+  # timeout, an error, or a crash. Errors are further split into named reasons — an invalid registry
+  # entry, an external directory that turned out broken, a git step that failed before or after the
+  # routine ran, or the routine's own resolution step failing — so a dashboard can tell a
+  # configuration problem apart from a transient one. Anything that fails to match a known reason
+  # still counts as an error rather than disappearing from the metrics, under a generic catch-all
+  # reason.
+
   # guard: clean exit short-circuits to ok with no reason
   if exit_code == 0:
     return ("ok", None)
@@ -601,6 +623,15 @@ def record_tick(
   with _state[MetricStateKey.LOCK]:
     _state[MetricStateKey.TICKS].inc(
       { MetricLabel.REPO: repo, MetricLabel.ROUTINE: routine, MetricLabel.STATUS: status })
+
+    # Domain(runtime.metrics):
+    # # Run versus idle-heartbeat ticks
+    # A tick counts as a run only when it did real work. A routine type that reports how many items
+    # it dispatched marks its own idle ticks with a dispatched count of zero, and those never count
+    # as runs; a routine type that reports no count at all is assumed to have worked every time it
+    # ran. This keeps the run-rate metric meaningful for routines that mostly find nothing to do,
+    # instead of it tracking the same number as the raw tick count.
+
     # A tick is a "run" unless its routine type reported an explicit zero dispatch count —
     # scan/inbox/git ticks that matched nothing are the idle heartbeat, not real work.
     if dispatched is None or dispatched > 0:
@@ -933,6 +964,16 @@ def resolve_repo_label(repo_root: Path, override: str | None) -> str:
     otherwise, when the directory name falls outside the label charset, the first 12 hex
     chars of the SHA-1 of the `origin` remote URL.
   """
+
+  # Domain(runtime.metrics):
+  # # Repo label resolution for dashboards
+  # The `repo` label is how an operator tells one daemon apart from another on a shared dashboard, so
+  # it is chosen for readability first: the checkout's own directory name, casing preserved, whenever
+  # that name is itself safe to use as a label value. A directory name outside the allowed label
+  # characters falls back to a short hash of the repository's `origin` remote URL, which is stable
+  # across renames of the same checkout but unreadable on its own — a deliberate trade against the
+  # alternative of refusing to label the repo at all.
+
   # guard: explicit override wins
   if override:
     return override
@@ -968,6 +1009,11 @@ def set_queue_depth_from_filesystem(repo_root: Path) -> None:
   per `(expert, state)` combination. The gauge is cleared before re-populating
   so jobs that have been removed disappear from the next scrape.
 
+  Guarantees:
+    - Every call replaces the `queue_depth` gauge's full contents with this scan's result; an
+      `(expert, state)` pair with no matching job directory in this scan does not survive into
+      the next scrape.
+
   Args:
     repo_root: Absolute path to the repository root.
   """
@@ -998,6 +1044,11 @@ def set_queue_depth_from_filesystem(repo_root: Path) -> None:
         continue
       state = _classify_job_state(job_dir)
       counts[(expert, state)] = counts.get((expert, state), 0) + 1
+
+  # Contract:
+  # Every call replaces the queue_depth gauge's full contents with this scan's result; an
+  # (expert, state) pair with no matching job directory in this scan does not survive into
+  # the next scrape.
 
   # republish the gauge from scratch so (expert, state) pairs that vanished stop being exported
   repo = _state[MetricStateKey.REPO]
@@ -1258,6 +1309,14 @@ def aggregate_incidents_from_ledger(repo_root: Path) -> None:
       except (UnicodeDecodeError, json.JSONDecodeError):
         # malformed line — skip without poisoning the counter
         continue
+
+      # Domain(runtime.incidents):
+      # # Incident counting counts only the opening event
+      # An incident is counted once, at the moment it opens. The same incident produces further
+      # journal events as it is triaged and eventually resolved, but those describe an incident a
+      # dashboard has already seen — counting them again would inflate the rate an alert fires on
+      # for the one incident that happens to get worked on more than once.
+
       # guard: only the opening event counts as one incident
       if rec.get(IncidentKey.PHASE) != IncidentPhase.OPENED:
         continue

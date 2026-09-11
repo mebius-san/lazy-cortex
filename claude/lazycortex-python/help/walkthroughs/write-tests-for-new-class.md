@@ -9,7 +9,7 @@ source_skills:
   - lazy-python.test-writer
   - lazy-python.testing-guidelines
   - tst
-source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
+source_sha: 6a88e0ee788b304da05e4160a5a7b181dbbaf1d2
 ---
 # Generate tests that cover all seven Paranoid-Testing categories for a new class
 
@@ -128,7 +128,7 @@ The agent ran `tst-py <module> -q` in Step 7. Run it again to confirm the suite 
 tst-py mymodule -q
 ```
 
-`tst-py` is the project-local wrapper deployed into `cli/` by `/lazy-python.install`, layered over the plugin's shipped `tst` runner. It uses bare module names, not file paths and not `.py` extensions — pass the top-level directory name under `tests/` that matches your source module (e.g. `mymodule` for `src/mymodule/`). `tst` scopes pytest to `tests/<module>/`, and pytest recurses through every subdirectory beneath that on its own — a nested source tree (`src/mymodule/subpackage/widget.py` → `tests/mymodule/subpackage/widget.py`) is still reached with the same top-level module name; there is no dotted or otherwise nested argument form.
+`tst-py` is the project-local wrapper deployed into `cli/` by `/lazy-python.install`, layered over the plugin's shipped `tst` runner. It uses bare module names, not file paths and not `.py` extensions — pass the top-level directory name under `tests/` that matches your source module (e.g. `mymodule` for `src/mymodule/`). `tst` scopes pytest to `tests/<module>/`, and pytest recurses through every subdirectory beneath that on its own — a nested source tree (`src/mymodule/subpackage/widget.py` → `tests/mymodule/subpackage/widget.py`) is still reached with the same top-level module name; there is no dotted or otherwise nested argument form. `tst-py all` and a bare `tst-py` (no module argument) are the same whole-suite run — use whichever reads clearer in a script. Pass a module name that has no matching `tests/<module>/` directory and `tst-py` refuses up front, naming every module that does exist under `tests/`, instead of handing pytest a path that isn't there.
 
 If your project declares `python.env_source` (see "What you need" above), `tst-py` sources that script automatically before running pytest — no extra step needed on your part.
 

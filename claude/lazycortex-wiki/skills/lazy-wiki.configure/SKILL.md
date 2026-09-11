@@ -429,7 +429,7 @@ Outcome: `derived` (new mode) / `collected` (edit mode) + `dictionary-<created|a
 Seed the array with the dictionary itself plus every tool-report glob, and show them as the default:
 
 - the dictionary itself (`<file>`) — without it every term trivially "occurs in a document of the scope" and the dead-term check can never fire once;
-- `**/code-report.md`, `**/data-report.md`, `**/docs-report.md`, `**/test-report.md` — the tool-type build journals, appended dozens of times per implementation, setting no terminology. An operator-declared tool type brings its own `report_doc`; when the repo declares one beyond the shipped four, offer its glob in the same seed.
+- `**/code-report.md`, `**/data-report.md`, `**/docs-report.md`, `**/test-report.md` — the tool-type build journals, appended dozens of times per implementation, setting no terminology. An operator-declared tool type brings its own `report_doc`; when the repo declares one beyond the shipped journals, offer its glob in the same seed only if that report type is declared `append_only: true` — a stage-bearing report such as the `research` tool's `research-report` is content and is never offered for exclusion.
 
 Add `<upstream-mirror-glob>/**` to the seed when the repo carries an upstream mirror tree whose files fall under the collected `paths` — mirrored foreign markdown would otherwise fill the dictionary with another studio's vocabulary, and the audit would then report term repairs against mirrors that must not be edited.
 

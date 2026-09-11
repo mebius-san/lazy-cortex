@@ -165,6 +165,11 @@ def with_explainer(section: str, lang: str, table: dict[tuple[str, str], str]) -
   Idempotent: an explainer already present under the heading (any language or
   form, from a prior render) is replaced rather than stacked.
 
+  Guarantees:
+    - An explainer already present under the heading — in any language or form, from a prior
+      render — is replaced rather than stacked, so calling this function again on its own
+      output never leaves more than one explainer line under the heading.
+
   Args:
     section: A rendered section — heading line plus body.
     lang: The vault's authoring language; falls back to English per line.
@@ -174,6 +179,12 @@ def with_explainer(section: str, lang: str, table: dict[tuple[str, str], str]) -
     The section with exactly one explainer line under the heading, or unchanged
     when no explainer is defined for its heading.
   """
+
+  # Contract:
+  # An explainer already present under the heading — in any language or form, from a prior
+  # render — is replaced rather than stacked; calling this function again on its own output
+  # never leaves more than one explainer line under the heading.
+
   heading, _, rest = section.partition("\n")
   note = explainer_text(heading, lang, table)
   # guard: a heading without a defined explainer renders exactly as before
@@ -201,6 +212,12 @@ def ensure_explainers(
   comments, plain prose) is left in place and the explainer is inserted above
   it.
 
+  Guarantees:
+    - For every heading in `body` known to `table`, exactly one explainer line ends up
+      directly under it — after the section's `#protected/...` owner tag when one is present —
+      so calling this function again on its own output never accumulates more than one
+      explainer line per heading.
+
   Args:
     body: The note body text (post-frontmatter).
     lang: The vault's authoring language; falls back to English per line.
@@ -210,6 +227,26 @@ def ensure_explainers(
     The body with explainer lines in place; unchanged when no known heading is
     present.
   """
+
+  # Domain(spec.notes):
+  # # Self-documenting generated sections
+  # Every section an automation writes into an asset's note carries one short line directly under
+  # its heading, explaining in plain language what the section is for and, where relevant, that it
+  # is filled in automatically. This lets someone reading the note understand a generated section
+  # without having to already know the system that produces it, while staying out of the way of
+  # the rendered document — the line is written in a form that shows in the source but not in the
+  # rendered page, so it never clutters what is actually read day to day. A note carrying an older,
+  # plainly-visible form of the same explanation from earlier tooling has that older line replaced
+  # the next time the section is regenerated, so a note never accumulates more than one explanation
+  # per section. When a section is itself claimed by another automation as territory it alone may
+  # rewrite, the explanation still applies to it but is placed after that claim, never before it.
+
+  # Contract:
+  # For every heading in `body` known to `table`, exactly one explainer line ends up directly
+  # under it — placed after a `#protected/...` owner tag when the section carries one — so
+  # calling this function again on its own output never accumulates more than one explainer
+  # line per heading.
+
   texts = ASSET_EXPLAINERS if table is None else table
   lines = body.splitlines()
   idx = 0
@@ -313,6 +350,15 @@ def history_fragments(key: str, **fields: str) -> list[str]:
     The rendered fragments, one per language carrying the key, in table order.
   """
 
+  # Domain(spec.notes):
+  # # Multi-language history narration
+  # Every automatic step an asset goes through is written into its permanent history as one line
+  # of plain narration, in whichever language that particular note is authored in. Because
+  # different notes in the same catalog can be authored in different languages, and a note's own
+  # authoring language can change over its life, a later check asking "was this event already
+  # recorded" must recognize the record regardless of which language it happened to be written in,
+  # not only whichever language is currently in force for the note.
+
   # Contract:
   # Every `*-scan` key's template MUST stay a substring of its written counterpart's rendering
   # in every language the table ships, so a body scanned with the returned fragments recognizes
@@ -332,6 +378,10 @@ def heal_note_text(note_path: Path, text: str) -> str:
   string: the frontmatter block is split off untouched and the body is run
   through `ensure_explainers` in the note's resolved language.
 
+  Guarantees:
+    - The frontmatter block is returned byte-for-byte unchanged; only the body below it is
+      run through the explainer healer.
+
   Args:
     note_path: The note file the text is about to be written to.
     text: The full note text (frontmatter plus body).
@@ -339,6 +389,11 @@ def heal_note_text(note_path: Path, text: str) -> str:
   Returns:
     The text with explainer lines in place under every known section heading.
   """
+
+  # Contract:
+  # The frontmatter block — from the opening `---` fence through its closing `---` line — is
+  # returned byte-for-byte unchanged; only the body below it is modified.
+
   # split the frontmatter off so heading scans never look inside it
   fm_end = 0
   if text.startswith("---\n"):

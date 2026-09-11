@@ -25,7 +25,7 @@ source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
   - lazy-spec.audit
-source_sha: 3f4c00192599a38cbb9db4308367d5db80ec2dfd
+source_sha: fc47aeeb8c042b2968809c8cef31d078ec76efaf
 ---
 # Troubleshooting
 
@@ -41,11 +41,11 @@ source_sha: 3f4c00192599a38cbb9db4308367d5db80ec2dfd
 
 ## `/lazy-spec.install` reports a routine already registered
 
-**Symptom**: The install run reports `routine lazy-spec.gate-tick already registered`, `routine lazy-spec.coordinator-watch already registered`, or `routine lazy-spec.collect already registered` and moves on without rewiring it.
+**Symptom**: The install run reports `routine lazy-spec.gate-tick already registered`, `routine lazy-spec.coordinator-watch already registered`, `routine lazy-spec.collect already registered`, or `routine lazy-spec.upstream-tick already registered` and moves on without rewiring it.
 
-**Likely cause**: A prior install already wired that routine. Re-running `/lazy-spec.install` never overwrites an existing routine registration — this is the expected `routine-already-present` outcome, not a failure. `lazy-spec.collect` is the postman routine that delivers a finished expert job's terminal marker back into the asset's status folder-note — install registers it alongside the gate-tick and coordinator-watch routines.
+**Likely cause**: A prior install already wired that routine. Re-running `/lazy-spec.install` never overwrites an existing routine registration — this is the expected `routine-already-present` outcome, not a failure. `lazy-spec.collect` is the postman routine that delivers a finished expert job's terminal marker back into the asset's status folder-note. `lazy-spec.upstream-tick` runs the unattended `upstream/` fetch/detect pass on a schedule — install only registers it once at least one source is configured under `spec.upstream`, skipping silently otherwise. All four register alongside each other during install.
 
-**Fix**: Nothing to do if the routine's shape is still correct. To change its shape (schedule, paths, filters), run `/lazy-routine.unregister lazy-spec.gate-tick` (or `lazy-spec.coordinator-watch`, or `lazy-spec.collect`) first, then re-run `/lazy-spec.install` so it re-registers fresh.
+**Fix**: Nothing to do if the routine's shape is still correct. To change its shape (schedule, paths, filters), run `/lazy-routine.unregister lazy-spec.gate-tick` (or `lazy-spec.coordinator-watch`, `lazy-spec.collect`, or `lazy-spec.upstream-tick`) first, then re-run `/lazy-spec.install` so it re-registers fresh.
 
 ---
 
@@ -63,7 +63,7 @@ source_sha: 3f4c00192599a38cbb9db4308367d5db80ec2dfd
 
 **Symptom**: The wizard reaches the expert-assignment step and aborts with a message saying a chosen expert name is not registered.
 
-**Likely cause**: The use-case-writer, designer, system-designer, architect, ui-designer, planner, developer, tester, or data-writer persona you selected for one of the built-in review roles is not a key in the `experts` settings section. This happens when the persona has not been composed yet or the name was mistyped.
+**Likely cause**: The use-case-writer, designer, system-designer, architect, ui-designer, planner, developer, tester, data-writer, or researcher persona you selected for one of the built-in review roles is not a key in the `experts` settings section. This happens when the persona has not been composed yet or the name was mistyped.
 
 **Fix**: Compose the missing persona via `lazycortex-experts` first, then re-run `/lazy-spec.product-config`. Do not type a free-form name that does not exist in the registry — the skill validates every name against `settings-get experts`.
 

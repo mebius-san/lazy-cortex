@@ -243,6 +243,13 @@ def _check_callout_tags(repo_root: Path, settings: dict, findings: list[dict]) -
       # this attribute access against the wrong module's shape
       report = _note_ops.build_report(file_path.read_text())  # type: ignore[attr-defined]
 
+      # Domain(review.config):
+      # # Closed vocabulary for review callout tags
+      # A callout inside a review document may only carry one of the operator-facing marker
+      # tags — a command, a question, or a concern — or the tag of a state the status banner
+      # itself can render. Any other tag is a configuration error: it names a state or intent
+      # the review system has no way to act on.
+
       # every callout not in the closed vocabulary FAILs, named by its repo-relative path and line
       # waiver: 'callouts'/'tag'/'line' are note_ops.build_report's own wire-shape keys, not keys.py-promoted constants
       for callout in report["callouts"]:
@@ -302,6 +309,13 @@ def _check_all(settings: dict, findings: list[dict], *, repo_root: Path | None =
     if not isinstance(paths, list) or not paths or any(not isinstance(p, str) for p in paths):
       _add(findings, ReviewStatus.FAIL,f"class_{i}_paths",
            f"class #{i} 'paths' must be a non-empty list of strings")
+
+    # Domain(review.config):
+    # # Class identity versus routing globs
+    # A review class entry is addressed by administrative tooling through its own identity
+    # token, never through the glob patterns that route documents into it. The token must be
+    # unique across every class entry in one configuration — two entries sharing one token
+    # would leave anything naming a class directly with an ambiguous target.
 
     # `class` is the entry's identity: tooling addresses entries by it, globs stay routing-only
     token = class_cfg.get(JobKey.CLASS)
@@ -409,10 +423,19 @@ def _bundle(findings: list[dict]) -> dict:
   """
   Compute the aggregate level and wrap findings into a result bundle.
 
+  Guarantees:
+    - The returned `level` is `FAIL` whenever any finding is `FAIL`, `WARN` when none are
+      `FAIL` but at least one is `WARN`, and `PASS` only when every finding is `PASS`.
+
   Returns:
     A dict with `level` set to `FAIL` if any finding is FAIL, `WARN` if any is WARN and none
     are FAIL, or `PASS` otherwise; and `findings` containing the full list.
   """
+
+  # Contract:
+  # The aggregate `level` MUST be `FAIL` when any finding is `FAIL`, `WARN` when none are
+  # `FAIL` but at least one is `WARN`, and `PASS` only when every finding is `PASS`.
+
   levels = {f[JobKey.SEVERITY] for f in findings}
   if ReviewStatus.FAIL in levels:
     level = ReviewStatus.FAIL

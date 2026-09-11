@@ -39,8 +39,10 @@
       "icon": "LiFlaskConical",
       "color": "#64748b",
       "default_path": "research",
-      "start_doc": "design.md:design",
-      "default_tools": [],
+      "start_doc": "design.md:research-design",
+      "default_tools": [
+        "research"
+      ],
       "playbook": "lazycortex-specs:lazy-spec.research-playbook",
       "vision": "opt-in"
     },

@@ -55,10 +55,13 @@ def settings_get(section: str, *, cwd: Path | str | None = None) -> dict:
   """
   Load one tracked section of the consumer's `lazy.settings.json`.
 
-  The tracked layer is read without the local overlay, so the returned value is the
-  exact on-disk section a subsequent write would round-trip. A section absent from the
-  file (or a missing file) yields the version-stamped empty stub that
-  `load_tracked_section` produces.
+  A section absent from the file (or a missing file) yields the version-stamped empty
+  stub that `load_tracked_section` produces.
+
+  Guarantees:
+    - The returned value is read from the tracked layer only, without the local
+      overlay, so it is the exact on-disk section a subsequent `settings_set` call
+      would round-trip.
 
   Args:
     section: Name of the top-level section to read.
@@ -70,6 +73,21 @@ def settings_get(section: str, *, cwd: Path | str | None = None) -> dict:
   Raises:
     json.JSONDecodeError: If the tracked settings file is not valid JSON.
   """
+
+  # Contract:
+  # The returned value is read from the tracked layer only, without the local overlay,
+  # so it is the exact on-disk section a subsequent settings_set call would round-trip.
+
+  # Domain(plugin.boundaries):
+  # # Settings exchange never touches the personal per-machine layer
+  # When one plugin reads or writes a whole section of the shared settings file on another
+  # plugin's behalf, the exchange always happens on the tracked layer that ships with the
+  # repository, never on the local overlay a single machine keeps for its own personal
+  # choices. Reading only the tracked value is what lets whatever comes back be written back
+  # unchanged as a full round trip; writing straight into the tracked layer keeps the local
+  # overlay untouched by any cross-plugin exchange, so a personal preference recorded on one
+  # machine is never silently overridden by a section another plugin wrote.
+
   return load_tracked_section(_resolve_settings_path(cwd), section)
 
 
@@ -77,9 +95,11 @@ def settings_set(section: str, value: object, *, cwd: Path | str | None = None) 
   """
   Persist one section of the consumer's `lazy.settings.json` atomically.
 
-  The section is written through the version-stamping atomic writer; surrounding sections
-  are preserved untouched and the local overlay is never written. A non-object section
-  value is rejected before any write happens.
+  A non-object section value is rejected before any write happens.
+
+  Guarantees:
+    - Only the named section is written; every other tracked section is preserved
+      untouched and the local overlay is never written.
 
   Args:
     section: Name of the top-level section to store under.
@@ -93,6 +113,11 @@ def settings_set(section: str, value: object, *, cwd: Path | str | None = None) 
     ValueError: If `value` is not a JSON object (dict).
     OSError: If the tracked settings file or its parent directory cannot be written.
   """
+
+  # Contract:
+  # Only the named section is written; every other tracked section is preserved
+  # untouched and the local overlay is never written.
+
   # guard: a section is always a JSON object — reject scalars / arrays before touching disk
   if not isinstance(value, dict):
     # waiver: naming the rejected JSON type in a CLI error message; no class registry exists here

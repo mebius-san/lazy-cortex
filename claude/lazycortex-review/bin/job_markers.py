@@ -79,6 +79,9 @@ def doc_key(repo: Path, doc: Path) -> str:
   """
   Return the store key for one document.
 
+  Guarantees:
+    - Two distinct documents never resolve to the same store key.
+
   Args:
     repo: Repository root the key is relative to.
     doc: The reviewed document's path, absolute or already repo-relative.
@@ -87,6 +90,11 @@ def doc_key(repo: Path, doc: Path) -> str:
     The document's repo-relative POSIX path, or its absolute POSIX path when it lies
     outside `repo` (a caller mistake that must not collapse two documents onto one key).
   """
+
+  # Contract:
+  # Two distinct documents never resolve to the same store key, whether or not they
+  # lie inside `repo`.
+
   try:
     return doc.resolve().relative_to(repo.resolve()).as_posix()
   except ValueError:
@@ -190,6 +198,10 @@ def update(repo: Path, doc: Path, changes: Mapping[str, str | None]) -> dict[str
   """
   Apply `changes` to one document's entry and persist the store.
 
+  Guarantees:
+    - Once every field of the resulting entry is null, the document's row is removed from
+      the store rather than kept as an all-null entry.
+
   Args:
     repo: Repository root holding the sidecar.
     doc: The reviewed document's path.
@@ -201,6 +213,20 @@ def update(repo: Path, doc: Path, changes: Mapping[str, str | None]) -> dict[str
   Raises:
     ValueError: If `changes` names a field outside the closed schema.
   """
+
+  # Contract:
+  # Once every field of the resulting entry is null, the document's row is removed from
+  # the store rather than kept as an all-null entry.
+
+  # Domain(review.jobs):
+  # # Job markers live outside the document
+  # The review loop's job-in-flight state is tracked outside the document being reviewed, in
+  # a runtime store keyed by the document's own path. Because the markers never enter the
+  # document, an operator hand-editing the document cannot corrupt the loop's understanding of
+  # what job is running by mangling a marker, and setting or clearing a marker never requires a
+  # commit of its own — the document's git history stays a record of content, not of the
+  # loop's internal bookkeeping.
+
   unknown = [field for field in changes if field not in _FIELDS]
   # guard: a field outside the schema is a typo, and a typo must not become state
   if unknown:

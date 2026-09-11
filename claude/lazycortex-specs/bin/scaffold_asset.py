@@ -298,6 +298,20 @@ def _resolve_template(repo: Path, category: str, product: str, name: str, *,
   Raises:
     SystemExit: When no layer carries the named template.
   """
+
+  # Domain(spec.declarations):
+  # # A produced document is styled through three layers, most specific first
+  # Every document a declaration produces is rendered from a template, and a product or the
+  # whole project may restyle any of them without ever touching the plugin's own shipped copy:
+  # a per-product version wins over a project-wide version, which wins over the plugin's own
+  # baseline. A type that only borrows another type's playbook still consults its own full
+  # layering before falling back to anything the borrowed type supplies, so an alias can be
+  # restyled on its own without touching the type it borrows behaviour from. Two shared floors
+  # sit beneath every declared type: one shared by every type that keeps to the common
+  # document set, and one beneath that shared by every type regardless of what documents it
+  # declares, so a freshly declared type needs no templates of its own to produce a working
+  # folder-note.
+
   def chain(cat: str) -> list[Path]:
     cat_dir = f"spec.{cat}"
     return [
@@ -342,6 +356,14 @@ def _type_folder(asset_type: str, record: dict, explicit: str) -> str:
   Raises:
     SystemExit: When the explicit path would place the asset outside `spec_path`.
   """
+
+  # Domain(spec.declarations):
+  # # An asset never lands outside its product's own tree
+  # When an asset's landing folder is named explicitly rather than taken from its type's own
+  # default, that folder must still resolve inside the product's own document tree — reaching
+  # outside it, whether by an absolute path or by climbing upward, would scatter the catalog
+  # across locations nothing else in the product expects to find it in.
+
   # guard: the caller named no folder — the type's own declaration decides
   if not explicit:
     return asset_types.default_path(asset_type, record)
@@ -442,6 +464,10 @@ def _inject_note_keys(text: str, asset_type: str, tools: list[str]) -> str:
   A type declaring no default tools writes no `spec_tools` key at all — an absent key reads as
   "not determined yet", which an empty list would wrongly claim to have settled.
 
+  Guarantees:
+    - A type declaring no default tools writes no `spec_tools` key at all; the key is added only
+      when there are tools to record, never as an empty list.
+
   Args:
     text: Full folder-note text including the leading frontmatter block.
     asset_type: The asset type to stamp.
@@ -454,6 +480,12 @@ def _inject_note_keys(text: str, asset_type: str, tools: list[str]) -> str:
   # guard: no frontmatter block to stamp into
   if not fm_match:
     return text
+
+  # Contract:
+  # A type declaring no default tools never gets a `spec_tools` key at all — the key is written
+  # only when there are tools to record, never as an empty list.
+
+  # stamp the type unconditionally, the tools line only when there are tools to record
   lines = [ f"{_K.ASSET_TYPE}: {asset_type}" ]
   if tools:
     lines.append(f"{_K.SPEC_TOOLS}: [ " + ", ".join(f'"{tool}"' for tool in tools) + " ]")
@@ -564,6 +596,16 @@ def _default_source_docs(_spec_path: str, _category_folder: str, _slug: str,
   Returns:
     The empty list — a scaffolded document starts with no source documents at all.
   """
+
+  # Domain(spec.notes):
+  # # A fresh document cites only what the vault layout cannot already tell you
+  # A document that has just been created starts with no recorded citations at all: citing
+  # something the vault's own layout already reveals — the sibling documents an asset holds
+  # alongside it — would only give a fresh copy of a fact editors would then have to keep in
+  # sync by hand. The citation list exists for relationships the layout cannot show on its
+  # own, chiefly the requests that led to a document's existence and links across separate
+  # assets, and a document earns those citations only once someone actually adds them.
+
   return []
 
 
@@ -655,6 +697,10 @@ def main(argv: list[str]) -> int:
   """
   Run the `scaffold-asset` subcommand: scaffold a new asset folder under a product.
 
+  Guarantees:
+    - An existing target asset folder is never merged into or overwritten; the scaffold refuses
+      the request and creates nothing under it.
+
   Args:
     argv: Subcommand argv tail (`<product> <type> <slug> [--doc <name>:<type> ...] [--path <dir>]`).
 
@@ -690,6 +736,11 @@ def main(argv: list[str]) -> int:
   spec_path = record[_K.SPEC_PATH]
   content_root = spec_paths.spec_content_root(repo)
   target_folder = content_root / spec_path / folder / args.slug
+
+  # Contract:
+  # An existing target asset folder is never merged into or overwritten; the scaffold refuses the
+  # request with a logical error and creates nothing under it.
+
   # guard: target folder already there, refuse rather than merge into it
   if target_folder.exists():
     _fail(_K.CAT_LOGICAL, f"target folder already exists: {target_folder}")
@@ -753,6 +804,15 @@ def main(argv: list[str]) -> int:
   # declared type's own folder or an ad-hoc one — carries no colour key whatsoever, only the
   # icon of the type that owns it as its default folder. A type's declared colour never reaches
   # that folder; it reaches only the asset status notes of that type, as their seed colour.
+
+  # Domain(spec.declarations):
+  # # A shared folder gets its own note only once, from whichever asset arrives first
+  # A folder several assets share is not itself an asset, so it earns an editable note of its
+  # own only the first time something lands in it — never rewritten afterward, and never
+  # created at all over a note the operator or an enclosing asset already owns, or at the
+  # product's own root, which is a different worker's concern entirely. The note identifies
+  # the folder itself, taking its icon from whichever declared type calls that folder its own
+  # default home, regardless of which asset actually happened to trigger the seed.
 
   # group folders exist lazily: the folder's first asset seeds its operator-zone folder-note,
   # last so a refusal anywhere above leaves no stray note in the shared group folder. An

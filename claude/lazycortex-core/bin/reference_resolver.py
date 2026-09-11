@@ -109,6 +109,12 @@ def resolve(ref: str, *, category: str, repo: Path) -> Path:
     `user:<name>` — global `~/.claude/<category>/<name>.md`.
     `<name>` — repo-local `.claude/<category>/<name>.md`.
 
+  Guarantees:
+    - For a plugin-scoped reference, a matching dev-plugin directory takes precedence over
+      the installed plugin cache.
+    - A dev-plugin match whose file is missing raises rather than silently falling back to
+      the cache.
+
   Args:
     ref: Reference string in one of the three forms above.
     category: One of `agents`, `protocols`, or `aspects`.
@@ -122,6 +128,26 @@ def resolve(ref: str, *, category: str, repo: Path) -> Path:
       scope match points at a missing file, when no cache registry contains the
       plugin scope, or when the plugin has no cached versions.
   """
+
+  # Contract:
+  # For a plugin-scoped reference, a matching dev-plugin directory MUST be preferred over the
+  # installed plugin cache; only when no dev-plugin directory declares the requested plugin
+  # name does resolution fall back to the cache.
+
+  # Contract:
+  # Once a dev-plugin directory's manifest matches the requested plugin name, resolution MUST
+  # NOT fall through to the plugin cache even when the declared file is missing on disk — that
+  # mismatch is raised as an error instead of being silently masked by a cache hit.
+
+  # Domain(plugin.boundaries):
+  # # Reference scoping across plugin, user, and repo layers
+  # A shared reference names where one document lives: inside a single named plugin, in the
+  # operator's own global configuration, or in the consuming repository's local configuration.
+  # A plugin-scoped reference always tries that plugin's active development sources first, so
+  # work in progress on a plugin is read from its live source rather than a stale installed
+  # copy; only once no matching development source exists does resolution fall back to the
+  # installed copies of that plugin, and it always prefers the newest one found.
+
   # Plugin-shipped protocols live under <plugin-root>/references/ — the
   # repo-wide convention used by every plugin's own protocol/contract docs
   # (lazy-obsidian.iconize-protocol.md, lazy-core.expert-protocols-contract.md,

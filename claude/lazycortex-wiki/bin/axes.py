@@ -252,6 +252,12 @@ def ensure_axes(repo: Path, axes: list[str]) -> dict:
     when every requested axis was already declared. When `wiki.tag_axes` itself is not a list,
     the result is instead the single-key `{"error": "wiki.tag_axes must be a list"}`.
   """
+
+  # Contract:
+  # No scope's own configuration is read or written by this call; the axis vocabulary belongs
+  # to the repository, and a scope only ever narrows what the repository already declares.
+
+  # read the current axis vocabulary before unioning in the requested axes
   wiki = _settings_get(repo, _K.WIKI_SECTION)
   declared = wiki.get(_K.TAG_AXES)
   # guard: malformed `wiki.tag_axes` (e.g. an object) — report cleanly instead of unioning into it
@@ -338,6 +344,12 @@ def ensure_scope_config(
   # guard: malformed `wiki.scopes` (e.g. a list) — report cleanly instead of crashing below
   if not isinstance(scopes, dict):
     return { _K.ERROR: "wiki.scopes must be an object" }
+
+  # Contract:
+  # A scope that is not already configured is NEVER created by this call; the refusal is
+  # reported as this call's outcome and nothing is written to settings.
+
+  # look up the named scope; guarded below so seeding never creates one
   cfg = scopes.get(scope_id)
   # guard: the named scope does not exist — seeding must never create one
   if not isinstance(cfg, dict):
@@ -354,6 +366,10 @@ def ensure_scope_config(
   # Contract:
   # An existing filter predicate for a requested key is NEVER overwritten or merged into;
   # only keys the scope's filter does not carry are seeded.
+
+  # Contract:
+  # An exclude glob already listed on the scope is NEVER duplicated; globs missing from the
+  # scope's list are appended in the order requested.
 
   # collect the exclude globs the scope does not list yet, in request order
   changed_excludes: list[str] = []

@@ -155,6 +155,15 @@ def _is_abandoned_bundle(jdir: Path) -> bool:
   # forever as "still being assembled", the collector would never reap it (it reaps only the
   # terminal markers), and it would sit in the queue depth as work that never drains.
 
+  # Domain(runtime.jobs):
+  # # Dispatch order and the abandoned-bundle signature
+  # A job's request and configuration are written before the job is armed for the queue, and
+  # the queue marker is the last thing a dispatch touches. A bundle carrying none of the
+  # markers a dispatched job goes on to acquire is therefore not one still being assembled —
+  # it is one whose dispatch died in the narrow window before arming, and it never becomes
+  # ready on its own. Only the complete absence of every such marker counts as that signature;
+  # any single one present means some other stage already owns the bundle's fate.
+
   # any marker at all means the dispatch completed and some other branch owns the bundle
   return not any(
     (jdir / m).exists()
@@ -245,6 +254,15 @@ def _build_dead_json(jdir: Path, expert: str, job_id: str, marked_at: float) -> 
     None if queued_at is None or claimed_at is None else max(0.0, claimed_at - queued_at)
   )
 
+  # Domain(runtime.job-execution):
+  # # Startup-crash and hung-job classification
+  # A dead job's likely cause is read from how long its claimant survived and whether it left
+  # any output behind before dying. A claimant that dies almost immediately with nothing to
+  # show for it most likely crashed at startup; one that stayed alive far longer than any
+  # real run should, again with nothing produced, was most likely hung or killed outright.
+  # Any output at all before death points instead to a crash partway through the work, since
+  # the claimant at least reached the point of producing something.
+
   # classify by duration + output presence — informative label, not a contract
   if duration_alive_sec is None:
     likely_cause = "dispatch_never_armed"
@@ -306,6 +324,10 @@ def _detect_dead_jobs(repo: Path, *, grace_sec: float = 0.0) -> int:
   applies a grace window before declaring a truly unresponsive job dead so a slow
   response has time to land.
 
+  Guarantees:
+    - A claimed job that already has `response.json` is treated as finished, never marked dead,
+      regardless of its claimant's liveness or how long it has sat unclaimed.
+
   Notes:
     - Records a `job_dead` incident in the error ledger for each job newly marked dead.
 
@@ -317,6 +339,11 @@ def _detect_dead_jobs(repo: Path, *, grace_sec: float = 0.0) -> int:
   Returns:
     The number of jobs newly marked dead in this scan.
   """
+
+  # Contract:
+  # A claimed job that already has `response.json` MUST be treated as finished, never marked
+  # dead, regardless of its claimant's liveness or how long it has sat unclaimed.
+
   base = Path(repo) / JOBS_BASE
   # guard: nothing to scan when the jobs root has not been created yet
   if not base.exists():
@@ -362,6 +389,15 @@ def _detect_dead_jobs(repo: Path, *, grace_sec: float = 0.0) -> int:
         alive = _pid_alive(pid)
       except (OSError, ValueError):
         alive = False
+
+      # Domain(runtime.job-execution):
+      # # Grace window before a claimed job is declared dead
+      # A job whose claimant process is gone is not immediately buried: the first sighting
+      # opens a grace window instead of a verdict, since the process that recorded the claim
+      # is the pump itself, and a pump killed by its own routine timeout can look dead while
+      # the expert subprocess it spawned is still seconds away from writing its result. Only
+      # a job still unclaimed once that window elapses is declared dead; a claimant seen alive
+      # again before then cancels the window rather than shortening it on a later scan.
 
       # the candidate marker records when this job was first seen unclaimed
       candidate = jdir / JobMarker.DEAD_CANDIDATE
@@ -452,12 +488,22 @@ def _agent_is_read_only(agent_path: Path) -> bool:
   or includes any write-capable tool, the agent is treated as write-capable so the
   post-Claude dirty-tree check applies to its runs.
 
+  Guarantees:
+    - An agent whose `tools:` field is absent, empty, unparsable, or names any tool outside the
+      known read-only set is always classified as write-capable, never read-only.
+
   Args:
     agent_path: Path to the agent definition file.
 
   Returns:
     True only when every declared tool is in the known read-only set; False otherwise.
   """
+
+  # Contract:
+  # An agent MUST be classified as write-capable whenever its `tools:` field is absent, empty,
+  # unparsable, or names any tool outside the known read-only set; only an agent whose declared
+  # tools are entirely within that set is classified read-only.
+
   try:
     text = agent_path.read_text()
   except OSError:
@@ -504,6 +550,16 @@ def _check_post_claude(repo: Path, expert_name: str, jdir: Path) -> bool:
     True when the working tree was dirty (caller is expected to raise the halt exception),
     False when the tree was clean.
   """
+
+  # Domain(runtime.job-execution):
+  # # Shared-checkout dirty-tree halt
+  # A job run against the shared working tree is judged more strictly than an isolated one:
+  # any uncommitted dirt it leaves behind is now sitting on the exact tree every other queued
+  # job will run against next, so it stops the whole queue rather than just failing the one
+  # job that caused it. This is the reason the shared checkout gets a daemon-wide halt where
+  # an isolated worktree only fails its own job — the blast radius of the same mistake is
+  # different depending on whose tree it landed in.
+
   dirty = _check_working_tree(repo)
   # guard: working tree is clean — nothing to do
   if dirty is None:
@@ -579,6 +635,17 @@ def _isolated_job_failure(wt: Path, pre_spawn_tip: str | None) -> str | None:
   Returns:
     None when the worktree is clean and the branch moved, else a one-line failure text.
   """
+
+  # Domain(runtime.job-execution):
+  # # Isolated job's commit obligation
+  # A job running in its own worktree carries the whole responsibility for its own durable
+  # output: nothing it leaves uncommitted survives past the job, and the worktree is removed
+  # once the run ends regardless of outcome. A run that leaves the tree dirty broke that
+  # obligation outright; a run that leaves the tree clean but never advanced the branch beyond
+  # where it started is equally a failure, since it produced nothing durable either way — a
+  # continuation is judged the same way, against the tip the branch already carried before
+  # this run, not against where it started overall.
+
   status = subprocess.run(
     # waiver: git CLI vocabulary, not a domain constant
     [ "git", "status", "--porcelain" ], cwd = str(wt), capture_output = True, text = True, check = False,
@@ -628,6 +695,9 @@ def pump(repo: Path) -> dict:
   host's rate-limit guard has flagged the account. The single-spawn ceiling matters because
   the daemon's per-routine timeout is the only bound on a Claude subprocess.
 
+  Guarantees:
+    - Spawns at most one Claude expert process per call, regardless of how many jobs are READY.
+
   Args:
     repo: Repository root containing the expert job tree.
 
@@ -637,6 +707,11 @@ def pump(repo: Path) -> dict:
     timestamp when the rate limit reopens) instead of processing a job. When a halt fires
     instead, adds the offending expert and job_id.
   """
+
+  # Contract:
+  # A single call MUST spawn at most one Claude expert process, even when several jobs are
+  # READY across the queue; only the oldest READY job is picked and processed per call.
+
   repo = Path(repo)
   settings_path = repo / SettingsFile.REL
   daemon = load_section(settings_path, SettingsKey.DAEMON)
@@ -1082,6 +1157,14 @@ def build_expert_argv(repo: Path, env: dict[str, str], *, contract_path: Path,
   explicitly. The pump and the launchability preflight share this builder so the
   probed command line matches the real one.
 
+  Guarantees:
+    - The assembled command line always includes `--strict-mcp-config`, so no ambient operator
+      MCP server is ever inherited; MCP servers come only from the per-expert `mcp_config`
+      allow-list.
+    - The assembled command line always includes `--setting-sources`, defaulting to
+      `project,local` when the expert declares none, so operator user-scope settings never load
+      unless the expert explicitly opts into `user` scope.
+
   Args:
     repo: Repository root the spawn runs inside.
     env: Environment mapping the spawn inherits; read for `LAZYCORTEX_PLUGIN_DIRS`.
@@ -1095,6 +1178,17 @@ def build_expert_argv(repo: Path, env: dict[str, str], *, contract_path: Path,
   Returns:
     The full argv list ready for `subprocess.run`.
   """
+
+  # Contract:
+  # The assembled command line MUST always include `--strict-mcp-config`; no ambient operator
+  # MCP server (from `~/.claude.json` or a project `.mcp.json`) is ever inherited. MCP servers
+  # reach the spawn only through the per-expert `mcp_config` allow-list.
+
+  # Contract:
+  # The assembled command line MUST always include `--setting-sources`, defaulting to
+  # `project,local` when the expert declares none. Operator user-scope settings NEVER load in
+  # the spawn unless the expert explicitly opts into `user` scope.
+
   # `--permission-mode dontAsk` (not `bypassPermissions`): auto-deny any tool
   # call outside the sandbox — bypassPermissions skips even deny rules and lets a
   # misguided agent burn minutes on `find /Users/...`; dontAsk fails immediately.
@@ -1141,8 +1235,9 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
   `~/.claude/.env` fails the job before the Claude subprocess is spawned.
 
   Guarantees:
-    - For a provider-bound job, `CLAUDE_CODE_OAUTH_TOKEN` is absent from the spawn environment —
-      the operator's own Anthropic OAuth token never reaches a foreign endpoint.
+    - For a provider-bound job, `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY` are absent
+      from the spawn environment — neither of the operator's own Anthropic credentials ever
+      reaches a foreign endpoint.
 
   Args:
     repo: Repository root the spawn runs inside.
@@ -1406,6 +1501,15 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     # lost, and a run the provider rejected exits non-zero, so binding the read to a clean exit
     # (as token capture does) would miss the very case the guard exists for.
 
+    # Domain(runtime.job-execution):
+    # # Idle-stream stall retry
+    # A run that goes silent on its output stream for longer than the configured idle window
+    # is treated as a transient freeze rather than a failure of the work itself, since the
+    # underlying model service can hiccup mid-response. A stalled run is torn down and retried
+    # from a fresh session up to a bounded number of times before the job is instead left for
+    # the next scheduled attempt — each retry redoes the whole run, since a session that froze
+    # partway through cannot be resumed from where it stopped.
+
     # frames seen across every attempt of this job, for the degradation warning below
     seen_frames = 0
     for stall_attempt in range(max_stall_retries + 1):
@@ -1429,6 +1533,15 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
         f"stream-idle-stall after {max_stall_retries + 1} spawn(s); no stdout for >{idle_timeout_sec}s",
       )
       return
+
+    # Domain(runtime.job-execution):
+    # # Rate-limit guard blind-spot signal
+    # A completed run against the operator's own subscription always carries at least one
+    # rate-limit signal frame, however far from any limit it stayed. A run reporting none of
+    # them does not mean the account is healthy — it means the signal the guard relies on to
+    # notice trouble has stopped arriving, which is itself worth flagging separately from an
+    # actually raised limit. This blind-spot check does not apply to a run against a foreign
+    # provider endpoint, which never emits such frames in the first place.
 
     # Silence must not read as "all clear": the provider emits a rate-limit frame in every run,
     # so a completed run carrying none means the signal the guard depends on has degraded.
@@ -1960,11 +2073,36 @@ def _reject_response(jdir: Path, message: str) -> None:
   the fault reproduces regardless of the run, so the job is failed for good and
   the incident is opened for an operator.
 
+  Guarantees:
+    - A rejection within the retry limit removes `response.json` and the claim's `PID` marker
+      while leaving `READY` intact, so the job re-queues as though never claimed.
+    - A rejection past the retry limit closes the job for good via the same error path as any
+      other logical failure.
+
   Args:
     jdir: Path to the job directory whose attempt is being rejected.
     message: Human-readable reason handed back to the expert and recorded with
       the incident.
   """
+
+  # Domain(runtime.job-execution):
+  # # Envelope-violation retry policy
+  # A response that violates the outcome envelope gets exactly one corrective re-spawn before
+  # the job is failed for good. One retry is enough to separate an ordinary bad roll on a
+  # single run from a fault the expert reproduces regardless of the run, and no amount of
+  # further retrying would ever fix the second case — it would only spend more model calls
+  # to fail the same way again.
+
+  # Contract:
+  # A rejection within the retry limit MUST leave the job re-queueable: `response.json` and the
+  # claim's `PID` marker are removed while the `READY` marker stays untouched, so the next pump
+  # tick re-picks the same bundle as though it were never claimed.
+
+  # Contract:
+  # A rejection past the retry limit MUST close the job for good through the same path as any
+  # other logical failure, rather than leaving it queued for another spawn that would only
+  # reproduce the same violation.
+
   # the counter was bumped before this attempt started, so it counts attempts so far
   try:
     attempts = int((jdir / JobArtifact.ATTEMPTS).read_text().strip())
@@ -2001,6 +2139,16 @@ def _spend_transient_budget(jdir: Path) -> bool:
     True while the bundle's transient-error count stays below the configured budget
     (`daemon.transient_max_retries`, default 5), False once the budget is exhausted.
   """
+
+  # Domain(runtime.job-execution):
+  # # Transient-failure retry budget
+  # A transient failure — one caused by the environment rather than the work itself — is
+  # allowed to recur a bounded number of times before a bundle is finally closed as failed.
+  # Every recorded transient failure spends one unit of the budget regardless of what caused
+  # it, so a bundle that keeps hitting different transient problems exhausts the same budget
+  # as one hitting the same problem repeatedly; the count exists to stop a storm of retries,
+  # not to distinguish one transient cause from another.
+
   # read the persisted counter; a missing or garbled file restarts the budget from zero,
   # which errs toward retrying — the cap exists to stop storms, not to lose work
   counter = jdir / JobArtifact.TRANSIENT_ERRORS

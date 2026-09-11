@@ -24,7 +24,7 @@ This tool has a plan: `plan_doc: test-plan`.
 
 The label is `Start testing`. It is **never parameterised**: an asset carries one `test` tool, there is nothing to tell apart, and the form `Start implementation (test)` is not used.
 
-**When it appears.** The checkbox hangs once `spec_develop_done` is closed — that is, **every non-test tool of the asset has reported and its report has been accepted** — and the tool's plan no longer holds the gate (absent, or `approved`). The `test` tool does not start before every non-test tool's implementation is finished. A halted asset never gets the checkbox at all.
+**When it appears.** The checkbox hangs once `spec_develop_done` is closed — that is, **every non-test tool of the asset has reported and its report has been accepted** — and the tool's plan no longer holds the gate (absent, or `approved`). The `test` tool does not start before every non-test tool's implementation is finished. A halted asset never gets the checkbox at all. The tool's contribution must not be counted toward the gate — an accepted report hangs no checkbox until the source-staleness rule turns the gate back off.
 
 **What a tick dispatches.** The role is `tester`; the expert is resolved mechanically as the main writer of the review class named after the tool's `report_doc` — the `test-report` class. The job's source is `test-plan`, or the asset's `design` when no plan exists. Context is `design` (when it did not itself take the source slot) plus the product's guidelines for the role and its wildcard guidelines. Result is a document of type `test-report`.
 
@@ -40,6 +40,10 @@ One active job per asset at a time.
 - a green but unaccepted report does not close the gate — acceptance has not happened yet.
 
 The `test` tool does not contribute to `spec_develop_done` at all: that gate is an AND across the non-test tools, and `test` is neither a term of it nor a condition on it.
+
+## Staleness
+
+The source of this tool's report is `test-plan.md`. When the plan is re-approved after `test-report.md` was accepted, the report keeps its stage-less journal form — nothing moves on it — while `spec_tests_passing` turns off and `Start testing` hangs again; the tick continues the same expert against the re-approved plan, who appends to the journal and re-submits it.
 
 ## The acceptance cycle
 

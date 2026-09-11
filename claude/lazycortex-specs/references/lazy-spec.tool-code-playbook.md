@@ -24,7 +24,7 @@ This tool has a plan: `plan_doc: code-plan`.
 
 The label is `Start implementation (code)`. The bare label `Start implementation` is permitted and means exactly the same thing when the asset has exactly one non-test tool: the parameter exists only to tell several implementation checkboxes on one asset apart.
 
-**When it appears.** The checkbox hangs once `spec_plan_done` is closed, the tool's own plan no longer holds the gate (above), and every dependency named in `spec_depends_on` has closed its own `spec_develop_done` — bottom-up, dependency before dependent. A halted asset never gets the checkbox at all, and one already hung comes down.
+**When it appears.** The checkbox hangs once `spec_plan_done` is closed, the tool's own plan no longer holds the gate (above), and every dependency named in `spec_depends_on` has closed its own `spec_develop_done` — bottom-up, dependency before dependent. A halted asset never gets the checkbox at all, and one already hung comes down. The tool's contribution must not be counted toward the gate — an accepted report hangs no checkbox until the source-staleness rule turns the gate back off.
 
 **What a tick dispatches.** The role is `developer`; the expert is resolved mechanically as the main writer of the review class named after the tool's `report_doc` — the `code-report` class. The job's source is `code-plan`, or the asset's `design` when no plan exists. Context is `design` (when it did not itself take the source slot) plus the product's guidelines for the role and its wildcard guidelines; a declared path that does not resolve to a file becomes a warning line in the asset's history, never a silent drop. Result is a document of type `code-report`, which the job writes itself.
 
@@ -35,6 +35,10 @@ One active job per asset at a time: while the previous one has not reported, a s
 The `code` tool's contribution is closed when its `code-report` is **accepted by review** — it has reached `approved` (approved-with-concerns counts as accepted). Not "the job returned DONE", not "the code is committed": a job's terminal marker only opens review on the fresh report, and it is the accepted report that closes the contribution.
 
 `spec_develop_done` is an AND across every non-test tool of the asset. An accepted `code-report` closes exactly one term of that AND; if the asset also declares, say, `data` or `docs`, the gate waits for their reports too.
+
+## Staleness
+
+The source of this tool's report is `code-plan.md`. When the plan is re-approved after `code-report.md` was accepted, the report keeps its stage-less journal form — nothing moves on it — while `spec_develop_done` turns off and `Start implementation (code)` hangs again; the tick continues the same expert against the re-approved plan, who appends to the journal and re-submits it.
 
 ## The acceptance cycle
 

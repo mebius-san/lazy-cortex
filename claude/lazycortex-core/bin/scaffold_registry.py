@@ -274,8 +274,11 @@ def splice_upsert(md: str, plugin: str, entries: dict) -> str:
 
   When the key already exists, its entire line span is replaced with a freshly
   rendered block. When the key is absent, the rendered block is appended after
-  the last existing key. All other key regions and every byte outside the fence
-  markers are preserved verbatim.
+  the last existing key.
+
+  Guarantees:
+    - Every other plugin's key-region and every byte outside the fence markers are
+      preserved verbatim.
 
   Args:
     md: Full markdown source containing a `## Registry` ```yaml block.
@@ -285,6 +288,21 @@ def splice_upsert(md: str, plugin: str, entries: dict) -> str:
   Returns:
     The updated markdown source with the plugin key-region replaced or appended.
   """
+
+  # Contract:
+  # Every other plugin's key-region and every byte outside the fence markers are
+  # preserved verbatim; only the named plugin's own line span is replaced or appended.
+
+  # Domain(install.reconciliation):
+  # # Splicing a registry key touches only that key's own lines
+  # A plugin registering, updating, or dropping its own entries in a shared registry never
+  # rewrites the file as a whole; it replaces only the contiguous span of lines that belong to
+  # its own top-level key, leaving every other plugin's key and every byte outside the
+  # registry's own block untouched. Ordering follows arrival — a key that does not exist yet
+  # is appended after whatever is already there, never inserted or reordered — so an
+  # independent writer touching a different key at another time can never see its own
+  # untouched region moved.
+
   body = _body_lines(md)
   rendered = render_key(plugin, entries).splitlines()
   span = _key_line_span(body, plugin)
@@ -301,9 +319,11 @@ def graft_registry(shipped_md: str, target_md: str) -> str:
   Return the shipped rule text carrying the target's current Registry block body.
 
   Everything outside the `## Registry` fence comes from the shipped source, so a
-  stale consumer copy is refreshed wholesale; the block body is the consumer's
-  own state — the customer-authored key plus every installed plugin's key — and
-  is carried over verbatim.
+  stale consumer copy is refreshed wholesale.
+
+  Guarantees:
+    - The target's Registry block body — the customer-authored key plus every
+      installed plugin's key — is carried over verbatim.
 
   Args:
     shipped_md: Full markdown source of the rule as the plugin ships it.
@@ -315,6 +335,21 @@ def graft_registry(shipped_md: str, target_md: str) -> str:
   Raises:
     ValueError: If either source lacks a well-formed `## Registry` ```yaml block.
   """
+
+  # Contract:
+  # The target's Registry block body — the customer-authored key plus every
+  # installed plugin's key — is carried over verbatim; no key is dropped or reordered.
+
+  # Domain(install.reconciliation):
+  # # A scaffold registry refresh keeps the consumer's block, replaces everything around it
+  # Refreshing a consumer's scaffold registry file takes the whole document from the shipped
+  # source except for one region: the body of the registry block, which is the consumer's own
+  # accumulated state — every installed plugin's own entries plus whatever the consumer
+  # authored under its own key. That body survives a refresh unchanged while every other byte
+  # in the file, instructions and heading text alike, is replaced with whatever the shipping
+  # plugin ships today, so a stale consumer copy of the surrounding rule text is corrected on
+  # every sync without losing a single registered key.
+
   body = _body_lines(target_md)
   # an empty consumer block carries no keys, so the shipped empty-dict sentinel stands in
   return _rewrite_block(shipped_md, body or ["{}"])
@@ -337,6 +372,18 @@ def validate(md: str) -> list[dict]:
     and `msg`. Returns an empty list when the block is structurally valid and no
     overlaps are detected.
   """
+
+  # Domain(install.reconciliation):
+  # # A scaffold template path always lives in the consumer's own tree
+  # A registered template path names where a scaffolded file will be authored inside the
+  # consumer's own tree — a project's own template directory or the operator's global one —
+  # never inside the shipping plugin's installed directory. A path built from a variable that
+  # only resolves inside a plugin's own tree therefore names nothing a consumer could ever
+  # reach, and is rejected outright rather than merely warned about. Two different registered
+  # keys claiming an overlapping glob is a softer problem: both stay valid on their own, only
+  # the choice between them for one shared path becomes ambiguous, so it is surfaced for a
+  # human to judge instead of treated as a structural defect.
+
   findings: list[dict] = []
   try:
     data = parse_registry_block(md)
@@ -384,8 +431,11 @@ def splice_remove(md: str, plugin: str) -> str:
   Delete a plugin key-region from the Registry block.
 
   Removes the `<plugin>:` heading line and all of its indented child lines.
-  Has no effect when the key is absent. All other key regions and every byte
-  outside the fence markers are preserved verbatim.
+  Has no effect when the key is absent.
+
+  Guarantees:
+    - Every other plugin's key-region and every byte outside the fence markers are
+      preserved verbatim.
 
   Args:
     md: Full markdown source containing a `## Registry` ```yaml block.
@@ -395,6 +445,11 @@ def splice_remove(md: str, plugin: str) -> str:
     The updated markdown source with the plugin key-region removed, or the
     original source unchanged when the key was not present.
   """
+
+  # Contract:
+  # Every other plugin's key-region and every byte outside the fence markers are
+  # preserved verbatim; only the named plugin's own line span is removed.
+
   body = _body_lines(md)
   span = _key_line_span(body, plugin)
   # guard: key absent — nothing to remove

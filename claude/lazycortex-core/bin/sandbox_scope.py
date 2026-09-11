@@ -103,6 +103,16 @@ def _dead_cache_entries(entries: list[str]) -> list[str]:
     The entries (as recorded, not expanded) whose expanded path sits under the plugin cache
     root and does not exist on disk; order-stable, empty when none qualify.
   """
+
+  # Domain(runtime.preflight):
+  # # Stale plugin-cache grants are pruned, everything else is left alone
+  # A recorded read entry that points inside the LazyCortex plugin cache and no longer exists
+  # on disk is a version pin left behind by a plugin update — the checkout moved past that
+  # cached version and the old directory is simply gone, so nothing is lost by dropping the
+  # entry that named it. The same emptiness anywhere outside the plugin cache is never treated
+  # this way and stays recorded exactly as found, because a checkout may hold that entry for
+  # a reason this mechanism has no way to see.
+
   cache_root = _expand(Path.home() / _PLUGIN_CACHE_REL / _PLUGIN_CACHE_REGISTRY)
   return [ e for e in entries
            if _is_covered_by(_expand(e), cache_root) and not os.path.isdir(_expand(e)) ]
@@ -124,6 +134,18 @@ def resolve_scope(entries: list[str]) -> list[str]:
     The expanded entries followed by the resolved locations they reach, deduplicated and
     order-stable; a location already covered by an entry is dropped.
   """
+
+  # Domain(runtime.preflight):
+  # # Sandbox confinement follows the resolved location, not the allowlist spelling
+  # A confined spawn is checked by the operating system against the location a path actually
+  # resolves to, never against the literal text an allowlist entry spells. An entry reached
+  # only through a symlink therefore grants confinement over the link itself while leaving
+  # the location its target actually lives at outside the sandbox entirely, so every write
+  # through that link fails even though the entry appears to cover it. Each directory an
+  # entry reaches through one of its own immediate symlinks earns a resolved entry of its
+  # own so the sandbox has something literal to compare against; a location a broader entry
+  # already reaches needs no separate one.
+
   # the entries themselves, in the literal form the confinement compares against
   expanded = [ _expand(e) for e in entries if str(e).strip() ]
 
@@ -220,9 +242,9 @@ def audit(repo: Path | str) -> dict:
   """
   Report which locations the recorded sandbox scope of a repository fails to grant.
 
-  Notes:
-    - A checkout with no sandbox settings file runs its spawns unconfined; it has nothing
-      to be missing, and is reported as absent rather than as a set of findings.
+  Guarantees:
+    - A checkout with no sandbox settings file is reported as absent rather than as a
+      set of findings; it runs its spawns unconfined and has nothing to be missing.
 
   Args:
     repo: Repository root whose sandbox settings are read.
@@ -231,6 +253,12 @@ def audit(repo: Path | str) -> dict:
     A result dict carrying `SandboxSyncKey` fields: the file location, whether it exists,
     the recorded confinement switch, and the uncovered read and write locations.
   """
+
+  # Contract:
+  # A checkout with no sandbox settings file is reported as absent rather than as a set
+  # of findings; a caller must not read an empty missing-read/missing-write list from an
+  # absent file as proof of full coverage.
+
   # what the checkout records today, and whether it records a confinement switch at all
   path = settings_path(repo)
   doc = _read(path)
@@ -253,20 +281,15 @@ def sync(repo: Path | str, *, read: list[str] | None = None, write: list[str] | 
   """
   Record the full sandbox scope of a repository, adding every location its entries reach.
 
-  Notes:
-    - The repository root is always in scope, readable and writable; a spawn confined out
-      of the checkout it works in can do nothing.
-    - Whatever is writable is also readable, so the write scope is folded into the read
-      allowlist as well.
-    - Recorded entries are never dropped or reordered, with one exception: a recorded read
-      grant under the LazyCortex plugin cache root whose directory no longer exists is a dead
-      version pin left behind by a past plugin update, and is pruned. A recorded confinement
-      switch or unsandboxed-retry switch is never overwritten — the file belongs to the
-      checkout, and this only adds to it (and prunes the plugin-cache dead weight). An
-      unrecorded retry switch is recorded closed.
-    - The file is rewritten whenever the document to record differs from what is already on
-      disk — including recording a previously absent confinement switch with no scope growth —
-      and is left untouched otherwise.
+  Guarantees:
+    - The repository root is always in scope, readable and writable.
+    - Whatever is writable is also readable.
+    - A recorded allowlist entry is never dropped or reordered, except a recorded read
+      entry naming a LazyCortex plugin-cache location that no longer exists on disk.
+    - A recorded confinement switch or unsandboxed-retry switch is never overwritten;
+      only a switch absent from the file is given its default value.
+    - The file is rewritten only when the document to record differs from what is
+      already on disk; a pass that changes nothing leaves the file untouched.
 
   Args:
     repo: Repository root whose sandbox settings are recorded.
@@ -278,6 +301,28 @@ def sync(repo: Path | str, *, read: list[str] | None = None, write: list[str] | 
     the confinement switch after the call, the entries appended to each allowlist, the read
     entries pruned as dead plugin-cache versions, and whether the file was rewritten.
   """
+
+  # Contract:
+  # The repository root is always included in both the read and write allowlists,
+  # regardless of the `read` / `write` arguments — a spawn confined out of the checkout
+  # it works in can do nothing.
+
+  # Contract:
+  # Every location included in the write allowlist is also included in the read
+  # allowlist.
+
+  # Contract:
+  # A recorded allowlist entry is never dropped or reordered, except a recorded read
+  # entry naming a LazyCortex plugin-cache location that no longer exists on disk.
+
+  # Contract:
+  # A recorded confinement switch or unsandboxed-retry switch is never overwritten;
+  # only a switch absent from the file is given its default value.
+
+  # Contract:
+  # The settings file is rewritten only when the document to record differs from what
+  # is already on disk; a pass that changes nothing leaves the file untouched.
+
   # what the checkout records today, snapshot before anything is written
   path = settings_path(repo)
   # waiver: read once, but the write below flips it — the result must report the state the caller met

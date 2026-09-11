@@ -54,6 +54,17 @@ def is_enabled(name: str) -> bool:
     lists `name` under `hooks.disabled`.
   """
   allow = os.environ.get(EnvVar.HOOKS_ALLOW_LIST)
+
+  # Domain(runtime.daemon-loop):
+  # # Which hooks a spawn may run
+  # A spawned process runs under one of two mutually exclusive regimes for deciding which hooks
+  # fire. When it carries an explicit allow-list, only the hooks named in that list run at all, and
+  # an allow-list that names nothing disables every hook for that spawn — a dispatcher sets this
+  # regime for every unit of work it hands off, scoped to that unit's own declared hook set, so
+  # nothing it triggers runs a hook it never opted into. When no allow-list is present, every hook
+  # runs by default, and only an explicit operator block-list can silence one — an interactive
+  # session is presumed to want the full hook set unless told otherwise.
+
   # Allow-list mode: the variable's presence is the signal, regardless of who set it. Pure
   # in-memory check — the expert-spawn fast path exits here with no I/O.
   if allow is not None:
@@ -70,10 +81,29 @@ def _disabled_hooks() -> frozenset[str]:
   the local overlay merged on top). Fails open — any resolution error yields an empty set so no
   hook is silenced by accident.
 
+  Guarantees:
+    - Any failure to resolve this list — no repository, no settings file, or an unreadable or
+      malformed value — yields an empty set rather than a disabled hook; only an explicit
+      `hooks.disabled` entry can silence one.
+
   Returns:
     The frozenset of disabled hook short names, or an empty frozenset when none are configured or
     the settings cannot be read.
   """
+
+  # Contract:
+  # Any failure to resolve the disabled-hooks list — no repository, no settings file, or an
+  # unreadable or malformed value — yields the empty set, never a hook name. A resolution
+  # failure never disables a hook; only an explicit `hooks.disabled` entry can.
+
+  # Domain(runtime.daemon-loop):
+  # # Silencing a hook is always deliberate
+  # A hook is treated as disabled only when the operator's own configuration names it explicitly.
+  # Any failure to resolve that configuration — no repository, no settings file, an unreadable or
+  # malformed value — resolves to nothing being disabled, never the other way around. A hook must
+  # never fall silent because of a missing or broken settings file; it can only fall silent because
+  # someone said so.
+
   repo = _repo_root()
   # guard: not inside a git repository — nothing to disable against
   if repo is None:

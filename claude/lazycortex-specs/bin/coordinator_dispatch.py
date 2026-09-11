@@ -286,6 +286,18 @@ def _is_attributed_ticked_block(ticked: bool, block_lines: list[str]) -> bool:
     True when `ticked` is set and the last non-empty line in `block_lines` trims to one of
     `_QUESTION_ATTRIBUTIONS`.
   """
+
+  # Domain(spec.lifecycle):
+  # # Attributed-answer detection
+  # A ticked option under a question callout counts as an answer to the coordinator only when
+  # the callout carries the coordinator's own signed closing line — a question an expert or an
+  # operator raised, even ticked, is never mistaken for a reply to something the coordinator
+  # itself asked. Two personas share this recognition, each signed with its own line, so a note
+  # that hosts both an asset-level and a product-level coordinator still tells their own
+  # questions apart. Scanning back past any blank continuation line before comparing the
+  # signature also matters, since a trailing blank line under a genuine signature must not
+  # defeat a real match.
+
   # guard: an unticked block never reaches ANSWER regardless of attribution
   if not ticked:
     return False
@@ -381,6 +393,20 @@ def _has_operator_authored_recently(repo_root: Path, item: dict, cursor: str | N
     (falling back to a bounded window of the most recent ones when no cursor is usable) include
     a non-bot author; False otherwise, including when the item carries no usable `path` / `sha`.
   """
+
+  # Domain(spec.lifecycle):
+  # # Buried-operator-commit rescue for a git-watch tick
+  # A change watch hands the coordinator only the single most recent commit on a document's own
+  # path, so an operator's edit is invisible to that commit alone whenever an automated commit
+  # lands on the same path afterward, inside the same watch window — the operator's edit is
+  # buried under the newer one. The rescue scans the document's own commit history since the
+  # last commit the coordinator actually reacted to, and treats any commit in that span authored
+  # by someone other than the automation's own identity as proof an operator touched the
+  # document during the window, even though the watch item itself points at the later, automated
+  # commit. Without a known starting point for the scan, the rescue instead looks back a fixed
+  # number of commits and stops early the moment it reaches one of the coordinator's own
+  # historic commits, since everything before that point has already been accounted for.
+
   # guard: the item's own author is already non-bot — nothing further to check
   if _BOT_MARK not in item.get(_ITEM_AUTHOR_EMAIL, ""):
     return True
@@ -603,9 +629,9 @@ def _resolve_doc_transition(sibling_doc: Path, fm: dict) -> tuple[str, str] | No
       marker (`spec_keys.SpecCoordinatorDocStateKey.STATE`), if any.
 
   Returns:
-    `(basename, new_value)` when the sibling's current `review_result` differs from what this
-    worker already recorded for that basename (appeared or changed); `None` when the sibling
-    is parked, carries no `review_result` right now, or it matches the recorded value.
+    `(basename, new_value)` when the sibling's current `review_result` differs from the recorded
+    marker — including `(basename, "")` when a recorded result was cleared; `None` when the
+    sibling is parked, has never carried a result, or matches the marker.
   """
   basename = sibling_doc.name
   sibling_fm, _ = flip_gate._parse_frontmatter(sibling_doc.read_text())
@@ -613,15 +639,15 @@ def _resolve_doc_transition(sibling_doc: Path, fm: dict) -> tuple[str, str] | No
   if str(sibling_fm.get(StageKey.STAGE, "")).strip() == Stage.DEFERRED:
     return None
   current = sibling_fm.get(SpecKey.REVIEW_RESULT)
-  # guard: no stamped result on the sibling right now — nothing has transitioned TO
-  if current is None:
-    return None
   previous = _read_doc_state(fm).get(basename)
+  # guard: no result now and none ever recorded — nothing has transitioned in either direction
+  if current is None and not previous:
+    return None
+  # a cleared result is the document re-entering review: recorded as the empty token, so the
+  # next terminal value — even the same one as before — differs from the marker and re-fires
+  if current is None:
+    return basename, SpecCoordinatorDocStateKey.REVIEW_REOPENED
   # guard: identical to what this worker already dispatched on — a re-tick, not a transition
-  # limit: a doc that reopens for review (review_result cleared) then re-lands the SAME terminal
-  # value never re-fires, since the marker is only ever updated on a successful dispatch, not on
-  # the intervening clear; upgrade path is stamping the marker on every observed value, not only
-  # on a wake, if a genuine re-approval-to-the-same-token needs to re-wake the coordinator
   if current == previous:
     return None
   return basename, current
@@ -698,6 +724,19 @@ def _resolve_wake_trigger(
   Returns:
     A `CoordinatorTrigger` token, or None when nothing wakes the coordinator this tick.
   """
+
+  # Domain(spec.lifecycle):
+  # # Wake-trigger priority order
+  # A coordinator wake evaluates several possible reasons to act, in a fixed order, and only the
+  # first one that applies is acted on this wake: an explicit operator command, then — unless
+  # the asset is paused — a fresh answer to a question the coordinator itself asked, then a
+  # background job finishing, then a linked document's review outcome changing, then any other
+  # operator edit. Pausing an asset silences every one of these except the explicit command,
+  # which still gets through, so an operator can always reach a paused asset directly even
+  # though the automation around it has gone quiet. An edit to a linked document that is itself
+  # under active review belongs to that review's own loop rather than to this precedence, so it
+  # is never treated as an operator edit until the review concludes.
+
   # a non-empty commands section wakes the coordinator even on a halted asset — the one
   # exception to the halt override below (playbook § 1, § 5 "Commands run on halted assets too")
   if _read_section_body(body, Section.COORD_COMMANDS):
@@ -1026,6 +1065,18 @@ def _wake_ready_dependents(asset_dir: Path, my_token: str, *, today: str | None)
       `payload["dep"]`.
     today: Optional ISO date forwarded into each dependent's own `# History` line.
   """
+
+  # Domain(spec.lifecycle):
+  # # Downstream wake on dependency and release crossings
+  # When an asset's own readiness advances far enough that something else waiting on it could
+  # now proceed, every asset that names this one as a dependency is woken to check again, so a
+  # chain of related work never sits idle only because nothing prompted a second look.
+  # Separately, when an asset finishes and is released, the product that contains it is woken
+  # once, so a product-level view stays current without polling every asset inside it. Both
+  # notifications travel exactly one hop outward from the asset that changed — never chased
+  # further downstream from there — and only fire once the asset's own change has safely landed,
+  # so a failure telling a neighbour can never undo or block the change that caused it.
+
   for dependent_note in _scan_dependents(asset_dir):
     try:
       coordinator_dispatch(dependent_note, {}, today = today, dependency_wake = my_token)
@@ -1544,6 +1595,9 @@ def coordinator_dispatch(
   the same halt override every other trigger respects (`lazy-spec.coordination-playbook.md` § 1).
 
   Guarantees:
+    - At most one coordinator job runs against a given note at a time; a wake that arrives while
+      one is still active never dispatches a second job for that note until the running one
+      finishes.
     - Writes and commits the status folder-note only when the produced text differs from the
       note's bytes as read at the start of the call; a wake that changes nothing leaves the note
       byte-identical and creates no commit.
@@ -1645,6 +1699,25 @@ def coordinator_dispatch(
   is_level = role in LEVEL_ROLES
   expert = _CATALOG_EXPERT if is_level else _COORDINATOR_EXPERT
   doc_basenames = LevelDoc.BASENAMES if is_level else None
+
+  # Domain(spec.lifecycle):
+  # # One coordinator job per asset
+  # At most one coordinator action ever runs against a given asset at a time. A reason to act
+  # that arrives while one is already running is not queued or replayed — it is remembered as a
+  # single flag, since acting on it immediately could mean rewriting the asset's own record out
+  # from under the action already in flight. Once free, that flag makes the coordinator look at
+  # the asset's current state fresh rather than replay the original reason, since real time has
+  # passed and something more specific may already have happened. A flag raised because the
+  # running action itself just finished survives a wake that gets preempted by something more
+  # urgent, so its result is still revisited later; a flag raised for any other reason is
+  # cleared the moment any wake at all is acted on for the asset, because whatever runs next
+  # already accounts for it. Pausing the asset holds either flag untouched until the pause is
+  # lifted, rather than resolving it into a generic catch-up the operator never asked for.
+
+  # Contract:
+  # At most one coordinator job runs against a given note at a time; a wake that arrives while
+  # a job is still active for that note never dispatches a second job until the running one
+  # finishes.
 
   # one active coordinator job per asset — unconditional, no halt/command exception
   note_dirty = False

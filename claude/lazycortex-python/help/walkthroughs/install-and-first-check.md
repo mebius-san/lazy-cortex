@@ -11,7 +11,7 @@ source_skills:
   - chk
   - tst
   - pcf.py
-source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
+source_sha: f3dcc55c389b71a983c894ee1c0407d8311e931c
 ---
 # Bootstrap the plugin in a clean repo and confirm the checker stack is wired up
 

@@ -123,7 +123,32 @@ This chapter is the gate MACHINERY and nothing else — the booleans, their orde
 
 **A parked document is skipped by the walk, not by the wake.** A sibling at `spec_stage: deferred` is passed over by the promotion even when it carries an approved `review_result`, and it closes nothing: an asset gate whose precondition names that document stays open, because `deferred` is neither an approval nor an absence — the document exists and is simply not being worked on. A commit touching it DOES wake you, as an ordinary operator edit on the status note, so the gates, the `# Status brief` and the launch rows get put in order around it. What it never raises is a doc-transition off its own verdict; and you never edit the parked document itself.
 
-**Downward reconciliation.** A gate already true goes stale when the thing that closed it stops holding — a governing document reappears un-accepted, a tool's implementation is reopened, a child regresses. The coordinator watches for that on every wake and flips the gate back off (`--off`, auto) the moment it fires; WHICH conditions count as a regression for a given gate is, again, the playbook that closed it. A downward flip commits atomically and the coordinator immediately re-runs its upward checks against the fresh state, so a dependent checkbox disappears the same cycle rather than lagging a tick.
+**Downward reconciliation.** A gate already true goes stale when the thing that closed it stops holding — a governing document reappears un-accepted, a tool's implementation is reopened, a child regresses, or a document's SOURCE is re-approved after the document itself was accepted. The coordinator watches for that on every wake and flips the gate back off (`--off`, auto) the moment it fires; WHICH conditions count as a regression for a given gate is, again, the playbook that closed it. A downward flip commits atomically and the coordinator immediately re-runs its upward checks against the fresh state, so a dependent checkbox disappears the same cycle rather than lagging a tick.
+
+**Source staleness — the one rule that lowers a stage.** Every dependent document has one source, read from this table; a level document (`vision.md` / `design.md` / `tech.md` at a product root or the catalog root) is outside it.
+
+| Dependent document | Source | Gate that turns off |
+|---|---|---|
+| the asset's `design.md` (types `design`, `research-design`) | the asset's `vision.md`, when one exists | `spec_design_done` |
+| `architecture.md`, `ui-design.md` | `design.md` | `spec_plan_done` (architecture holds it on a code-bearing asset) |
+| `code-plan.md` | `architecture.md` when it exists, else `design.md` | `spec_plan_done` |
+| `test-plan.md` | `design.md` | `spec_plan_done` |
+| a tool's report where the tool has a plan (`code-report.md`, `test-report.md`) | that tool's plan | `spec_develop_done` / `spec_tests_passing` |
+| a tool's report where the tool has no plan (`data-report.md`, `docs-report.md`, `research.md`) | `design.md` | `spec_develop_done` |
+| `use-cases.md` | the asset's `vision.md`, when one exists | none — no gate reads it; its `Review use-cases.md` block hangs |
+
+A document with no source — `bug.md`, which follows no vision — never goes stale by this rule.
+
+A dependent is stale when the moment its source was last approved sits below the moment the dependent was accepted, both read from `# History`. `lazy-spec.set-stage` writes `- <date> — lazy-spec.set-stage · <doc>.md spec_stage <old>→<new>` on every stage move and `flip-gate` writes `- <date> — lazy-spec.flip-gate · <gate> → true|false`, so the source's moment is its latest `spec_stage …→approved` line; the dependent's moment is its own `spec_stage …→approved` line when it carries a stage, or the `<gate> → true` line of the gate its acceptance closed when it is a stage-less journal (`code-report.md`, `test-report.md`, `data-report.md`, `docs-report.md`). Git is never read. A doc-transition wake whose value is empty means the source re-entered review, not that it was re-approved: that wake runs ordinary downward reconciliation (the gate the source closed no longer holds); the staleness rule runs on the later wake where the source lands `approved` again.
+
+On the wake that sees it, for each stale dependent, in this order:
+
+1. For a stage-bearing dependent, `Skill(lazycortex-specs:lazy-spec.set-stage, "<dependent> draft")` — the single case in which the coordinator lowers a stage; the primitive takes no reason, the reason is the step 4 line. A stage-less journal has no stage to move and skips this step.
+2. `flip-gate --off` for the gate of the table row.
+3. The ordinary upward pass in the same commit. A plan or a definition document now hangs its `Review <file>` block (Chapter 5); a tool's report now satisfies its tool's `Start implementation (<tool>)` condition again, and the tick runs as a continuation to the same expert with the re-approved source in its context. Nothing is dispatched without a tick.
+4. One `# History` line per stale dependent, written by the coordinator: `- <date> — spec.coordinator · <dependent>.md stale: source <file> re-approved`, and one sentence in `# Status brief` naming what went stale and what waits on a tick.
+
+The dependent's body is never edited; its gate, its stage where it has one, and the journal line are the whole signal. A stale dependent that was itself the source of something further down is handled by the next wake, when its own re-approval lands — the chain runs one hop per re-approval.
 
 **Halt.** `spec_halted: true` silences every automation layer built on the gates — checkbox dispatch, cascade dispatch, rule-driven dispatch — but never the five booleans themselves and never `# Coordinator commands`. A halted asset still reads its gates truthfully; it just stops acting on them.
 
@@ -295,7 +320,7 @@ This playbook deliberately does NOT restate or duplicate those formats — it de
 
 **The `folder_note: false` invariant must not break silently.** The coordinator's ownership of every asset/product/type folder-note requires NO coordination with the wiki or terms-curation subsystems ONLY because every wiki scope's `folder_note: false` setting (enforced by `scope.py`, including on relink) already excludes folder-notes from wiki curation. This is presently a side effect of that scope filter's design, not a contract the wiki subsystem has explicitly committed to preserving. Treat this note as the tripwire: if a refactor on either the coordinator side or the wiki side ever touches `folder_note` handling, re-verify this invariant before assuming it still holds.
 
-**A spec wiki scope must exclude the append-only journals.** A `/lazy-wiki.configure` scope covering spec content should carry every tool's report document (`**/code-report.md`, `**/test-report.md`, and whatever a declared tool adds) in its `exclude_paths` — each is an append-by-a-running-job doc, and without the exclusion the wiki curator re-fires on every append.
+**A spec wiki scope must exclude the append-only journals.** A `/lazy-wiki.configure` scope covering spec content should carry every tool's append-only report journal (`**/code-report.md`, `**/test-report.md`, `**/data-report.md`, `**/docs-report.md`, and whatever a declared tool adds with `append_only: true`; a stage-bearing report such as the `research` tool's `research.md` is content and is never excluded) in its `exclude_paths` — each is an append-by-a-running-job doc, and without the exclusion the wiki curator re-fires on every append.
 
 ## 17. Spec-only mode
 

@@ -37,9 +37,9 @@ Exactly six values. The old `review`, `done`, and `wtr` are gone — "in review"
 
 ### Applies to
 
-Documents whose `spec_doc_type` is declared with `stages: true` (the shipped types with the flag set: `vision`, `system-vision`, `use-cases`, `design`, `system-design`, `architecture`, `ui-design`, `code-plan`, `test-plan`, `bug`, `system-tech`). Which document kinds those are is a property of the declaration, not of a filename — see `lazy-spec.file-roles-protocol.md` § Document type. Which of them a given asset actually carries is the type playbook's declaration, not this file's: a plan document exists exactly for a tool whose `tool_types.<name>` record names a `plan_doc`, and its absence is a declared state, not a gap `lazy-spec.audit` flags.
+Documents whose `spec_doc_type` is declared with `stages: true` (the shipped types with the flag set: `vision`, `system-vision`, `use-cases`, `design`, `system-design`, `architecture`, `ui-design`, `code-plan`, `test-plan`, `bug`, `system-tech`, `research-design`, `research-report`). Which document kinds those are is a property of the declaration, not of a filename — see `lazy-spec.file-roles-protocol.md` § Document type. Which of them a given asset actually carries is the type playbook's declaration, not this file's: a plan document exists exactly for a tool whose `tool_types.<name>` record names a `plan_doc`, and its absence is a declared state, not a gap `lazy-spec.audit` flags.
 
-Does NOT carry `spec_stage` — every type declared `stages: false`, plus the untyped notes: the status folder-note (carries gates instead); container folder-notes (`<product>.md`, `features/features.md`, …); the append-only report journals (`code-report.md` / `test-report.md` / `data-report.md` / `docs-report.md`, and any other `report_doc` a tool declares) — they are written during execution, never approved into a stage, and carry no lifecycle state of their own; the opt-in `decisions.md` registry (product-level or asset-level) — it is an append-only registry written only by the `decide` primitive, never opted into review, and carries no lifecycle state of its own. They sit outside both layers of this protocol: no per-file stage, no role in any gate precondition.
+Does NOT carry `spec_stage` — every type declared `stages: false`, plus the untyped notes: the status folder-note (carries gates instead); container folder-notes (`<product>.md`, `features/features.md`, …); the append-only report journals (`code-report.md` / `test-report.md` / `data-report.md` / `docs-report.md`, and any other `report_doc` a tool declares with `append_only: true`) — they are written during execution, never approved into a stage, and carry no lifecycle state of their own; the opt-in `decisions.md` registry (product-level or asset-level) — it is an append-only registry written only by the `decide` primitive, never opted into review, and carries no lifecycle state of its own. They sit outside both layers of this protocol: no per-file stage, no role in any gate precondition. A tool whose report is declared with stages — the `research` tool's `research.md`, typed `research-report` — carries a per-file stage like any authored document and is not in this set.
 
 ### Mapping to lazycortex-review v4 flags
 
@@ -56,9 +56,9 @@ Does NOT carry `spec_stage` — every type declared `stages: false`, plus the un
 
 Forward: `empty → draft → approved`.
 
-`rejected` is reachable when a review or developer rejects the doc; the only path out is back to `draft` (re-open). `cancelled` is reachable from any non-terminal stage.
+`rejected` is reachable when a review or developer rejects the doc; the only path out is back to `draft` (re-open). `cancelled` is reachable from `empty`, `draft`, `rejected` and `deferred`, never from `approved`.
 
-`approved` and `cancelled` are terminal; `rejected` is a re-open marker, NOT terminal.
+`cancelled` is terminal. `approved` is terminal for every writer but one: `spec.coordinator` moves an approved document back to `draft` when the document's source was re-approved after it (source staleness, `lazy-spec.coordination-playbook.md` Chapter 4) — the only downward stage move in the system, always with a `# History` line naming the source. `rejected` is a re-open marker, NOT terminal.
 
 `deferred` is reachable from any stage on any stage-bearing type — asset-level and level documents alike — and `draft` is its single exit. Those two calls are the whole vocabulary of parking: `lazy-spec.set-stage <doc> deferred` parks, `lazy-spec.set-stage <doc> draft` unparks, and no other target stage is accepted while the document sits parked. Nothing else moves the stage on its own — a review verdict landing on a parked document is recorded on the file and read by nobody until it comes back.
 

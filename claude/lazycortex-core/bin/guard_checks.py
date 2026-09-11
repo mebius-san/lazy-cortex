@@ -136,11 +136,26 @@ def compile_scope_glob(glob: str) -> re.Pattern[str]:
   Returns:
     A compiled regular expression that matches paths covered by the glob.
   """
+
+  # Contract:
+  # A `**` segment matches any number of path segments, including zero — a path sitting
+  # directly in the directory a trailing `**` segment anchors still matches, not only a path
+  # nested further beneath it.
+
   parts = []
   i = 0
   while i < len(glob):
     c = glob[i]
     if c == "*" and i + 1 < len(glob) and glob[i + 1] == "*":
+
+      # Domain(guard.public-scan):
+      # # A double-wildcard segment covers any depth, including none at all
+      # In a public-scope path pattern, a double-wildcard segment matches not only one or more path
+      # segments but also the complete absence of any — a pattern anchored at a directory with a
+      # trailing double-wildcard must still cover a file sitting directly in that directory, not
+      # only files nested somewhere beneath it.
+
+      # a double-wildcard segment maps to "match anything, any length"
       parts.append(".*")
       i += 2
       # consume a following slash so `dir/**/file` also matches `dir/file`
@@ -166,6 +181,10 @@ def in_public_scope(path: str, compiled_globs: list[re.Pattern[str]]) -> bool:
   """
   Return whether the given path is considered part of the public scope.
 
+  Guarantees:
+    - When no scope globs are configured, every path counts as public; scope narrowing takes
+      effect only once at least one glob is configured.
+
   Args:
     path: Repo-root-relative path to test.
     compiled_globs: Compiled scope globs from the guard config.
@@ -174,6 +193,18 @@ def in_public_scope(path: str, compiled_globs: list[re.Pattern[str]]) -> bool:
     True when no scope globs are configured (legacy whole-repo-public behavior) or when
     the path matches at least one configured glob; False otherwise.
   """
+
+  # Contract:
+  # When no scope globs are configured, every path is considered public; scope narrowing takes
+  # effect only once at least one glob is configured.
+
+  # Domain(guard.public-scan):
+  # # No declared scope means the whole repository is public
+  # A repository that declares no public-scope patterns at all is not treated as having no public
+  # surface — it is treated as being public everywhere, matching how the guard behaved before scope
+  # narrowing existed. Declaring even one scope pattern switches the repository into narrowed mode,
+  # where only paths matching a declared pattern count as public.
+
   # guard: no scopes declared — treat the whole repo as public
   if not compiled_globs:
     return True
@@ -241,6 +272,11 @@ def is_waived(check_id: str, file_path: str, matched_text: str, waivers: list) -
   scope glob covers the file path (`*` or `fnmatch`), its pattern matches the offending
   text (case-insensitive `re.search`), and any declared expiry is still in the future.
 
+  Guarantees:
+    - A finding is suppressed only when a waiver's check identifier, scope glob, and pattern
+      all match it and any declared expiry has not yet passed; missing even one of these
+      conditions leaves the finding unsuppressed.
+
   Args:
     check_id: Identifier of the check that produced the finding (e.g. `"A3"`).
     file_path: Repo-relative path of the file where the finding occurred.
@@ -250,6 +286,20 @@ def is_waived(check_id: str, file_path: str, matched_text: str, waivers: list) -
   Returns:
     True if at least one waiver covers the finding; False otherwise.
   """
+
+  # Contract:
+  # A waiver suppresses a finding only when its check identifier, its scope glob, and its
+  # pattern all match the finding, and any declared expiry has not yet passed. A finding
+  # missing even one of these conditions is never suppressed.
+
+  # Domain(guard.public-scan):
+  # # A waiver only covers a finding when every one of its conditions holds
+  # An accepted exception is never a blanket suppression. It applies to one finding only when its
+  # check identifier covers the finding, its scope glob covers the file the finding was found in,
+  # its pattern actually matches the offending text, and — when it declares an expiry — that expiry
+  # has not yet passed. Missing any one of these conditions means the waiver does not apply, and the
+  # finding still blocks the run as if no waiver existed at all.
+
   # a waiver covers the finding only when check id, scope, pattern, and expiry all agree
   today = date.today().isoformat()
   for w in waivers:
@@ -361,6 +411,13 @@ def collect_staged_added_lines(root: str) -> list[tuple[str, str]]:
       if current_file:
         added_lines.append((current_file, line[1:]))
 
+  # Domain(guard.public-scan):
+  # # Encrypted content is out of scope for plaintext scanning
+  # A file that is encrypted by design carries no plaintext for a pattern-based scan to examine —
+  # any apparent match inside it is scanning noise, not a real secret or a real PII exposure. Such
+  # files are excluded from the added-lines collection entirely rather than scanned and waived,
+  # because there is nothing meaningful in their ciphertext for any check to judge.
+
   # drop .age files — they're encrypted by design
   # waiver: filesystem extension idiom (age-encrypted artifact), not a domain constant
   return [ (f, c) for f, c in added_lines if not f.endswith(".age") ]
@@ -382,6 +439,14 @@ def scan_lines(
   """
   findings = []
   for file_path, content in lines:
+
+    # Domain(guard.public-scan):
+    # # A safe-line shape is exempt project-wide, before any specific check runs
+    # A line whose shape is a template placeholder, a shell variable reference, a known-fake email
+    # domain, or a git trailer can never carry a real secret or a real private detail regardless of
+    # what any individual check's pattern would otherwise match on it. Such a line is skipped in
+    # full before any check is even attempted, rather than being judged check by check.
+
     # guard: skip lines matching a known safe-line pattern
     if any(p.search(content) for p in SAFE_LINE_PATTERNS):
       continue
@@ -428,6 +493,14 @@ def main(argv: list[str]) -> int:
         lines.extend((rel, line.rstrip("\n")) for line in f)
     except (OSError, UnicodeDecodeError):
       continue
+
+  # Domain(guard.public-scan):
+  # # Severity classes gate differently
+  # Every scan check belongs to one of two severities: a check that finds a real secret always
+  # blocks the run it participates in, while a check that finds personally-identifying or
+  # infrastructure detail only warns and lets the run continue. A gate built to stop a commit or a
+  # publish outright consults only the blocking category; the warn-only category exists for
+  # surfaces that must flag exposure without refusing the work outright.
 
   # findings decide the exit code — the publish gate branches on it
   findings = scan_lines(lines, FAIL_CHECKS, waivers)

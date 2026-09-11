@@ -7,6 +7,8 @@
     "test": { "playbook": "lazycortex-specs:lazy-spec.tool-test-playbook",
               "report_doc": "test-report", "plan_doc": "test-plan" },
     "docs": { "playbook": "lazycortex-specs:lazy-spec.tool-docs-playbook",
-              "report_doc": "docs-report" }
+              "report_doc": "docs-report" },
+    "research": { "playbook": "lazycortex-specs:lazy-spec.tool-research-playbook",
+                  "report_doc": "research-report" }
   }
 }

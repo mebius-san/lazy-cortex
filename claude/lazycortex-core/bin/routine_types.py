@@ -162,6 +162,10 @@ def routine_hooks_env(cfg: dict) -> dict[str, str]:
   the variable's *presence*, so an absent variable would leave every hook running while an empty
   one silences all of them. A routine therefore runs no lazycortex hook unless it names one.
 
+  Guarantees:
+    - The overlay entry is present in the returned dict on every call, even when the routine
+      declares no hooks; only its value is empty in that case.
+
   Args:
     cfg: Routine configuration dict.
 
@@ -169,8 +173,11 @@ def routine_hooks_env(cfg: dict) -> dict[str, str]:
     `{LAZYCORTEX_HOOKS_ALLOW_LIST: "<name1>,<name2>,..."}` with the routine's declared hook short
     names, blank and whitespace-only names dropped, or an empty-value entry when it declared none.
   """
-  # Contract: the entry is emitted on every call, empty value included — `hook_gate.is_enabled`
-  # keys on the variable's presence, so omitting it would leave every hook running.
+
+  # Contract:
+  # The entry is emitted on every call, empty value included. `hook_gate.is_enabled` keys on the
+  # variable's presence, so omitting it would leave every hook running instead of none.
+
   names = cfg.get(RoutineKey.HOOKS_ENABLED) or []
   return {
     EnvVar.HOOKS_ALLOW_LIST: ",".join(name.strip() for name in names if name.strip()),
@@ -453,6 +460,14 @@ def validate_routine_entry(name: str, cfg: dict) -> None:
 
   # the command/expert pair carries its own cross-field rule
   _validate_command_or_expert(name, cfg, rtype)
+
+  # Domain(settings.versioning):
+  # # Retired config field tolerance
+  # A configuration field a later version drops must never break a consumer still carrying it in an
+  # older settings file — an already-working setup does not start refusing to run just because the
+  # schema moved on. Such a field is silently ignored rather than rejected, with a warning surfaced
+  # once per process so an operator eventually notices, rather than repeated on every validation
+  # pass for the life of the process; removing the field from the file is left to a maintenance pass.
 
   # Orphaned keys of the retired routine-side worktree path: still ALLOWED (a consumer's config
   # must not start failing validation over a dead flag) but ignored with a warning, until
@@ -1115,6 +1130,16 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
   # yet, waits on something outside the system to change — typically an operator creating a record the
   # work depends on — so its window defaults to a full day and can be widened per routine; retiring it
   # sooner would just re-observe the same unchanged world on every tick.
+
+  # Domain(runtime.routines):
+  # # Same-path item identity in a destructive inbox queue
+  # A file arriving at a location an inbox routine has already seen is not necessarily the same
+  # unit of work as before — an external producer can drop an unrelated file under a name it has
+  # reused. Before a completed job's success is allowed to destroy the input it was dispatched
+  # against, the item's identity at that path is checked against the identity recorded at dispatch
+  # time; a mismatch means a different file has since taken that name, so the completed result is
+  # discarded without touching the file, leaving the fresh arrival to be picked up as its own unit
+  # of work on a later tick.
 
   # Reconcile finished work against the inbox. The input file is never copied
   # into the job bundle (only its path is passed), so the inbox is the single
@@ -2176,6 +2201,12 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
   those are not per-file conditions and retrying them per file is wasteful
   noise.
 
+  Guarantees:
+    - Never moves or deletes a candidate file; the dispatched expert or command reads and edits
+      it in place at its original path.
+    - A single candidate's failure never aborts the tick for the remaining candidates; only a
+      shared-state setup failure aborts the tick before any candidate is attempted.
+
   Args:
     repo: Path-like reference to the repository.
     name: Routine name.
@@ -2189,6 +2220,17 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
     accumulated per-file errors under `errors`), `exit = -1` and an `error`
     field when every candidate failed or a shared-state setup failed.
   """
+
+  # Contract:
+  # The routine NEVER moves or deletes a candidate file — the file stays exactly where it was
+  # found so the dispatched expert or command reads and edits it in place.
+
+  # Contract:
+  # A single candidate's failure never aborts the tick for the remaining candidates; every
+  # candidate is still attempted and its error recorded. Only a shared-state setup failure (an
+  # unavailable frontmatter parser, or a failed command resolution) aborts the tick before any
+  # candidate is attempted.
+
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   import time
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
@@ -2348,6 +2390,16 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
         request = _render_template(
           request_template, { "file": str(f) },
         )
+
+        # Domain(runtime.routines):
+        # # Markdown-scan retry through re-matching, not a read result
+        # A markdown-scan routine never inspects what its dispatched work actually did — it drives
+        # an external state transition purely by whether a candidate still matches the scan's
+        # declared filter. A prior attempt that already finished, whether it succeeded or failed, is
+        # therefore never treated as proof the transition took effect: the routine releases that
+        # attempt's claim on the file before dispatching again, so a candidate still matching the
+        # filter on a later tick is retried rather than left stuck behind an old attempt's slot.
+
         # retire this key's finished bundle first: md-scan never reads a
         # response back, so a prior attempt that completed (success or error)
         # would otherwise hold the dedup slot forever and block re-dispatch.

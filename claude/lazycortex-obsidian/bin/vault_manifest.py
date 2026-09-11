@@ -235,7 +235,7 @@ def is_secret(key: object,
     True when the entry must never reach the manifest.
   """
 
-  # Domain(unfiled):
+  # Domain(obsidian.vault-capture):
   # # Recognising a credential in captured configuration
   # A configuration entry counts as a credential on either of two independent signals: the name of
   # the entry says so outright, or the value itself has the shape of a credential a provider issues.
@@ -264,6 +264,10 @@ def strip_secrets(obj: Any,  # waiver: arbitrary JSON payload — plugin setting
   Only string values are dropped: a boolean flag naming a token is not one, and blanking
   it would change behaviour on deploy.
 
+  Guarantees:
+    - Returns a new copy; the `obj` passed in is never mutated in place.
+    - Preserves any value that is not a string, whatever key it sits under.
+
   Args:
     obj: Value to scan, of any JSON shape.
     path: Dotted path of `obj` within its file, used to report omissions.
@@ -272,6 +276,15 @@ def strip_secrets(obj: Any,  # waiver: arbitrary JSON payload — plugin setting
   Returns:
     A copy of `obj` with credential values removed.
   """
+
+  # Contract:
+  # The returned value is always a new copy; the `obj` passed to `strip_secrets` is never
+  # mutated in place.
+
+  # Contract:
+  # A value that is not a string is never dropped or altered, whatever key it sits under —
+  # only a string value can ever be removed as a credential.
+
   if isinstance(obj, dict):
     out: dict[str, Any] = {}  # waiver: arbitrary JSON payload
     for key, value in obj.items():
@@ -345,6 +358,10 @@ def fetch_bytes(url: str, *, accept: str = Http.JSON) -> bytes:
   """
   Fetch a URL.
 
+  Guarantees:
+    - A resolved token is only ever attached to a request whose URL targets a recognized GitHub
+      host; it is never sent to any other host.
+
   Args:
     url: Absolute URL to request.
     accept: Media type to ask for.
@@ -357,6 +374,10 @@ def fetch_bytes(url: str, *, accept: str = Http.JSON) -> bytes:
   """
   request = urllib.request.Request(
     url, headers = { Http.ACCEPT: accept, Http.USER_AGENT: Http.AGENT_VALUE })
+
+  # Contract:
+  # A resolved token is only ever attached to a request whose URL targets a recognized GitHub
+  # host; it is never sent to any other host.
 
   # authenticate only to GitHub's own hosts, and only when a token was found at all
   token = resolve_github_token()
@@ -396,6 +417,9 @@ def resolve_bundle(pid: str, repo: str | None) -> dict:  # waiver: mixed bytes/s
   Upstream is the repo's HEAD manifest version — the same signal Obsidian uses for update
   checks — and a rebranded repo can never pass itself off as the source for a different plugin's id.
 
+  Guarantees:
+    - Never returns a bundle recorded under a plugin id other than the one requested.
+
   Args:
     pid: Plugin id to resolve.
     repo: Owner/name of the plugin's GitHub repo, or None when it is unknown.
@@ -404,6 +428,21 @@ def resolve_bundle(pid: str, repo: str | None) -> dict:  # waiver: mixed bytes/s
     An envelope carrying the bundle's source, version, asset bytes, and the upstream error
     whenever a fallback was needed.
   """
+
+  # Domain(obsidian.plugin-bundling):
+  # # Trusting a repository for a plugin's current bundle
+  # A plugin's latest bundle is resolved the same way Obsidian's own updater does: by reading the
+  # version a repository declares in the manifest at its default branch, never a version recorded
+  # anywhere else, and then downloading the release tagged with that version.
+  # A repository only ever serves the bundle for the plugin id its own manifest currently declares.
+  # When a repository is repurposed for a different plugin, its manifest now names that other id,
+  # and the mismatch is treated as the repository no longer sourcing the original plugin at all —
+  # never as an update to it.
+
+  # Contract:
+  # Every bundle this returns, whatever its source, declares the requested plugin id; a
+  # repository or cache entry recorded under a different id is never returned as a match.
+
   cache_dir = cache_root() / CachePath.BUNDLES / pid
 
   # a plugin outside the catalog needs an explicit repo in its manifest entry to be resolvable
@@ -581,6 +620,10 @@ def build_manifest(root: Path) -> dict:  # waiver: manifest of mixed JSON shapes
   The palette group is preserved from whatever manifest the repo already carries: it names
   the template the vault grew from, which the config directory itself does not record.
 
+  Guarantees:
+    - Carries the group value over from the manifest already on disk at `root`; never derives
+      it from the vault's own configuration.
+
   Args:
     root: Vault repo root, the directory holding the config directory.
 
@@ -600,6 +643,10 @@ def build_manifest(root: Path) -> dict:  # waiver: manifest of mixed JSON shapes
   config = _capture_config(vault, omitted)
   previous = load_json(root / VaultPath.MANIFEST) or {}
   appearance = config.get(VaultPath.APPEARANCE) or {}
+
+  # Contract:
+  # The group field always carries over from whatever manifest already sits at `root`; it is
+  # never derived from the vault's own configuration, which does not record it.
 
   # assemble the manifest from the captured parts
   return {
@@ -653,6 +700,18 @@ def _capture_config(vault: Path, omitted: list[str]) -> dict:  # waiver: Obsidia
   Returns:
     A map of config filename to its captured content.
   """
+
+  # Domain(obsidian.vault-capture):
+  # # Portable configuration versus per-device state
+  # A vault's configuration directory mixes settings that describe the vault and belong in a
+  # portable snapshot with settings that describe the device or session viewing it, which would
+  # corrupt every other device the snapshot is later deployed onto.
+  # A whole configuration file is left out of the snapshot when it records nothing but window
+  # layout or session state, or when its entire content is already derived from another part of
+  # the snapshot and restoring it separately would let the two copies disagree.
+  # Within a file that is otherwise worth keeping, a single per-device setting is stripped from
+  # it instead of disqualifying the whole file — window zoom is the only such setting today.
+
   config: dict[str, Any] = {}  # waiver: Obsidian config JSON
   for path in find_all_matching(vault, VaultPath.JSON_GLOB):
     # guard: derived and per-device files never enter the manifest
@@ -684,7 +743,7 @@ def _capture_snippets(vault: Path) -> dict:  # waiver: snippet entries of mixed 
     A map of snippet filename to its provenance and, for vault-owned snippets, its body.
   """
 
-  # Domain(unfiled):
+  # Domain(obsidian.vault-capture):
   # # Provenance of a stylesheet snippet in a captured configuration
   # A snippet that is byte-identical to the one the tooling itself installs belongs to the tooling,
   # not to the vault, and travels by name alone. Recording its text instead would freeze the copy
@@ -729,6 +788,15 @@ def _capture_plugins(vault: Path, omitted: list[str]) -> dict:  # waiver: plugin
       continue
     pid = directory.name
     installed = load_json(directory / VaultPath.PLUGIN_MANIFEST) or {}
+
+    # Domain(obsidian.vault-capture):
+    # # Plugin settings owned by another writer
+    # A plugin's settings are worth capturing only when this tool is the sole writer able to put
+    # them back. A plugin that rebuilds its own settings from the vault's notes on every run owns
+    # that data itself; restoring a captured copy would only be overwritten on the next run, so
+    # capturing it in the first place would record a fact that is never true for more than a moment.
+
+    # skip capturing settings for a plugin that restores its own from elsewhere
     data = (
       None if pid in PLUGIN_DATA_SKIP
       else strip_secrets(load_json(directory / VaultPath.PLUGIN_DATA), pid, omitted))
@@ -750,6 +818,10 @@ def drift(root: Path) -> dict:  # waiver: report envelope of mixed shapes
   Writes nothing: the operator decides whether the live vault is right (re-capture) or the
   manifest is (re-deploy).
 
+  Guarantees:
+    - Never writes to the manifest or the vault's configuration; only reads state and reports
+      differences.
+
   Args:
     root: Vault repo root, the directory holding the manifest.
 
@@ -759,6 +831,11 @@ def drift(root: Path) -> dict:  # waiver: report envelope of mixed shapes
   Raises:
     WorkerError: When the repo root carries no readable manifest or no config directory.
   """
+
+  # Contract:
+  # This never writes to the manifest or the vault's configuration; it only reads state and
+  # reports differences for the operator to arbitrate.
+
   stored = load_json(root / VaultPath.MANIFEST)
   # guard: there is nothing to compare the vault against
   if not isinstance(stored, dict):
@@ -844,6 +921,16 @@ def _compare_plugins(stored: dict, live: dict, warnings: list[str]) -> list[str]
                       f"in the manifest, {now.get(PluginKey.ENABLED)} in the vault")
     if was.get(PluginKey.DATA) != now.get(PluginKey.DATA):
       findings.append(f"plugins.{pid}: settings differ")
+
+    # Domain(obsidian.vault-capture):
+    # # A version that moved on is not settings drift
+    # A plugin's version at the moment it was captured is recorded only so a later comparison can
+    # tell two situations apart: settings that genuinely changed since the snapshot, and settings
+    # that only look different because the installed plugin has migrated its own schema past what
+    # the snapshot recorded. Only the first is drift the snapshot should be blamed for; the second
+    # is a signal that the snapshot itself has gone stale and is due for a fresh capture.
+
+    # compare the version captured then against the version installed now
     captured, installed = was.get(PluginKey.CAPTURED_VERSION), now.get(PluginKey.CAPTURED_VERSION)
     # a settings snapshot taken under an older plugin may predate that plugin's own migration
     if captured and installed and captured != installed:

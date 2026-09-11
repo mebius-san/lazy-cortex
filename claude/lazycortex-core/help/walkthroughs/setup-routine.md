@@ -8,7 +8,7 @@ diagram_spec:
 source_skills:
   - lazy-routine.register
   - lazy-routine.unregister
-source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
+source_sha: 5745ae1a08dafec458ccc19d9c810a13a8974fa3
 ---
 # Register a periodic routine with the runtime daemon
 

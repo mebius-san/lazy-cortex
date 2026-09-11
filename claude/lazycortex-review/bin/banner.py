@@ -104,12 +104,35 @@ def extract(body: str) -> State | None:
 
   Mid-body callouts (anything after the first H1) are scaffold logs or stale snapshots, never the banner.
 
+  Guarantees:
+    - Recognition depends only on the `#review/<tag>` token in the callout's first line; the
+      callout's marker style (`[!hint]`, `[!caution]`, etc.) is never read.
+    - Only the region above the document's first top-level heading is searched; a
+      banner-shaped callout appearing later in the body is never recognized.
+
   Args:
     body: Full document text to search.
 
   Returns:
     The `State` encoded in the banner tag, or `None` if no banner is found above the first H1.
   """
+
+  # Contract:
+  # Recognition MUST depend only on the `#review/<tag>` token in a line's content, never on
+  # the callout's marker style.
+
+  # Contract:
+  # Only the region above the document's first top-level heading MUST be searched; a
+  # banner-shaped line appearing later in the body MUST NEVER be recognized.
+
+  # Domain(review.markup):
+  # # Banner recognition by tag, not by callout style
+  # The status banner at the top of a review document is identified by its `#review/<tag>`
+  # token, never by the surrounding callout's visual style. An operator-authored callout in the
+  # same visual style but without the tag is not read as a banner at all. Only the region above
+  # the document's first top-level heading is searched, because a banner-shaped line appearing
+  # later in the body is a leftover scaffold trace or a stale snapshot, never the live status.
+
   h1 = _H1_RE.search(body)
   scan_end = h1.start() if h1 else len(body)
   region = body[:scan_end]
@@ -263,6 +286,15 @@ def desired_state(
            `review_approved: true`.)
     5. else → READY
 
+  Guarantees:
+    - Returns `State.IN_PROCESS` whenever `dispatch_state` is not `CHAIN_EXHAUSTED`,
+      regardless of every other argument.
+    - Once the dispatch has exhausted, the result follows a fixed priority: a pending
+      concerns decision outranks every other signal; an unanswered question, an
+      undecided candidate, an open concern, or a failed `domain_ready` check outranks
+      approval; and only once none of those hold does `approved` decide between
+      `IN_PROCESS` / `FINALIZING` and `READY`.
+
   Args:
     body: Full document text, scanned for open questions and concerns.
     dispatch_state: Current phase of the dispatch cycle.
@@ -278,6 +310,27 @@ def desired_state(
   Returns:
     The `State` the banner should display for this tick.
   """
+
+  # Contract:
+  # When `dispatch_state` is not `CHAIN_EXHAUSTED`, the result MUST be `State.IN_PROCESS`
+  # regardless of every other argument. Once exhausted, `concerns_decision_pending` MUST
+  # outrank every other signal; an open question, undecided candidate, open concern, or a
+  # failed `domain_ready` check MUST outrank approval; and only once none of those hold
+  # does `approved` decide between `IN_PROCESS` / `FINALIZING` and `READY`.
+
+  # Domain(review.markup):
+  # # Banner state priority once the work chain has emptied
+  # While an agent action is still pending in the current round, the banner always reports
+  # that work is in progress — the operator has nothing to decide yet. Once the chain has
+  # drained, the state follows a fixed priority: a pending concerns decision comes first and
+  # overrides every other signal, because the operator must choose a direction before anything
+  # else matters. Next, an open question, an undecided proposal, or an open concern holds the
+  # document at "action needed", and so does a failed domain-specific readiness check even with
+  # no open callout. Only once none of these hold does approval take over: an approved document
+  # still reports work in progress while post-approval validation is still running, and only
+  # reports "finalizing" once that work is done. A document that clears every gate without yet
+  # being approved is simply ready for the operator to approve.
+
   if dispatch_state is not DispatchState.CHAIN_EXHAUSTED:
     return State.IN_PROCESS
   if concerns_decision_pending:
@@ -345,6 +398,10 @@ def render(
   - For `State.IN_PROCESS`, `waiting_context` enriches the title ("Waiting: validators" etc.);
     unknown or `None` → bare "Waiting".
 
+  Guarantees:
+    - The "approve the whole document" checkbox line appears in the rendered markup only
+      when `state` is `State.READY`; every other state's output never carries it.
+
   Args:
     state: Banner state to render.
     approved: Ticks the approval checkbox when rendering `State.READY`.
@@ -355,6 +412,17 @@ def render(
   Returns:
     Callout markdown string for the given state, ready to embed in the document body.
   """
+
+  # Contract:
+  # The rendered markup MUST carry the "approve the whole document" checkbox line only
+  # when `state` is `State.READY`; every other state's output MUST NEVER contain it.
+
+  # Domain(review.markup):
+  # # Approval checkbox scope
+  # The tickable "approve the whole document" checkbox appears only in the ready-to-approve
+  # banner. No other banner state ever renders it — an operator cannot approve mid-round, while
+  # a concerns decision is still pending, or once finalizing has already started.
+
   if state is State.CONCERNS_DECISION:
     return _CONCERNS_DECISION_TEMPLATE.format(
         tick_continue = "x" if continue_review        else " ",
@@ -408,10 +476,32 @@ def replace_banner(
     against whatever precedes the body and the blank-line-or-not
     ambiguity (Bug 30 part a) can't bleed in.
 
+    Guarantees:
+      - The result carries exactly one banner block, positioned as the first content
+        directly below any leading frontmatter (or at the very top when there is none) —
+        never above the frontmatter and never further down, regardless of where a prior
+        banner sat in `body`.
+
     Returns:
       The body with exactly one banner block, anchored at the top of the
       content below any leading frontmatter.
     """
+
+  # Contract:
+  # The returned body MUST carry exactly one banner block, anchored as the first content
+  # directly below any leading frontmatter (or at the very top when there is none) — never
+  # above the frontmatter, never further down, and never duplicated.
+
+  # Domain(review.markup):
+  # # Banner anchoring invariant
+  # A review document carries exactly one status banner, and it always sits at the very top of
+  # the document's content — directly below the frontmatter block when one is present, never
+  # above it and never further down. Whenever the banner is repainted, whatever occupies that
+  # role is removed first, wherever it currently sits, because an earlier round can leave a
+  # stray banner mis-anchored deeper in the body; only after that removal does the fresh banner
+  # get placed at the top, so the document never ends up carrying two banners or one sitting
+  # below its own content.
+
   new_banner = render(
       state,
       approved=approved,

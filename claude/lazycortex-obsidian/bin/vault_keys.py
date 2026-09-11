@@ -194,6 +194,15 @@ class BundleSourceKind(StrEnum):
     NONE: Nothing could be resolved; the plugin was skipped.
   """
 
+  # Domain(obsidian.plugin-bundling):
+  # # Plugin bundle resolution fallback ladder
+  # A community plugin's install bundle is resolved by trying, in order: the plugin's live upstream
+  # release, then a copy vendored in the local cache from an earlier successful resolution, then a
+  # copy bundled with this plugin for a plugin with no public release to fall back to, and finally
+  # nothing when none of those has the bundle. Each source is pinned to the plugin's own id, so a
+  # repository that has been renamed or repurposed can never serve as the bundle source for a
+  # different plugin id than the one it originally shipped.
+
   UPSTREAM = "upstream"
   CACHE = "cache"
   BUNDLED = "bundled"
@@ -219,6 +228,14 @@ class ReportKey:
     ERRORS: Conditions the operator must resolve; a non-empty list fails the run.
   """
 
+  # Domain(obsidian.vault-capture):
+  # # Report severity model
+  # The worker's report carries two independent kinds of condition worth surfacing after a run.
+  # A warning names something the operator may want to look at, but the run still succeeded and
+  # nothing about it needs fixing before the vault can be trusted. An error names something the
+  # operator must resolve; a report carrying even one error means the run as a whole failed,
+  # regardless of how much of the work it otherwise completed.
+
   ACTION = "action"
   MANIFEST = "manifest"
   CONFIG_FILES = "config_files"
@@ -240,6 +257,14 @@ class AppearanceKey:
     CSS_THEME: Name of the active theme.
     ZOOM_FACTOR: Window zoom, a per-device value never captured.
   """
+
+  # Domain(obsidian.vault-capture):
+  # # Device-local settings excluded from portable capture
+  # A vault's captured configuration is meant to travel unchanged across machines and devices, so a
+  # setting that only reflects the specific device or window the vault happened to be open on has no
+  # place in it. The window zoom factor is such a setting: it is never written into the captured
+  # record, so restoring the configuration on a different device leaves that device's own zoom
+  # exactly where it already was rather than overwriting it with a value that belonged elsewhere.
 
   CSS_THEME = "cssTheme"
   ZOOM_FACTOR = "zoomFactor"
@@ -277,6 +302,16 @@ class Http:
     ENV_TOKENS: Environment variables consulted for a GitHub token, in order.
     TOKEN_HOSTS: Hosts whose requests carry the token.
   """
+
+  # Domain(obsidian.plugin-bundling):
+  # # Credential scope for bundle fetches
+  # A GitHub token, once found, is never attached to every outgoing request — only to a request
+  # aimed at one of a fixed set of known GitHub hosts. A URL outside that set never carries the
+  # token, however the token was obtained, so a compromised or unexpected release location can
+  # never harvest the operator's credential merely by being asked for a bundle. When more than
+  # one source of a token is available, the value already sitting in the environment always wins
+  # over the one behind an external command, since reading the environment carries no risk of
+  # side effects.
 
   ACCEPT = "Accept"
   USER_AGENT = "User-Agent"

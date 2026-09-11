@@ -167,6 +167,17 @@ def _managed_keys(role: str, record: dict) -> list[tuple[str, str]]:
     The role key, the four level gates closed, the halt flag, and the role's paint keys, in
     write order; the colour literal is quoted so YAML never reads it as a comment.
   """
+
+  # Domain(spec.notes):
+  # # A level note's identity keys are fixed per level role
+  # A level note carries a closed set of frontmatter keys that name what it is rather than what
+  # it discusses: which level role it plays, every level gate closed until the coordinator
+  # judges otherwise, and a halt flag cleared until something stops the level's own progress.
+  # Paint follows the same role — a product may declare its own icon and colour, and where it
+  # does not, the shipped role declaration supplies them, so every level note of one role
+  # starts out looking and gating the same way.
+
+  # every level note owes its role, every gate closed, and a cleared halt flag
   pairs = [ ( SpecKey.ROLE, role ) ]
   pairs += [ ( gate, BOOL_FALSE ) for gate in LEVEL_GATE_ORDER ]
   pairs.append(( SpecHaltKey.HALTED, BOOL_FALSE ))
@@ -276,6 +287,17 @@ def _insert_sections(body: str, blocks: dict[str, list[str]], lang: str) -> tupl
     A `(body, added)` pair — `added` names the headings inserted, in canonical order, and is
     empty when the body already carried the full roster.
   """
+
+  # Domain(spec.notes):
+  # # A level note's body keeps one fixed section order
+  # Every level note — the catalog root's own or a product's — carries its working sections in
+  # the same fixed order: a summary opens the document and an attachments registry closes it,
+  # with the coordinator's own working sections placed between the two. Whichever of those
+  # working sections a note already has stays exactly where it is; only a section still missing
+  # is inserted, always ahead of the next section the roster expects to follow it, so the shape
+  # converges toward the same order no matter how many passes it takes to complete.
+
+  # locate every canonical section already present, and note the schema's still-missing ones
   lines = body.splitlines()
   positions = { line.strip(): idx for idx, line in enumerate(lines) if line.strip() in _SECTION_ORDER }
   missing = [ heading for heading in _SECTION_ORDER if heading not in positions ]

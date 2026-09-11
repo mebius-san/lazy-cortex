@@ -395,6 +395,14 @@ class Check8Scaffold:
         "severity": "WARN",
         "message": f"{self.MARKER!r} not found in {self.RULE_REL} — re-run /lazy-python.install",
       }
+
+    # Domain(install.reconciliation):
+    # # Scaffold registry entries must hold literal consumer paths
+    # A scaffold registry entry is read as a literal string, never expanded as an environment
+    # reference, so an entry that still names a shipped plugin location or an unresolved
+    # placeholder never resolves for the consumer; only a path already rewritten to the
+    # consumer's own tree at install time works.
+
     # The entry must point at the consumer-local copy, not a plugin path. `${CLAUDE_PLUGIN_ROOT}`
     # does not expand in rule bodies, so a registry value carrying it (or an absolute cache path)
     # never resolves — scaffold-sync writes the consumer-local path; an env-var / absolute value
@@ -574,6 +582,16 @@ class Check11Venv:
     Returns:
       Finding dict with `severity` (PASS or WARN) and a `message` string.
     """
+
+    # Domain(install.reconciliation):
+    # # Python environment resolution order
+    # The tooling looks for a Python execution environment in a fixed order: an already
+    # activated environment, a project-local environment, an explicitly configured one, and
+    # only when none of those exist, one created automatically before the checks run. The
+    # first candidate that exists settles the outcome even when it turns out to lack the
+    # required tools — a broken candidate is reported as broken rather than being skipped in
+    # favor of a later candidate in the order.
+
     # probe 1: $VIRTUAL_ENV
     virtual_env = os.environ.get("VIRTUAL_ENV", "")
     if virtual_env:
@@ -688,6 +706,14 @@ class Check12DomainDictionary:
     Returns:
       Finding dict with `severity` (PASS or WARN) and a `message` string.
     """
+
+    # Domain(wiki.domains):
+    # # Domain dictionary becomes required only once knowledge is filed
+    # A domain-groups dictionary is optional until at least one source in the project actually
+    # carries a domain knowledge marker; only from that point does the dictionary's absence
+    # become a finding, since before any marker exists there is nothing yet for a dictionary
+    # to resolve groups against.
+
     dictionary = self._dictionary_path()
     # guard: the dictionary is there, so every group in code has something to resolve against
     if dictionary.exists():

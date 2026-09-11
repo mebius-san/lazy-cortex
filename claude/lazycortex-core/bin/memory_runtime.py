@@ -51,6 +51,10 @@ def resolve_slug(expert_dir: Path, base: str) -> str:
   """
   Pick a slug under the expert directory that does not collide with an existing note.
 
+  Guarantees:
+    - The returned slug never collides with an existing note file already present under
+      `expert_dir` at the moment of the call.
+
   Args:
     expert_dir: Directory under `.memory/<expert>/` where the note will be written.
     base: Candidate slug, typically produced by `slugify`.
@@ -59,6 +63,18 @@ def resolve_slug(expert_dir: Path, base: str) -> str:
     `base` when no `<base>.md` exists in `expert_dir`; otherwise the lowest-numbered `<base>-N` suffix
     (starting at `-2`) for which `<base>-N.md` does not yet exist.
   """
+
+  # Contract:
+  # The returned slug never collides with an existing note file already present under
+  # `expert_dir` at the moment of the call.
+
+  # Domain(runtime.memory):
+  # # Memory note slug collision resolution
+  # Two memory notes never share a slug within the same expert directory. The first note to claim a
+  # title keeps the plain slug; every later note whose title collapses to the same slug is renumbered
+  # with a `-2`, `-3`, ... suffix, always starting at two rather than one so the original, unnumbered
+  # note is never mistaken for a numbered duplicate of itself.
+
   # guard: no collision — base slug is available as-is
   if not (expert_dir / f"{base}.md").exists():
     return base
@@ -80,6 +96,16 @@ def validate_frontmatter(fm: dict) -> None:
     FrontmatterError: If a required field is missing, if `tags` is not a non-empty list of strings
       each prefixed with `memory/`, or if `type` is not one of the values in `VALID_TYPES`.
   """
+
+  # Domain(runtime.memory):
+  # # Memory note frontmatter contract
+  # A memory note's frontmatter must always declare a title, its tags, a type, and a one-line summary —
+  # the fields later recall and browsing rely on to find and judge the note without opening its body.
+  # Every tag carries the `memory/` prefix so a note's own tags stay distinguishable from tags any
+  # other system attaches to the same file tree. A note's type is drawn from a fixed vocabulary —
+  # persona, rule, example, warning, fact — so every consumer of the memory store can classify a
+  # note's nature the same way, regardless of who wrote it.
+
   for field in ("title", "tags", "type", "summary"):
     # guard: required field missing from frontmatter
     if field not in fm:
@@ -218,6 +244,10 @@ def regen_local_tag_file(expert_dir: Path, topic: str) -> None:
   one bullet per matching note into `<expert_dir>/.tags/<topic>.md`. Deletes the tag file when no
   note carries the tag.
 
+  Guarantees:
+    - After the call, the per-expert tag file for `topic` exists if and only if at least one note
+      under `expert_dir` still carries the `memory/<topic>` tag.
+
   Args:
     expert_dir: Directory under `.memory/` for one expert.
     topic: Topic suffix (the portion after the `memory/` prefix) to regenerate.
@@ -225,6 +255,13 @@ def regen_local_tag_file(expert_dir: Path, topic: str) -> None:
   Raises:
     OSError: If the tag file or its parent directory cannot be written or removed.
   """
+
+  # Contract:
+  # After the call, the per-expert tag file for `topic` exists if and only if at least one
+  # note under `expert_dir` still carries the `memory/<topic>` tag; it is deleted when the
+  # last carrying note is gone, never left behind as a stale empty file.
+
+  # locate the per-expert tag file this topic would live in
   tags_dir = expert_dir / RepoDir.TAGS
   tag_file = tags_dir / f"{topic}.md"
   # (slug, type, summary) tuples for every matching note
@@ -239,6 +276,15 @@ def regen_local_tag_file(expert_dir: Path, topic: str) -> None:
       tags = [ tags ]
     if f"{TAG_PREFIX}{topic}" in tags:
       matching.append((note.name, fm.get(MemoryFrontmatterKey.TYPE, "?"), fm.get(MemoryFrontmatterKey.SUMMARY, "")))
+
+  # Domain(runtime.memory):
+  # # Memory tag index self-pruning
+  # A tag file exists only for as long as at least one note still carries that tag; the moment none
+  # do, the tag file is deleted rather than left behind empty. The same rule holds one level up, where
+  # a cross-expert tag file lists only the experts that still hold the topic locally. This keeps the
+  # tag index an accurate, browsable reflection of what memory currently exists, with no stale entries
+  # left for anyone to clean up by hand.
+
   # no notes carry the topic — remove the stale tag file if any
   if not matching:
     if tag_file.exists():
@@ -257,6 +303,10 @@ def regen_global_tag_file(memory_root: Path, topic: str) -> None:
   exists, and writes one bullet per holding expert into `<memory_root>/.tags/<topic>.md`. Deletes
   the global tag file when no expert holds the topic.
 
+  Guarantees:
+    - After the call, the cross-expert tag file for `topic` exists if and only if at least one
+      expert directory under `memory_root` still holds a local tag file for `topic`.
+
   Args:
     memory_root: Root `.memory/` directory containing per-expert subdirectories.
     topic: Topic suffix (the portion after the `memory/` prefix) to regenerate.
@@ -264,6 +314,13 @@ def regen_global_tag_file(memory_root: Path, topic: str) -> None:
   Raises:
     OSError: If the global tag file or its parent directory cannot be written or removed.
   """
+
+  # Contract:
+  # After the call, the cross-expert tag file for `topic` exists if and only if at least one
+  # expert directory under `memory_root` still holds a local tag file for `topic`; it is
+  # deleted when the last holding expert is gone, never left behind as a stale empty file.
+
+  # locate the cross-expert tag file this topic would live in
   global_tag_file = memory_root / RepoDir.TAGS / f"{topic}.md"
   holders: list[str] = []
   if memory_root.is_dir():

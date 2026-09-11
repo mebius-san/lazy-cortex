@@ -182,6 +182,17 @@ def _classify(values: dict, body: str) -> str:
   Returns:
     One of `naked`, `partial`, `ready`, `ready-for-apply`, `terminal`, or `unknown-state`.
   """
+
+  # Domain(spec.requests):
+  # # Request intake state table
+  # A request file's place in the intake pipeline is read entirely from its own frontmatter and
+  # body, never carried anywhere else: a file with no frontmatter yet has not opted in at all; a
+  # draft carrying every opt-in key plus its banner is fully in the review loop; a draft missing
+  # any of those pieces is only partway opted in; a draft that also carries a review result has
+  # already been finalized and awaits the separate apply step, which owns that state exclusively;
+  # a status outside the draft stage is terminal and closed to further opt-in; and a draft with
+  # no status at all is left alone as operator state nobody but the operator should touch.
+
   if not values:
     return State.NAKED
   status = values.get(SpecKey.STATUS)
@@ -368,6 +379,11 @@ def open_naked_file(file_path: Path) -> str:
   """
   Apply the mechanical opt-in transition to a request file.
 
+  Guarantees:
+    - When the delegated review-side bootstrap fails after the spec-side frontmatter write has
+      already landed, the file is left in a shape the next call classifies as `partial`, so a
+      retry on the same file always resumes and completes the interrupted opt-in.
+
   Notes:
     - Writes to `file_path` and, for the `opened` and `repaired` outcomes, invokes the
       `lazycortex-review` CLI to seed the review-side shape before returning.
@@ -383,6 +399,21 @@ def open_naked_file(file_path: Path) -> str:
     SystemExit: When the review CLI cannot be resolved or exits non-zero, for the
       `opened` and `repaired` transitions.
   """
+
+  # Domain(spec.requests):
+  # # Partial opt-in self-heals on the next pass
+  # Opening a request is two steps that cannot land as one transaction: the spec-side frontmatter
+  # is written to disk first, and only afterward is the review-side shape delegated onward. When
+  # the delegated step fails, the new shape is left on disk without ever being committed — but
+  # that half-shaped file is exactly what the next pass classifies as partial, so the same repair
+  # is simply retried instead of getting stuck. No operator intervention is needed for an
+  # interrupted opt-in to complete itself.
+
+  # Contract:
+  # When the delegated review-side bootstrap fails after the spec-side frontmatter write has
+  # already landed, the file is left in a shape the next call classifies as `partial`, so a
+  # retry on the same file always resumes and completes the interrupted opt-in.
+
   text = file_path.read_text()
   values, _, fm_end = _parse_frontmatter(text)
   state = _classify(values, text[fm_end:])
@@ -431,6 +462,15 @@ def _atomic_commit(
   Raises:
     subprocess.CalledProcessError: When either git invocation exits non-zero.
   """
+
+  # Domain(spec.notes):
+  # # A container's summary rides the same commit as its membership
+  # The requests inbox keeps a running summary of what it holds, and that summary is only ever
+  # true the instant it is read if it changes in step with the requests it counts. Folding the
+  # summary's own update into the very commit that opened or repaired a request is what keeps
+  # the two from drifting apart — a separate summary commit would leave a window where the
+  # displayed count disagrees with what the inbox actually contains.
+
   cwd = file_path.parent
   add_paths: list[str] = [str(file_path)]
   # waiver: inbox path segments are fixed protocol constants; no constants class in this module

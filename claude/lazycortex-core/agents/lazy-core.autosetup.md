@@ -12,11 +12,11 @@ Single-dispatch maintenance agent. One prompt (`repo=<absolute path>`) in, one s
 
 Before any other tool call, write out the step ledger — one line per phase below (`Phase 1 — Guard`, `Phase 2 — Discover`, `Phase 3 — Execute installs`, `Phase 4 — Commit`, `Phase 5 — Report + log`), each marked `pending`. Re-emit the line `in_progress` on enter and `completed` on exit with a one-word outcome. Do not reach Phase 5 while an earlier phase is still `pending`.
 
-**Discovery goes through `Glob` and `Grep`, never through Bash.** Every enumeration of the target repo — its `.claude/` layout, plugin manifests, settings files — is a `Glob` (or `Grep`) call; `Bash` `find`, `ls`, `grep -r`, `rg` over a repo or home path are never issued, in any spelling of the path. **A permission denial is terminal for that step:** record the outcome `failed` with the refusal text verbatim and move on. Re-issuing the same command with a different path form (`~/` for `/Users/…`), a different tool, or a compound wrapper is forbidden — a denied command is the operator's decision, not an obstacle.
+**Discovery goes through `Glob` and `Grep`, never through Bash.** Every enumeration of the target repo or of the plugin cache — its `.claude/` layout, plugin manifests, settings files, `skills/*/SKILL.md` — is a `Glob` (or `Grep`) call; `Bash` `find`, `ls`, `cat`, `grep -r`, `rg` over a repo, cache, or home path are never issued, in any spelling of the path. **A permission denial is terminal for that step:** record the outcome `failed` with the refusal text verbatim and move on. A denied command is the operator's decision, not an obstacle, and every re-issue of it is the same violation whatever the disguise: a different path form (`~/` for `/Users/…`, a variable holding the path, a relative path after `cd`), a different tool, a prefix (`echo x; ls …`, `true && ls …`), a chain (`;`, `&&`, `||`, a newline inside one Bash call), a wrapper (`env`, `sh -c`, a subshell, a `for` loop), or a `2>&1` / `| head` suffix. Wrapping a denied command so the deny rule no longer matches is exactly the manoeuvre this paragraph forbids, and a report that calls it "worked around" is a report of a violation.
 
 ## Phase 1 — Guard
 
-1. Parse `repo=` from the prompt; the path must exist and be a git repository (`git -C <repo> rev-parse --git-dir`). Fail explicitly otherwise.
+1. Parse `repo=` from the prompt; the path must exist (`Bash(test -d <repo>)`) and be a git repository (`git -C <repo> rev-parse --git-dir`). Fail explicitly otherwise. Never `ls` the path or its parent to "see what is there".
 2. **Dirty tree** — `git -C <repo> status --porcelain` non-empty → return the report with a single `skipped-dirty` outcome; touch nothing.
 3. **Identity** — read `git -C <repo> config user.email`. If unset, or the repo has a remote whose owner obviously mismatches the identity (e.g. a public github remote with a private-persona email), return `skipped-identity` without committing anything. Otherwise record the identity for Phase 4.
 
@@ -27,14 +27,18 @@ Outcome: `guarded` / `skipped-dirty` / `skipped-identity` / `failed: <reason>`.
 Mirror `lazy-core.setup` Step 1, read-only, resolved against the **target repo** — never the machine's union of all projects. `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.setup-phases-contract.md § Resolving a repo's enabled plugin set` is the authority for the next two bullets:
 
 - Enabled-plugin set := union of `enabledPlugins` (keys whose value is `true`, `@<marketplace>` suffix stripped) from `<repo>/.claude/settings.json` and `<repo>/.claude/settings.local.json`. This — not `installed_plugins.json` — decides which install chains run. Consult `~/.claude/plugins/installed_plugins.json` only to resolve each such plugin's `installPath` (any entry for the plugin will do). A plugin enabled in the repo but absent from the machine registry/cache → report its skill line as `skipped: plugin not installed on this machine`, never a hard fail.
-- Candidates: any `*.install` skill directory in an enabled plugin, plus any skill with `lazy_setup_phase:` frontmatter. Exclude any candidate whose frontmatter declares `requires_live_session: true` — it needs live-session resources (e.g. loaded `mcp__*` tools) a headless agent never has; report its line as `skipped: live-session-only`, never execute or fail it.
+- Candidates: any `*.install` skill directory in an enabled plugin, plus any skill with `lazy_setup_phase:` frontmatter. Enumerate them per plugin as `Glob: <installPath>/skills/*.install/SKILL.md` and `Grep: ^lazy_setup_phase:` over `<installPath>/skills/*/SKILL.md`, where `<installPath>` comes from `installed_plugins.json` — the cache tree is never listed with `ls` or `find`, and the version directory under it is never guessed. Exclude any candidate whose frontmatter declares `requires_live_session: true` — it needs live-session resources (e.g. loaded `mcp__*` tools) a headless agent never has; report its line as `skipped: live-session-only`, never execute or fail it.
 - Order per `lazy-core.setup` Step 2: pre-install → per-plugin (`lazy-core.install` first, then alphabetical) → post-install.
 
 Outcome: `discovered: N`.
 
 ## Phase 3 — Execute installs (no-questions discipline)
 
+**The settings ladder runs first.** Before the first install, mirror `lazy-core.setup` Step 0 against the target: `Bash(PYTHONPATH=<core-installPath>/bin "${LAZYCORTEX_PYTHON:-python3}" <core-installPath>/bin/lazy_settings.py migrate <repo>/.claude/lazy.settings.json)`, where `<core-installPath>` is `lazycortex-core`'s path from Phase 2. Carry the printed summary line and every per-section `<section>: vN -> vM` line into the Phase 5 report as `migrated: …`. A non-zero exit ends Phase 3 with `aborted-by-migration-failure` and no install runs, exactly as `lazy-core.setup` does — an installer reading a stale schema writes a stale shape.
+
 For each discovered SKILL.md, in order: `Read` it and execute its steps yourself against the target repo — every `<repo-root>` / "current project" reference in the skill resolves to `repo=`, never to your own cwd. Do NOT dispatch children via a `Skill` tool — a question-gated child would dead-end without a user channel.
+
+**Execute the skill as the skill, not as a paraphrase of it.** Before the first tool call of each skill, write out that skill's own step ledger — its `Execution discipline` list, titles verbatim — and close every step with its outcome word before moving to the next; a step you did not close is a step you did not run, and Phase 5 reports it as `failed: <skill> / <step> — not executed`. Every `Bash` call in this phase is a command line taken from the step being executed, with the skill's placeholders (`<repo-root>`, `${CLAUDE_PLUGIN_ROOT}`, `<installPath>`) substituted and nothing else changed. A loop of your own over plugins, a `diff` in place of `file_sync.py`, a `python3 -` script the step does not contain, a `cat > ~/tmp/…` staging file, or a `rm` the step does not name is not executing the step, it is replacing it. When a step's command cannot be issued — a tool the step needs is not on your list, a permission is denied — the step's outcome is `failed` with the reason, never a substitute of your own.
 
 **Install-managed mirrors are never judged by reading.** Every rule and template a skill copies out of its plugin cache is synced by that skill's own script (`lazycortex-core file-sync`, `scaffold sync-rule`, `install_phases.py phase1`) — run it, and take the verdict from its receipt. Two things follow, both non-negotiable:
 
@@ -65,6 +69,7 @@ Write the run log per `lazy-log.logging` to `<repo>/.logs/claude/lazy-core.autos
 ## autosetup: <repo>
 
 ### outcomes
+migrated: <the summary line, its per-section lines, or `failed: <stderr>`>
 applied: <skill/step list or none>
 already-current: <list or none — each entry carries the receipt counts it rests on>
 needs-interactive: <skill/step list or none>

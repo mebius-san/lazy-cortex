@@ -161,6 +161,18 @@ def _strip_diff(text: str) -> str:
     Text with each fence span replaced by its surviving emissions, cancelled lines removed, and
     everything outside fences kept byte-for-byte.
   """
+
+  # Domain(review.markup):
+  # # Cross-fence revision semantics for diff-style edits
+  # A writer revising an insertion made in an earlier round marks the prior text for removal in
+  # a new diff-style edit block, alongside its replacement. The removal retracts the earliest
+  # still-live insertion or emphasis line, from any earlier block anywhere in the document,
+  # whose content matches exactly; the replacement then stands in the retracted line's place,
+  # so the reviewer never sees the abandoned prior text alongside its revision. Context lines
+  # shown for reference are never subject to retraction, since they are not a writer's own
+  # change. A removal with no matching earlier insertion falls back to being dropped from its
+  # own block, the plain reading of a deletion against unedited body text.
+
   fences = list(_DIFF_FENCE_RE.finditer(text))
   # guard: no fences present — return source verbatim
   if not fences:
@@ -229,6 +241,10 @@ def drop_whitespace_only_diff_fences(text: str) -> str:
   Defensive layer over the writer-protocol rule "do not reflow body you do not semantically
   change" — defends against writers that reflow anyway.
 
+  Guarantees:
+    - A `diff` fence with any real content difference between its `-` and `+` payload is left
+      in the output unchanged.
+
   Args:
     text: Source text possibly containing `diff` fences.
 
@@ -236,6 +252,13 @@ def drop_whitespace_only_diff_fences(text: str) -> str:
     The input text with whitespace-only `diff` fences replaced by their resolved content;
     real-content fences are left intact.
   """
+
+  # Contract:
+  # A `diff` fence with any real content difference between its `-` and `+`
+  # payload is left in the output exactly as written; only a fence whose
+  # `-` and `+` payload differ solely in whitespace is replaced with its
+  # resolved text.
+
   def repl(match: re.Match[str]) -> str:
     body = match.group(1)
     minus_lines: list[str] = []
@@ -358,6 +381,9 @@ def strip_markers(text: str, *, style: str) -> str:
   normalized to a single paragraph break so the finalized document carries no stray whitespace
   gaps (Bug 90).
 
+  Guarantees:
+    - The returned text never contains a run of three or more consecutive newlines.
+
   Args:
     text: Source text containing edit-annotation markup.
     style: Annotation style to strip; one of `SUPPORTED_STYLES`.
@@ -369,6 +395,23 @@ def strip_markers(text: str, *, style: str) -> str:
   Raises:
     ValueError: If `style` is not a recognized annotation style.
   """
+
+  # Contract:
+  # The returned text never contains a run of three or more consecutive
+  # newlines; any such run is always collapsed to a single paragraph
+  # break (two newlines).
+
+  # Domain(review.markup):
+  # # Edit-annotation styles
+  # A review writer marks a proposed body edit in one of several selectable markup styles: an
+  # inline style with a marker per operation, a unified-diff-style fenced block with a prefix
+  # per line, the CriticMarkup convention, or inline HTML edit tags. Every style carries the
+  # same operations — a deletion, an insertion, an inline note not meant to survive to the
+  # final text, and a highlighted emphasis — differing only in how each is written. Whichever
+  # style a document is configured for, every writer touching that document uses it
+  # consistently, and its markup folds away entirely once a round finalizes, leaving only the
+  # resolved text behind.
+
   try:
     folded = _STRIPPERS[style](text)
   except KeyError as exc:

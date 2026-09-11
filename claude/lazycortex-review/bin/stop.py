@@ -45,12 +45,29 @@ def stop_review(file_path: Path) -> bool:
   """
   Set `review_active` to `false` in the document's frontmatter.
 
+  Guarantees:
+    - Leaves the round counter, phase, done-lists, approval state, and the document body
+      unchanged; only `review_active` is modified.
+
   Args:
     file_path: Absolute path to the markdown file to update.
 
   Returns:
     `True` if the file was modified, `False` if it was already inactive.
   """
+
+  # Domain(review.lifecycle):
+  # # Stopping pauses the round machine, it does not reset it
+  # Leaving review only turns the loop off; the round counter, phase, done-lists, and
+  # approval state are left exactly as they stood, and the document body is untouched. A
+  # later re-entry into review resumes the round machine from wherever it was paused,
+  # rather than starting the cycle over.
+
+  # Contract:
+  # Stopping review changes only `review_active`; the round counter, phase,
+  # done-lists, approval state, and the document body are left unchanged.
+
+  # flip the active flag; every other lifecycle key is left untouched
   text = file_path.read_text()
   new_text = _fm.set_field(text, ReviewKey.ACTIVE, False)
   if new_text == text:

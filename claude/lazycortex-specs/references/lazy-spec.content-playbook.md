@@ -1,8 +1,8 @@
 ---
 name: lazy-spec.content-playbook
-description: Type playbook for content assets — one design document describing a game entity, tools preset to data at creation, no architecture and no planning step.
+description: Type playbook for content assets — a design document describing a game entity (an opt-in vision may precede it), tools preset to data at creation, no architecture and no planning step.
 ---
-# Content type playbook — one game entity, one document, zero planning
+# Content type playbook — one game entity, zero planning
 
 This file is the law of the wake on which `spec.coordinator` works an asset whose status folder-note carries `spec_asset_type: content`. It covers the first half of the flow: what defines the asset, what closes `spec_design_done` and `spec_plan_done`, and which checkboxes hang before work starts. Implementation and verification are declared by the `data` and `test` tool playbooks.
 
@@ -10,7 +10,7 @@ This file is the law of the wake on which `spec.coordinator` works an asset whos
 
 `spec_asset_type: content` — the asset describes **one** game entity: a race, a skill, an item, an enemy class, a faction. Not a set, not a subsystem, not a mechanic — a single unit of content that is then entered into the project's data files against its schemas.
 
-- **Start document** — `design.md`, `spec_doc_type: design`, and it is the only document of definition. The design states what the entity is, how it differs from its neighbours, what its numbers and links are. No second document is authored on this type: a unit of content has no separate "how it is built" layer — the build is dictated by the project's schemas, not by the asset.
+- **Start document** — `design.md`, `spec_doc_type: design`, and it is the document of definition. The design states what the entity is, how it differs from its neighbours, what its numbers and links are. An opt-in `vision.md` may precede it through `Write vision`, and nothing else is authored on this type: a unit of content has no separate "how it is built" layer — the build is dictated by the project's schemas, not by the asset.
 - **`cancelled` is refused on `design.md`** — the asset is abandoned as a whole through `spec_cancelled`.
 - **Location is not a fact of the type.** The declaration's `default_path` drops new content assets into their own subfolder, but the asset is legal anywhere: inside the folder of a feature that introduces a family of entities, or next to its siblings. Type resolution reads `spec_asset_type`, never a path; the asset boundary stays the folder whose folder-note carries `spec_role: status`.
 - **Tools are known from creation.** The type declaration names `default_tools: ["data"]`, and the scaffold writes that list into `spec_tools` when the asset is created. The tool determination that happens after design approval on other types has already happened here: a unit of content is made by entering data. The `test` tool is added by the same rules as any other — a coordinator decision, when the entity warrants an executed check, never automatically.
@@ -29,13 +29,17 @@ The gates are a strict ladder — each requires the one before it. The `lazy-spe
 
 `spec_develop_done` is closed by the `data` tool's own accepted report, `spec_tests_passing` by the `test` tool or by freedom from its absence, `spec_released` by an external signal. What exactly closes them is stated by the tool playbooks.
 
+**Downward reconciliation.** A gate already true goes stale when its governing document reappears un-accepted, and a dependent document whose source was re-approved after it goes stale — back to `draft` where it carries a stage — and its gate turned off — the source-staleness rule of `lazy-spec.coordination-playbook.md`, whose table names the source of every document of this type. The coordinator flips the gate back with `flip-gate --off` and re-runs its upward checks in the same pass.
+
 ## The first-half checkboxes
 
-Exactly one:
+| Checkbox | Appears when | On tick |
+|---|---|---|
+| `Write design` | asset exists AND `design.md` doesn't exist | seed `design.md:design`, then the seed-then-start flow below |
+| `Write vision` | asset exists AND `design.md` is not `approved` AND `vision.md` doesn't exist | seed `vision.md:vision`, then the seed-then-start flow below |
+| `Publish` | `spec_released` true AND `spec_draft` still true | no job — the tick clears `spec_draft` through `note-set-key` and the coordinator removes the checkbox |
 
-| Checkbox | Appears when |
-|---|---|
-| `Publish` | the terminal gate `spec_released` has closed and `spec_draft` is still `true`. |
+**Seed-then-start.** The single mechanic for every `Write` row of this table: a tick is never a writer job. The coordinator seeds the one document with `lazycortex-specs seed-doc <product> <folder-note-path> --doc <name>:<type>` — the type's template chain, stage `empty`, the folder-note's `spec_source_requests` copied onto the doc — and then branches on the folder-note's `## Source requests`. With at least one entry there, review opens immediately with `Skill(lazycortex-review:lazy-review.start, "<doc>")`, and the class's main writer works round 1 reading the request(s) from its job context. With none, the coordinator waits for the operator's own commit into the skeleton and opens review on that wake.
 
 Neither `Write architecture` nor a plan checkbox ever hangs on this type: there is no architecture step for a unit of content by definition of the type, and there are no plans because none of its tools declares one. Block shape in `# Gates` is the common one:
 

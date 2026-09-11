@@ -211,6 +211,17 @@ def _rewrite_body(body: str, pattern: re.Pattern, replacement: str) -> tuple[str
   count = 0
   in_fence = False
   in_see_also = False
+
+  # Domain(wiki.terms):
+  # # What a terms decision may rename
+  # A terms decision only ever renames how a concept is spelled in ordinary prose. A fenced
+  # code block, an inline code span, a markdown link's target, and a wikilink's target are
+  # quoted or structural rather than the name of anything, so rewriting inside them could
+  # corrupt a working link or an unrelated snippet of code that merely happens to share the
+  # word. The protected See-also section belongs to the wiki's own link-maintenance layer,
+  # not to the document's prose, and is skipped for the same reason.
+
+  # walk every body line, tracking which protected region (if any) currently contains it
   for line in lines:
     # a fence line toggles the block state and is itself never prose
     if _FENCE_RE.match(line):
@@ -245,6 +256,8 @@ def apply_term(repo: Path | str, path: Path | str, old_term: str, new_term: str)
       and the protected See-also section are carried through byte-for-byte.
     - A document under an open review round or inside a scope's mirror tree is refused, and the
       file is not written at all.
+    - A replacement matches only whole-word, case-sensitive occurrences of the replaced term.
+    - A successful application is idempotent: a repeated call with the same terms rewrites nothing.
 
   Args:
     repo: Repository root, used to resolve the scope configuration and to report the path.
@@ -265,6 +278,14 @@ def apply_term(repo: Path | str, path: Path | str, old_term: str, new_term: str)
   # A document carrying `review_active: true`, or lying inside a scope's mirror tree, is refused
   # and never written.
 
+  # Contract:
+  # A replacement matches `old_term` only as a whole word and only case-sensitively; a substring
+  # match or a differently-cased occurrence is never rewritten.
+
+  # Contract:
+  # A successful application is idempotent: calling `apply_term` again with the same terms after
+  # a successful call finds no free occurrence and writes nothing.
+
   repo = Path(repo).resolve()
   path = Path(path)
   label = _rel_label(repo, path)
@@ -282,6 +303,17 @@ def apply_term(repo: Path | str, path: Path | str, old_term: str, new_term: str)
   # guard: replacing a term with a phrase containing it would re-match on the next pass
   if pattern.search(new_term):
     return _refusal(label, _REASON_GROWING)
+
+  # Domain(wiki.terms):
+  # # Which documents a terms decision may not touch
+  # A settled terms decision defers to whichever mechanism already owns a document's content.
+  # A document inside an open review round belongs to that round until it closes; a rename
+  # landing from outside the round counts against it rather than helping it, so it is refused.
+  # A document inside a mirror tree is a projection of a foreign source that gets rewritten
+  # wholesale on the next refresh; a rename applied there would vanish at that refresh and the
+  # drift check would then read the edited text as a corruption of the source, so it is
+  # refused as well.
+
   # guard: a mirrored document is regenerated from its source — the edit would not survive
   if _under_mirror(label, _mirror_paths(repo)):
     return _refusal(label, _REASON_MIRROR)

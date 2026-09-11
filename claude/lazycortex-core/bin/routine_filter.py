@@ -81,9 +81,24 @@ def ensure_routine_filter(repo: Path, name: str, filter_frontmatter: dict) -> di
     `{"status": "unchanged"}` when every key was already present, or
     `{"status": "error", "reason": "no such routine"}` for an unregistered name.
   """
+
+  # Domain(plugin.boundaries):
+  # # Non-destructive filter seeding across plugin boundaries
+  # When one plugin needs to keep a class of content it understands away from a routine owned
+  # by a different plugin, it seeds a matching predicate onto that routine instead of editing
+  # the owning plugin's configuration directly. Seeding only plants a predicate for a key the
+  # routine does not judge yet; an operator's own predicate for that key is never overwritten,
+  # merged into, or reordered, and a routine that has not been registered yet is never created
+  # as a side effect of seeding.
+
   path = _resolve_settings_path(repo)
   routines = load_tracked_section(path, SettingsKey.ROUTINES)
   entry = routines.get(name)
+
+  # Contract:
+  # A routine that is not registered is NEVER created as a side effect of seeding; the
+  # caller receives the failure as this call's outcome instead.
+
   # guard: seeding must never register a routine — that is the registrar's job
   if not isinstance(entry, dict):
     return { _K.STATUS: _K.ERROR, _K.REASON: _K.NO_SUCH_ROUTINE }

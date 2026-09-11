@@ -37,7 +37,7 @@ There is no `spec.cfg-<product>.md` rule file any more — that form is removed.
 | `color` | no (default `#64748b`) | Iconize colour of the product folder, mirrored into the managed `iconize_color`. A product root is the one ordinary container that carries a colour — the neutral one — so the products stand out from the group folders beneath them; the key exists to override that for one product. See § Container colour below |
 | `dependencies` | no | List of upstream deps (other products, repos, or external) — see [sources](./lazy-spec.sources-protocol.md) Part 3 |
 | `asset_types` | no | Per-type declarations, merged **key-by-key** over the plugin's shipped spawnable set (`feature`, `change`, `bug`, `content`, `research`; `references/lazy-spec.asset-types.json` also carries the `catalog` and `product` level entries, which have no `default_path` and spawn nothing), so a product may replace one field of a shipped type without restating the rest, or declare a type of its own. Written by `/lazy-spec.add-asset-type`. See below and [layout](./lazy-spec.layout-protocol.md) § Asset types |
-| `tool_types` | no | Per-tool declarations, merged key-by-key over the plugin's shipped set (`references/lazy-spec.tool-types.json` — `code`, `data`, `test`, `docs`). See below |
+| `tool_types` | no | Per-tool declarations, merged key-by-key over the plugin's shipped set (`references/lazy-spec.tool-types.json` — `code`, `data`, `test`, `docs`, `research`). See below |
 | `guidelines` | no | Extra context files folded into launch-checkbox job dispatch, keyed by dispatched role token plus the wildcard `"*"`. See below |
 | `mode` | no (default full) | `"spec-only"` activates the designer-only ladder (`lazy-spec.coordination-playbook.md` Chapter 17, extracted as `lazy-spec.spec-only-playbook.md`) for every asset under this product — design.md → review → approve → `spec_design_done`, no architecture/plan/implementation/test steps. Absence means the ordinary full ladder. Written by `/lazy-spec.product-config`'s wizard. `_build_bundle` folds the owning product's whole record — `mode` included — into every coordinator job's `payload["product"]` unconditionally, so no separate settings read is needed to detect the profile. |
 
@@ -108,10 +108,10 @@ Each key is a tool name — the value an asset's `spec_tools` list carries. Each
 | Field | Required | Description |
 |---|---|---|
 | `playbook` | yes | Reference key of the playbook the coordinator loads when driving this tool's work on an asset |
-| `report_doc` | yes | Document type of the tool's append-only execution journal (e.g. `code-report`, `data-report`) |
+| `report_doc` | yes | Document type of the tool's report — an append-only execution journal for `code` / `data` / `test` / `docs` (e.g. `code-report`), a stage-bearing deliverable for `research` (`research-report`) |
 | `plan_doc` | no | Document type of the tool's plan. Its presence is what hangs the `Write <tool>-plan` launch checkbox; a tool without `plan_doc` gets no plan checkbox |
 
-The shipped set is `code` (`code-plan` / `code-report`), `data` (`data-report`), `test` (`test-plan` / `test-report`), and `docs` (`docs-report`).
+The shipped set is `code` (`code-plan` / `code-report`), `data` (`data-report`), `test` (`test-plan` / `test-report`), `docs` (`docs-report`), and `research` (the research report written from the approved research design; its report type carries a stage).
 
 Per-product doc-template overrides are NOT declared in the record. The override signal is **folder presence** under `.claude/templates/` — a per-product override folder `spec.<type>/<compound-key>/`, and the consumer's own type baseline `spec.<type>/`. Resolution is per-file across a five-layer fallback that ends at the plugin's linear per-doc-type base (`spec.docs/`), so a type needs no template folder of its own to be scaffoldable, and an override folder may contain only the files that differ. See [layout](./lazy-spec.layout-protocol.md) Part 1 § Template storage for the full layer order.
 

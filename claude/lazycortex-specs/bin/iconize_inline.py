@@ -79,9 +79,9 @@ def repaint_paths(repo: Path, paths: list[str]) -> list[str]:
   Resolves the `lazycortex-obsidian` CLI through `$LAZYCORTEX_PLUGIN_DIRS` (the blessed
   cross-plugin contract) and asks it to refresh the named repo-relative notes.
 
-  Notes:
-    - Best-effort by design: any failure — plugin absent, environment unset, worker
-      exiting non-zero, unparseable output — yields an empty list and never raises.
+  Guarantees:
+    - Never raises; any failure — the obsidian plugin absent, the environment unset, the
+      worker exiting non-zero, or unparseable output — yields an empty list instead.
 
   Args:
     repo: Absolute path to the repository root.
@@ -91,6 +91,21 @@ def repaint_paths(repo: Path, paths: list[str]) -> list[str]:
     Repo-relative paths whose frontmatter the repaint actually changed; empty when the
     repaint was unavailable, failed, or changed nothing.
   """
+
+  # Contract:
+  # This call never raises: any failure — the obsidian plugin absent, the environment unset,
+  # the worker exiting non-zero, or unparseable output — yields an empty list instead.
+
+  # Domain(plugin.boundaries):
+  # # Cosmetic side effects never gate the commit they ride with
+  # Refreshing a note's icon is bookkeeping for how the file looks in the vault, never a
+  # correctness requirement for the change the note is actually about. Asking a sibling plugin to
+  # do that refresh is therefore always best-effort: the sibling being absent, misconfigured, or
+  # simply failing this one time must never stop or delay the substantive commit it was meant to
+  # ride along with, and produces no partial or retried effect of its own — the note either gets
+  # its icon refreshed together with the change, or it does not, silently, until the next change
+  # gives the repaint another chance.
+
   # guard: nothing to repaint — skip the subprocess entirely
   if not paths:
     return []

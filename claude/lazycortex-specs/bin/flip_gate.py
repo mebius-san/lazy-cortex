@@ -465,6 +465,10 @@ def flip_gate(
   boolean, and the flip's reason lives in the run log. Halting an asset (`main`'s
   `--halt`) is a separate primitive, `halt_asset` — it never calls this function.
 
+  Guarantees:
+    - A refusal leaves the folder-note file byte-identical; nothing is written until every
+      refusal check has passed.
+
   Args:
     asset_dir: The asset or level folder holding `<asset_dir.name>.md` and siblings.
     gate: The `spec_*` gate key to flip, from the ladder the note's role carries.
@@ -479,6 +483,26 @@ def flip_gate(
     `{"status": "flipped", "gate": gate, "value": <bool>}` on success, or
     `{"status": "refused", "gate": gate, "reason": <message>}` when refused.
   """
+
+  # Contract:
+  # A refusal — an unknown gate name, a gate outside the note's own role ladder, or a flip
+  # attempted on a cancelled asset — leaves the folder-note file byte-identical; nothing is
+  # written until every refusal check has passed.
+
+  # Domain(spec.lifecycle):
+  # # Two gate ladders, one shared checkpoint
+  # An asset that ships its own deliverable moves through five yes/no checkpoints — design,
+  # plan, build, tests passing, and release — plus a cancelled flag that, once raised, ends its
+  # life to any further sequencing regardless of which checkpoints were already met. A product,
+  # or the whole catalog, runs a different four-checkpoint ladder instead — vision, design, UI
+  # design, and technical readiness — because it accumulates approved decisions rather than
+  # shipping one deliverable. Which ladder a note runs is the note's own declared stance, not a
+  # guess from its position in the tree; a checkpoint belonging to the other ladder is refused
+  # outright. Design readiness is the one checkpoint both ladders share, which is why it means
+  # the same thing wherever it appears. Moving a checkpoint, forward or back, is never
+  # conditioned on a readiness check of its own — that judgement is made once, elsewhere, by
+  # whatever decided the move belongs on the ladder now; this mechanic only records the outcome.
+
   # guard: a name outside the two ladders is a caller typo, refused before the note is read —
   # writing it would leave an invented boolean in the frontmatter that nothing ever reads
   if gate not in FLIPPABLE_GATES:
@@ -617,6 +641,10 @@ def halt_asset_text(
   own `# History` line in the same folder-note write) can fold the halt into it instead of
   triggering a second, separate commit.
 
+  Guarantees:
+    - When the asset is already halted with this exact failure reason recorded, the call is a
+      no-op: `fm_text` and `body` are returned unchanged and `changed` is False.
+
   Args:
     fm_text: The folder-note's frontmatter block text (opening through closing `---` fence).
     body: The folder-note's body text (post-frontmatter).
@@ -630,6 +658,12 @@ def halt_asset_text(
     changed (False on the idempotent no-op, in which case `fm_text` / `body` are the inputs
     unchanged).
   """
+
+  # Contract:
+  # When the asset is already halted with this exact failure reason recorded (under any
+  # historical authoring language), the call is a no-op: `fm_text` and `body` are returned
+  # unchanged and `changed` is False.
+
   fm_values, _ = _parse_frontmatter(fm_text)
   callout = _halt_callout(reason, lang)
 
@@ -670,6 +704,10 @@ def halt_asset(
   commit both read as that caller's own. The mutation itself is `halt_asset_text`; this wrapper
   owns the read/write/commit around it.
 
+  Guarantees:
+    - Once set, the halt persists until an operator resolves it by hand; nothing in this
+      codebase clears `spec_halted` or its failure callout automatically.
+
   Args:
     asset_dir: The asset folder holding `<asset_dir.name>.md`.
     reason: Human-readable clause naming what went wrong (see `HaltReason` in `spec_keys.py`).
@@ -683,6 +721,21 @@ def halt_asset(
     `{"status": "halted", "reason": reason}` on a fresh halt, or `{"status": "noop", "reason":
     reason}` when the asset was already halted with this exact failure recorded.
   """
+
+  # Contract:
+  # Once an asset is halted, nothing in this codebase clears the halt automatically — the
+  # `spec_halted` flag and its failure callout persist until an operator resolves them by hand.
+
+  # Domain(spec.lifecycle):
+  # # Halting a stuck asset
+  # When the automation carrying an asset forward cannot make progress — a dependency it was
+  # waiting on failed, a change could not be folded in cleanly, a cleanup step left the asset
+  # half-finished — the asset is marked halted instead of retried silently. A halted asset
+  # stops being picked up as more work to sequence until an operator has looked at it; nothing
+  # automated clears the mark on its own. Recording the same failure a second time changes
+  # nothing — the mark and its explanation are written once and left alone, so retrying the
+  # same broken condition does not pile up duplicate records of it.
+
   # the status folder-note's frontmatter carries the halt flag this function sets
   note = asset_dir / f"{asset_dir.name}.md"
   text = note.read_text()

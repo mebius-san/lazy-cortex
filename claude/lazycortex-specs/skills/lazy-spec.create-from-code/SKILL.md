@@ -160,7 +160,13 @@ Group folders (`features/` and the rest) and their operator-zone folder-notes ap
 
 ### P4 — Author product-vision and product-design prose
 
-**Vision first.** Before the design, author `<spec_path>/vision.md` (doc type `system-vision`) when it does not exist yet: instantiate `${CLAUDE_PLUGIN_ROOT}/templates/spec.docs/system-vision.md` with the product key and fill its sections from the code evidence, following each section's own template comment. Then set its stage via `lazy-spec.set-stage` → `draft`. A pre-existing `vision.md` is left untouched.
+**Vision first.** Before the design, author `<spec_path>/vision.md` (doc type `system-vision`) when it does not exist yet. Seed it through the primitive, anchored on the product's level note (`<leaf>` = the final segment of `spec_path`; `/lazy-spec.product-config` created it) — never by copying the template yourself:
+
+```bash
+lazycortex-specs seed-doc --root <spec_path>/<leaf>.md --doc vision.md:system-vision
+```
+
+The primitive fills every template token, injects the type's `iconize_icon` / `iconize_color` and journals the seed in the note's `# History`. Then fill the seeded sections from the code evidence, following each section's own template comment, and set its stage via `lazy-spec.set-stage` → `draft`. A pre-existing `vision.md` is left untouched.
 
 The product design doc describes WHAT the product is, who uses it, and what it does — behavior terms only. NO source URLs, file paths, or class/function names. Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md` this doc MUST NOT contain source URLs, and per "Branch handling" it never carries `spec_source_branches`.
 
@@ -218,7 +224,13 @@ Context (print before asking):
 AskUserQuestion: header "Use cases", question "Also author the product-level use-cases.md for <product> from the same code survey?", options `yes` / `no` with descriptions.
 ```
 
-On yes, instantiate `${CLAUDE_PLUGIN_ROOT}/templates/spec.docs/use-cases.md` at `<spec_path>/use-cases.md` (drop the `wiki/category/` pin — a product-level doc has no category), fill the actors and cross-feature scenarios the code evidences, and set its stage `draft`. On no, skip silently — the doc is opt-in and its absence is never a defect.
+On yes, seed it through the primitive, anchored on the same product level note:
+
+```bash
+lazycortex-specs seed-doc --root <spec_path>/<leaf>.md --doc use-cases.md:use-cases
+```
+
+Then drop the `wiki/category/…` line from the seeded `wiki_pinned_topics` (a product-level doc has no category), fill the actors and cross-feature scenarios the code evidences, and set its stage `draft`. On no, skip silently — the doc is opt-in and its absence is never a defect.
 
 **Mark the decisions the code embodies.** Where the code shows a real fork was taken (per the weight test in `${CLAUDE_PLUGIN_ROOT}/rules/spec.decisions.md` — a genuine alternative existed, reversal is expensive, the why is unrecoverable from the artifact), record it in the design body as a `[!decision] <thesis> #spec/decision` callout with its `**Why.**` / `**Rejected.**` lines per `lazy-core.markdown-style`. On the document's approve these blocks transfer automatically into the sibling `decisions.md` via `lazycortex-specs decide promote`. Do not force forks that are not there.
 

@@ -71,6 +71,16 @@ def _canon_email(email: str) -> str:
   Returns:
     The email with a legacy domain replaced by `@bot.invalid`, or the input unchanged.
   """
+
+  # Domain(runtime.bot-identity):
+  # # A reserved domain marks automated commits
+  # An automated commit's author address always ends in one reserved, deliberately
+  # undeliverable domain, so any consumer that needs to tell an automatic commit apart from an
+  # operator's own can do so by looking at the domain alone. Earlier versions of this project
+  # used other domains for the same purpose; an address still carrying one of those is silently
+  # rewritten onto the current reserved domain, keeping only the part of the address that
+  # identifies which bot it was.
+
   for domain in _LEGACY_DOMAINS:
     # guard: only a legacy-domain email is rewritten
     if email.endswith(domain):
@@ -144,6 +154,17 @@ def _recanon_identity(name: str, entry: object) -> object:
     rebuilt too when it still spelled the old key; the input unchanged when the key is not
     being renamed or the address is one the operator chose.
   """
+
+  # Domain(runtime.bot-identity):
+  # # An identity migrates with its key, but only while nothing has customised it
+  # When an expert's own identifying key is renamed, its bot identity is expected to follow —
+  # the address is rebuilt from the new key so it keeps matching what the rest of the system
+  # recognises. That relocation only happens while the address still equals the exact default
+  # that key would have produced; the moment an operator has set the address to anything else,
+  # the identity is treated as customised and is left completely alone. A display name follows
+  # the same rule independently: it moves onto the new key's name only if it still spelled out
+  # the old key.
+
   # guard: only the closed pre-canon set moves, and only a dict entry carries an identity
   if (canon := _PRE_CANON_EXPERT_KEYS.get(name)) is None or not isinstance(entry, dict):
     return entry

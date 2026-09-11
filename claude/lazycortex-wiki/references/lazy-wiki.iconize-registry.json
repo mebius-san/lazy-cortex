@@ -7,7 +7,7 @@
       "priority": 240
     },
     {
-      "when": { "frontmatter_has": "wiki_src_hash" },
+      "when": { "frontmatter_has": "wiki_src_hash", "frontmatter_missing": "spec_doc_type" },
       "resolve": { "iconName": "LiCopy", "iconColor": "#94a3b8" },
       "priority": 230
     },

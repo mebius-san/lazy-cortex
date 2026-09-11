@@ -83,6 +83,17 @@ def check_inbox_collision(repo: Path | str, platform: str | None = None) -> list
     One finding dict per contested inbox carrying `InboxGuardKey` fields; empty when this
     checkout registers no inbox routine or no other daemon shares one.
   """
+
+  # Domain(runtime.preflight):
+  # # Physical-inbox collision across checkouts
+  # A directory reached through a symlink can be the very same physical location for two
+  # separate checkouts of one project — an interactive checkout and a checkout driving its own
+  # daemon, say. Each checkout keeps its own record of what it has already handled, so neither
+  # sees the other, and a file dropped into the shared location is picked up and acted on twice.
+  # The only way to catch this ahead of time is by evidence, not configuration: every daemon
+  # registered on the same machine is checked for whether it resolves, symlinks followed, to the
+  # identical directory.
+
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   from daemon_registry import RegistryRow, enumerate_local_daemons
   repo = Path(repo).resolve()
@@ -133,6 +144,15 @@ def check_inbox_collision_for_install(repo: Path | str, platform: str | None = N
     `daemon.run_here` maps this host elsewhere or not at all — a daemon can never start there,
     so a shared inbox is uncontested by construction.
   """
+
+  # Domain(runtime.preflight):
+  # # A shared inbox is contested only by the authorized checkout
+  # Checking for a shared inbox is only meaningful from the one checkout actually authorized to
+  # run a daemon on this machine — the same pairing of hostname to checkout path the daemon's own
+  # start gate reads before it will run at all. A checkout the mapping does not name, or names for
+  # a different machine, can never start a daemon here, so nothing it scans is genuinely at risk
+  # of being processed twice, and no finding is reported for it.
+
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   from lazy_settings import load_section
   repo = Path(repo).resolve()

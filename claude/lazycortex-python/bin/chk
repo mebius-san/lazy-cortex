@@ -140,7 +140,21 @@ if [ "$cmd" = "all" ]; then
 # mypy type checks (excludes read from pyproject.toml)
 elif [ "$cmd" = "mypy" ]; then
   ensure_venv
-  mypy "${mods[@]}"
+  # an explicitly named directory is checked even when the config's `exclude` covers it:
+  # mypy applies `exclude` while discovering files under a directory but never to a file
+  # named on the command line, so the directory is expanded to its files here. A bare `.`
+  # stays as is -- that is the recursive run whose excludes are the whole point.
+  targets=()
+  for m in "${mods[@]}"; do
+    if [ -d "$m" ] && [ "$m" != "." ]; then
+      while IFS= read -r f; do
+        targets+=("$f")
+      done < <(find "$m" -name '*.py' -not -path '*/.venv/*' -not -path '*/__pycache__/*' | sort)
+    else
+      targets+=("$m")
+    fi
+  done
+  mypy "${targets[@]}"
 
 # pylint checks (excludes read from pyproject.toml)
 elif [ "$cmd" = "pylint" ]; then

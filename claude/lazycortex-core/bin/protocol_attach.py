@@ -58,6 +58,12 @@ def add_protocols(routine_name: str, ids: list[str], *, cwd: Path | str | None =
   registered (e.g. the daemon gate unregistered it) nothing is created and the call is a
   no-op reporting `routine_absent`.
 
+  Guarantees:
+    - An id already present in the routine's `protocols` list is preserved in its existing
+      order and never duplicated; only ids not yet present are appended.
+    - When `routine_name` is not present in the tracked settings' `routines` section, no
+      entry is created; the call returns `routine_absent: True` and touches nothing on disk.
+
   Args:
     routine_name: Key under the `routines` section to attach protocols to.
     ids: Protocol reference ids (`<plugin>:<name>`) to union into the routine.
@@ -74,12 +80,23 @@ def add_protocols(routine_name: str, ids: list[str], *, cwd: Path | str | None =
   path = _resolve_settings_path(cwd)
   routines = load_tracked_section(path, SettingsKey.ROUTINES)
   routine = routines.get(routine_name)
+
+  # Contract:
+  # When `routine_name` is not present in the tracked settings' `routines` section, no entry
+  # is created; the call returns `routine_absent: True` and touches nothing on disk.
+
   # guard: routine not registered — nothing to attach to
   if not isinstance(routine, dict):
     return { "routine": routine_name, "routine_absent": True, "added": [], RoutineKey.PROTOCOLS: [] }
   current = routine.get(RoutineKey.PROTOCOLS)
   if not isinstance(current, list):
     current = []
+
+  # Contract:
+  # An id already present in the routine's `protocols` list is preserved in its existing
+  # order and never duplicated; only ids not yet present are appended.
+
+  # union the requested ids into the routine's existing protocols, in order
   added: list[str] = []
   for pid in ids:
     # guard: already attached — preserve, never duplicate

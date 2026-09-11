@@ -6,11 +6,11 @@ diagram_spec:
   anchor: "How the block flows"
   request: "Flow diagram showing the requests block pipeline: the catalog-root routing coordinator orchestrates — it calls lazy-spec.request-classify (returns a class token), then lazy-spec.request-find-candidates (returns a ranked candidate list), then writes only structural routing fields (verb, target, product/path/tools/targets/drop) into the routing decision — no per-target prose. Show an operator confirmation step, then a single lazy-spec.request-apply node that branches internally into attach (folds the request onto an existing entity's primary doc) or spawn (scaffolds a new entity's folder and status note only, documents seeded later per launch checkbox) — both paths converge into 'doc's own writer builds from source in its review job'."
 source_skills:
-  - spec.coordinator
   - lazy-spec.coordinator
+  - lazy-spec.catalog-coordinator
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
-source_sha: 3f4c00192599a38cbb9db4308367d5db80ec2dfd
+source_sha: 104257023c3e2d920e0f105e0035292df3650436
 ---
 # Requests
 

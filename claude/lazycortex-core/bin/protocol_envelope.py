@@ -77,6 +77,17 @@ def _audit_file(path: Path) -> dict | None:
   # guard: a protocol that never mentions the response file declares nothing about it
   if JobFile.RESPONSE not in text:
     return None
+
+  # Domain(runtime.protocols):
+  # # Protocol envelope ownership
+  # The outcome field of the response envelope is the one discriminator every consumer of a
+  # finished unit of work reads to decide whether it succeeded. A wire contract may declare
+  # which values that field takes and which extra fields ride beside it, but it may never
+  # define a status field of its own in place of it. A contract that does so leaves nothing
+  # for a consumer to read the outcome from, so a reported failure is indistinguishable from
+  # a success.
+
+  # a rival status key beside — or instead of — outcome is the violation this audit exists to catch
   rival = _find_rival_key(text)
   names_outcome = JobResponseKey.OUTCOME in text
   if rival is not None and not names_outcome:
@@ -95,12 +106,21 @@ def audit(repo: Path) -> list[dict]:
   Scans the repository's own reference directory and the same directory under the user's
   home, so protocols authored at either scope are covered by one call.
 
+  Guarantees:
+    - Skips a protocol file that cannot be read instead of raising, so one unreadable file
+      never aborts the scan of the rest.
+
   Args:
     repo: Path to the repository root whose protocols are audited.
 
   Returns:
     One `{path, detail}` finding per offending protocol, in scan order.
   """
+
+  # Contract:
+  # A protocol file that cannot be read is skipped rather than raised; the scan continues
+  # and reports findings for every other file, never aborting on one unreadable protocol.
+
   findings: list[dict] = []
   for root in ( Path(repo), Path.home() ):
     for rel in _REFERENCE_DIRS:

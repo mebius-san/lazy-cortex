@@ -188,6 +188,17 @@ def _section_is_tagged(section_body: str) -> bool:
     `True` when the first non-empty content line is a single-line Obsidian hashtag,
     `False` otherwise.
   """
+
+  # Domain(review.markup):
+  # # A section's ownership tag is its identity
+  # Any first content line shaped like a single-line hashtag marks its whole section as
+  # belonging to someone other than the main writer — a validation writer, a terminal writer,
+  # a cross-plugin overlay, or a downstream consumer — regardless of whether the tag names a
+  # specific owner. Only the two-part expert-and-section form identifies exactly who owns a
+  # section; every other tagged section is still foreign and must be protected the same way,
+  # because ownership and protection are separate questions — a section can be off-limits to
+  # the main writer without the main writer being able to say whose it is.
+
   for line in section_body.split("\n"):
     stripped = line.strip()
     # guard: leading blank lines aren't the tag line; skip to the first non-empty content line.
@@ -419,6 +430,16 @@ def section_has_concerns(body: str, owner: tuple[str, str]) -> bool:
     `True` when the section exists and contains non-whitespace content beyond scaffolding;
     `False` otherwise.
   """
+
+  # Domain(review.markup):
+  # # Scaffolding is not a concern
+  # An owned section that carries only its heading, its ownership tag, and the deterministic
+  # no-concerns marker holds no operator-facing content, even though the section is not
+  # literally empty. Only content beyond that scaffolding counts as a genuine concern; a
+  # section auto-marked "no concerns" because its writer had nothing to raise must never be
+  # mistaken for a section awaiting attention, or every re-approval would loop back into
+  # validation forever.
+
   content = section_content_for_owner(body, owner)
   if content is None:
     return False
@@ -595,6 +616,16 @@ def upsert_status_callout(
   Returns:
     `body` with the status callout inserted or replaced at the top.
   """
+
+  # Domain(review.markup):
+  # # Terminal status lives outside the review-state namespace
+  # A finished document's landing marker is tagged in its own namespace, never inside the
+  # review-state namespace that carries the active round's banner. A cycle boundary strips
+  # every review-state callout but leaves the landing marker in place, so the record of how a
+  # finalized document was resolved survives for the operator to see, and a downstream
+  # consumer recording its own disposition of the document writes into that same slot rather
+  # than inventing a second one.
+
   body_no_old = _STATUS_CALLOUT_BLOCK_RE.sub("", body, count=1).lstrip("\n")
   head = f"> [!{marker}] {title} #status/{state}"
   extras = [f"> {line}" for line in body_lines]
@@ -810,6 +841,11 @@ def restore_protected_sections(body: str, saved: list[str]) -> str:
   every finalize pass, so each is still present and is replaced verbatim by the section it
   stood in for.
 
+  Guarantees:
+    - Given the exact `(body, saved)` pair `split_out_protected_sections` produced, every
+      protected section's original text is reproduced byte-for-byte, in its original
+      position.
+
   Args:
     body: Body carrying the placeholder H1 lines produced by `split_out_protected_sections`.
     saved: The ordered original section texts (list index = placeholder index).
@@ -817,6 +853,11 @@ def restore_protected_sections(body: str, saved: list[str]) -> str:
   Returns:
     The body with every placeholder restored to its original protected section.
   """
+
+  # Contract:
+  # Given the exact `(body, saved)` pair `split_out_protected_sections` produced, this MUST
+  # reproduce each protected section's original text byte-for-byte, in its original position.
+
   for idx, section_text in enumerate(saved):
     body = body.replace(_PROTECTED_PLACEHOLDER.format(idx=idx) + "\n", section_text, 1)
   return body
@@ -874,10 +915,36 @@ def reassemble(
   before the operator's free body; bottom-positioned (and unmapped) sections are placed
   after it, before `# History`.
 
+  Guarantees:
+    - For `phase='main'`, the returned body's content comes from `agent_body`; the
+      operator's owned sections, `# History`, and banner are carried over unchanged.
+    - For `phase='section'`, the returned body equals the operator's document except that
+      `owned_owner`'s own section is replaced by the matching section from `agent_body`;
+      any other edit the agent made is discarded.
+
   Returns:
     The reassembled document text with the agent's contribution grafted onto the operator
     state per the phase rules.
   """
+
+  # Contract:
+  # For phase='main', the returned document's body content MUST come from `agent_body`;
+  # the operator's owned sections, `# History`, and banner MUST be restored unchanged. For
+  # phase='section', the returned document MUST equal the operator's document except that
+  # `owned_owner`'s own section is replaced by `agent_body`'s matching section; any other
+  # edit in `agent_body` MUST be discarded.
+
+  # Domain(review.dispatch):
+  # # Ownership isolation between writer roles
+  # Every review document splits into content the operator authored and sections other roles
+  # own. When a round belongs to the main writer, only that content half returns to the
+  # document; any section the writer touched, invented, or removed in its reply is discarded,
+  # and the operator's owned sections and history are restored around the agreed content. When
+  # a round belongs to a section writer, the reverse holds: the operator's whole document is
+  # authoritative and only the writer's own owned section is taken from the reply — any edit
+  # made anywhere else in the response is silently ignored. A writer's reach into the document
+  # is bounded by its role, never by trust in what it chose to send back.
+
   _op_meta, op_body = _fm.parse(operator_text)
   op_fm_text = operator_text[: len(operator_text) - len(op_body)]
 
@@ -1064,6 +1131,15 @@ def _carry_title_from_operator(operator_body: str, new_content: str) -> str:
       `new_content` with the operator's title re-anchored at the top when
       the writer dropped it, otherwise `new_content` unchanged.
     """
+
+  # Domain(review.markup):
+  # # The document title is not writer-editable content
+  # The first untagged, unowned heading in a document is its title — the operator's own
+  # headline, not something any writer role may silently remove. A main writer's reply that
+  # drops it is not treated as an intentional deletion; the title is re-anchored at the top
+  # of whatever content the writer returned, because losing it would leave nothing for the
+  # document's other placement rules to anchor against.
+
   op_title = _document_title_heading(operator_body)
   # guard: operator body carries no title H1 — nothing to restore
   if op_title is None:

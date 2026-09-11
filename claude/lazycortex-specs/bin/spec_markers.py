@@ -74,6 +74,15 @@ class Markers:
     REQUESTS_MARKER_ID: Marker identifier for the requests sub-section's managed region.
   """
 
+  # Domain(spec.notes):
+  # # A shared container narrows ownership to one sub-kind at a time
+  # A source-references section can hold several kinds of reference side by side, each
+  # contributed by a different party, without any one contributor owning the whole section. The
+  # section itself is claimed once, as a whole, so that nothing outside the spec system ever
+  # rewrites it wholesale; inside it, a heading marks out each kind's own share of the space, and
+  # only the narrow span belonging to one automated kind is ever rewritten on its own. A kind an
+  # operator wrote by hand, with no such span of its own, is never touched by any rewrite.
+
   # ──────────────────────────────────────────────────────────────────────────
   # H1 container — owned at the section level, no managed inner bytes at
   # this layer (the inner is composed of per-kind H2 sub-sections, each
@@ -87,6 +96,14 @@ class Markers:
   # protected cross-plugin region. Foreign plugins (e.g. lazy-review.finalize) preserve
   # the whole section byte-for-byte; specs writers manage the per-sub-section bytes.
   SOURCES_PROTECTED_TAG = "#protected/spec/sources"
+
+  # Domain(spec.notes):
+  # # A frontmatter list projects into a matching body list, never the reverse
+  # Which requests contributed to a document is recorded once, in the document's own
+  # frontmatter, and everything visible in the body is only ever a rendering of that record —
+  # one bullet per contributing request, refreshed to match whenever the frontmatter list
+  # changes. Editing the visible list directly is never how a contribution is added or removed;
+  # the frontmatter stays the one place that decides what the projection shows next.
 
   # ──────────────────────────────────────────────────────────────────────────
   # `## Requests` sub-section — auto-projected from `spec_source_requests`
@@ -140,6 +157,10 @@ class Markers:
         <inner lines>
         <!-- auto:<marker_id>:end -->
 
+    Guarantees:
+      - Calling this method twice with the same `inner` and `marker_id` produces
+        byte-identical output on the second call.
+
     Args:
       text: Full document text (or body text) containing the markers.
       marker_id: Logical identifier of the managed region to rewrite.
@@ -150,6 +171,11 @@ class Markers:
       Document text with the inner region replaced.  Unchanged when the
       marker pair is not present.
     """
+
+    # Contract:
+    # Calling this method twice with the same `inner` and `marker_id` produces
+    # byte-identical output on the second call.
+
     start = self._start_marker(marker_id)
     end = self._end_marker(marker_id)
 
@@ -185,6 +211,10 @@ class Markers:
     The returned content has surrounding newlines stripped, mirroring the
     normalization `rewrite_between` applies on write.
 
+    Guarantees:
+      - Reading text that `rewrite_between` just wrote for the same `marker_id` returns
+        exactly the normalized `inner` value that was written.
+
     Args:
       text: Full document text (or body text) that may contain the markers.
       marker_id: Logical identifier of the managed region to read; defaults
@@ -194,6 +224,11 @@ class Markers:
       The inner content with surrounding newlines stripped, or `None` when
       the marker pair is not present.
     """
+
+    # Contract:
+    # Reading text that `rewrite_between` just wrote for the same `marker_id` returns
+    # exactly the normalized `inner` value that was written.
+
     start = self._start_marker(marker_id)
     end = self._end_marker(marker_id)
 
@@ -228,6 +263,10 @@ class Markers:
         # Sources
         #protected/spec/sources
 
+    Guarantees:
+      - Never duplicates or modifies an already-present container; repeated calls are
+        idempotent.
+
     Args:
       body: Markdown body text (the part after the frontmatter fences, or the
         entire document when there is no frontmatter).
@@ -236,6 +275,11 @@ class Markers:
       Body text with the container present at the end (newly inserted or
       already there, unchanged).
     """
+
+    # Contract:
+    # Never duplicates or modifies an already-present `# Sources` container; repeated
+    # calls with the same `body` converge to the same idempotent result.
+
     # guard: container already present — leave the existing one alone, sub-section writers manage inside
     if self._container_present(body):
       return body
@@ -272,6 +316,10 @@ class Markers:
         <bullets>
         <!-- auto:spec-requests:end -->
 
+    Guarantees:
+      - Never creates a second `## Requests` sub-section; repeated calls converge to one
+        sub-section whose managed region always reflects the latest `bullets`.
+
     Args:
       body: Markdown body text.
       bullets: Lines to place between the request-markers — typically the
@@ -281,6 +329,11 @@ class Markers:
     Returns:
       Body text with the requests sub-section present and up-to-date.
     """
+
+    # Contract:
+    # Never creates a second `## Requests` sub-section; repeated calls converge to one
+    # sub-section whose managed region always reflects the latest `bullets`.
+
     mid = self.REQUESTS_MARKER_ID
     start = self._start_marker(mid)
     end = self._end_marker(mid)

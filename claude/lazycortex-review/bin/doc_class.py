@@ -84,6 +84,12 @@ def class_for_file(settings: dict, repo: Path, file_path: Path) -> dict | None:
   None (a type declared `review: false` is expected to have none). A document with no type falls
   back to the first class whose `paths` match it.
 
+  Guarantees:
+    - Among the classes serving a document's `spec_doc_type`, a product-scoped class whose
+      `paths` cover the document always outranks the bare, type-only class.
+    - A document carrying no `spec_doc_type` resolves to the first configured class whose
+      `paths` cover it, in configuration order.
+
   Args:
     settings: Parsed `lazy.settings.json` contents.
     repo: Repository root the glob patterns are relative to.
@@ -92,6 +98,23 @@ def class_for_file(settings: dict, repo: Path, file_path: Path) -> dict | None:
   Returns:
     The matching class config dict, or None when nothing matches.
   """
+
+  # Domain(review.config):
+  # # Review-class resolution for a document
+  # A document's review class is identified by its class label: the segment before an `@`
+  # separator names the document type the class serves, and an optional segment after it
+  # scopes the class to one product. Among the classes serving a document's type, the
+  # product-scoped class wins whenever its paths cover the file; the bare, type-only class is
+  # the fallback otherwise. A type with no matching class at all resolves to no review class,
+  # by design. A document carrying no recognized type is not a typed catalog document, and
+  # instead resolves to the first configured class whose paths cover it.
+
+  # Contract:
+  # Among the classes serving a document's `spec_doc_type`, a product-scoped class whose
+  # `paths` cover the document always outranks the bare, type-only class; a type with no
+  # matching class resolves to `None`. A document carrying no `spec_doc_type` resolves to
+  # the first configured class whose `paths` cover it, in configuration order.
+
   rel = _rel_for(repo, file_path)
 
   # guard: not a readable file inside the repo — no class

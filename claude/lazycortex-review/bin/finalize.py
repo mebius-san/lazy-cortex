@@ -99,6 +99,15 @@ def document_edit_marker_style(file_path: Path) -> str:
   # opened; a `review.edit_marker_style` settings change made mid-cycle never reaches
   # an open review.
 
+  # Domain(review.lifecycle):
+  # # Edit-marker style pin for a review cycle
+  # A review cycle fixes its edit-marker style the moment it opens, recording the value the
+  # repository was configured with at that instant. Every later step of the cycle — dispatch,
+  # markup stripping, finalize — reads that recorded value instead of the live configuration,
+  # so a configuration change made mid-cycle never reaches a review already in progress. A
+  # document that never had this value recorded falls back to the repository's current
+  # configuration.
+
   try:
     meta, _ = _fm.parse(file_path.read_text())
   except OSError:
@@ -181,6 +190,16 @@ def _section_ids_for_finalize(
   Returns:
     The set of section-ids whose owned H1 sections survive the finalize strip.
   """
+
+  # Domain(review.lifecycle):
+  # # Section survival at finalize
+  # A review class distinguishes two kinds of authored section: a terminal kind whose writer
+  # closes the review cycle, and a validation kind whose writer only matters while concerns
+  # are still open. A terminal section always survives the finalize strip — it is the record
+  # of the decision itself. A validation section survives only when the document is finalized
+  # with outstanding concerns accepted; a clean approval drops it, since nothing about it
+  # still needs explaining.
+
   experts_cfg = (class_cfg or {}).get(JobKey.EXPERTS) or {}
   preserve_section_ids = set(experts_cfg.get(Bucket.TERMINAL) or {})
   if with_concerns:
@@ -197,6 +216,10 @@ def finalize_text(
 ) -> str:
   """
   Apply the finalize transforms to `text` and return the result.
+
+  Guarantees:
+    - Calling this function again on text it has already finalized returns that text
+      unchanged.
 
   Args:
     text: Full document text including YAML frontmatter and body.
@@ -217,6 +240,23 @@ def finalize_text(
     Finalized document text with review-machinery markers, transient frontmatter
     keys, and non-preserved expert sections removed, and `review_result` stamped.
   """
+
+  # Contract:
+  # Calling this function again on text it has already finalized returns
+  # that text unchanged; finalize is idempotent.
+
+  # Domain(review.lifecycle):
+  # # Terminal review outcome
+  # A finalized document carries one terminal outcome — approved, or approved with concerns
+  # — recorded twice: as a frontmatter value other systems treat as the signal that a review
+  # has just closed and their own follow-on action may now run, and as a status callout
+  # placed above the document's first heading so a reader sees the outcome without opening
+  # frontmatter or scanning history. The callout lives in its own status namespace, distinct
+  # from the in-review callouts it replaces, and is upserted rather than accumulated, so
+  # re-finalizing an already-finalized document leaves it unchanged. A consumer that owns a
+  # richer terminal state of its own may overwrite the callout with its own record once its
+  # action lands; this is only the review system's default.
+
   # split the document once; every step below rewrites either the frontmatter text or the body
   meta, body = _fm.parse(text)
   fm_text = text[: len(text) - len(body)]

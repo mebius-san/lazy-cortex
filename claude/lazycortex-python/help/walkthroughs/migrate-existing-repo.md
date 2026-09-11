@@ -11,7 +11,7 @@ source_skills:
   - chk
   - pcf.py
   - lazy-python.knowledge-sweep
-source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
+source_sha: f3dcc55c389b71a983c894ee1c0407d8311e931c
 ---
 # Adopt the plugin in a repo with pre-existing Python that drifted from the canon
 
@@ -79,6 +79,7 @@ Save the full output — it is your remediation queue. Do not start fixing yet; 
 
 - **Language.** `pcf` checks that every comment and docstring is written in a configured language — by default just `english`, resolved by matching each letter's Unicode script against the language names in `[tool.pcf] allowed_languages`. A repo whose existing comments were written in another language (or several) surfaces one finding per offending line, naming the first letter that doesn't match. Add the languages this repo actually uses to `[tool.pcf] allowed_languages` in `pyproject.toml` before working through the language findings — a single wrong assumption otherwise produces a finding on every non-English comment in the tree. A finding you genuinely want to keep as-is (a proper noun, a quoted external string) is exempted with a trailing `# waiver: <reason>` rather than a config change.
 - **Project package.** `pcf`'s import-boundary checks (which imports count as first-party vs. third-party) resolve the project's own package name — from `[tool.pcf] project_package` when set, otherwise autodetected from the repo layout. A repo whose layout confuses the autodetector (an unconventional `src/` shape, multiple top-level packages) surfaces import-classification findings that trace back to the wrong package being treated as first-party. Pin `project_package` explicitly in `pyproject.toml` rather than fighting individual findings.
+- **Test files.** `pcf`'s magic-literal and assert-usage checks are suppressed inside pytest test files (`test_*.py` under `tests/`) — an `assert` and the literal value it checks against are the point of a test, not something to flag. If a pre-existing test suite would otherwise have been buried in that noise, expect the inventory to skip it there.
 
 If Step 1's pre-2.0 migration note applies to your repo and you skipped uncommenting the `[tool.pcf]` examples, expect `pcf` to also flag every class that used the old `Generation Rules` / `Value Ranges` sections or the old `_field_filters` escape hatch — go back to Step 1 and declare them before continuing. If Step 1's 3.0 marker-rename note applies, expect additional `pcf` findings for any leftover `REF:` / `DOC(...):` / `Contract!` markers and for `Domain(...):` / `Contract:` / `Decision:` blocks that aren't blank-line-separated from their surroundings. `mypy` surfaces type annotation gaps. `pylint` adds naming and complexity findings. A repo with a few dozen Python files may produce hundreds of lines of output; that is normal and expected.
 

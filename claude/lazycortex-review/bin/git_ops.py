@@ -230,6 +230,19 @@ def _phase_trailer(
     Trailer value string: `<phase>` optionally followed by `; expert=<name>`
     and `; round=<N>` segments.
   """
+
+  # Domain(review.lifecycle):
+  # # Commit phase vocabulary
+  # Every commit the review system makes carries exactly one phase token recording which
+  # step of the round machine produced it. A round-writer commit — the main writer or a
+  # section writer — carries its writer's identity and the round number it acted in; an
+  # empty-outcome commit carries the same identity and round with no content change, so
+  # the round machine can still advance past a writer that had nothing to add. A
+  # mechanical commit — bootstrap, a banner repaint, a scaffold strip, the coordinator's
+  # own history and command writes — carries no writer identity, since no round advanced.
+  # A finalize commit closes the cycle and carries no writer identity either. A commit
+  # with no phase token at all was not made by the review system.
+
   parts = [phase]
   if expert:
     parts.append(f"expert={expert}")
@@ -441,6 +454,15 @@ def commit_mechanical(
   Returns:
     Full SHA of the new commit.
   """
+
+  # Domain(review.coordinator):
+  # # Icon repaint rides the mechanical commit
+  # A note's icon repaint is folded into the same commit as the mechanical edit that
+  # triggered it rather than committed on its own. A separate commit would carry a foreign
+  # identity the coordinator does not recognize as one of the review system's own, and an
+  # unrecognized identity reads as an operator edit — waking the coordinator over a change
+  # nobody made. Riding the same commit keeps the repaint invisible to wake detection.
+
   # fold the note's icon repaint into this same commit so no separate icons commit follows
   extras = tuple(repaint_inline(repo, [str(path.relative_to(repo))]))
   for extra in extras:
@@ -471,9 +493,18 @@ def commit_empty(
 
   `phase` is one of `main` or `section`; see `commit_review_round`.
 
+  Guarantees:
+    - The commit carries no content change; content staged by anyone else in the shared
+      index stays there, unpublished.
+
   Returns:
     Full SHA of the new commit.
   """
+
+  # Contract:
+  # The commit carries no content change — content staged by anyone else
+  # in the shared index stays there, unpublished.
+
   trailers = [
       (Trailer.PHASE, _phase_trailer(phase, expert=expert, round_=round_)),
   ]
@@ -564,10 +595,17 @@ def history_for_file(repo: Path, path: Path) -> list[CommitRecord]:
 
   `path` may not exist on disk (deleted / never created); an empty list is returned in that case.
 
+  Guarantees:
+    - Commits are ordered most-recent-first.
+
   Returns:
     List of `CommitRecord` entries in reverse-chronological order, or an empty list when no
     commits touch `path`.
   """
+
+  # Contract:
+  # Returned commits are ordered most-recent-first (reverse-chronological).
+
   rel = str(path.relative_to(repo)) if path.is_absolute() else str(path)
   out = _run_git(
       repo,

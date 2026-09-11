@@ -124,6 +124,22 @@
       "icon": "LiLayoutDashboard",
       "color": "#94a3b8",
       "template": "ui-design.md"
+    },
+    "research-design": {
+      "stages": true,
+      "review": true,
+      "append_only": false,
+      "icon": "LiPencilRuler",
+      "color": "#94a3b8",
+      "template": "research-design.md"
+    },
+    "research-report": {
+      "stages": true,
+      "review": true,
+      "append_only": false,
+      "icon": "LiFlaskConical",
+      "color": "#94a3b8",
+      "template": "research.md"
     }
   }
 }

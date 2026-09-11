@@ -149,6 +149,10 @@ def _collect_guideline_paths(repo: Path, product_record: dict, role: str) -> tup
   Per `products[<key>].guidelines` (`lazy-spec.product-config` schema), a missing declared path is
   never a silent skip — it is surfaced as a warning string for the caller to log.
 
+  Guarantees:
+    - A declared guideline path that does not resolve to a file is always reported in
+      `warnings`, never silently dropped.
+
   Args:
     repo: The repository root the declared guideline paths are relative to.
     product_record: The owning product's settings record, or `{}` when none was resolved.
@@ -159,6 +163,20 @@ def _collect_guideline_paths(repo: Path, product_record: dict, role: str) -> tup
     that resolves to a file, role-specific ones first; `warnings` names every declared path that
     does not.
   """
+
+  # Contract:
+  # A declared guideline path that does not resolve to a file is never silently dropped; it is
+  # always reported back in `warnings` for the caller to log.
+
+  # Domain(spec.dispatch):
+  # # Guideline priority for a dispatched job
+  # A job dispatched to work on a spec asset follows guidelines chosen for the specific role it
+  # is playing, extended with the guidelines that apply to every role no matter what it is
+  # doing — the role's own voice always comes first, the universal rules are added after. A
+  # guideline a product declares but that turns out not to exist on disk is never silently
+  # skipped; it is reported as a gap, so a missing file gets noticed instead of quietly leaving
+  # the job less informed than the product intended.
+
   # role-specific guidelines first, then the wildcard set that applies to every role
   guidelines_cfg = (product_record or {}).get(_SettingsKey.GUIDELINES) or {}
   declared = list(guidelines_cfg.get(role) or []) + list(guidelines_cfg.get(_SettingsKey.WILDCARD_ROLE) or [])
@@ -193,6 +211,15 @@ def _collect_decisions_paths(repo: Path, asset_dir: Path | None, product_record:
     The repo-relative path of whichever registry resolved to an existing file, the asset's own
     first; a registry that does not exist yet is silently omitted.
   """
+
+  # Domain(spec.dispatch):
+  # # Decisions context for a dispatched job
+  # Regardless of the role it is dispatched to play, every job working on a spec asset is given
+  # the same decision history: the record kept at the asset's own level, and the one kept by
+  # the product that owns it. The asset's own record always comes first, because the two files
+  # share a name and their order is the only thing that says which is which; a level whose
+  # record does not exist yet on disk is simply left out rather than treated as an error.
+
   # the asset level, when this bundle has an owning asset — asset_dir already IS the resolved
   # folder, never a token needing translation against a root
   paths: list[str] = []
@@ -238,6 +265,19 @@ def _resolve_core_cli(repo: Path) -> Path:
   Raises:
     RuntimeError: When both lookup stages fail to find a binary.
   """
+
+  # Domain(plugin.boundaries):
+  # # Reaching a neighbouring plugin's binary from this project's own dev checkout
+  # Before a neighbouring plugin's published command can be run as a subprocess, its binary has
+  # to be found. The general answer is to walk the plugin directories a spawning process was
+  # handed, then fall back to that plugin's own installed cache — described where that lookup
+  # itself lives. Here a further fallback exists on top of it, because this project's own
+  # working copy carries the neighbouring plugin's source right alongside this one, in the same
+  # tree. A caller running straight from that source, with neither a spawning process's
+  # directory list nor an installed cache to consult, still finds the binary sitting where this
+  # project's own layout keeps it — a fallback specific to this one tree carrying both plugins
+  # side by side, not a general way installed plugin caches can be addressed.
+
   # Stage 1 — env-declared plugin dirs (set by the daemon for every subprocess routine), then the
   # plugin cache a consumer install runs from.
   cli = spec_paths.resolve_plugin_cli(_CORE_CLI_NAME)
@@ -311,11 +351,20 @@ def consume_stale_job(repo: Path, expert: str, job_id: str) -> None:
   rather than raising, since the caller's own tick already succeeded and will simply retry the
   same key on the next tick.
 
+  Guarantees:
+    - Never raises; any failure to retire the bundle degrades to a silent no-op that the
+      caller's next tick simply retries.
+
   Args:
     repo: The repository root the CLI resolves settings and its own binary against.
     expert: The stale bundle's dispatched expert name.
     job_id: The stale bundle's job id.
   """
+
+  # Contract:
+  # This call never raises: any failure to retire the bundle (an unresolvable CLI, a hung or
+  # crashed subprocess) degrades to a silent no-op, leaving the retry to the caller's next tick.
+
   # guard: CLI unresolvable — nothing to retire against, degrade to a no-op
   try:
     cli = _resolve_core_cli(repo)

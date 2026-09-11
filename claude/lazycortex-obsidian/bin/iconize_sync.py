@@ -309,6 +309,14 @@ def validate_icon_name(name: str) -> None:
     IconizeError: When the value is empty, contains whitespace, or does not match either
       accepted shape.
   """
+
+  # Domain(obsidian.icon-resolution):
+  # # An icon can be named two different ways
+  # An icon value is either a symbolic key naming an entry in the icon library — a plain identifier of
+  # letters, digits, underscores, and hyphens of any length — or a literal emoji character used directly
+  # as the icon itself, accepted as a short fallback shape rather than checked against the library. Any
+  # other value, and any value that is empty, padded, or carries whitespace, names no icon at all.
+
   # guard: empty, padded, or whitespace-bearing values are rejected
   if not name or name.strip() != name or any(ch.isspace() for ch in name):
     raise IconizeError(f"invalid iconName {name!r}")
@@ -541,6 +549,15 @@ def _is_in_paint_roots(icon_map: dict, rel: str) -> bool:
   # An icon-map with no `paint_roots` list — absent, or present but not a list — puts every
   # note in scope. Callers MUST NOT read the absence as an empty root set; a map authored
   # before the key existed keeps painting the whole vault.
+
+  # Domain(obsidian.icon-resolution):
+  # # Icon painting can be scoped to a subset of the vault
+  # A vault may declare a fixed list of directories icon painting is allowed to touch, so an unrelated
+  # part of the vault is never considered for a rule match at all. A note outside every declared
+  # directory is invisible to icon rules regardless of what its frontmatter would otherwise match. When
+  # no such list is declared, the whole vault stays in scope, so a vault authored before this option
+  # existed keeps behaving exactly as it always did. A declared directory only claims a path that sits
+  # under it as a real subdirectory, never a differently named sibling that merely shares its prefix.
 
   roots = icon_map.get(MapKey.PAINT_ROOTS)
   # guard: nothing declared — the whole vault stays in scope
@@ -2463,9 +2480,11 @@ def resolve_matchers(icon_map: dict, path: str, frontmatter: dict) -> list:
   an icon decides the note; a matcher that matches but resolves only a colour carries that colour
   forward to whichever matcher later names the icon, outranking the colour that naming matcher
   carries on its own. When every matching matcher only supplied a colour, that colour applies
-  alone. A matcher that matches and resolves nothing at all leaves the note unclaimed. Under
-  schema 2 the result is either `[]` (no match or empty resolution) or a single-element list
-  `[(self_path, entry)]`.
+  alone. A matcher that matches and resolves nothing at all leaves the note unclaimed.
+
+  Guarantees:
+    - Under schema 2 the result is always `[]` or a single-element list `[(self_path, entry)]`;
+      callers MUST NOT expect more than one entry.
 
   Args:
     icon_map: Parsed icon-map dict.
@@ -2486,6 +2505,12 @@ def resolve_matchers(icon_map: dict, path: str, frontmatter: dict) -> list:
   # rule that matches but resolves to nothing at all still leaves the note unclaimed outright: that is a
   # broken rule rather than a rule with nothing to say about appearance. When every rule that claimed the
   # note only painted, the colour alone stands.
+
+  # Contract:
+  # The returned list carries at most one entry: under schema 2 the result is always `[]` (no
+  # matcher claimed the file, or the claiming matcher resolved nothing) or a single-element
+  # list holding the one `(path, entry)` pair the walk settled on. Callers MUST NOT expect
+  # more than one entry.
 
   # the basename is shared across every matcher tried below
   basename = _basename(path)

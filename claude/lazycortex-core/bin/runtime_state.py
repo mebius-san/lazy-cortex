@@ -93,9 +93,12 @@ def atomic_write_text(path: Path, text: str) -> None:
   """
   Write text to a file, replacing its previous content in one atomic step.
 
+  Guarantees:
+    - An interrupted call leaves the previous content at `path` intact; readers never
+      observe a corrupted or partially written file.
+
   Notes:
     - Creates the parent directory of `path` when it does not already exist.
-    - The write is crash-safe: an interrupted call leaves the previous content at `path` intact.
 
   Args:
     path: Destination file to write.
@@ -104,6 +107,11 @@ def atomic_write_text(path: Path, text: str) -> None:
   Raises:
     OSError: If `path` or its parent directory cannot be written.
   """
+
+  # Contract:
+  # An interrupted call never corrupts or truncates the previously persisted content at
+  # `path`; a reader always sees either the old content in full or the new content in full.
+
   path.parent.mkdir(parents = True, exist_ok = True)
   # write to a sibling temp file first so an interrupted call leaves the previous content intact
   # waiver: temp-file naming idiom, not a domain constant
@@ -128,9 +136,11 @@ def update(repo_root: Path, mutator: Callable[[dict], object]) -> dict:
   Atomically read-modify-write the state file.
 
   Loads the current on-disk state, applies `mutator` (which mutates the dict in place),
-  then persists the result. Re-reading on every call is what prevents one writer from
-  clobbering a key another writer set since the caller last loaded — every write merges
-  into the latest on-disk content rather than overwriting a held snapshot.
+  then persists the result.
+
+  Guarantees:
+    - The write always merges into the latest on-disk state; a key another writer
+      persisted since this caller's own load is never clobbered.
 
   Args:
     repo_root: Absolute path to the root of the repository.
@@ -141,6 +151,11 @@ def update(repo_root: Path, mutator: Callable[[dict], object]) -> dict:
   Returns:
     The persisted state dict.
   """
+
+  # Contract:
+  # The write always merges into the latest on-disk state; a key another writer
+  # persisted since this caller's own load is never clobbered by this call.
+
   state = load(repo_root)
   mutator(state)
   save(repo_root, state)

@@ -73,6 +73,10 @@ def commit_doc(repo: Path, file_path: Path, subject: str) -> dict:
   """
   Commit the document's working-tree state as the coordinator's single wake commit.
 
+  Guarantees:
+    - Commits nothing when the document is unmodified and the icon repaint has nothing to
+      touch; a no-op wake leaves the repository's history untouched.
+
   Args:
     repo: Repository root.
     file_path: Absolute path to the review document.
@@ -89,6 +93,11 @@ def commit_doc(repo: Path, file_path: Path, subject: str) -> dict:
       capture_output=True, text=True, check=False,
   ).stdout.strip()
   extras = _git_ops.repaint_inline(repo, [rel])
+
+  # Contract:
+  # A wake that leaves the document unmodified and the icon repaint untouched commits
+  # nothing; the repository's history gains no entry for a no-op wake.
+
   # guard: nothing changed this wake — no commit, and saying so is the verb's contract
   if not status and not extras:
     return {"committed": False}

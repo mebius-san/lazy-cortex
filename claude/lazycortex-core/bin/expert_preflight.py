@@ -506,6 +506,15 @@ def _static_checks(repo: Path, expert: str, entry: dict | None) -> list[dict]:
     any(marker in f.get(RKey.MESSAGE, "") for marker in _AGENT_UNRESOLVED_MARKERS) for f in findings
   )
 
+  # Domain(runtime.preflight):
+  # # Explicit-model invariant for a dispatchable expert
+  # Every expert a routine can actually launch must resolve to one explicit model before it counts
+  # as launchable — either a model pinned on the expert itself or a tier recorded for its agent
+  # elsewhere in settings. An expert with neither is not merely warned about; it fails outright,
+  # because a spawn that resolves no explicit model silently inherits whatever model the operator's
+  # own CLI happens to default to at that moment, which drifts unnoticed as that personal default
+  # changes and produces a launch nobody actually chose.
+
   # mandatory-model invariant (CR: every dispatchable agent resolves an explicit
   # model): a spawn without one silently inherits the operator's CLI default
   if not agent_broken and not (model and isinstance(model, str)):
@@ -796,6 +805,16 @@ def _classify_server(debug_text: str, server: str) -> tuple[str, str]:
     A tuple of the status and a short human-readable detail line, empty when the
     status is `connected` or `unknown`.
   """
+
+  # Domain(runtime.preflight):
+  # # Severity-first classification of a probed server
+  # A server's declared MCP-init outcome is read by scanning every debug-log line that mentions it
+  # against a fixed list of outcome markers ordered from most to least severe, and the first
+  # matching outcome wins. The order matters because the log is a running transcript, not a final
+  # verdict: a server that failed early can still emit an unrelated benign line — including the
+  # words for a successful connection — later in the same run, and reading markers in severity order
+  # keeps that later line from masking the real failure underneath it.
+
   # guard: no debug output captured — cannot classify from the file
   if not debug_text:
     return Srv.UNKNOWN, "no debug output captured"
@@ -980,6 +999,16 @@ def _fixes_for(expert: str, static: list[dict], dynamic: dict | None) -> list[di
         ),
         RKey.DETAIL: msg,
       })
+
+  # Domain(runtime.preflight):
+  # # Two remedies for an unhealthy server, never one
+  # An MCP server that timed out during init or failed to spawn at all gets no login prompt proposed
+  # for it — that server is treated as broken beyond the operator's reach from here, and the remedy
+  # offered is dropping it from the expert's configuration outright. A server that reports needing
+  # authentication or sitting on pending approval is not broken the same way: the server itself
+  # answered, only its credentials are missing, so the remedy offered instead is a manual login step
+  # the operator can actually complete.
+
   # guard: no probe ran — only static-derived fixes are available
   if not dynamic:
     return fixes
@@ -1018,6 +1047,17 @@ def _verdict_for(static: list[dict], dynamic: dict | None) -> str:
     `fail` when any static finding is `fail` or the probe reported a hang, a
     non-zero exit with an unresolved agent, or a bad server status; `ok` otherwise.
   """
+
+  # Domain(runtime.preflight):
+  # # A launch probe that never ran proves nothing either way
+  # A hard static finding fails an expert outright regardless of whether a probe ran, because a
+  # broken reference or an unresolved model is wrong before any spawn is attempted. When a probe was
+  # deliberately skipped instead of run — the account's rate-limit window is closed at the moment of
+  # the check — its absence carries no verdict weight of its own: the expert passes on its static
+  # findings alone rather than being penalized for a diagnostic the runtime chose not to spend. Only
+  # a probe that actually ran can fail the expert further, on a wall-clock hang, an agent that never
+  # proved it resolved, or any declared server landing in an unhealthy state.
+
   # guard: any hard static failure fails the expert regardless of the probe
   if any(f.get(RKey.LEVEL) == Level.FAIL for f in static):
     return Verdict.FAIL
@@ -1135,6 +1175,10 @@ def _cli(argv: list[str]) -> int:
   """
   Parse arguments, run the preflight, and print the JSON verdict document.
 
+  Guarantees:
+    - Exits 0 for a completed run regardless of the verdict; a non-zero exit is reserved for an
+      invocation error.
+
   Args:
     argv: Argument vector after the program name.
 
@@ -1160,6 +1204,12 @@ def _cli(argv: list[str]) -> int:
   repo = Path(args.cwd) if args.cwd else Path(os.environ.get("LAZY_REPO_ROOT", os.getcwd()))
   doc = preflight(repo, expert = args.expert, probe = not args.no_probe)
   print(json.dumps(doc, indent = 2))
+
+  # Contract:
+  # The process always exits 0 for a completed run; a non-zero exit is reserved for an
+  # invocation error such as bad arguments, never for a failing verdict.
+
+  # the verdict travels in the printed document, not in the exit code
   return 0
 
 

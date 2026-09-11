@@ -60,12 +60,30 @@ def strip_code_fences(body: str) -> str:
   Neither case is a real callout. Predicates that decide "is there an open #review/question?"
   must ignore them — otherwise documents deadlock forever on stale or example markup.
 
+  Guarantees:
+    - Line positions in the result match the original: byte offsets computed against the
+      result stay aligned with offsets in the original `body`.
+
   Args:
     body: Raw document body text, possibly containing triple-backtick code fences.
 
   Returns:
     Body text with all fenced content replaced by blank lines, fences included.
   """
+
+  # Contract:
+  # Line positions in the result match the original: byte offsets computed against the
+  # result stay aligned with offsets in the original `body`.
+
+  # Domain(review.markup):
+  # # Fenced content is inert to markup detection
+  # A code fence's content is never a live callout, tick, or candidate, no matter what it
+  # visually resembles — a diff-style edit block quoting a removed callout, or a fence-wrapped
+  # example of callout syntax in prose, are both body content the writer meant literally, never
+  # a signal to act on. Every predicate that scans a document for its own markup treats fenced
+  # content as blank; skipping this step lets a stale or illustrative marker deadlock the
+  # review loop forever, since it never resolves the way a live one would.
+
   out: list[str] = []
   in_fence = False
   for line in body.split("\n"):
@@ -134,6 +152,10 @@ class Document:
   Callers read sections and metadata from this object without re-parsing the source text.
   Concatenating `frontmatter_text` and `body` reproduces the original input byte-for-byte.
 
+  Guarantees:
+    - Concatenating `frontmatter_text` and `body` always reproduces the original parsed text
+      byte-for-byte.
+
   Attributes:
     meta: Frontmatter key-value pairs parsed from the YAML block.
     frontmatter_text: Raw frontmatter block including its opening and closing fences.
@@ -142,6 +164,9 @@ class Document:
     top_heading: First H1 section, or `None` when the body has no H1 headings.
     history_section: Historian-owned H1 section identified by its ownership tag, or `None`.
   """
+
+  # Contract:
+  # `frontmatter_text + body` always reproduces the original parsed text byte-for-byte.
 
   meta: dict[str, str]
   frontmatter_text: str

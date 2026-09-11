@@ -108,6 +108,10 @@ def resolve_product_by_path(vault: Path, rel_path: str) -> tuple[str | None, dic
   segment-wise prefix of it. When several products nest, the one with the
   longest matching `spec_path` wins.
 
+  Guarantees:
+    - When several configured products' `spec_path` values nest, the returned product is always
+      the one with the longest matching `spec_path`, never a shorter enclosing ancestor.
+
   Args:
     vault: Vault root directory holding `.claude/lazy.settings.json`.
     rel_path: Vault-relative doc path to attribute to a product.
@@ -116,6 +120,20 @@ def resolve_product_by_path(vault: Path, rel_path: str) -> tuple[str | None, dic
     A `(key, record)` pair for the longest-matching product, or `(None, None)`
     when no product's `spec_path` matches.
   """
+
+  # Contract:
+  # When several configured products' spec_path values nest, the returned product is always the
+  # one with the longest matching spec_path, never a shorter enclosing ancestor.
+
+  # Domain(spec.config):
+  # # Nested products resolve by longest owning path
+  # A document belongs to whichever configured product's own tree contains it, matched on
+  # whole path segments rather than raw text, so a product named one thing never accidentally
+  # claims a document that merely starts with the same letters under a differently named
+  # sibling. When one product's tree sits nested inside another's, the more specific,
+  # longer-matching tree wins, so a sub-product's own documents are never mistakenly
+  # attributed to the broader product that just happens to contain it.
+
   vroot = _vault_root_value(vault)
   parts = list(Path(rel_path).parts)
   # strip the vault-root prefix when the caller passed a repo-root-relative path

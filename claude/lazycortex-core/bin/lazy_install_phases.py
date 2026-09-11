@@ -40,6 +40,16 @@ def ensure_gitignore_lines(repo: Path | str, lines: list[str]) -> str:
     `"updated"` when at least one line was appended, `"already-present"` when every
     requested line was already present.
   """
+
+  # Domain(install.reconciliation):
+  # # Slash-variant equivalence for an ignore entry
+  # A directory entry in an ignore file means the same thing whether it is written with or
+  # without its trailing slash, so an idempotent write must recognise both spellings as the same
+  # entry — otherwise a repeated install run would keep appending an equivalent line in a
+  # different notation forever. Removing an entry asks the opposite question and is answered
+  # exactly, with no tolerance: a caller that names a precise line to strip is trusted to have
+  # named the form that is actually there, and only that exact form is taken out.
+
   repo = Path(repo)
   # waiver: filesystem filename idiom, not a domain constant
   gi = repo / ".gitignore"
@@ -133,6 +143,11 @@ def ensure_self_ignoring_dir(directory: Path | str) -> str:
     `"created"` when the directory and/or a new `.gitignore` were materialised,
     `"already-present"` when both already existed.
   """
+
+  # Contract:
+  # An existing `.gitignore` inside `directory`, whatever it contains, is left
+  # byte-for-byte untouched; only a missing file is written.
+
   directory = Path(directory)
   dir_existed = directory.is_dir()
   directory.mkdir(parents = True, exist_ok = True)
@@ -181,6 +196,10 @@ def bootstrap_logs_dir(repo: Path | str) -> str:
     if ensure_self_ignoring_dir(repo / name) == "created":
       materialised_any = True
 
+  # Contract:
+  # A root-`.gitignore` line left over from an earlier version of this phase is never
+  # removed; only missing entries are appended.
+
   # legacy root-.gitignore lines from earlier versions of this phase stay as they are —
   # the operator's call, never removed
   gi_outcome = ensure_gitignore_lines(repo, [ ".logs/", ".runtime/" ])
@@ -209,6 +228,10 @@ def migrate_log_hooks(settings_path: Path | str) -> str:
   lists are dropped. Unrelated hooks are preserved. Idempotent: a second run on
   already-clean settings is a no-op.
 
+  Guarantees:
+    - A hook command that does not reference the retired path is left in the settings
+      file exactly as it was.
+
   Args:
     settings_path: Path to the Claude Code settings file to migrate.
 
@@ -222,6 +245,10 @@ def migrate_log_hooks(settings_path: Path | str) -> str:
   if not settings_path.exists():
     # waiver: install-phase outcome token, not a reusable domain key
     return "no-stale-entries"
+
+  # Contract:
+  # A hook command that does not reference the retired `lazycortex-log/hooks/` path is
+  # left in the settings file exactly as it was.
 
   # pull in the hook table this migration rewrites
   # waiver: stdlib encoding idiom
@@ -305,6 +332,10 @@ def bootstrap_lazyignore(repo: Path | str, template: Path | str) -> str:
   seed only ever creates a missing file. No-op when the template source is absent.
   Idempotent.
 
+  Guarantees:
+    - An existing `.lazyignore` is never overwritten; the consumer's own content is
+      always left exactly as it was.
+
   Args:
     repo: Path to the repository root.
     template: Path to the shipped `.lazyignore` template to copy from.
@@ -319,6 +350,15 @@ def bootstrap_lazyignore(repo: Path | str, template: Path | str) -> str:
   # waiver: filesystem filename idiom, not a domain constant
   target = repo / ".lazyignore"
 
+  # Domain(install.reconciliation):
+  # # A standing precondition, not a one-time seed
+  # Most of what an install phase writes is seeded once and then left alone, but an ignore entry
+  # a daemon's own job execution actually depends on cannot wait for a first-time seed: an
+  # untracked workspace directory left behind by an in-flight job makes the checkout's working
+  # tree look dirty to every later check, and a daemon halts rather than run against a dirty
+  # tree. So this one entry is ensured on every single run, even on a checkout that was
+  # bootstrapped long before this precondition existed.
+
   # The worktree-root gitignore entry is a precondition of every `workspace: branch` job, not a
   # first-seed nicety: an untracked `<worktree_root>/job-<id>/` makes the primary checkout's
   # `git status --porcelain` non-empty and the daemon halts on `uncommitted_changes`. So it runs
@@ -329,6 +369,10 @@ def bootstrap_lazyignore(repo: Path | str, template: Path | str) -> str:
   # waiver: filesystem path idiom, not a domain constant
   worktree_root = str(git_cfg.get(GitConfigKey.WORKTREE_ROOT, ".worktrees")).strip("/")
   ensure_gitignore_lines(repo, [ f"{worktree_root}/" ])
+
+  # Contract:
+  # An existing `.lazyignore` is never overwritten; the consumer's own content is
+  # always left exactly as it was.
 
   # guard: consumer already has a .lazyignore — their copy is authoritative
   if target.exists():
@@ -437,6 +481,17 @@ def detect_install_scope(
     only at the user scope or the install record's own scope resolves there, and
     `"not-installed"` when the plugin has no install record at all, regardless of enablement.
   """
+
+  # Domain(install.reconciliation):
+  # # Install-scope resolution follows activation, not history
+  # Where a plugin's generated configuration should land is decided by where the plugin is
+  # actually switched on right now, never by where it happened to be installed originally — a
+  # plugin installed once at the user scope but later enabled for one project must have its
+  # config land in that project. Project-level activation is the strongest signal and wins
+  # outright even when the original install record claims the user scope. Only when neither
+  # settings scope shows the plugin active does the original install record's own scope decide,
+  # preferring the project scope when the record lists both.
+
   home = Path.home() if home is None else Path(home)
   project_root = Path(project_root)
 
@@ -484,6 +539,10 @@ def bootstrap_daemon_git(repo: Path | str) -> str:
   territory and is never seeded. Absent-only: a block already carrying content is left
   untouched, so an operator's hand-written configuration survives every re-run.
 
+  Guarantees:
+    - An operator-authored `daemon.git` block is never overwritten; once it carries any
+      content, this phase leaves it untouched on every later run.
+
   Args:
     repo: Path to the repository root.
 
@@ -492,6 +551,16 @@ def bootstrap_daemon_git(repo: Path | str) -> str:
     already on record, `"skipped-no-branch"` when the checkout has no branch to ride
     (not a repository, or a detached `HEAD`).
   """
+
+  # Domain(install.reconciliation):
+  # # Derived-only automation git block
+  # The checkout's own git state is the sole source for the settings a daemon's git behaviour
+  # reads — never a question asked of the operator — because the checkout already carries the
+  # one true answer: which branch is checked out, and whether a remote exists to publish routine
+  # commits to. A checkout with no remote has nowhere to publish generated commits, so nothing is
+  # assumed there. Once an operator has written anything into this block by hand, it is never
+  # touched again by this derivation, on any later run.
+
   repo = Path(repo)
   branch = _git_capture(repo, [ "rev-parse", "--abbrev-ref", "HEAD" ])
   # guard: no branch to ride — not a repo, or a detached HEAD the daemon must not check out
@@ -502,6 +571,11 @@ def bootstrap_daemon_git(repo: Path | str) -> str:
   # read the daemon section the seed would land in
   settings = repo / SettingsFile.REL
   section = load_tracked_section(settings, SettingsKey.DAEMON)
+
+  # Contract:
+  # An operator-authored `daemon.git` block is never overwritten; once any content is
+  # recorded there, this phase leaves it untouched on every later run.
+
   # guard: an operator-written block is authoritative — never overwrite what is already there
   if section.get(DaemonKey.GIT):
     # waiver: install-phase outcome token, not a reusable domain key

@@ -66,6 +66,16 @@ class SpecValue:
     TAG_DRAFT: The `tags:` member added on opt-in.
   """
 
+  # Domain(spec.lifecycle):
+  # # A note's declared role decides which coordinator drives it
+  # Every folder-note that participates in automation declares what kind of note it is, and that
+  # declaration alone decides which of two coordinating personas acts on it — never its position
+  # in the folder tree, never a guess from its content. A note declaring itself a product's own
+  # level note or the catalog root's own level note is driven by the persona that owns the whole
+  # catalog structure; every other participating note is driven by the persona that owns one
+  # asset's own progress. The two personas never both react to the same note, so a role that a
+  # note has not declared is a role nothing is watching for it.
+
   ROLE_REQUEST = "request"
   ROLE_STATUS = "status"
   ROLE_PRODUCT = "product"
@@ -161,6 +171,16 @@ class Gate:
     TECH_DONE: The level ladder's tech-accepted gate.
   """
 
+  # Domain(spec.lifecycle):
+  # # Derived gates versus human-confirmed gates
+  # A checkpoint closes one of two ways. Every checkpoint of the four-step ladder, and the first
+  # two checkpoints of the five-step ladder, are settled entirely by a sibling document's own
+  # approval — once that document is accepted, the checkpoint simply reflects it, with no
+  # separate confirmation of its own. The remaining three checkpoints of the five-step ladder —
+  # the deliverable being built, its tests passing, its release — answer a question no document
+  # approval can settle by itself, so each one waits for an explicit confirmation from outside
+  # the automation before it closes.
+
   DESIGN_DONE = "spec_design_done"
   PLAN_DONE = "spec_plan_done"
   DEVELOP_DONE = "spec_develop_done"
@@ -186,6 +206,14 @@ class Stage:
     DEFERRED: A doc parked out of the automation's reach — no coordinator reacts to it, no gate
       reads it, and `draft` is the only way back out.
   """
+
+  # Domain(spec.lifecycle):
+  # # A deferred document is invisible to automation until reclaimed
+  # A document can be parked outside the automation's reach at any point in its own approval
+  # cycle — nothing reacts to it, and nothing that depends on its acceptance is unblocked by it,
+  # for as long as it stays parked. There is exactly one way back: putting the document back into
+  # active drafting is what makes it visible again, at which point its approval cycle resumes
+  # from that same starting point rather than from wherever it was parked.
 
   EMPTY = "empty"
   DRAFT = "draft"
@@ -222,6 +250,16 @@ class AssetState:
     BLOCKED: An asset named in `spec_depends_on` has not reached the state this one needs.
     DONE: `spec_released` is true.
   """
+
+  # Domain(spec.lifecycle):
+  # # One state wins when several conditions hold at once
+  # An asset's visible state names the single condition that best describes where it stands
+  # right now, chosen by checking a fixed list of conditions in order and stopping at the first
+  # one that holds — never by combining several that are true at the same time. A backlog of
+  # parked work is called out ahead of a lone operator gesture still hanging, because a whole
+  # backlog sitting idle is a different situation from one small thing waiting on a person, even
+  # though the second condition's own trigger would otherwise also be satisfied by the same
+  # parked work.
 
   DRAFT = "draft"
   IN_REVIEW = "in-review"
@@ -327,6 +365,14 @@ class SiblingDoc:
       Never a review-tracked sibling: carrying no `review_result`, it transitions nothing and
       wakes no coordinator, whatever the git-watch filter delivers.
   """
+
+  # Domain(spec.lifecycle):
+  # # Architecture is a mandatory step only for code-bearing work
+  # Once a design is accepted for an asset that will ship its own code, the code's own shape —
+  # its module boundaries and where responsibility sits — is settled as its own separate step
+  # before any plan is written, never folded into planning itself and never skipped. A bug
+  # carries no such step: fixing an already-shaped system needs no shape of its own to settle
+  # first.
 
   DESIGN = "design.md"
   ARCHITECTURE = "architecture.md"
@@ -480,6 +526,16 @@ class PlanReview:
     BIN_DIR: The per-plugin `bin/` subdir holding the CLI binary.
     START_TIMEOUT_S: Seconds the best-effort `start` subprocess may run.
   """
+
+  # Domain(spec.lifecycle):
+  # # Accepting a design can auto-open review on its own follow-up plan
+  # The moment a design is accepted, the plan document that follows it is offered straight into
+  # review on its own, without waiting for anything else to notice — but only when that offer
+  # still makes sense: the plan must still be at a stage where opening review means something,
+  # and must not already be under review from something else. When the plan document does not
+  # exist at all, there is nothing to offer, which is a normal shape rather than a failure to
+  # act on. A reviewing tool that cannot be reached in time leaves the plan exactly as accepting
+  # the design found it, for a later pass to try again.
 
   KEY = "plan_review"
   OPENED = "opened"
@@ -767,9 +823,12 @@ class SpecCoordinatorDocStateKey:
     STATE: The `spec_coordinator_doc_state` frontmatter key. Its value is a JSON object mapping
       a sibling-doc basename (`design.md`, `code-plan.md`, ...) to the `review_result` value last
       seen on that doc when this worker dispatched `DOC_TRANSITION` for it.
+    REVIEW_REOPENED: The doc-state marker value recorded when a sibling's review_result is
+      cleared (review reopened).
   """
 
   STATE = "spec_coordinator_doc_state"
+  REVIEW_REOPENED = ""
 
 
 # ----------------------------------------------------------------------------------------
@@ -840,6 +899,14 @@ class CascadeLabel:
     TEST_PLAN: The tester half of the pair — folds the same delta into the target's own
       `test-plan.md`, dispatched once the designer half's job completes.
   """
+
+  # Domain(spec.lifecycle):
+  # # A change's design cascades into its targets automatically
+  # Once a change's own design is accepted, its approved delta is folded into every feature it
+  # targets without an operator ticking anything — first into the target's own design, then,
+  # once that step finishes, into the target's own test plan. The two steps always run in that
+  # order because the second step folds a delta whose shape the first step just settled; folding
+  # the test-plan half first would have nothing accepted yet to fold against.
 
   DESIGN = "Cascade design"
   TEST_PLAN = "Cascade test-plan"
@@ -983,6 +1050,16 @@ class UpstreamStatus:
     INVALID: The unit's directory carries no markdown file.
     EXCLUDED: The unit's path fell out of the mount's `units` glob or into `exclude`.
   """
+
+  # Domain(spec.upstream):
+  # # Most upstream statuses recompute every pass; two stay frozen
+  # An upstream unit's own status is normally free to be recomputed from scratch on every pass —
+  # nothing about a prior pass constrains what the next one may conclude. Two statuses are the
+  # exception. A unit under an open request is frozen against recomputation entirely, because the
+  # request already owns deciding what happens to it next; a unit the operator postponed stays
+  # frozen only as long as the source content it was postponed against has not itself moved on —
+  # once the source changes again, the postponement no longer applies to the same thing it was
+  # given for, and the unit is free to be judged fresh.
 
   NEW = "new"
   DRIFTED = "drifted"

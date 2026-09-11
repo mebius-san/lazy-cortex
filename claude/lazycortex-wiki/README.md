@@ -15,8 +15,8 @@ Maintains a curated, LLM-navigable semantic wiki over a markdown+code base — s
 
 - **curation** — Per-node curator dispatch: curate one node's summary, topic tags, and See-also links; update the topic index. Members: wiki.relink.
 - **query** — Associative Q&A over the wiki graph. `/lazy-wiki.query` dispatches a per-scope `lazy-wiki.seeker` to pick entry points from the topic index, then a single `lazy-wiki.gatherer` to traverse glossed See-also links and synthesise the answer — the large index and node bodies stay in the subagents' contexts. Members: wiki.query.
-- **audit** — Integrity checks across the scope: orphan topics, broken links, missing summaries, stale glosses, unknown axes, overlapping scopes. Members: wiki.doctor.
-- **install-and-audit** — Bootstrap lazycortex-wiki in your project: create scope config, register routines, compose the wiki.curator expert, sync the navigation and structure rules. Members: wiki.install, wiki.configure, wiki.doctor, wiki.help.
+- **audit** — Integrity checks across the scope: orphan topics, broken links, missing summaries, stale glosses, unknown axes, overlapping scopes. Members: wiki.audit.
+- **install-and-audit** — Bootstrap lazycortex-wiki in your project: create scope config, register routines, compose the wiki.curator expert, sync the navigation and structure rules. Members: wiki.install, wiki.configure, wiki.audit, wiki.help.
 - **structure** — One repo-wide map, `docs/structure.md`, of what lives where. `/lazy-wiki.structure rebuild` walks the tracked tree and rewrites it; `/lazy-wiki.structure query [<path>]` returns just the slice a caller needs; three git-watch routines dispatch a curator that keeps the map current per commit (added, deleted, and renamed paths — a content edit never changes the tree's shape, so modifications are deliberately not watched), wired by `/lazy-wiki.configure structure`. Members: wiki.structure.
 - **terms** — One dictionary per scope so a concept never grows a second name. A writing expert asks `/lazy-wiki.terms` for the repository's agreed word before coining one; a curator fills the dictionary from finished documents on a git-watch routine, and the terms section of `/lazy-wiki.audit` reports where documents and dictionary have drifted apart. Members: wiki.terms.
 - **domains** — Query the generated domain-spec tree (`docs/domains/` by default, materialized from code's `Domain(…)` markers) for a group's doc section or a term across the whole tree, without loading the whole group doc or the tree. Members: wiki.domains.
@@ -79,7 +79,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 
 | Command | Description |
 |---|---|
-| `lazy-wiki.help` | Run when the operator asks what lazycortex-wiki can do, how the semantic wiki gets built, curated, or asked a question, or which verb sets up a scope — lists the wiki surface: install / configure / relink / query / doctor / domain-sync, plus the curator, seeker, gatherer, and domain-spec-writer agents those skills dispatch. |
+| `lazy-wiki.help` | Run when the operator asks what lazycortex-wiki can do, how the semantic wiki gets built, curated, or asked a question, or which verb sets up a scope — lists the wiki surface: install / configure / relink / query / audit / domain-sync, plus the curator, seeker, gatherer, and domain-spec-writer agents those skills dispatch. |
 
 ## Rules
 

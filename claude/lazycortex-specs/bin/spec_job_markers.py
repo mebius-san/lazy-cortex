@@ -114,12 +114,26 @@ def sidecar_path(repo: Path) -> Path:
   Returns:
     Absolute path of `<repo>/.runtime/lazy-specs.jobs.json`, whether or not it exists.
   """
+
+  # Domain(spec.lifecycle):
+  # # Job markers live beside the note, never inside it
+  # Which background job is running against an asset, and whether a coordinator job already
+  # holds it, is tracked apart from the note's own content rather than as one more field an
+  # operator could edit by hand. This keeps a hand edit to the note from ever corrupting a live
+  # job's record or defeating the one-job-per-asset rule, and it keeps every mark and every clear
+  # free of its own commit, since the record is disposable runtime state, never part of the
+  # asset's lasting history.
+
   return repo / _RUNTIME_DIR / _JOBS_SIDECAR
 
 
 def note_key(repo: Path, note: Path) -> str:
   """
   Return the store key for one status folder-note.
+
+  Guarantees:
+    - Two distinct notes always resolve to distinct keys, even when a note lies outside
+      `repo` and falls back to its absolute path.
 
   Args:
     repo: Repository root the key is relative to.
@@ -129,6 +143,11 @@ def note_key(repo: Path, note: Path) -> str:
     The note's repo-relative POSIX path, or its absolute POSIX path when it lies outside `repo`
     (a caller mistake that must not collapse two notes onto one key).
   """
+
+  # Contract:
+  # Two distinct notes never resolve to the same store key, even when a note lies
+  # outside `repo` and falls back to its absolute path.
+
   try:
     return note.resolve().relative_to(repo.resolve()).as_posix()
   except ValueError:
@@ -162,6 +181,16 @@ def check_sub_schema(field: str, value: dict) -> str | None:
     An error string naming the violation, or None when `field` declares no sub-schema or `value`
     satisfies the one it declares.
   """
+
+  # Domain(spec.lifecycle):
+  # # A wake reason is closed vocabulary; a launch label is not
+  # The reason a coordinator job is running is always one of a fixed, known set, so it is checked
+  # against that set outright. A launch job's own label is never checked the same way, because
+  # which launches exist — and how one launch can be parameterised per tool — is a decision the
+  # coordinating playbook makes, not one this record is entitled to constrain; the label is
+  # validated only for being a real, non-empty identifier, whatever vocabulary the playbook draws
+  # it from.
+
   sub_schema = _SUB_SCHEMAS.get(field)
   # guard: this field carries no closed sub-schema — nothing further to check
   if sub_schema is None:
@@ -271,6 +300,10 @@ def update(repo: Path, note: Path, changes: Mapping[str, dict | str | None]) -> 
   """
   Apply `changes` to one note's entry and persist the store.
 
+  Guarantees:
+    - When `changes` fails validation, the store is left exactly as it was before the
+      call; no field of `changes` is ever partially persisted.
+
   Args:
     repo: Repository root holding the sidecar.
     note: The asset status folder-note's path.
@@ -283,6 +316,11 @@ def update(repo: Path, note: Path, changes: Mapping[str, dict | str | None]) -> 
     ValueError: If `changes` names a field outside the closed schema, gives a dict-valued field
       a non-dict value, or gives it an object violating that field's closed sub-schema.
   """
+
+  # Contract:
+  # When `changes` fails validation for any reason, the sidecar store is left
+  # byte-identical to its state before the call — no partial write is ever persisted.
+
   unknown = [field for field in changes if field not in _FIELDS]
   # guard: a field outside the schema is a typo, and a typo must not become state
   if unknown:
@@ -319,10 +357,17 @@ def clear(repo: Path, note: Path) -> None:
   """
   Drop one note's entry entirely.
 
+  Guarantees:
+    - Clearing a note that carries no recorded entry succeeds as a no-op.
+
   Args:
     repo: Repository root holding the sidecar.
     note: The asset status folder-note's path.
   """
+
+  # Contract:
+  # Clearing a note that carries no recorded entry succeeds as a no-op; it never raises.
+
   # clearing every field of the schema at once is what prunes the row from the store
   update(repo, note, dict.fromkeys(_FIELDS))
 

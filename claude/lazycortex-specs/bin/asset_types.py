@@ -165,6 +165,17 @@ def resolve(asset_type: str, record: dict) -> dict | None:
   Returns:
     The merged declaration dict, or None when neither the plugin nor the product declares it.
   """
+
+  # Domain(spec.declarations):
+  # # Asset kind rests on a declaration, not a closed list
+  # An asset's kind is only ever what some declaration names — the plugin's own shipped set,
+  # extended or overridden per product — never a value checked against a fixed catalogue baked
+  # into the tooling. A kind nobody declared is simply absent from the registry, not rejected
+  # as invalid; consulting the declaration is the only way any consumer learns what a kind
+  # implies — its icon, its playbook, the folder it defaults into, its starting document, or
+  # the tools it carries before anyone has judged it.
+
+  # ask the declaration directly rather than testing membership in a closed set
   return _declared(record).get(asset_type)
 
 
@@ -182,6 +193,18 @@ def alias_base(asset_type: str, record: dict) -> str:
   Raises:
     ValueError: When the alias names an unknown base, or a base that is itself an alias.
   """
+
+  # Domain(spec.declarations):
+  # # Playbook aliasing reaches exactly one hop
+  # A type declaration may name another type as its alias base to reuse that type's playbook
+  # without duplicating the reference, letting several kinds be coordinated identically while
+  # remaining distinct kinds of their own. Only the playbook is borrowed this way — the icon,
+  # the default folder, the starting document, and the implied tools always stay the alias's
+  # own. The base a declaration names must itself be a concrete type, never another alias, so
+  # resolving which playbook a type ultimately uses never depends on the order aliases happen
+  # to be declared in.
+
+  # resolve the alias target and enforce the one-hop rule
   base = (resolve(asset_type, record) or {}).get(AssetTypeField.ALIAS_OF, "")
   # guard: a concrete type borrows nothing — nothing further to validate
   if not base:
@@ -308,12 +331,21 @@ def type_of(note: Path) -> str:
   The folder name is never consulted — a note under `ideas/` carrying `spec_asset_type: bug`
   is a bug.
 
+  Guarantees:
+    - The folder holding the note is never consulted; only the note's own frontmatter
+      determines the returned type.
+
   Args:
     note: The status folder-note to read.
 
   Returns:
     The declared type name, or the empty string when the key is absent.
   """
+
+  # Contract:
+  # The folder holding the note is NEVER consulted; only the note's own frontmatter determines
+  # the returned type.
+
   # waiver: sibling-module frontmatter parser -- the one parser every specs primitive shares
   fm_values, _fm_end = flip_gate._parse_frontmatter(note.read_text(encoding = _K.ENCODING))
   return fm_values.get(_TYPE_KEY, "")
@@ -340,6 +372,14 @@ def _folder_map(repo: Path) -> dict[str, str]:
     except json.JSONDecodeError:
       data = {}
     records = [ rec for rec in (data.get(_K.PRODUCTS) or {}).values() if isinstance(rec, dict) ] or [ {} ]
+
+  # Domain(spec.declarations):
+  # # Legacy asset typing follows the folder it sits in
+  # A status note that predates explicit typing carries no kind of its own, so one is inferred
+  # from the folder that holds it: a folder declared as a type's own default location, or
+  # simply named after the type itself, identifies every legacy asset it contains. A folder no
+  # declaration recognizes yields no guess at all — the asset is left with an explicit
+  # unresolved-kind marker instead, to be typed later once someone judges what it actually is.
 
   # a later product's declaration may name the same folder; first writer wins, which keeps the
   # shipped set authoritative for the folder names it already owns
@@ -376,12 +416,24 @@ def backfill(repo: Path) -> dict:
   coordinator resolves on its own wake. Idempotent: a note already carrying the key is left
   alone and counted `skipped`. Never commits — the caller owns that.
 
+  Guarantees:
+    - A note that already carries `spec_asset_type` is left unchanged and counted as skipped.
+    - The run never stages or commits its changes; the caller owns the commit.
+
   Args:
     repo: Absolute repository root (holds `.claude/lazy.settings.json`).
 
   Returns:
     `{"touched": N, "skipped": M}` — `N` notes gained the key, `M` already carried it.
   """
+
+  # Contract:
+  # A note that already carries `spec_asset_type` is left completely unchanged and counted as
+  # skipped; the run NEVER rewrites an existing value.
+
+  # Contract:
+  # The run NEVER stages or commits its changes; the caller owns the commit.
+
   settings_root = spec_paths.find_settings_root(repo)
   content_root = spec_paths.spec_content_root(settings_root)
   mapping = _folder_map(settings_root)

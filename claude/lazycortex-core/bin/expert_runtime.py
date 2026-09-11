@@ -208,6 +208,15 @@ def dispatch_job(
   # here as manifests and copied only at claim. The `source_inline` and `context_inline` buckets
   # are the sole exception: they carry content that exists in no file and are written now.
 
+  # Domain(runtime.jobs):
+  # # What counts as an active job for dedup matching
+  # A dispatch naming a dedup key treats an existing bundle for the same expert as still active
+  # — and therefore a reason to skip a fresh dispatch — for as long as it has been queued and
+  # neither cancelled, permanently dead, nor already consumed by its caller. A bundle that
+  # already finished but whose result nobody has consumed yet still counts as active: the dedup
+  # key is only released once whoever asked for the job says they are done with the answer, not
+  # once the answer exists.
+
   # dedup short-circuit: scan existing job bundles for a live `_dedup_key` match
   if dedup_key is not None:
     edir = Path(repo) / JOBS_BASE / expert
@@ -399,6 +408,16 @@ def resolve_agent_model(repo: Path, agent_ref: str | None) -> str | None:
     or None when the agent is unconfigured, sentinel-routed, or `agent_ref` is
     None.
   """
+
+  # Domain(settings.versioning):
+  # # Agent model tier resolution stays project-scoped
+  # An agent's model tier resolves from the dispatching repository's own tracked configuration
+  # only, deliberately excluding any global or user-scope layer that might also define tiers —
+  # the same expert dispatched from two different checkouts can legitimately run on two
+  # different tiers, and neither overrides the other. When one agent name is pinned in more
+  # than one configuration group inside that same file, the group read last wins, so the order
+  # the groups are declared in is itself part of choosing the effective tier.
+
   # guard: no agent ref — nothing to look up
   if not agent_ref:
     return None
@@ -566,6 +585,17 @@ def _job_status(jdir: Path) -> str | None:
     or `"queued"` when the bundle matches one of the recognised marker
     shapes, or None when the bundle is in an unrecognised shape.
   """
+
+  # Domain(runtime.jobs):
+  # # Job status precedence among terminal and in-flight markers
+  # A dispatched job carries a small set of terminal and in-flight markers, and more than one
+  # can be present on the same bundle at once. Cancellation is an operator decision and always
+  # wins over every other marker, including a job that already finished; a permanently failed
+  # bundle marked dead is reported as dead even if it also carries a finished response; and a
+  # finished bundle's status is not "done" by itself — it is read from the response it produced.
+  # Among bundles that have not finished at all, one with a claimed worker is active and one
+  # without is still queued.
+
   # cancellation is a terminal operator decision — it outranks every other marker
   if (jdir / JobMarker.CANCELLED).exists():
     return JobStatus.CANCELLED
@@ -595,14 +625,19 @@ def cancel_job(repo: Path, expert: str, job_id: str) -> None:
   executor runs in its own session — are terminated first, then the
   worker's own group, each with a SIGTERM → grace → SIGKILL escalation.
 
-  Idempotent — calling on a non-existent or already-cancelled bundle is
-  a no-op.
+  Guarantees:
+    - Idempotent: calling on a non-existent or already-cancelled bundle is a no-op.
 
   Args:
     repo: Absolute path to the repository that hosts the job queue.
     expert: Expert name as registered in `lazy.settings.json[experts]`.
     job_id: Identifier of the job to cancel.
   """
+
+  # Contract:
+  # Cancelling a job MUST be idempotent: calling this on a non-existent or
+  # already-cancelled bundle is a no-op, never an error.
+
   d = _job_dir(repo, expert, job_id)
   # guard: bundle never existed or was already removed
   if not d.exists():
@@ -718,7 +753,10 @@ def consume_job(
   to the consumer's lookup, and after CONSUMED it is no longer relevant
   for dedup or re-read.
 
-  Idempotent — a second call on the same job is a no-op.
+  Guarantees:
+    - Once consumed, the job is invisible to `dispatch_job`'s pre-dispatch dedup check and to
+      any consumer-side lookup by dedup key, so a fresh dispatch under the same key is free to run.
+    - Idempotent: a second call on the same job is a no-op.
 
   Notes:
     - Also records `<expert>/<job_id>` in the unpushed-consume ledger (`RuntimeFile.CONSUMED_UNPUSHED`,
@@ -731,6 +769,21 @@ def consume_job(
     expert: Expert name as registered in `lazy.settings.json[experts]`.
     job_id: Identifier of the job to retire.
   """
+
+  # Contract:
+  # Once `consume_job` has been called on a job, it MUST become invisible to `dispatch_job`'s
+  # dedup check and to any consumer lookup by dedup key, so a fresh dispatch under the same
+  # key is free to run again. A second call on the same job MUST be a no-op.
+
+  # Domain(runtime.jobs):
+  # # Producer-done versus consumer-done job lifecycle
+  # A job's finished response and a caller's acknowledgment that it read that response are two
+  # separate facts, recorded by two separate markers, and they are allowed to land at different
+  # times. Between the two, the response stays reachable to a lookup by dedup key exactly as if
+  # the job were still unfinished — a fresh dispatch under the same key is refused — because
+  # nobody has yet said the answer was used. Once the caller acknowledges it, the job stops
+  # mattering for that lookup and a later dispatch under the same key is free to run again.
+
   d = _job_dir(repo, expert, job_id)
   # guard: caller may consume a job that no longer exists on disk
   if not d.exists():
@@ -1063,6 +1116,14 @@ def unregister_routine(repo: Path, name: str) -> None:
   Raises:
     ValueError: When `name` matches a protected built-in routine.
   """
+
+  # Domain(runtime.daemon-loop):
+  # # Built-in routines outlive per-repository configuration
+  # A small set of routines are load-bearing for the runtime itself — without them nothing ever
+  # dispatches work or recovers from a stuck state — so removing one through ordinary
+  # configuration editing is not offered. Retiring a built-in routine is only possible by
+  # retiring the plugin that ships it, never by editing one repository's settings.
+
   # guard: protected routines may only be removed by uninstalling the plugin
   if name in PROTECTED_ROUTINES:
     raise ValueError(
@@ -1185,16 +1246,33 @@ def bootstrap_default_routines(repo: Path) -> None:
   """
   Register the built-in expert-pump, doctor-tick, index-guard, and autocheckup routines when absent.
 
-  Idempotent — never overwrites a value an existing routine already carries. A key the
-  defaults gained after the routine was first registered is filled in, since a repository
-  installed before that key existed would otherwise never receive it; a key the operator
-  has set, to any value including an empty one, is left alone. Intended to be called from
-  the plugin install skill so the built-in routines exist and stay current after every
-  fresh install or update.
+  A key the defaults gained after the routine was first registered is filled in, since a
+  repository installed before that key existed would otherwise never receive it. Intended to
+  be called from the plugin install skill so the built-in routines exist and stay current
+  after every fresh install or update.
+
+  Guarantees:
+    - Idempotent: never overwrites a value an existing routine already carries, including a
+      value the operator explicitly set to empty or falsy.
 
   Args:
     repo: Absolute path to the repository whose settings file is updated.
   """
+
+  # Contract:
+  # A key already present on a registered built-in routine MUST NEVER be overwritten by this
+  # call, whatever its value — an explicit empty or falsy value is the operator's decision,
+  # not a gap to backfill.
+
+  # Domain(runtime.daemon-loop):
+  # # Built-in routine default backfill guarantee
+  # A built-in routine's own default configuration is allowed to grow new fields over time as
+  # the runtime evolves, and every repository that registered the routine before a field existed
+  # must still receive it — otherwise that repository is stuck on the shape it had at first
+  # install forever. The backfill only ever adds a field the registered routine does not carry
+  # at all; a field the operator already set, even to an empty or falsy value, is never touched,
+  # because an explicit empty answer is a decision, not a gap.
+
   # waiver: deferred import — avoid module-load cycle with lazy_settings
   from lazy_settings import load_section, load_tracked_section
   settings = Path(repo) / SettingsFile.REL

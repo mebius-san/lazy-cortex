@@ -437,6 +437,16 @@ def _resolve_trigger(current_report: dict, blob_report: dict, is_operator_edit: 
   Returns:
     A `_Trigger` token, or None when nothing wakes the coordinator this tick.
   """
+
+  # Domain(review.coordinator):
+  # # Wake-trigger priority order
+  # A coordinator wake evaluates four possible triggers in a fixed order, and the first one
+  # that fires is the only one acted on this wake: a document entering review, an expert job
+  # landing its result, an operator command left in the document, then any other operator
+  # edit. The command trigger is checked ahead of the general operator-edit trigger on
+  # purpose — a command is itself delivered by an operator commit, so checking edits first
+  # would consume the wake as a plain edit and the command would never be seen.
+
   # waiver: 'frontmatter' is note_ops.build_report's own wire-shape key (module docstring), not a keys.py-promoted constant
   current_fm, blob_fm = current_report["frontmatter"], blob_report["frontmatter"]
 
@@ -736,6 +746,11 @@ def dispatch_job_done(repo: Path, asset_note: Path, dedup_hint: str) -> dict:
   and queues the coordinator itself. The coordinator lands the payload with `collect-job
   --no-commit` inside its own wake and commits once.
 
+  Guarantees:
+    - At most one coordinator job runs per document across both dispatch paths: a live
+      tracked job blocks a new dispatch, and a terminal or vanished one is cleared before
+      this call queues its own job.
+
   Args:
     repo: Repository root.
     asset_note: The reviewed document's path.
@@ -750,6 +765,12 @@ def dispatch_job_done(repo: Path, asset_note: Path, dedup_hint: str) -> dict:
       exits non-zero — the caller's sweep boundary decides what a failed dispatch means.
   """
   markers = _job_markers.read(repo, asset_note)
+
+  # Contract:
+  # At most one coordinator job runs per document across both dispatch paths: a
+  # `coordinator_job` marker naming a bundle that is still running blocks a new dispatch,
+  # while one naming a finished, dead, cancelled, or vanished bundle is cleared before this
+  # call queues its own job.
 
   # same one-live-job mutex as the git path: a running bundle keeps the turn, a terminal
   # one is cleared and this same call goes on to dispatch

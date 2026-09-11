@@ -431,6 +431,15 @@ def _dedup_key(thesis: str, body: str) -> str:
     § on promoting a living doc's decisions, which consumes the Supersedes command rather than
     storing it), since it is stripped out before this is called.
   """
+
+  # Domain(spec.decisions):
+  # # What makes two decisions the same
+  # Two records count as the same decision when their thesis and full body agree once incidental
+  # whitespace is ignored — reformatting never creates a duplicate, and two records that actually
+  # say something different are never folded together. A record's note about which earlier
+  # decision it replaces plays no part in this comparison: that note describes a relationship
+  # between two decisions, not the substance of either one.
+
   return "\x00".join(_normalize_text(v) for v in (thesis, body))
 
 
@@ -569,6 +578,14 @@ def _set_status(body: str, number: int, new_status: str) -> tuple[str, bool]:
     `(new_body, changed)` — `changed` is False (body returned unmodified) when the record or its
     `Status:` line could not be located.
   """
+
+  # Domain(spec.decisions):
+  # # A decision record's lifecycle
+  # A record starts out active. Later it may be marked obsolete, carrying the reason it no
+  # longer applies, or marked as superseded, carrying a link to the record that replaces it.
+  # Either mark is final for the record's own life span, but the record itself is never removed
+  # from the registry — it stays as history, just no longer read as the live word on the subject.
+
   heading_m = re.search(rf"(?m)^## D-{number:03d} — .*$", body)
   # guard: no such record in this body
   if heading_m is None:
@@ -700,6 +717,8 @@ def add(decisions_path: Path, thesis: str, body: str, *,
 
   Guarantees:
     - Concurrent callers never allocate the same `D-NNN` number.
+    - The record's body text is written exactly as given — never rewritten, summarized, or
+      reduced to a subset of its own fields.
 
   Args:
     decisions_path: The registry file's path (asset-level or product-level; need not exist yet).
@@ -749,6 +768,10 @@ def add(decisions_path: Path, thesis: str, body: str, *,
     if dup is not None:
       return {_K.STATUS: _Result.DUPLICATE, _K.ID: f"D-{dup[_K.NUMBER]:03d}",
               _K.FILE: str(decisions_path)}
+
+    # Contract:
+    # the record's body text is written exactly as given — never rewritten, summarized, or
+    # reduced to a subset of its own fields before it lands in the registry file.
 
     # no dedup match — allocate the next number and write the record
     number = _next_number(existing_body)
@@ -862,6 +885,8 @@ def _find_decision_blocks(body: str) -> list[dict]:
   Guarantees:
     - Two `[!decision]` blocks with no blank line between them are never merged into one — a
       line opening a new callout always ends the block in progress.
+    - A block is never collected out of a foreign `#protected/...` or `#expert/...` H1
+      section.
 
   Args:
     body: The document's body text (post-frontmatter).
@@ -874,6 +899,11 @@ def _find_decision_blocks(body: str) -> list[dict]:
   # Contract:
   # a block's own lines stop at the next line that opens a new callout (`> [!...]`) — two
   # decision blocks with no blank line between them are never merged into one
+
+  # Contract:
+  # a `[!decision]` block is never collected out of a foreign `#protected/...` or
+  # `#expert/...` H1 section — such a section is owned by another plugin or by a review
+  # cycle, and its content is never read as this document's own decision content.
 
   # set up the scan state before the single forward pass below
   lines = body.splitlines()
@@ -1006,6 +1036,8 @@ def promote(doc_path: Path, *, today: str | None = None) -> dict:
   Guarantees:
     - Every outcome dict — refused, noop, or promoted — carries both `records` and
       `touched_paths`, each `[]` when not applicable.
+    - Promoting the same document a second time performs no duplicate work: a block whose
+      thesis and body already match an existing record writes no new record.
 
   Args:
     doc_path: The living doc's path.
@@ -1032,6 +1064,15 @@ def promote(doc_path: Path, *, today: str | None = None) -> dict:
     return {_K.STATUS: _Result.REFUSED, _K.REASON: f"no such doc: {doc_path}",
             _K.TOUCHED_PATHS: [], _K.RECORDS: []}
 
+  # Domain(spec.decisions):
+  # # Decisions can only be promoted out of a living document
+  # A decision only enters the registry when it comes from a document that still tracks the
+  # feature it concerns: a design, a bug report, a piece of tech work, or an architecture
+  # write-up. A plan merely breaks an already-accepted decision into tasks and disappears with
+  # the feature it belongs to, so it is never itself a source. A report only ever carries
+  # candidate decisions still under discussion, never ones that were actually made, so it is
+  # never a source either.
+
   # only a living doc (the closed `_LIVING_ROLES` set) is a legal source for a promote call
   text = doc_path.read_text()
   fm_values, fm_end = flip_gate._parse_frontmatter(text)
@@ -1043,6 +1084,12 @@ def promote(doc_path: Path, *, today: str | None = None) -> dict:
     return {_K.STATUS: _Result.REFUSED,
             _K.REASON: f"spec_role '{role}' is not a living doc ({'/'.join(sorted(_LIVING_ROLES))})",
             _K.TOUCHED_PATHS: [], _K.RECORDS: []}
+
+  # Domain(spec.decisions):
+  # # No new decisions on a closed asset
+  # An asset that has been cancelled, halted, or already released is considered closed: nothing
+  # further is decided about it, regardless of who is asking or through what path. Any attempt to
+  # record a new decision against such an asset is refused outright rather than silently applied.
 
   # a product-level doc has no owning asset and so no terminal/halt flags to check at all; an
   # asset-level doc's owning asset gates every promote call regardless of who invoked it (auto on
@@ -1072,6 +1119,11 @@ def promote(doc_path: Path, *, today: str | None = None) -> dict:
   touched: set[str] = set()
   records: list[dict] = []
   lines = body.splitlines()
+
+  # Contract:
+  # promoting the same document a second time performs no duplicate work — a block whose
+  # thesis and body already match an existing record writes no new record, so a repeat call
+  # is safe to retry.
 
   # process blocks in reverse document order so earlier line-range replacements never shift the
   # indices of blocks still to be processed
@@ -1124,6 +1176,10 @@ def promote(doc_path: Path, *, today: str | None = None) -> dict:
 def main(argv: list[str]) -> int:
   """
   Run one `decide` operation from the command line, printing the result as JSON.
+
+  Guarantees:
+    - The exit code names the outcome for every process that subprocesses this CLI: 0 on any
+      non-refused status, 1 on "refused" — no other exit code is ever returned.
 
   Args:
     argv: Subcommand argv tail (the operation name plus its own arguments).
@@ -1190,6 +1246,10 @@ def main(argv: list[str]) -> int:
       result = promote(args.doc_path.resolve(), today = args.today)
   except ValueError as error:
     result = {_K.STATUS: _Result.REFUSED, _K.REASON: str(error)}
+
+  # Contract:
+  # the exit code names the outcome for every process that subprocesses this CLI: 0 on any
+  # non-refused status (including a dedup "duplicate"), 1 on "refused" — never any other code.
 
   # print the result the same way every other lazycortex-specs verb does
   print(json.dumps(result))

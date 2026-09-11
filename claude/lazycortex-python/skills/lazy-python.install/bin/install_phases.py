@@ -107,6 +107,11 @@ class Phase1MirrorRules:
     Returns:
       0 when every rule verified successfully, 1 when at least one write failed verification.
     """
+
+    # Contract:
+    # Only files shipped by the plugin under its rules directory are ever written to the
+    # consumer's rules directory; any other file already present there is left untouched.
+
     self.target_dir.mkdir(parents = True, exist_ok = True)
     shipped = sorted(name for name in os.listdir(self.source_dir) if name.endswith(".md"))
     states = { name: self._mirror(name) for name in shipped }
@@ -129,6 +134,17 @@ class Phase1MirrorRules:
     Returns:
       One of `installed`, `unchanged`, `refreshed`, `failed`.
     """
+
+    # Domain(install.reconciliation):
+    # # Shipped-file reconciliation states
+    # A file the plugin ships is fully install-owned: reconciliation never blends shipped
+    # and existing content, it either leaves a byte-identical file untouched or replaces it
+    # wholesale. The three settled outcomes — freshly created, already identical, replaced
+    # because it drifted — are distinct from a failure outcome that only fires when a write
+    # does not actually land: the target is read back after writing, and any mismatch there
+    # downgrades an apparently completed install step to a failure instead of reporting
+    # success on unverified disk state.
+
     source = self.source_dir / name
     target = self.target_dir / name
     shipped = source.read_bytes()
@@ -140,6 +156,11 @@ class Phase1MirrorRules:
     else:
       state = "refreshed"
     shutil.copyfile(source, target)
+
+    # Contract:
+    # A successful outcome is reported only after the target has been read back and its
+    # bytes verified to match what was shipped; an unverified write is reported as failed.
+
     # guard: the write is only an outcome once the target actually holds the shipped bytes
     if target.read_bytes() != shipped:
       return "failed"
@@ -151,6 +172,9 @@ class Phase2Wrappers:
   """
   Install phase that writes `chk-py` and `tst-py` wrapper scripts into the consumer's `cli/`
   directory and ensures `.venv/` is listed in the consumer's `.gitignore`.
+
+  Guarantees:
+    - Leaves a `.gitignore` that already ignores `.venv` byte-for-byte untouched.
   """
 
   WRAPPERS = (
@@ -185,8 +209,23 @@ class Phase2Wrappers:
     """
     Append `.venv/` to the consumer's `.gitignore` when absent.
     """
+
+    # Domain(install.reconciliation):
+    # # Gitignore line reconciliation
+    # Once a line is present anywhere in the consumer's ignore file, install leaves that file
+    # byte-for-byte untouched — presence is an exact trimmed-line match, not a content search,
+    # so a broader pattern that happens to also ignore the same path still triggers a fresh
+    # append. When the line is genuinely absent, it is appended after a trailing newline is
+    # guaranteed on any prior content, never inserted elsewhere and never used to justify
+    # rewriting a line the consumer already wrote.
+
     existing = self.gitignore.read_text() if self.gitignore.exists() else ""
     present = any(line.strip() in (".venv", ".venv/") for line in existing.splitlines())
+
+    # Contract:
+    # A `.gitignore` that already ignores `.venv` is left byte-for-byte untouched; the
+    # ignore line is appended only when genuinely absent.
+
     # guard: already ignored → leave the file byte-for-byte
     if present:
       print("gitignore-already-present")
@@ -204,6 +243,10 @@ class HomeWrappersPhase:
   These are the only files this plugin ever marks executable: they live outside every
   vault, so no mode-blind git client can strip the bit, and they find the repo's own
   `cli/` wrapper by walking up from the caller's directory.
+
+  Guarantees:
+    - Reasserts the executable bit on both wrappers every run, even when their content
+      is already current.
   """
 
   TEMPLATES: tuple = (
@@ -238,6 +281,13 @@ class HomeWrappersPhase:
         state = "refreshed"
       if state != "unchanged":
         dst.write_bytes(body)
+
+      # Contract:
+      # The executable bit is reasserted on both wrappers every run, even when their
+      # content is already current, so a git client that stripped it is corrected without
+      # requiring a content change.
+
+      # apply the exec bit unconditionally, restoring it if a git client stripped it
       dst.chmod(dst.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
       receipt[name] = state
     print(json.dumps({ "phase": "phase2b", "wrappers": receipt }, indent = 2))
@@ -265,6 +315,15 @@ class Phase3Pyproject:
     target: Path to the consumer's `pyproject.toml` file.
     template: Path to the plugin's template file supplying the checker-stack sections.
   """
+
+  # Domain(install.reconciliation):
+  # # Checker-configuration section completion
+  # A checker-stack section the consumer's project file already declares is never replaced
+  # outright; only the sub-keys it is still missing are inserted into it, leaving every
+  # sub-key value the consumer already set exactly as configured. A section that is entirely
+  # absent is instead appended as a whole verbatim block, preserving the shipped defaults'
+  # own comments and formatting. Both paths converge on the same rule: whatever the consumer
+  # has explicitly written, at any granularity, always outranks the shipped default.
 
   # Always-deployed checker sections. pch is added only when PyCharm is present —
   # it spins up a headless PyCharm and is meaningless without it, so it is deployed
@@ -309,6 +368,10 @@ class Phase3Pyproject:
     # Determine which wanted sections are MISSING under [tool] in the consumer file.
     missing = [s for s in wanted if s not in existing_tool]
 
+    # Contract:
+    # A checker section already present in the consumer's file keeps every sub-key value
+    # the consumer has already set; only sub-keys still missing from that section are added.
+
     # A section already present may still be a partial write from an older install — complete
     # its own missing sub-keys (never touching a sub-key the consumer already set), in place.
     for section_name in wanted:
@@ -326,6 +389,10 @@ class Phase3Pyproject:
         continue
       injected = "\n".join(template_keys[k] for k in missing_keys)
       existing_text = self._insert_after_header(existing_text, section_name, injected)
+
+    # Contract:
+    # Re-running this phase once every checker section already carries every template
+    # sub-key leaves `pyproject.toml` byte-identical to its prior state.
 
     # Idempotent no-op when every checker section is present and none needed a sub-key completed.
     if not missing:
@@ -460,6 +527,9 @@ class Phase5Overlay:
   """
   Install phase that creates per-topic guideline overlay stub files under the
   consumer's `docs/guidelines/` directory.
+
+  Guarantees:
+    - Never overwrites an overlay file the consumer has already created for a topic.
   """
 
   TOPICS = ("coding", "documenting", "testing", "checking")
@@ -478,6 +548,11 @@ class Phase5Overlay:
     self.target_dir.mkdir(parents = True, exist_ok = True)
     for topic in self.TOPICS:
       target = self.target_dir / f"{topic}_guidelines.md"
+
+      # Contract:
+      # An overlay file the consumer has already created for a topic is never overwritten
+      # by this phase, regardless of its contents.
+
       # guard: never clobber a consumer-authored overlay
       if target.exists():
         continue
@@ -511,6 +586,11 @@ class Phase6EnvSource:
   active, so a project that exports secret paths or provider credentials from its own wrapper
   keeps working under the plugin runners. This phase never overwrites a value already on record.
 
+  Guarantees:
+    - Never overwrites a `python.env_source` value already on record.
+    - Auto-records a detected script only when exactly one candidate is found; multiple
+      candidates are reported without being recorded.
+
   Notes:
     - A value already on record is left untouched and reported as `env-source-already-set`.
     - When `LAZY_PYTHON_ENV_SOURCE` is set, its value is recorded as the skill's disambiguated choice.
@@ -522,6 +602,15 @@ class Phase6EnvSource:
     consumer_dir: Root directory of the consumer repository being installed into.
     settings: Path to the consumer's `.claude/lazy.settings.json` file.
   """
+
+  # Domain(install.reconciliation):
+  # # Environment-source detection precedence
+  # A value already on record for this setting is treated as final and is never reconsidered
+  # by a later install, however detection would resolve today. Only when nothing is recorded
+  # yet does detection run at all, and even then an explicit choice always outranks whatever
+  # auto-detection would have found. Auto-detection itself only ever commits a value when
+  # exactly one recognised candidate exists; finding several is reported without picking one,
+  # leaving the ambiguity for a human to resolve rather than silently guessing.
 
   CANDIDATES = ("cli/env", ".env.sh", "scripts/env.sh")
   OVERRIDE_ENV = "LAZY_PYTHON_ENV_SOURCE"
@@ -537,6 +626,11 @@ class Phase6EnvSource:
     Returns:
       0 always; a missing or unwritten value is a benign no-op, not a failure.
     """
+
+    # Contract:
+    # Once `python.env_source` is recorded, a later install run never overwrites it,
+    # however auto-detection would resolve today.
+
     # guard: a recorded value is authoritative — never overwrite it
     if self._already_set():
       print("env-source-already-set")
@@ -560,6 +654,12 @@ class Phase6EnvSource:
       self._record(found[0])
       print(f"env-source-recorded: {found[0]}")
       return 0
+
+    # Contract:
+    # `python.env_source` is auto-recorded only when detection finds exactly one candidate
+    # script; multiple candidates are reported and never auto-recorded.
+
+    # report the ambiguity without recording any of the candidates
     print("env-source-multiple: " + ",".join(found))
     return 0
 
@@ -610,6 +710,12 @@ class Phase7Expert:
   `lazy.settings.json`, so the review phase is dispatchable from the expert runtime as well
   as from the check pipeline.
 
+  Guarantees:
+    - Refreshing an existing expert entry touches only its install-managed fields (`agent`,
+      `aspects`); every other field, including operator-set ones, is left untouched.
+    - Registering or refreshing the entry never alters any other expert or top-level
+      section of the settings file.
+
   Notes:
     - Registers a full entry when none exists on record; when an entry already exists, only
       its install-managed fields (`agent`, `aspects`) are refreshed on drift, leaving every
@@ -632,6 +738,15 @@ class Phase7Expert:
     },
   }
 
+  # Domain(install.reconciliation):
+  # # Managed versus operator-owned entry fields
+  # A registered entry is split at the field level: some fields belong to the plugin and are
+  # silently corrected back to the shipped values whenever they drift, while every other field
+  # is the operator's own and is never touched once the entry exists. This lets an operator
+  # freely edit their own fields without an install step ever reverting them, while a plugin
+  # upgrade that changes its own managed fields still reaches every existing consumer without
+  # requiring a fresh registration.
+
   # Install-managed fields: this phase's own writing, refreshed on drift. `git_author`
   # is the operator's to set once registered — it is seeded on first registration only.
   MANAGED_FIELDS = ("agent", "aspects")
@@ -647,6 +762,12 @@ class Phase7Expert:
     Returns:
       0 always; the registration or refresh is additive and cannot fail the install.
     """
+
+    # Contract:
+    # Registering or refreshing the reviewer expert entry never alters any other expert
+    # entry or any other top-level section of the settings file; both are carried through
+    # unchanged.
+
     data = self._load()
     experts = data.get("experts")
     # a settings file with no experts section yet starts from an empty mapping
@@ -671,6 +792,11 @@ class Phase7Expert:
     if all(entry.get(field) == self.EXPERT_ENTRY[field] for field in self.MANAGED_FIELDS):
       print("expert-already-registered")
       return 0
+
+    # Contract:
+    # Refreshing an existing expert entry rewrites only its install-managed fields
+    # (`agent`, `aspects`); every other field on the entry, including operator-set ones,
+    # is left exactly as recorded.
 
     # correct only the plugin-owned fields; every other field (operator's own) stays as recorded
     for field in self.MANAGED_FIELDS:

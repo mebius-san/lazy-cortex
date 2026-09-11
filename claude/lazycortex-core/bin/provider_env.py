@@ -92,6 +92,18 @@ def validate_entry(name: str, entry: object) -> dict:
   if not token_env or not isinstance(token_env, str):
     raise ProviderConfigError(f"provider {name!r}: token_env is required")
 
+  # Domain(runtime.providers):
+  # # Foreign-provider routing completeness
+  # Spawning against a non-Anthropic endpoint only works when every model-selection surface the
+  # harness can address is pinned to that provider's own alias; a gap falls through to the
+  # literal Claude alias name, and a literal Claude name is meaningless to a foreign endpoint —
+  # the spawn ends up silently talking to whatever the endpoint treats that name as, not to what
+  # the operator configured. A provider's model mapping must therefore cover every tier the
+  # harness can emit, and none of those tiers may be a literal Claude-owned name. The one
+  # provider that also serves the operator's own interactive traffic under a separate route
+  # additionally requires every runtime-facing tier to carry that route's own prefix, so
+  # automated work can never be misrouted onto the operator's personal route by omission.
+
   # the tier map must cover every alias the harness can emit, or an uncovered
   # tier leaks to the foreign endpoint under its Claude alias name
   models = entry.get(ProviderKey.MODELS) or {}
@@ -158,6 +170,10 @@ def resolve_token(token_env: str, *, env_file: Path | None = None) -> str | None
   Checks the process environment first, then falls back to reading an env file, favoring
   its last assignment of the variable when several are present.
 
+  Guarantees:
+    - The process environment always takes precedence over the fallback file.
+    - When the fallback file is read, its last assignment of the variable wins over earlier ones.
+
   Args:
     token_env: Name of the environment variable that carries the provider's token.
     env_file: Fallback file to read when the token is not in the process environment;
@@ -166,6 +182,11 @@ def resolve_token(token_env: str, *, env_file: Path | None = None) -> str | None
   Returns:
     The resolved token, or `None` if it is found in neither place.
   """
+
+  # Contract:
+  # The process environment MUST take precedence over the fallback env file; when the file
+  # is consulted and holds several assignments of the same variable, the last one MUST win.
+
   # check process environment first
   value = os.environ.get(token_env)
   # guard: the process environment wins — same precedence the daemon's token gate uses
@@ -194,6 +215,10 @@ def build_spawn_env(provider: dict, token: str) -> dict[str, str]:
   """
   Build the environment variable overrides needed to spawn against a provider's endpoint.
 
+  Guarantees:
+    - Every model-selection surface the harness can address is redirected to the provider,
+      including a built-in subagent that names no tier of its own.
+
   Notes:
     - Removing `CLAUDE_CODE_OAUTH_TOKEN` from the caller's environment remains the
       caller's own responsibility; this function only adds variables.
@@ -206,6 +231,13 @@ def build_spawn_env(provider: dict, token: str) -> dict[str, str]:
     The environment variable overrides to apply — tier-alias remaps, `ANTHROPIC_BASE_URL`,
     `ANTHROPIC_AUTH_TOKEN`, and `CLAUDE_CODE_SUBAGENT_MODEL`.
   """
+
+  # Contract:
+  # The returned overrides MUST redirect every model-selection surface the harness can
+  # address to the given provider — including a built-in subagent that names no tier of
+  # its own — so no request tied to this provider can fall back to the operator's own
+  # Anthropic account.
+
   # build tier-to-env mappings for model selection aliases
   # the alias-remap variables cover --model tiers AND subagent frontmatter tiers;
   # CLAUDE_CODE_SUBAGENT_MODEL backstops built-in subagents with no model: at all
@@ -216,6 +248,15 @@ def build_spawn_env(provider: dict, token: str) -> dict[str, str]:
   # waiver: ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN are harness-canonical env var names
   overrides["ANTHROPIC_BASE_URL"] = provider[ProviderKey.BASE_URL]
   overrides["ANTHROPIC_AUTH_TOKEN"] = token
+
+  # Domain(runtime.providers):
+  # # Subagent backstop against routing completeness
+  # A built-in subagent that names no tier of its own is not covered by the per-tier alias
+  # remaps above, so left alone it would run against the harness's own default model — an
+  # Anthropic model, reached even while the job around it is deliberately spawned against a
+  # foreign endpoint. Pinning every such subagent to one fixed, provider-specific tier closes
+  # that last gap, so no subagent of a foreign-endpoint job can fall back onto the operator's
+  # own account.
 
   # Decision: sonnet tier backstops built-in subagents (not haiku, not the job's own tier) —
   # mid-tier matches the harness's own subagent default class; the backstop must be

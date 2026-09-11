@@ -30,6 +30,7 @@ This skill has 23 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 11.5 — Seed providers`
    - `Step 12 — Bootstrap built-in routines (expert pump, doctor tick, index guard, weekly autocheckup)`
    - `Step 12.5 — Restore externally-sourced working directories`
+   - `Step 12.7 — Record the interpreter for skills and hooks`
    - `Step 13 — Daemon gate (enabled + run_here) + supervisor install`
    - `Step 13.5 — Configure expert-spawn sandbox in .runtime/sandbox.settings.json`
    - `Step 13.6 — Provision metrics (port + repo label + scrape-targets file)`
@@ -783,6 +784,27 @@ The wrapper stays silent in a checkout that would never run a daemon — `daemon
 
 Outcome: `no-declaration` / `linked` / `unchanged` / `declined-on-record` / `ignores-ok` / `ignores-updated` / `ignores-declined` / `inbox-conflict` / `not-this-checkout`. The repair outcome and the ignore-coverage outcome are both stated — `linked, ignores-updated` is a normal pair.
 
+## Step 12.7: Record the interpreter for skills and hooks
+
+Unconditional — this step runs in every checkout, daemon or not. Skills and hooks shipped by every lazycortex plugin run Python as `"${LAZYCORTEX_PYTHON:-python3}" ${CLAUDE_PLUGIN_ROOT}/bin/<file>` in whichever checkout a session opens, so the interpreter is recorded before the daemon gate below decides anything about this checkout; a checkout the `run_here` map does not name still runs every skill and hook.
+
+- **python** = the absolute interpreter. Derive it once: `Bash(python3 -c 'import sys; print(sys.executable)')`. Hold it as `<PYTHON>` for this step and for 13b/13c. It is machine-specific and is never written into the tracked `lazy.settings.json`.
+
+Merge `{"env": {"LAZYCORTEX_PYTHON": "<PYTHON>"}}` into `<repo-root>/.claude/settings.local.json` (create the file as `{}` when absent; deep-merge, never overwrite other keys; the file is gitignored — a machine-specific absolute path never enters tracked settings):
+
+```bash
+python3 - "<repo-root>/.claude/settings.local.json" "<PYTHON>" <<'PY'
+import json, sys
+from pathlib import Path
+p, py = Path(sys.argv[1]), sys.argv[2]
+data = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
+data.setdefault("env", {})["LAZYCORTEX_PYTHON"] = py
+p.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+PY
+```
+
+Outcome: **python-recorded** (or **python-unchanged** when the value already matched).
+
 ## Step 13: Daemon gate (enabled + run_here) + supervisor install
 
 If Step 9 was skipped (outcome `skipped-not-in-git-repo`), or Step 12.5 stated `inbox-conflict`, inherit the same outcome and skip this step.
@@ -827,8 +849,8 @@ else:
 ```
 
 - Output `run-here` → this machine and this checkout are the pair on record; proceed to 13a and install the supervisor. Do NOT ask.
-- Output `not-this-host` → the map is on record and this machine is not in it; go to **13e** (teardown), state **not-this-host**, then skip the supervisor install. Do NOT ask.
-- Output `not-this-checkout` → this machine is on record but drives a different checkout of the project; go to **13e** (teardown), state **not-this-checkout**, print the path the map names, then skip the supervisor install. Do NOT ask — which checkout drives the project is already answered, and re-pointing it is a deliberate edit, not an install-time default.
+- Output `not-this-host` → the map is on record and this machine is not in it; go to **13d** (teardown), state **not-this-host**, then skip the supervisor install. Do NOT ask.
+- Output `not-this-checkout` → this machine is on record but drives a different checkout of the project; go to **13d** (teardown), state **not-this-checkout**, print the path the map names, then skip the supervisor install. Do NOT ask — which checkout drives the project is already answered, and re-pointing it is a deliberate edit, not an install-time default.
 - Output `invalid-shape` → `run_here` is on record as a boolean or a bare host list, left by an install that predates the map. State **run-here-invalid**, print the offending value, and ask the question below — the answer replaces it. The daemon refuses to start until it is replaced, so never leave it as found.
 - Output `unset` → ask once:
 
@@ -901,7 +923,7 @@ save_section(p, 'daemon', sec)
 
 Hold the derived boolean as `<dev_mode>` for 13b/13c.
 
-- **python** = the absolute interpreter the supervisor will hand to the shim. Derive it once: `Bash(python3 -c 'import sys; print(sys.executable)')`. Hold it as `<PYTHON>` for 13b/13c/13d. It is machine-specific and is never written into the tracked `lazy.settings.json`.
+- **python** = `<PYTHON>` as recorded by Step 12.7 — the supervisor hands the same interpreter to the shim that skills and hooks already use. Never re-derive it here.
 
 - **login-shell / env-files** = operator-provided supervisor options (NOT derived — read verbatim from the `daemon.supervisor` block, alongside `dev_mode`). They give the daemon a login-equivalent environment on headless hosts where launchd/systemd exec the shim without a login shell, so `claude -p` otherwise fails "Not logged in" and `claude` may not resolve in PATH. Both default off → byte-identical behaviour when absent.
 
@@ -946,24 +968,7 @@ When the platform is Linux:
 8. State **systemd-installed** (or **systemd-installed-dev-mode** when `<dev_mode>` is True).
 7. State **systemd-installed** (or **systemd-installed-dev-mode** when `<dev_mode>` is True).
 
-### 13d. Record the interpreter for skills and hooks
-
-Skills and hooks shipped by every lazycortex plugin run Python as `"${LAZYCORTEX_PYTHON:-python3}" ${CLAUDE_PLUGIN_ROOT}/bin/<file>`. Make the recorded interpreter reach them: merge `{"env": {"LAZYCORTEX_PYTHON": "<PYTHON>"}}` into `<repo-root>/.claude/settings.local.json` (create the file as `{}` when absent; deep-merge, never overwrite other keys; the file is gitignored — a machine-specific absolute path never enters tracked settings):
-
-```bash
-python3 - "<repo-root>/.claude/settings.local.json" "<PYTHON>" <<'PY'
-import json, sys
-from pathlib import Path
-p, py = Path(sys.argv[1]), sys.argv[2]
-data = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
-data.setdefault("env", {})["LAZYCORTEX_PYTHON"] = py
-p.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-PY
-```
-
-State **python-recorded** (or **python-unchanged** when the value already matched).
-
-### 13e. Teardown when a host list excludes this host
+### 13d. Teardown when a host list excludes this host
 
 Reached only from the `not-this-host` branch of the gate. Compute `<REPO_ID>` with the 13a snippet (same formula, same inputs), then remove this checkout's supervisor unit **on this host only** — the unit for a checkout that must not run here is either a leak from a synced overlay or a stale install, and leaving it loaded keeps a duplicate daemon alive.
 
@@ -1010,13 +1015,15 @@ Block 2 — `<repo-root>/.claude/settings.local.json` (permission scope; loaded 
 {
   "permissions": {
     "additionalDirectories": ["~/.claude/plugins/cache/lazycortex"],
-    "allow": ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Skill", "Bash(lazycortex-core *)"],
-    "deny":  ["Bash(find /*)", "Bash(find /Users/*)", "Bash(find ~/*)", "Bash(grep -r /*)", "Bash(grep -R /*)", "Bash(grep -r ~/*)", "Bash(grep -R ~/*)", "Bash(rg /*)", "Bash(rg --files /*)", "Bash(rg ~/*)", "Bash(rg --files ~/*)", "Bash(ls /Users/*)", "Bash(ls ~/*)"]
+    "allow": ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Skill", "WebSearch", "WebFetch", "Bash(lazycortex-core *)"],
+    "deny":  ["Bash(find /*)", "Bash(find /Users/*)", "Bash(find ~/*)", "Bash(grep -r /*)", "Bash(grep -R /*)", "Bash(grep -r ~/*)", "Bash(grep -R ~/*)", "Bash(rg /*)", "Bash(rg --files /*)", "Bash(rg ~/*)", "Bash(rg --files ~/*)"]
   }
 }
 ```
 
 The `Bash(lazycortex-core *)` entry is required so dispatched experts can invoke the core CLI (`expert-pump-once`, `permission-allow`, etc.) — Claude Code's `dontAsk` permission mode auto-allows only well-known commands (git, python3, ls in PWD) and silently denies any other Bash command without an explicit allow-pattern. Sibling plugins' install skills add their own `Bash(lazycortex-<short> *)` patterns to this same `permissions.allow` list via `lazycortex-core permission-allow`.
+
+The bare `WebSearch` and `WebFetch` entries are required for the research-shaped experts (`lazycortex-experts`' researcher): under `dontAsk` both tools are refused without an explicit allow rule, `WebSearch` accepts only the bare form, and the bare `WebFetch` permits any domain. Neither tool runs through the Bash sandbox — they execute in-process — so the sandbox file does not govern them; the permission file does. `WebSearch` is unavailable on the Bedrock provider; that is a provider limit, not a seeding error, and the entry is still written.
 
 Tilde-form (`~/...`) is acceptable for paths the operator wants portable across machines — Claude Code expands `~` at load time. Absolute paths are equally valid.
 
@@ -1147,6 +1154,7 @@ Report to the user:
 - lazycortex-core agent-model tier seed outcome (Step 11 §1b, via `lazy-core.agent-models-seed`)
 - Expert-pump routine registration outcome (Step 12)
 - External working-directory outcome (Step 12.5), including every `skipped (was …)` line, the ignore-coverage outcome with each appended `.gitignore` line (or, on `ignores-declined`, the WARN naming every path git can still see), and any `inbox-conflict` refusal
+- Interpreter record outcome (Step 12.7)
 - Daemon supervisor install outcome (Step 13)
 - Sandbox/permissions merge outcome (Step 13.5)
 - Metrics provisioning outcome (Step 13.6)

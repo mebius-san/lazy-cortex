@@ -284,6 +284,10 @@ def build_report(text: str, job_markers: dict[str, str | None] | None = None) ->
   """
   Parse a review document into the structural report the coordinator and watch worker act on.
 
+  Guarantees:
+    - When `parse_failed` is `True`, every other report field is empty rather than
+      partially populated.
+
   Args:
     text: Full document text to inspect.
     job_markers: The document's runtime marker entry from `job_markers.read`, reported
@@ -301,6 +305,11 @@ def build_report(text: str, job_markers: dict[str, str | None] | None = None) ->
     meta, body = _fm.parse(text)
   except ParseError:
     meta, body = {}, ""
+
+  # Contract:
+  # When `parse_failed` is True, every other report field is empty rather than
+  # partially populated.
+
   # guard: no usable frontmatter — the document is structurally broken for review purposes
   if not meta:
     return {
@@ -313,6 +322,15 @@ def build_report(text: str, job_markers: dict[str, str | None] | None = None) ->
         "ticked_question_options": [],
         "job_markers": markers,
     }
+
+  # Domain(review.config):
+  # # Closed vocabulary for review frontmatter signals
+  # A review document's frontmatter carries the review system's own control state as a closed
+  # set of `review_`-prefixed keys; nothing else in that namespace is state the review system
+  # recognizes. A key that carries the same prefix but sits outside the closed set is reported
+  # on its own rather than silently folded into the recognized state or silently dropped, so a
+  # signal from a newer or unrelated system stays visible to whoever reads the report instead
+  # of vanishing into either bucket.
 
   # split the parsed keys into the closed schema and everything outside it
   frontmatter: dict[str, bool | int | str] = {}
@@ -344,6 +362,10 @@ def set_key(text: str, key: str, value: object) -> str:
   The key must be a member of the closed schema `_KNOWN_REVIEW_KEYS`. When the value
   is `None`, the key line is deleted instead. Document body is preserved byte-for-byte.
 
+  Guarantees:
+    - The document body (everything after the frontmatter block) is preserved byte-for-byte;
+      only the target key's frontmatter line is added, updated, or removed.
+
   Args:
     text: Raw document text to modify.
     key: The frontmatter key to set or delete.
@@ -357,6 +379,11 @@ def set_key(text: str, key: str, value: object) -> str:
     ValueError: If `key` is not in the closed schema.
     ParseError: If the document has an opening frontmatter fence with no matching closing fence.
   """
+
+  # Contract:
+  # The document body (everything after the frontmatter block) remains byte-for-byte
+  # unchanged; only the target key's frontmatter line is added, updated, or removed.
+
   # guard: key must be in the known schema
   if key not in _KNOWN_REVIEW_KEYS:
     raise ValueError(
@@ -397,6 +424,15 @@ def waiting_context_for_phase(review_phase: str | None) -> str:
     The matching barrier/finalize label, or `Bucket.WRITER` for any phase without one — an
     active job outside a named barrier phase is a main-writer round waiting on that writer.
   """
+
+  # Domain(review.markup):
+  # # Waiting-context label scope
+  # The banner's in-process title names the barrier a round is waiting on only while that
+  # barrier is a distinct phase of the round machine — a validation pass, a terminal pass, or
+  # the finalize step. Every other phase, including no phase at all, reports the same generic
+  # "waiting on the writer" label, because outside those three barriers there is only one thing
+  # a round can be waiting on.
+
   # guard: no phase to look up — fall back to the writer label
   if review_phase is None:
     return Bucket.WRITER
@@ -410,6 +446,10 @@ def repaint_banner(text: str, *, job_in_flight: bool = False) -> str:
   The banner state is driven by frontmatter (`review_approved`,
   `review_approved_with_concerns`, `review_phase`) plus the body's own open-question/-concern
   content — no class-config lookup. A job in flight always paints the in-process banner.
+
+  Guarantees:
+    - Repainting is idempotent: calling this function again on its own output, with the
+      same `job_in_flight` value, returns identical text.
 
   Args:
     text: Full document text, frontmatter included.
@@ -425,6 +465,11 @@ def repaint_banner(text: str, *, job_in_flight: bool = False) -> str:
   Raises:
     ParseError: If the document has an opening frontmatter fence with no matching closing fence.
   """
+
+  # Contract:
+  # Repainting is idempotent: calling this function again on its own output, with the
+  # same `job_in_flight` value, returns identical text.
+
   meta, body = _fm.parse(text)
   # guard: no frontmatter — nothing to derive a banner state from
   if not meta:

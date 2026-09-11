@@ -208,12 +208,35 @@ def enumerate_local_daemons(platform: str | None = None) -> list[dict]:
   settings will not parse are skipped with a one-line warning on stderr. None of the repos
   walked here belongs to the caller, so one unreadable neighbour never fails the enumeration.
 
+  Guarantees:
+    - A single unit that cannot be read or parsed, or whose repo no longer exists or has
+      unreadable settings, is skipped rather than aborting the whole call.
+    - The returned list is always sorted by unit name.
+
   Args:
     platform: Optional `sys.platform` override; defaults to the current platform.
 
   Returns:
     One dict per daemon with the `RegistryRow` keys, sorted by unit name.
   """
+
+  # Contract:
+  # A single unit that cannot be read or parsed, or whose repo no longer exists or has
+  # unreadable settings, is skipped rather than aborting the whole call; the result is
+  # always whatever subset of units could be successfully resolved.
+
+  # Contract:
+  # The returned list is always sorted by unit name.
+
+  # Domain(runtime.metrics):
+  # # Host daemon registry derived from supervisor units
+  # The list of runtime daemons on a host is never kept in a database of its own; it is
+  # recovered afresh each time by reading every installed supervisor unit and reading back the
+  # checkout path each one was set up for. That path is the join key into the checkout's own
+  # settings, so a daemon's identity and its metrics configuration always stay in step with
+  # whichever checkout currently owns the unit, even after the checkout moves or its settings
+  # change — there is nothing else to keep synchronized.
+
   platform = platform or sys.platform
   base = _unit_dir(platform)
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
@@ -261,6 +284,10 @@ def identify_holder(port: int, registry: list[dict] | None = None) -> dict | Non
   Uses `lsof` to find the listener and cross-references the daemon registry so a conflict
   with another lazycortex daemon is reported with its repo path.
 
+  Guarantees:
+    - Never raises because `lsof` is missing, times out, or produces unexpected output;
+      such conditions resolve to no holder found instead.
+
   Args:
     port: TCP port to inspect.
     registry: Optional pre-computed `enumerate_local_daemons()` result; computed when omitted.
@@ -269,6 +296,19 @@ def identify_holder(port: int, registry: list[dict] | None = None) -> dict | Non
     A dict with the `HolderKey` keys (`repo_root` present only when the port belongs to a
     registered daemon); None when no listener is found or `lsof` is unavailable.
   """
+
+  # Contract:
+  # This call never raises because `lsof` is missing, times out, or produces unexpected
+  # output; any such condition resolves to no holder found rather than propagating.
+
+  # Domain(runtime.metrics):
+  # # Distinguishing a registered daemon from a foreign listener
+  # A port occupied by one of this host's own registered daemons is not a conflict — it is
+  # simply that daemon's metrics endpoint doing its job. Naming the listener as a conflict is
+  # meaningful only once it has been checked against the registry: a listener whose port
+  # matches a metrics-enabled row belongs to that row's checkout, and every listener whose port
+  # matches nothing in the registry is a stranger to the fleet.
+
   try:
     proc = subprocess.run(
       # waiver: external lsof CLI flags, not domain constants
@@ -312,6 +352,11 @@ def write_scrape_targets_file(out: Path | None = None, registry: list[dict] | No
   port and the `repo` label — no repo paths, no hostnames, no credentials. The write is
   atomic (sibling temp file + `os.replace`).
 
+  Guarantees:
+    - Every written entry carries only a loopback address, the daemon's port, and the
+      `repo` label; it never carries a repository path, a hostname, or a credential.
+    - The file is replaced atomically; a reader never observes a partially written file.
+
   Args:
     out: Optional output path; defaults to `scrape_targets_path()`.
     registry: Optional pre-computed `enumerate_local_daemons()` result; computed when omitted.
@@ -320,6 +365,23 @@ def write_scrape_targets_file(out: Path | None = None, registry: list[dict] | No
     A dict with `path` (the written file), `count` (number of targets), and `targets`
     (the file content that was written).
   """
+
+  # Contract:
+  # Every written entry carries only a loopback address, the daemon's port, and the
+  # `repo` label; it never carries a repository path, a hostname, or a credential.
+
+  # Contract:
+  # The scrape-targets file is replaced atomically; a concurrent reader never observes a
+  # partially written file.
+
+  # Domain(runtime.metrics):
+  # # Server-blind, loopback-only scrape targets
+  # The scrape-targets file names only what a collector needs to reach a daemon's metrics
+  # endpoint — never a repository path, a hostname, or a credential. A daemon bound to every
+  # interface is still named by its loopback address rather than its wildcard bind, because the
+  # file only ever describes how this same host's own collector reaches a daemon that lives on
+  # it, never an address meant to be reachable from elsewhere on the network.
+
   registry = registry if registry is not None else enumerate_local_daemons()
   targets = []
   for row in registry:

@@ -65,6 +65,14 @@ def _dead_jobs_needing_doctor(repo: Path) -> list[dict]:
     A list of dicts with keys `expert`, `job_id`, and `jdir_rel` (the job dir path relative to
     the repository root). Empty list when no dead jobs await triage.
   """
+
+  # Domain(runtime.incidents):
+  # # Un-triaged dead job
+  # A job that died is not yet an incident the doctor needs to see — only one that has not
+  # already been given a retry-or-permanent-fail judgment is. The judgment is recorded once
+  # and for good beside the job itself, so a job the doctor already looked at is never handed
+  # back to it a second time.
+
   base = repo / JOBS_BASE
   # guard: jobs base directory does not exist — no dead jobs to inventory
   if not base.is_dir():
@@ -236,6 +244,13 @@ def _source_state(repo: Path, config_json: dict | None) -> list[dict]:
   # the doctor's context describing the work as it stands now, and without it a stale job passes
   # every attempt band and gets retried into a document the operator already moved past.
 
+  # Domain(runtime.incidents):
+  # # Vanished source as an abandonment signal
+  # The strongest evidence that a dead job's work no longer matters is that the document it
+  # was dispatched to touch has disappeared since. Its absence is reported to the doctor rather
+  # than silently skipped, because a target that vanished is exactly the situation where
+  # retrying the job would only recreate work the operator already moved past.
+
   # guard: an unreadable config leaves nothing to describe, and a missing key is not an error
   paths = (config_json or {}).get(JobConfigKey.SOURCE_PATHS)
   if not isinstance(paths, list):
@@ -376,6 +391,10 @@ def doctor_tick(repo: Path) -> dict:
   """
   Run one hourly doctor trigger pass against the given repository.
 
+  Guarantees:
+    - At most one `runtime.doctor` job is ever in flight; a finished bundle is retired before a
+      fresh dispatch, and an in-flight bundle blocks a new one entirely.
+
   Args:
     repo: Absolute path to the repository root.
 
@@ -385,6 +404,16 @@ def doctor_tick(repo: Path) -> dict:
     halt and dead-job counts, the ids of finished doctor bundles retired before the fresh
     dispatch, and the dispatch result returned by `expert_runtime.dispatch_job`.
   """
+
+  # Domain(runtime.incidents):
+  # # Doctor trigger conditions and single-flight dispatch
+  # The doctor is woken only by one of two conditions: a halt that has sat unresolved long
+  # enough that nobody is coming to fix it by hand, or a dead job that has never been given a
+  # retry-or-give-up judgment. Because the doctor never reports back to anything that consumes
+  # its answer, a finished dispatch — successful or not — is recycled before a new one is
+  # queued; otherwise the one dedicated doctor slot would stay occupied by old work and no
+  # newly triggered condition could ever be looked at.
+
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   from expert_runtime import dispatch_job, retire_completed_jobs
   repo = Path(repo)
@@ -397,6 +426,11 @@ def doctor_tick(repo: Path) -> dict:
       "triggered": False, "halt": None, "dead_jobs": 0,
       "remote_halt_cleared": remote_halt_cleared,
     }
+
+  # Contract:
+  # At most one `runtime.doctor` job is ever in flight; a finished bundle is retired
+  # before a fresh dispatch, and an in-flight bundle blocks a new one entirely.
+
   # Recycle finished doctor bundles before re-dispatch: the doctor is fire-and-
   # forget (nobody consumes its response), so a DONE bundle — success or error —
   # holds the dedup slot and silently disables the doctor until the cleanup TTL.

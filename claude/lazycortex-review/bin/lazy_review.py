@@ -88,6 +88,10 @@ def cmd_set_key(args: argparse.Namespace) -> int:
   """
   Delegate the `set-key` subcommand to the note_ops module.
 
+  Guarantees:
+    - An unknown `key` is rejected without writing anything; the file is left completely
+      untouched.
+
   Args:
     args: Parsed namespace with `file`, `key`, `value`, and `repo` attributes.
 
@@ -97,6 +101,11 @@ def cmd_set_key(args: argparse.Namespace) -> int:
   Raises:
     ParseError: If the document has an opening frontmatter fence with no matching closing fence.
   """
+
+  # Contract:
+  # The file is left completely untouched when `key` is not in the reserved schema; a
+  # rejected key never produces a partial write.
+
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import note_ops  # type: ignore
@@ -366,6 +375,10 @@ def cmd_strip_markup(args: argparse.Namespace) -> int:
   writer dispatches — those experts judge the document's final state, not the
   raw diff material main writers work on.
 
+  Guarantees:
+    - Never aborts on an unrecognized configured edit-marker style; the document's body is
+      printed with its markup left unresolved instead.
+
   Args:
     args: Parsed namespace with a `file` attribute.
 
@@ -395,6 +408,20 @@ def cmd_strip_markup(args: argparse.Namespace) -> int:
   text = file_path.read_text(encoding = "utf-8")
   _meta, body = _fm.parse(text)
   fm_text = text[: len(text) - len(body)]
+
+  # Domain(review.dispatch):
+  # # Resolved text for judging, raw markup for revising
+  # A writer that revises a document's body works from its edit-annotation markup left
+  # unresolved, so a later round can still retract or build on an earlier round's marked
+  # change. A writer that only judges the document's current state — whether it is ready to
+  # advance, or whether it already satisfies a terminal check — is instead handed the markup
+  # folded away into the plain text the operator would actually read, because judging the
+  # wrong view risks approving or rejecting text that no longer exists once the markup
+  # resolves.
+
+  # Contract:
+  # An unrecognized configured edit-marker style never aborts the dispatch; the document's
+  # body is returned with its markup left unresolved instead of raising.
 
   # resolve the body's edit markup per the document's pinned style; an unknown style must not
   # kill the dispatch — `body` stays the raw document half and the verb degrades gracefully

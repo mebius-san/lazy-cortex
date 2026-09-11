@@ -80,6 +80,16 @@ def spec_content_root(settings_root: Path) -> Path:
   Returns:
     `settings_root / <spec.vault_root>` (default `specs`).
   """
+
+  # Domain(spec.config):
+  # # Settings and content live at two different roots
+  # A checkout keeps its configuration and its actual spec content at two different roots on
+  # purpose: the settings-root is wherever the project's own configuration already lives, while
+  # the content-root is a separate, configurable location underneath it that holds nothing but
+  # the spec catalog itself. Keeping them apart lets the spec catalog occupy its own named
+  # location in a project that organizes its other content differently, without the project's
+  # own configuration having to move to make room for it.
+
   return settings_root / _vault_root_value(settings_root)
 
 
@@ -143,6 +153,10 @@ def resolve_plugin_cli(name: str) -> Path | None:
   environment (exported by the daemon) is walked first; outside the daemon, a cached install falls
   back to the sibling's newest version in the same plugin cache.
 
+  Guarantees:
+    - When both the plugin-dirs environment and the plugin cache carry a matching CLI, the
+      plugin-dirs environment's copy is returned.
+
   Args:
     name: Name of the CLI binary to look for under each plugin directory's `bin/` folder.
 
@@ -150,6 +164,11 @@ def resolve_plugin_cli(name: str) -> Path | None:
     The resolved binary path, or None when neither the plugin-dirs environment nor the plugin
     cache carries the named CLI.
   """
+
+  # Contract:
+  # When both the plugin-dirs environment and the plugin cache carry a matching CLI,
+  # the plugin-dirs environment's copy is returned.
+
   raw = os.environ.get(_ENV_PLUGIN_DIRS, "")
   for entry in raw.split(os.pathsep):
     # guard: empty path segment (trailing/double pathsep) — skip it

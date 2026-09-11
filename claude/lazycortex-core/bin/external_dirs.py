@@ -60,6 +60,16 @@ def _is_contained(rel: str) -> bool:
   Returns:
     True when the path resolves inside the repository; False when it climbs out of it.
   """
+
+  # Domain(install.reconciliation):
+  # # Containment invariant for declared external directories
+  # A declaration naming where a repository sources one of its directories from travels with
+  # every clone of that repository, so it must never be able to point the repair mechanism
+  # outside the repository it was written for. A declared path that resolves to an absolute
+  # location or that climbs above the repository root names something other than a slot inside
+  # this checkout, and is treated as if it had never been declared at all — dropped silently
+  # rather than surfaced as a broken or repairable entry.
+
   norm = os.path.normpath(rel)
   # guard: an absolute entry names a location of its own, not a slot in the repository
   if os.path.isabs(norm):
@@ -71,10 +81,9 @@ def declared_paths(repo: Path | str) -> list[str]:
   """
   List the repo-relative paths a repository sources from outside itself.
 
-  Notes:
-    - A declared entry that climbs out of the repository is dropped rather than reported.
-      The declaration travels with every clone, and repair creates directories and plants
-      symlinks, so a path the repository does not contain is never acted on.
+  Guarantees:
+    - A declared entry that resolves outside the repository (absolute, or climbing above the
+      root) is dropped rather than reported, so nothing downstream ever acts on it.
 
   Args:
     repo: Repository root whose declaration is read.
@@ -83,6 +92,13 @@ def declared_paths(repo: Path | str) -> list[str]:
     The declared paths with surrounding slashes stripped, in declaration order;
     empty when the repository declares none.
   """
+
+  # Contract:
+  # A declared path that resolves outside the repository (absolute, or climbing above the
+  # root) MUST be dropped from the result silently, never surfaced as a broken or repairable
+  # entry — the declaration travels with every clone, and repair plants symlinks and creates
+  # directories from it.
+
   raw = _section(Path(repo)).get(ExternalDirsKey.PATHS) or []
   stripped = [str(p).strip("/") for p in raw if str(p).strip("/")]
   return [rel for rel in stripped if _is_contained(rel)]
@@ -106,13 +122,22 @@ def source_root(repo: Path | str) -> Path | None:
   """
   Return the absolute source root recorded for this checkout.
 
+  Guarantees:
+    - A relative recorded value is anchored to the repository, never to the working
+      directory of the reading process.
+
   Args:
     repo: Repository root whose overlay is read.
 
   Returns:
-    The expanded absolute path, or None when no source root is on record. A relative value
-    is anchored to the repository, never to the working directory of the reading process.
+    The expanded absolute path, or None when no source root is on record.
   """
+
+  # Contract:
+  # A relative source root MUST resolve against the repository root, never against the
+  # working directory of the reading process — the daemon and an interactive install run
+  # from different cwds and MUST agree on where the same declaration points.
+
   repo = Path(repo)
   raw = _section(repo).get(ExternalDirsKey.ROOT)
   # guard: no source root on record — this checkout is unconfigured
@@ -293,6 +318,17 @@ def _status_for(link: Path, source: Path) -> str:
   Returns:
     One token from `ExternalDirStatus`, never `UNCONFIGURED`.
   """
+
+  # Domain(install.reconciliation):
+  # # External-directory link status classification
+  # A declared external directory has exactly one of a small set of states, checked in a fixed
+  # order: what is actually a symlink is diagnosed by where it points, never by what else might
+  # exist at the same path, and a link is broken before it is checked for pointing at the wrong
+  # place. Real content sitting where a link should be belongs to the operator and is never
+  # confused with a link that is merely wrong. Only once neither a link nor real content is
+  # found does the absence of a source itself become the reported condition, ahead of a plain
+  # missing link.
+
   # guard: a symlink is diagnosed by its target, whatever else is on disk
   if link.is_symlink():
     target = _link_target(link)
@@ -372,10 +408,12 @@ def apply(repo: Path | str) -> list[dict]:
   """
   Create or re-point the symlinks for every repairable declared external directory.
 
+  Guarantees:
+    - Never removes or overwrites anything other than a symlink it is repairing: operator
+      content in a declared slot, an absent source, and an unconfigured checkout are left
+      untouched and reported as skipped, and only a symlink is ever unlinked.
+
   Notes:
-    - Operator content in a declared slot, an absent source, and a checkout with no
-      source root on record are reported as skipped; none of them is ever modified.
-    - Only a symlink is ever unlinked, so a real directory cannot be destroyed by a repair.
     - A path whose repair the filesystem refuses is reported as skipped with the reason
       appended to its observed status, and the remaining declared paths are still repaired.
 
@@ -385,6 +423,21 @@ def apply(repo: Path | str) -> list[dict]:
   Returns:
     One repair record per declared path, carrying the pre-repair status and the action taken.
   """
+
+  # Contract:
+  # This repair MUST NEVER remove or overwrite anything other than a symlink it is
+  # repairing. Operator content in a declared slot, an absent source, and an unconfigured
+  # checkout are always left untouched and reported as skipped rather than guessed at.
+
+  # Domain(install.reconciliation):
+  # # External-directory repair safety boundary
+  # An automated repair of a declared external directory is only ever allowed to create or
+  # re-point a symlink; it is never allowed to remove or overwrite real content. A slot that
+  # already holds something other than a symlink is the operator's, a checkout with no source
+  # root on record has nothing safe to link to yet, and a declared source that does not exist
+  # has nothing to link at all — every one of these is reported and left exactly as found rather
+  # than guessed at.
+
   repo = Path(repo)
   records: list[dict] = []
   for finding in check(repo):

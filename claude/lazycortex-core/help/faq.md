@@ -32,7 +32,7 @@ source_skills:
   - lazy-expert.cancel-job
   - lazy-expert.list-jobs
   - lazy-memory.write
-source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
+source_sha: f3dcc55c389b71a983c894ee1c0407d8311e931c
 ---
 # FAQ
 
@@ -186,9 +186,9 @@ Edit the map by hand — add or remove a `"<hostname>": "<path>"` entry — then
 
 ## Why does `/lazy-core.install` now write a `LAZYCORTEX_PYTHON` entry, and what breaks if it doesn't?
 
-Only on a checkout that reaches the supervisor install (`daemon.enabled: true` and this machine/checkout named in the `run_here` map — see the two questions above). Once the launchd/systemd unit is installed, install runs one more step: it resolves the absolute interpreter with `python3 -c 'import sys; print(sys.executable)'` — captured under your own interactive environment, where `python3` reliably resolves to the right binary — and merges `{"env": {"LAZYCORTEX_PYTHON": "<path>"}}` into the checkout's gitignored `.claude/settings.local.json`, deep-merging so no other key is touched. The supervisor unit's `{PYTHON}` placeholder is substituted with the same absolute path.
+Unconditionally, on every checkout — daemon-supervised or not. Step 12.7 resolves the absolute interpreter with `python3 -c 'import sys; print(sys.executable)'` — captured under your own interactive environment, where `python3` reliably resolves to the right binary — and merges `{"env": {"LAZYCORTEX_PYTHON": "<path>"}}` into the checkout's gitignored `.claude/settings.local.json`, deep-merging so no other key is touched. This runs before the daemon gate (`daemon.enabled` + `run_here`, see the two questions above) decides anything about this checkout, because every lazycortex skill and hook — not just a supervised daemon's spawns — shells out through the recorded interpreter. If the checkout later does reach the supervisor install, that step reuses the same `<PYTHON>` value recorded here rather than re-deriving it, and substitutes it into the supervisor unit's `{PYTHON}` placeholder.
 
-This closes a gap specific to headless supervision: launchd and systemd start the shim with a minimal environment that doesn't source your shell profile (unless `--login-shell` is set), so a bare `python3` inside the unit isn't guaranteed to resolve to the same interpreter — or to any interpreter — that resolves interactively. Every lazycortex skill and hook now shells out as `"${LAZYCORTEX_PYTHON:-python3}" ${CLAUDE_PLUGIN_ROOT}/bin/<file>` instead of a bare `python3 ...`, so once the variable is recorded, the daemon's spawns and your own interactive sessions run the identical interpreter; with the variable unset (a non-supervised checkout, or a session running by hand), every call falls back to plain `python3` exactly as before.
+This closes a gap specific to headless supervision, but the fix now covers interactive sessions too: launchd and systemd start the shim with a minimal environment that doesn't source your shell profile (unless `--login-shell` is set), so a bare `python3` inside the unit isn't guaranteed to resolve to the same interpreter — or to any interpreter — that resolves interactively. Every lazycortex skill and hook shells out as `"${LAZYCORTEX_PYTHON:-python3}" ${CLAUDE_PLUGIN_ROOT}/bin/<file>` instead of a bare `python3 ...`, so once the variable is recorded, every checkout's spawns — supervised daemon or plain interactive session — run the identical interpreter; with the variable unset (an install that predates this step), every call falls back to plain `python3` exactly as before.
 
 The step is idempotent and reports **python-recorded** the first time it writes the value, or **python-unchanged** on a re-run that finds it already matches — re-running `/lazy-core.install` after moving to a different Python installation (a pyenv version bump, for instance) picks up the new interpreter automatically.
 
@@ -481,3 +481,11 @@ Because the heal runs automatically on this cadence, you should rarely see the p
 The staging-window mutex is the previous default and is now dormant on a fresh install — it only takes over when you flip `lazy.settings.json["git"]["pathspec_enabled"]` to `false` and `["mutex_enabled"]` to `true`. In that mode, multiple Claude Code sessions sharing one checkout serialize the staging window — from the first `git add` that makes the index non-empty to the `git commit` that empties it again — so only one session stages at a time, with the same auto-break heuristics as before (holder process dead, on a different host, or idle for a while).
 
 `/lazy-core.git-status` and `/lazy-core.git-unlock` only have something to act on under mutex mode; on the pathspec-discipline default no session ever opens a staging window, so there is nothing to inspect or break. Run `/lazy-core.git-status` to check the lock (holder, age, liveness, whether it's currently breakable) without changing anything, and reach for `/lazy-core.git-unlock` — which asks for confirmation before deleting the lock file — only when status shows a lock the automatic heuristics won't break on their own. Setting `lazy.settings.json["git"]["enabled"]` to `false` silences the hook entirely, in either mode.
+
+---
+
+## How do I write or update an expert's memory note, and why can't I just edit `.memory/` files directly?
+
+Run `/lazy-memory.write` rather than `Write`/`Edit`ing under `.memory/` by hand. The skill is the only blessed writer of that directory: a direct edit changes the note but leaves the `.tags/` index pointing at stale content, since nothing else regenerates it. `/lazy-memory.write` validates the note's frontmatter (`title`, `tags` — every entry prefixed `memory/` — `type` one of `persona | rule | example | warning | fact`, and `summary`), picks a non-colliding slug, regenerates every `.tags/` file for a topic in either the note's old or new tags, and commits the change as a single atomic commit under a `memory.<expert>` identity — never your own or the expert's own git author.
+
+The skill only accepts a note for an expert already marked persona (carrying `lazycortex-core:lazy-memory.persona-aspect` in its `aspects[]`); run `/lazy-memory.mark-persona <expert>` first if it isn't. An optional `--consolidate <path>` list deletes ephemeral source material (a run-log entry, an older memory file) in the same commit once its content has been distilled into the new note — every path must live under `.logs/` or `.memory/`, so a memory write can never be used to delete unrelated repo content.

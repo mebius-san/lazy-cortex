@@ -88,6 +88,16 @@ def _classify(note_text: str) -> str:
   Returns:
     One of `released` / `cancelled` / `in_progress` / `not_started`.
   """
+
+  # Domain(spec.lifecycle):
+  # # Container summary buckets rank cancellation and release above raw progress
+  # A category's summary line sorts each asset into exactly one of four buckets by checking
+  # cancellation first, then release, then whether any ladder step at all has opened, and only
+  # calling an asset not started when none of those hold. Cancellation always wins the reading
+  # because a cancelled asset stopped counting toward progress the moment it was cancelled,
+  # whatever it had reached before; release is checked next because it is the more informative
+  # fact about where an asset stands than merely being under way.
+
   # waiver: magic literal 3 -- length of the leading '---\n' fence start consumed by find()
   end = note_text.find("\n---", 3)
   fm = note_text[: end if end > 0 else len(note_text) ]
@@ -137,6 +147,15 @@ def _is_requests_inbox(container_dir: Path) -> bool:
   Returns:
     True when the requests-inbox heuristic matches.
   """
+
+  # Domain(spec.requests):
+  # # A requests container is told apart from an asset category by shape, not by count
+  # A folder is read as a requests inbox — counted by intake status rather than by the asset
+  # ladder — the moment it holds no asset subfolders of its own, because a container that holds
+  # assets is always a category and never an inbox, no matter what loose files sit beside them.
+  # Within such a folder, the canonical inbox name settles the reading even while still empty,
+  # and any other folder qualifies the moment one file inside it has already opted into intake.
+
   dir_name = container_dir.name
   has_request_file = False
   for entry in container_dir.iterdir():

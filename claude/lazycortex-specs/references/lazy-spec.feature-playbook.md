@@ -65,7 +65,7 @@ An absent `spec_tools` key on the status folder-note means "tools are not determ
 
 The architecture step gets no boolean gate of its own — it lives inside `spec_plan_done`'s precondition, between the design check and the plan check.
 
-**Downward reconciliation.** An already-closed `spec_plan_done` goes stale when a declared tool's plan reappears outside `{approved, cancelled}`; the coordinator turns the gate back off with `flip-gate --off` and re-runs its upward checks against the fresh state in the same pass, so a dependent checkbox disappears that same cycle rather than a tick later.
+**Downward reconciliation.** An already-closed `spec_plan_done` goes stale when a declared tool's plan reappears outside `{approved, cancelled}`; the coordinator turns the gate back off with `flip-gate --off` and re-runs its upward checks against the fresh state in the same pass, so a dependent checkbox disappears that same cycle rather than a tick later. A dependent document whose source was re-approved after it goes stale — back to `draft` where it carries a stage — and its gate turns off by the source-staleness rule of `lazy-spec.coordination-playbook.md`; the table there names the source of every document of this type.
 
 ## The checkboxes of the definition half
 

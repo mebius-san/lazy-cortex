@@ -4,9 +4,13 @@
 # Sources the shared venv (mypy/pylint/pytest), then the optional project-env
 # bootstrap (python.env_source in .claude/lazy.settings.json), then runs pytest
 # scoped to the requested module under tests/<module>/, or all tests if no arg given.
+# `all` is the module name for the whole suite, so `tst all` and a bare `tst` are the
+# same run; a module with no tests/<module>/ directory is refused up front, naming the
+# modules that do exist, instead of handing pytest a path it cannot find.
 #
 # Usage:
 #   tst                  # run pytest across all tests/ subdirs
+#   tst all              # the same whole-suite run, by name
 #   tst <module>         # run pytest on tests/<module>/ only
 #   tst -q [<module>]    # -q is accepted as a no-op (per lazy-python.style.md mandate)
 #   tst --help           # print this usage
@@ -25,8 +29,8 @@ function print_help() {
   echo "run Python tests via pytest"
   echo "usage: tst [<module>]"
   echo
-  echo "  <module>   one of the names under tests/ (e.g., 'core', 'rpg')"
-  echo "             omit to run all tests"
+  echo "  <module>   one of the names under tests/ (e.g., 'core', 'rpg'), or 'all'"
+  echo "             omit (or pass 'all') to run the whole suite"
   echo
   echo "  -q         accepted as no-op (lazy-python.style.md compat)"
   echo "  --help     this help"
@@ -67,8 +71,18 @@ source "$script_dir/_ensure_env.sh"
 # aggregator + per-package shims) so each test runs once; a no-op in repos without shims.
 export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$script_dir"
 
-if [ -z "$mod" ]; then
-  exec pytest -q -p _pytest_dedup tests/
+# `all` and no argument are the same whole-suite run; anything else scopes to tests/<mod>/
+if [ -z "$mod" ] || [ "$mod" = "all" ]; then
+  target="tests/"
 else
-  exec pytest -q -p _pytest_dedup "tests/${mod}/"
+  target="tests/${mod}/"
 fi
+
+# refuse an unknown module before pytest runs, naming what tests/ actually holds
+if [ ! -d "$target" ]; then
+  echo "tst: no such module '${mod}' — tests/${mod}/ does not exist" >&2
+  echo "tst: modules under tests/: $(ls -d tests/*/ 2>/dev/null | xargs -n1 basename | tr '\n' ' ')" >&2
+  exit 1
+fi
+
+exec pytest -q -p _pytest_dedup "$target"

@@ -142,6 +142,14 @@ def record(repo: Path, event: dict) -> None:  # type: ignore[type-arg]
   """
   Append one event to the journal. Best-effort — never raises into the caller.
 
+  Guarantees:
+    - Never raises into the caller; an internal failure is reported to stderr and the call
+      returns normally.
+    - Each event lands in the journal as one complete line; concurrent writers never produce a
+      torn line.
+    - A repeat of the immediately preceding event (same incident, phase, kind, cause, and detail)
+      within a short window is dropped rather than appended.
+
   Notes:
     - A missing `id` or `ts` is filled in before the event is written, and an overlong `detail` is
       truncated to fit the line-length budget.
@@ -154,6 +162,11 @@ def record(repo: Path, event: dict) -> None:  # type: ignore[type-arg]
     repo: Repository root containing the `.runtime/` directory.
     event: Event dict; at minimum `incident`, `phase`, `kind`, `cause`.
   """
+
+  # Contract:
+  # This call never raises into the caller; on any internal failure it is reported to
+  # stderr and the call returns normally.
+
   try:
     ev = dict(event)
     ev.setdefault(_F_ID, _ulid())
@@ -170,11 +183,31 @@ def record(repo: Path, event: dict) -> None:  # type: ignore[type-arg]
     path = Path(repo) / JOURNAL_REL
     # the last journal line is the baseline the dedupe window compares against
     prev = _last_event(path)
+
+    # Domain(runtime.incidents):
+    # # Crash-loop dedupe window
+    # The journal is an incident's persistent memory, so a process that crashes and restarts must
+    # still see its own recent history instead of starting blind. A new event that repeats the same
+    # incident, phase, kind, cause, and detail as the journal's immediately preceding entry, within a
+    # bounded window, adds no new fold signal and is dropped rather than recorded — otherwise a tight
+    # crash loop floods the journal with copies of the same failure instead of leaving one entry the
+    # operator can act on.
+
+    # Contract:
+    # A repeat of the immediately preceding event (same incident, phase, kind, cause, and
+    # detail) within a short window is dropped rather than appended.
+
     # guard: crash-loop dedupe — a repeat of the last journal line within the window adds no fold signal
     if (prev is not None
         and all(prev.get(k) == ev.get(k) for k in _DEDUP_KEYS)
         and time.time() - _event_unix(prev) < _DEDUP_WINDOW_SEC):
       return
+
+    # Contract:
+    # Each event lands in the journal as one complete line; concurrent writers on the
+    # same journal never interleave into a torn line.
+
+    # append the encoded line to the journal, creating the directory and file on first use
     path.parent.mkdir(parents = True, exist_ok = True)
     fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT, _MODE_RW_R_R)
     try:
@@ -304,6 +337,16 @@ def _fold_state(events: list[dict]) -> str:  # type: ignore[type-arg]
     return _ST_CLOSED
   if last.get(_F_PHASE) == _PH_TRIAGED and last.get(_F_CAUSE) == _CAUSE_PERMANENT_FAIL:
     return _ST_NEEDS_OPERATOR
+
+  # Domain(runtime.incidents):
+  # # Incident state folding
+  # An incident's current state is read from only its most recent event, never a full history scan,
+  # because the journal is append-only and so the last entry in file order is always the authoritative
+  # one. A `resolved` entry closes the incident outright. Anything else opens it, except two escalation
+  # paths that both skip ahead to needing an operator without a resolved entry: a triage conclusion
+  # naming a permanent failure, and a daemon halt whose cause belongs to a fixed set of causes that
+  # describe real, persistent trouble rather than a transient hiccup a retry might clear on its own.
+
   # guard: daemon halts with human-action causes escalate without triage
   if last.get(_F_KIND) == _KIND_DAEMON_HALT and last.get(_F_CAUSE) in _HUMAN_HALT_CAUSES:
     return _ST_NEEDS_OPERATOR
@@ -435,6 +478,15 @@ def _gc_gone_job_incidents(repo: Path) -> int:
     if not key.startswith(_JOB_PREFIX):
       continue
     jdir = Path(repo) / _JOBS_BASE_REL / key[len(_JOB_PREFIX):]
+
+    # Domain(runtime.incidents):
+    # # Job incidents die with their job
+    # An incident opened for a running job has no path back to `resolved` once the job it names has
+    # already been consumed or cancelled — nothing will ever triage or close it through the normal
+    # channel again. Such an incident is closed here as gone rather than left open or escalated,
+    # because an open incident that can never be acted on is worse than silence: it would sit in the
+    # operator's queue forever pointing at work that no longer exists.
+
     # guard: job dir still present — the incident is genuinely live
     if jdir.exists():
       continue
@@ -448,6 +500,12 @@ def _gc_gone_job_incidents(repo: Path) -> int:
 def prune(repo: Path, retention_days: int) -> dict:  # type: ignore[type-arg]
   """
   Drop aged and over-cap journal events, retaining still-open incidents in the snapshot.
+
+  Guarantees:
+    - An open or needs-operator incident is never dropped from a later `incidents()` call, even
+      after every one of its events has aged past the retention window.
+    - Each incident retains only its newest events up to a fixed per-incident cap, regardless of
+      age, so one noisy incident can never grow the journal without bound.
 
   Notes:
     - Each incident keeps only its newest events up to a fixed per-incident cap, regardless of age, so
@@ -468,6 +526,27 @@ def prune(repo: Path, retention_days: int) -> dict:  # type: ignore[type-arg]
   cutoff = time.time() - retention_days * _SECONDS_PER_DAY
   snap = _read_snapshot(repo)
   counters = dict(snap.get(_SNAP_COUNTERS, {}))
+
+  # Contract:
+  # An open or needs-operator incident is never dropped from a later `incidents()` call by
+  # pruning, even after every one of its events has aged past the retention window.
+
+  # Contract:
+  # Each incident retains only its newest events up to a fixed per-incident cap, regardless
+  # of age, so one noisy incident can never grow the journal without bound.
+
+  # Domain(runtime.incidents):
+  # # Retention keeps every open incident visible
+  # Pruning drops aged and excess journal events, but no incident is allowed to silently vanish from
+  # the incident list because its own events aged out or were capped. Each incident keeps only its
+  # newest events up to a fixed per-incident cap regardless of age, so one noisy incident can never
+  # grow the journal without bound while a young, low-volume incident keeps its whole recent history.
+  # A still-open or needs-operator incident whose every event aged out of the cutoff window is carried
+  # forward instead as a single latest-event entry in the retention snapshot, so it keeps appearing in
+  # the incident list even after its raw events are gone. Only a dropped `opened` event advances the
+  # all-time per-kind counters, so an incident's later phases are never double-counted as new
+  # occurrences of the same kind.
+
   # pass 1 — per-incident latest event + young-event counts; snapshot first so journal events win
   # waiver: dict[str, dict] inner value is a mixed-type event dict; Any is banned; bare dict is the lesser evil
   latest: dict[str, dict] = {}  # type: ignore[type-arg]

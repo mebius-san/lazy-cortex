@@ -80,7 +80,7 @@ class _K:
 # per-role remapping.
 _PIN_ROLES = frozenset({
     "vision", "use-cases", "design", "architecture", "ui-design", "code-plan", "code-report",
-    "test-plan", "test-report", "bug", "tech", "status", "decisions",
+    "test-plan", "test-report", "bug", "tech", "status", "decisions", "research",
 })
 
 _SPEC_ROLE_LINE_RE = re.compile(r"(?m)^spec_role:\s*(\S+)\s*$")

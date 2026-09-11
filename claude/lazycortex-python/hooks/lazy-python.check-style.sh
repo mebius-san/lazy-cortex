@@ -13,8 +13,10 @@
 #   ${CLAUDE_PLUGIN_ROOT}/bin/pcf.py on the edited file and emits any violations as a
 #   PostToolUse additionalContext JSON payload to stdout. Stdlib-only — no venv needed.
 # - File exclusion (`.venv`, `__pycache__`, project `[tool.pcf] exclude` paths) is delegated
-#   to pcf.py: the hook passes the edited file through and pcf.py's own exclude logic decides
-#   whether to analyze it. No source-root filter, no install-time substitution.
+#   to pcf.py: the hook passes the edited file through with `--honor-excludes`, and pcf.py's
+#   own exclude logic decides whether to analyze it. Without that flag pcf.py checks any file
+#   it is explicitly given; the flag is what keeps an edit under an excluded path a no-op here.
+#   No source-root filter, no install-time substitution.
 # - Every other path is a deterministic no-op exit 0.
 #
 # Contract (lazy-core.hook-writing § 1–3, 8):
@@ -63,7 +65,7 @@ python3 -m py_compile "$REAL_FILE_PATH" 2>/dev/null || exit 0
 
 # Run pcf.py and capture its notes. pcf emits one "<file>:<line>: note: <msg>" per
 # violation; absence of `: note:` lines means clean (or excluded) file.
-PCF_OUT="$(python3 "$CLAUDE_PLUGIN_ROOT/bin/pcf.py" "$REAL_FILE_PATH" 2>&1 || true)"
+PCF_OUT="$(python3 "$CLAUDE_PLUGIN_ROOT/bin/pcf.py" --honor-excludes "$REAL_FILE_PATH" 2>&1 || true)"
 VIOLATIONS="$(printf '%s\n' "$PCF_OUT" | grep ': note:' || true)"
 if [ -n "$VIOLATIONS" ]; then
     # § 3 — context-only branch: emit PostToolUse additionalContext JSON, nothing else.

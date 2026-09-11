@@ -205,7 +205,7 @@ AskUserQuestion: header "Type playbook", question "Which playbook should spec.co
 - **`lazycortex-specs:lazy-spec.change-playbook`** — a modification of assets that already exist, defined as current-state versus target-state, whose approved design cascades into the assets it targets.
 - **`lazycortex-specs:lazy-spec.bug-playbook`** — a defect whose report IS its definition: no architecture step, and the tools follow from where the defect actually lives.
 - **`lazycortex-specs:lazy-spec.content-playbook`** — one unit of content described by a single design document, tools preset to `data` at creation, no planning step.
-- **`lazycortex-specs:lazy-spec.research-playbook`** — an asset whose deliverable is the decision itself; it closes on an answer, not on shipped code.
+- **`lazycortex-specs:lazy-spec.research-playbook`** — an asset whose deliverable is the answer itself: a research design approved, then the research tool's report accepted; it closes on an answer, not on shipped code.
 - **own playbook (I will write it)** — the type's flow matches none of the above closely enough to borrow.
 
 **Shipped-playbook branch.** Take the chosen reference verbatim as `<playbook-ref>`. Outcome sub-tag `shipped`.

@@ -44,7 +44,20 @@ class ReapplyResult:
     section-writer) modified content outside its owned section. The
     text in that case is the graceful-clipped version — agent's body
     edits ignored, agent's owned section spliced into the operator's
-    body."""
+    body.
+
+  Guarantees:
+    - `text` always holds the fully grafted document, whether or not an ownership
+      violation was detected.
+    - `ownership_violation` is non-`None` only when the agent modified content outside
+      its owned section.
+  """
+
+  # Contract:
+  # `text` always holds the fully grafted document; `ownership_violation` is non-`None`
+  # only when the agent modified content outside its owned section, and the graft still
+  # succeeds in that case rather than being withheld.
+
   text: str
   ownership_violation: _payload.OwnershipViolationInfo | None = None
 
@@ -90,6 +103,16 @@ def reapply(
                              `owned_owner` is missing, or a `require_fm` key is absent
                              from both the overlay and the operator's frontmatter.
     """
+
+  # Domain(review.dispatch):
+  # # A required signal must land, not merely be attempted
+  # Some rounds are gated on a piece of information — a document's resolved class, for
+  # instance — that a writer is expected to establish before the round closes. That
+  # requirement is satisfied by the signal actually being present once the round ends,
+  # whether the current round wrote it fresh or an earlier round already had it; a round that
+  # neither confirms nor produces the required signal is a failed run, not a silent commit of
+  # a document still missing state the rest of the system depends on.
+
   # The overlay is already allow-filtered at the dispatcher collect seam
   # (review.classes[].experts.*.frontmatter.allow). Enforce the require half here: a
   # required key must end up set — written this round (overlay) OR already present from an

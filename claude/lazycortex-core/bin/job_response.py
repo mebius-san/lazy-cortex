@@ -27,6 +27,9 @@ def outcome_tokens(response: dict) -> list[str]:
   `outcome` is absent, empty, or not a string yields an empty list — the shape
   that marks a violated response envelope.
 
+  Guarantees:
+    - Tokens are returned in the order they appear in the field.
+
   Args:
     response: Parsed `response.json` payload, or an empty dict when the file
       was absent or unreadable.
@@ -38,6 +41,11 @@ def outcome_tokens(response: dict) -> list[str]:
   # guard: a missing or non-string outcome carries no tokens
   if not isinstance(raw, str):
     return []
+
+  # Contract:
+  # Tokens are returned in the order they appear in the field.
+
+  # split into individual tokens, discarding empty entries
   return [ token.strip() for token in raw.split(",") if token.strip() ]
 
 
@@ -50,6 +58,10 @@ def is_deferred(response: dict) -> bool:
   the input nor treat the job as failed. An `error` token alongside it wins:
   a failure is a failure regardless of what else the payload claims.
 
+  Guarantees:
+    - An error token always overrides a deferred token; this returns `False` whenever an
+      error token is present, regardless of whether the deferred token also appears.
+
   Args:
     response: Parsed `response.json` payload, or an empty dict when the file
       was absent or unreadable.
@@ -58,6 +70,12 @@ def is_deferred(response: dict) -> bool:
     `True` when the payload reports the reserved deferred outcome.
   """
   tokens = outcome_tokens(response)
+
+  # Contract:
+  # An error token always overrides a deferred token: this returns False whenever
+  # ERROR is present, regardless of whether DEFERRED also appears.
+
+  # the deferred token wins only when no error token accompanies it
   return JobOutcome.DEFERRED in tokens and JobOutcome.ERROR not in tokens
 
 
@@ -95,6 +113,17 @@ def classify_response(response: dict) -> str:
     work, `JobStatus.FAILED` for everything else — an error outcome and a
     violated envelope alike.
   """
+
+  # Domain(runtime.protocols):
+  # # Outcome envelope classification
+  # A finished job may report more than one outcome token as a single comma-separated value, so
+  # classification reads the field as a set rather than a single string. The response counts as
+  # completed work only when at least one token is present and neither of the two reserved tokens
+  # — error or deferred — appears among them. An outcome that is missing, empty, or unparseable is
+  # read exactly as a violated envelope: a failure, never an ambiguous or pending state. Every
+  # consumer of a finished job — queue accounting, the dispatcher, anything reconciling against an
+  # external store — reaches this same verdict from the same bytes.
+
   # guard: postponed work is neither finished nor failed, and must not be counted as either
   if is_deferred(response):
     return JobStatus.DEFERRED

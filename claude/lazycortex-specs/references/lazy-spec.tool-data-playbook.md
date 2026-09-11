@@ -22,7 +22,7 @@ The practical consequence: from this tool's side `spec_plan_done` always reads r
 
 The label is `Start implementation (data)`. The bare label `Start implementation` is permitted and means the same thing when `data` is the asset's only non-test tool — the typical shape of an asset that is one design plus the data written from it.
 
-**When it appears.** The checkbox hangs as soon as `spec_plan_done` is closed — this tool waits on no plan of its own. The shared dependency rule still applies: every dependency named in `spec_depends_on` must have closed its own `spec_develop_done`. A halted asset never gets the checkbox at all.
+**When it appears.** The checkbox hangs as soon as `spec_plan_done` is closed — this tool waits on no plan of its own. The shared dependency rule still applies: every dependency named in `spec_depends_on` must have closed its own `spec_develop_done`. A halted asset never gets the checkbox at all. The tool's contribution must not be counted toward the gate — an accepted report hangs no checkbox until the source-staleness rule turns the gate back off.
 
 **What a tick dispatches.** The role is the data writer; the expert is resolved mechanically as the main writer of the review class named after the tool's `report_doc` — the `data-report` class. The job's source is the **asset's design document**: it IS the specification of the entity being written. Context is the product's guidelines for the role and its wildcard guidelines, plus the decision registries (product-level and asset-level) so the data does not drift from a choice already on record; a declared path that does not resolve to a file becomes a warning line in the asset's history, never a silent drop. Result is a document of type `data-report`.
 
@@ -35,6 +35,10 @@ One active job per asset at a time.
 The `data` tool's contribution is closed when its `data-report` is **accepted by review** — it has reached `approved` (approved-with-concerns counts as accepted). A green validator does not close the contribution on its own: it is a precondition of the report, not a substitute for acceptance.
 
 `spec_develop_done` is an AND across every non-test tool of the asset. An accepted `data-report` closes exactly one term; with `code` or `docs` declared alongside, the gate waits for their reports too.
+
+## Staleness
+
+The source of this tool's report is `design.md`. When the design is re-approved after `data-report.md` was accepted, the report keeps its stage-less journal form — nothing moves on it — while `spec_develop_done` turns off and `Start implementation (data)` hangs again; the tick continues the same expert against the re-approved design, who appends to the journal and re-submits it.
 
 ## The acceptance cycle
 

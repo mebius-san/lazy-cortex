@@ -52,13 +52,19 @@ def account_identity() -> str:
   Scopes rate-limit flag records to the account currently spending tokens, so a record raised
   under one account cannot gate a different account sharing the same host.
 
-  Notes:
-    - An exported OAuth token's digest takes precedence over the machine login's account id; a
-      process with neither is filed under a shared unknown bucket.
+  Guarantees:
+    - Resolution follows a fixed precedence: an explicit token's digest, then the machine
+      login's account id, then a shared unknown bucket for a process with neither — so two
+      processes spending under the same account always agree on the identity string.
 
   Returns:
     A short stable identity string; never empty, never the raw token.
   """
+
+  # Contract:
+  # The identity resolves via a fixed precedence — an explicit token, then the machine
+  # login's account id, then a shared unknown bucket — so two processes spending under the
+  # same account always resolve to the same identity string on this host.
 
   # Domain(runtime.job-execution):
   # # Per-account rate-limit scoping
@@ -122,6 +128,10 @@ def config(daemon: dict) -> dict:
   section predating the guard — or one a migration has not reached — protects rather than
   exposes the subscription.
 
+  Guarantees:
+    - Every guard key defaults to its protecting value when the settings section omits it:
+      every trigger enabled, and the warning threshold at its shipped default.
+
   Args:
     daemon: The parsed `daemon` section of `lazy.settings.json`.
 
@@ -129,6 +139,21 @@ def config(daemon: dict) -> dict:
     A dict carrying every guard key with its effective value — the boolean triggers plus the
     float `warning_utilization_threshold`.
   """
+
+  # Contract:
+  # Every guard key MUST default to its protecting value — triggers enabled, threshold at
+  # `WARNING_THRESHOLD_DEFAULT` — whenever the settings section omits it, so an unconfigured
+  # or not-yet-migrated project is guarded exactly as a configured one would be.
+
+  # Domain(runtime.job-execution):
+  # # Guard defaults protect, never expose
+  # A settings section that predates this guard, or one a migration has not yet reached, carries
+  # no opinion on any of these keys — and a missing opinion is read as the safest one rather than
+  # the loosest. Every trigger defaults to enabled and the warning threshold to its shipped value,
+  # so an unconfigured project stops spending on a raised window exactly as a configured one
+  # would, instead of silently running unguarded until an operator opts in.
+
+  # resolve the guard block, defaulting every key toward protecting the subscription
   raw = daemon.get(DaemonKey.RATE_LIMIT_GUARD)
   block = raw if isinstance(raw, dict) else {}
   return {
@@ -145,12 +170,21 @@ def frames(stdout: str) -> list[dict]:
   """
   Extract every rate-limit payload carried by a stream-json stdout buffer.
 
+  Guarantees:
+    - A line that fails to parse, or whose payload is not a rate-limit event, is skipped
+      rather than raised, so extraction never aborts on one malformed line.
+
   Args:
     stdout: Raw stdout produced by a `claude -p --output-format stream-json` invocation.
 
   Returns:
     The payload dicts in the order they appeared; empty when the buffer carries none.
   """
+
+  # Contract:
+  # A line that is not valid JSON, or whose payload is not a rate-limit event object, is
+  # skipped rather than raised — extraction never aborts on one malformed line.
+
   found: list[dict] = []
   for line in stdout.splitlines():
     raw = line.strip()
@@ -321,6 +355,8 @@ def live() -> list[dict]:
     - An unreadable, malformed, or non-object record is reported on stderr and treated as not raised.
     - A read failure never reaches the caller as an exception.
     - A record whose window has already reopened is excluded, regardless of when it was written.
+    - A record raised under a different account identity than the caller's own is excluded;
+      a legacy record with no account field stays visible to every reader on this host.
 
   Returns:
     The unexpired records; empty when nothing is raised, the directory is absent, or every
@@ -335,6 +371,11 @@ def live() -> list[dict]:
   # Contract:
   # A record MUST stop being reported as raised once its window's reset time passes; expiry
   # alone releases every caller blocked on it, with no action required from any writer.
+
+  # Contract:
+  # A record raised under a different account identity than the caller's own is excluded from
+  # the result; a legacy record carrying no account field stays visible to every reader on
+  # this host, whatever account it runs under.
 
   # Domain(runtime.job-execution):
   # # Fail-open reading of the rate-limit flag

@@ -22,6 +22,10 @@ def parse_frontmatter(text: str) -> dict:
   the most recent key. Quoted strings are unquoted; nested mappings, anchors, and multi-line scalars
   are not supported.
 
+  Guarantees:
+    - Never raises on malformed input; missing, malformed, or empty frontmatter always
+      resolves to an empty dict rather than an exception.
+
   Args:
     text: Full document text whose frontmatter block (if any) is delimited by lines containing
       exactly `---`.
@@ -30,6 +34,11 @@ def parse_frontmatter(text: str) -> dict:
     The parsed frontmatter mapping, or an empty dict when the input is empty, lacks an opening
     `---` fence, has no matching closing `---`, or carries no parseable key.
   """
+
+  # Contract:
+  # This function MUST NEVER raise on malformed input. Missing, malformed, or empty
+  # frontmatter always resolves to an empty dict rather than propagating an exception.
+
   # guard: empty input — nothing to parse
   if not text:
     return {}

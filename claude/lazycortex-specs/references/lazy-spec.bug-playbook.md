@@ -49,6 +49,8 @@ The gates are a strict ladder — each requires the one before it. The `lazy-spe
 
 `spec_develop_done`, `spec_tests_passing`, and `spec_released` are not this playbook's to close: the first is an AND over the contributions of every non-`test` tool, the second belongs to the `test` tool, the third is an external release signal. What exactly closes them is stated by the tool playbooks.
 
+**Downward reconciliation.** A gate already true goes stale when its governing document reappears un-accepted, and a dependent document whose source was re-approved after it goes stale — back to `draft` where it carries a stage — and its gate turned off — the source-staleness rule of `lazy-spec.coordination-playbook.md`, whose table names the source of every document of this type. The coordinator flips the gate back with `flip-gate --off` and re-runs its upward checks in the same pass.
+
 ## The first-half checkboxes
 
 The coordinator reconciles this set on every relevant wake: it hangs the ones whose condition now holds and takes down the ones whose condition stopped holding. `spec_halted: true` overrides everything — a halted asset carries no checkbox at all.

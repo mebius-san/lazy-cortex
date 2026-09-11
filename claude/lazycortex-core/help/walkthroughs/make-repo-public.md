@@ -9,7 +9,7 @@ diagram_spec:
 source_skills:
   - lazy-repo.mark-public
   - lazy-guard.check-public
-source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
+source_sha: 5745ae1a08dafec458ccc19d9c810a13a8974fa3
 ---
 # Making a Repo Public Safely
 

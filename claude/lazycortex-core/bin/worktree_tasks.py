@@ -104,6 +104,11 @@ class WorktreeTaskManager:
     wt = self.path_for(job_id)
     # waiver: git CLI vocabulary, not a domain constant
     branch_exists = self._git("rev-parse", "--verify", "--quiet", branch).returncode == 0
+
+    # Contract:
+    # The worktree root directory MUST gain its own self-ignoring `.gitignore` before any
+    # worktree is added beneath it.
+
     # the worktree root itself must never reach the primary checkout's tracked tree — each
     # job directory beneath it is its own linked worktree with its own git bookkeeping
     ensure_self_ignoring_dir(self._root)
@@ -149,6 +154,16 @@ class WorktreeTaskManager:
     Args:
       wt: Path to the worktree directory to provision.
     """
+
+    # Domain(runtime.job-execution):
+    # # Config inheritance for an isolated job worktree
+    # A freshly created job worktree materialises only the files git tracks, so the
+    # gitignored local configuration layer an ordinary checkout carries is simply absent
+    # from it. That layer is linked in explicitly so a job's agents inherit the same
+    # permission and path posture as the primary checkout; building the rest of the
+    # execution environment a worktree also lacks — installed packages, a virtualenv,
+    # anything else gitignored — is left entirely to the isolation's own bootstrap step.
+
     # waiver: filesystem path idiom, not a domain constant
     ( wt / ".claude" ).mkdir(parents = True, exist_ok = True)
     for rel in self._LOCAL_CONFIG:
@@ -206,6 +221,21 @@ class WorktreeTaskManager:
     Returns:
       None on success or when no command is configured, else a one-line failure description.
     """
+
+    # Contract:
+    # Every new untracked path the bootstrap command produces MUST be recorded into the
+    # worktree's own `.gitignore`, which also lists itself alongside them; nothing is
+    # written when the command created nothing untracked.
+
+    # Domain(runtime.job-execution):
+    # # Bootstrap byproducts declared ignorable
+    # Building an isolated job's execution environment is expected to leave new files behind
+    # that never existed in the tracked tree — installed packages, caches, generated
+    # artifacts. Whatever a bootstrap step creates is recorded into a worktree-local ignore
+    # list, together with the list itself, so the cleanliness check that follows a job's run
+    # sees only dirt the job itself produced, not the ordinary residue of preparing its
+    # environment.
+
     # guard: no bootstrap configured — the worktree runs on tracked files alone
     if not cmd:
       return None
@@ -236,9 +266,18 @@ class WorktreeTaskManager:
     durable product; an agent's uncommitted dirt disappears with the directory. Best-effort:
     a failed removal leaves an orphan the hourly `sweep` collects.
 
+    Guarantees:
+      - Never raises, even when the underlying git removal fails; a failed removal is left
+        for `sweep` to collect instead of surfacing to the caller.
+
     Args:
       wt: Path to the worktree directory to remove.
     """
+
+    # Contract:
+    # `remove` NEVER raises, even when the underlying git removal fails; a failed removal
+    # is left for `sweep` to collect instead of surfacing to the caller.
+
     # waiver: git CLI vocabulary, not a domain constant
     self._git("worktree", "remove", "--force", str(wt))
 
@@ -253,6 +292,14 @@ class WorktreeTaskManager:
     Returns:
       The paths of the orphan worktree directories that were removed.
     """
+
+    # Domain(runtime.job-execution):
+    # # Exhaustive orphan sweep
+    # Every directory found under the worktree root is treated as an orphan without further
+    # inspection: an isolated job's worktree exists only for the length of one synchronous
+    # run, and the runtime never starts a second run while a sweep is in progress, so nothing
+    # under that root can ever be a worktree still in active use at the moment a sweep walks it.
+
     # waiver: git CLI vocabulary, not a domain constant
     self._git("worktree", "prune")
     removed: list[str] = []

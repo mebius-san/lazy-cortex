@@ -165,6 +165,16 @@ def _render(source_link: str, title: str, body: str) -> str:
     The complete file text: the spec-side frontmatter, the title heading, and the body.
   """
 
+  # Domain(spec.requests):
+  # # Candidate requests are the catalog's own self-correction
+  # When a re-approved system document no longer agrees with what sits beneath it, each
+  # divergence becomes a candidate request rather than an automatic edit, because only the
+  # operator's own intake and review process gets to decide whether the divergence is a real
+  # problem worth acting on. The candidate is shaped exactly like one an operator would have
+  # written by hand, so the ordinary intake pipeline opens, classifies, and routes it without
+  # ever knowing a coordinator raised it — and the coordinator that raised it never revisits it
+  # again once it has been dropped into the inbox.
+
   # Contract:
   # Neither `review_active` nor `review_result` is written. `open_request` reads the first as
   # "already opted in" and the second as "post-finalize", so either key would strand the

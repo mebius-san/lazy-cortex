@@ -253,6 +253,9 @@ def set_field(text: str, key: str, value: object) -> str:
   exists, its entire logical entry (header line plus any block-style continuation
   lines) is replaced with a single-line scalar form.
 
+  Guarantees:
+    - Every byte of `text` outside the `key` entry's own span is left unchanged.
+
   Args:
     text: Raw document text to modify.
     key: The frontmatter key to set.
@@ -261,6 +264,12 @@ def set_field(text: str, key: str, value: object) -> str:
   Returns:
     The updated document text with the key set and all other bytes unchanged.
   """
+
+  # Contract:
+  # Every byte of the input outside the `key` entry's own span (its header
+  # line plus any block-style continuation lines) is left unchanged; other
+  # frontmatter keys, body text, and formatting survive byte-for-byte.
+
   rendered = f"{key}: {_serialise_scalar(value)}"
   span = _find_fences(text)
   if span is None:
@@ -318,6 +327,9 @@ def unset_field(text: str, key: str) -> str:
 
   No-op when the key is absent or the document has no frontmatter.
 
+  Guarantees:
+    - Every byte of `text` outside the removed `key` entry's own span is left unchanged.
+
   Args:
     text: Raw document text to modify.
     key: The frontmatter key to remove.
@@ -325,6 +337,12 @@ def unset_field(text: str, key: str) -> str:
   Returns:
     The updated document text with the key removed and all other bytes unchanged.
   """
+
+  # Contract:
+  # Every byte of the input outside the removed `key` entry's own span is
+  # left unchanged; when the key is absent or no frontmatter exists, the
+  # input is returned unchanged.
+
   span = _find_fences(text)
   if span is None:
     return text

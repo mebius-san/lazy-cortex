@@ -72,9 +72,11 @@ def sync_one(src: str, dst: str, *, copy_diverged: bool = False, chmod_x: bool =
   """
   Triage a single source/target pair and copy when mechanically safe.
 
-  Every copy is re-compared against its source afterwards; a target whose bytes
-  still differ from the source is reported as `failed` rather than as a
-  successful write.
+  Guarantees:
+    - A returned state of `installed` or `refreshed` means the target's bytes are verified
+      to match the source by a second byte comparison after the write; a target whose bytes
+      still differ is reported as `failed` rather than as a successful write.
+    - `chmod_x` is never applied to a target left in the `diverged` state.
 
   Args:
     src: Path of the shipped source file.
@@ -86,6 +88,16 @@ def sync_one(src: str, dst: str, *, copy_diverged: bool = False, chmod_x: bool =
   Returns:
     One of `installed`, `unchanged`, `refreshed`, `diverged`, `failed`.
   """
+
+  # Contract:
+  # A state of `installed` or `refreshed` MUST mean the target's bytes are verified to
+  # match the source by a second, independent byte comparison performed after the write;
+  # a mismatch MUST downgrade the outcome to `failed`, regardless of which branch wrote it.
+
+  # Contract:
+  # `chmod_x` MUST NEVER be applied to a target left in the `diverged` state — permission
+  # bits are only touched once the target's content is settled to match the source.
+
   os.makedirs(os.path.dirname(dst) or ".", exist_ok = True)
   if not os.path.exists(dst):
     shutil.copyfile(src, dst)
@@ -97,6 +109,17 @@ def sync_one(src: str, dst: str, *, copy_diverged: bool = False, chmod_x: bool =
     state = STATE_REFRESHED
   else:
     state = STATE_DIVERGED
+
+  # Domain(install.reconciliation):
+  # # A write only counts once it is verified
+  # Copying a shipped source into a consumer-side target is judged by a second, independent byte
+  # comparison performed after the write completes, never by the write call succeeding alone. When
+  # that comparison still finds a difference, the outcome is downgraded to a failure regardless of
+  # which triage branch attempted the write — a caller must never be able to read a state as
+  # successfully applied when the target's bytes do not actually match the source. Permission bits
+  # follow the same caution: they are only touched on an outcome whose content is already settled,
+  # never on a target still awaiting a human merge decision.
+
   # a write that did not land is a failure, not a sync: the caller must never read it as applied
   if state in (STATE_INSTALLED, STATE_REFRESHED) and not _equal(src, dst):
     return STATE_FAILED
@@ -118,6 +141,10 @@ def sync_dir(
   """
   Triage every file of a flat source directory against the target directory.
 
+  Guarantees:
+    - A target-side file reported as `kept-orphan` is never deleted or modified by this
+      call; it is only ever surfaced for a human to judge.
+
   Args:
     src_dir: Directory holding the shipped source files (flat — subdirectories are ignored).
     dst_dir: Consumer-side target directory (created when missing).
@@ -130,6 +157,12 @@ def sync_dir(
   Returns:
     One result dict per file: `{"file", "src", "dst", "state"}`.
   """
+
+  # Contract:
+  # A target-side file reported as `kept-orphan` MUST NEVER be deleted or modified by this
+  # call — removing installed content without operator consent is out of scope for an
+  # automated reconciliation; the orphan is surfaced for a human to judge, nothing more.
+
   # the shipped set is flat and sorted, so the receipt order is stable across runs
   results = []
   names = sorted(
@@ -150,6 +183,15 @@ def sync_dir(
   # guard: orphan detection is reporting-only and needs both patterns and an existing target dir
   if not owned_globs or not os.path.isdir(dst_dir):
     return results
+
+  # Domain(install.reconciliation):
+  # # Owned-namespace orphans are reported, never reclaimed
+  # A target-side file that matches none of the caller's declared owned-namespace patterns is
+  # invisible to this reconciliation — it belongs to something else entirely and is left alone
+  # without comment. A file that does match one of those patterns but has no same-named source
+  # anymore is a leftover of a namespace the caller owns; it is surfaced as an orphan for a human
+  # to judge, and is never deleted automatically, because removing installed content without
+  # consent is a stronger action than this reconciliation is trusted to take on its own.
 
   # target-side leftovers inside an owned namespace are reported, never removed
   for name in sorted(os.listdir(dst_dir)):

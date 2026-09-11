@@ -266,6 +266,19 @@ def _stuck_draft_docs(asset_dir: Path, *, fm_values: dict, body: str, markers: d
     Bare filenames of the stranded docs, in `_AUTHORED_DOC_CHECKBOX` order; empty when nothing
     is certainly stuck.
   """
+
+  # Domain(spec.lifecycle):
+  # # Certainty-only backstop for stranded review
+  # A document whose writing job has already finished but whose review was never opened is meant
+  # to be caught immediately by the process that finished the job, so it should never actually
+  # reach this fallback. When it is checked here anyway, only the cases where nothing else could
+  # explain the gap are treated as truly stranded: no other work is in flight on the asset, nothing
+  # is waiting to be noticed, the asset itself is not stopped, and the document sits exactly where
+  # a finished-but-unreviewed draft would sit with no trace of a review ever having started. Any
+  # condition left uncertain is read as "not a problem" rather than acted on, because opening a
+  # review that was not actually missing is worse than leaving a genuinely stuck one for the next
+  # pass to catch.
+
   # guard: any tracked job or pending wake means the loop is still moving — not stuck
   if any(markers.get(key) for key in (JobMarker.ACTIVE_JOB, JobMarker.COORDINATOR_JOB, JobMarker.PENDING_WAKE)):
     return []
@@ -309,6 +322,10 @@ def _submit_stuck_draft(asset_dir: Path, doc_name: str) -> bool:
   Best-effort: any failure (CLI unresolvable, timeout, non-zero exit) degrades to a False
   return, never raises — the doc stays stranded and the next tick retries.
 
+  Guarantees:
+    - Never raises; any failure degrades to a False return that leaves the doc stranded for
+      the next tick to retry.
+
   Args:
     asset_dir: The asset folder holding the doc.
     doc_name: The stranded doc's bare filename.
@@ -316,6 +333,11 @@ def _submit_stuck_draft(asset_dir: Path, doc_name: str) -> bool:
   Returns:
     True when review was actually opened; False on every failure path.
   """
+
+  # Contract:
+  # This call never raises: any failure (an unresolvable review CLI, a timeout, a non-zero
+  # exit) degrades to a False return, leaving the doc stranded for the next tick to retry.
+
   cli = flip_gate._resolve_review_cli()
   # guard: review CLI not resolvable on the env path — degrade to a skip
   if cli is None:
@@ -473,6 +495,10 @@ def _run_note_check(asset_note: Path) -> list[dict]:
   a missing or broken CLI degrades to reporting no violations rather than failing the tick, since
   the structural check is advisory (the coordinator repairs what it finds, this worker never does).
 
+  Guarantees:
+    - Never raises; a missing, broken, or unparseable CLI response degrades to an empty
+      violations list rather than failing the tick.
+
   Args:
     asset_note: The status folder-note path to check.
 
@@ -480,6 +506,11 @@ def _run_note_check(asset_note: Path) -> list[dict]:
     The `note-check` violations list; empty when the note is structurally clean, or the CLI
     itself could not be resolved, run, or parsed.
   """
+
+  # Contract:
+  # This call never raises and never fails the tick: a missing, broken, or unparseable CLI
+  # response degrades to an empty violations list rather than propagating a failure.
+
   cli = _BIN / _SPEC_CLI_NAME
   # guard: sibling CLI missing from this checkout — degrade to a skip, never fail the tick
   if not cli.is_file():
@@ -660,6 +691,12 @@ def _apply_coordinator_job_marker(
   sidecar flag (`job-done` or `declined`) raised while the swept job ran is left as-is on every
   branch — it survives for the next genuine wake to redeem, never cleared here.
 
+  Guarantees:
+    - A `DEAD` marker never sets `spec_halted` on the asset; the coordinator's own job death is
+      recorded as a `# History` WARNING line only.
+    - A `DONE` or `CANCELLED` marker retires the job bundle via `gate_dispatch.consume_stale_job`,
+      freeing its dedup key for the coordinator's next dispatch.
+
   Args:
     asset_note: The status folder-note path.
     text: The folder-note's full text as last read from disk.
@@ -675,6 +712,14 @@ def _apply_coordinator_job_marker(
   Returns:
     A result dict naming the applied `TickAction` plus the job's `trigger` and `job_id`.
   """
+
+  # Contract:
+  # A `DEAD` coordinator-job marker never sets `spec_halted` on the asset — the coordinator's
+  # own wake job is not a ladder expert job, so its death is recorded as a `# History` WARNING
+  # line only. A `DONE` or `CANCELLED` marker retires the job bundle via
+  # `gate_dispatch.consume_stale_job`, freeing its dedup key for the coordinator's next
+  # dispatch.
+
   trigger = job_info[JobMarker.TRIGGER]
   job_id = job_info[JobMarker.JOB_ID]
   spec_job_markers.update(repo_root, asset_note, { JobMarker.COORDINATOR_JOB: None })
@@ -750,6 +795,18 @@ def gate_tick(asset_note: Path, today: str | None = None) -> dict:
   fm_values, fm_end = flip_gate._parse_frontmatter(text)
   body = text[fm_end:]
   markers = spec_job_markers.read(repo_root, asset_note)
+
+  # Domain(spec.lifecycle):
+  # # Expert job terminal outcomes
+  # A dispatched expert job finishes in one of three states. A completed or a cancelled job both
+  # free the ladder's work slot for the same step to be dispatched again if it is still needed —
+  # the attempt is done with, successfully or not, and nothing about it needs to be kept in the
+  # way. A job that dies instead stops the whole asset from moving forward until an operator looks
+  # at it: the failed attempt is left exactly as it was, on purpose, so there is something to
+  # examine before deciding what happens next. That stop applies only to a step on the asset's own
+  # promotion ladder — the automation's own background job watching over the asset is not part of
+  # that ladder, so its own death is only ever recorded as a warning and never halts the asset it
+  # was watching.
 
   # Step 0.6 — active-job polling: an asset tracking an `active_job` marker has its job bundle's
   # terminal marker checked before anything else this tick

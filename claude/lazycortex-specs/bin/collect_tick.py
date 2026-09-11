@@ -50,6 +50,10 @@ def collect_tick(repo: Path) -> dict:
   """
   Poll every sidecar-recorded note once and report how many polls did work.
 
+  Guarantees:
+    - A poll failure on one note never aborts the sweep; every other recorded note is still
+      polled, and the failure is reported through the returned `error` field.
+
   Args:
     repo: Absolute path to the repository root.
 
@@ -58,6 +62,12 @@ def collect_tick(repo: Path) -> dict:
     completed, M is how many of those polls reported a non-noop action. Carries an additional
     `"error"` field summarizing the failures when one or more polls raised.
   """
+
+  # Contract:
+  # A poll failure on one note NEVER aborts the sweep; every other recorded note is still
+  # polled, and the failure is reported through the returned `error` field rather than being
+  # swallowed.
+
   swept = 0
   ticked = 0
   failed: list[str] = []

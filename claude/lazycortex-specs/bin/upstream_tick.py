@@ -706,6 +706,15 @@ def _invalid_char_reason(unit_path: str) -> str | None:
   Returns:
     A human-readable refusal reason, or `None` when every segment is vault-safe.
   """
+
+  # Domain(spec.upstream):
+  # # Vault-unsafe upstream names are refused, never renamed
+  # An upstream directory whose name would break the vault's own markdown syntax — carrying a
+  # tag marker, a wikilink bracket, a table pipe, or a frontmatter-breaking colon — is refused
+  # outright rather than landed under an escaped or sanitised spelling. The unit simply never
+  # materializes; inventing a substitute name the upstream source never had would only stop
+  # matching the source the next time it is fetched.
+
   for segment in unit_path.split("/"):
     bad = next((ch for ch in _K.UNSAFE_NAME_CHARS if ch in segment), None)
     # guard: first offending character found — one reason is enough, no need to scan further
@@ -1848,6 +1857,15 @@ def _accept_unit(
   Returns:
     `(had_work, status)` — `status` is always `UpstreamStatus.PROCESSED`.
   """
+
+  # Domain(spec.upstream):
+  # # Accepting a unit replaces its tracked baseline wholesale, never merges onto it
+  # When an upstream unit's proposed change is accepted, the baseline snapshot becomes an exact
+  # copy of what was just reviewed — not the previous baseline plus whatever changed. A file the
+  # source dropped in this round disappears from the baseline too, so the baseline can never
+  # accumulate content upstream no longer carries, and always reflects exactly what was reviewed
+  # and approved, nothing more and nothing less.
+
   source_dir = unit_dir / _K.SOURCE_DIR
   processed_dir = unit_dir / _K.PROCESSED_DIR
   # processed/ is REPLACED, not merged — a file the source dropped must disappear from the
@@ -2111,6 +2129,33 @@ def _advance_unit(
     `UpstreamStatus` value. `status` is `None` only when a draft-gated unit's first-ever landing
     was undone this tick — it never materialized (no `source/`, no note, § draft-gate).
   """
+
+  # Domain(spec.upstream):
+  # # A draft-gated unit is frozen out of ingestion entirely
+  # When the upstream author's own root note for a unit still marks it a draft, the unit is not
+  # merely paused — it never reaches the operator as something to decide on at all. Its very
+  # first appearance is undone rather than landed, and once it has landed before the flag was
+  # set, later passes stop refreshing its mirror and hold its last status in place. The gate
+  # lifts silently the moment the upstream author clears the draft flag themselves.
+
+  # Domain(spec.upstream):
+  # # A unit's recorded revision tracks its own content, not the source's tip
+  # The commit recorded against a unit is the one that actually changed that unit's own bytes,
+  # never simply the latest commit the source happened to be at when a pass ran. An upstream
+  # commit elsewhere in the same repository, one that never touches this unit's own subtree,
+  # must never move the recorded revision — otherwise every single pass would produce a
+  # revision-only commit with nothing else to show for it.
+
+  # Domain(spec.upstream):
+  # # Resuming and postponing on the same unit always resolves toward resuming
+  # A unit that is new or has drifted carries both its own take-into-work action and a postpone
+  # toggle side by side, and a unit already postponed carries only its own resume action in the
+  # postpone toggle's place. Ticking both in the same pass never stalls the unit between two
+  # intents — taking it into work always wins. Unticking the postpone toggle alone, with nothing
+  # else ticked, is its own distinct move: it releases the unit back to its ordinary state with
+  # no request opened, a pure change of mind about deferring the same content, not a decision to
+  # act on it.
+
   # resolve this unit's on-disk layout before anything else needs it
   unit_dir = _unit_dir(repo, repo_key, mount, unit_path)
   title = unit_path.rsplit("/", 1)[-1]

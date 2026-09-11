@@ -137,6 +137,10 @@ def open_submit(
   the review loop), and submit lands the document on the operator's Ready banner
   without dispatching the opening writer round.
 
+  Guarantees:
+    - Re-submitting a document already in the leapfrogged state (phase `awaiting-operator`
+      with every requested writer already in the done-list) makes no further change.
+
   Args:
     file_path: The markdown document to bootstrap.
     expert: Optional per-document main-writer override; writes `review_expert` when provided.
@@ -146,12 +150,30 @@ def open_submit(
   Returns:
     `True` if the document changed; `False` on an idempotent re-run.
   """
+
+  # Domain(review.lifecycle):
+  # # Submitting skips the opening writer round
+  # A document whose body was already authored outside the review loop does not need the
+  # round machine's opening writer round run over it. Submitting marks every writer of that
+  # round done in one shot — either the single writer given as an override, or the
+  # document's whole configured writer set for that round — and advances the round counter
+  # past all of them at once, reaching the round machine's post-main-settled state directly
+  # instead of only after each of those writers had actually run. The document surfaces on
+  # the operator's own waiting state rather than dispatching that round's writers.
+  # Re-submitting an already-skipped document changes nothing further.
+
   text = file_path.read_text()
   # Reuse start's bootstrap (review_active / round / approved / banner /
   # review_result clear / optional review_expert).
   _start.open_review(file_path, expert=expert)  # bootstrap, writes in place, no commit
   bootstrapped = file_path.read_text()
   meta, _body = _fm.parse(bootstrapped)
+
+  # Contract:
+  # Re-submitting a document whose leapfrog already landed on `review_phase:
+  # awaiting-operator` with every requested writer already marked done makes
+  # no further change — the round counter and done-list are not bumped again.
+
   # Idempotency: detect already-settled state. When `review_phase: awaiting-operator`
   # AND every requested main writer is already present in `review_main_done`, the
   # leapfrog was applied on a prior run — re-seeding would re-bump `review_round`.

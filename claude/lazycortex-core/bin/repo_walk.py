@@ -97,14 +97,32 @@ class RepoWalk:
     """
     Yield every non-ignored file path under the repository root.
 
-    A tracked path listed in `.lazyignore` is still excluded. Outside a git repository, the
-    walk falls back to the full directory tree, excluding only `.git`.
+    Guarantees:
+      - A tracked path listed in `.lazyignore` is always excluded from the walk, even when
+        git itself still tracks that path.
+      - Outside a git repository, enumeration falls back to walking the entire directory
+        tree, excluding only the `.git` directory.
 
     Yields:
       Absolute `Path` objects for each file that survives the ignore filters.
     """
+
+    # Domain(repo.file-enumeration):
+    # # What counts as part of the repository for tooling
+    # Enumeration over a repository includes every file git tracks plus any untracked file
+    # git's own ignore stack does not exclude. A path listed in the project's ignore-override
+    # file is excluded from enumeration even when git itself still tracks it, so that file can
+    # stay version-controlled while tooling treats it as absent. Outside a git repository
+    # altogether, enumeration falls back to walking the whole directory tree, leaving out only
+    # git's own internal directory.
+
     repo = self._repo
     rels = self._git_list()
+
+    # Contract:
+    # Outside a git repository, enumeration falls back to walking the entire directory
+    # tree, excluding only the `.git` directory.
+
     # guard: git enumeration unavailable — walk everything except git internals
     if rels is None:
       for base, dirs, files in os.walk(str(repo)):
@@ -112,6 +130,11 @@ class RepoWalk:
         for f in files:
           yield Path(base) / f
       return
+
+    # Contract:
+    # A tracked path listed in `.lazyignore` is always excluded from the walk, even when
+    # git itself still tracks that path.
+
     # one batch check: `ls-files -c` lists tracked paths even when the ignore stack
     # excludes them (a tracked dir in `.lazyignore`) — `--no-index` filters those out
     ignored = self._ignored(rels)

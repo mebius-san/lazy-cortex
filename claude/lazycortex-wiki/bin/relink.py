@@ -258,6 +258,17 @@ class RelinkPlanner:
         if node is None:
           continue
         stored = node.stored_src_hash
+
+        # Domain(wiki.graph):
+        # # Why an incremental delta still needs a content check
+        # A commit landing between the anchor and the current point does not always mean a
+        # document's authored material changed: the wiki's own upkeep can rewrite a document's
+        # managed regions without touching what its author wrote. History alone cannot tell the
+        # two apart, so an incremental pass also compares each changed document's current content
+        # against the text it was last curated from, and skips reclassifying whatever that
+        # comparison finds unchanged. This is what lets a repeated pass over an untouched
+        # document converge to nothing left to do.
+
         # guard: operator content unchanged since last curation — only managed
         # regions moved (e.g. this relink's own commit). Skip so a re-run with no
         # real edits converges to an empty plan (idempotent); same content-hash

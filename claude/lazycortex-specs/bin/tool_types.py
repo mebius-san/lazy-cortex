@@ -107,12 +107,28 @@ def _declared(record: dict) -> dict[str, dict]:
   The product's own declarations merge key-by-key over the shipped ones, so a product may
   replace a single field of a shipped tool without restating the rest.
 
+  Guarantees:
+    - A product's own declaration for a tool overrides the shipped default field by field; it
+      never replaces the shipped declaration as a whole.
+
   Args:
     record: The product's settings record, or `{}` when the caller has no product in scope.
 
   Returns:
     Mapping of tool name to its merged declaration dict.
   """
+
+  # Domain(spec.declarations):
+  # # A tool declaration is overridden one field at a time
+  # A product customizing a shipped tool never replaces its declaration wholesale — its own
+  # declaration is layered over the shipped one, field by field. Naming a different playbook
+  # for a tool never requires restating its report document type or any other field the
+  # shipped declaration already settled.
+
+  # Contract:
+  # A product's own declaration for a tool overrides the shipped default field by field; it
+  # never replaces the shipped declaration as a whole.
+
   merged = dict(builtin_defaults())
   for name, decl in ((record or {}).get(_K.TOOL_TYPES) or {}).items():
     merged[name] = { **merged.get(name, {}), **decl }
@@ -186,6 +202,15 @@ def tools_of(note: Path) -> list[str] | None:
     None when the key is absent (nobody has judged the asset yet), an empty list when it is
     declared empty (judged to need no tool), or the declared tool names.
   """
+
+  # Domain(spec.declarations):
+  # # A tool set carries three distinct readings
+  # An asset's declared tool set is read three ways, and the difference is never interchangeable:
+  # nobody having judged the asset yet, a deliberate judgement that it needs no tool at all, and
+  # a judgement naming which tools it needs. The undetermined case and the deliberately-empty
+  # case must stay distinguishable, because collapsing them would make a genuinely tool-less
+  # asset look exactly like one nobody has looked at yet.
+
   text = note.read_text(encoding = _K.ENCODING)
   # waiver: sibling-module frontmatter parser -- the one parser every specs primitive shares
   fm_values, fm_end = flip_gate._parse_frontmatter(text)

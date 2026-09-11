@@ -170,14 +170,39 @@ def open_review(file_path: Path, *, expert: str | None = None) -> bool:
   """
   Apply the bootstrap mutations to `file_path`.
 
+  Guarantees:
+    - An already-set review round, approval, phase, or main-writer done-list value survives
+      the call unchanged; only a missing key is seeded.
+    - Opening a document that still carries a prior finalize's terminal outcome clears
+      `review_result` from the frontmatter and strips the terminal status callout from the body.
+
   Returns:
     `True` if anything changed; `False` if the file was already opted-in and fully bootstrapped
     (idempotent re-run).
   """
+
+  # Domain(review.lifecycle):
+  # # Opening a document resets it to the round machine's starting state
+  # A document entering review is set to round one, the opening writer phase, an empty
+  # done-list for that phase's writers, and not yet approved — the exact state the
+  # coordinator's own bootstrap would produce, so its first wake has nothing left to write
+  # and only dispatches the opening turn. Re-opening a document that still carries a prior
+  # finalize's terminal outcome clears that outcome everywhere it was recorded — the
+  # frontmatter discriminator a downstream consumer gates on, and the landing marker shown
+  # above the document's first heading — because entering review again means the outcome
+  # no longer describes the document.
+
   text = file_path.read_text()
   new_text = text
   new_text = _fm.set_field(new_text, ReviewKey.ACTIVE, True)
   meta, _ = _fm.parse(new_text)
+
+  # Contract:
+  # An already-set `review_round`, `review_approved`, `review_phase`, or
+  # `review_main_done` value survives this call unchanged; only a missing
+  # key is seeded.
+
+  # seed only the round-machine keys still missing from frontmatter
   if ReviewKey.ROUND not in meta:
     new_text = _fm.set_field(new_text, ReviewKey.ROUND, 1)
   if ReviewKey.APPROVED not in meta:
@@ -204,6 +229,12 @@ def open_review(file_path: Path, *, expert: str | None = None) -> bool:
     new_text = _fm.unset_field(new_text, ReviewKey.RESULT)
   if expert:
     new_text = _fm.set_field(new_text, ReviewKey.EXPERT, expert)
+
+  # Contract:
+  # Opening a document that still carries a prior finalize's terminal outcome
+  # clears `review_result` from the frontmatter and strips the terminal status
+  # callout from the body.
+
 # Re-opening a finalized doc: strip the prior cycle's `#status/<state>` landing
 # callout from body. Symmetric with the `review_result` frontmatter clear above —
 # both are terminal markers from the previous finalize and no longer apply while
