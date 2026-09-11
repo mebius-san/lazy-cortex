@@ -1,7 +1,7 @@
 ---
 name: lazy-core.agent-models-seed
 description: "Dispatched by a plugin's `<namespace>.install` skill (core, diagram, experts, obsidian, python, review, specs, wiki) to seed that plugin's agent-model tiers into the consumer's `lazy.settings.json`; not for direct use. Tiers come from `lazycortex-core`'s `default-tiers.json`, and an operator's existing value is never overwritten."
-allowed-tools: Read, Write, Glob, Bash(FILE=*), Bash(git rev-parse*), AskUserQuestion, Agent
+allowed-tools: Read, Write, Bash(ls *), Bash(FILE=*), Bash(git rev-parse*), AskUserQuestion, Agent
 execution-discipline-waiver: "nested-from-install — the calling install skill owns step discipline; a preamble here would re-anchor the caller and drop its remaining steps (lazy-core.skill-writing § 1.5)"
 ---
 # Seed agent-model tiers for a plugin
@@ -39,7 +39,7 @@ done
 echo "${FILE:-unresolved}"
 ```
 
-`unresolved` → `Glob: <home>/.claude/plugins/cache/lazycortex/lazycortex-core/*/skills/lazy-core.agent-models/default-tiers.json` (`<home>` = the absolute home directory) and take the match whose version segment sorts highest numerically (`10.0.0` above `9.1.1`). Never `ls` or `find` the cache: enumeration is `Glob`'s job, a consumer's deny list blocks `find` outright, and a refusal is terminal.
+`unresolved` → `Bash(ls <home>/.claude/plugins/cache/lazycortex/lazycortex-core/*/skills/lazy-core.agent-models/default-tiers.json)` (`<home>` = the absolute home directory) and take the printed path whose version segment sorts highest numerically (`10.0.0` above `9.1.1`). That one pattern is the whole enumeration: never `find` or a walk of the cache, and a refusal is terminal.
 
 The newest version wins. If the file is absent → abort `sot-missing` with `lazycortex-core not installed; install it before seeding <prefix> tiers` — never fall through to a hardcoded fallback (silent drift is exactly what the SOT prevents). Outcome: `sot-resolved` or abort.
 

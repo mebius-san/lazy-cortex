@@ -9,7 +9,7 @@ source_skills:
   - lazy-diagram.draw-mermaid
   - lazy-diagram.draw-ascii
   - lazy-diagram.install
-source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
+source_sha: b64fa05cbf19b509170c33f3dcf3a28377d7a194
 ---
 # Frequently asked questions
 

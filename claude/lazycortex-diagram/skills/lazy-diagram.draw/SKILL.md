@@ -1,7 +1,7 @@
 ---
 name: lazy-diagram.draw
 description: "Use when a NEW diagram should land under a named heading in a markdown file — an authoring skill reaching a declared draw seam, or a direct request to draw a flow / sequence / state / architecture / layout picture of something. Picks (kind, format) from the free-form request, dispatches the per-format drawer agent, and writes one fenced diagram. For re-conforming a fence that already exists, see `/lazy-diagram.fix`."
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash, AskUserQuestion, Agent
+allowed-tools: Read, Write, Edit, Bash, AskUserQuestion, Agent
 ---
 # lazy-diagram.draw
 
@@ -23,7 +23,7 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome line for it". No-ops count only if they produced an explicit outcome word (e.g. `unchanged`, `skipped-below-threshold`, `failed:format-not-supported-for-kind`, `n/a (ascii)`).
 3. **Do not reach Step 8 (Report and log) until the ledger shows every prior task `completed`.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one outcome line per step above. A missing line is a bug; do not render the report with gaps.
-5. **`${CLAUDE_PLUGIN_ROOT}` arrives in this skill's text already expanded to an absolute path.** Never pass that literal to `Bash` — every template and scheme lookup (Steps 2, 4, 5) goes through `Glob` or `Read`, never `ls` / `test -f`, and never as a `;`-chained compound command; the permission layer denies those and the skill dies before Step 6.
+5. **`${CLAUDE_PLUGIN_ROOT}` arrives in this skill's text already expanded to an absolute path.** Never pass that literal to `Bash` — every template and scheme lookup (Steps 2, 4, 5) is the single `Bash(ls …)` / `Bash(test -f …)` the step names, written with the `${CLAUDE_PLUGIN_ROOT}` variable form exactly as printed here, and never as a `;`-chained compound command; the permission layer denies an expanded absolute path and the skill dies before Step 6.
 
 ## Caller contract
 
@@ -62,7 +62,7 @@ The dispatcher provides as keyword=value pairs:
 
 - Parse the dispatch prompt into the keyword inputs above. Apply defaults.
 - `target_file` must exist (`Read` it; `[FAIL] target_file not found` otherwise).
-- `anchor_section` must appear verbatim as an H2 or H3 heading in `target_file` (`Grep` for `^#{2,3} <anchor>`; `[FAIL] anchor not found in target_file` otherwise).
+- `anchor_section` must appear verbatim as an H2 or H3 heading in `target_file` (`Bash(grep -nE "^#{2,3} <anchor>$" <target_file>)` prints it; `[FAIL] anchor not found in target_file` otherwise).
 - `request` must be non-empty (`[FAIL] empty request` otherwise).
 - If `kind` is provided, hold for Step 5 compatibility check.
 - If `format` is provided and is not `mermaid` or `ascii`, `[FAIL] unsupported format=<format>`.
@@ -71,8 +71,8 @@ Outcome: `validated` (with parsed inputs echoed in Report) or `[FAIL]`.
 
 ### Step 2: Discover available kinds
 
-- `Glob: ${CLAUDE_PLUGIN_ROOT}/templates/diagram.mermaid/diagram-*.md` → `available_kinds_mermaid`.
-- `Glob: ${CLAUDE_PLUGIN_ROOT}/templates/diagram.ascii/diagram-*.md` → `available_kinds_ascii`.
+- `Bash(ls "${CLAUDE_PLUGIN_ROOT}/templates/diagram.mermaid/"diagram-*.md)` → `available_kinds_mermaid`.
+- `Bash(ls "${CLAUDE_PLUGIN_ROOT}/templates/diagram.ascii/"diagram-*.md)` → `available_kinds_ascii`.
 - Strip prefix `diagram-` and suffix `.md` from each match to get the kind.
 
 Outcome: `discovered (mermaid=<count>, ascii=<count>)`.
@@ -131,14 +131,14 @@ Outcome: `resolved kind=<kind> format=<format> source=<pinned-by-caller|heuristi
 
 ### Step 4: Resolve scheme path
 
-- For `format=mermaid`: Glob: `${CLAUDE_PLUGIN_ROOT}/templates/diagram.mermaid/styles-<scheme|default>.json`. An empty result → propagate `failed:scheme-not-found:<name>` and short-circuit. The skill does not parse the JSON itself; the drawer agent does. The skill only verifies presence so a missing scheme fails fast at the dispatcher rather than inside the agent.
+- For `format=mermaid`: `Bash(test -f "${CLAUDE_PLUGIN_ROOT}/templates/diagram.mermaid/styles-<scheme|default>.json")`. A non-zero exit → propagate `failed:scheme-not-found:<name>` and short-circuit. The skill does not parse the JSON itself; the drawer agent does. The skill only verifies presence so a missing scheme fails fast at the dispatcher rather than inside the agent.
 - For `format=ascii`: skip — ASCII drawers do not consume scheme files.
 
 Outcome: `resolved scheme=<name>` (mermaid) / `n/a (ascii)` / `failed:scheme-not-found:<name>`.
 
 ### Step 5: Format-compatibility check
 
-- Glob: `${CLAUDE_PLUGIN_ROOT}/templates/diagram.<format>/diagram-<kind>.md`. An empty result → `failed:format-not-supported-for-kind=<kind> in format=<format>`. Hard fail; do NOT silently switch format. Short-circuit to Step 8.
+- `Bash(test -f "${CLAUDE_PLUGIN_ROOT}/templates/diagram.<format>/diagram-<kind>.md")`. A non-zero exit → `failed:format-not-supported-for-kind=<kind> in format=<format>`. Hard fail; do NOT silently switch format. Short-circuit to Step 8.
 
 Outcome: `compatible` or `failed:format-not-supported-for-kind`.
 

@@ -12,7 +12,7 @@ source_skills:
   - lazy-log.timeline
   - lazy-log.summary
   - lazy-log.bullets
-source_sha: 5745ae1a08dafec458ccc19d9c810a13a8974fa3
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Change history and run-log housekeeping
 

@@ -9,7 +9,7 @@ source_skills:
   - lazy-repo.mark-public
   - lazy-guard.check-public
   - lazy-guard.allow-mcp
-source_sha: 5745ae1a08dafec458ccc19d9c810a13a8974fa3
+source_sha: 49c3acca48d76212bd8165bbd0df7bc23243faa9
 ---
 # Public-repo guardrails and MCP permission management
 

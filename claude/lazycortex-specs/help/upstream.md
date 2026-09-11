@@ -8,7 +8,7 @@ diagram_spec:
 source_skills:
   - lazy-spec.upstream-run
   - lazy-spec.refresh-sources
-source_sha: 5745ae1a08dafec458ccc19d9c810a13a8974fa3
+source_sha: 96065ecb921a5361a941067595fd42986b1bb185
 ---
 
 Some design material for your product doesn't start life in your spec vault — it lives in someone else's repository, updated on its own schedule. This block covers two jobs that keep your specs honest about material like that: pulling in what changed in a mirrored external source, and making sure a doc's visible list of sources actually matches what its frontmatter says it's built from.

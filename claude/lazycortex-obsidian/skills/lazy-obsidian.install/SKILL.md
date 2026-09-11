@@ -1,7 +1,7 @@
 ---
 name: lazy-obsidian.install
 description: "Run when the operator asks to set up Obsidian for this repo or to wire up a fresh vault, and again after a plugin update so new artifacts land. Also the answer when tag pages render empty (Dataview missing), the tag-page template isn't in `.claude/templates/`, icons are unpainted, or diagrams render unstyled — at project scope this is the plugin family's root entry point and chains `/lazy-obsidian.iconize-install` and `/lazy-obsidian.diagram-install`. Idempotent; install scope is detected, not asked."
-allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *), Bash(lazycortex-core *), AskUserQuestion, Skill, Agent
+allowed-tools: Read, Write, Edit, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(ls *), Bash(date *), Bash(diff *), Bash(lazycortex-core *), AskUserQuestion, Skill, Agent
 ---
 # Install lazycortex-obsidian
 
@@ -63,7 +63,7 @@ then run `/plugin install lazycortex/lazycortex-obsidian`.
 
 ## Step 2: Determine paths
 
-Enumerate every rule file shipped by the plugin via `Glob: <installPath>/rules/*.md` — never hardcode filenames. `<installPath>` is the `installPath` field from `installed_plugins.json` for `lazycortex-obsidian@lazycortex`.
+Enumerate every rule file shipped by the plugin via `Bash(ls <installPath>/rules/*.md)` — never hardcode filenames. `<installPath>` is the `installPath` field from `installed_plugins.json` for `lazycortex-obsidian@lazycortex`.
 
 For each source file `<installPath>/rules/<name>.md`, the rule destination by scope is:
 
@@ -84,9 +84,9 @@ If the glob returns zero files, abort and tell the user the plugin cache is empt
 
 ### Enumerate source and target
 
-- Source rules: `Glob <installPath>/rules/*.md`.
+- Source rules: `Bash(ls <installPath>/rules/*.md)`.
 - Owned namespaces: the plugin name minus the `lazycortex-` prefix (so `lazycortex-obsidian` → `lazy-obsidian`), plus every unique `<ns>.` prefix appearing in source rule filenames. When no rules ship, the owned namespace is just `lazy-obsidian`.
-- Target candidates: `Glob <targetRulesDir>/<ns>.*.md` for each owned namespace.
+- Target candidates: `Bash(ls <targetRulesDir>/<ns>.*.md)` for each owned namespace.
 - Ensure the destination directory exists with `mkdir -p`.
 
 ### Per-rule decision (quiet file-sync)
@@ -158,7 +158,7 @@ Installs every CSS snippet the plugin ships and enables all of them with one `ap
 
 ### Sync (file-sync policy)
 
-Enumerate `Glob ${CLAUDE_PLUGIN_ROOT}/templates/obsidian/snippets/*.css` — never hardcode the snippet list, so a plugin update that adds a new snippet lands here without an install-skill edit. `mkdir -p <vault>/snippets` first. For each `<name>.css`:
+Enumerate `Bash(ls "${CLAUDE_PLUGIN_ROOT}/templates/obsidian/snippets/"*.css)` — never hardcode the snippet list, so a plugin update that adds a new snippet lands here without an install-skill edit. `mkdir -p <vault>/snippets` first. For each `<name>.css`:
 
 - Source: `${CLAUDE_PLUGIN_ROOT}/templates/obsidian/snippets/<name>.css`.
 - Target: `<vault>/snippets/<name>.css`.

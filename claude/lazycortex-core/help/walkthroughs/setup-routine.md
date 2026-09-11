@@ -8,7 +8,7 @@ diagram_spec:
 source_skills:
   - lazy-routine.register
   - lazy-routine.unregister
-source_sha: 5745ae1a08dafec458ccc19d9c810a13a8974fa3
+source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Register a periodic routine with the runtime daemon
 
@@ -22,7 +22,7 @@ After this walkthrough you know how to register any of the five routine types, v
 
 - `lazycortex-core` installed in the project with the expert runtime enabled (`/lazy-core.install` with daemon opt-in complete, `run.sh` present).
 - `.claude/lazy.settings.json` already bootstrapped and writable — re-run `/lazy-core.install` if it is absent.
-- A dot-namespaced routine name in `<plugin>.<verb>` form (e.g. `lazy-review.tick`, `acme-lint.sweep`).
+- A dot-namespaced routine name in `<plugin>.<verb>` form (e.g. `lazy-review.tick`, `acme-lint.sweep`). A third `.<scope>` segment is allowed for a routine registered once per scope (e.g. `lazy-wiki.mirror-sync.<scope-id>`).
 - For `inbox`-type routines: the inbox directory should be gitignored — the wizard checks and offers to add it if not.
 
 ## The journey
@@ -38,11 +38,11 @@ Every type also takes one of two dispatch shapes:
 
 The validator enforces exactly-one of the two dispatch shapes. Choose the type, then you will be asked for the type-specific fields followed by the dispatch shape question.
 
-- **subprocess** — fire on a fixed interval (e.g. every 300 seconds). Required: `interval_sec`. Good for lint sweeps, data refreshes, and any periodic invocation.
-- **inbox** — watch a directory and fire once per file found. With `expert + request` the file's path is passed to the expert (`{file}` template + `dedup_key`) — the inbox stays the single source of truth. A succeeded job drains its input on the next tick; a failed job is left parked as a dead letter, and its dedup key blocks re-dispatch until you clear it. When the expert reports the reserved `deferred` outcome instead — work it cannot finish until something outside the runtime changes — the bundle is parked the same way, but ages out on its own: once it has waited `deferred_retry_sec`, the next tick offers the same untouched file back to the queue, no manual triage needed. With `command`, the file stays in the inbox until the consumer command moves or deletes it. Required: `inbox_dir`, `interval_sec`. Optional: `deferred_retry_sec` (seconds a deferred bundle stays parked before retry; default one day).
+- **subprocess** — fire on a fixed interval (e.g. every 300 seconds). Required: `interval_sec`. Optional: `timeout_sec` (caps how long a spawned command may run). Good for lint sweeps, data refreshes, and any periodic invocation.
+- **inbox** — watch a directory and fire once per file found. With `expert + request` the file's path is passed to the expert (`{file}` template + `dedup_key`) — the inbox stays the single source of truth. A succeeded job drains its input on the next tick; a failed job is left parked as a dead letter, and its dedup key blocks re-dispatch until you clear it. When the expert reports the reserved `deferred` outcome instead — work it cannot finish until something outside the runtime changes — the bundle is parked the same way, but ages out on its own: once it has waited `deferred_retry_sec`, the next tick offers the same untouched file back to the queue, no manual triage needed. With `command`, the file stays in the inbox until the consumer command moves or deletes it. Required: `inbox_dir`, `interval_sec`. Optional: `deferred_retry_sec` (seconds a deferred bundle stays parked before retry; default one day), `timeout_sec`.
 - **schedule** — fire once per cron boundary (5-field cron expression). Required: `cron`. Use when wall-clock timing matters more than a fixed cadence.
-- **git** — watch local HEAD for new commits, new files, changed files, deleted files, or renamed files; fire once per item. Required: `watch`, `interval_sec`. The `branch` and `remote` fields are vestigial — the watch always targets local HEAD regardless of their values, and remote sync is the daemon's own job. The wizard may surface them for schema compatibility; leave them blank or skip them. Optional: `filter` (the same composite frontmatter block `md-scan` takes, for watched paths worth narrowing by frontmatter) and `group_globs` (an ordered list of directory globs — file items whose path sits below a matching glob collapse into one item per matched directory, carrying every changed path in that directory together, instead of firing once per file; not valid together with `watch: new_commits`).
-- **md-scan** — scan markdown files matching vault-relative globs, filter by frontmatter values, and fire once per match. Files are edited in place by the consumer — no move. Required: `paths` (list of globs), `interval_sec`. A plain glob (e.g. `requests/*.md`) matches only direct children of that directory; a glob containing `**` (e.g. `requests/**/*.md`) matches recursively across any number of nested directories, including zero — use it for a coarse scope-root sieve and let the `filter` narrow it down. Optional: `filter` (composite filter block, e.g. `{"frontmatter": {"key": {"in": [...], "not_in": [...]}}}`) — a `null` value in the `in` list matches files where the key is absent or explicitly null, which is useful for picking up files that have never been processed; an absent `filter` matches all files.
+- **git** — watch local HEAD for new commits, new files, changed files, deleted files, or renamed files; fire once per item. Required: `watch`, `interval_sec`. The `branch` and `remote` fields are vestigial — the watch always targets local HEAD regardless of their values, and remote sync is the daemon's own job. The wizard may surface them for schema compatibility; leave them blank or skip them. `repo_dir` defaults to `.` — change it only when the routine should watch a different checkout than the one the daemon runs in. Optional: `filter` (the same composite frontmatter block `md-scan` takes, for watched paths worth narrowing by frontmatter), `path_filter` (a plain path-glob narrowing before the frontmatter filter runs), and `group_globs` (an ordered list of directory globs — file items whose path sits below a matching glob collapse into one item per matched directory, carrying every changed path in that directory together, instead of firing once per file; not valid together with `watch: new_commits`).
+- **md-scan** — scan markdown files matching vault-relative globs, filter by frontmatter values, and fire once per match. Files are edited in place by the consumer — no move. Required: `paths` (list of globs), `interval_sec`. A plain glob (e.g. `requests/*.md`) matches only direct children of that directory; a glob containing `**` (e.g. `requests/**/*.md`) matches recursively across any number of nested directories, including zero — use it for a coarse scope-root sieve and let the `filter` narrow it down. Optional: `filter` (composite filter block, e.g. `{"frontmatter": {"key": {"in": [...], "not_in": [...]}}}`) — a `null` value in the `in` list matches files where the key is absent or explicitly null, which is useful for picking up files that have never been processed; an absent `filter` matches all files. Also optional: `timeout_sec`.
 
 Three fields apply to every type, asked after the type-specific fields and the dispatch shape:
 
@@ -71,7 +71,7 @@ For a `git` routine, supply `watch` (one of `new_commits` / `new_files` / `chang
 
 After the type-specific fields and the `command`/`expert`+`request` question, the wizard asks about the three shared fields — `hooks_enabled`, `ignore_halt`, `git_author`. Accept the defaults (all unset) unless your routine's command needs a specific hook, needs to keep ticking through a daemon halt, or commits under its own bot identity.
 
-The skill validates the `<plugin>.<verb>` naming pattern and the per-type schema before writing anything. If validation fails it aborts with a clear message — fix the reported field and re-run.
+The skill validates the `<plugin>.<verb>` (or `<plugin>.<verb>.<scope>`) naming pattern and the per-type schema before writing anything. If validation fails it aborts with a clear message — fix the reported field and re-run.
 
 ### Step 3 — Confirm the routine is registered
 

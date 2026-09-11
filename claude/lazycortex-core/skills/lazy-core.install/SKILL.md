@@ -1,7 +1,7 @@
 ---
 name: lazy-core.install
 description: "Run when the operator asks to set up lazycortex-core in a repo (or globally), or when core artifacts are missing — the plugin's rules are not in `.claude/rules/`, `lazy.settings.json` has no runtime section, `.experts/` is not initialised, or the daemon was never wired. Installs this plugin only; `/lazy-core.setup` is the one that runs every plugin's install. Idempotent and quiet on re-run — decisions are persisted and never re-asked."
-allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git init*), Bash(cp *), Bash(rm *), Bash(test *), Bash(find *), Bash(date *), Bash(diff *), Bash(chmod *), Bash(launchctl *), Bash(systemctl *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
+allowed-tools: Read, Write, Edit, AskUserQuestion, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git init*), Bash(cp *), Bash(rm *), Bash(test *), Bash(ls *), Bash(find *), Bash(date *), Bash(diff *), Bash(chmod *), Bash(launchctl *), Bash(systemctl *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
 ---
 # Install lazycortex-core
 
@@ -135,7 +135,7 @@ then run `/plugin install lazycortex/lazycortex-core`.
 
 ## Step 2: Determine paths
 
-Enumerate every rule file shipped by the plugin via `Glob: <installPath>/rules/*.md` — never hardcode filenames. `<installPath>` is the `installPath` field from `installed_plugins.json`.
+Enumerate every rule file shipped by the plugin via `Bash(ls <installPath>/rules/*.md)` — never hardcode filenames. `<installPath>` is the `installPath` field from `installed_plugins.json`.
 
 For each source file `<installPath>/rules/<name>.md`, the target is:
 
@@ -492,9 +492,9 @@ Register every expert candidate the enabled plugins ship — there is no per-can
 
 ### 1. Discover candidates
 
-Glob for agent files containing `expert_protocol:` frontmatter at three scopes. For the plugin cache, resolve the latest version per plugin via numeric version sort on the version directory (`sort -V`, so `10.0.0` outranks `9.1.1`):
+List agent files that may carry `expert_protocol:` frontmatter at three scopes, one `Bash(ls …)` per pattern below — never `find` or a walk. For the plugin cache, resolve the latest version per plugin via numeric version sort on the version directory (`sort -V`, so `10.0.0` outranks `9.1.1`):
 
-- `~/.claude/plugins/cache/*/*/` — list subdirectories, take the highest by numeric version sort as latest version, then glob `<latest-version>/agents/*.md`
+- `Bash(ls -d ~/.claude/plugins/cache/*/*/*/)` — every plugin's version directories; per plugin take the highest by numeric version sort as latest version, then `Bash(ls <latest-version>/agents/*.md)`
 - `~/.claude/agents/*.md`
 - `<repo-root>/.claude/agents/*.md`
 
@@ -908,7 +908,7 @@ print(os.path.basename(root) + '-' + hashlib.sha256(root.encode()).hexdigest()[:
 ```
 
   Hold the printed value as `<REPO_ID>` for 13b/13c. `<REPO_NAME>` (bare basename) is still used only for the human-readable systemd `Description`.
-- **dev-mode** = whether this repo IS a plugin-authoring vault. It is True when `Glob: <repo-root>/claude/*/.claude-plugin/plugin.json` returns at least one path, else False (never `Bash find` — the deny seed in Step 13.5c blocks `find` over repo and home paths). In dev-mode the shim prefers in-repo plugin sources under `<repo-root>/claude/*/` over the cache. Persist the derived value under the flat `daemon` section:
+- **dev-mode** = whether this repo IS a plugin-authoring vault. It is True when `Bash(ls <repo-root>/claude/*/.claude-plugin/plugin.json)` prints at least one path, else False. In dev-mode the shim prefers in-repo plugin sources under `<repo-root>/claude/*/` over the cache. Persist the derived value under the flat `daemon` section:
 
 ```bash
 PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
@@ -1015,8 +1015,7 @@ Block 2 — `<repo-root>/.claude/settings.local.json` (permission scope; loaded 
 {
   "permissions": {
     "additionalDirectories": ["~/.claude/plugins/cache/lazycortex"],
-    "allow": ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Skill", "WebSearch", "WebFetch", "Bash(lazycortex-core *)"],
-    "deny":  ["Bash(find /*)", "Bash(find /Users/*)", "Bash(find ~/*)", "Bash(grep -r /*)", "Bash(grep -R /*)", "Bash(grep -r ~/*)", "Bash(grep -R ~/*)", "Bash(rg /*)", "Bash(rg --files /*)", "Bash(rg ~/*)", "Bash(rg --files ~/*)"]
+    "allow": ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Skill", "WebSearch", "WebFetch", "Bash(lazycortex-core *)"]
   }
 }
 ```
@@ -1026,6 +1025,8 @@ The `Bash(lazycortex-core *)` entry is required so dispatched experts can invoke
 The bare `WebSearch` and `WebFetch` entries are required for the research-shaped experts (`lazycortex-experts`' researcher): under `dontAsk` both tools are refused without an explicit allow rule, `WebSearch` accepts only the bare form, and the bare `WebFetch` permits any domain. Neither tool runs through the Bash sandbox — they execute in-process — so the sandbox file does not govern them; the permission file does. `WebSearch` is unavailable on the Bedrock provider; that is a provider limit, not a seeding error, and the entry is still written.
 
 Tilde-form (`~/...`) is acceptable for paths the operator wants portable across machines — Claude Code expands `~` at load time. Absolute paths are equally valid.
+
+No `deny` list is seeded. What a spawn may reach on disk is the sandbox's business (`.runtime/sandbox.settings.json`, resolved paths, enforced by the OS), and this file is loaded by the operator's own interactive sessions too, so a deny rule here would police the operator, not the expert. Permission posture is consumer-owned — the install never writes one.
 
 ### 13.5c. Run the sandbox sync, then apply the consumer-owned-config policy to the permission file
 

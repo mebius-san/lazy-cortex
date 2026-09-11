@@ -1,7 +1,7 @@
 ---
 name: lazy-core.doctor
 description: "Run when the operator asks whether the project config is healthy, or when something feels off — a rule or skill is not firing, plugins may be behind the marketplace, settings / agents / memory / hooks / CLAUDE.md have drifted apart. Merges its own cross-artifact scan with the installed plugins' audits, applies the repairs that follow mechanically from what it read, and asks per finding about the rest; the sibling `/lazy-core.audit` only measures context weight and authoring compliance and never fixes."
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash(wc *), Bash(mkdir -p *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(claude plugin update *), mcp__*__recall, mcp__*__retain, AskUserQuestion, Agent
+allowed-tools: Read, Write, Edit, Bash(ls *), Bash(wc *), Bash(mkdir -p *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(claude plugin update *), mcp__*__recall, mcp__*__retain, AskUserQuestion, Agent
 ---
 # Project Health Check
 
@@ -9,9 +9,9 @@ Coordinator skill. Dispatches three **Explore** subagents in parallel to scan th
 
 Read `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md` before dispatching for the coordinator pattern. Severity vocabulary: `PASS` / `WARN` / `FAIL`, plus `INFO` (reserved for Phase 2.5 transient status lines — e.g. "marketplace unreachable, used cached manifest" — that don't require a user fix).
 
-**CRITICAL PATH RULE** (applies to every dispatched agent): `$HOME/.claude/` is protected from Bash access. Agents must use ONLY Glob and Read under `$HOME/.claude/`. Only project-root paths may use `wc -c`. For `$HOME/.claude/` file sizes, estimate as `lines × 45 bytes`.
+**CRITICAL PATH RULE** (applies to every dispatched agent): under `$HOME/.claude/` agents only `Read` files and list with a single-pattern `Bash(ls <dir or glob>)` — never `find`, `grep -r`, or `rg` over it. Only project-root paths may use `wc -c`. For `$HOME/.claude/` file sizes, estimate as `lines × 45 bytes`.
 
-**Path expansion** (mandatory): Glob and Read do **not** shell-expand `~` or `$HOME`. Before any Glob/Read targeting a home-relative path, run `Bash(echo $HOME)` once and substitute the result (or read the absolute home path from the session env block). A literal `~/.claude/rules/*.md` or `$HOME/.claude/rules/*.md` passed to Glob will match nothing and silently report "empty".
+**Path expansion** (mandatory): `Read` does **not** shell-expand `~` or `$HOME`. Before any `Read` targeting a home-relative path, run `Bash(echo $HOME)` once and substitute the result (or read the absolute home path from the session env block). A literal `~/.claude/rules/<file>.md` or `$HOME/.claude/rules/<file>.md` passed to `Read` resolves nothing and silently reports "missing"; `Bash(ls …)` expands both forms itself.
 
 **Read-first**: collect all findings before any fix. Never fix silently.
 
@@ -38,7 +38,7 @@ This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reord
 
 Detect mode at the start of the run; pass the result to every dispatched agent and to Phase 2.6.
 
-- **Local tool mode** — this repo *authors* plugins. Detected by `Glob("claude/**/.claude-plugin/plugin.json")` returning any match. Every content check also applies to plugin sources under `claude/**` (see per-agent scope expansions below). Outdated-plugin suppression (Phase 2.6) is **disabled** — the sources are authored here, so full integrity is required regardless of installed-plugin currency.
+- **Local tool mode** — this repo *authors* plugins. Detected by `Bash(ls claude/*/.claude-plugin/plugin.json)` printing any path. Every content check also applies to plugin sources under `claude/**` (see per-agent scope expansions below). Outdated-plugin suppression (Phase 2.6) is **disabled** — the sources are authored here, so full integrity is required regardless of installed-plugin currency.
 - **Release mode** (default) — this repo *consumes* installed plugins. Plugin-owned rule files in `.claude/rules/` and `$HOME/.claude/rules/` are synced copies; if the owning plugin is outdated (per Phase 2.5), content-level findings on those files are suppressed by Phase 2.6 and only the version-outdated WARN is surfaced (upgrading will overwrite the stale content).
 
 The per-plugin "owned namespaces" set computed by Agent A's Plugin rule sync check is the key used to decide plugin ownership of any given rule filename.
@@ -86,7 +86,7 @@ Checks the agent performs:
   - For each installed plugin, read `<installPath>/.claude-plugin/plugin.json` and collect its `dependencies` array (default empty if absent).
   - `[WARN]` for each `<dep>` in that array where `<dep>` is not present in the installed-plugin set. Finding: `plugin <name> requires <dep> but <dep> is not installed — install it via its marketplace entry or remove the dependency`.
 - **Plugin rule sync** (same installed-plugin set as above) — for each installed plugin that ships a `rules/` directory:
-  - Glob `<installPath>/rules/*.md` → source-rule set; empty set → skip this plugin.
+  - `Bash(ls <installPath>/rules/*.md)` → source-rule set; empty set → skip this plugin.
   - Compute the plugin's owned namespaces: the set of leading dot-segments from source-rule filenames (e.g. `lazy-log.logging.md` → `lazy-log`). One plugin may own multiple namespaces (e.g. `lazycortex-core` ships `lazy-core.*` and `lazy-guard.*`).
   - **Drift**: for each source rule whose filename also exists at `.claude/rules/<filename>` (or `$HOME/.claude/rules/<filename>` for user-scoped installs), compare contents. If bytes differ → `[WARN] rule <filename> drifted from <plugin> source — run /<namespace>.install to reconcile (per-rule overwrite/keep-local/merge prompt)`.
   - **Orphan**: any file in target rules dir whose filename matches one of the plugin's owned namespaces but is NOT in the source-rule set → `[WARN] rule <filename> is an orphan from <plugin> (removed between versions) — run /<namespace>.install to offer deletion`.
@@ -406,7 +406,7 @@ The coordinator supports two backend shapes. It never names a specific MCP serve
 
 ### 2.7b. Load waivers
 
-1. **File-based** — `Glob` both scoped `doctor.waivers/` directories. `Read` each match; parse its YAML frontmatter into a waiver record (see §2.7d).
+1. **File-based** — `Bash(ls <dir>/*.md)` on each scoped `doctor.waivers/` directory. `Read` each match; parse its YAML frontmatter into a waiver record (see §2.7d).
 2. **MCP (only if discovered)** — call the discovered `recall`-shaped tool with `tags: ["doctor-waiver"]`. A tool error is a soft-fail: log it, continue with only file-based waivers.
 3. Build `waiver_set = { fingerprint → {reason, date, scope, backend, location} }`. If the same fingerprint exists in both file and MCP backends, the **file entry wins** and an `INFO` note is appended to the run log so the user notices the drift. No automatic cleanup.
 

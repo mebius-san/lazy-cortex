@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 9.4.0 — 2026-09-11 UTC
+
+- Install chain discovery now runs through a dedicated `lazy_setup.py discover` step instead of `Glob`/`Grep`, and setup no longer seeds a `find`/`grep -r` deny list into the consumer's permission file — sandbox enforcement covers that instead.
+
 ### 9.3.1 — 2026-09-11 UTC
 
 - `lazy-core.install` now seeds bare `WebSearch` and `WebFetch` allow rules for headless expert spawns (enables the new researcher role to reach the web under `dontAsk`), and the curated agent-model tier table gains that role on the opus tier.
@@ -641,6 +645,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 8.1.1 — 2026-09-11 UTC
+
+- Fixed `lazy-spec.drive`, `lazy-spec.install`, and `lazy-spec.sync-with-code` stalling in permission modes without `Glob`/`Grep` (e.g. Claude Code's `auto` mode) — they now resolve notes, the wiki binary, and diagram fences via `find`/`ls`/`grep` instead.
+
 ### 8.1.0 — 2026-09-11 UTC
 
 - New `research` document type: a two-zone `research.md` (operator states the question and scope, researcher writes findings and conclusion) that starts life as `research-design` and graduates to a `research-report`, each with its own review class, stage tracking, and playbook.
@@ -899,6 +907,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 5.2.2 — 2026-09-11 UTC
+
+- Fixed `lazy-obsidian.install` aborting silently before syncing anything in sessions without a `Glob` tool (e.g. Claude Code's `auto` permission mode) — rule, target-directory, and CSS-snippet listings now use `ls`, so installs complete again.
+
 ### 5.2.1 — 2026-09-11 UTC
 
 - Iconize callbacks now run by their own shebang instead of relying on the file's execute bit, so a callback stripped of exec permission by mobile sync (or any mode-blind git client) produces its icon again instead of failing silently; a callback with no shebang is now refused out loud instead of failing dark.
@@ -1094,6 +1106,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Depends on `lazycortex-core`.
 
 ## lazycortex-diagram
+
+### 1.2.2 — 2026-09-11 UTC
+
+- Fixed `/lazy-diagram.draw` and `/lazy-diagram.install` failing to find templates, schemes, and rules in sessions without `Glob`/`Grep` tools available (e.g. Claude Code's `auto` permission mode) — lookups now use `ls`/`test -f`/`grep` instead.
 
 ### 1.2.1 — 2026-09-11 UTC
 

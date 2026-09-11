@@ -10,7 +10,7 @@ source_skills:
   - lazy-spec.product-config
   - lazy-spec.audit
   - lazy-spec.help
-source_sha: fc47aeeb8c042b2968809c8cef31d078ec76efaf
+source_sha: cd29c413bffc0e9251ad6a89fdddeeb8df754fbf
 ---
 # Bootstrapping, configuring products, and auditing spec health
 

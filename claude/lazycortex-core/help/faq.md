@@ -32,7 +32,7 @@ source_skills:
   - lazy-expert.cancel-job
   - lazy-expert.list-jobs
   - lazy-memory.write
-source_sha: f3dcc55c389b71a983c894ee1c0407d8311e931c
+source_sha: 184997801e1412d5c2c6617e1649a1bb615298a9
 ---
 # FAQ
 
@@ -109,6 +109,16 @@ The file exists separately because model-routing preferences are architectural d
 The tracked `settings.json` files (global `~/.claude/settings.json` and project `.claude/settings.json`) are for enablement-only entries: `enabledPlugins`, `enabledMcpjsonServers`, `hooks` registrations, non-secret `env` vars, model selection, and status-line config. Per-tool permission entries (`permissions.allow`, `permissions.ask`), `additionalDirectories`, and machine-specific `env` values belong in the gitignored `settings.local.json` files. Committing permission lists leaks your personal risk preferences to teammates who may have different policies. The `lazy-guard.settings` PreToolUse hook enforces this split by intercepting writes to settings files that violate it.
 
 The same split applies to `lazy.settings.json[daemon].metrics`: the `enabled` flag and `repo_label` are tracked (they're a shared design decision), while the allocated port lives only in the gitignored local overlay, because a port that is free on one machine can be taken on another. `daemon.run_here` is the deliberate exception to "per-machine stays local" — it is a hostname-to-checkout-path map and lives in the **tracked** file on purpose, so the pairing travels to every clone (see the Dropbox/iCloud question below). `daemon.token_env` is tracked too — it only names an environment variable, never the token itself (see the next question but one).
+
+---
+
+## Why doesn't `/lazy-core.install` write a `deny` list into my permission file anymore?
+
+Earlier versions did: a `permissions.deny` block in the checkout's `.claude/settings.local.json` blocked absolute-path `find`, recursive `grep -r`/`rg` scans, and — for one release — `ls` on any absolute or home-relative path, meant to keep a headless expert spawn from walking the whole filesystem. That block is gone. `/lazy-core.install` now writes only the `allow` list into `.claude/settings.local.json` (`Read`, `Write`, `Edit`, `Glob`, `Grep`, `Bash`, `Skill`, `WebSearch`, `WebFetch`, plus `Bash(lazycortex-core *)` and the sibling `Bash(lazycortex-<short> *)` patterns other plugins' installers add) — no `deny` entries at all.
+
+The reason is where confinement actually belongs. What an expert spawn may reach on disk is the sandbox's job: `.runtime/sandbox.settings.json`, loaded only via the expert pump's `--settings` flag for that one spawn, resolved-path aware, and OS-enforced. `.claude/settings.local.json`, by contrast, is loaded by every session in the checkout — including your own interactive one — so a `deny` rule written there ends up policing you, not the expert it was meant to confine. Permission posture in that file is your call now; install stopped making it for you.
+
+If an older install already wrote `deny` entries into your `settings.local.json`, re-running `/lazy-core.install` does not remove them — install only adds what's missing to a consumer-owned file, it never subtracts. Delete them yourself if they're now blocking something you need in your own interactive session (a `find`, `grep -r`, `rg`, or `ls` call over an absolute or home-relative path being the usual culprit).
 
 ---
 
