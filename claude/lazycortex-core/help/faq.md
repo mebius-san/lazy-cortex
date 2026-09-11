@@ -32,7 +32,7 @@ source_skills:
   - lazy-expert.cancel-job
   - lazy-expert.list-jobs
   - lazy-memory.write
-source_sha: 184997801e1412d5c2c6617e1649a1bb615298a9
+source_sha: dc58b15311ea88afe586b684518a261e247ae02a
 ---
 # FAQ
 
@@ -194,13 +194,11 @@ Edit the map by hand — add or remove a `"<hostname>": "<path>"` entry — then
 
 ---
 
-## Why does `/lazy-core.install` now write a `LAZYCORTEX_PYTHON` entry, and what breaks if it doesn't?
+## Where does `LAZYCORTEX_PYTHON` come from, and do I need to set it?
 
-Unconditionally, on every checkout — daemon-supervised or not. Step 12.7 resolves the absolute interpreter with `python3 -c 'import sys; print(sys.executable)'` — captured under your own interactive environment, where `python3` reliably resolves to the right binary — and merges `{"env": {"LAZYCORTEX_PYTHON": "<path>"}}` into the checkout's gitignored `.claude/settings.local.json`, deep-merging so no other key is touched. This runs before the daemon gate (`daemon.enabled` + `run_here`, see the two questions above) decides anything about this checkout, because every lazycortex skill and hook — not just a supervised daemon's spawns — shells out through the recorded interpreter. If the checkout later does reach the supervisor install, that step reuses the same `<PYTHON>` value recorded here rather than re-deriving it, and substitutes it into the supervisor unit's `{PYTHON}` placeholder.
+Only the daemon's supervisor unit sets it, and you never set it by hand. launchd and systemd start the shim with a minimal environment that doesn't source your shell profile (unless `--login-shell` is set), so a bare `python3` inside the unit isn't guaranteed to resolve to the same interpreter — or to any interpreter — that resolves interactively. Step 13 of `/lazy-core.install` therefore derives the absolute interpreter once, with `python3 -c 'import sys; print(sys.executable)'` under your own interactive environment, and substitutes it into the unit's `{PYTHON}` placeholder; the shim starts the runner through it, and everything the daemon spawns inherits the variable.
 
-This closes a gap specific to headless supervision, but the fix now covers interactive sessions too: launchd and systemd start the shim with a minimal environment that doesn't source your shell profile (unless `--login-shell` is set), so a bare `python3` inside the unit isn't guaranteed to resolve to the same interpreter — or to any interpreter — that resolves interactively. Every lazycortex skill and hook shells out as `"${LAZYCORTEX_PYTHON:-python3}" ${CLAUDE_PLUGIN_ROOT}/bin/<file>` instead of a bare `python3 ...`, so once the variable is recorded, every checkout's spawns — supervised daemon or plain interactive session — run the identical interpreter; with the variable unset (an install that predates this step), every call falls back to plain `python3` exactly as before.
-
-The step is idempotent and reports **python-recorded** the first time it writes the value, or **python-unchanged** on a re-run that finds it already matches — re-running `/lazy-core.install` after moving to a different Python installation (a pyenv version bump, for instance) picks up the new interpreter automatically.
+Every lazycortex skill and hook shells out as `"${LAZYCORTEX_PYTHON:-python3}" ${CLAUDE_PLUGIN_ROOT}/bin/<file>` instead of a bare `python3 ...`, so under the daemon they run the unit's interpreter and in a plain interactive session they fall back to `python3` from your `PATH` — which is the same binary the install step would have derived there. That is why the install no longer records the value in `.claude/settings.local.json`: outside the daemon it duplicated the fallback, and in a checkout whose local settings are tracked (a dotfiles repo) it dragged a machine-specific path into git. An entry left there by an older install is harmless while it resolves; delete it once it stops resolving.
 
 ---
 

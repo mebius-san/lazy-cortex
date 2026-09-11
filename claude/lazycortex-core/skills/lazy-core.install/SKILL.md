@@ -30,7 +30,6 @@ This skill has 23 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 11.5 — Seed providers`
    - `Step 12 — Bootstrap built-in routines (expert pump, doctor tick, index guard, weekly autocheckup)`
    - `Step 12.5 — Restore externally-sourced working directories`
-   - `Step 12.7 — Record the interpreter for skills and hooks`
    - `Step 13 — Daemon gate (enabled + run_here) + supervisor install`
    - `Step 13.5 — Configure expert-spawn sandbox in .runtime/sandbox.settings.json`
    - `Step 13.6 — Provision metrics (port + repo label + scrape-targets file)`
@@ -784,27 +783,6 @@ The wrapper stays silent in a checkout that would never run a daemon — `daemon
 
 Outcome: `no-declaration` / `linked` / `unchanged` / `declined-on-record` / `ignores-ok` / `ignores-updated` / `ignores-declined` / `inbox-conflict` / `not-this-checkout`. The repair outcome and the ignore-coverage outcome are both stated — `linked, ignores-updated` is a normal pair.
 
-## Step 12.7: Record the interpreter for skills and hooks
-
-Unconditional — this step runs in every checkout, daemon or not. Skills and hooks shipped by every lazycortex plugin run Python as `"${LAZYCORTEX_PYTHON:-python3}" ${CLAUDE_PLUGIN_ROOT}/bin/<file>` in whichever checkout a session opens, so the interpreter is recorded before the daemon gate below decides anything about this checkout; a checkout the `run_here` map does not name still runs every skill and hook.
-
-- **python** = the absolute interpreter. Derive it once: `Bash(python3 -c 'import sys; print(sys.executable)')`. Hold it as `<PYTHON>` for this step and for 13b/13c. It is machine-specific and is never written into the tracked `lazy.settings.json`.
-
-Merge `{"env": {"LAZYCORTEX_PYTHON": "<PYTHON>"}}` into `<repo-root>/.claude/settings.local.json` (create the file as `{}` when absent; deep-merge, never overwrite other keys; the file is gitignored — a machine-specific absolute path never enters tracked settings):
-
-```bash
-python3 - "<repo-root>/.claude/settings.local.json" "<PYTHON>" <<'PY'
-import json, sys
-from pathlib import Path
-p, py = Path(sys.argv[1]), sys.argv[2]
-data = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
-data.setdefault("env", {})["LAZYCORTEX_PYTHON"] = py
-p.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-PY
-```
-
-Outcome: **python-recorded** (or **python-unchanged** when the value already matched).
-
 ## Step 13: Daemon gate (enabled + run_here) + supervisor install
 
 If Step 9 was skipped (outcome `skipped-not-in-git-repo`), or Step 12.5 stated `inbox-conflict`, inherit the same outcome and skip this step.
@@ -923,7 +901,7 @@ save_section(p, 'daemon', sec)
 
 Hold the derived boolean as `<dev_mode>` for 13b/13c.
 
-- **python** = `<PYTHON>` as recorded by Step 12.7 — the supervisor hands the same interpreter to the shim that skills and hooks already use. Never re-derive it here.
+- **python** = the absolute interpreter the supervisor unit hands to the shim. Derive it once here: `Bash(python3 -c 'import sys; print(sys.executable)')`, hold it as `<PYTHON>` for 13b/13c. launchd and systemd exec the shim with a minimal `PATH`, so the unit needs the absolute path; an interactive session does not — skills and hooks run `"${LAZYCORTEX_PYTHON:-python3}"` and resolve `python3` from `PATH` on their own. The value is machine-specific and is never written anywhere but the unit file: not into the tracked `lazy.settings.json`, and not into `.claude/settings.local.json` either.
 
 - **login-shell / env-files** = operator-provided supervisor options (NOT derived — read verbatim from the `daemon.supervisor` block, alongside `dev_mode`). They give the daemon a login-equivalent environment on headless hosts where launchd/systemd exec the shim without a login shell, so `claude -p` otherwise fails "Not logged in" and `claude` may not resolve in PATH. Both default off → byte-identical behaviour when absent.
 
@@ -1155,7 +1133,6 @@ Report to the user:
 - lazycortex-core agent-model tier seed outcome (Step 11 §1b, via `lazy-core.agent-models-seed`)
 - Expert-pump routine registration outcome (Step 12)
 - External working-directory outcome (Step 12.5), including every `skipped (was …)` line, the ignore-coverage outcome with each appended `.gitignore` line (or, on `ignores-declined`, the WARN naming every path git can still see), and any `inbox-conflict` refusal
-- Interpreter record outcome (Step 12.7)
 - Daemon supervisor install outcome (Step 13)
 - Sandbox/permissions merge outcome (Step 13.5)
 - Metrics provisioning outcome (Step 13.6)

@@ -168,7 +168,7 @@ The `supervisor` key (nested under the flat `daemon` section) is optional and re
 | `login_shell` | bool | `false` | When `true`, the rendered supervisor invokes `lazy.runtime.sh` with `--login-shell`. The shim re-execs itself through a login shell (`$SHELL -lc`, default `/bin/zsh`) so the daemon inherits the operator's login environment (`.zprofile` / `.zshrc` → `CLAUDE_CODE_OAUTH_TOKEN` + full PATH). See § Headless hosts below. |
 | `env_files` | `[string]` | `[]` | A list of env-file paths. Each is rendered as a `--env-file <path>` flag on the shim invocation; the shim sources each (`set -a; . <path>; set +a`) so its exported vars reach the runner → daemon → `claude`. A leading `~` is expanded by the shim. Surgical alternative to `login_shell` when only a token file is needed, not a full login PATH. |
 
-`LAZYCORTEX_PYTHON` — absolute interpreter recorded by install step 13a; exported by the supervisor unit to the shim and written to `.claude/settings.local.json[env]` for skills and hooks.
+`LAZYCORTEX_PYTHON` — absolute interpreter derived by install step 13b and exported by the supervisor unit to the shim, which starts the runner through it. It lives nowhere but the unit file: an interactive session runs skills and hooks as `"${LAZYCORTEX_PYTHON:-python3}"` and resolves `python3` from its own `PATH`.
 
 `dev_mode`, `login_shell`, and `env_files` are install-skill state, not runtime config — changing them in `lazy.settings.json` does NOT affect the running daemon. To apply a change, re-run `/lazy-core.install` so the supervisor unit is re-rendered, then reload the unit (`launchctl unload && launchctl load` on macOS, `systemctl --user daemon-reload && systemctl --user restart` on Linux).
 

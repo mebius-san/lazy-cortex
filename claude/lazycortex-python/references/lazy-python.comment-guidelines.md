@@ -135,9 +135,12 @@ A block marker is **not a comment to the code** — it is a standalone block, se
     # The returned clone is a fully independent deep copy;
     # mutating it never affects the original.
     ```
+  - Placement by layer. A guarantee that an interface declares for every implementation is written once, on the abstract declaration in the interface: the block sits inside the abstract method's body, above its `raise NotImplementedError`, and states what every implementation MUST honour. An implementation of that method in a subclass never repeats the block; its docstring `Guarantees` section carries the promise and traces it to the interface's contract. A method with no interface declaration — a private helper, a concrete-only method — keeps its contract at the load-bearing spot in its own body, as before.
+  - A contract that only one implementation adds on top of the interface's promise, and that callers of that concrete class rely on, goes in that implementation and is not lifted to the interface.
 - Treatment rules:
   - Never remove or alter `# Contract:` comments without explicit user approval.
   - When generating or updating a method's docstring `Guarantees` section, include every `Contract:` comment from that method.
+  - When a method carries the same `Contract:` block on both its interface declaration and its implementation, the duplicate on the implementation is a finding: keep the interface's block, drop the implementation's, and keep the implementation's `Guarantees` section pointing at the interface.
 
 ## Domain Comments
 - Domain comments (`# Domain(group name):`) are special documentation comments that describe domain rules, mechanics, algorithms, or other domain-specific principles.

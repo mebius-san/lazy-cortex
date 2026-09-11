@@ -35,7 +35,7 @@ conventions.
 
 ### Knowledge Marker Rules
 - **Mark knowledge as you write it.** Knowledge markers are written by the author at writing time, not backfilled by a later sweep:
-  - Code that implements a **caller-visible guarantee** — behavior callers may rely on that must survive refactoring — gets a `Contract:` block at the load-bearing spot, and the owning docstring's **Guarantees** section is synced in the same pass.
+  - Code that implements a **caller-visible guarantee** — behavior callers may rely on that must survive refactoring — gets a `Contract:` block at the load-bearing spot — the interface declaration when the guarantee is part of an interface's protocol, the implementation body otherwise; the owning docstring's **Guarantees** section is synced in the same pass.
   - Code that implements **domain knowledge** — a mechanic, formula, or rule of the modeled subject area — gets a `Domain(<group>):` block. The group comes from the project's domain-groups dictionary; when no listed group fits, park the block under `Domain(unfiled):` — never invent a permanent group.
   - Block shapes and boundaries: the comment canon's Contract Comments / Domain Comments / Marker Comments sections (`lazy-python.comment-guidelines.md`). Whether an unmarked guarantee or mechanic slipped through is a review-phase finding.
 

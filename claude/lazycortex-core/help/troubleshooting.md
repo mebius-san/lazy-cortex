@@ -38,7 +38,7 @@ source_skills:
   - lazy-runtime.preflight
   - lazy-runtime.recover
   - lazy-runtime.tick
-source_sha: 184997801e1412d5c2c6617e1649a1bb615298a9
+source_sha: dc58b15311ea88afe586b684518a261e247ae02a
 ---
 # Troubleshooting
 
@@ -56,9 +56,9 @@ source_sha: 184997801e1412d5c2c6617e1649a1bb615298a9
 
 **Symptom**: After upgrading `lazycortex-core`, a skill that previously worked fine — installing, dispatching or collecting an expert job, writing or reflecting memory, registering a routine, ticking the runtime, or almost anything else that shells out to Python — fails with a shell error naming a Python path that does not exist, instead of running normally.
 
-**Likely cause**: Every lazycortex skill and hook now runs its Python helpers as `"${LAZYCORTEX_PYTHON:-python3}" <script>` instead of relying on the script's own executable bit — that bit means nothing once a git client that is blind to file modes (obsidian-git on Android, a mode-blind Windows checkout) strips it on clone or pull. `/lazy-core.install` Step 12.7 resolves the actual interpreter once per machine (`sys.executable`) and records it as `LAZYCORTEX_PYTHON` in this checkout's gitignored `.claude/settings.local.json` — unconditionally, in every checkout, whether or not the daemon is set up; every later skill or hook invocation reads that recorded value. If the recorded path stops resolving — the Python installation behind it was upgraded or removed, or the settings file was copied in from a different machine — every invocation that shells out to Python fails the same way, not just the one you happened to run first.
+**Likely cause**: Every lazycortex skill and hook runs its Python helpers as `"${LAZYCORTEX_PYTHON:-python3}" <script>` instead of relying on the script's own executable bit — that bit means nothing once a git client that is blind to file modes (obsidian-git on Android, a mode-blind Windows checkout) strips it on clone or pull. In an interactive session the variable is normally unset and `python3` resolves from your `PATH`. A path that does not exist therefore comes from somewhere that sets the variable explicitly: an `env.LAZYCORTEX_PYTHON` entry left in `.claude/settings.local.json` by an older install (the step that wrote it is gone), or a shell profile exporting a value copied from another machine.
 
-**Fix**: Re-run `/lazy-core.install` — Step 12.7 re-derives the interpreter from the current environment and rewrites the `LAZYCORTEX_PYTHON` entry (reporting `python-recorded` or `python-unchanged`) in `.claude/settings.local.json`. If the entry was copied or synced in from a different machine — the value is deliberately kept out of tracked settings for exactly this reason — delete the `env.LAZYCORTEX_PYTHON` entry from this checkout's `.claude/settings.local.json` and re-run `/lazy-core.install` to have it re-derived for this machine.
+**Fix**: Delete the `env.LAZYCORTEX_PYTHON` entry from this checkout's `.claude/settings.local.json` (and any export of it in your shell profile) and open a new session — skills and hooks then fall back to `python3` from `PATH`. The daemon's supervisor unit is the one place that legitimately carries the absolute path; if that one is stale, re-run `/lazy-core.install` so Step 13 re-derives it and re-renders the unit.
 
 ---
 

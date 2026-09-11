@@ -1,7 +1,7 @@
 ---
 name: lazy-diagram.fix
 description: "Use when a diagram fence that already exists has drifted from the current contract — hardcoded palette, missing theme directive, node labels that no longer match the prose around them — or when `/lazy-diagram.audit` offers to repair an offending file. Infers (kind, format) from the fence's syntax marker, re-renders it against the host section's prose, and replaces it in place. For inserting a NEW fence under a heading, see `/lazy-diagram.draw`."
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Agent
+allowed-tools: Read, Write, Edit, Bash, Agent
 ---
 # lazy-diagram.fix
 
@@ -23,7 +23,7 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome line for it".
 3. **Do not reach Step 7 (Report) until the ledger shows every prior task `completed`.**
 4. **The Report step is a structural verifier.** Output one line per task — gaps are a bug.
-5. **`${CLAUDE_PLUGIN_ROOT}` arrives in this skill's text already expanded to an absolute path.** Never pass that literal to `Bash` — every template and scheme lookup goes through `Glob` or `Read`, never `ls` / `test -f`, and never as a `;`-chained compound command; the permission layer denies those and the skill dies before Step 5.
+5. **`${CLAUDE_PLUGIN_ROOT}` arrives in this skill's text already expanded to an absolute path.** Never pass that literal to `Bash` — every scheme lookup (Step 4) is the single `Bash(test -f …)` the step names, written with the `${CLAUDE_PLUGIN_ROOT}` variable form exactly as printed here, and never as a `;`-chained compound command; the permission layer denies an expanded absolute path and the skill dies before Step 5.
 
 ## Input
 
@@ -37,7 +37,7 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 ### Step 1: Validate inputs and locate fence
 
-- Read `target_file`. `Grep` for `<anchor_section>` (H2 or H3). Within the section's body, locate the FIRST code fence — `` ```mermaid `` or `` ```text `` — and capture its body (between the fences) and the `info-string` (`mermaid` / `text`).
+- Read `target_file`. `Bash(grep -nE "^#{2,3} <anchor_section>$" <target_file>)` locates the heading (H2 or H3). Within the section's body, locate the FIRST code fence — `` ```mermaid `` or `` ```text `` — and capture its body (between the fences) and the `info-string` (`mermaid` / `text`).
 - If no fence is found → `[FAIL] no fence under anchor`. Short-circuit to Step 7.
 
 Outcome: `located fence at line <N>` or `[FAIL]`.
@@ -78,7 +78,7 @@ Outcome: `extracted (<chars>)` or `warned`.
 
 ### Step 4: Resolve scheme path
 
-- For `format=mermaid`: Glob: `${CLAUDE_PLUGIN_ROOT}/templates/diagram.mermaid/styles-<scheme|default>.json`. An empty result → `failed:scheme-not-found:<name>`. Short-circuit.
+- For `format=mermaid`: `Bash(test -f "${CLAUDE_PLUGIN_ROOT}/templates/diagram.mermaid/styles-<scheme|default>.json")`. A non-zero exit → `failed:scheme-not-found:<name>`. Short-circuit.
 - For `format=ascii`: skip — ASCII drawers do not consume scheme files.
 
 Outcome: `resolved scheme=<name>` (mermaid) / `n/a (ascii)` / `failed:scheme-not-found:<name>`.

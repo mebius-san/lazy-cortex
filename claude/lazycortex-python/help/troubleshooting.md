@@ -19,7 +19,7 @@ source_skills:
   - lazy-python.knowledge-sweep
   - lazy-python.domain-writer
   - lazy-python.contract-writer
-source_sha: f3dcc55c389b71a983c894ee1c0407d8311e931c
+source_sha: 7bb7ffdd946f6774a970182afea33d221674dd58
 ---
 # Troubleshooting
 
@@ -406,6 +406,26 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 **Likely cause**: The agent's hard rules exclude three categories from ever becoming a contract: pure implementation details invisible to callers, anything already obvious from the signature and type hints, and presentation details (exact message text, log lines, formatting) — the last is only ever contractable when a caller demonstrably parses the string programmatically, and even then the contract names the parsed structure, not the prose.
 
 **Fix**: This is expected behaviour, not a bug — writing a contract for one of these would violate the plugin's own documenting canon. If the guarantee is genuinely caller-visible (a return value's shape, a side effect, an invariant that must survive refactoring), re-describe it in those terms in the dispatch. If it's presentation-only, it belongs in a code comment or the docstring's ordinary prose instead of a `Contract:` block.
+
+---
+
+## `lazy-python.contract-writer` won't write a contract block on an implementation — only a synced `Guarantees` section
+
+**Symptom**: Dispatching `lazy-python.contract-writer` against a method that overrides an interface or abstract base leaves no new `Contract:` block on the implementation — only its docstring's `Guarantees` section changes, tracing back to a guarantee stated elsewhere.
+
+**Likely cause**: Before writing, the agent checks whether the method is declared on an interface or abstract base. When it is, the guarantee belongs on that declaration only — the implementation gets a synced `Guarantees` section (so a reader still sees the guarantee in the class the caller actually calls) but never its own copy of the `Contract:` block. Mirroring the same contract text onto both layers is exactly what the agent is built to avoid.
+
+**Fix**: This is expected behaviour. Dispatch the agent against the interface or abstract base declaration instead if the block itself needs writing or updating; dispatch it against the implementation only when that method isn't declared elsewhere. If `lazy-python.code-reviewer` already flagged an existing mirrored block (see the next entry), the fix is to delete the implementation's copy, not to write a new one.
+
+---
+
+## `lazy-python.code-reviewer` reports a `WARN` for a "mirrored contract"
+
+**Symptom**: A review finding names a `Contract:` block on an implementation as a mirror of one already on the interface or abstract base it implements, at `WARN` severity.
+
+**Likely cause**: The reviewer's checklist treats a guarantee repeated verbatim on both an interface declaration and an implementation of the same method as redundant — the guarantee belongs on the interface, and the implementation should only trace to it through a synced `Guarantees` docstring section. This does not fire for a block that states an extra guarantee only the implementation itself adds; only an actual duplicate.
+
+**Fix**: Drop the implementation's copy of the `Contract:` block and confirm its docstring's `Guarantees` section still states the guarantee in prose (add it if the section is missing it). If the implementation genuinely enforces something extra beyond what the interface promises, a block there is fine for that additional guarantee only — never a re-statement of the interface's.
 
 ---
 

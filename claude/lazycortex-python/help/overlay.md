@@ -10,7 +10,7 @@ source_skills:
   - lazy-python.comment-guidelines
   - lazy-python.testing-guidelines
   - lazy-python.guidelines-index
-source_sha: f3dcc55c389b71a983c894ee1c0407d8311e931c
+source_sha: 7bb7ffdd946f6774a970182afea33d221674dd58
 ---
 # Per-repo overlay guidelines
 

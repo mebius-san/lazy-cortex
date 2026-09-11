@@ -9,7 +9,7 @@ source_skills:
   - lazy-python.install
   - lazy-python.docstring-writer
   - lazy-python.coding-guidelines
-source_sha: f3dcc55c389b71a983c894ee1c0407d8311e931c
+source_sha: 7bb7ffdd946f6774a970182afea33d221674dd58
 ---
 # Add a project-specific documentation-guideline clause and confirm the docstring writer honors it
 

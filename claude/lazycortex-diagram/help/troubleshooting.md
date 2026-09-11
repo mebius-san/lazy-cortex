@@ -7,7 +7,7 @@ source_skills:
   - lazy-diagram.draw
   - lazy-diagram.fix
   - lazy-diagram.install
-source_sha: b64fa05cbf19b509170c33f3dcf3a28377d7a194
+source_sha: 0957646fe88bb43168922cfd85bd6a9b6c298d1d
 ---
 # Troubleshooting
 

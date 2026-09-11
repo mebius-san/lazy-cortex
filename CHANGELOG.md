@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 9.4.1 — 2026-09-11 UTC
+
+- `/lazy-core.install` no longer writes `LAZYCORTEX_PYTHON` into your `.claude/settings.local.json` — the absolute interpreter path now surfaces only for the daemon's launchd/systemd unit, so a tracked `settings.local.json` no longer picks up a machine-specific path.
+
 ### 9.4.0 — 2026-09-11 UTC
 
 - Install chain discovery now runs through a dedicated `lazy_setup.py discover` step instead of `Glob`/`Grep`, and setup no longer seeds a `find`/`grep -r` deny list into the consumer's permission file — sandbox enforcement covers that instead.
@@ -1107,6 +1111,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-diagram
 
+### 1.2.3 — 2026-09-11 UTC
+
+- `/lazy-diagram.fix` no longer fails in Claude Code's `auto` permission mode: its style-scheme and anchor lookups used `Glob`/`Grep`, which aren't available there, so step 4 died outright — now it uses a plain file check and a single `grep`, matching how `/lazy-diagram.draw` already does it.
+
 ### 1.2.2 — 2026-09-11 UTC
 
 - Fixed `/lazy-diagram.draw` and `/lazy-diagram.install` failing to find templates, schemes, and rules in sessions without `Glob`/`Grep` tools available (e.g. Claude Code's `auto` permission mode) — lookups now use `ls`/`test -f`/`grep` instead.
@@ -1590,6 +1598,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 4.5.0 — 2026-09-11 UTC
+
+- `contract-writer` and `code-reviewer` now place a `Contract:` block once, on the interface/abstract declaration, never mirrored onto the implementation (which instead carries a `Guarantees` docstring section tracing back to it); `code-reviewer` flags a mirrored contract as a `WARN` naming which copy to drop.
 
 ### 4.4.1 — 2026-09-11 UTC
 

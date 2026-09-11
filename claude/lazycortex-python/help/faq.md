@@ -21,7 +21,7 @@ source_skills:
   - review.py
   - lazy-python.coding-guidelines
   - lazy-python.checking-guidelines
-source_sha: f3dcc55c389b71a983c894ee1c0407d8311e931c
+source_sha: 7bb7ffdd946f6774a970182afea33d221674dd58
 ---
 # Frequently asked questions
 
@@ -228,6 +228,14 @@ After the writer agents run file by file, two passes catch drift that no single 
 ## Why did `lazy-python.contract-writer` refuse to write a contract for an error message or log line?
 
 Contracts pin caller-visible guarantees that must survive refactoring, and exact human-readable text — a message string, a log line, `repr`/pretty-print formatting — is presentation, not a guarantee: rewording it should never count as breaking a contract. The agent writes one for such a string only when a caller demonstrably parses it programmatically, and even then the contract names the parsed structure the caller depends on, not the prose itself. This exclusion is enforced both in the agent's hard rules on every dispatch and in the sweep's contract-consolidation pass, which strips any block that slipped through before the exclusion existed.
+
+---
+
+## Why does `lazy-python.contract-writer` put a `Contract:` block on an interface method but not on the class that implements it?
+
+A guarantee that is part of an interface's protocol belongs on the interface (or abstract base) declaration, not on every implementation that satisfies it. Before writing a block, the agent checks whether the method is declared on an interface or abstract base; if it is, the block goes there only, and each implementation gets its docstring's `Guarantees` section synced to the same wording with no `Contract:` block of its own. An implementation that adds a guarantee the interface does not make still gets its own block — that is not a mirror.
+
+`lazy-python.code-reviewer` backs this at review time: a `Contract:` block repeated word-for-word on both the interface declaration and an implementation is a `WARN` naming the implementation's copy as the one to drop, as long as the implementation's `Guarantees` section still traces back to the interface's wording.
 
 ---
 
