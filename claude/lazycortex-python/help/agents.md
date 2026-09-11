@@ -4,7 +4,7 @@ summary: Manual review via /lazy-python.check-style, the chk-py review guideline
 last_regen: 2026-09-11
 diagram_spec:
   anchor: "How the seven members fit together"
-  request: "Flow showing seven entry points grouped by trigger: (1) user invokes /lazy-python.check-style — reads canon coding + documenting guidelines and project overlay, runs eight-category manual review, then chk-py per-file (or per-dir when >3 files share a directory) and whole-project, then tst-py per touched module; (2) user or skill dispatches lazy-python.docstring-writer — reads documenting guidelines and overlay, writes or fixes docstrings only, runs pre-return self-check (8 semantic checks), then chk-py; (3) user or skill dispatches lazy-python.test-writer — reads testing and checking guidelines and overlay, writes test files only (no production code), then chk-py and tst-py; (4) user or skill dispatches lazy-python.domain-writer — reads documenting guidelines and the project's domain-groups dictionary, writes or updates a Domain(group): block for one mechanic (or, in refile=true mode, re-picks groups for already-parked Domain(unfiled): blocks), parking unmatched knowledge under Domain(unfiled): rather than inventing a group, then chk-py; (5) user or skill dispatches lazy-python.contract-writer — reads documenting guidelines, writes or updates a Contract: block for one caller-visible guarantee and syncs the owning docstring's Guarantees/Subclassing section, then chk-py; (6) chk-py all's final step runs chk-py review, which hashes the diff scope (HEAD or an explicit --base ref) into a scope key, writes a manifest naming every guideline layer (canon, overlay, project .claude/rules, CLAUDE.md), and names lazy-python.code-reviewer for dispatch — the agent walks its thirteen-category checklist (the twelfth being unmarked knowledge: changed code with a guarantee or mechanic but no Contract:/Domain: block; the thirteenth being a Contract: block mirrored on both an interface declaration and its implementation), writes a findings document, and chk-py review --render prints it and exits non-zero on any FAIL; an unchanged scope key reuses cached findings instead of re-dispatching; (7) operator runs /lazy-python.knowledge-sweep — grows the domain-groups dictionary from parked Domain(unfiled): blocks by settling candidate clusters itself and reporting them for the operator to overrule, then dispatches lazy-python.domain-writer (refile=true) and lazy-python.contract-writer across the sweep scope, verifies with chk-py, and commits. Highlight the shared guideline-read step, the no-production-code constraint on the two writer-only agents (test-writer, domain-writer, contract-writer never edit production logic beyond their own marker/docstring scope), the docstring-sync carve-out on contract-writer, and the findings-only (no-edit) constraint on code-reviewer."
+  request: "Overview flow of the seven members as entry points only — what each one is entered by and what they share, never the steps inside any of them. Seven entry nodes: /lazy-python.check-style (manual review), lazy-python.docstring-writer, lazy-python.test-writer, lazy-python.domain-writer, lazy-python.contract-writer, lazy-python.code-reviewer (named for dispatch by chk-py review), and /lazy-python.knowledge-sweep. Every one of the seven first passes through one shared node: read the canon guidelines plus the project overlay. From that shared node the work fans back out and every member ends at one shared node: verify with chk-py and tst-py. Keep it to those nine nodes and no decision diamonds — the per-member steps are prose in the chapter, not part of this diagram. Label the shared read node 'Read canon guidelines + project overlay' and the shared verify node 'Verify with chk-py / tst-py'."
   kind_hint: flow
 source_skills:
   - lazy-python.check-style
@@ -96,81 +96,38 @@ Seven members split cleanly by role: `/lazy-python.check-style` is the audit-and
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  invokeCheckStyle[User invokes\n/lazy-python.check-style]
-  invokeDocstringWriter[User or skill dispatches\nlazy-python.docstring-writer]
-  invokeTestWriter[User or skill dispatches\nlazy-python.test-writer]
+  checkStyle["/lazy-python.check-style (manual review)"]
+  docstringWriter["lazy-python.docstring-writer"]
+  testWriter["lazy-python.test-writer"]
+  domainWriter["lazy-python.domain-writer"]
+  contractWriter["lazy-python.contract-writer"]
+  codeReviewer["lazy-python.code-reviewer (dispatched by chk-py review)"]
+  knowledgeSweep["/lazy-python.knowledge-sweep"]
+  readCanon["Read canon guidelines + project overlay"]
+  verifyChkTst["Verify with chk-py / tst-py"]
 
-  readCanonGuidelines[Read canon coding +\ndocumenting guidelines\n+ project overlay]
-  readDocGuidelines[Read documenting\nguidelines + overlay]
-  readTestGuidelines[Read testing +\nchecking guidelines\n+ overlay]
-
-  manualReview[Run eight-category\nmanual review]
-  writeDocstrings[Write or fix\ndocstrings only]
-  writeTestFiles[Write test files only\n— no production code]
-
-  noProductionCode{{No production\ncode constraint}}
-
-  selfCheck[Run pre-return\nself-check\n8 semantic checks]
-
-  fileCountGuard{More than 3 files\nshare a directory?}
-
-  chkPyPerFile[chk-py per-file]
-  chkPyPerDir[chk-py per-dir]
-  chkPyWholeProject[chk-py whole-project]
-  tstPyTouchedModules[tst-py per\ntouched module]
-
-  chkPyDocstring[chk-py per-file]
-  chkPyTestWriter[chk-py per-file]
-  tstPyTestWriter[tst-py per\ntouched module]
-
-  invokeCheckStyle -->|starts| readCanonGuidelines
-  invokeDocstringWriter -->|starts| readDocGuidelines
-  invokeTestWriter -->|starts| readTestGuidelines
-
-  readCanonGuidelines -->|guidelines loaded| manualReview
-  readDocGuidelines -->|guidelines loaded| writeDocstrings
-  readTestGuidelines -->|guidelines loaded| noProductionCode
-
-  noProductionCode -->|constraint enforced| writeTestFiles
-
-  manualReview -->|review done| fileCountGuard
-  fileCountGuard -->|yes| chkPyPerDir
-  fileCountGuard -->|no| chkPyPerFile
-  chkPyPerDir -->|dir check done| chkPyWholeProject
-  chkPyPerFile -->|file checks done| chkPyWholeProject
-  chkPyWholeProject -->|project check done| tstPyTouchedModules
-
-  writeDocstrings -->|docstrings written| selfCheck
-  selfCheck -->|self-check passed| chkPyDocstring
-
-  writeTestFiles -->|tests written| chkPyTestWriter
-  chkPyTestWriter -->|check passed| tstPyTestWriter
+  checkStyle -->|invoked manually| readCanon
+  docstringWriter -->|dispatched for docstrings| readCanon
+  testWriter -->|dispatched for tests| readCanon
+  domainWriter -->|dispatched for domain knowledge| readCanon
+  contractWriter -->|dispatched for contracts| readCanon
+  codeReviewer -->|dispatched by chk-py review| readCanon
+  knowledgeSweep -->|invoked manually| readCanon
+  readCanon -->|fans out to member work| verifyChkTst
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
-  classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
-  classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
 
-  class invokeCheckStyle entry
-  class invokeDocstringWriter entry
-  class invokeTestWriter entry
-  class readCanonGuidelines action
-  class readDocGuidelines action
-  class readTestGuidelines action
-  class manualReview action
-  class writeDocstrings action
-  class writeTestFiles action
-  class noProductionCode error
-  class selfCheck action
-  class fileCountGuard guard
-  class chkPyPerFile action
-  class chkPyPerDir action
-  class chkPyWholeProject action
-  class tstPyTouchedModules success
-  class chkPyDocstring success
-  class chkPyTestWriter action
-  class tstPyTestWriter success
+  class checkStyle entry
+  class docstringWriter entry
+  class testWriter entry
+  class domainWriter entry
+  class contractWriter entry
+  class codeReviewer entry
+  class knowledgeSweep entry
+  class readCanon action
+  class verifyChkTst success
 ```
 
 ## See also
