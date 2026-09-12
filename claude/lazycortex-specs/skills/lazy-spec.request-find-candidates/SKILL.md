@@ -76,7 +76,7 @@ These thresholds are heuristics; the caller may adjust per its own prompt logic.
 ## Failure modes
 
 - **Class is `unknown`** — refuse with a clear message: `unknown` class means classify-first is incomplete; caller must classify before searching candidates.
-- **Product specified but not registered** — resolve the product via `lazycortex-specs resolve-product by-key <product>` (reads `lazy.settings.json[products]`). A null `record` means the product is not registered → refuse with the list of configured products from the `products` section.
+- **Product specified but not registered** — resolve the product via `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" resolve-product by-key <product>` (reads `lazy.settings.json[products]`). A null `record` means the product is not registered → refuse with the list of configured products from the `products` section.
 
 ## Run logging
 

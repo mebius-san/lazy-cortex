@@ -25,7 +25,11 @@ Product config and repo config are both records in `lazy.settings.json`: product
 
 A product's registration is a record under the `products` section of `.claude/lazy.settings.json`, keyed by the product's **compound-key** — an arbitrary stable string the operator chooses at registration (lowercase-with-hyphens recommended). The key is NOT derived from the product's path: `spec_path` says where the product lives, the key says how it is addressed, and the two vary independently — moving the folder never renames the key. The section's `_version` key carries the schema version and is not a product record.
 
-There is no `spec.cfg-<product>.md` rule file any more — that form is removed. The product record is read and written atomically via `lazycortex-core settings-get products` / `lazycortex-core settings-set products`, and resolved by the `lazycortex-specs resolve-product` primitive (below). `/lazy-spec.product-config` is the wizard that creates and edits these records.
+`<core-cli>` stands for the core plugin's `bin/lazycortex-core` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-core/<version>/`, or `claude/lazycortex-core/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+
+`<specs-cli>` stands for the specs plugin's `bin/lazycortex-specs` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-specs/<version>/`, or `claude/lazycortex-specs/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+
+There is no `spec.cfg-<product>.md` rule file any more — that form is removed. The product record is read and written atomically via `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get products` / `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set products`, and resolved by the `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> resolve-product` primitive (below). `/lazy-spec.product-config` is the wizard that creates and edits these records.
 
 | Field | Required | Description |
 |-------|----------|-------------|
@@ -167,11 +171,11 @@ Each key is a type name — the value a document's `spec_doc_type` carries. Each
 
 **`icon` / `color` are the document's kind half of the paint contract.** The seed says what kind of document this is; the iconize registry's matchers say what state it is in and own the colour from the first `lazy-spec.set-stage` onward. A stage-less type — a journal, the decisions registry — is never claimed by any matcher, so its seed is the only paint it will ever carry; a stage-bearing type shows the seed only until its first stage lands. This is why the registry enumerates no document kinds at all: a project type declares its own paint here and needs no registry edit.
 
-The key is entirely optional: a product with no `doc_types` sees exactly the shipped set, whatever `references/lazy-spec.doc-types.json` currently declares — the file is the count, never a number repeated in prose that a later type silently invalidates. `lazycortex-specs doc-type list --product <key>` prints the merged set, `doc-type resolve <type> --product <key>` one merged declaration.
+The key is entirely optional: a product with no `doc_types` sees exactly the shipped set, whatever `references/lazy-spec.doc-types.json` currently declares — the file is the count, never a number repeated in prose that a later type silently invalidates. `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> doc-type list --product <key>` prints the merged set, `doc-type resolve <type> --product <key>` one merged declaration.
 
 ### Repo records — `lazy.settings.json[repos]`
 
-Repo records live in the cross-plugin `repos` section of `.claude/lazy.settings.json`, symmetric to `products[]`. The section maps a symbolic `<repo-key>` to runtime metadata for one local checkout. It is read and written atomically via `lazycortex-core settings-get repos` / `lazycortex-core settings-set repos`, and resolved by the `lazy-spec.resolve-repo` primitive. The `repos` section is registered in lazy-core's `CURRENT_VERSIONS` and auto-initializes on first `settings-get`; `/lazy-spec.product-config` (inline repo wizard) is the wizard that writes records. Being cross-plugin (top-level, not under a plugin namespace), the section is also available to other plugins that need repo metadata.
+Repo records live in the cross-plugin `repos` section of `.claude/lazy.settings.json`, symmetric to `products[]`. The section maps a symbolic `<repo-key>` to runtime metadata for one local checkout. It is read and written atomically via `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get repos` / `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set repos`, and resolved by the `lazy-spec.resolve-repo` primitive. The `repos` section is registered in lazy-core's `CURRENT_VERSIONS` and auto-initializes on first `settings-get`; `/lazy-spec.product-config` (inline repo wizard) is the wizard that writes records. Being cross-plugin (top-level, not under a plugin namespace), the section is also available to other plugins that need repo metadata.
 
 ```yaml
 repos:
@@ -203,10 +207,10 @@ Repo records DO NOT carry the repo's URL. The URL is derived at runtime from the
 
 ### Resolving a Product
 
-Product resolution goes through the `lazycortex-specs resolve-product` primitive, which reads the `products` settings section directly. Two modes:
+Product resolution goes through the `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> resolve-product` primitive, which reads the `products` settings section directly. Two modes:
 
-- **by-key** — `lazycortex-specs resolve-product by-key <key>` returns `{"key": <key>, "record": <record-or-null>}`. A direct record fetch by the exact compound-key.
-- **by-path** — `lazycortex-specs resolve-product by-path <path>` returns `{"key": <owning-key-or-null>, "record": <record-or-null>}`. The `<path>` argument is resolved relative to the content-root (`<settings-dir>/<spec.vault_root>`); if the caller supplies a path that begins with the vault-root segment (e.g. `specs/Server/Tester/chapter/features/foo`), that leading segment is stripped before matching. Finds the product whose `spec_path` equals the normalised path or is a segment-wise prefix of it; when several products nest, the longest matching `spec_path` wins. Segment-wise matching means `A/B` owns `A/B/x` but not `A/Bx/...`, so it transparently covers the product's standard subtree (`<spec_path>/features/<feat>/...`, `<spec_path>/changes/<change-name>/...`, `<spec_path>/bugs/<bug-name>/...`) and the product-root files (`<spec_path>/<product>.md` folder-note, `<spec_path>/design.md`, `<spec_path>/tech.md`). Request files are NOT under a product — they live in `<content-root>/requests/` — so `resolve-product by-path` never attributes them to a product.
+- **by-key** — `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> resolve-product by-key <key>` returns `{"key": <key>, "record": <record-or-null>}`. A direct record fetch by the exact compound-key.
+- **by-path** — `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> resolve-product by-path <path>` returns `{"key": <owning-key-or-null>, "record": <record-or-null>}`. The `<path>` argument is resolved relative to the content-root (`<settings-dir>/<spec.vault_root>`); if the caller supplies a path that begins with the vault-root segment (e.g. `specs/Server/Tester/chapter/features/foo`), that leading segment is stripped before matching. Finds the product whose `spec_path` equals the normalised path or is a segment-wise prefix of it; when several products nest, the longest matching `spec_path` wins. Segment-wise matching means `A/B` owns `A/B/x` but not `A/Bx/...`, so it transparently covers the product's standard subtree (`<spec_path>/features/<feat>/...`, `<spec_path>/changes/<change-name>/...`, `<spec_path>/bugs/<bug-name>/...`) and the product-root files (`<spec_path>/<product>.md` folder-note, `<spec_path>/design.md`, `<spec_path>/tech.md`). Request files are NOT under a product — they live in `<content-root>/requests/` — so `resolve-product by-path` never attributes them to a product.
 
 `spec.*` skills follow this protocol:
 
@@ -222,7 +226,7 @@ Each product's `spec_path` is its spec root. Each spec root is self-contained �
 
 ## Part 3 — Language resolution
 
-A spec doc's effective prose language is resolved through a fallback chain (first non-empty wins), via the `lazycortex-specs resolve-language <relpath>` primitive:
+A spec doc's effective prose language is resolved through a fallback chain (first non-empty wins), via the `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> resolve-language <relpath>` primitive:
 
 1. the doc's own frontmatter `spec_language` key;
 2. the owning product's `language` field in `products[<key>]` (`lazy.settings.json`);
@@ -247,7 +251,7 @@ Skills that write or edit spec content MUST honour the resolved language (ISO 63
 
 **Skill behavior**:
 
-- Resolve the effective language via `lazycortex-specs resolve-language <relpath>` (the four-step chain above). If unresolvable, treat as `en`.
+- Resolve the effective language via `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> resolve-language <relpath>` (the four-step chain above). If unresolvable, treat as `en`.
 - When generating new prose, write in that language.
 - When editing existing prose, keep the existing language — do not retranslate.
 - No linguistic validation is attempted.

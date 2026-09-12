@@ -9,7 +9,7 @@ Adds or removes repo-specific scaffold types under the reserved `_local` key in 
 
 Invoked with optional args: `mode=<add|remove>` (default: `add`), `group=<group>`, `kind=<kind>`.
 
-Note: `_local` is just another top-level key to the `lazycortex-core scaffold` primitive — no special-casing; the same surgical write protects sibling plugin keys and surrounding prose.
+Note: `_local` is just another top-level key to the `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" scaffold` primitive — no special-casing; the same surgical write protects sibling plugin keys and surrounding prose.
 
 ## Execution discipline (MANDATORY — read before any action)
 

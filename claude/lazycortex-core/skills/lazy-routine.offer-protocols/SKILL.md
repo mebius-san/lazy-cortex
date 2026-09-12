@@ -2,7 +2,7 @@
 name: lazy-routine.offer-protocols
 description: "Run when the operator asks to attach optional protocol references to a writer-dispatching routine — it discovers the flagged candidates, offers the contextually relevant ones, and unions the picks into the routine's flat `protocols` list. Operator-invoked only: install skills never dispatch it, a system routine's protocol set is fixed by design and seeded without questions."
 execution-discipline-waiver: "single offer-and-append interaction — a numbered step list would outweigh the one decision the skill mediates"
-allowed-tools: Read, Write, Glob, AskUserQuestion, Bash(lazycortex-core *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Agent
+allowed-tools: Read, Write, Glob, AskUserQuestion, Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Agent
 ---
 # lazy-routine.offer-protocols
 
@@ -59,7 +59,7 @@ The operator may pick none.
 For the chosen ids run:
 
 ```
-Bash(lazycortex-core add-protocols --routine <routine> --ids "<comma-separated-chosen-ids>")
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" add-protocols --routine <routine> --ids "<comma-separated-chosen-ids>")
 ```
 
 The CLI unions them into the routine's existing `protocols` list idempotently (already-present ids are no-ops) and writes `.claude/lazy.settings.json`. If the operator chose none, run nothing.

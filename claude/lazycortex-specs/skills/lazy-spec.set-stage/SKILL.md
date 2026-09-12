@@ -24,16 +24,16 @@ Three checks, in order. None of them reads a filename or a path.
 1. **The document declares a type.**
 
    ```
-   Bash(lazycortex-specs doc-type of <file>)
+   Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" doc-type of <file>)
    ```
 
-   An empty `doc_type` in the returned JSON is a refusal: `document carries no spec_doc_type`. Name the file and point the caller at `lazycortex-specs doc-type backfill`, which adds the key to every typed document in the catalog missing it.
+   An empty `doc_type` in the returned JSON is a refusal: `document carries no spec_doc_type`. Name the file and point the caller at `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" doc-type backfill`, which adds the key to every typed document in the catalog missing it.
 
 2. **The type is declared, and it carries stages.** Resolve the owning product first, then its declaration:
 
    ```
-   Bash(lazycortex-specs resolve-product by-path <file>)
-   Bash(lazycortex-specs doc-type resolve <type> --product <key>)
+   Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" resolve-product by-path <file>)
+   Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" doc-type resolve <type> --product <key>)
    ```
 
    A non-zero exit from `doc-type resolve` is a refusal: ``type `<type>` is not declared in this product's scope`` — the value is either a typo or a type nobody declared, and the fix is to correct it or declare it under `products[<key>].doc_types`. A declaration carrying `stages: false` is a refusal too: ``type `<type>` carries no spec_stage``.
@@ -85,7 +85,7 @@ A doc with no attachments makes this a silent no-op.
 
 The folder-note is the file whose basename matches the enclosing folder (e.g., `features/chapter-log/chapter-log.md`). For `design.md` / `tech.md` / `architecture.md` / `code-plan.md` / `test-plan.md` under `<spec_path>/features/<feat>/` or `<spec_path>/changes/<change-name>/`, and for `bug.md` / `code-plan.md` / `test-plan.md` under `<spec_path>/bugs/<bug-name>/`, the folder-note is in the same directory.
 
-A **system-level** authored doc — `vision.md` / `design.md` / `ui-design.md` / `tech.md` loose at a product root (`<spec_path>/`) or at the content-root — has a folder-note in scope too: the level note beside it (`<spec_path>/<leaf>.md`, or `<content-root>/<basename of content-root>.md`), the one carrying `spec_role: product` or `spec_role: catalog`. Append the history line there exactly as for an asset — the level note is `spec.catalog-coordinator`'s own note, not operator-zone, and its `# History` is where a level document's stage transitions belong. Skip the history step only when no such note exists on disk (a catalog that predates the level schema; the fix is `lazycortex-specs catalog-note backfill`).
+A **system-level** authored doc — `vision.md` / `design.md` / `ui-design.md` / `tech.md` loose at a product root (`<spec_path>/`) or at the content-root — has a folder-note in scope too: the level note beside it (`<spec_path>/<leaf>.md`, or `<content-root>/<basename of content-root>.md`), the one carrying `spec_role: product` or `spec_role: catalog`. Append the history line there exactly as for an asset — the level note is `spec.catalog-coordinator`'s own note, not operator-zone, and its `# History` is where a level document's stage transitions belong. Skip the history step only when no such note exists on disk (a catalog that predates the level schema; the fix is `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" catalog-note backfill`).
 
 When a folder-note is in scope, append one line to its `# History` section:
 
@@ -100,7 +100,7 @@ When a folder-note is in scope, append one line to its `# History` section:
 The asset's category container note is the note whose basename matches the category folder that holds the asset (e.g. `features/features.md` for an asset under `features/<slug>/`). When that container note exists, refresh its `<!-- spec:stats:* -->` region so the bucket counts reflect this stage change:
 
 ```
-Bash(lazycortex-specs render-container-stats <category_note>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" render-container-stats <category_note>)
 ```
 
 Then `git add` the category note into the SAME commit as the doc and folder-note edits. Guard: skip silently when the category container note does not exist (a product-level authored doc with no category container, or a container carrying no stats markers — `render-container-stats` is a no-op there).
@@ -110,7 +110,7 @@ Then `git add` the category note into the SAME commit as the doc and folder-note
 When the requested stage is `approved` AND the doc is a **living doc** — its type's declaration carries `stages: true` AND `append_only: false` — run the transfer primitive. Both flags come from the `doc-type resolve` call already made in step 1; no second lookup is needed.
 
 ```
-Bash(lazycortex-specs decide promote <doc>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" decide promote <doc>)
 ```
 
 Fold its returned `touched_paths` into the SAME commit as the doc, folder-note, and category container note edits — the doc itself may be one of those paths again (the primitive rewrites `[!decision]` blocks into reference links), its sibling `decisions.md`, and, when a transferred block carried a `**Supersedes.**` command, a second `decisions.md` it stamped `superseded-by`.
@@ -132,7 +132,7 @@ This primitive only edits the doc's own per-file `spec_stage`. It does NOT evalu
 
 ## Failure modes
 
-- **`/lazy-spec.set-stage` refuses with: document carries no `spec_doc_type`** — the target file has no type key, so no declaration can be resolved → run `lazycortex-specs doc-type backfill` to type the catalog, or add the key to that one document.
+- **`/lazy-spec.set-stage` refuses with: document carries no `spec_doc_type`** — the target file has no type key, so no declaration can be resolved → run `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" doc-type backfill` to type the catalog, or add the key to that one document.
 - **`/lazy-spec.set-stage` refuses with: type `<type>` is not declared in this product's scope** — the value resolves to no declaration, shipped or project-level → fix the typo, or declare the type under `products[<key>].doc_types` in `.claude/lazy.settings.json`.
 - **`/lazy-spec.set-stage` refuses with: type `<type>` carries no `spec_stage`** — the declaration exists but carries `stages: false` → that kind of document has no independently-settable stage; nothing to set.
 - **`/lazy-spec.set-stage` refuses with: stage `<value>` is not in the closed set** — passed a value outside `empty | draft | approved | rejected | cancelled | deferred` (e.g. the removed `review` / `done` / `wtr`) → pass `draft` + set `review_active: true` for in-review, `approved` for accepted, or the correct closed-set value per intent.

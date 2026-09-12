@@ -1,7 +1,7 @@
 ---
 name: lazy-diagram.install
 description: "Run when the operator asks to set up diagram drawing in a repo, and again after a plugin update so new artifacts land. Also the answer when `/lazy-diagram.draw` or `/lazy-diagram.fix` misbehaves because the `lazy-diagram.authoring` rule is missing from the rules directory or the drawer agents have no model tier assigned. Idempotent and quiet on re-run; install scope is detected, not asked."
-allowed-tools: Read, Write, Edit, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(test *), Bash(ls *), Bash(date *), Bash(diff *), Bash(lazycortex-core *), AskUserQuestion, Skill, Agent
+allowed-tools: Read, Write, Edit, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(test *), Bash(ls *), Bash(date *), Bash(diff *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), AskUserQuestion, Skill, Agent
 ---
 # Install lazycortex-diagram
 
@@ -44,8 +44,10 @@ Scope = **where the plugin is actually enabled**, not where `/plugin install` la
 
 Resolve it via the core CLI, which reads `enabledPlugins` from the project settings first, then the global settings, and falls back to the install record's own `scope` only when neither settings file enables the plugin:
 
+**Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file: when this repo authors the plugin itself (`claude/lazycortex-core/.claude-plugin/plugin.json` exists) that is `<repo-root>/claude/lazycortex-core/bin/lazycortex-core`; otherwise `Read` `$HOME/.claude/plugins/installed_plugins.json` and take `<installPath>/bin/lazycortex-core` from the last `lazycortex-core@lazycortex` record. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
+
 ```
-Bash(lazycortex-core detect-scope lazycortex-diagram@lazycortex)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> detect-scope lazycortex-diagram@lazycortex)
 ```
 
 The command prints exactly one word:

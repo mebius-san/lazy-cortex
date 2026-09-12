@@ -1,11 +1,11 @@
 ---
 name: lazy-spec.record-decision
 description: "Use when the operator wants to record, supersede, obsolete, or promote an entry in the spec catalog's decisions registry — 'log this decision', 'mark D-007 superseded', 'D-012 is obsolete now', 'pull the decision blocks out of design.md'. Interactive wrapper over the `decide` CLI primitive; never edits a `decisions.md` file by hand."
-allowed-tools: Read, Glob, Bash(lazycortex-specs *), Bash(git add -N *), Bash(git commit *), Bash(git status*), Bash(mkdir -p *), AskUserQuestion, Agent
+allowed-tools: Read, Glob, Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(git add -N *), Bash(git commit *), Bash(git status*), Bash(mkdir -p *), AskUserQuestion, Agent
 ---
 # Record Decision
 
-Interactive wrapper over the four `decide` operations — `add`, `supersede`, `obsolete`, `promote`. All writes go through `Bash(lazycortex-specs decide ...)`; this skill NEVER edits a `decisions.md` file, or a living doc's `[!decision]` blocks, by hand. Before recording a new decision, hold the operator to the weight test in `${CLAUDE_PLUGIN_ROOT}/rules/spec.decisions.md` — a real fork, expensive to reverse, unrecoverable from the artifact.
+Interactive wrapper over the four `decide` operations — `add`, `supersede`, `obsolete`, `promote`. All writes go through `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" decide ...)`; this skill NEVER edits a `decisions.md` file, or a living doc's `[!decision]` blocks, by hand. Before recording a new decision, hold the operator to the weight test in `${CLAUDE_PLUGIN_ROOT}/rules/spec.decisions.md` — a real fork, expensive to reverse, unrecoverable from the artifact.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -58,10 +58,10 @@ Before collecting an `add` or `supersede` thesis, restate the three-test weight 
 
 Subprocess the matching call, quoting every free-text argument:
 
-- `Bash(lazycortex-specs decide add <decisions.md> "<thesis>" --why "<why>" --rejected "<rejected>" [--origin "<origin>"])`
-- `Bash(lazycortex-specs decide supersede <decisions.md> <old-id> "<thesis>" --why "<why>" --rejected "<rejected>" [--origin "<origin>"])`
-- `Bash(lazycortex-specs decide obsolete <decisions.md> <id> "<reason>")`
-- `Bash(lazycortex-specs decide promote <living-doc>)`
+- `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" decide add <decisions.md> "<thesis>" --why "<why>" --rejected "<rejected>" [--origin "<origin>"])`
+- `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" decide supersede <decisions.md> <old-id> "<thesis>" --why "<why>" --rejected "<rejected>" [--origin "<origin>"])`
+- `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" decide obsolete <decisions.md> <id> "<reason>")`
+- `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" decide promote <living-doc>)`
 
 Parse the single-line JSON printed on stdout.
 

@@ -32,9 +32,11 @@ Both need the `lazycortex-core` runtime daemon; with the daemon off, nothing wak
 
 ## Where things land
 
+`<core-cli>` stands for the core plugin's `bin/lazycortex-core` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-core/<version>/`, or `claude/lazycortex-core/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+
 - Job queue: `.experts/.jobs/<expert>/<job_id>/` (request, response, and the terminal `DONE` / `DEAD` marker).
 - Per-run logs: `.logs/lazy-review/runs/`.
-- Failures: the `lazycortex-core` error registry — read it with `lazycortex-core error-list`.
+- Failures: the `lazycortex-core` error registry — read it with `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> error-list`.
 - Expert wire contract: `references/lazy-review.doc-review-protocol.md`; the coordinator's own law: `references/lazy-review.coordination-playbook.md`.
 
 <!-- help-block:start -->

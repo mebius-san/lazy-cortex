@@ -58,7 +58,7 @@ The record (when present) carries `spec_path` (required, vault-relative), option
 - If the key is absent or its value is null → the product is not registered. Refuse with a message naming `<product>` and suggesting `/lazy-spec.product-config` to register it. Do NOT proceed.
 - Otherwise capture `spec_path`, `language` (default `en` when absent), and `asset_types` (default `{}` when absent — the product's own declarations merge key-by-key over the plugin's shipped ones at `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.asset-types.json`).
 
-This skill MUST NOT invoke `lazycortex-specs resolve-product` via `Bash` for this resolution: apply-context experts run under Claude Code's `dontAsk` permission mode which silently denies arbitrary plugin-CLI invocations and would force the agent into a partial improv path. A direct `Read` of `.claude/lazy.settings.json` is the contract here. The CLI subcommand remains valid for direct shell use; the skill just no longer depends on it.
+This skill MUST NOT invoke `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" resolve-product` via `Bash` for this resolution: apply-context experts run under Claude Code's `dontAsk` permission mode which silently denies arbitrary plugin-CLI invocations and would force the agent into a partial improv path. A direct `Read` of `.claude/lazy.settings.json` is the contract here. The CLI subcommand remains valid for direct shell use; the skill just no longer depends on it.
 
 All narrative prose this skill authors (doc bodies) is rendered in the product's `language`. Frontmatter keys/values, fixed section headers (`## Overview`, `## Way to reproduce`, …), wikilinks, and code/URLs stay English. The effective language for any authored doc is the resolved product's `language` field; no separate per-doc resolution step is required.
 
@@ -126,7 +126,7 @@ The status template ships WITHOUT `iconize_icon` / `iconize_color` lines (a dev-
 Invoke the deterministic scaffold primitive via `Bash`:
 
 ```
-Bash(lazycortex-specs scaffold-asset <product> <asset-type> <slug> --doc <name>:<spec_doc_type> [--doc ...] [--path <dir>])
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" scaffold-asset <product> <asset-type> <slug> --doc <name>:<spec_doc_type> [--doc ...] [--path <dir>])
 ```
 
 Pass one `--doc` per document Step 4 resolved — the type's `start_doc` first, then anything the type playbook added. **At least one `--doc` is mandatory**: the primitive has no default layout and a call carrying none is a logical refusal, not an empty scaffold. Pass `--path <dir>` only when Step 2 settled on a folder other than the type's `default_path`; omit it to take the default.

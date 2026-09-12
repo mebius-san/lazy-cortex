@@ -1,7 +1,7 @@
 ---
 name: lazy-experts.audit
 description: "Run when the operator asks whether this project's expert composition is still sound, or when dispatching an expert fails in a way that smells like config — a job aborts saying the agent ref does not resolve, an expert writes to a contract it should not have, a role the class map prescribes turns out to have no entry. Delegated from `lazy-core.doctor` Phase 3. Read-only check of the plugin's shipped agents and aspect references against the `experts` entries in `.claude/lazy.settings.json`; reports PASS / WARN / FAIL / INFO and never writes — the fix is `/lazy-experts.install`."
-allowed-tools: Read, Glob, Grep, Write, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Bash(lazycortex-core *), Agent
+allowed-tools: Read, Glob, Grep, Write, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Agent
 ---
 # lazy-experts.audit
 
@@ -26,8 +26,10 @@ This skill has 6 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 Two paths to resolve before anything is checked.
 
+**Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file: when this repo authors the plugin itself (`claude/lazycortex-core/.claude-plugin/plugin.json` exists) that is `<repo-root>/claude/lazycortex-core/bin/lazycortex-core`; otherwise `Read` `$HOME/.claude/plugins/installed_plugins.json` and take `<installPath>/bin/lazycortex-core` from the last `lazycortex-core@lazycortex` record. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
+
 - **Plugin root** — the `installPath` field for `lazycortex-experts@lazycortex` in `~/.claude/plugins/installed_plugins.json`. When the repo at hand authors this plugin, `claude/lazycortex-experts/` is the root instead and wins, so the audit judges the sources being edited rather than a stale cached copy. Neither present → `FAIL plugin-root-unresolved`; stop, no further phase runs.
-- **Settings** — `<repo-root>/.claude/lazy.settings.json` (root from `git rev-parse --show-toplevel`, cwd when not in a git repo), falling back to `~/.claude/lazy.settings.json` when the plugin is enabled only at user scope. Resolve the scope with `Bash(lazycortex-core detect-scope lazycortex-experts@lazycortex)`. File absent, or its `experts` section absent or holding nothing besides `_version` → report `INFO no-experts-configured` and run Phase 2 alone; Phase 3 states `skipped (no entries)`.
+- **Settings** — `<repo-root>/.claude/lazy.settings.json` (root from `git rev-parse --show-toplevel`, cwd when not in a git repo), falling back to `~/.claude/lazy.settings.json` when the plugin is enabled only at user scope. Resolve the scope with `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> detect-scope lazycortex-experts@lazycortex)`. File absent, or its `experts` section absent or holding nothing besides `_version` → report `INFO no-experts-configured` and run Phase 2 alone; Phase 3 states `skipped (no entries)`.
 
 Read the `experts` section through `lazy_settings.load_tracked_section` so a local overlay is never mistaken for tracked config.
 

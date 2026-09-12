@@ -122,7 +122,7 @@ Emit one `[INFO]` per enabled server. Emit `[WARN]`:
 
 Skip both probes silently if neither runs (sandbox restriction); the renderer treats the section as absent.
 
-**Scaffold registry validation** — for each in-scope `lazy-core.scaffold.md` (`.claude/rules/`, `$HOME/.claude/rules/`), run `lazycortex-core scaffold validate --registry <path>` (resolve the core CLI from `installed_plugins.json[lazycortex-core@lazycortex].installPath`/`bin/lazycortex-core`; skip silently if unresolvable). Map each returned finding: `parse_error` / `bad_shape` / `plugin_root_var` → `[FAIL]`; `glob_overlap` → `[WARN]`. The primitive's deterministic parse is the single source of structural truth — do not also eyeball the YAML.
+**Scaffold registry validation** — for each in-scope `lazy-core.scaffold.md` (`.claude/rules/`, `$HOME/.claude/rules/`), run `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" scaffold validate --registry <path>` (resolve the core CLI from `installed_plugins.json[lazycortex-core@lazycortex].installPath`/`bin/lazycortex-core`; skip silently if unresolvable). Map each returned finding: `parse_error` / `bad_shape` / `plugin_root_var` → `[FAIL]`; `glob_overlap` → `[WARN]`. The primitive's deterministic parse is the single source of structural truth — do not also eyeball the YAML.
 
 **Path hygiene** — grep every project-level config file (`.claude/agents/*.md`, `.claude/rules/*.md`, `.claude/skills/*/SKILL.md`, `.claude/commands/*.md`, `CLAUDE.md`) and emit `[WARN]` for:
 
@@ -466,8 +466,8 @@ print(json.dumps(audit(Path('.')), ensure_ascii=False))
 
 `present: false` → emit nothing (no sandbox file, so expert spawns run unconfined). `enabled: false` → emit nothing (confinement is off; the allowlist neither grants nor denies). Otherwise:
 
-- `[FAIL]` `allow_unsandboxed` is not `false` — `sandbox allowUnsandboxedCommands is not recorded false, so a command the sandbox blocks is retried unsandboxed | .runtime/sandbox.settings.json`; `fix: run lazycortex-core sandbox-sync --repo-root "$PWD"` when the key is absent (a recorded `true` is the operator's decision — report it, never flip it).
-- `[FAIL]` each entry of `missing_write` — `sandbox allowWrite does not cover <path>, which its own entries resolve to | .runtime/sandbox.settings.json`; `fix: run lazycortex-core sandbox-sync --repo-root "$PWD"`.
+- `[FAIL]` `allow_unsandboxed` is not `false` — `sandbox allowUnsandboxedCommands is not recorded false, so a command the sandbox blocks is retried unsandboxed | .runtime/sandbox.settings.json`; `fix: run "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" sandbox-sync --repo-root "$PWD"` when the key is absent (a recorded `true` is the operator's decision — report it, never flip it).
+- `[FAIL]` each entry of `missing_write` — `sandbox allowWrite does not cover <path>, which its own entries resolve to | .runtime/sandbox.settings.json`; `fix: run "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" sandbox-sync --repo-root "$PWD"`.
 - `[WARN]` each entry of `missing_read` — `sandbox allowRead does not cover <path> | .runtime/sandbox.settings.json`; same fix.
 
 The confinement is checked against the resolved path, so an allowlist entry naming a directory reached through a symlink grants nothing where the data lives: every write there fails with `Operation not permitted` while the recorded config still reads as correct. The sync appends only what is missing and drops nothing.

@@ -15,7 +15,7 @@ Seed the `agent_models.lazycortex` domain group of a consumer's `lazy.settings.j
 Parse two inputs from `args` (or the invoking skill's context):
 
 - `prefix` — the plugin's dispatch-string prefix, e.g. `lazycortex-diagram`. Every `default-tiers.json` key of the form `<prefix>:<agent>` is in scope. Required — abort `missing-prefix` if absent.
-- `scope` — `project` or `user`, the install scope the caller already resolved (via `lazycortex-core detect-scope`). Required — abort `missing-scope` if absent or not one of the two.
+- `scope` — `project` or `user`, the install scope the caller already resolved (via `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" detect-scope`). Required — abort `missing-scope` if absent or not one of the two.
 
 ### Resolve the target settings file
 

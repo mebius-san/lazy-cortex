@@ -1,7 +1,7 @@
 ---
 name: lazy-experts.install
 description: "Run when the operator asks to set up lazycortex-experts in a repo, to add or complete an expert class (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, `sci-fi`, `fantasy`), or when dispatching an expert fails because `lazy.settings.json` has no matching `experts` entry or no model tier for a generic agent. Unlike the sibling install skills, it syncs no rules — it only seeds composed expert entries per the class map plus agent-model tiers, asks for classes only on a project that has none yet, and never overwrites what an operator chose — the one thing it completes on an existing entry is a missing mandatory cross-cutting aspect. Idempotent and quiet on re-run; install scope is detected."
-allowed-tools: Read, Write, Edit, Glob, Skill, AskUserQuestion, Bash(mkdir -p *), Bash(git rev-parse*), Bash(test *), Bash(date *), Bash(ls *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(lazycortex-core *), Agent
+allowed-tools: Read, Write, Edit, Glob, Skill, AskUserQuestion, Bash(mkdir -p *), Bash(git rev-parse*), Bash(test *), Bash(date *), Bash(ls *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
 ---
 # Install lazycortex-experts
 
@@ -38,8 +38,10 @@ This skill is **idempotent and quiet on re-run**. It asks exactly one thing, and
 
 Scope = **where the plugin is actually enabled**, not where `/plugin install` last ran. The `scope` field in `installed_plugins.json` records the install command's origin, which drifts from the activation scope — a plugin enabled per-project in `.claude/settings.json` can carry an install record of `scope: "user"`. Resolve it via the core CLI, which reads `enabledPlugins` from the project settings first, then the global settings, falling back to the install record's own `scope` only when neither enables the plugin:
 
+**Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file: when this repo authors the plugin itself (`claude/lazycortex-core/.claude-plugin/plugin.json` exists) that is `<repo-root>/claude/lazycortex-core/bin/lazycortex-core`; otherwise `Read` `$HOME/.claude/plugins/installed_plugins.json` and take `<installPath>/bin/lazycortex-core` from the last `lazycortex-core@lazycortex` record. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
+
 ```
-Bash(lazycortex-core detect-scope lazycortex-experts@lazycortex)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> detect-scope lazycortex-experts@lazycortex)
 ```
 
 The command prints exactly one word:
@@ -233,7 +235,7 @@ A hardcoded table here would name only the roles that existed when someone last 
 
 ### The check
 
-For each declared key, resolve whether the declaring plugin is enabled at the current scope: `Bash(lazycortex-core detect-scope <plugin>@lazycortex)` — treat `project`/`user` as enabled, `not-installed` as disabled (skip its keys, state `skipped: <plugin> not installed`).
+For each declared key, resolve whether the declaring plugin is enabled at the current scope: `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> detect-scope <plugin>@lazycortex)` — treat `project`/`user` as enabled, `not-installed` as disabled (skip its keys, state `skipped: <plugin> not installed`).
 
 For each enabled plugin's declared keys, check presence in the loaded `experts` section:
 

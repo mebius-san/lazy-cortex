@@ -25,20 +25,22 @@ This skill has 5 ordered phases. The executing agent MUST NOT skip, merge, reord
 
 One named subroutine, invoked after every gesture and once on entry (Phase 2's resume). It mirrors, in one session, what the daemon's two routines (`lazy-spec.coordinator-watch` git-watch, `lazy-spec.gate-tick` md-scan) do over many ticks:
 
+**Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file: when this repo authors the plugin itself (`claude/lazycortex-core/.claude-plugin/plugin.json` exists) that is `<repo-root>/claude/lazycortex-core/bin/lazycortex-core`; otherwise `Read` `$HOME/.claude/plugins/installed_plugins.json` and take `<installPath>/bin/lazycortex-core` from the last `lazycortex-core@lazycortex` record. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
+
 ```
 repeat up to 20 times (ponytail: fixed ceiling — a real ladder settles in a handful of
                         iterations; a run that still hasn't converged at 20 is a bug to
                         report, not a loop to keep spinning):
-  1. Bash(lazycortex-specs gate-tick "<repo-relative asset-note-path>")
+  1. Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" gate-tick "<repo-relative asset-note-path>")
      — clears a just-finished job's active_job / coordinator_job marker in the runtime
        sidecar, runs the structural note-check. Mirrors the daemon's lazy-spec.gate-tick worker.
-  2. Bash(lazycortex-specs coordinator-dispatch "$(python3 -c 'import json,sys; print(json.dumps({"path": sys.argv[1]}))' "<repo-relative asset-note-path>")")
+  2. Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" coordinator-dispatch "$(python3 -c 'import json,sys; print(json.dumps({"path": sys.argv[1]}))' "<repo-relative asset-note-path>")")
      — wakes spec.coordinator through the SAME trigger-resolution logic the daemon's
        git-watch routine uses (reads git log on this checkout; no push/pull needed —
        the commit already landed here). Parse the JSON action field.
   3. If action is "noop" or "dispatch-stale": the ladder has settled — stop the loop.
   4. Otherwise (`action == "dispatched"`) a fresh job was queued — drain it:
-       while Bash(lazycortex-core expert-pump-once) reports processed > 0: repeat.
+       while Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> expert-pump-once) reports processed > 0: repeat.
        (Parses "experts=N processed=P cleaned=C" from stdout; a bounded drain, same
        ceiling as the outer loop — 20 pump calls without processed=0 is a bug.)
   5. Go back to step 1 — a job that just finished may have hung a fresh checkbox or
@@ -52,7 +54,7 @@ Every commit either loop step produces lands under a `@bot.` identity already (g
 
 **Resolve the note.** `$ARGUMENTS` names a coordination folder-note — an asset's status note (a repo-relative path `specs/products/<product>/features/<slug>/<slug>.md`, or a bare `<category>/<slug>` shorthand), a product's level note (`<spec_path>/<leaf>.md`), or the catalog root's level note (`<content-root>/<basename>.md`). For the shorthand, `Bash(find <content-root> -path "*/<slug>/<slug>.md")` under the vault's spec content root (`spec.vault_root` in `.claude/lazy.settings.json`, default `specs/`) and pick the match whose parent dir name matches `<category>`'s folder. `Read` the result and confirm its `spec_role` is one of `status`, `product`, `catalog` — refuse (outcome `not-a-coordination-note`) otherwise. The role decides which coordinator the drive loop wakes: `status` drives an asset through the S0..S5 ladder under `spec.coordinator`, while `product` and `catalog` drive a LEVEL through the four level gates under `spec.catalog-coordinator` (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.catalog-playbook.md`) — the loop, the gestures, and the CLI calls below are identical either way, since `coordinator-dispatch` routes by the note's own role. With no argument at all: `Bash(find <content-root> -name "*.md")` lists every note under the content root; `Read` each frontmatter, list those with `spec_released` false and `spec_cancelled` false; if the list is short enough to offer, `AskUserQuestion` with one option per asset (label = product/category/slug) — context first: where (`/lazy-spec.drive · Phase 1 — Resolve asset + preflight`, target the spec content root), found (no argument; the `<n>` open assets — neither released nor cancelled — listed), why asking (the skill drives exactly one asset and never guesses which), answers (one option per asset — this session drives that note; nothing persisted, asked again on the next argument-less run); header "Asset", question "Which open asset under `<content-root>` should this drive session work?", each option's description its `# Status brief` first line; otherwise print the count and ask the operator to re-invoke naming a path — never guess. Outcome: `asset-resolved` or `no-asset-picked`.
 
-**Derive `LAZYCORTEX_PLUGIN_DIRS` for this session's own CLI calls.** `coordinator-dispatch` internally subprocesses `lazycortex-core dispatch-job` via the `$LAZYCORTEX_PLUGIN_DIRS` walk (the blessed cross-plugin CLI contract) — with the var unset it raises `lazycortex-core CLI not resolvable`, not a soft failure. Export it before any other Bash call this session makes to these CLIs, mirroring the daemon's own precedence (`runtime_daemon.set_plugin_dirs` / `expert_preflight._derive_plugin_dirs`): dev-vault sources under `<repo>/claude/*/.claude-plugin/plugin.json` first (when this checkout IS the lazycortex dev vault), then the latest cached version per plugin under `~/.claude/plugins/cache/*/<plugin>/<version>/`.
+**Derive `LAZYCORTEX_PLUGIN_DIRS` for this session's own CLI calls.** `coordinator-dispatch` internally subprocesses `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> dispatch-job` via the `$LAZYCORTEX_PLUGIN_DIRS` walk (the blessed cross-plugin CLI contract) — with the var unset it raises `lazycortex-core CLI not resolvable`, not a soft failure. Export it before any other Bash call this session makes to these CLIs, mirroring the daemon's own precedence (`runtime_daemon.set_plugin_dirs` / `expert_preflight._derive_plugin_dirs`): dev-vault sources under `<repo>/claude/*/.claude-plugin/plugin.json` first (when this checkout IS the lazycortex dev vault), then the latest cached version per plugin under `~/.claude/plugins/cache/*/<plugin>/<version>/`.
 
 ```
 Bash(export LAZYCORTEX_PLUGIN_DIRS=$(python3 -c "
@@ -91,7 +93,7 @@ Any signal `running`/`ok` → refuse: print which signal fired and that the daem
 
 ## Phase 2 — Resume: settle outstanding state
 
-Re-running this skill on an asset MUST resume, never blindly restart. `Read` the note's current frontmatter (`spec_halted`, `spec_cancelled`, and its gates — the five asset gates on a status note, the four level gates on a `product` / `catalog` note), run `Bash(lazycortex-specs note-check <asset-note>)` for its `job_markers` block (the two job markers live in the runtime sidecar, not in the note), and `Bash(git status --porcelain -- <spec content root>)` for anything left uncommitted by a prior interrupted session.
+Re-running this skill on an asset MUST resume, never blindly restart. `Read` the note's current frontmatter (`spec_halted`, `spec_cancelled`, and its gates — the five asset gates on a status note, the four level gates on a `product` / `catalog` note), run `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" note-check <asset-note>)` for its `job_markers` block (the two job markers live in the runtime sidecar, not in the note), and `Bash(git status --porcelain -- <spec content root>)` for anything left uncommitted by a prior interrupted session.
 
 Run **the drive loop** once, unconditionally — this catches a job that finished while nobody was watching (a stale `active_job` / `coordinator_job` marker) and lets the ladder settle before the operator sees anything. `spec_cancelled: true` still runs the loop (gate-tick/coordinator-dispatch are read-first and no-op safely on a cancelled asset) but the render below says so plainly.
 

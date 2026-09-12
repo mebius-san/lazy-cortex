@@ -39,7 +39,7 @@ On `no` → exit no-op (outcome `skipped-per-user-choice`). On `yes` → continu
 
 ### 3. Subprocess the primitive
 
-Run `lazycortex-specs flip-gate <asset_dir> <gate>`, appending `--off` when regressing. Do NOT pass `--auto` from the interactive path — `--auto` is only for the non-interactive callers that skipped step 2. Report the primitive's result verbatim: on success, the flipped gate and new value; on refusal, the primitive's refusal message (always "asset is cancelled" — the only refusal case) — do NOT retry or work around it.
+Run `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" flip-gate <asset_dir> <gate>`, appending `--off` when regressing. Do NOT pass `--auto` from the interactive path — `--auto` is only for the non-interactive callers that skipped step 2. Report the primitive's result verbatim: on success, the flipped gate and new value; on refusal, the primitive's refusal message (always "asset is cancelled" — the only refusal case) — do NOT retry or work around it.
 
 ## Output
 

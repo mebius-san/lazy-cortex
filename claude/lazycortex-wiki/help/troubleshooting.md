@@ -17,6 +17,8 @@ source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 ---
 # Troubleshooting
 
+`<wiki-cli>` stands for the wiki plugin's `bin/lazycortex-wiki` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-wiki/<version>/`, or `claude/lazycortex-wiki/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+
 ## `/lazy-wiki.install` aborts: "lazycortex-wiki not enabled"
 
 **Symptom**: Running `/lazy-wiki.install` immediately stops with the message "lazycortex-wiki not enabled — add `"lazycortex-wiki@lazycortex": true` to `enabledPlugins` in your `settings.json` and run `/plugin install lazycortex/lazycortex-wiki`."
@@ -253,7 +255,7 @@ source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
 
 **Likely cause**: Nothing has pruned the dangling link yet. When the background daemon is running, deletions are picked up automatically — a dedicated routine watches for deleted files and, on its next poll, drops the dangling See-also lines and rebuilds `topics.md`. Without the daemon, or before its next poll, no automatic pass has happened.
 
-**Fix**: With a running daemon, wait for the next poll (roughly a minute) — the deletion is pruned and committed on its own. Without a daemon, run `/lazy-wiki.relink <scope-id>`, whose pruning step drops links to any deleted nodes as part of the normal relink pass. You can also run `/lazy-wiki.audit <scope-id>` to confirm the "broken See-also" finding and then `lazycortex-wiki doctor <scope-id> --apply`, which drops the dangling lines directly.
+**Fix**: With a running daemon, wait for the next poll (roughly a minute) — the deletion is pruned and committed on its own. Without a daemon, run `/lazy-wiki.relink <scope-id>`, whose pruning step drops links to any deleted nodes as part of the normal relink pass. You can also run `/lazy-wiki.audit <scope-id>` to confirm the "broken See-also" finding and then `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> doctor <scope-id> --apply`, which drops the dangling lines directly.
 
 ---
 

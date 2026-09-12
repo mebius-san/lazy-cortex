@@ -25,6 +25,8 @@ A host where the pre-flight finds a *foreign* collector already scraping your da
 
 `/lazy-observe.install` checks for an already-working collection stack — a running `prometheus`, `otelcol`, `alloy`, or `grafana-agent` scraping your daemons, or a live connection into one of their metrics ports — before asking a single question. What happens next depends on *whose* coverage it found:
 
+`<core-cli>` stands for the core plugin's `bin/lazycortex-core` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-core/<version>/`, or `claude/lazycortex-core/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+
 - **Our own shipper is already running** (the detected signals include an installed lazycortex-observe service unit) — the installer prints the signals and **aborts untouched**: the default on a working standalone install is to leave it alone. Re-run with `--force-standalone` to re-render it anyway.
 - **A foreign collector is already running** (Prometheus, otelcol, Alloy, or grafana-agent you set up yourself — no observe service unit among the signals) — the installer no longer aborts here. It prints the detected signals and **switches into integrate mode automatically, without asking a single question**: it regenerates a Prometheus `file_sd` scrape-targets file so your existing stack picks up every local lazycortex-core daemon, installs no shipper at all, and records `mode = "integrate"` so future runs stay silent about it. `/lazy-observe.install --integrate-only` forces this same mode explicitly on any host, and `/lazy-observe.install --force-standalone` installs the shipper anyway, alongside whatever is already running.
 
@@ -119,11 +121,11 @@ The `/metrics` endpoint is serving data from the lazycortex-core daemon, but no 
 
 ## What's the `lazycortex_runtime_incidents_total` series, and what do the new alerts watch?
 
-`lazycortex_runtime_incidents_total` (labeled by `repo`, `kind`, and `cause`) counts incidents opened in the runtime's error ledger — the same journal `lazycortex-core error-list` reads from. It ships alongside the job outcome series (`lazycortex_runtime_expert_jobs_total`) and queue-depth series (`lazycortex_runtime_queue_depth`) you already had; there's nothing to configure — `/lazy-observe.install` picks it up on the next install or re-render, and the dashboard and alert rule files ship it out of the box.
+`lazycortex_runtime_incidents_total` (labeled by `repo`, `kind`, and `cause`) counts incidents opened in the runtime's error ledger — the same journal `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> error-list` reads from. It ships alongside the job outcome series (`lazycortex_runtime_expert_jobs_total`) and queue-depth series (`lazycortex_runtime_queue_depth`) you already had; there's nothing to configure — `/lazy-observe.install` picks it up on the next install or re-render, and the dashboard and alert rule files ship it out of the box.
 
 This release also tightens what counts as a finished job: the runtime is fail-closed, so an expert response that's missing `outcome`, carries an unrecognized value, or otherwise doesn't prove the work completed is now counted `failed` rather than `done` in `expert_jobs_total`. Silence from an expert is a failure, not a free pass.
 
-Three alerts in `claude/lazycortex-observe/alerts/lazycortex-runtime.rules.yml` watch this: `LazyCortexExpertJobsFailing` fires when a job on a repo/expert finishes with any outcome other than `done` in the last 15 minutes; `LazyCortexDeadLetterQueueGrowing` fires when bundles sit parked in `failed`, `deferred`, or `dead` state for 30+ minutes; `LazyCortexIncidentsOpening` fires when the error ledger opens a new incident, by kind and cause, in the last 15 minutes. All three annotations point you at `lazycortex-core error-list --repo <repo>` to triage.
+Three alerts in `claude/lazycortex-observe/alerts/lazycortex-runtime.rules.yml` watch this: `LazyCortexExpertJobsFailing` fires when a job on a repo/expert finishes with any outcome other than `done` in the last 15 minutes; `LazyCortexDeadLetterQueueGrowing` fires when bundles sit parked in `failed`, `deferred`, or `dead` state for 30+ minutes; `LazyCortexIncidentsOpening` fires when the error ledger opens a new incident, by kind and cause, in the last 15 minutes. All three annotations point you at `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> error-list --repo <repo>` to triage.
 
 ---
 

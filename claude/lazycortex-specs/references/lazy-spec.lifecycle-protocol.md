@@ -155,7 +155,9 @@ Each gate is still one of two kinds, a distinction the coordinator's own reasoni
 
 ### The single mutation channel — `lazy-spec.flip-gate`
 
-`bin/flip_gate.py` (driven by the `/lazy-spec.flip-gate` skill, and called directly by `spec.coordinator` through the `lazycortex-specs flip-gate` CLI verb) is the **only** writer of gate booleans. The flip is unconditional on call:
+`<specs-cli>` stands for the specs plugin's `bin/lazycortex-specs` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-specs/<version>/`, or `claude/lazycortex-specs/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+
+`bin/flip_gate.py` (driven by the `/lazy-spec.flip-gate` skill, and called directly by `spec.coordinator` through the `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> flip-gate` CLI verb) is the **only** writer of gate booleans. The flip is unconditional on call:
 
 1. Reads the folder-note frontmatter.
 2. Refuses only when the asset is cancelled (`spec_cancelled: true`) — no other precondition check.
@@ -166,7 +168,7 @@ Each gate is still one of two kinds, a distinction the coordinator's own reasoni
 
 There is no post-flip cascade anymore — a forward flip of `spec_design_done` does not itself open review on a plan document. Opening that review is now a coordinator decision executed as an ordinary launch-checkbox dispatch (§ Part 3), ordered by the playbooks, not a side effect wired into the flip primitive.
 
-CLI: `lazycortex-specs flip-gate <asset_dir> <gate> [--off] [--auto] [--reason TEXT]`.
+CLI: `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> flip-gate <asset_dir> <gate> [--off] [--auto] [--reason TEXT]`.
 
 ### The `gate-tick` md-scan worker — a pure poller, no decisions
 
@@ -179,7 +181,7 @@ CLI: `lazycortex-specs flip-gate <asset_dir> <gate> [--off] [--auto] [--reason T
 
 Everything this worker used to decide — sibling-doc stage promotion, gate readiness, the launch-checkbox ladder, downward reconciliation, change-cascade dispatch — is gone from this file entirely; it lives in `lazy-spec.coordination-playbook.md`, executed by `spec.coordinator`. A no-op tick (no terminal marker yet, note structurally clean) returns `{"action": "noop"}`.
 
-CLI: `lazycortex-specs gate-tick <asset_note> [--today YYYY-MM-DD]`.
+CLI: `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> gate-tick <asset_note> [--today YYYY-MM-DD]`.
 
 ## Part 2b — Level gates (catalog root and product root)
 
@@ -222,7 +224,7 @@ The dispatched job itself is NOT frontmatter. It lives in the gitignored runtime
 {"checkbox": "Start implementation", "expert": "claude-plugin.developer", "job_id": "20260101-abcd"}
 ```
 
-Writes go through `lazycortex-specs mark-job <asset_note> active <json>` (or `--clear`), which validates the object's SHAPE and nothing else: exactly the three keys `checkbox` / `expert` / `job_id`, each a non-empty string. The label's spelling is not checked against any list — the vocabulary belongs to the playbooks, not to this primitive. The coordinator writes the marker as part of dispatching the job it tracks; `lazy-spec.gate-tick`'s active-job polling pass (Part 2 above) is the one piece of code that clears it. Because the marker is runtime state rather than document content, neither write costs a commit, and an operator hand-editing the folder-note cannot lose a live job's record. Read it back through `note-check`, whose result carries the note's `job_markers` entry; a `spec_active_job` key found in frontmatter is a regression, not a source.
+Writes go through `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> mark-job <asset_note> active <json>` (or `--clear`), which validates the object's SHAPE and nothing else: exactly the three keys `checkbox` / `expert` / `job_id`, each a non-empty string. The label's spelling is not checked against any list — the vocabulary belongs to the playbooks, not to this primitive. The coordinator writes the marker as part of dispatching the job it tracks; `lazy-spec.gate-tick`'s active-job polling pass (Part 2 above) is the one piece of code that clears it. Because the marker is runtime state rather than document content, neither write costs a commit, and an operator hand-editing the folder-note cannot lose a live job's record. Read it back through `note-check`, whose result carries the note's `job_markers` entry; a `spec_active_job` key found in frontmatter is a regression, not a source.
 
 ### The label set is open
 

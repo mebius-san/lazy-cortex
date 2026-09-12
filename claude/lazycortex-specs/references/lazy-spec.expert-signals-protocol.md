@@ -15,7 +15,9 @@ An expert reaches the coordinator through exactly three markup shapes, all autho
 
 A decision the job WAS told to make is not a signal, but it has one legal form in a living doc — `design.md`, `architecture.md`, `bug.md`, the product's `tech.md` — and the coordinator reads that form on approve:
 
-- **`[!decision] … #spec/decision`** — a decision statement, written only for a real fork per the weight test in `${CLAUDE_PLUGIN_ROOT}/rules/spec.decisions.md` § 2 (a genuine alternative existed, reversal is expensive, the why is unrecoverable from the artifact). It stands immediately after the prose that states the decided principle. A decision written any other way — a bold bullet, a paragraph, a list item — is a description of the implementation, not a decision, and the approve-time transfer into the sibling `decisions.md` (`lazycortex-specs decide promote`) does not see it. Shape (thesis line, `**Why.**`, `**Rejected.**`): `lazy-core.markdown-style.md` § Decision statement shape.
+`<specs-cli>` stands for the specs plugin's `bin/lazycortex-specs` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-specs/<version>/`, or `claude/lazycortex-specs/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+
+- **`[!decision] … #spec/decision`** — a decision statement, written only for a real fork per the weight test in `${CLAUDE_PLUGIN_ROOT}/rules/spec.decisions.md` § 2 (a genuine alternative existed, reversal is expensive, the why is unrecoverable from the artifact). It stands immediately after the prose that states the decided principle. A decision written any other way — a bold bullet, a paragraph, a list item — is a description of the implementation, not a decision, and the approve-time transfer into the sibling `decisions.md` (`"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> decide promote`) does not see it. Shape (thesis line, `**Why.**`, `**Rejected.**`): `lazy-core.markdown-style.md` § Decision statement shape.
 
 ## `request.json` extra fields
 
@@ -50,7 +52,7 @@ This channel permits attachments — files an expert creates beside its target d
 
 ## Language
 
-Before writing any prose into its target document, the expert resolves the document's effective language itself: run `lazycortex-specs resolve-language <target relpath>` — the CLI resolved by walking `$LAZYCORTEX_PLUGIN_DIRS` for a directory whose path contains `lazycortex-specs` — and write every line of prose in the language the primitive returns. The language never arrives in the payload and is never inferred from the source documents' own language: settings are the source of truth, and the verb is how the writer reads them.
+Before writing any prose into its target document, the expert resolves the document's effective language itself: run `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> resolve-language <target relpath>` — the CLI resolved by walking `$LAZYCORTEX_PLUGIN_DIRS` for a directory whose path contains `lazycortex-specs` — and write every line of prose in the language the primitive returns. The language never arrives in the payload and is never inferred from the source documents' own language: settings are the source of truth, and the verb is how the writer reads them.
 
 The obligation covers scaffolded content too. A template explainer, a seeded section stub, or any other shipped English boilerplate the writer keeps in the document is translated into the resolved language when it differs — a finished document half in the vault's language and half in the templates' English is the failure this clause exists to prevent. When editing existing prose, keep its language — never retranslate.
 

@@ -123,7 +123,9 @@ Two folder-notes carry a LEVEL role instead of `status`, and `spec.catalog-coord
 - **Product level note** — `<spec_path>/<leaf>.md`, where `<leaf>` is the final segment of the product's `spec_path`. `spec_role: product`. One per registered product.
 - **Catalog level note** — `<content-root>/<basename of content-root>.md` (`specs/specs.md` under the default `spec.vault_root`). `spec_role: catalog`. Exactly one per vault.
 
-Both are created and brought to schema by one verb, `lazycortex-specs catalog-note backfill <product>` / `--root`, from the shipped template `${CLAUDE_PLUGIN_ROOT}/templates/spec.product/level-note.md`. Neither is ever hand-written: the verb adds what a note lacks and rewrites nothing, so an operator's `# Coordinator rules` and the rendered `# Summary` survive every run byte-for-byte.
+`<specs-cli>` stands for the specs plugin's `bin/lazycortex-specs` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-specs/<version>/`, or `claude/lazycortex-specs/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+
+Both are created and brought to schema by one verb, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> catalog-note backfill <product>` / `--root`, from the shipped template `${CLAUDE_PLUGIN_ROOT}/templates/spec.product/level-note.md`. Neither is ever hand-written: the verb adds what a note lacks and rewrites nothing, so an operator's `# Coordinator rules` and the rendered `# Summary` survive every run byte-for-byte.
 
 ### Level frontmatter schema
 

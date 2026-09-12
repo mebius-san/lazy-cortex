@@ -52,7 +52,7 @@ For each of the three notes (asset, category, product root) that actually exist:
 
 - Locate the `# Summary` section. It is protected under `#protected/spec/summary`. Never write outside the `<!-- spec:precis:start --> / <!-- spec:precis:end -->` marker pair within that section. Never touch the operator-authored body below the protected region, and never touch any `#protected/spec/{gates,history}` section.
 - Author one LLM-generated précis sentence that captures the meaning of the note and write it into the `<!-- spec:precis:start --> / <!-- spec:precis:end -->` region, replacing any prior précis. The précis is plain prose — no wikilinks, no markup.
-- For **container notes** (category, product root) only: after writing the précis, run `Bash(lazycortex-specs render-container-stats <note-path>)` to refresh the `<!-- spec:stats:start --> / <!-- spec:stats:end -->` region with deterministic counts. Never write the stats region by hand; always delegate to the CLI. Asset notes are précis-only — do not call `render-container-stats` on them.
+- For **container notes** (category, product root) only: after writing the précis, run `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" render-container-stats <note-path>)` to refresh the `<!-- spec:stats:start --> / <!-- spec:stats:end -->` region with deterministic counts. Never write the stats region by hand; always delegate to the CLI. Asset notes are précis-only — do not call `render-container-stats` on them.
 
 Scope guards:
 - Skip any note in the hierarchy that does not exist on disk.

@@ -19,8 +19,10 @@ The authoritative definitions (the `repos` settings section shape, known-forges 
 
 Read the cross-plugin `repos` section:
 
+**Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file: when this repo authors the plugin itself (`claude/lazycortex-core/.claude-plugin/plugin.json` exists) that is `<repo-root>/claude/lazycortex-core/bin/lazycortex-core`; otherwise `Read` `$HOME/.claude/plugins/installed_plugins.json` and take `<installPath>/bin/lazycortex-core` from the last `lazycortex-core@lazycortex` record. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
+
 ```bash
-lazycortex-core settings-get repos
+"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get repos
 ```
 
 The command prints the `repos` object — each key is a repo key, each value a record. Select the record under `<repo>` and read:

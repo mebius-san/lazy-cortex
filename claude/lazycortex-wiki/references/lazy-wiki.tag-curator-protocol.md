@@ -5,7 +5,9 @@ description: Tag-canon protocol for the wiki.tag-curator expert — payload/resu
 ---
 # lazy-wiki.tag-curator-protocol v1
 
-Canonical contract for jobs dispatched to `wiki.tag-curator` by `lazycortex-wiki`'s `tag-tick` dispatcher (or any consumer producing tag-curator-shaped jobs). The dispatcher builds the bundle and queues it via `dispatch-job`; the tag curator (C-hybrid, has Bash) applies its judgement by running the deterministic `lazycortex-wiki retag` primitive, rewrites the advisory tag-values dictionary to match, and then commits. Which surfaces exist, how often they are ticked, and how the dictionary path is configured are the consumer's concern, out of scope for this wire contract.
+`<wiki-cli>` stands for the wiki plugin's `bin/lazycortex-wiki` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-wiki/<version>/`, or `claude/lazycortex-wiki/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+
+Canonical contract for jobs dispatched to `wiki.tag-curator` by `lazycortex-wiki`'s `tag-tick` dispatcher (or any consumer producing tag-curator-shaped jobs). The dispatcher builds the bundle and queues it via `dispatch-job`; the tag curator (C-hybrid, has Bash) applies its judgement by running the deterministic `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> retag` primitive, rewrites the advisory tag-values dictionary to match, and then commits. Which surfaces exist, how often they are ticked, and how the dictionary path is configured are the consumer's concern, out of scope for this wire contract.
 
 **Version 1** carries the `normalize-tags` kind that `lazy-wiki.curator-protocol` v4 defined for the `wiki.curator` expert. The kind moved here unchanged in substance; what is new is that a job names a **surface** rather than a scope (a configured wiki scope, or the generated domain-doc tree) and that the expert owns the advisory dictionary as a second output.
 
@@ -68,15 +70,15 @@ Outcome semantics:
 }
 ```
 
-The map gives each in-use value its canonical form per axis: merge a synonym (`"food": "coffee"`), nest a subtype (`"espresso": "coffee/espresso"`), or omit a value to leave it unchanged. Values not listed are kept as-is. An empty object (`{}`) is valid — nothing to consolidate. The file is consumed directly by `lazycortex-wiki retag <surface> --from result/alias_map.json`.
+The map gives each in-use value its canonical form per axis: merge a synonym (`"food": "coffee"`), nest a subtype (`"espresso": "coffee/espresso"`), or omit a value to leave it unchanged. Values not listed are kept as-is. An empty object (`{}`) is valid — nothing to consolidate. The file is consumed directly by `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> retag <surface> --from result/alias_map.json`.
 
 ## Side-effect rules
 
 The tag curator is a C-hybrid expert: it has Bash access and is expected to apply its own result. The sequence is:
 
 1. The expert writes `result/alias_map.json`.
-2. Unless the map is empty, it runs `lazycortex-wiki retag <surface> --from result/alias_map.json --repo <repo-root>`, which rewrites the aliased tags across the surface's nodes through the deterministic apply path. This call must succeed (exit 0) before the expert proceeds.
-3. It re-surveys the surface (`lazycortex-wiki collect-tags <surface>`) and rewrites the file named by `tag_dictionary` so the dictionary matches the surface's post-apply values, keeping the entries and glosses that belong to values this surface does not carry — another surface may be the one wearing them.
+2. Unless the map is empty, it runs `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> retag <surface> --from result/alias_map.json --repo <repo-root>`, which rewrites the aliased tags across the surface's nodes through the deterministic apply path. This call must succeed (exit 0) before the expert proceeds.
+3. It re-surveys the surface (`"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> collect-tags <surface>`) and rewrites the file named by `tag_dictionary` so the dictionary matches the surface's post-apply values, keeping the entries and glosses that belong to values this surface does not carry — another surface may be the one wearing them.
 4. It commits the touched files with a short, kind-qualified message, e.g. `wiki(normalize-tags): <surface>`.
 
 - The expert MUST NOT hand-edit node tags — `retag` is the only permitted write path for node content.

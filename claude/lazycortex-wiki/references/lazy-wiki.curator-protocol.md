@@ -177,17 +177,19 @@ Fields:
 }
 ```
 
-The map gives each in-use value its canonical form per axis: merge a synonym (`"food": "coffee"`), nest a subtype (`"espresso": "coffee/espresso"`), or omit a value to leave it unchanged. Values not listed are kept as-is. An empty object (`{}`) is valid — nothing to consolidate. The file is consumed directly by `lazycortex-wiki retag <scope> --from result/alias_map.json`.
+`<wiki-cli>` stands for the wiki plugin's `bin/lazycortex-wiki` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-wiki/<version>/`, or `claude/lazycortex-wiki/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+
+The map gives each in-use value its canonical form per axis: merge a synonym (`"food": "coffee"`), nest a subtype (`"espresso": "coffee/espresso"`), or omit a value to leave it unchanged. Values not listed are kept as-is. An empty object (`{}`) is valid — nothing to consolidate. The file is consumed directly by `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> retag <scope> --from result/alias_map.json`.
 
 ## Side-effect rules
 
-The curator is a C-hybrid expert: it has Bash access and is expected to apply its result by calling `lazycortex-wiki apply-node` and then committing. The sequence is:
+The curator is a C-hybrid expert: it has Bash access and is expected to apply its result by calling `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> apply-node` and then committing. The sequence is:
 
 1. The expert writes `result/curation.json` with the appropriate kind-specific fields.
-2. The expert runs `lazycortex-wiki apply-node <real-node-path> --from result/curation.json` to apply the result to the node file via the deterministic apply code. `apply-node` writes only the fields present in the JSON (classify fields → `wiki_summary` + `wiki/*` tags + `wiki_connectors`; link fields → See-also section). A missing `connectors` key leaves the node's existing connectors block untouched; an empty array clears it. This call must succeed (exit 0) before the expert proceeds.
+2. The expert runs `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> apply-node <real-node-path> --from result/curation.json` to apply the result to the node file via the deterministic apply code. `apply-node` writes only the fields present in the JSON (classify fields → `wiki_summary` + `wiki/*` tags + `wiki_connectors`; link fields → See-also section). A missing `connectors` key leaves the node's existing connectors block untouched; an empty array clears it. This call must succeed (exit 0) before the expert proceeds.
 3. The expert commits the modified node file with a short, kind-qualified commit message, e.g. `wiki(classify): <node-basename>` or `wiki(link): <node-basename>`.
 
-**For `normalize-tags`** the apply primitive is `retag`, not `apply-node`: the expert writes `result/alias_map.json`, runs `lazycortex-wiki retag <scope_id> --from result/alias_map.json` (which rewrites the aliased `wiki/*` tags across the scope's nodes through the deterministic apply path), then commits, e.g. `wiki(normalize-tags): <scope_id>`. An empty alias map is a no-op — the expert skips the `retag` call and reports `empty`.
+**For `normalize-tags`** the apply primitive is `retag`, not `apply-node`: the expert writes `result/alias_map.json`, runs `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> retag <scope_id> --from result/alias_map.json` (which rewrites the aliased `wiki/*` tags across the scope's nodes through the deterministic apply path), then commits, e.g. `wiki(normalize-tags): <scope_id>`. An empty alias map is a no-op — the expert skips the `retag` call and reports `empty`.
 
 The expert MUST NOT hand-edit the node file directly — the `apply-node` call (per-node kinds) and `retag` (normalize-tags) are the only permitted write paths for node content outside the job dir.
 

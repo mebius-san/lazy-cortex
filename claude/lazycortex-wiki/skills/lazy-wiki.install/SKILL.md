@@ -1,7 +1,7 @@
 ---
 name: lazy-wiki.install
 description: "Run when the operator asks to set up the wiki in a repo, after a lazycortex-wiki update, or when wiki skills fail because the `lazy-wiki.navigation` rule, the `wiki`, `structure`, or `terms` settings section, or the `wiki.curator` / `wiki.terms-curator` / `wiki.structure-curator` / `wiki.tag-curator` expert is missing from the project. Bootstrap only — defining what the wiki covers is `/lazy-wiki.configure`, what the terms dictionary covers is `/lazy-wiki.configure terms`, and the structure map's profiles and routines are `/lazy-wiki.configure structure`. Idempotent and quiet on re-run; install scope is detected, never asked."
-allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *), Bash(ls *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(lazycortex-core *), Bash(lazycortex-wiki *), Agent
+allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *), Bash(ls *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
 ---
 # Install lazycortex-wiki
 
@@ -48,8 +48,10 @@ The navigation rule's `## Coverage` section is the one region a mirror carries t
 
 Scope = **where the plugin is actually enabled**, not where `/plugin install` last ran. The `scope` field in `installed_plugins.json` records the install command's origin, which drifts from the activation scope — a plugin enabled per-project in `.claude/settings.json` can carry an install record of `scope: "user"`. Resolve it via the core CLI, which reads `enabledPlugins` from the project settings first, then the global settings, falling back to the install record's own `scope` only when neither enables the plugin:
 
+**Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file: when this repo authors the plugin itself (`claude/lazycortex-core/.claude-plugin/plugin.json` exists) that is `<repo-root>/claude/lazycortex-core/bin/lazycortex-core`; otherwise `Read` `$HOME/.claude/plugins/installed_plugins.json` and take `<installPath>/bin/lazycortex-core` from the last `lazycortex-core@lazycortex` record. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
+
 ```
-Bash(lazycortex-core detect-scope lazycortex-wiki@lazycortex)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> detect-scope lazycortex-wiki@lazycortex)
 ```
 
 The command prints exactly one word:
@@ -175,7 +177,7 @@ Outcome: `wiki-section: <seeded|already-present>` (with `tag_axes: <seeded|alrea
 `doc-kind` is the mandatory classification axis of the vault's vocabulary — the value that says what a node is by form (`design`, `skill`, `rule`, …), owned by this plugin. It is not an operator choice: no question is asked, and the axis is unioned into the repository-wide `wiki.tag_axes` unconditionally, exactly like any other install-managed default. Every scope reaches it from there: a scope declaring no narrowing speaks the full vocabulary, and one that narrows can only pick from it.
 
 ```
-Bash(lazycortex-wiki ensure-axes doc-kind --repo <target-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" ensure-axes doc-kind --repo <target-root>)
 ```
 
 `<target-root>` is `~` at user scope or `<repo-root>` at project scope — same split Step 2's table resolves `lazy.settings.json` from (the CLI builds `<target-root>/.claude/lazy.settings.json`). Omitting it would let the primitive fall back to `$LAZY_REPO_ROOT`-or-cwd, which at user scope is the wrong file — this install skill runs from whatever directory the operator invoked it in, not from `~`.
@@ -331,7 +333,7 @@ Same `<current-branch>` substitution as `lazy-wiki.scan`. No `filter` block — 
 }
 ```
 
-**`lazy-wiki.doctor-apply`** — daily deterministic sanitizer; applies only the `lazycortex-wiki doctor --apply` CLI's fixable finding set (`orphan-topic`, `index-desync`, `see-also-path-base`, `broken-see-also`, `stale-gloss` — pure index/link derivations, never mirror or content findings) across every scope and commits what it repaired:
+**`lazy-wiki.doctor-apply`** — daily deterministic sanitizer; applies only the `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" doctor --apply` CLI's fixable finding set (`orphan-topic`, `index-desync`, `see-also-path-base`, `broken-see-also`, `stale-gloss` — pure index/link derivations, never mirror or content findings) across every scope and commits what it repaired:
 
 ```json
 "lazy-wiki.doctor-apply": {
@@ -404,8 +406,8 @@ Read `wiki.domains` from the target `lazy.settings.json`. Absent → skip this w
 Both routines dispatch `wiki.domain-writer` jobs that write markdown docs with formulas, so attach the markdown-style protocol to each (idempotent union, exactly like `lazy-wiki.scan` in the protocol sub-step below):
 
 ```
-Bash(lazycortex-core add-protocols --routine lazy-wiki.domain-scan --ids lazycortex-core:lazy-core.markdown-style)
-Bash(lazycortex-core add-protocols --routine lazy-wiki.domain-full --ids lazycortex-core:lazy-core.markdown-style)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> add-protocols --routine lazy-wiki.domain-scan --ids lazycortex-core:lazy-core.markdown-style)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> add-protocols --routine lazy-wiki.domain-full --ids lazycortex-core:lazy-core.markdown-style)
 ```
 
 ### Mirror-sync routines (only for scopes with a `mirror` block)
@@ -430,8 +432,8 @@ Write the file if any mutation happened (preserve `_version: 1` for both `routin
 `lazy-wiki.scan` and `lazy-wiki.relink-weekly` dispatch curator jobs that write into vault notes (`wiki_summary`, tag values, the glossed `# See also` block), so both carry one mandatory protocol. Attach it after the routine write, whether the entry was just seeded or kept local — the union is idempotent and never removes what the operator added:
 
 ```
-Bash(lazycortex-core add-protocols --routine lazy-wiki.scan --ids lazycortex-core:lazy-core.markdown-style)
-Bash(lazycortex-core add-protocols --routine lazy-wiki.relink-weekly --ids lazycortex-core:lazy-core.markdown-style)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> add-protocols --routine lazy-wiki.scan --ids lazycortex-core:lazy-core.markdown-style)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> add-protocols --routine lazy-wiki.relink-weekly --ids lazycortex-core:lazy-core.markdown-style)
 ```
 
 `lazy-wiki.scan-deletes` gets nothing: `prune-node` is deterministic and dispatches no expert, so a protocol there would be dead config.
@@ -458,7 +460,7 @@ Per `lazy-core.hygiene` § Settings split, per-tool permissions live in `setting
 Apply via the `lazycortex-core` CLI (idempotent — already-present patterns are no-ops):
 
 ```
-Bash(lazycortex-core permission-allow <settings-local> "Bash(lazycortex-wiki *)")
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> permission-allow <settings-local> 'Bash("${LAZYCORTEX_PYTHON:-python3}" *)')
 ```
 
 Outcome: `cli-allow-added` or `cli-allow-already-present`.

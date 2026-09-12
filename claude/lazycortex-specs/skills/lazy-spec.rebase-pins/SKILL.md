@@ -39,7 +39,9 @@ Flag:
 
 ## Step 1 — Discover repo records
 
-Read the `repos` section (`lazycortex-core settings-get repos`). For each repo key (skip the `_version` marker), call `lazy-spec.resolve-repo(<repo-key>)` to get `{local_path, branch (default), host, owner, repo, forge, base_url, …}`, and use the preferred remote (default: `origin`).
+**Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file: when this repo authors the plugin itself (`claude/lazycortex-core/.claude-plugin/plugin.json` exists) that is `<repo-root>/claude/lazycortex-core/bin/lazycortex-core`; otherwise `Read` `$HOME/.claude/plugins/installed_plugins.json` and take `<installPath>/bin/lazycortex-core` from the last `lazycortex-core@lazycortex` record. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
+
+Read the `repos` section (`"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get repos`). For each repo key (skip the `_version` marker), call `lazy-spec.resolve-repo(<repo-key>)` to get `{local_path, branch (default), host, owner, repo, forge, base_url, …}`, and use the preferred remote (default: `origin`).
 
 Products themselves live in `lazy.settings.json[products]` (resolve via `resolve-product`); this skill walks pinned files across the whole vault and attributes each to its owning product via `resolve-product by-path <rel-path>` when it needs the product context for a gate proposal.
 

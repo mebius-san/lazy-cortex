@@ -55,7 +55,7 @@ This skill has 11 ordered steps. The diagram seam set is **runtime-computed** â€
 Resolve the product record:
 
 ```bash
-lazycortex-specs resolve-product by-key <product>
+"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" resolve-product by-key <product>
 ```
 
 The command prints `{"key": "<product>", "record": <record-or-null>}`. The record (when present) carries `spec_path` (required, vault-relative), optional `source` (`{ repo, paths }`), optional `language` (defaults to `en`), and optional `asset_types` / `tool_types` (each merged key-by-key over the plugin's shipped set).

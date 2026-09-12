@@ -73,6 +73,8 @@ source_sha: cd29c413bffc0e9251ad6a89fdddeeb8df754fbf
 
 **Symptom**: The wizard rejects the derived path with a message that the `spec_path` sits inside another product's `spec_path`.
 
+`<specs-cli>` stands for the specs plugin's `bin/lazycortex-specs` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-specs/<version>/`, or `claude/lazycortex-specs/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+
 **Likely cause**: Products in lazycortex-specs are flat siblings — one product's folder must not be a subdirectory of another product's folder. A path like `Server/products/api/auth` would be rejected if `Server/products/api` is already registered.
 
 **Fix**: Choose a sibling path at the same level as the other product, or introduce an optional namespace folder (e.g. `Server/products/backend/auth` alongside `Server/products/backend/api`). Re-run `/lazy-spec.product-config` with the corrected path.
@@ -143,9 +145,9 @@ source_sha: cd29c413bffc0e9251ad6a89fdddeeb8df754fbf
 
 **Symptom**: Agent D's `note-check` delegation reports a FAIL naming `unknown-key` on `spec_doc_type` for the product folder-note (`<spec_path>/<leaf>.md`) or the catalog root's own note — even though nothing was hand-edited.
 
-**Likely cause**: An older `lazycortex-specs doc-type backfill` run derived a type from the level note's own `product` / `catalog` role and wrote `spec_doc_type: <role>` onto it — a key no level-note schema has ever declared room for. Only the asset status note and the operator-zone group/category notes were excluded from typing before this was fixed; a level note slipped through and picked up a stray key that `note-check` now rejects.
+**Likely cause**: An older `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> doc-type backfill` run derived a type from the level note's own `product` / `catalog` role and wrote `spec_doc_type: <role>` onto it — a key no level-note schema has ever declared room for. Only the asset status note and the operator-zone group/category notes were excluded from typing before this was fixed; a level note slipped through and picked up a stray key that `note-check` now rejects.
 
-**Fix**: Two verbs clear this, and the finding names whichever fits. For the whole catalog in one pass, re-run `lazycortex-specs doc-type backfill` (or re-run `/lazy-spec.install`, whose Step 7c calls it) — reporting the count under a `cleaned` counter alongside `touched` / `skipped`. For a single note, run `lazycortex-specs note-drop-key <note_dir> spec_doc_type` directly — the same verb the coordinators reach for to clean up a stray key on their own wake, so a level note under an active coordinator usually self-heals before this audit pass ever reports it. Re-run `/lazy-spec.audit` afterward to confirm the FAIL clears.
+**Fix**: Two verbs clear this, and the finding names whichever fits. For the whole catalog in one pass, re-run `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> doc-type backfill` (or re-run `/lazy-spec.install`, whose Step 7c calls it) — reporting the count under a `cleaned` counter alongside `touched` / `skipped`. For a single note, run `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> note-drop-key <note_dir> spec_doc_type` directly — the same verb the coordinators reach for to clean up a stray key on their own wake, so a level note under an active coordinator usually self-heals before this audit pass ever reports it. Re-run `/lazy-spec.audit` afterward to confirm the FAIL clears.
 
 ---
 
@@ -155,7 +157,7 @@ source_sha: cd29c413bffc0e9251ad6a89fdddeeb8df754fbf
 
 **Likely cause**: `/lazy-spec.audit` is read-only in every invocation — it reports and stops, and it has no apply mode at all. Repair is a separate move you make.
 
-**Fix**: Run the route the report names beside each finding — `/lazy-spec.set-stage` for a stage/tag drift, `/lazy-spec.flip-gate` for a gate, `lazycortex-specs note-set-key` / `note-drop-key` for a frontmatter key, `lazycortex-specs doc-type backfill` / `asset-type backfill` / `pins` for a missing key across the catalog, `lazycortex-specs upstream-doctor --apply` for a `dangling-request-link` finding on a mirrored upstream unit, `/lazy-spec.sync-with-code` for a stale tech doc, `/lazy-spec.product-config` for a product or repo record. Findings with no named verb are hand edits. `/lazy-core.doctor` runs this audit as one of its delegated checks and drives a fix/waive loop over the merged findings if you want one place to work through them.
+**Fix**: Run the route the report names beside each finding — `/lazy-spec.set-stage` for a stage/tag drift, `/lazy-spec.flip-gate` for a gate, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> note-set-key` / `note-drop-key` for a frontmatter key, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> doc-type backfill` / `asset-type backfill` / `pins` for a missing key across the catalog, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> upstream-doctor --apply` for a `dangling-request-link` finding on a mirrored upstream unit, `/lazy-spec.sync-with-code` for a stale tech doc, `/lazy-spec.product-config` for a product or repo record. Findings with no named verb are hand edits. `/lazy-core.doctor` runs this audit as one of its delegated checks and drives a fix/waive loop over the merged findings if you want one place to work through them.
 
 ---
 
@@ -395,7 +397,7 @@ source_sha: cd29c413bffc0e9251ad6a89fdddeeb8df754fbf
 
 **Likely cause**: Per-file stage now resolves purely from the document's declared type, never from its filename or path — an untyped document (usually predating the type-declaration model, or a hand-created file) has no type key to resolve.
 
-**Fix**: Run `lazycortex-specs doc-type backfill` to type every document in the catalog that's missing the key, or add `spec_doc_type` to that one document by hand, then re-invoke `/lazy-spec.set-stage`.
+**Fix**: Run `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> doc-type backfill` to type every document in the catalog that's missing the key, or add `spec_doc_type` to that one document by hand, then re-invoke `/lazy-spec.set-stage`.
 
 ---
 

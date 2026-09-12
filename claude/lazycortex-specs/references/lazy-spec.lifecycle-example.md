@@ -7,6 +7,8 @@ Extracted from `lazy-spec.lifecycle-protocol.md`, where it closed the contract a
 
 The old cross-layer chain in that file described a fully automatic sequence with no operator step in the middle. That sequence no longer exists as code — every link below is now a `spec.coordinator` decision, woken by a commit to the asset's folder-note that has reached the *daemon's own checkout* (`daemon.run_here` — never the operator's checkout, per the model-audit's Step 0 topology), reasoning from `lazy-spec.coordination-playbook.md` plus the playbooks the asset's own frontmatter names. Every arrow marked "operator" below is a full commit + push + pull round trip, not an in-process step:
 
+`<specs-cli>` stands for the specs plugin's `bin/lazycortex-specs` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-specs/<version>/`, or `claude/lazycortex-specs/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+
 ```
 design.md approved in lazy-review (review_result: approved)
   → operator's review-approval commit is pushed from wherever the operator worked
@@ -23,7 +25,7 @@ design.md approved in lazy-review (review_result: approved)
   → Stage promotion (playbook Ch.4): coordinator calls `lazy-spec.set-stage design.md approved`
        (scalar + spec/approved mirror tag + folder-note # History; unchanged primitive)
   → the TYPE playbook's own condition for spec_design_done holds on the promoted state
-  → coordinator calls `lazycortex-specs flip-gate <asset> spec_design_done --auto`
+  → coordinator calls `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> flip-gate <asset> spec_design_done --auto`
        (unconditional flip; callout + history line + atomic commit — flip_gate's own work, Part 2)
   → coordinator reconciles the checkbox set the playbooks declare (the protocol's Part 3 is only
     the block SHAPE): the next box the type playbook declares at this state is hung in # Gates

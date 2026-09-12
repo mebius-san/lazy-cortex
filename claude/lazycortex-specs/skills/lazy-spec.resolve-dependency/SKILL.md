@@ -38,7 +38,9 @@ One dep entry in its YAML shape, one of:
 
 ### 2. Resolve internal-product
 
-1. Resolve the product record for `<product-key>` from `lazy.settings.json[products]` — run `lazycortex-specs resolve-product by-key <product-key>`, or read the whole section via `lazycortex-core settings-get products` and select the entry.
+**Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file: when this repo authors the plugin itself (`claude/lazycortex-core/.claude-plugin/plugin.json` exists) that is `<repo-root>/claude/lazycortex-core/bin/lazycortex-core`; otherwise `Read` `$HOME/.claude/plugins/installed_plugins.json` and take `<installPath>/bin/lazycortex-core` from the last `lazycortex-core@lazycortex` record. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
+
+1. Resolve the product record for `<product-key>` from `lazy.settings.json[products]` — run `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" resolve-product by-key <product-key>`, or read the whole section via `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get products` and select the entry.
 2. Refuse if missing — suggest registering the product under `products[<product-key>]` with `lazy-spec.product-config`.
 3. Read `spec_path` and `source.repo` from the product record.
 4. Resolve `source.repo` via the `lazy-spec.resolve-repo` primitive to get `{base_url, …}`.
@@ -46,7 +48,7 @@ One dep entry in its YAML shape, one of:
 
 ### 3. Resolve internal-repo
 
-1. Confirm `<repo-key>` is a key in the `repos` settings section (`lazycortex-core settings-get repos`). Refuse if absent.
+1. Confirm `<repo-key>` is a key in the `repos` settings section (`"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get repos`). Refuse if absent.
 2. Resolve via `lazy-spec.resolve-repo(<repo-key>)` to get `{base_url, …}`.
 3. Find which product (if any) declares this repo as its `source.repo` by scanning `lazy.settings.json[products]`. If multiple, pick the first product in alphabetic-by-key order; record the fact that there are multiple.
 4. Emit: ``` kind: internal-repo spec_link: [[<picked product spec_path>/design|<repo-key> (<picked product>)]] dev_link:  <base_url> local_spec_path: <picked product spec_path, or unset if no product uses this repo> ```

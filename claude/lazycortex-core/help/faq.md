@@ -68,7 +68,7 @@ The one case this never touches is your own edit. Agent-model entries carry this
 
 ## My sandbox's recorded read paths shrank after a `/plugin update` — is that a bug?
 
-No. `lazycortex-core sandbox-sync` — run by `/lazy-core.install` and offered by `/lazy-core.doctor`'s D13 fix — is normally append-only: it adds missing paths and never drops or reorders a recorded entry, so anything you added by hand stays. The one exception is a recorded read grant that names a version-pinned `<plugin>/<version>` directory under the plugin cache root whose directory no longer exists on disk — a dead pin left behind once a `/plugin update` moved that plugin to a newer cache version. Those are pruned and reported as `removed_read` in the sync's receipt. Nothing else is ever pruned: a write-scope entry always stays, and a read entry outside the plugin cache root stays even when its path is currently missing, since you may simply not have created it yet.
+No. `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> sandbox-sync` — run by `/lazy-core.install` and offered by `/lazy-core.doctor`'s D13 fix — is normally append-only: it adds missing paths and never drops or reorders a recorded entry, so anything you added by hand stays. The one exception is a recorded read grant that names a version-pinned `<plugin>/<version>` directory under the plugin cache root whose directory no longer exists on disk — a dead pin left behind once a `/plugin update` moved that plugin to a newer cache version. Those are pruned and reported as `removed_read` in the sync's receipt. Nothing else is ever pruned: a write-scope entry always stays, and a read entry outside the plugin cache root stays even when its path is currently missing, since you may simply not have created it yet.
 
 ---
 
@@ -114,7 +114,7 @@ The same split applies to `lazy.settings.json[daemon].metrics`: the `enabled` fl
 
 ## Why doesn't `/lazy-core.install` write a `deny` list into my permission file anymore?
 
-Earlier versions did: a `permissions.deny` block in the checkout's `.claude/settings.local.json` blocked absolute-path `find`, recursive `grep -r`/`rg` scans, and — for one release — `ls` on any absolute or home-relative path, meant to keep a headless expert spawn from walking the whole filesystem. That block is gone. `/lazy-core.install` now writes only the `allow` list into `.claude/settings.local.json` (`Read`, `Write`, `Edit`, `Glob`, `Grep`, `Bash`, `Skill`, `WebSearch`, `WebFetch`, plus `Bash(lazycortex-core *)` and the sibling `Bash(lazycortex-<short> *)` patterns other plugins' installers add) — no `deny` entries at all.
+Earlier versions did: a `permissions.deny` block in the checkout's `.claude/settings.local.json` blocked absolute-path `find`, recursive `grep -r`/`rg` scans, and — for one release — `ls` on any absolute or home-relative path, meant to keep a headless expert spawn from walking the whole filesystem. That block is gone. `/lazy-core.install` now writes only the `allow` list into `.claude/settings.local.json` (`Read`, `Write`, `Edit`, `Glob`, `Grep`, `Bash`, `Skill`, `WebSearch`, `WebFetch`, plus `Bash("${LAZYCORTEX_PYTHON:-python3}" *)` and the sibling `Bash(lazycortex-<short> *)` patterns other plugins' installers add) — no `deny` entries at all.
 
 The reason is where confinement actually belongs. What an expert spawn may reach on disk is the sandbox's job: `.runtime/sandbox.settings.json`, loaded only via the expert pump's `--settings` flag for that one spawn, resolved-path aware, and OS-enforced. `.claude/settings.local.json`, by contrast, is loaded by every session in the checkout — including your own interactive one — so a `deny` rule written there ends up policing you, not the expert it was meant to confine. Permission posture in that file is your call now; install stopped making it for you.
 
@@ -194,6 +194,12 @@ Edit the map by hand — add or remove a `"<hostname>": "<path>"` entry — then
 
 ---
 
+## How do I run a plugin CLI verb by hand, and what does `<core-cli>` stand for?
+
+Every plugin CLI is a Python file — `bin/lazycortex-core`, `bin/lazycortex-specs`, `bin/lazycortex-wiki`, `bin/lazycortex-review`, `bin/lazycortex-obsidian` — with no exec bit and no place on your `PATH`, so a bare `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> error-list` prints "command not found" and a direct `"${LAZYCORTEX_PYTHON:-python3}" <dir>/lazycortex-core error-list` exits 126. Hand the file to the interpreter instead: `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> error-list --repo <repo>`. In the help pages `<core-cli>` stands for that file: the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-core/<version>/bin/lazycortex-core`, or `claude/lazycortex-core/bin/lazycortex-core` in a checkout that authors the plugin. The other placeholders (`<specs-cli>`, `<wiki-cli>`, `<review-cli>`, `<obsidian-cli>`) resolve the same way under their own plugin directory. Skills and the daemon's agents resolve the path themselves before their first call; the form is the same one they use.
+
+---
+
 ## Where does `LAZYCORTEX_PYTHON` come from, and do I need to set it?
 
 Only the daemon's supervisor unit sets it, and you never set it by hand. launchd and systemd start the shim with a minimal environment that doesn't source your shell profile (unless `--login-shell` is set), so a bare `python3` inside the unit isn't guaranteed to resolve to the same interpreter — or to any interpreter — that resolves interactively. Step 13 of `/lazy-core.install` therefore derives the absolute interpreter once, with `python3 -c 'import sys; print(sys.executable)'` under your own interactive environment, and substitutes it into the unit's `{PYTHON}` placeholder; the shim starts the runner through it, and everything the daemon spawns inherits the variable.
@@ -257,7 +263,7 @@ Only the named hooks run for that expert's spawns; every other lazycortex hook s
 
 A confined spawn is only as strong as what happens when the sandbox actually blocks something. Claude Code's own default for an absent `allowUnsandboxedCommands` key is `true`, and under that default a command the sandbox refuses on its first try is simply retried unsandboxed — subject only to the ordinary permission check, which the bare `Bash` allow entry every expert spawn already carries in `settings.local.json` passes without a prompt. In practice this meant a confined spawn could still write or delete outside its `allowWrite` scope on the second attempt, even though the first attempt was correctly blocked.
 
-`lazycortex-core sandbox-sync` now writes `allowUnsandboxedCommands: false` into `.runtime/sandbox.settings.json` whenever the key is absent, closing that retry path — it never touches a value already on record, so a `true` you (or an earlier install) set deliberately is left as your call, not silently reversed. `/lazy-core.audit` and `/lazy-runtime.preflight` both `[FAIL]` on a missing or `true` value now, and either finding points at the same fix: `lazycortex-core sandbox-sync --repo-root "$PWD"`.
+`"${LAZYCORTEX_PYTHON:-python3}" <core-cli> sandbox-sync` now writes `allowUnsandboxedCommands: false` into `.runtime/sandbox.settings.json` whenever the key is absent, closing that retry path — it never touches a value already on record, so a `true` you (or an earlier install) set deliberately is left as your call, not silently reversed. `/lazy-core.audit` and `/lazy-runtime.preflight` both `[FAIL]` on a missing or `true` value now, and either finding points at the same fix: `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> sandbox-sync --repo-root "$PWD"`.
 
 ---
 
@@ -277,7 +283,7 @@ Every other reason routes through the same manual-fix path: the skill prints rea
 - **`inbox_collision`** — two checkouts on the same host register inbox routines that resolve to the same physical directory, so both daemons would drain, and duplicate, the same files. This check runs only at daemon startup, so resuming without separating the two `inbox_dir` paths (or retiring one checkout's supervisor) puts a duplicating daemon back to work silently — it will not re-detect the collision until the daemon restarts.
 - **`rate_limit`** — the subscription rate-limit window is closed. Nothing is broken and no repair is needed: the daemon lifts this halt itself once the window reopens (the halt block's `resets_at`, in epoch seconds, says when); resume early only if you want the queue moving again right away — the pump's own pre-spawn check still refuses to spawn while the window stays closed, so an early resume burns no tokens either way.
 
-For any reason beyond `uncommitted_changes`, the halt block itself carries no free-text detail — the skill reads the extra context (git stderr, the offending patch-id, the colliding routines and checkouts) from the halt's own incident (`Bash(lazycortex-core error-list --kind daemon_halt)`) or the newest matching record in the runtime journal at `.logs/lazy-core/runtime/<date>.jsonl`.
+For any reason beyond `uncommitted_changes`, the halt block itself carries no free-text detail — the skill reads the extra context (git stderr, the offending patch-id, the colliding routines and checkouts) from the halt's own incident (`Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> error-list --kind daemon_halt)`) or the newest matching record in the runtime journal at `.logs/lazy-core/runtime/<date>.jsonl`.
 
 ---
 

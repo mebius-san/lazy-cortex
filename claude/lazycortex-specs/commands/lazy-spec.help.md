@@ -35,8 +35,10 @@ Authors product / feature / change / bug (and operator-defined) specs as Markdow
 
 ## Request processing
 
+`<specs-cli>` stands for the specs plugin's `bin/lazycortex-specs` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-specs/<version>/`, or `claude/lazycortex-specs/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+
 - `spec.coordinator` (agent) — Routing mode, woken at the terminal group of a request's own review cycle: classifies, finds candidates, writes the `# Routing` section as a per-target description + structured decision block (surfaces the routing decision as a `[!question]`, folds the answer to prose). Composes the two read-only primitives below.
-- `lazy-spec.request-apply` (worker) — Post-finalize executor (Python primitive at `bin/apply_request.py`): reads the resolved routing prose, calls `lazycortex-specs scaffold-asset` for spawns, seeds each entity's primary doc with the coordinator's per-target description (never the request body — the doc's own main writer pulls the request from `context/` on its review round), opens review cycles, stamps the terminal `request_status`. No LLM dispatch; attach and spawn are both branches inside this one primitive.
+- `lazy-spec.request-apply` (worker) — Post-finalize executor (Python primitive at `bin/apply_request.py`): reads the resolved routing prose, calls `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> scaffold-asset` for spawns, seeds each entity's primary doc with the coordinator's per-target description (never the request body — the doc's own main writer pulls the request from `context/` on its review round), opens review cycles, stamps the terminal `request_status`. No LLM dispatch; attach and spawn are both branches inside this one primitive.
 - `lazy-spec.request-classify` — Primitive: body → `request_class` (open set: closed meta classes plus the product's asset types).
 - `lazy-spec.request-find-candidates` — Primitive: body + class → ranked existing-entity matches.
 
@@ -46,7 +48,7 @@ Authors product / feature / change / bug (and operator-defined) specs as Markdow
 - `lazy-spec.upstream-run` — Manual, no-daemon counterpart of the `lazy-spec.upstream-tick` routine: mirrors every configured external design source, derives each unit's status, opens a request for a ticked unit, and unfreezes an `in-review` unit whose linked request concluded.
 - `lazy-spec.audit` — Audit a product spec for staleness, broken links, role/gate/stage inconsistencies; report-only, naming the repair route per finding.
 - `lazy-spec.coverage` — Gap-scan a product's structure map and domain groups against its spec-asset tree; report uncovered capabilities with a proposed category + slug for a retro-spec.
-- `lazycortex-specs pins` (CLI, no skill wrapper) — One-shot backfill: add `wiki_pinned_topics` to every role-bearing spec doc missing it (pre-dates the pin landing in its template, or was scaffolded from an unrefreshed per-product/per-category override). Idempotent, repeatable — `lazy-spec.audit` reports missing pins but never writes them.
+- `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> pins` (CLI, no skill wrapper) — One-shot backfill: add `wiki_pinned_topics` to every role-bearing spec doc missing it (pre-dates the pin landing in its template, or was scaffolded from an unrefreshed per-product/per-category override). Idempotent, repeatable — `lazy-spec.audit` reports missing pins but never writes them.
 
 ## Primitives (called by other skills)
 

@@ -1,7 +1,7 @@
 ---
 name: lazy-review.install
 description: "Run when the operator asks to set up document review in this repo, after a lazycortex-review update, or when review skills fail because `lazy.settings.json` has no `review` section, the `.experts/.jobs/` queue is missing, or the coordinator routines were never registered. Per-repo bootstrap only — wiring the first document class is `/lazy-review.configure`. Idempotent and quiet on re-run."
-allowed-tools: Read, Write, AskUserQuestion, Skill, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Bash(cp *), Bash(test *), Bash(diff *), Bash(git rev-parse*), Bash(lazycortex-core *), Agent
+allowed-tools: Read, Write, AskUserQuestion, Skill, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Bash(cp *), Bash(test *), Bash(diff *), Bash(git rev-parse*), Agent
 ---
 # lazy-review.install
 
@@ -66,8 +66,10 @@ Outcome: `installed` (anything was created or merged) or `already-installed` (no
 
 Step 1's seed gives `lazy-review.coordinator-watch` its **mandatory** protocol, the coordination playbook the woken coordinator reasons from. The doc-review protocol is NOT attached here: the coordinator attaches it to each expert job it dispatches, and the routine's own job carries the playbook instead. Attach the shared markdown-style protocol too, since every wake produces markdown in the vault — a mandatory protocol is not an operator choice, so no question is asked:
 
+**Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file: when this repo authors the plugin itself (`claude/lazycortex-core/.claude-plugin/plugin.json` exists) that is `<repo-root>/claude/lazycortex-core/bin/lazycortex-core`; otherwise `Read` `$HOME/.claude/plugins/installed_plugins.json` and take `<installPath>/bin/lazycortex-core` from the last `lazycortex-core@lazycortex` record. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
+
 ```
-Bash(lazycortex-core add-protocols --routine lazy-review.coordinator-watch --ids lazycortex-core:lazy-core.markdown-style)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> add-protocols --routine lazy-review.coordinator-watch --ids lazycortex-core:lazy-core.markdown-style)
 ```
 
 That is the whole step. The coordinator is a system expert: its protocol set is fixed by design, so install never offers optional protocols for its routine and asks the operator nothing here. An operator who wants an extra protocol on a routine attaches it deliberately via `/lazy-routine.offer-protocols` — that skill is the operator-facing channel, not an install sub-step.
@@ -96,7 +98,7 @@ Per `lazy-core.hygiene` § Settings split, per-tool permissions live in `setting
 Apply via the `lazycortex-core` CLI (idempotent — already-present patterns are no-ops):
 
 ```
-Bash(lazycortex-core permission-allow <repo-root>/.claude/settings.local.json "Bash(lazycortex-review *)")
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> permission-allow <repo-root>/.claude/settings.local.json 'Bash("${LAZYCORTEX_PYTHON:-python3}" *)')
 ```
 
 Outcome: `cli-allow-added` or `cli-allow-already-present`.

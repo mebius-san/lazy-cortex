@@ -23,7 +23,9 @@ A declaration carries three independent boolean flags, each defaulting to `false
 - `append_only` — the file is only ever appended to, never rewritten;
 - `template` — filename of the type's linear template under `templates/spec.docs/`.
 
-Validation everywhere is "a declaration for this type exists", never "this name is in the enum". `lazycortex-specs doc-type` is the one reader: `of <file>`, `resolve <type> --product <key>`, `list --product <key>`, `backfill`.
+`<specs-cli>` stands for the specs plugin's `bin/lazycortex-specs` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-specs/<version>/`, or `claude/lazycortex-specs/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+
+Validation everywhere is "a declaration for this type exists", never "this name is in the enum". `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> doc-type` is the one reader: `of <file>`, `resolve <type> --product <key>`, `list --product <key>`, `backfill`.
 
 Three consequences worth stating outright:
 
@@ -76,7 +78,7 @@ The following roles no longer exist — do not author them, do not reference the
 
 Category and group folder-notes (`features/features.md`, `<spec_path>/<category>/<category>.md`, …) are **operator-zone** — same-name-as-folder folder-notes the plugin does not own. They carry **NO `spec_role`** key. The plugin writes only the managed `iconize_icon` / `iconize_color` keys (and reads a category folder-note's `description`); their bodies are operator-owned. See [layout](./lazy-spec.layout-protocol.md) Part 1.
 
-Three same-name-as-folder folder-notes DO carry a `spec_role`: the asset status folder-note (`spec_role: status`), the product-root level note (`spec_role: product`), and the catalog-root level note (`spec_role: catalog`). The product root was operator-zone before the level coordinator existed; it is now a plugin-owned note whose `# Coordinator rules` and `# Summary` stay operator-authored inside a plugin-owned shape — `lazycortex-specs catalog-note backfill` is what brings an older one across, adding what it lacks and rewriting nothing.
+Three same-name-as-folder folder-notes DO carry a `spec_role`: the asset status folder-note (`spec_role: status`), the product-root level note (`spec_role: product`), and the catalog-root level note (`spec_role: catalog`). The product root was operator-zone before the level coordinator existed; it is now a plugin-owned note whose `# Coordinator rules` and `# Summary` stay operator-authored inside a plugin-owned shape — `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> catalog-note backfill` is what brings an older one across, adding what it lacks and rewriting nothing.
 
 ### Request files
 

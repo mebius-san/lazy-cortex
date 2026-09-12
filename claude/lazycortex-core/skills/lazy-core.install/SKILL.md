@@ -171,7 +171,7 @@ The script creates the destination directory, copies absent targets (**installed
 
 ### `lazy-core.scaffold.md` — registry-block exemption (§5a)
 
-`lazy-core.scaffold.md` is the one mirror with consumer state inside it: its `## Registry` fenced block is **primitive-owned** — written only by `lazycortex-core scaffold`, and holding the consumer's `_local` key alongside every installed plugin's key. Blind-overwriting it would wipe that. The prose and frontmatter around the block are plugin-owned like any other mirror.
+`lazy-core.scaffold.md` is the one mirror with consumer state inside it: its `## Registry` fenced block is **primitive-owned** — written only by `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" scaffold`, and holding the consumer's `_local` key alongside every installed plugin's key. Blind-overwriting it would wipe that. The prose and frontmatter around the block are plugin-owned like any other mirror.
 
 One deterministic primitive resolves both halves — it takes the shipped file whole and grafts the consumer's existing block body back in:
 
@@ -976,12 +976,12 @@ Both writes are clean, non-contradictory merges — apply the File-sync policy *
 
 ### 13.5b. Sandbox scope (CLI) and the permission block
 
-The sandbox file is written by `lazycortex-core sandbox-sync`, never by hand. The sandbox compares the **resolved** path, so an allowlist entry reached through a symlink grants nothing where the data actually lives — the CLI records the resolved location of every entry plus the targets of the symlinks directly inside it (an external-dirs `Data` / `-Inbox` slot), which is exactly what a hand-written allowlist misses.
+The sandbox file is written by `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" sandbox-sync`, never by hand. The sandbox compares the **resolved** path, so an allowlist entry reached through a symlink grants nothing where the data actually lives — the CLI records the resolved location of every entry plus the targets of the symlinks directly inside it (an external-dirs `Data` / `-Inbox` slot), which is exactly what a hand-written allowlist misses.
 
 Substitute `<repo-root>` with the absolute path of the current repo. The plugin sources a spawn reads are granted through ONE entry, the LazyCortex marketplace's cache root `~/.claude/plugins/cache/lazycortex` — never a versioned `<plugin>/<version>` directory (it goes stale on every `/plugin update` and accumulates), and never another marketplace's or a third-party plugin's directory (those are not this skill's to grant). In dev-mode the in-repo `<repo-root>/claude/<plugin>/` sources are already covered by the repo root; the cache entry is still written, since a spawn loads the sibling plugins this repo does not author from the cache.
 
 ```bash
-lazycortex-core sandbox-sync --repo-root <repo-root> \
+"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" sandbox-sync --repo-root <repo-root> \
   --allow-read ~/.claude/plugins/cache/lazycortex
 ```
 
@@ -993,12 +993,12 @@ Block 2 — `<repo-root>/.claude/settings.local.json` (permission scope; loaded 
 {
   "permissions": {
     "additionalDirectories": ["~/.claude/plugins/cache/lazycortex"],
-    "allow": ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Skill", "WebSearch", "WebFetch", "Bash(lazycortex-core *)"]
+    "allow": ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Skill", "WebSearch", "WebFetch", "Bash(\"${LAZYCORTEX_PYTHON:-python3}\" *)"]
   }
 }
 ```
 
-The `Bash(lazycortex-core *)` entry is required so dispatched experts can invoke the core CLI (`expert-pump-once`, `permission-allow`, etc.) — Claude Code's `dontAsk` permission mode auto-allows only well-known commands (git, python3, ls in PWD) and silently denies any other Bash command without an explicit allow-pattern. Sibling plugins' install skills add their own `Bash(lazycortex-<short> *)` patterns to this same `permissions.allow` list via `lazycortex-core permission-allow`.
+The `Bash("${LAZYCORTEX_PYTHON:-python3}" *)` entry is required so dispatched experts can invoke the core CLI (`expert-pump-once`, `permission-allow`, etc.) — Claude Code's `dontAsk` permission mode auto-allows only well-known commands (git, python3, ls in PWD) and silently denies any other Bash command without an explicit allow-pattern. Sibling plugins' install skills add their own `Bash(lazycortex-<short> *)` patterns to this same `permissions.allow` list via `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" permission-allow`.
 
 The bare `WebSearch` and `WebFetch` entries are required for the research-shaped experts (`lazycortex-experts`' researcher): under `dontAsk` both tools are refused without an explicit allow rule, `WebSearch` accepts only the bare form, and the bare `WebFetch` permits any domain. Neither tool runs through the Bash sandbox — they execute in-process — so the sandbox file does not govern them; the permission file does. `WebSearch` is unavailable on the Bedrock provider; that is a provider limit, not a seeding error, and the entry is still written.
 

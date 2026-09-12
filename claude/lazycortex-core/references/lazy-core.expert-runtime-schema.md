@@ -119,8 +119,10 @@ Every expert spawn is confined by `.runtime/sandbox.settings.json` (daemon-owned
 
 So the file is written by CLI, never by hand:
 
+`<core-cli>` stands for the core plugin's `bin/lazycortex-core` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-core/<version>/`, or `claude/lazycortex-core/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+
 ```
-lazycortex-core sandbox-sync --repo-root <repo> [--allow-read <path>]... [--allow-write <path>]...
+"${LAZYCORTEX_PYTHON:-python3}" <core-cli> sandbox-sync --repo-root <repo> [--allow-read <path>]... [--allow-write <path>]...
 ```
 
 The repo root is granted read+write implicitly; whatever is writable is also readable. Each entry — recorded, passed, or the root — contributes the location it resolves to, plus the targets of the symlinks directly inside it (the `external_dirs` slots of `lazy-core.state-schema.md` § 15). Recorded entries are never dropped or reordered and a recorded `enabled` or `allowUnsandboxedCommands` is never overwritten, so the call is idempotent; `enabled: false` comes back in the result for the caller to act on. An unrecorded `allowUnsandboxedCommands` is written `false` — Claude Code's default of `true` retries a command the sandbox blocked with the sandbox disabled, subject only to the permission check a bare `Bash` allow passes, which would let a confined spawn write outside its scope on the second try. `/lazy-runtime.preflight` reports the switch as `fail` whenever it is not recorded `false`. `sandbox-audit --repo-root <repo>` is the read-only companion: it reports `missing_read` / `missing_write` — locations the recorded entries resolve to but do not grant. `/lazy-runtime.preflight` folds that audit into its checkout-level findings (`fail` on write, `warn` on read), so a symlink that moves after install surfaces as a finding instead of as a run of jobs failing on every write.

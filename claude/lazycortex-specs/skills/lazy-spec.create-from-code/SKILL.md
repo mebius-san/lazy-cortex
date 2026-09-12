@@ -57,7 +57,7 @@ Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`, a product f
 Resolve the product record:
 
 ```bash
-lazycortex-specs resolve-product by-key <product>
+"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" resolve-product by-key <product>
 ```
 
 The command prints `{"key": "<product>", "record": <record-or-null>}`. The record (when present) carries `spec_path` (required, vault-relative), optional `source` (`{ repo, paths }`), optional `language` (defaults to `en`), and optional `asset_types` / `tool_types` (each merged key-by-key over the plugin's shipped set).
@@ -163,7 +163,7 @@ Group folders (`features/` and the rest) and their operator-zone folder-notes ap
 **Vision first.** Before the design, author `<spec_path>/vision.md` (doc type `system-vision`) when it does not exist yet. Seed it through the primitive, anchored on the product's level note (`<leaf>` = the final segment of `spec_path`; `/lazy-spec.product-config` created it) — never by copying the template yourself:
 
 ```bash
-lazycortex-specs seed-doc --root <spec_path>/<leaf>.md --doc vision.md:system-vision
+"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" seed-doc --root <spec_path>/<leaf>.md --doc vision.md:system-vision
 ```
 
 The primitive fills every template token, injects the type's `iconize_icon` / `iconize_color` and journals the seed in the note's `# History`. Then fill the seeded sections from the code evidence, following each section's own template comment, and set its stage via `lazy-spec.set-stage` → `draft`. A pre-existing `vision.md` is left untouched.
@@ -227,12 +227,12 @@ AskUserQuestion: header "Use cases", question "Also author the product-level use
 On yes, seed it through the primitive, anchored on the same product level note:
 
 ```bash
-lazycortex-specs seed-doc --root <spec_path>/<leaf>.md --doc use-cases.md:use-cases
+"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" seed-doc --root <spec_path>/<leaf>.md --doc use-cases.md:use-cases
 ```
 
 Then drop the `wiki/category/…` line from the seeded `wiki_pinned_topics` (a product-level doc has no category), fill the actors and cross-feature scenarios the code evidences, and set its stage `draft`. On no, skip silently — the doc is opt-in and its absence is never a defect.
 
-**Mark the decisions the code embodies.** Where the code shows a real fork was taken (per the weight test in `${CLAUDE_PLUGIN_ROOT}/rules/spec.decisions.md` — a genuine alternative existed, reversal is expensive, the why is unrecoverable from the artifact), record it in the design body as a `[!decision] <thesis> #spec/decision` callout with its `**Why.**` / `**Rejected.**` lines per `lazy-core.markdown-style`. On the document's approve these blocks transfer automatically into the sibling `decisions.md` via `lazycortex-specs decide promote`. Do not force forks that are not there.
+**Mark the decisions the code embodies.** Where the code shows a real fork was taken (per the weight test in `${CLAUDE_PLUGIN_ROOT}/rules/spec.decisions.md` — a genuine alternative existed, reversal is expensive, the why is unrecoverable from the artifact), record it in the design body as a `[!decision] <thesis> #spec/decision` callout with its `**Why.**` / `**Rejected.**` lines per `lazy-core.markdown-style`. On the document's approve these blocks transfer automatically into the sibling `decisions.md` via `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" decide promote`. Do not force forks that are not there.
 
 Write the default `spec_source_docs` (`<spec_path>` resolved to the product's absolute vault path from Step 0):
 

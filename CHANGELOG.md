@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 9.4.2 — 2026-09-12 UTC
+
+- Fixed CLI plugin calls that skipped the Python interpreter and failed with exit 126 when the executable bit was missing — this could silently drop install steps during `lazy-core.autosetup`.
+- `lazy-core.doctor` now warns when a CLI call bypasses the interpreter, in your local `.claude/` config and (in the dev repo) plugin sources.
 ### 9.4.1 — 2026-09-11 UTC
 
 - `/lazy-core.install` no longer writes `LAZYCORTEX_PYTHON` into your `.claude/settings.local.json` — the absolute interpreter path now surfaces only for the daemon's launchd/systemd unit, so a tracked `settings.local.json` no longer picks up a machine-specific path.
@@ -649,6 +653,9 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 8.1.2 — 2026-09-12 UTC
+
+- Fixed skills, agents, commands, and installer steps that called plugin CLIs in bare form, which crashed with exit 126 whenever the executable bit was missing — install no longer silently drops steps.
 ### 8.1.1 — 2026-09-11 UTC
 
 - Fixed `lazy-spec.drive`, `lazy-spec.install`, and `lazy-spec.sync-with-code` stalling in permission modes without `Glob`/`Grep` (e.g. Claude Code's `auto` mode) — they now resolve notes, the wiki binary, and diagram fences via `find`/`ls`/`grep` instead.
@@ -911,6 +918,9 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 5.2.3 — 2026-09-12 UTC
+
+- Fixed the install skill invoking the core CLI as a bare command, which failed with exit code `126` on a checkout without the executable bit set — calls now route through the Python interpreter.
 ### 5.2.2 — 2026-09-11 UTC
 
 - Fixed `lazy-obsidian.install` aborting silently before syncing anything in sessions without a `Glob` tool (e.g. Claude Code's `auto` permission mode) — rule, target-directory, and CSS-snippet listings now use `ls`, so installs complete again.
@@ -1111,6 +1121,9 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-diagram
 
+### 1.2.4 — 2026-09-12 UTC
+
+- Fixed the install skill's core-CLI call, which failed with exit 126 because it invoked `lazycortex-core detect-scope` as a bare command with no exec bit; it now resolves the core CLI's path and runs it through the interpreter.
 ### 1.2.3 — 2026-09-11 UTC
 
 - `/lazy-diagram.fix` no longer fails in Claude Code's `auto` permission mode: its style-scheme and anchor lookups used `Glob`/`Grep`, which aren't available there, so step 4 died outright — now it uses a plain file check and a single `grep`, matching how `/lazy-diagram.draw` already does it.
@@ -1188,6 +1201,9 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+### 6.4.4 — 2026-09-12 UTC
+
+- Fixed review install, coordinator, and command steps that could fail with exit code 126 once the executable bit stopped being set — CLI calls now always route explicitly through the Python interpreter.
 ### 6.4.3 — 2026-09-11 UTC
 
 - Cross-plugin CLI resolution grew a dev-checkout stage ahead of the plugin cache, and subprocess calls to sibling-plugin binaries now launch via the Python interpreter instead of relying on the script's exec bit — job dispatch and commit-time icon repaint no longer silently run against a stale installed version, or break outright when a sync tool strips executable permissions.
@@ -1341,6 +1357,9 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-observe
 
+### 2.0.1 — 2026-09-12 UTC
+
+- Fixed the shipped Prometheus alert annotations and FAQ, which pointed at the bare `lazycortex-core error-list` command — that form exits 126 (no exec bit, not on `PATH`); triage commands now run through the interpreter and actually work when copied.
 ### 2.0.0 — 2026-09-11 UTC
 
 - **Breaking.** `/lazy-observe.doctor` is now `/lazy-observe.audit`, with no compatibility stub — re-run `/plugin update` and use the new name; the check itself is unchanged.
@@ -1463,6 +1482,9 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+### 1.6.1 — 2026-09-12 UTC
+
+- Fixed `lazy-experts.install` and `lazy-experts.audit` failing outright when checking scope against the core CLI — a bare-command call exited `126` without an exec bit; both now invoke it through the Python interpreter.
 ### 1.6.0 — 2026-09-11 UTC
 
 - **New `researcher` role.** The `lazy-experts.researcher` agent joins the technical class map as a persona-only, opus-tier role with `WebSearch`/`WebFetch` access — the fourteenth technical role, listed in `/lazy-experts.help`.
@@ -1787,6 +1809,9 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-wiki
 
+### 3.0.2 — 2026-09-12 UTC
+
+- Fixed install, relink, and domain-sync steps that could fail outright because the plugin's commands called its own and other plugins' CLIs directly instead of through the Python interpreter.
 ### 3.0.1 — 2026-09-11 UTC
 
 - The setup chapter's diagram is current again — a single diagram trying to cover install, configure, and audit had been rejected as too large on two consecutive publishes; it's now three diagrams, one per skill, drawn from current behavior.

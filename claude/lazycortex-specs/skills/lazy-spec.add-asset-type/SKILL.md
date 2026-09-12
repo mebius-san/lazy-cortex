@@ -45,7 +45,7 @@ Every `AskUserQuestion` this skill issues is a single question (one question per
 Resolve the product record:
 
 ```bash
-lazycortex-specs resolve-product by-key <product>
+"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" resolve-product by-key <product>
 ```
 
 The command prints `{"key": "<product>", "record": <record-or-null>}` with `spec_path` (required, vault-relative), optional `language` (defaults to `en`), and optional `asset_types` / `tool_types`.
@@ -170,14 +170,16 @@ Outcome: `path-set` or `path-defaulted`.
 
 Each settings mutation is an atomic read-modify-write. Read the current products section, edit the in-memory object, write it back:
 
+**Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file: when this repo authors the plugin itself (`claude/lazycortex-core/.claude-plugin/plugin.json` exists) that is `<repo-root>/claude/lazycortex-core/bin/lazycortex-core`; otherwise `Read` `$HOME/.claude/plugins/installed_plugins.json` and take `<installPath>/bin/lazycortex-core` from the last `lazycortex-core@lazycortex` record. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
+
 ```bash
-lazycortex-core settings-get products
+"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get products
 ```
 
 In the parsed object, set `products[<key>].asset_types.<name>` to `{ "icon": <icon>, "start_doc": "<file>:<doc_type>" }` — and add, ONLY when the corresponding step captured a value: `"color": <color>` (Step 3), `"alias_of": <alias-base>` (Step 2), `"default_tools": [...]` (Step 5 — write `[]` for the explicit "never builds anything" answer, omit the key entirely for "the coordinator determines"), `"default_path": <dir>` (Step 6). **Do NOT write `playbook` here** — Step 8 appends it with a second read-modify-write of its own, so a run that aborts between the two leaves a declaration the coordinator reports rather than a wrong law it obeys. Preserve every other product, every other type under this product, and every other field on this product's record. Create the `asset_types` map if the product has none yet. Then write the whole products object back via stdin:
 
 ```bash
-printf '%s' '<edited-products-json>' | lazycortex-core settings-set products
+printf '%s' '<edited-products-json>' | "${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set products
 ```
 
 `settings-set` performs the atomic write. Do NOT touch any other settings section in this step.

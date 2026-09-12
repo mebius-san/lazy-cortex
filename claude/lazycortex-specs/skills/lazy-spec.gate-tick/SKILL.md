@@ -25,7 +25,7 @@ A no-op tick (no terminal marker yet, note structurally clean) reports `{"action
 ## CLI
 
 ```
-lazycortex-specs gate-tick <asset_note> [--today YYYY-MM-DD]
+"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" gate-tick <asset_note> [--today YYYY-MM-DD]
 ```
 
 `--today` overrides the date stamped into callouts (used by tests). Normal runs read the current UTC date.

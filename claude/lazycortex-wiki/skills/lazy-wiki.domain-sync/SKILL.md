@@ -1,7 +1,7 @@
 ---
 name: lazy-wiki.domain-sync
 description: "Use when the domain-spec tree needs regenerating right now — this checkout runs no runtime daemon, domain markers or the dictionary just changed and the operator wants the docs current, or a `/lazy-python.knowledge-sweep` backfill has landed. Computes the domain plan, dispatches the domain-spec writer synchronously per changed group, removes orphaned docs, rebuilds `domains.md`, and makes one commit under the operator identity."
-allowed-tools: Read, Bash(lazycortex-wiki *), Bash(date -u *), Bash(git *), Bash(mkdir -p *), Bash(rm *), Write, Agent
+allowed-tools: Read, Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(date -u *), Bash(git *), Bash(mkdir -p *), Bash(rm *), Write, Agent
 ---
 # lazy-wiki.domain-sync
 
@@ -31,7 +31,7 @@ This skill has 6 ordered steps. The executing agent MUST NOT skip, merge, reorde
 Compute `<repo-root>` via `Bash(git rev-parse --show-toplevel)`, then run:
 
 ```
-Bash(lazycortex-wiki domain-plan --repo <repo-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" domain-plan --repo <repo-root>)
 ```
 
 A non-zero exit means `wiki.domains` is not configured — surface the message, point at `/lazy-wiki.configure domains`, and stop.
@@ -76,7 +76,7 @@ Outcome: `dropped:<n>` (or `empty-set`); when `unlisted_docs` is non-empty, appe
 After all writes and removals:
 
 ```
-Bash(lazycortex-wiki domain-apply-index --repo <repo-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" domain-apply-index --repo <repo-root>)
 ```
 
 Parse `{index, updated}`; track the index path for the commit when `updated` is true.

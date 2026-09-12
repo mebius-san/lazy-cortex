@@ -4,7 +4,7 @@ description: "Run when the operator asks to fetch upstream sources now, check wh
 ---
 # Upstream Run
 
-Run one full upstream tick over every source configured under the `spec` settings section's `upstream` sub-section, and report what it found. This skill is the operator-invoked entry point; `/lazy-spec.install` registers a `lazy-spec.upstream-tick` schedule routine that calls the same underlying primitive (`lazycortex-specs upstream-tick`) on a cadence — running this skill by hand and waiting for the routine produce identical results. One tick runs all three lifecycle phases: it mirrors and diffs each configured unit and derives its status (hanging an operator checkbox on `new`/`drifted`), opens a body-only request for any unit whose checkbox was ticked in a prior commit, and unfreezes an `in-review` unit once its linked request's review has concluded. It never dispatches an expert job itself — a landed request enters the standard review pipeline, which routes and dispatches on its own schedule, not this pass's.
+Run one full upstream tick over every source configured under the `spec` settings section's `upstream` sub-section, and report what it found. This skill is the operator-invoked entry point; `/lazy-spec.install` registers a `lazy-spec.upstream-tick` schedule routine that calls the same underlying primitive (`"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" upstream-tick`) on a cadence — running this skill by hand and waiting for the routine produce identical results. One tick runs all three lifecycle phases: it mirrors and diffs each configured unit and derives its status (hanging an operator checkbox on `new`/`drifted`), opens a body-only request for any unit whose checkbox was ticked in a prior commit, and unfreezes an `in-review` unit once its linked request's review has concluded. It never dispatches an expert job itself — a landed request enters the standard review pipeline, which routes and dispatches on its own schedule, not this pass's.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -19,7 +19,7 @@ This skill has 3 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 ## Step 1 — Run the fetch/detect pass
 
-Run `Bash(lazycortex-specs upstream-tick)`. It prints exactly one JSON object to stdout —
+Run `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" upstream-tick)`. It prints exactly one JSON object to stdout —
 `{"units_ordered": <n>, "units_visited": <n>, "units_touched": <n>, "statuses": {"<status>": <n>, ...}, "errors": [<message>, ...]}`
 — and always exits `0`; a per-source fetch failure is isolated into `errors`, never a process
 failure, so one unreachable source does not abort the others. Parse the JSON.

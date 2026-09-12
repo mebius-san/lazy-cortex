@@ -258,7 +258,7 @@ Outcome: `written` and `logged`.
 
 ## Mirror branch — `/lazy-wiki.configure mirror`
 
-Configures the nested `mirror` block of an **existing** scope in `lazy.settings.json[wiki.scopes][<id>]` — the block that drives `lazycortex-wiki mirror-sync <id>`: the source repo is cloned into the gitignored runtime dir and its markdown lands under `mirror_path` as ordinary wiki nodes. Canonical task list for this branch (create these instead of the scope phases, titles verbatim):
+Configures the nested `mirror` block of an **existing** scope in `lazy.settings.json[wiki.scopes][<id>]` — the block that drives `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" mirror-sync <id>`: the source repo is cloned into the gitignored runtime dir and its markdown lands under `mirror_path` as ordinary wiki nodes. Canonical task list for this branch (create these instead of the scope phases, titles verbatim):
 
 - `Mirror 1 — Verify install + pick scope`
 - `Mirror 2 — Collect url + branch`
@@ -348,7 +348,7 @@ Then add the glob `<mirror_path>/**` to the same scope's `paths` array when it i
 Log to `./.logs/claude/lazy-wiki.configure/<UTC-timestamp>.md` per the Phase 8 recipe (`input: "mirror scope_id=<id>"`).
 
 Print two pointers (no questions):
-- *"Re-run `/lazy-wiki.install` to register the daemon schedule routine; the manual run is `Bash(lazycortex-wiki mirror-sync <id>)` from any session — fetch, sync, commit, and the git-watch `lazy-wiki.scan` picks the changed files up for curation."*
+- *"Re-run `/lazy-wiki.install` to register the daemon schedule routine; the manual run is `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" mirror-sync <id>)` from any session — fetch, sync, commit, and the git-watch `lazy-wiki.scan` picks the changed files up for curation."*
 - *"Mirror bodies are written by the sync — hand-edits to a mirrored node's body are overwritten; operator state lives in the pin keys and survives."*
 
 Outcome: `written`, `logged`, and `coverage-<refreshed|unchanged|absent>`.

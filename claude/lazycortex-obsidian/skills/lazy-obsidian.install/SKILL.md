@@ -1,7 +1,7 @@
 ---
 name: lazy-obsidian.install
 description: "Run when the operator asks to set up Obsidian for this repo or to wire up a fresh vault, and again after a plugin update so new artifacts land. Also the answer when tag pages render empty (Dataview missing), the tag-page template isn't in `.claude/templates/`, icons are unpainted, or diagrams render unstyled — at project scope this is the plugin family's root entry point and chains `/lazy-obsidian.iconize-install` and `/lazy-obsidian.diagram-install`. Idempotent; install scope is detected, not asked."
-allowed-tools: Read, Write, Edit, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(ls *), Bash(date *), Bash(diff *), Bash(lazycortex-core *), AskUserQuestion, Skill, Agent
+allowed-tools: Read, Write, Edit, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(ls *), Bash(date *), Bash(diff *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), AskUserQuestion, Skill, Agent
 ---
 # Install lazycortex-obsidian
 
@@ -42,8 +42,10 @@ This skill has 11 ordered steps. The executing agent MUST NOT skip, merge, reord
 
 Resolve it via the core CLI, which reads `enabledPlugins` from the project settings first, then the global settings, and falls back to the install record's own `scope` only when neither settings file enables the plugin:
 
+**Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file: when this repo authors the plugin itself (`claude/lazycortex-core/.claude-plugin/plugin.json` exists) that is `<repo-root>/claude/lazycortex-core/bin/lazycortex-core`; otherwise `Read` `$HOME/.claude/plugins/installed_plugins.json` and take `<installPath>/bin/lazycortex-core` from the last `lazycortex-core@lazycortex` record. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
+
 ```
-Bash(lazycortex-core detect-scope lazycortex-obsidian@lazycortex)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> detect-scope lazycortex-obsidian@lazycortex)
 ```
 
 The command prints exactly one word:

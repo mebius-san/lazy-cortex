@@ -73,7 +73,7 @@ Read the mode first — it follows from how you were dispatched:
 3. **Stop or tail** depending on mode:
    - **tail:false:** STOP after writing the doc. Do NOT touch the index, do NOT run git. The dispatching skill rebuilds the index and commits under the operator identity. State the outcome in your reply.
    - **Daemon path:** resolve the wiki CLI from `$LAZYCORTEX_PLUGIN_DIRS` (first `<dir>/bin/lazycortex-wiki` that exists), then run the tail:
-     1. `$WIKI_BIN domain-apply-index --repo <repo-root>` — refresh `domains.md`.
+     1. `"${LAZYCORTEX_PYTHON:-python3}" "$WIKI_BIN" domain-apply-index --repo <repo-root>` — refresh `domains.md`.
      2. `git add <doc_path> <output>/domains.md && git commit -m "wiki(domains): <group>"` — do NOT pass `--author`; the pump exported `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL`.
      3. Write `result/response.json`: `{"outcome": "written", "doc": "<doc_path>"}`.
 

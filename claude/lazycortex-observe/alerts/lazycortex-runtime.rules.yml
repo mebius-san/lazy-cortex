@@ -1,6 +1,8 @@
 # Prometheus recording + alerting rules for lazycortex-core runtime metrics.
 # Drop into your Prometheus rule_files glob, e.g. /etc/prometheus/rules.d/.
 # Alert routing (severity → channel) is operator's responsibility.
+# `<core-cli>` in the annotations stands for the core plugin's `bin/lazycortex-core` file (its cached
+# install or the dev checkout); it runs as "${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>, never bare.
 
 groups:
   - name: lazycortex-runtime
@@ -71,7 +73,7 @@ groups:
             routine_config_invalid — the routine named above fails schema
                                      validation and was dropped; the schema
                                      error is in its own incident, readable via
-                                     `lazycortex-core error-list`.
+                                     `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> error-list`.
 
             Every reason needs a human: the daemon never clears a halt itself.
             Operator runs `/lazy-runtime.recover` on the affected host, which
@@ -93,7 +95,7 @@ groups:
             response envelope. An autonomous runtime fails silently otherwise:
             the work stops, nothing tells anyone.
 
-            Inspect with `lazycortex-core error-list --repo <repo>` and the
+            Inspect with `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> error-list --repo <repo>` and the
             bundles under .experts/.jobs/{{ $labels.expert }}/ on the host.
 
       - alert: LazyCortexDeadLetterQueueGrowing
@@ -111,7 +113,7 @@ groups:
             operator consumes them. A deferral clears itself once its routine's
             window elapses; a failed or dead bundle does not.
 
-            Triage with `/lazy-runtime.recover` or `lazycortex-core error-list`.
+            Triage with `/lazy-runtime.recover` or `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> error-list`.
 
       - alert: LazyCortexIncidentsOpening
         expr: |
@@ -126,7 +128,7 @@ groups:
             The error ledger opened at least one incident of kind
             {{ $labels.kind }} with cause {{ $labels.cause }} in the last 15
             minutes. Read the journal with
-            `lazycortex-core error-list --repo <repo>`.
+            `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> error-list --repo <repo>`.
 
       - alert: LazyCortexNoMetricsScraped
         expr: up{job=~".*lazycortex.*"} == 0

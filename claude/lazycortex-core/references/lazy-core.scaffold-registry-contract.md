@@ -41,7 +41,9 @@ Each plugin declares its registry entries in a per-group manifest `claude/<plugi
 
 ## The primitive
 
-The `## Registry` block is owned exclusively by the `lazycortex-core scaffold` CLI (`bin/scaffold_registry.py`), a dependency-free parser/serializer (no PyYAML). Five subcommands, each of which takes `--registry <path>` naming the registry markdown file to operate on — argparse marks the flag required on all five, so an invocation that omits it exits 2 without touching anything:
+`<core-cli>` stands for the core plugin's `bin/lazycortex-core` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-core/<version>/`, or `claude/lazycortex-core/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+
+The `## Registry` block is owned exclusively by the `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold` CLI (`bin/scaffold_registry.py`), a dependency-free parser/serializer (no PyYAML). Five subcommands, each of which takes `--registry <path>` naming the registry markdown file to operate on — argparse marks the flag required on all five, so an invocation that omits it exits 2 without touching anything:
 
 - `scaffold upsert --registry <path> --plugin <n> --entries <@file|json>`
 - `scaffold remove --registry <path> --plugin <n>`
@@ -85,7 +87,7 @@ When globs from coexisting keys match the same path, resolution (stated in the s
 
 ## Validation
 
-`lazy-core.audit` runs `lazycortex-core scaffold validate` against each in-scope registry and maps its findings into the audit glossary. The primitive's deterministic parse enforces:
+`lazy-core.audit` runs `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold validate` against each in-scope registry and maps its findings into the audit glossary. The primitive's deterministic parse enforces:
 
 - **Single fenced YAML block** under `## Registry` — additional blocks or non-YAML content in that section is a finding.
 - **Block parses as valid YAML** — top level must be a mapping; values must be mappings; leaf values must be sequences of strings.

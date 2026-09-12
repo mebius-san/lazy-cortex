@@ -29,7 +29,7 @@ Signature: `<product>` — the product compound-key (e.g. `specs`, `core`). If o
 
 ## Phase 1 — Resolve the product
 
-1. Run `lazycortex-specs resolve-product by-key <product>`. It prints `{"key": "<product>", "record": <record-or-null>}`.
+1. Run `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" resolve-product by-key <product>`. It prints `{"key": "<product>", "record": <record-or-null>}`.
 2. **`record` is `null`** — refuse, naming `<product>` and pointing at `/lazy-spec.product-config` to register it. Do NOT proceed.
 3. **`record` present** — capture `spec_path` (required, vault-relative), optional `source` (`{repo, paths}`), and the visible `asset_types` names (the product's own declarations merged key-by-key over the plugin's shipped `feature` / `change` / `bug` / `content` / `research`).
    - **No `source` block** (design-only product) — there is no code side to gap-scan. Mark Phases 2, 3, and the fallback branch of Phase 5 `skipped` with outcome `no-source-binding`, proceed straight to Phase 4 to confirm the spec tree exists, then report "no code binding — nothing to gap-scan" at Phase 6. Do NOT invent a code-side comparison.

@@ -5,9 +5,11 @@ allowed-tools: Read, Glob, Grep, Bash, Edit, Write, Skill, AskUserQuestion, Agen
 ---
 # Configure Product
 
-Unified wizard that owns the product-registration lifecycle. One entry point for **creating a new product** (with source code, or design-only) and for **editing an existing product** (add `source` to a design-only product, extend `dependencies`, switch `language` / `icon`). The product record lives in `lazy.settings.json[products][<compound-key>]`, read and written atomically via `lazycortex-core settings-get products` / `lazycortex-core settings-set products`. On save the skill scaffolds the product root, writes its operator-zone folder-note carrying the iconize icon (group folders and their notes appear lazily — the first `create-asset` landing an asset seeds them), and generates or reuses the shared review classes so the product's design / tech / feature / change / bug docs flow through the review loop.
+**Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file: when this repo authors the plugin itself (`claude/lazycortex-core/.claude-plugin/plugin.json` exists) that is `<repo-root>/claude/lazycortex-core/bin/lazycortex-core`; otherwise `Read` `$HOME/.claude/plugins/installed_plugins.json` and take `<installPath>/bin/lazycortex-core` from the last `lazycortex-core@lazycortex` record. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
 
-Repo records are NOT part of this product record — they live in the cross-plugin `lazy.settings.json[repos]` section (read/written via `lazycortex-core settings-get repos` / `lazycortex-core settings-set repos`) and are resolved by `lazy-spec.resolve-repo`. The inline repo wizard in Step 4 writes a `repos[<repo-key>]` record when the operator attaches a new source repo. The product `language` overrides the repo-global `spec.language` (the `language` key in the `spec` settings section) for narrative prose this product emits.
+Unified wizard that owns the product-registration lifecycle. One entry point for **creating a new product** (with source code, or design-only) and for **editing an existing product** (add `source` to a design-only product, extend `dependencies`, switch `language` / `icon`). The product record lives in `lazy.settings.json[products][<compound-key>]`, read and written atomically via `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get products` / `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set products`. On save the skill scaffolds the product root, writes its operator-zone folder-note carrying the iconize icon (group folders and their notes appear lazily — the first `create-asset` landing an asset seeds them), and generates or reuses the shared review classes so the product's design / tech / feature / change / bug docs flow through the review loop.
+
+Repo records are NOT part of this product record — they live in the cross-plugin `lazy.settings.json[repos]` section (read/written via `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get repos` / `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set repos`) and are resolved by `lazy-spec.resolve-repo`. The inline repo wizard in Step 4 writes a `repos[<repo-key>]` record when the operator attaches a new source repo. The product `language` overrides the repo-global `spec.language` (the `language` key in the `spec` settings section) for narrative prose this product emits.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -50,8 +52,8 @@ The user provides one of:
 Read the products section and the existing repo records once:
 
 ```bash
-lazycortex-core settings-get products
-lazycortex-core settings-get repos
+"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get products
+"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get repos
 ```
 
 The first prints the `products` object — each key is a compound-key, each value a record (`spec_path`, optional `language`, `icon`, `source`, `dependencies`, `asset_types`, `tool_types`). The second prints the `repos` object — each key is a repo key, each value a record (`local_path`, `branch`, optional `forge`); this is the repo registry the source step offers. Ignore the `_version` key in each section.
@@ -230,13 +232,13 @@ Triggered from Step 4 when `source.repo` names an unregistered repo:
 5. Write the new repo record into the cross-plugin `repos` section, preserving every other repo and the section's `_version`. Read-modify-write atomically:
 
    ```bash
-   lazycortex-core settings-get repos
+   "${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get repos
    ```
 
    In the parsed object, set `repos[<repo-key>]` to `{ "local_path": <local_path>, "branch": <branch> }`; add `"forge": <key>` ONLY when the host is not in the known-forges table (per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.sources-protocol.md`) — otherwise omit it so `lazy-spec.resolve-repo` auto-detects. The remote URL and forge type are NOT written — they are derived at runtime by `lazy-spec.resolve-repo`. Then write the whole object back:
 
    ```bash
-   printf '%s' '<edited-repos-json>' | lazycortex-core settings-set repos
+   printf '%s' '<edited-repos-json>' | "${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set repos
    ```
 
 ## Step 5 — Dependencies (autodetect + confirm)
@@ -340,8 +342,8 @@ Outcome: `guidelines-set`, `no-guidelines`, or (edit mode) `unchanged`.
 The built-in review classes generated in Step 12 are driven by ten roles — `use-case-writer`, `designer`, `system-designer`, `architect`, `ui-designer`, `planner`, `developer`, `tester`, `data-writer`, `researcher`. These experts are **shared vault-wide**: one common set of review classes serves every product whose role-experts are identical, so a second product normally reuses the first product's experts rather than adding its own classes (see Step 12). Read the available expert names and the current review classes first:
 
 ```bash
-lazycortex-core settings-get experts
-lazycortex-core settings-get review
+"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get experts
+"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get review
 ```
 
 The keys of the first printed object are the registered expert names. In the second, the **shared set** is the classes whose `class` labels are the bare doc-kinds `use-cases`, `design`, `system-design`, `system-tech`, `ui-design`, `code-plan`, `test-plan`, `bug`, `code-report`, `test-report`, `data-report`, `docs-report`, `research-design`, `research-report` (no `@<key>` suffix). Determine the path:
@@ -430,7 +432,7 @@ Outcome: `spec-only` or `full` (no key written).
 Each settings mutation is an atomic read-modify-write. Read the products section, edit the in-memory object, write it back:
 
 ```bash
-lazycortex-core settings-get products
+"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get products
 ```
 
 In the parsed object, set `products[<compound-key>]` to the gathered fields:
@@ -446,7 +448,7 @@ In the parsed object, set `products[<compound-key>]` to the gathered fields:
 **Edit mode**: start from the existing record captured in Step 2 and merge — add `source` to a design-only product, extend `dependencies`, switch `language` / `icon` / `guidelines` / `mode` — while preserving `asset_types` / `tool_types` and every untouched field. Never emit empty `dependencies: []` or an empty `source`; likewise, a Step 7 outcome of `no-guidelines` or an `unchanged`/`remove a role's paths` edit that empties every role means an absent `guidelines` key, never an empty `guidelines: {}`. Then write the whole products object back:
 
 ```bash
-printf '%s' '<edited-products-json>' | lazycortex-core settings-set products
+printf '%s' '<edited-products-json>' | "${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set products
 ```
 
 Initialize the on-disk structure (create mode, or any missing piece in edit mode). Use two separate calls for each folder-note — `Bash(mkdir -p <dir>)` then the `Write` tool (never chain):
@@ -455,7 +457,7 @@ Initialize the on-disk structure (create mode, or any missing piece in edit mode
 2. **Product level note** `<spec_path>/<leaf>.md` (`<leaf>` = the final segment of `spec_path`) — the folder-note `spec.catalog-coordinator` owns (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.catalog-playbook.md`). Never hand-written here: one verb creates it, or brings an existing one up to the level schema without disturbing what the operator put in it.
 
    ```bash
-   lazycortex-specs catalog-note backfill <compound-key>
+   "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" catalog-note backfill <compound-key>
    ```
 
    The verb writes `spec_role: product`, the four level gates at `false`, `spec_halted: false`, and the managed paint keys — `iconize_icon` from the Step 6 value (the operator's, or the default `LiPackage`) and `iconize_color` from `products[<key>].color` when the record declares one, otherwise the product default `#64748b` — plus the coordinator's own body sections (`# Summary`, `# Gates`, `# Status brief`, `# Coordinator rules`, `# Coordinator commands`, `# History`, `# Attachments`). On an existing note it adds only what is missing: no key is rewritten, no section is moved, and the operator's `# Coordinator rules` and rendered `# Summary` survive byte-for-byte. A product root is the only ordinary container that carries a colour; group folders beneath it carry none (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md` § Container colour). Run the verb in edit mode too — it is idempotent, and a note that predates the level schema gains it here.
@@ -463,7 +465,7 @@ Initialize the on-disk structure (create mode, or any missing piece in edit mode
    Then author the note's `<!-- spec:precis -->` region — one-line description drawn from the product's design intent — inline between the `<!-- spec:precis:start -->` and `<!-- spec:precis:end -->` markers of its `# Summary` section, replacing any `_TBD` placeholder, and run `render-container-stats` so the `<!-- spec:stats:* -->` region is populated:
 
    ```bash
-   lazycortex-specs render-container-stats <content_root>/<spec_path>/<leaf>.md
+   "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" render-container-stats <content_root>/<spec_path>/<leaf>.md
    ```
 
    Fold the verb's returned `note` path into this step's own commit.
@@ -471,14 +473,14 @@ Initialize the on-disk structure (create mode, or any missing piece in edit mode
 3. **Product-level `vision.md`** (create mode only): if `<content_root>/<spec_path>/vision.md` does not exist AND `<content_root>/<spec_path>/design.md` does not exist either (the seeding guard — a product with a pre-vision `design.md` is a legal state migrated by the operator by hand, never seeded over), seed it beside the level note item 2 just wrote — never by copying the template yourself:
 
    ```bash
-   lazycortex-specs seed-doc --root <content_root>/<spec_path>/<leaf>.md --doc vision.md:system-vision
+   "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" seed-doc --root <content_root>/<spec_path>/<leaf>.md --doc vision.md:system-vision
    ```
 
    The primitive resolves the product from the note's folder, instantiates the `system-vision` type's template with every token filled (`{{product}}`, `{{product_tag}}`), injects the type's `iconize_icon` / `iconize_color`, sets `spec_stage: empty` and journals the seed in the note's `# History` — the same file a coordinator's launch checkbox would produce. Fold the returned `doc` path (and the note, whose history line changed) into this step's own commit. The seeding is the whole obligation — no gate and no doctor check exists at this level. Outcome: `vision-seeded`, `vision-already-present`, or `vision-skipped-pre-vision-design`.
 4. **Vault-root request inbox** (shared by every product — created once, idempotent): resolve the spec content-root `<content_root> = <repo>/<spec.vault_root>` (default `specs`; read `spec.vault_root` from `.claude/lazy.settings.json`). Ensure `<content_root>/requests/` exists (`Bash(mkdir -p <content_root>/requests)`). ALWAYS `Write` `<content_root>/requests/requests.md` when absent as the operator-zone inbox folder-note (`iconize_icon: LiInbox`, `iconize_color: "#f0abfc"` — the intake-shelf accent, double-quoted, NO `spec_role`, the `# Summary` skeleton from the group-note template with the static précis `Vault-wide request intake inbox.` filled in, then operator-zone body) and ALWAYS `git add` it so the `requests/` directory is committed and pushed even with zero request files. If it already exists, leave the body untouched (stats are refreshed by the event-driven primitive). When creating the requests inbox, run `render-container-stats` on it too:
 
    ```bash
-   lazycortex-specs render-container-stats <content_root>/requests/requests.md
+   "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" render-container-stats <content_root>/requests/requests.md
    ```
 
 Real icon values are fine — the iconize hook only strips unresolvable placeholder icon values, not concrete ones.
@@ -490,7 +492,7 @@ Outcome: `written`.
 Append the built-in review classes to `review.classes`. Read the section, append, write back:
 
 ```bash
-lazycortex-core settings-get review
+"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get review
 ```
 
 In the parsed object, write the classes below into `review.classes` (create the list if absent) per the reconcile rule further down. **The review-class schema is owned by `lazycortex-review`** — match it exactly:
@@ -514,8 +516,8 @@ Generate **one class per declared type carrying `review: true`** — the shipped
 **Enumerate the types first.** The set of classes is derived, not written down here:
 
 ```
-Bash(lazycortex-specs doc-type list --product <key>)
-Bash(lazycortex-specs doc-type resolve <type> --product <key>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" doc-type list --product <key>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" doc-type resolve <type> --product <key>)
 ```
 
 Take every name `doc-type list` returns, keep those whose declaration carries `review: true`, and emit one class per surviving type with `class` = the type's own name. A type declared `review: false` (the shipped `decisions`, and any project type declaring the same) gets no class and never enters the review loop.
@@ -531,7 +533,7 @@ Context (print before asking, one block per project-declared type):
 AskUserQuestion: header "<type> class", question "Validation shape for product `<key>`'s project-declared type `<type>` — who validates its documents after the main writer?", options `A` / `D` / `TA` / `DV` / `P` / `R` / `NONE` with the descriptions above.
 ```
 
-`design`, `bug`, `use-cases`, and `research-design` additionally carry `context_from_frontmatter: [spec_source_requests]` — at main-job dispatch the dispatcher resolves that frontmatter key's wikilink/path values on the document under review to repo files and folds them into the job's `context/`, so the writer's job bundle includes the originating request(s). Attribution reaches a doc two ways: `lazy-spec.request-apply`'s `ensure_source_request` writer stamps `spec_source_requests` onto an attach target's primary doc, and `lazycortex-specs seed-doc` copies the status folder-note's union (stamped there at apply) onto every checkbox-seeded doc:
+`design`, `bug`, `use-cases`, and `research-design` additionally carry `context_from_frontmatter: [spec_source_requests]` — at main-job dispatch the dispatcher resolves that frontmatter key's wikilink/path values on the document under review to repo files and folds them into the job's `context/`, so the writer's job bundle includes the originating request(s). Attribution reaches a doc two ways: `lazy-spec.request-apply`'s `ensure_source_request` writer stamps `spec_source_requests` onto an attach target's primary doc, and `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" seed-doc` copies the status folder-note's union (stamped there at apply) onto every checkbox-seeded doc:
 
 | `class` label | `paths` | `experts.main` | `experts.validation` | extra |
 |---|---|---|---|---|
@@ -604,12 +606,12 @@ AskUserQuestion: header "Diverging class", question "Class `<kind>@<key>` carrie
 
 Bare doc-kind labels (the shared set) and `@<key>` labels naming a DIFFERENT product are never touched. This makes Step 12 idempotent across create and edit mode — re-running `/lazy-spec.product-config` in edit mode on a product generated under the old per-product scheme IS the migration to the shared set (a per-product scheme's classes collapse onto the shared set).
 
-**Expert re-verification (MANDATORY, before the write).** Collect every expert name the classes are about to carry — each `main[].name`, each `validation.<section-id>.name`, each `history.name` — and re-check every one against the keys of `lazycortex-core settings-get experts`. Any name missing → abort WITHOUT calling `settings-set review`, naming the dangling expert and pointing at `lazycortex-experts` (same abort as Step 8's `expert-undefined`). Step 8's earlier validation does not guard this write — a dangling reference (e.g. an unregistered tester) must be impossible to persist.
+**Expert re-verification (MANDATORY, before the write).** Collect every expert name the classes are about to carry — each `main[].name`, each `validation.<section-id>.name`, each `history.name` — and re-check every one against the keys of `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get experts`. Any name missing → abort WITHOUT calling `settings-set review`, naming the dangling expert and pointing at `lazycortex-experts` (same abort as Step 8's `expert-undefined`). Step 8's earlier validation does not guard this write — a dangling reference (e.g. an unregistered tester) must be impossible to persist.
 
 Write the edited review object back:
 
 ```bash
-printf '%s' '<edited-review-json>' | lazycortex-core settings-set review
+printf '%s' '<edited-review-json>' | "${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set review
 ```
 
 Then check for the retired `lazy-review.scan` routine — a leftover of the md-scan sieve model, which `/lazy-review.install` deletes on sight (its `process-file` consumer no longer exists, so a surviving registration is a routine the daemon runs into a missing subcommand). Review's live discovery surface is the repo-wide `lazy-review.coordinator-watch` git-watch routine, which its own install seeds and which carries no per-product masks — nothing here to normalize, in either routine. `Bash`-free check: **absent** → outcome `legacy-scan-routine-absent`. **Present** → do NOT touch it, and report `legacy-scan-routine-present` so the operator re-runs `/lazy-review.install`. Same posture as `/lazy-spec.install`'s Step 6f, which owns this cleanup for the install path.
