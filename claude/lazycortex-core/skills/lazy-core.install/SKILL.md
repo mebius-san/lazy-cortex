@@ -176,10 +176,10 @@ The script creates the destination directory, copies absent targets (**installed
 One deterministic primitive resolves both halves — it takes the shipped file whole and grafts the consumer's existing block body back in:
 
 ```
-Bash(<coreCli> scaffold sync-rule --src <installPath>/rules/lazy-core.scaffold.md --registry <targetRulesDir>/lazy-core.scaffold.md)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold sync-rule --src <installPath>/rules/lazy-core.scaffold.md --registry <targetRulesDir>/lazy-core.scaffold.md)
 ```
 
-`<coreCli>` is `<installPath>/bin/lazycortex-core`. Status is `installed` (target absent — shipped file lands with its empty `{}` block, Step 4 then populates it), `unchanged`, `refreshed` (stale prose replaced, block carried over), `failed` (the write did not verify), or `error` (the consumer's block does not parse — report it and leave the file alone). Never hand-merge this file: surgical per-key registry writes are `scaffold-sync`'s job, and the prose is the primitive's.
+`<core-cli>` is `<installPath>/bin/lazycortex-core`, run through the interpreter like every other verb — the file carries no exec bit. Status is `installed` (target absent — shipped file lands with its empty `{}` block, Step 4 then populates it), `unchanged`, `refreshed` (stale prose replaced, block carried over), `failed` (the write did not verify), or `error` (the consumer's block does not parse — report it and leave the file alone). Never hand-merge this file: surgical per-key registry writes are `scaffold-sync`'s job, and the prose is the primitive's.
 
 ## Step 4: Sync authoring templates
 
@@ -930,7 +930,7 @@ When the platform is macOS (`darwin`):
    - **If `<dev_mode>` is True**: a `<string>--dev-mode</string>` line.
 5. `Bash(mkdir -p ~/Library/LaunchAgents/)`
 6. Write the rendered plist to `~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_ID>.plist`.
-7. `Bash(launchctl load ~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_ID>.plist)`
+7. `Bash(launchctl bootout gui/$UID/com.lazycortex.runtime.<REPO_ID> 2>/dev/null; launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_ID>.plist)` — `bootout` first, because `launchctl load` on an already-loaded label silently keeps the old plist in memory and the daemon never sees a re-rendered unit; a not-loaded unit is not an error.
 8. State **launchd-installed** (or **launchd-installed-dev-mode** when `<dev_mode>` is True; append **-login-shell** / **-env-files** when those flags were injected).
 
 ### 13c. Linux systemd
@@ -1159,7 +1159,7 @@ Use two separate steps: `Bash(mkdir -p ...)` then the `Write` tool. Never chain 
 - **Step 11 wizard: frontmatter parse failure** — a candidate agent file's frontmatter is malformed YAML → the candidate is skipped and flagged in the report as `parse-error`; fix the frontmatter manually and re-run `/lazy-core.install` to pick it up.
 - **Step 11 wizard: protocol reference unresolvable** — `reference_resolver.resolve_reference` returns `None` or raises for a candidate's `expert_protocol:` value → the candidate is skipped and flagged as `protocol-unresolvable`; verify the protocol file exists at the referenced path or reinstall the owning plugin.
 - **Step 13 fails: supervisor template not found** — `${CLAUDE_PLUGIN_ROOT}/templates/runtime/com.lazycortex.runtime.plist` or `lazy-core-runtime.service` is missing from the plugin cache → run `/plugin update lazycortex-core@lazycortex` to restore templates, then re-run.
-- **Step 13 fails: `launchctl load` error** — the plist was written but `launchctl load` returned a non-zero exit code → inspect the plist at `~/Library/LaunchAgents/` for substitution errors, then run `launchctl load <path>` manually.
+- **Step 13 fails: `launchctl bootstrap` error** — the plist was written but `launchctl bootstrap` returned a non-zero exit code → inspect the plist at `~/Library/LaunchAgents/` for substitution errors, then run `launchctl bootout gui/$UID/<label>; launchctl bootstrap gui/$UID <path>` manually.
 - **Step 13 fails: `systemctl --user enable --now` error** — the service unit was written but `systemctl` returned a non-zero exit code → run `systemctl --user status lazy-core-runtime-<REPO_ID>.service` to inspect the error, then correct and re-enable manually.
 - **Daemon never starts for this checkout after install** — either `daemon.enabled` is `false` (the seeded default: routines are registered and run through `/lazy-runtime.tick`, no supervisor is installed), or it is true and `daemon.run_here` names a different machine or checkout → set the flag to `true`, point the map at this checkout (`{"<this host>": "<this path>"}`) in the tracked `lazy.settings.json`, and re-run `/lazy-core.install`.
 - **A second machine or checkout started its own daemon for the same project** — the map was left as a boolean or a bare host list by an older install, which cannot say which checkout drives the project → replace it with a hostname-to-path map naming the one checkout that should drive it, and re-run `/lazy-core.install` on the others; each removes its stray supervisor unit instead of installing one.

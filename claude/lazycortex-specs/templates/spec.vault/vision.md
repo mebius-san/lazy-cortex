@@ -1,10 +1,12 @@
 ---
 tags:
+  - {{product_tag}}
   - spec/draft
 spec_role: vision
 spec_doc_type: system-vision
 wiki_pinned_topics:
   - wiki/doc-kind/vision
+  - wiki/product/{{product}}
 spec_stage: draft
 spec_source_requests: []
 spec_source_docs: []

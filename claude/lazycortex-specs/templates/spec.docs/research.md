@@ -26,11 +26,11 @@ spec_source_docs: []
 
 ## Options
 
-<!-- Only when the question is a choice. The compared alternatives, the design's criteria, and how each option scores against each criterion. Leave the heading in place with `_n/a_` when the question is not a choice. -->
+<!-- Only when a question is a choice. The compared alternatives, the design's criteria, and how each option scores against each criterion. Leave the heading in place with `_n/a_` when no question is a choice. -->
 
 ## Conclusion
 
-<!-- The answer to the design's question in the first sentence. If the question carried a hypothesis, the second sentence says outright whether it held or not — never left to be inferred from the recommendation. Then the recommendation and what it rests on, confidence, and the conditions under which the answer would change. -->
+<!-- One paragraph per question of the design, in the design's order, the answer in its first sentence. Where the question carried a hypothesis, the next sentence says outright whether it held or not — never left to be inferred from the recommendation. Then the recommendation and what it rests on, confidence, and the conditions under which the answer would change. -->
 
 ## Sources
 

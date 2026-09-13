@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Common questions about installing lazycortex-experts, the class map, composing specialists, auditing the composition, and the fourteen generic agents' lane boundaries.
-last_regen: 2026-09-11
+last_regen: 2026-09-13
 no_diagram: true
 source_skills:
   - lazy-experts.install
@@ -20,7 +20,7 @@ source_skills:
   - lazy-experts.tester
   - lazy-experts.fiction-writer
   - lazy-experts.researcher
-source_sha: fc47aeeb8c042b2968809c8cef31d078ec76efaf
+source_sha: bf75c7aedc4a025e38fe7de10638c617e2a925c1
 ---
 # Frequently asked questions
 
@@ -132,11 +132,11 @@ The ui-designer takes an approved design and settles its user interface: the scr
 
 ## What does the researcher do, and how does it differ from the other design-time agents?
 
-The researcher takes an approved research design — a `design.md` typed `research-design` that states the question, the scope, and the known facts — and writes the research report, `research.md`, beside it: every route it walked (in order, naming any route the design called for and it skipped, with the reason), findings that each name a source (a repo-relative path, a wiki node, or a URL — a claim with no source never reaches the `## Findings` section), the options compared, a conclusion whose first sentence answers the question and whose second states outright whether the design's hypothesis held, and the sources list. It walks internal routes first — the spec tree, the code, the project-structure map, the wiki — and turns to `WebSearch` / `WebFetch` only for what those cannot answer or for questions about the world outside the repository.
+The researcher takes an approved research design — a `design.md` typed `research-design` that states the questions, the scope, and the known facts — and writes the research report, `research.md`, beside it: every route it walked (in order, naming any route the design called for and it skipped, with the reason), findings that each name a source (a repo-relative path, a wiki node, or a URL — a claim with no source never reaches the `## Findings` section), the options compared, a conclusion that answers each question in turn and states outright whether its hypothesis held, and the sources list. It walks internal routes first — the spec tree, the code, the project-structure map, the wiki — and turns to `WebSearch` / `WebFetch` only for what those cannot answer or for questions about the world outside the repository.
 
-It differs from the designer, the architect, and the planner because it isn't building anything: nothing it writes proposes a solution, a code structure, or a task sequence — the report is the deliverable, and an approved report is immutable. It differs from the use-case-writer and the ui-designer the same way — those settle what a product should do or look like, the researcher only answers a question that was already asked. If the question itself has a gap — it's really two questions, or the design's scope excludes the route that would decide it — the researcher raises that as a `[!question]` callout on the design rather than patching the report to compensate.
+It differs from the designer, the architect, and the planner because it isn't building anything: nothing it writes proposes a solution, a code structure, or a task sequence — the report is the deliverable, and an approved report is immutable. It differs from the use-case-writer and the ui-designer the same way — those settle what a product should do or look like, the researcher only answers questions that were already asked. If one of those questions has a gap — it's really two questions, or the design's scope excludes the route that would decide it — the researcher raises that as a `[!question]` callout on the design rather than patching the report to compensate.
 
-The researcher also plays a second role outside authorship: as the validator of a research design under review, it judges only whether the question can be answered as posed — one question, a bounded scope, a sourced known-facts section, an approach that names real routes — and does not start researching in that capacity. Like the other job-scoped writing roles, it's dispatched by the expert runtime as the `research` tool's job, carries `workspace: "branch"` and `can_commit_in_repo: true`, and is independently dispatchable given an approved research design and a target report path.
+The researcher also plays a second role outside authorship: as the validator of a research design under review, it judges only whether each question can be answered as posed — none hiding a second one with its own scope, a bounded scope, a sourced known-facts section, an approach that names real routes — and does not start researching in that capacity. Like the other job-scoped writing roles, it's dispatched by the expert runtime as the `research` tool's job, carries `workspace: "branch"` and `can_commit_in_repo: true`, and is independently dispatchable given an approved research design and a target report path.
 
 ---
 

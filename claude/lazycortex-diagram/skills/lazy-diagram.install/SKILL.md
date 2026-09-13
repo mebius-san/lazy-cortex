@@ -93,10 +93,10 @@ Owned namespaces: `lazy-diagram`, plus every unique `<ns>.` prefix appearing in 
 Byte comparison decides, the script writes, and it verifies each write. Nothing here is yours to judge. Run (one `--owned-glob` per owned namespace):
 
 ```
-Bash(<coreCli> file-sync --src <installPath>/rules --dst <targetRulesDir> --copy-diverged --owned-glob 'lazy-diagram.*.md')
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> file-sync --src <installPath>/rules --dst <targetRulesDir> --copy-diverged --owned-glob 'lazy-diagram.*.md')
 ```
 
-`<coreCli>` is `<coreInstallPath>/bin/lazycortex-core`, where `<coreInstallPath>` is the `installPath` of `lazycortex-core@lazycortex` in `installed_plugins.json` — `lazycortex-core` is a hard dependency of this plugin, so the CLI is always present.
+`<core-cli>` is `<coreInstallPath>/bin/lazycortex-core`, where `<coreInstallPath>` is the `installPath` of the highest-`version` record of `lazycortex-core@lazycortex` in `installed_plugins.json` (the registry keeps one record per project, and an older project's record names an older cache dir); it runs through the interpreter because the file carries no exec bit — `lazycortex-core` is a hard dependency of this plugin, so the CLI is always present.
 
 The command creates the destination directory, copies absent targets (**installed**), byte-compares the rest (**unchanged**), overwrites every stale target from the shipped source (**refreshed**), and reports owned targets with no source as **kept-orphan** (left in place, never deleted). Exit code 3 with a non-empty `failed` array means a write did not verify — report it as **failed**, never as applied.
 

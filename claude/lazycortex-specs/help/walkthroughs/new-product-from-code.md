@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a product bound to an existing codebase, generate its vision, design, and tech docs from source, then scaffold the first feature.
-last_regen: 2026-09-11
+last_regen: 2026-09-13
 diagram_spec:
   anchor: "How the skills hand off"
   request: "Sequence diagram showing the three-skill journey: operator runs lazy-spec.product-config to register the product and write settings, then runs lazy-spec.create-from-code to scan source and produce design + tech docs, then runs lazy-spec.create-feature to scaffold the first feature asset; show the operator, each skill, and the spec vault as actors, with the key handoff points between them."
@@ -9,7 +9,7 @@ source_skills:
   - lazy-spec.product-config
   - lazy-spec.create-from-code
   - lazy-spec.create-feature
-source_sha: fc47aeeb8c042b2968809c8cef31d078ec76efaf
+source_sha: f1a56b7fe545eee38ce6ac86f103b38934d0fe11
 ---
 # How do I get specs for a codebase that already exists?
 

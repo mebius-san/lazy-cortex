@@ -52,6 +52,7 @@ _SUB_DECIDE = "decide"
 _SUB_PINS = "pins"
 _SUB_DOC_TYPE = "doc-type"
 _SUB_ASSET_TYPE = "asset-type"
+_SUB_TEMPLATE = "template"
 # waiver: usage string -- help text printed to stderr; not a domain constant
 _USAGE = (
     "usage: lazycortex-specs <subcommand> [args...]\n"
@@ -74,7 +75,7 @@ _USAGE = (
     "  note-drop-key <asset_dir> <key> [--today YYYY-MM-DD]\n"
     "                                  remove an unrecognized spec_* frontmatter key the schema rejects\n"
     "  note-check <asset_note>        structural check: frontmatter schema + required section roster\n"
-    "  catalog-note backfill (<product> | --root) [--today YYYY-MM-DD]\n"
+    "  catalog-note backfill (<product> | --root) [--today YYYY-MM-DD] [--cwd DIR]\n"
     "                                  bring a product's or the catalog root's level note up to schema\n"
     "  request-draft --source <doc> --title <text> --body <file> [--cwd DIR]\n"
     "                                  drop one candidate request into the vault's requests inbox\n"
@@ -99,6 +100,8 @@ _USAGE = (
     "                                  same-named spec_role values included), the template and its\n"
     "                                  per-category copies, and every same-named review class\n"
     "  asset-type of <note> | backfill [--cwd DIR]\n"
+    "  template resolve --context <ctx> [--product K] [--type T] [--cwd DIR] <file>\n"
+    "                                  print the template file a context resolves for one filename\n"
     "                                  read an asset's spec_asset_type, or add it where missing\n"
 )
 
@@ -209,6 +212,10 @@ def main(argv: list[str]) -> int:
     # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
     import asset_types  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
     return asset_types.main(rest)
+  if sub == _SUB_TEMPLATE:
+    # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
+    import template_resolve  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
+    return template_resolve.main(rest)
   sys.stderr.write(f"unknown subcommand: {sub}\n")
   return 2
 

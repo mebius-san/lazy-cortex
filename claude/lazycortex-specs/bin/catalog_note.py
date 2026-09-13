@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -87,7 +88,9 @@ _SECTION_ORDER = (
 # level roles — the role reaches it as a token, so a consumer overriding the product category's
 # copy re-shapes the catalog root note with it.
 _TEMPLATE_NAME = "level-note.md"
-_TEMPLATE_CATEGORY = "product"
+# The two level contexts: a product root, and the catalog root falling through to it
+_TEMPLATE_CONTEXT_PRODUCT = "product"
+_TEMPLATE_CONTEXT_VAULT = "vault"
 _ROLE_TOKEN = "role"
 
 # Identity recorded in the `# History` line this verb leaves behind, mirroring the `<actor>` half
@@ -101,11 +104,15 @@ _ARG_VERB = "verb"
 _ARG_PRODUCT = "product"
 _ARG_ROOT = "--root"
 _ARG_TODAY = "--today"
+_ARG_CWD = "--cwd"
+# waiver: the env var the daemon exports for every subprocess it spawns
+_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 # waiver: one-off human-facing messages -- argparse help text and one stderr refusal line
 _HELP_VERB = "The level-note verb to run"
 _HELP_PRODUCT = "Product compound-key whose level note is backfilled; omit for --root"
 _HELP_ROOT = "Target the catalog root note instead of a product's own"
 _HELP_TODAY = "ISO date pinned into the emitted history line"
+_HELP_CWD = "Repository to run against; defaults to $LAZY_REPO_ROOT, then the process cwd"
 _ERR_TARGET = "name exactly one of <product> or --root\n"
 
 
@@ -207,7 +214,10 @@ def _seed_text(repo: Path, role: str, product: str, record: dict) -> str:
   Raises:
     SystemExit: When no layer of the override chain carries the level-note template.
   """
-  template = scaffold_asset._resolve_template(repo, _TEMPLATE_CATEGORY, product, _TEMPLATE_NAME)
+  # the catalog root has its own context and shares the level note with the product context
+  context = _TEMPLATE_CONTEXT_PRODUCT if product else _TEMPLATE_CONTEXT_VAULT
+  alias_base = "" if product else _TEMPLATE_CONTEXT_PRODUCT
+  template = scaffold_asset._resolve_template(repo, context, product, _TEMPLATE_NAME, alias_base = alias_base)
   text = scaffold_asset._substitute(template.read_text(), { _ROLE_TOKEN: role })
   icon, color = _paint(role, record)
   return scaffold_asset._inject_iconize(text, icon, color)
@@ -439,7 +449,7 @@ def main(argv: list[str]) -> int:
   Run the `catalog-note` subcommand from the command line, printing the result as JSON.
 
   Args:
-    argv: Subcommand argv tail — `backfill (<product> | --root) [--today YYYY-MM-DD]`.
+    argv: Subcommand argv tail — `backfill (<product> | --root) [--today YYYY-MM-DD] [--cwd DIR]`.
 
   Returns:
     Exit code: 0 on success, 2 when the call names both a product and the root, or neither.
@@ -451,6 +461,7 @@ def main(argv: list[str]) -> int:
   # waiver: argparse CLI signature -- option flag + standard argparse action
   parser.add_argument(_ARG_ROOT, action = "store_true", help = _HELP_ROOT)
   parser.add_argument(_ARG_TODAY, default = None, help = _HELP_TODAY)
+  parser.add_argument(_ARG_CWD, default = None, help = _HELP_CWD)
   args = parser.parse_args(argv)
 
   # guard: the two target forms are exclusive — a call naming both or neither is never guessed
@@ -458,8 +469,10 @@ def main(argv: list[str]) -> int:
     sys.stderr.write(_ERR_TARGET)
     return 2
 
-  # the verb runs against the repo the caller stands in, exactly like every sibling primitive
-  result = backfill(scaffold_asset._repo_root(Path.cwd()), product = args.product,
+  # the flag, then the daemon-exported env var, then the process cwd — like every sibling verb;
+  # a headless caller standing in another checkout would otherwise seed a catalog there
+  start = Path(args.cwd or os.environ.get(_ENV_REPO_ROOT) or Path.cwd())
+  result = backfill(scaffold_asset._repo_root(start), product = args.product,
                     root = args.root, today = args.today)
   print(json.dumps(result))
   return 0

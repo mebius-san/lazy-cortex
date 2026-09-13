@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-09-11
+last_regen: 2026-09-13
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, generic iteration loops, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys, seed data gaps), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models, plugin-path resolution, stale source paths at claim time), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources, worker import errors), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
@@ -38,7 +38,7 @@ source_skills:
   - lazy-runtime.preflight
   - lazy-runtime.recover
   - lazy-runtime.tick
-source_sha: dc58b15311ea88afe586b684518a261e247ae02a
+source_sha: 9fef3719f81552fe26c4b661a252c8abb88120d3
 ---
 # Troubleshooting
 
@@ -122,19 +122,19 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ## `/lazy-core.install` fails writing settings or installing the daemon supervisor
 
-**Symptom**: `/lazy-core.install` fails at Step 9 with "settings file unwritable", or at Step 13 with a message about a missing plist/service template file, or `launchctl load` / `systemctl enable` returning a non-zero exit code.
+**Symptom**: `/lazy-core.install` fails at Step 9 with "settings file unwritable", or at Step 13 with a message about a missing plist/service template file, or `launchctl bootstrap` / `systemctl enable` returning a non-zero exit code.
 
 **Likely cause (unwritable settings)**: `.claude/lazy.settings.json` or its parent directory has permissions that prevent writing.
 
 **Likely cause (supervisor template missing)**: The plugin cache does not contain `templates/runtime/com.lazycortex.runtime.plist` (macOS) or `templates/runtime/lazy-core-runtime.service` (Linux) because the cache was only partially downloaded.
 
-**Likely cause (launchctl/systemctl error)**: On macOS, the plist was written but `launchctl load` encountered a substitution error or permissions issue. On Linux, the systemd user instance is not running, or `daemon-reload` has not been called.
+**Likely cause (launchctl/systemctl error)**: On macOS, the plist was written but `launchctl bootstrap` encountered a substitution error or permissions issue — install runs `launchctl bootout` first (harmless when nothing was loaded yet) so a re-render always reaches a clean `bootstrap`, instead of `launchctl load` silently keeping an already-loaded label's old definition in memory. On Linux, the systemd user instance is not running, or `daemon-reload` has not been called.
 
 **Fix (unwritable)**: Check permissions on `.claude/lazy.settings.json` and the `.claude/` directory. Ensure both are writable by your current user, then re-run `/lazy-core.install`.
 
 **Fix (template missing)**: Run `/plugin update lazycortex-core@lazycortex` to restore the full cache, then re-run `/lazy-core.install` and accept the daemon supervisor install offer again.
 
-**Fix (macOS launchctl)**: Inspect the plist at `~/Library/LaunchAgents/com.lazycortex.runtime.<repo-name>.plist` for literal `{REPO_ROOT}` or `{REPO_NAME}` placeholders. If found, re-run `/lazy-core.install` to regenerate. Otherwise run `launchctl load <path>` manually from your terminal.
+**Fix (macOS launchctl)**: Inspect the plist at `~/Library/LaunchAgents/com.lazycortex.runtime.<repo-name>.plist` for literal `{REPO_ROOT}` or `{REPO_NAME}` placeholders. If found, re-run `/lazy-core.install` to regenerate. Otherwise run `launchctl bootout gui/$UID/com.lazycortex.runtime.<repo-name> 2>/dev/null; launchctl bootstrap gui/$UID <path>` manually from your terminal — the `bootout` is harmless when nothing was loaded yet, and running it first guarantees `bootstrap` picks up the freshly written plist instead of an old definition still held in memory under the same label.
 
 **Fix (Linux systemd)**: Run `systemctl --user daemon-reload` then `systemctl --user enable --now lazy-core-runtime-<repo-name>.service`, or re-run `/lazy-core.install` to reinstall the unit.
 
@@ -456,7 +456,7 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Likely cause**: This is expected — the daemon supervisor was just installed and has not been started yet, so there is no live process or recent log line for the check to confirm against.
 
-**Fix**: Start the daemon via the supervisor mechanism `/lazy-core.install` offered — `launchctl load` on macOS or `systemctl --user start` on Linux — then re-run `/lazy-core.audit` once the daemon has had a chance to write its first log line.
+**Fix**: Start the daemon via the supervisor mechanism `/lazy-core.install` offered — `launchctl bootstrap` on macOS or `systemctl --user start` on Linux — then re-run `/lazy-core.audit` once the daemon has had a chance to write its first log line.
 
 ---
 
@@ -477,6 +477,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: Reference docs (protocols, schemas, contracts under `references/`) carry the same size discipline as rules — over 25 KB is a WARN, over 50 KB is a FAIL. A reference that grew past the threshold without anyone noticing is the usual cause; the audit measures every reference's byte size on every run, whether or not it changed recently.
 
 **Fix**: Split the file along a natural section boundary — move the material no single reader needs together into a sibling reference, leaving a short numbered pointer behind, per `lazy-core.reference-writing § 4.1`. If the file is genuinely read whole by its one consumer and splitting would only fragment that reading, add `size-waiver: "<reason naming the reader>"` to its frontmatter instead — a boolean or empty value (`size-waiver: true`, `size-waiver: ""`) is itself flagged as an invalid-waiver finding and does not suppress the size finding, so the reason must be a real string. `/lazy-core.audit` only reports; it does not split or waive the file for you.
+
+---
+
+## `/lazy-core.doctor` flags a line as "runs a plugin CLI without the interpreter"
+
+**Symptom**: `/lazy-core.doctor` reports a WARN like "`<path>:<line> runs a plugin CLI without the interpreter — the file carries no exec bit and no plugin bin/ is on PATH, so the call exits 126 on any checkout a mode-blind git client touched and under every headless spawn; spell it `"${LAZYCORTEX_PYTHON:-python3}" <path-to-cli> <verb>`" against one of your own rules, skills, agents, commands, hooks, or reference files.
+
+**Likely cause**: The flagged line runs a plugin CLI directly instead of through the interpreter — as a bare command name, as a path to the CLI file on its own, or through a shell variable holding that path. Every plugin CLI ships with no executable bit and is never on `PATH`; such a call exits 126 the moment a mode-blind git client (obsidian-git on Android, a mode-blind Windows checkout) has ever touched the file, and under any headless spawn regardless of git history.
+
+**Fix**: Rewrite the flagged line to run the CLI through the interpreter — `"${LAZYCORTEX_PYTHON:-python3}" <path-to-cli> <verb>` — using the exact path the finding names. Re-run `/lazy-core.doctor` to confirm the WARN clears; this check is read-only and does not rewrite the line for you.
 
 ---
 
@@ -994,11 +1004,11 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Symptom**: `/lazy-core.doctor` reports "runtime daemon appears stale" even after running `/lazy-core.install` and setting up the supervisor. Re-running the doctor immediately after install still shows the same warning.
 
-**Likely cause 1**: On macOS, the launchd plist was written to `~/Library/LaunchAgents/` but has not been loaded yet. A `launchctl load` step is required before `launchctl kickstart` can start the daemon.
+**Likely cause 1**: On macOS, the launchd plist was written to `~/Library/LaunchAgents/` but has not been loaded yet. A `launchctl bootstrap` step is required before `launchctl kickstart` can start the daemon — `/lazy-core.install` now runs `launchctl bootout` (harmless when nothing was loaded yet) immediately before `bootstrap`, so a re-render always takes effect instead of `launchctl load` silently keeping an already-loaded label's old plist in memory.
 
 **Likely cause 2**: The daemon started successfully but has not yet written a JSONL log line — this takes up to one polling interval (`polling_interval_sec`, default 5 seconds). The liveness check uses log recency as one of its signals.
 
-**Fix for cause 1**: Run `/lazy-core.doctor`. When it reports the daemon as stalled, accept the "Restart via supervisor" fix offer (Fix L1). If `launchctl kickstart` fails with "No such process", the plist is not loaded — run `launchctl load ~/Library/LaunchAgents/com.lazycortex.runtime.<repo-name>.plist` manually, then re-run `/lazy-core.install` to re-register the supervisor if needed.
+**Fix for cause 1**: Run `/lazy-core.doctor`. When it reports the daemon as stalled, accept the "Restart via supervisor" fix offer (Fix L1). If `launchctl kickstart` fails with "No such process", the plist is not loaded — run `launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.lazycortex.runtime.<repo-name>.plist` manually, or just re-run `/lazy-core.install` (it does the equivalent `bootout`-then-`bootstrap` pair for you), then confirm the supervisor is registered.
 
 **Fix for cause 2**: Wait one polling cycle (5 seconds by default), then re-run `/lazy-core.doctor` to confirm the daemon is now live.
 

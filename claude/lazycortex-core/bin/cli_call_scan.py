@@ -5,7 +5,7 @@ Find plugin-CLI invocations that bypass the interpreter.
     cli_call_scan.py <repo-root> [--dev]
 
 Prints a JSON list of `{"path", "line", "text"}` findings, one per line that runs a
-`lazycortex-<plugin>` CLI (or a shell variable holding one) as a bare command. Such a line
+`lazycortex-<plugin>` CLI (or a placeholder or shell variable standing for one) as a bare command. Such a line
 works only where the file carries an exec bit and its `bin/` sits on `PATH`; neither holds
 after a mode-blind git client touched the checkout, and neither holds under a headless spawn.
 The accepted spelling is `"${LAZYCORTEX_PYTHON:-python3}" <path-to-cli> <verb> …`.
@@ -33,6 +33,8 @@ _CLI_NAMES = "core|specs|wiki|review|obsidian"
 # a bare or path-prefixed CLI name followed by a verb; a `lazycortex-x:agent` reference has no
 # space after the name and never matches
 _BARE = re.compile(rf'(?<![\w/.-])(?:[^\s"\'`()]*/)?lazycortex-(?:{_CLI_NAMES})\s+(?P<verb>[a-z][a-z-]*)')
+# a `<x-cli>` / `<xCli>` placeholder standing for a CLI file, run as the command itself
+_PLACEHOLDER = re.compile(r'<[A-Za-z-]*[Cc][Ll][Ii]>\s+(?P<verb>[a-z][a-z-]*)')
 # a shell variable that holds a resolved CLI path, run as the command itself
 _VAR = re.compile(r'"?\$\{?[A-Z_]*(?:BIN|CLI)\}?"?\s+(?P<verb>[a-z][a-z-]*)')
 # text before the match that proves an interpreter carries the call
@@ -82,6 +84,7 @@ def _in_code(line: str, at: int, fenced: bool) -> bool:
     True inside a fence, a backtick span, or a `Bash(` call.
   """
   # guard: a fenced line and a `Bash(` call are code wherever the match sits
+  # waiver: the Claude Code tool-call spelling, not a reusable domain key
   if fenced or "Bash(" in line[:at]:
     return True
   return any(span.start() < at < span.end() for span in _CODE_SPAN.finditer(line))
@@ -98,10 +101,12 @@ def _call_at(line: str, fenced: bool) -> bool:
   Returns:
     True when a code-context match with a real verb has no interpreter before it.
   """
-  for pattern in (_BARE, _VAR):
+  for pattern in (_BARE, _PLACEHOLDER, _VAR):
     for hit in pattern.finditer(line):
+      # guard: text before the match already hands the call to an interpreter
       if _INTERPRETED.search(line[:hit.start()]):
         continue
+      # waiver: the named group every pattern above declares
       if _is_verb(hit.group("verb")) and _in_code(line, hit.start(), fenced):
         return True
   return False

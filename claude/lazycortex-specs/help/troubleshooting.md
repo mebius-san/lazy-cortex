@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-09-11
+last_regen: 2026-09-13
 no_diagram: true
 source_skills:
   - lazy-spec.add-asset-type
@@ -25,7 +25,7 @@ source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
   - lazy-spec.audit
-source_sha: cd29c413bffc0e9251ad6a89fdddeeb8df754fbf
+source_sha: 10fab8e369cc16fd3f178db5a4e347eb512ab40a
 ---
 # Troubleshooting
 
@@ -688,6 +688,16 @@ source_sha: cd29c413bffc0e9251ad6a89fdddeeb8df754fbf
 **Likely cause**: The anchor you gave isn't a key in `lazy.settings.json[products]`, or a vault-relative path you gave doesn't resolve to a folder or file under the vault root — a typo, or a product that hasn't been registered yet.
 
 **Fix**: Correct the product key or path, or register the product first via `/lazy-spec.product-config`, then re-invoke `/lazy-spec.lookup` with the corrected anchor. A query with no anchor at all always succeeds — it just searches the whole vault instead of a scoped subtree.
+
+---
+
+## `/lazy-spec.lookup` refuses: bare category/slug without a product
+
+**Symptom**: A lookup call refuses, saying a `<category>/<slug>` anchor was given with no product to resolve it against.
+
+**Likely cause**: A `<category>/<slug>` shorthand (e.g. `features/csv-export`) is ambiguous on its own — the same category/slug pair can exist under more than one product.
+
+**Fix**: Pass the product key alongside the anchor, or give the full vault-relative path instead (e.g. `Server/products/api/features/csv-export`).
 
 ---
 

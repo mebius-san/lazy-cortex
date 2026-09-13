@@ -4,6 +4,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 9.4.3 — 2026-09-13 UTC
+
+- Installing or scaffolding a plugin now resolves the core CLI from the registry entry with the highest recorded version instead of the last one written, so a stale entry left behind by another project no longer sends the install chain to an old cached copy.
+- The CLI-call scanner behind `/lazy-core.doctor` now also flags a bare `<x-cli>`-style placeholder run without the interpreter, which caught ten such calls still left in the install and scaffold-sync/scaffold-local skills — all now go through `"${LAZYCORTEX_PYTHON:-python3}"` instead of failing with exit 126 on checkouts without the exec bit.
+- `/lazy-core.agent-models` now seeds tiers only for plugins the repo's `enabledPlugins` actually turns on, instead of every plugin a stale registry record still lists as installed.
+- macOS install now unloads the launchd unit before reloading it (`bootout` + `bootstrap` instead of `load`), so re-running `/lazy-core.install` on an already-running daemon actually picks up the updated plist instead of silently keeping the old one.
+
 ### 9.4.2 — 2026-09-12 UTC
 
 - Fixed CLI plugin calls that skipped the Python interpreter and failed with exit 126 when the executable bit was missing — this could silently drop install steps during `lazy-core.autosetup`.
@@ -653,6 +660,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 9.0.0 — 2026-09-13 UTC
+
+- **Breaking:** Product-level, catalog-root, and research-design template overrides move out of the shared `spec.docs/` base into their own context folders (`spec.research/`, `spec.product/`, `spec.vault/`); install now migrates any existing composite-named overrides automatically and reports conflicts instead of overwriting. A new `template resolve` CLI verb resolves a document's template by context and target filename, and doc-type rename now retypes context templates declaring the old type, not just files named after it.
+- Research documents no longer require a companion vision doc — the `research` type declares `vision: none` — and `## Question` becomes `## Questions`, so one research-design can carry several questions, each with its own hypothesis and its own answer paragraph in the report.
+- Fixed `catalog-note backfill` ignoring `--cwd` / `LAZY_REPO_ROOT`, which could seed the catalog into the wrong checkout when invoked headlessly from another repo.
+
 ### 8.1.2 — 2026-09-12 UTC
 
 - Fixed skills, agents, commands, and installer steps that called plugin CLIs in bare form, which crashed with exit 126 whenever the executable bit was missing — install no longer silently drops steps.
@@ -1121,6 +1134,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-diagram
 
+### 1.2.5 — 2026-09-13 UTC
+
+- Fixed a plugin-install failure: the install skill's core-CLI call could exit 126 on a checkout without the exec bit and could resolve to a stale cached copy of the core CLI; it now runs through the interpreter and always picks the highest-version registry record.
+
 ### 1.2.4 — 2026-09-12 UTC
 
 - Fixed the install skill's core-CLI call, which failed with exit 126 because it invoked `lazycortex-core detect-scope` as a bare command with no exec bit; it now resolves the core CLI's path and runs it through the interpreter.
@@ -1482,6 +1499,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+### 1.6.2 — 2026-09-13 UTC
+
+- The researcher now handles research designs with multiple questions: `## Conclusion` gives each its own paragraph in the design's order and rules on its own hypothesis, and review checks that every question is answerable as posed instead of requiring exactly one.
+
 ### 1.6.1 — 2026-09-12 UTC
 
 - Fixed `lazy-experts.install` and `lazy-experts.audit` failing outright when checking scope against the core CLI — a bare-command call exited `126` without an exec bit; both now invoke it through the Python interpreter.
@@ -1808,6 +1829,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 3.0.3 — 2026-09-13 UTC
+
+- Fixed the install skill's core-CLI call, which could fail on a checkout without the executable bit set (bare placeholder command), and made it resolve the core CLI path from the correct, highest-version plugin registry record instead of a possibly stale one.
 
 ### 3.0.2 — 2026-09-12 UTC
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Drive an asset's readiness gates and per-file doc stages from creation through release using a two-layer progression model.
-last_regen: 2026-09-11
+last_regen: 2026-09-13
 diagram_spec:
   anchor: "How the layers feed each other"
   request: "Show the two-layer progression model: per-file spec_stage transitions (empty→draft→approved) feeding into the five flat gates (spec_design_done through spec_released) via spec.coordinator's auto-flips and human-signal callouts, with lazy-spec.set-stage, lazy-spec.flip-gate, and spec.coordinator as the labeled actors — lazy-spec.gate-tick is a pure poller and decides no gate, so it is not one of the actors."
@@ -9,7 +9,7 @@ source_skills:
   - lazy-spec.flip-gate
   - lazy-spec.gate-tick
   - lazy-spec.set-stage
-source_sha: 3f4c00192599a38cbb9db4308367d5db80ec2dfd
+source_sha: f1a56b7fe545eee38ce6ac86f103b38934d0fe11
 ---
 # Gates — driving asset readiness from design to release
 
@@ -26,6 +26,7 @@ When docs get approved in the review loop, the gates still advance without you h
 - Understanding what the background worker has already done — which stages it promoted, which gates it flipped, which callouts it dropped — after returning from a review session.
 - Regressing a gate when a deploy is rolled back or a test suite breaks (`/lazy-spec.flip-gate --off`).
 - Cancelling an optional doc (`tech.md`, `code-plan.md`, `test-plan.md`, `use-cases.md`, or `ui-design.md`) when a feature needs no code, a bug needs no formal fix plan, an asset needs no dedicated functional test plan, or its behavior/interface is settled enough to skip a dedicated requirements or screens pass.
+- Understanding why an already-approved document reverted to `draft` and its gate turned back off on its own — an upstream source document was re-approved after it (source staleness), not an operator or reviewer action.
 
 ## How it fits together
 
@@ -39,6 +40,8 @@ A markdown attachment sitting beside an owner doc — one carrying `spec_owner_d
 
 You reach for `/lazy-spec.flip-gate` yourself when you need to advance or regress a gate explicitly — the most common case being the three human-signal gates: after a deploy, after tests go green, after a branch merges, you run `/lazy-spec.flip-gate <asset> spec_develop_done` (or the relevant gate). The primitive itself no longer checks readiness before flipping — it performs the mutation unconditionally, refusing only when the asset is cancelled — so satisfying the gate's actual precondition (design approved, code-plan approved-or-absent, and so on) is on you when you call it directly; the skill's confirmation question is your own chance to double check before it commits. The skill asks that one confirmation question unless you pass `--auto`; pass `--off` to regress a gate, which is likewise unconditional except for the cancelled-asset guard.
 
+**The one automatic downward move: source staleness.** Every dependent document is defined against a single upstream source — the asset's `design.md` reads from its own `vision.md` when one exists, `architecture.md` / `ui-design.md` / `test-plan.md` read from `design.md`, `code-plan.md` reads from `architecture.md` when it exists or `design.md` otherwise, and a tool's report reads from its plan or, absent a plan, from `design.md`. When that source gets re-approved after the dependent already reached `approved`, `spec.coordinator` moves the dependent back to `draft` through the very same `/lazy-spec.set-stage` primitive you'd call by hand, and flips the gate the dependent's approval had closed back off through the very same `/lazy-spec.flip-gate` primitive — the single case in the whole system where `approved` is not the end of the line. Nothing about the move is silent: the folder-note's `# History` gets a line naming the dependent and the source that went stale, `# Status brief` says what's waiting on a fresh review, and the dependent's own `Review <doc>` row reappears on the folder note for you to walk again. A document with no declared source — `bug.md`, which follows no vision — never goes stale by this rule, and the dependent's body itself is never touched; only its stage, its gate, and the history line change.
+
 The old fully-automatic tick-driven chain from a freshly approved `design.md` to S2 (plan done) no longer exists as a fixed cycle count — it now runs as a `spec.coordinator` wake per pushed-and-pulled commit to the asset (its folder-note, or a sibling doc's own approval): one wake promotes `design.md`'s stage, a further wake (or the same one, depending on what else changed) evaluates and flips `spec_design_done`, reconciles the ladder, and so on. Every mutation is still a separate atomic commit, and each one has to complete its own push-then-pull round trip before it is visible to whichever side reacts to it next — what changed is that an LLM decision, and a network hop, sit between each commit instead of a fixed two-tick cadence.
 
 ## Common adjustments
@@ -50,6 +53,7 @@ The old fully-automatic tick-driven chain from a freshly approved `design.md` to
 - **Check what the coordinator last did on an asset.** Read the asset folder-note's `# Status brief` (its own rewritten-every-invocation narration) and `# History`; the daemon log records each `gate-tick` and `coordinator-watch` dispatch, and `lazy-spec.flip-gate` writes its own log under `.logs/claude/lazy-spec.flip-gate/` for every flip.
 - **Re-open a rejected doc.** Run `/lazy-spec.set-stage <path/to/design.md> draft` — `rejected` is not terminal; moving back to `draft` re-opens the review loop.
 - **Advance a doc that has markdown attachments beside it.** Run `/lazy-spec.set-stage` on the owner doc as usual — the cascade re-stamps every attachment's `spec_stage` and `spec/<stage>` tag in the same commit. Do not target the attachment itself; the skill refuses it and points you back at the owner.
+- **Check why a stage or gate regressed on its own.** Read the folder-note's `# History` for a line reading `spec.coordinator · <dependent>.md stale: source <file> re-approved` — that's source staleness, not an operator action or a bug. Reconcile the dependent against its freshly re-approved source, then send it back through the review loop as usual (`/lazy-spec.set-stage <dependent> draft` already ran for you; you only need to bring the content current and resubmit).
 
 ## How the layers feed each other
 
@@ -84,6 +88,8 @@ flowchart LR
   class flipTestsPassing action
   class flipReleased success
 ```
+
+The diagram above traces only the forward climb. As the source-staleness paragraph above describes, a dependent document's stage and the gate it closed can also move backward exactly once — when its upstream source is re-approved after it — via the same two primitives running in reverse.
 
 ## See also
 

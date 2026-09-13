@@ -103,7 +103,7 @@ Create (with `mkdir -p`) the single consumer directory that holds per-project ar
 
 | Path (relative to consumer root) | Purpose |
 |---|---|
-| `templates/spec.feature/`, `templates/spec.change/`, `templates/spec.bug/`, `templates/spec.product/`, `templates/spec.request/` | One per category; each holds optional `<compound-key>/` per-product override sub-folders for that category's templates |
+| `templates/spec.feature/`, `templates/spec.change/`, `templates/spec.bug/`, `templates/spec.content/`, `templates/spec.research/`, `templates/spec.product/`, `templates/spec.vault/`, `templates/spec.docs/`, `templates/spec.request/` | One per template context: the shipped asset types, the two levels, the linear base, the request inbox; each asset-type and product folder holds optional `<compound-key>/` per-product override sub-folders |
 
 Report `created` or `already-exists`.
 
@@ -122,6 +122,22 @@ Bash(mkdir -p <consumer>/.claude/rules && for f in ${CLAUDE_PLUGIN_ROOT}/rules/*
 ```
 
 Outcome: `rules-mirrored:<N>` where N is the count of `installed` + `refreshed` rules (0 means every rule was already current).
+
+## Step 3c: Move context templates out of the linear base
+
+Before 9.0 a product-level or catalog-root document and a research design were overridden through composite filenames in the consumer's linear base. They now live in their context folders. For each file below that exists, move it; a target already present is a conflict — report both paths, move nothing for that pair, and continue with the next:
+
+| From (`.claude/templates/spec.docs/`) | To (`.claude/templates/`) |
+|---|---|
+| `system-vision.md` | `spec.product/vision.md` |
+| `system-design.md` | `spec.product/design.md` |
+| `system-tech.md` | `spec.product/tech.md` |
+| `vault-vision.md` | `spec.vault/vision.md` |
+| `vault-design.md` | `spec.vault/design.md` |
+| `vault-tech.md` | `spec.vault/tech.md` |
+| `research-design.md` | `spec.research/design.md` |
+
+`Bash(test -e <to> || mv <from> <to>)` per row — a worktree move, never `git mv`. Then, for every consumer template under `.claude/templates/spec.*/` that carries `spec_doc_type`, confirm the type is declared: `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" doc-type resolve <type> [--product <key>])`; a non-zero exit is a WARN naming the file. Outcome: `moved:<n>` / `conflicts:<n>` / `unknown-type:<n>` / `nothing-to-move`.
 
 ## Step 4: Seed default language
 
@@ -650,9 +666,9 @@ Under `review.classes` append each entry below whose `class:` token no existing 
       - name: <docs-writer-expert>
 
 # design.md class of a research asset (research-design) — designer writes the research design
-# (question with hypothesis, goals, scope, known, approach) from the originating request; one
-# researcher_review validation slot (is the question one, are the boundaries set, is the known
-# part sourced). context_from_frontmatter folds the originating request(s) into the writer's
+# (sections per the research-design template) from the originating request; one
+# researcher_review validation slot (can each question be answered as posed, are the boundaries
+# set, is the known part sourced). context_from_frontmatter folds the originating request(s) into the writer's
 # bundle, same as design/bug.
 - class: research-design
   protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol"]
@@ -975,5 +991,5 @@ Use two separate steps: `Bash(mkdir -p ...)` then `Write` tool. Never chain with
 - **Idempotent**: running this skill multiple times is safe. Every write follows the File-sync policy — absent → write, cleanly mergeable → merge silently, genuine conflict → the only case that asks. The consumer dir is never recreated and orphaned entries are kept, never deleted.
 - **Re-run after `/plugin update`**: this skill creates the one consumer dir and mirrors the plugin's own `rules/` (Step 3b re-syncs on every run). After a plugin update, the plugin's reference docs and templates refresh in cache automatically — no resync needed for those. Steps 5, 5b, and 6 surface any new wiring requirements on the next run.
 - **Scope independence**: running at project scope does not affect other projects or the global config.
-- **Per-product overrides** are NOT created by this skill — they live under `.claude/templates/spec.<category>/<compound-key>/` (one folder per category that the operator wants to customize), scaffolded by `lazy-spec.product-config` when the user opts into customization.
+- **Per-product overrides** are NOT created by this skill — they live under `.claude/templates/spec.<context>/<compound-key>/` (one folder per asset type or the product level that the operator wants to customize), scaffolded by `lazy-spec.product-config` when the user opts into customization.
 - **User-scope skip**: Step 6 (request runtime wiring) is a project-scope-only step. Request files live in `<vault-root>/requests/` per-vault; wiring at user scope would point the daemon at the wrong path. The skill detects user scope at Step 1 and silently skips Step 6 (`skipped-user-scope`).

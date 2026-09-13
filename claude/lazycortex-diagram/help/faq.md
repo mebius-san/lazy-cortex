@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about kind/format selection, scheme palettes, draw vs fix, ASCII vs mermaid, density bounds, split behaviour, direct agent invocation, and install.
-last_regen: 2026-09-11
+last_regen: 2026-09-13
 no_diagram: true
 source_skills:
   - lazy-diagram.draw
@@ -9,7 +9,7 @@ source_skills:
   - lazy-diagram.draw-mermaid
   - lazy-diagram.draw-ascii
   - lazy-diagram.install
-source_sha: 0957646fe88bb43168922cfd85bd6a9b6c298d1d
+source_sha: 9fef3719f81552fe26c4b661a252c8abb88120d3
 ---
 # Frequently asked questions
 

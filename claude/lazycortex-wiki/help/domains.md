@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Query a generated reference tree built from code's Domain(…) comments — one section or one term at a time, never the whole tree.
-last_regen: 2026-09-11
+last_regen: 2026-09-13
 diagram_spec:
   anchor: "How the domain tree stays current"
   request: "Flow diagram: code Domain(…)/Contract: comments feed domain-plan detection, which dispatches the domain-spec writer per changed group to (re)write docs/domains/<group>.md, then rebuilds the domains.md index; /lazy-wiki.domains reads that generated tree to answer group and term queries."
@@ -10,7 +10,7 @@ source_skills:
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
   - lazy-wiki.domain-spec-writer
-source_sha: 3f4c00192599a38cbb9db4308367d5db80ec2dfd
+source_sha: f1a56b7fe545eee38ce6ac86f103b38934d0fe11
 ---
 # Domain knowledge lookup
 

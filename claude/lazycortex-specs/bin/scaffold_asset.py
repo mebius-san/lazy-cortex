@@ -49,6 +49,7 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -88,6 +89,13 @@ class _K:
     TEMPLATES_DIR: The templates directory segment.
     LINEAR_TMPL_DIR: The per-type template directory serving every asset type.
     SHARED_TMPL_DIR: The type-agnostic template directory serving a type with no directory of its own.
+    LAYER_PRODUCT_OVERRIDE: Layer label — the consumer's per-product file in a context folder.
+    LAYER_CONSUMER_CONTEXT: Layer label — the consumer's file in a context folder.
+    LAYER_PLUGIN_CONTEXT: Layer label — the plugin's file in a context folder.
+    LAYER_BASE_PREFIX: Label prefix for the alias base's three context layers.
+    LAYER_CONSUMER_LINEAR: Layer label — the consumer's file in the linear base.
+    LAYER_PLUGIN_LINEAR: Layer label — the plugin's file in the linear base.
+    LAYER_PLUGIN_SHARED: Layer label — the plugin's file in the type-agnostic base.
     DOC_TYPE: Frontmatter key naming a seeded document's type.
     MD_SUFFIX: Markdown file extension, stripped to derive a document's type from its filename.
     HISTORY_HEADING: The `# History` heading appended to a folder-note.
@@ -140,6 +148,14 @@ class _K:
   TEMPLATES_DIR = "templates"
   LINEAR_TMPL_DIR = "spec.docs"
   SHARED_TMPL_DIR = "spec.asset"
+  # Template layer labels the `template resolve` verb prints
+  LAYER_PRODUCT_OVERRIDE = "product-override"
+  LAYER_CONSUMER_CONTEXT = "consumer-context"
+  LAYER_PLUGIN_CONTEXT = "plugin-context"
+  LAYER_BASE_PREFIX = "base-"
+  LAYER_CONSUMER_LINEAR = "consumer-linear"
+  LAYER_PLUGIN_LINEAR = "plugin-linear"
+  LAYER_PLUGIN_SHARED = "plugin-shared"
   DOC_TYPE = "spec_doc_type"
   MD_SUFFIX = ".md"
   # Body markers + headings
@@ -272,31 +288,88 @@ def _alias_base(asset_type: str, record: dict) -> str:
     _fail(_K.CAT_LOGICAL, str(err))
 
 
-def _resolve_template(repo: Path, category: str, product: str, name: str, *,
-                      alias_base: str = "") -> Path:
+def _template_layers(repo: Path, context: str, product: str, name: str, *,
+                     alias_base: str = "") -> list[tuple[str, Path]]:
   """
-  Pick the first existing template path across the three-layer override chain.
+  List the template lookup chain for one context and filename, most specific first.
 
-  For an alias category, templates from the category's own override chain always take
-  precedence over templates from the base category's chain.
+  Args:
+    repo: Repository root.
+    context: Template context — an asset type, `product`, or `vault`.
+    product: Product compound-key for the per-product layer; empty collapses it.
+    name: Target filename (`design.md`, `asset-note.md`).
+    alias_base: Base context whose own three layers follow the context's, or empty.
+
+  Returns:
+    `(label, path)` pairs in lookup order; paths need not exist.
+  """
+  def chain(cat: str, prefix: str) -> list[tuple[str, Path]]:
+    cat_dir = f"spec.{cat}"
+    return [
+      (prefix + _K.LAYER_PRODUCT_OVERRIDE, repo / _K.CLAUDE_DIR / _K.TEMPLATES_DIR / cat_dir / product / name),
+      (prefix + _K.LAYER_CONSUMER_CONTEXT, repo / _K.CLAUDE_DIR / _K.TEMPLATES_DIR / cat_dir / name),
+      (prefix + _K.LAYER_PLUGIN_CONTEXT, _plugin_root() / _K.TEMPLATES_DIR / cat_dir / name),
+    ]
+
+  # the context's own three layers, the alias base's three, then the two shared floors
+  layers = chain(context, "") + (chain(alias_base, _K.LAYER_BASE_PREFIX) if alias_base else [])
+  layers.append((_K.LAYER_CONSUMER_LINEAR, repo / _K.CLAUDE_DIR / _K.TEMPLATES_DIR / _K.LINEAR_TMPL_DIR / name))
+  layers.append((_K.LAYER_PLUGIN_LINEAR, _plugin_root() / _K.TEMPLATES_DIR / _K.LINEAR_TMPL_DIR / name))
+  layers.append((_K.LAYER_PLUGIN_SHARED, _plugin_root() / _K.TEMPLATES_DIR / _K.SHARED_TMPL_DIR / name))
+  return layers
+
+
+def _template_doc_type(path: Path) -> str:
+  """
+  Read the `spec_doc_type` a template declares in its frontmatter.
+
+  Args:
+    path: The template file.
+
+  Returns:
+    The declared type, or an empty string when the file declares none.
+  """
+  match = re.match(r"^---\n(.*?)\n---\n", path.read_text(encoding = "utf-8"), re.DOTALL)
+  # guard: a structural note carries no frontmatter type
+  if not match:
+    return ""
+  typed = re.search(r"(?m)^spec_doc_type\s*:\s*(\S+)\s*$", match.group(1))
+  return typed.group(1) if typed else ""
+
+
+def _resolve_template(repo: Path, category: str, product: str, name: str, *,
+                      alias_base: str = "", expect_type: str = "") -> Path:
+  """
+  Pick the first existing template path across the layered override chain.
+
+  The lookup key is the context and the target filename; the document type is what the chosen
+  file declares in its own frontmatter, and a caller that expects a type only checks it.
 
   Guarantees:
     - An alias category's own template chain (per-product, project-wide, plugin) outranks the base
       category's chain in full: an alias-local template wins over every base layer, not only the
       layer matching its own.
+    - With `expect_type` set, the returned file declares that `spec_doc_type` or none at all — a
+      file declaring another type is refused, never substituted.
+    - A filename no layer carries resolves, with `expect_type` set, to the first template in the
+      same chain that declares that type, so a custom-named document still seeds from its type.
 
   Args:
     repo: Repository root.
-    category: Asset category (`feature` / `change` / `bug` / operator-defined).
+    category: Template context — an asset type (`feature` / `change` / `bug` / operator-defined),
+      `product`, or `vault`.
     product: Product compound-key, used for per-product override layer.
     name: Template filename (e.g. `asset-note.md`, `design.md`).
-    alias_base: Base category key when `category` is an alias; empty otherwise.
+    alias_base: Base context when `category` is an alias or falls through to another; empty otherwise.
+    expect_type: The `spec_doc_type` the chosen file must declare or leave undeclared; empty skips
+      the check and the by-type fallback.
 
   Returns:
     Absolute path to the chosen template file.
 
   Raises:
-    SystemExit: When no layer carries the named template.
+    SystemExit: When no layer carries the named template (nor, with a type expected, any template
+      of that type), or the first file found declares a type other than `expect_type`.
   """
 
   # Domain(spec.declarations):
@@ -310,35 +383,42 @@ def _resolve_template(repo: Path, category: str, product: str, name: str, *,
   # sit beneath every declared type: one shared by every type that keeps to the common
   # document set, and one beneath that shared by every type regardless of what documents it
   # declares, so a freshly declared type needs no templates of its own to produce a working
-  # folder-note.
-
-  def chain(cat: str) -> list[Path]:
-    cat_dir = f"spec.{cat}"
-    return [
-      repo / _K.CLAUDE_DIR / _K.TEMPLATES_DIR / cat_dir / product / name,
-      repo / _K.CLAUDE_DIR / _K.TEMPLATES_DIR / cat_dir / name,
-      _plugin_root() / _K.TEMPLATES_DIR / cat_dir / name,
-    ]
+  # folder-note. The document type is never part of the key: a file is found by where it is
+  # used and what it is called, and it says for itself what type it produces.
 
   # Contract:
   # An alias category's own template chain (per-product, project-wide, plugin) outranks the
   # base category's chain in full: an alias-local template MUST win over every base layer,
-  # not only the layer matching its own.
+  # not only the layer matching its own. With `expect_type` set, the file returned declares
+  # that type or none — a same-named file of another type is never substituted for it.
 
-  # assemble the lookup order: the alias's full chain first, then the base's
-  candidates = chain(category) + (chain(alias_base) if alias_base else [])
-  # the linear per-type base: the last layer, so a per-category or per-product override of the
-  # same filename still wins — the base exists so a category needs no template of its own
-  candidates.append(_plugin_root() / _K.TEMPLATES_DIR / _K.LINEAR_TMPL_DIR / name)
-  # the type-agnostic base: a shipped type that declares no directory of its own (`content`,
-  # `research`) still needs a folder-note, and every per-type copy of it is byte-identical
-  candidates.append(_plugin_root() / _K.TEMPLATES_DIR / _K.SHARED_TMPL_DIR / name)
-  for candidate in candidates:
-    if candidate.is_file():
-      return candidate
+  candidates = _template_layers(repo, category, product, name, alias_base = alias_base)
+  for _label, candidate in candidates:
+    # guard: a layer without the file is simply skipped
+    if not candidate.is_file():
+      continue
+    declared = _template_doc_type(candidate)
+    # guard: a same-named file of another type is another document — never substitute it silently;
+    # an untyped consumer override written before typing landed is stamped by the caller instead
+    if expect_type and declared and declared != expect_type:
+      _fail(_K.CAT_LOGICAL,
+            f"template '{candidate}' declares spec_doc_type '{declared}', expected '{expect_type}'")
+    return candidate
+
+  # a custom filename (`notes.md` typed `design`) has no file of its own: the first template in
+  # the same chain that declares the expected type seeds it
+  if expect_type:
+    for _label, candidate in candidates:
+      # guard: a layer whose folder is absent holds no template of any type
+      if not candidate.parent.is_dir():
+        continue
+      for filename in sorted(os.listdir(candidate.parent)):
+        sibling = candidate.parent / filename
+        if filename.endswith(_K.MD_SUFFIX) and sibling.is_file() and _template_doc_type(sibling) == expect_type:
+          return sibling
   _fail(_K.CAT_LOGICAL,
         f"no template '{name}' for category '{category}' in product '{product}' "
-        f"(checked: {', '.join(str(path) for path in candidates)})")
+        f"(checked: {', '.join(str(path) for _label, path in candidates)})")
 
 
 def _type_folder(asset_type: str, record: dict, explicit: str) -> str:
@@ -414,31 +494,6 @@ def _parse_doc_token(token: str) -> tuple[str, str]:
   if not sep or not name or not doc_type or _K.DOC_TOKEN_SEP in doc_type:
     _fail(_K.CAT_LOGICAL, f"--doc '{token}' must have the name:type shape")
   return name, doc_type
-
-
-def _template_name(repo: Path, doc_type: str, product: str | None) -> str:
-  """
-  Resolve the template filename a document of one type is seeded from.
-
-  The document's own filename is never the lookup key: typing made templates a linear set by
-  type, so a document the caller names `notes.md` and types `design` is seeded from the design
-  template exactly like `design.md` is.
-
-  Args:
-    repo: Repository root the declarations are resolved against.
-    doc_type: The document's own declared type.
-    product: Product compound-key scoping the declaration lookup, or None when the caller has no
-      product in scope and only the shipped declarations apply.
-
-  Returns:
-    The declared template filename, falling back to the type's own name with the markdown suffix.
-  """
-  declaration = spec_doc_types.resolve(repo, doc_type, product)
-  # guard: a type no declaration covers cannot seed a document at all
-  if declaration is None:
-    scope = f" in product '{product}'" if product else ""
-    _fail(_K.CAT_LOGICAL, f"document type '{doc_type}' is declared nowhere{scope}")
-  return declaration.get(spec_doc_types.DocTypeFlag.TEMPLATE) or f"{doc_type}{_K.MD_SUFFIX}"
 
 
 def _initial_stage(repo: Path, doc_type: str, product: str) -> str:
@@ -764,9 +819,8 @@ def main(argv: list[str]) -> int:
   # one doc per --doc entry, each seeded with its cross-reference block and its declared stage
   produced: list[dict] = []
   for doc, doc_type in layout:
-    tmpl_path = _resolve_template(repo, args.asset_type, args.product,
-                                  _template_name(repo, doc_type, args.product),
-                                  alias_base = alias_base)
+    tmpl_path = _resolve_template(repo, args.asset_type, args.product, doc,
+                                  alias_base = alias_base, expect_type = doc_type)
     doc_text = _substitute(tmpl_path.read_text(), tokens)
     doc_text = _ensure_doc_type(doc_text, doc_type)
     # the type's own paint: the icon names the kind of document, the registry's matchers own

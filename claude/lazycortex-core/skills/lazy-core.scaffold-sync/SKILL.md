@@ -95,11 +95,11 @@ Read `~/.claude/plugins/installed_plugins.json`. Find the `lazycortex-core@lazyc
 
 > `scaffold-sync: cannot resolve core CLI — lazycortex-core not installed; run /lazy-core.install first`
 
-Take the first entry's `installPath` field. The core CLI is at `<installPath>/bin/lazycortex-core`.
+Take the `installPath` of the entry with the highest `version` — the registry keeps one record per project that ever installed the plugin, so the first or last entry may name an older cache dir. `<core-cli>` is `<installPath>/bin/lazycortex-core`; every verb below runs it through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`, because the file carries no exec bit.
 
-Verify the file exists with `Bash(test -f <coreCli>)`. If not → FAIL with:
+Verify the file exists with `Bash(test -f <core-cli>)`. If not → FAIL with:
 
-> `scaffold-sync: core CLI not found at <coreCli>; run /plugin update lazycortex-core@lazycortex to restore`
+> `scaffold-sync: core CLI not found at <core-cli>; run /plugin update lazycortex-core@lazycortex to restore`
 
 State outcome `resolved`.
 
@@ -118,7 +118,7 @@ Then `Write` the JSON to `~/tmp/scaffold-sync-entries-<timestamp>.json`.
 Run:
 
 ```bash
-<coreCli> scaffold upsert --plugin <plugin> --entries @~/tmp/scaffold-sync-entries-<timestamp>.json --registry <regPath>
+"${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold upsert --plugin <plugin> --entries @~/tmp/scaffold-sync-entries-<timestamp>.json --registry <regPath>
 ```
 
 Capture the JSON output on stdout. The primitive returns a top-level `status` field with one of: `registered`, `unchanged`, `created-and-registered`, `removed`, `absent`, `error`.

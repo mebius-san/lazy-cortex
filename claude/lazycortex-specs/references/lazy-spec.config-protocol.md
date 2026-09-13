@@ -165,7 +165,6 @@ Each key is a type name — the value a document's `spec_doc_type` carries. Each
 | `append_only` | boolean | `false` | The file is only ever appended to, never rewritten. |
 | `icon` | string | absent | Iconize identifier a document of the type is seeded with at creation, written into its managed `iconize_icon`. |
 | `color` | string | absent | Iconize colour paired with the icon, written into the managed `iconize_color`. |
-| `template` | string | absent | Filename of the type's linear template under `templates/spec.docs/`. |
 
 **Merge rule: key-by-key over the shipped declaration, never whole-record replacement.** `{"system-tech": {"review": false}}` turns review off for `system-tech` and leaves its `stages: true` and its `template` exactly as shipped. A type the plugin does not ship is declared from scratch, so every field it omits takes the `false` / absent default — `{"content-report": {"review": true, "append_only": true}}` is a review-bearing, append-only, non-staged document, which is a complete declaration and not an error.
 

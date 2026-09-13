@@ -1,11 +1,11 @@
 ---
 chapter_type: block
 summary: Answer one question against the spec tree without loading whole documents into your context.
-last_regen: 2026-09-11
+last_regen: 2026-09-13
 no_diagram: true
 source_skills:
   - lazy-spec.lookup
-source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
+source_sha: f1a56b7fe545eee38ce6ac86f103b38934d0fe11
 ---
 # Research: bounded lookups over the spec tree
 

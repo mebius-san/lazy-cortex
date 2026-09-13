@@ -5,88 +5,77 @@
       "review": true,
       "append_only": false,
       "icon": "LiTelescope",
-      "color": "#94a3b8",
-      "template": "vision.md"
+      "color": "#94a3b8"
     },
     "system-vision": {
       "stages": true,
       "review": true,
       "append_only": false,
       "icon": "LiTelescope",
-      "color": "#94a3b8",
-      "template": "system-vision.md"
+      "color": "#94a3b8"
     },
     "design": {
       "stages": true,
       "review": true,
       "append_only": false,
       "icon": "LiPencilRuler",
-      "color": "#94a3b8",
-      "template": "design.md"
+      "color": "#94a3b8"
     },
     "system-design": {
       "stages": true,
       "review": true,
       "append_only": false,
       "icon": "LiPencilRuler",
-      "color": "#94a3b8",
-      "template": "system-design.md"
+      "color": "#94a3b8"
     },
     "architecture": {
       "stages": true,
       "review": true,
       "append_only": false,
       "icon": "LiNetwork",
-      "color": "#94a3b8",
-      "template": "architecture.md"
+      "color": "#94a3b8"
     },
     "code-plan": {
       "stages": true,
       "review": true,
       "append_only": false,
       "icon": "LiGitBranchPlus",
-      "color": "#94a3b8",
-      "template": "code-plan.md"
+      "color": "#94a3b8"
     },
     "test-plan": {
       "stages": true,
       "review": true,
       "append_only": false,
       "icon": "LiTestTubes",
-      "color": "#94a3b8",
-      "template": "test-plan.md"
+      "color": "#94a3b8"
     },
     "bug": {
       "stages": true,
       "review": true,
       "append_only": false,
       "icon": "LiBug",
-      "color": "#94a3b8",
-      "template": "bug.md"
+      "color": "#94a3b8"
     },
     "system-tech": {
       "stages": true,
       "review": true,
       "append_only": false,
       "icon": "LiCog",
-      "color": "#94a3b8",
-      "template": "system-tech.md"
+      "color": "#94a3b8"
     },
     "code-report": {
       "stages": false,
       "review": true,
       "append_only": true,
       "icon": "LiScrollText",
-      "color": "#94a3b8",
-      "template": "code-report.md"
+      "color": "#94a3b8"
     },
     "test-report": {
       "stages": false,
       "review": true,
       "append_only": true,
       "icon": "LiClipboardCheck",
-      "color": "#94a3b8",
-      "template": "test-report.md"
+      "color": "#94a3b8"
     },
     "data-report": {
       "stages": false,
@@ -114,32 +103,28 @@
       "review": true,
       "append_only": false,
       "icon": "LiListChecks",
-      "color": "#94a3b8",
-      "template": "use-cases.md"
+      "color": "#94a3b8"
     },
     "ui-design": {
       "stages": true,
       "review": true,
       "append_only": false,
       "icon": "LiLayoutDashboard",
-      "color": "#94a3b8",
-      "template": "ui-design.md"
+      "color": "#94a3b8"
     },
     "research-design": {
       "stages": true,
       "review": true,
       "append_only": false,
       "icon": "LiPencilRuler",
-      "color": "#94a3b8",
-      "template": "research-design.md"
+      "color": "#94a3b8"
     },
     "research-report": {
       "stages": true,
       "review": true,
       "append_only": false,
       "icon": "LiFlaskConical",
-      "color": "#94a3b8",
-      "template": "research.md"
+      "color": "#94a3b8"
     }
   }
 }

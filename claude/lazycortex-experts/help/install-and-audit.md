@@ -1,12 +1,12 @@
 ---
 chapter_type: block
 summary: Bootstrap lazycortex-experts via seeded tiers and composed experts, then verify with the plugin's own read-only audit skill.
-last_regen: 2026-09-11
+last_regen: 2026-09-13
 no_diagram: true
 source_skills:
   - lazy-experts.install
   - lazy-experts.audit
-source_sha: fc47aeeb8c042b2968809c8cef31d078ec76efaf
+source_sha: f1a56b7fe545eee38ce6ac86f103b38934d0fe11
 ---
 # Installing and auditing lazycortex-experts
 

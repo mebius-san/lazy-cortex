@@ -1,10 +1,13 @@
 ---
 tags:
+  - {{product_tag}}
   - spec/draft
+product: {{product}}
 spec_role: tech
 spec_doc_type: system-tech
 wiki_pinned_topics:
   - wiki/doc-kind/tech
+  - wiki/product/{{product}}
 spec_stage: draft
 spec_source_requests: []
 spec_source_docs: []

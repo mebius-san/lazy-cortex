@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Take one spec asset from a blank slate through all five readiness gates to a confirmed release.
-last_regen: 2026-09-11
+last_regen: 2026-09-13
 diagram_spec:
   anchor: "How the journey flows"
   request: "Sequence diagram showing the five-skill lifecycle of one asset: lazy-spec.create-asset scaffolds and authors the asset, lazy-spec.set-stage marks the design approved and then the plan approved, lazy-spec.flip-gate advances each gate (spec_design_done through spec_tests_passing), lazy-spec.sync-with-code reconciles code reality and proposes spec_develop_done, lazy-spec.rebase-pins rebases branch pins and proposes spec_released."
@@ -11,7 +11,7 @@ source_skills:
   - lazy-spec.flip-gate
   - lazy-spec.sync-with-code
   - lazy-spec.rebase-pins
-source_sha: cd29c413bffc0e9251ad6a89fdddeeb8df754fbf
+source_sha: f1a56b7fe545eee38ce6ac86f103b38934d0fe11
 ---
 # How do I take an asset from creation all the way to release?
 
@@ -38,7 +38,7 @@ After completing this journey you have:
 
 Run `/lazy-spec.create-asset <product> <category> <slug>`, where `<product>` is the compound key for your registered product, `<category>` is `feature`, `change`, `bug`, or an operator-defined category, and `<slug>` is a lowercase-with-hyphens name for this asset.
 
-`lazy-spec.create-asset` opens a wizard (2–5 questions, one at a time) to gather scope, behavior, and edge-case detail for the category. Before scaffolding, it also settles the document set for the type: a mandatory definition document rides in automatically when the type declares one — the shipped `feature` type always seeds `vision.md` ahead of `design.md`, so goals and value proposition are captured before behavior — and a multiSelect question offers whichever opt-in documents the type playbook allows (`vision.md` where it isn't mandatory, e.g. a `change`; `use-cases.md`; `ui-design.md`), each with a one-line description of what it's for. Declining one leaves it available as a later launch checkbox, never a gap. After you answer, it scaffolds the asset folder at `<spec_path>/<category>/<slug>/`, authors every doc the resolved set named — the type's own start doc (`design.md` for a feature, starting at `draft` stage) plus any mandatory or selected definition documents — and fills in the folder-note's `# Summary` précis. Any real decision fork the clarification settled lands in the authored prose as a `[!decision]` callout, ready to transfer into the product's `decisions.md` once you approve the doc it lives in (Step 2 below). The scaffold draws no diagrams of its own — once a doc's prose is settled, ask for one explicitly via `/lazy-diagram.draw` if it needs a picture. The folder-note (`<slug>.md`) is created with all five gates at `false` and a `# History` H1 section carrying one scaffold entry per seeded doc. `code-plan.md` and `test-plan.md` stay opt-in in a stronger sense — the scaffold never creates either at all; Step 4 below covers authoring a code plan when your asset needs one.
+`lazy-spec.create-asset` opens a wizard (2–5 questions, one at a time) to gather scope, behavior, and edge-case detail for the category. Before scaffolding, it also settles the document set for the type: a mandatory definition document rides in automatically when the type declares one — the shipped `feature` type always seeds `vision.md` ahead of `design.md`, so goals and value proposition are captured before behavior — and a multiSelect question offers whichever opt-in documents the type playbook allows (`vision.md` where it isn't mandatory, e.g. a `change`; `use-cases.md`; `ui-design.md`), each with a one-line description of what it's for. Declining one leaves it available as a later launch checkbox, never a gap. For a `change`, one clarifying question also asks which existing asset(s) it modifies — the answer is recorded as `spec_targets` on the freshly-scaffolded folder-note, and once the change's own design is approved, that design cascades into each named target's own docs. After you answer, it scaffolds the asset folder at `<spec_path>/<category>/<slug>/`, authors every doc the resolved set named — the type's own start doc (`design.md` for a feature, starting at `draft` stage) plus any mandatory or selected definition documents — and fills in the folder-note's `# Summary` précis. Any real decision fork the clarification settled lands in the authored prose as a `[!decision]` callout, ready to transfer into the product's `decisions.md` once you approve the doc it lives in (Step 2 below). The scaffold draws no diagrams of its own — once a doc's prose is settled, ask for one explicitly via `/lazy-diagram.draw` if it needs a picture. The folder-note (`<slug>.md`) is created with all five gates at `false` and a `# History` H1 section carrying one scaffold entry per seeded doc. `code-plan.md` and `test-plan.md` stay opt-in in a stronger sense — the scaffold never creates either at all; Step 4 below covers authoring a code plan when your asset needs one.
 
 `design.md` describes the intended behavior only — it never writes in "not yet supported" or half-built code paths as if they were spec limitations. If a section feels narrower than you expected, that's an explicit scope decision from the wizard answers, not a reflection of what the code currently does.
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Non-obvious answers on install, LLM providers, the runtime daemon and experts, routines, scaffolding, git staging, and MCP permissions.
-last_regen: 2026-09-11
+last_regen: 2026-09-13
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -32,7 +32,7 @@ source_skills:
   - lazy-expert.cancel-job
   - lazy-expert.list-jobs
   - lazy-memory.write
-source_sha: dc58b15311ea88afe586b684518a261e247ae02a
+source_sha: 9fef3719f81552fe26c4b661a252c8abb88120d3
 ---
 # FAQ
 
@@ -196,7 +196,7 @@ Edit the map by hand — add or remove a `"<hostname>": "<path>"` entry — then
 
 ## How do I run a plugin CLI verb by hand, and what does `<core-cli>` stand for?
 
-Every plugin CLI is a Python file — `bin/lazycortex-core`, `bin/lazycortex-specs`, `bin/lazycortex-wiki`, `bin/lazycortex-review`, `bin/lazycortex-obsidian` — with no exec bit and no place on your `PATH`, so a bare `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> error-list` prints "command not found" and a direct `"${LAZYCORTEX_PYTHON:-python3}" <dir>/lazycortex-core error-list` exits 126. Hand the file to the interpreter instead: `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> error-list --repo <repo>`. In the help pages `<core-cli>` stands for that file: the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-core/<version>/bin/lazycortex-core`, or `claude/lazycortex-core/bin/lazycortex-core` in a checkout that authors the plugin. The other placeholders (`<specs-cli>`, `<wiki-cli>`, `<review-cli>`, `<obsidian-cli>`) resolve the same way under their own plugin directory. Skills and the daemon's agents resolve the path themselves before their first call; the form is the same one they use.
+Every plugin CLI is a Python file — `bin/lazycortex-core`, `bin/lazycortex-specs`, `bin/lazycortex-wiki`, `bin/lazycortex-review`, `bin/lazycortex-obsidian` — with no exec bit and no place on your `PATH`, so a bare `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> error-list` prints "command not found" and a direct `"${LAZYCORTEX_PYTHON:-python3}" <dir>/lazycortex-core error-list` exits 126. Hand the file to the interpreter instead: `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> error-list --repo <repo>`. In the help pages `<core-cli>` stands for that file: the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-core/<version>/bin/lazycortex-core`, or `claude/lazycortex-core/bin/lazycortex-core` in a checkout that authors the plugin. The other placeholders (`<specs-cli>`, `<wiki-cli>`, `<review-cli>`, `<obsidian-cli>`) resolve the same way under their own plugin directory. Skills and the daemon's agents resolve the path themselves before their first call; the form is the same one they use. `/lazy-core.doctor` now scans your own `.claude/` sources for exactly this mistake — a skill, agent, rule, or hook that calls a plugin CLI as a bare command, a path-only command, or through a shell variable holding the path — and flags each occurrence with the file and line to fix.
 
 ---
 

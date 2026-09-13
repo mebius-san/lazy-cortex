@@ -62,10 +62,11 @@ _SOURCE_REQUESTS_KEY = "spec_source_requests"
 _ERR_ROOT_WITH_PRODUCT = "--root takes no product and no positional folder-note"
 _ERR_MODE_INCOMPLETE = "seed-doc needs <product> <folder-note-path>, or --root <folder-note-path>"
 
-# The template family a level document is seeded from: `_resolve_template` prefixes the value
-# with `spec.`, so `docs` names the shipped per-type directory every document type lives in, and
-# the empty product below collapses the per-product layer, leaving project override then plugin.
-_ROOT_TEMPLATE_FAMILY = "docs"
+# The template contexts a level document is seeded from: a product root reads `spec.product/`,
+# the catalog root reads `spec.vault/` and falls through to `spec.product/` for what the two
+# levels share (the level note); the empty product below collapses the per-product layer.
+_ROOT_TEMPLATE_CONTEXT_PRODUCT = "product"
+_ROOT_TEMPLATE_CONTEXT_VAULT = "vault"
 _NO_PRODUCT = ""
 
 
@@ -130,7 +131,7 @@ def _product_for_note(repo: Path, note_path: Path) -> tuple[str, dict]:
   return "", {}
 
 
-def _root_seed_inputs(repo: Path, note_path: Path, note_fm: dict, slug: str,
+def _root_seed_inputs(repo: Path, note_path: Path, note_fm: dict, slug: str, doc_name: str,
                       doc_type: str) -> tuple[str, dict, Path]:
   """
   Resolve the product in scope, the template tokens and the template file a level document is seeded from.
@@ -140,6 +141,7 @@ def _root_seed_inputs(repo: Path, note_path: Path, note_fm: dict, slug: str,
     note_path: Absolute path of the level folder-note.
     note_fm: The level folder-note's parsed frontmatter.
     slug: The level folder-note's own filename stem.
+    doc_name: Filename of the document being seeded — the template lookup key.
     doc_type: The document's declared type.
 
   Returns:
@@ -162,16 +164,19 @@ def _root_seed_inputs(repo: Path, note_path: Path, note_fm: dict, slug: str,
   record: dict = {}
   if note_fm.get(SpecKey.ROLE) == SpecValue.ROLE_PRODUCT:
     product, record = _product_for_note(repo, note_path)
+  # the catalog root has no product record, so the content root's own directory names it
+  content_root_name = spec_paths.spec_content_root(repo).name
+  label = tag = content_root_name
   if product:
     label, tag = product, scaffold_asset._product_tag(record)
-  else:
-    # the catalog root has no product record, so the content root's own directory names it
-    label = tag = spec_paths.spec_content_root(repo).name
-  tokens = { "product": label, "product_tag": tag, "slug": slug,
+  # `project` names the whole document tree — the catalog root's own headings use it, and a product
+  # level carries the same value for a template shared by both levels
+  tokens = { "product": label, "product_tag": tag, "slug": slug, "project": content_root_name,
              "category": note_fm.get(SpecKey.ROLE, "") }
+  context = _ROOT_TEMPLATE_CONTEXT_PRODUCT if product else _ROOT_TEMPLATE_CONTEXT_VAULT
+  alias_base = "" if product else _ROOT_TEMPLATE_CONTEXT_PRODUCT
   return product, tokens, scaffold_asset._resolve_template(
-      repo, _ROOT_TEMPLATE_FAMILY, product or _NO_PRODUCT,
-      scaffold_asset._template_name(repo, doc_type, product or None))
+      repo, context, product or _NO_PRODUCT, doc_name, alias_base = alias_base, expect_type = doc_type)
 
 
 def main(argv: list[str]) -> int:
@@ -253,16 +258,17 @@ def main(argv: list[str]) -> int:
   note_text = note_path.read_text()
   note_fm, _fm_end = apply_request._parse_frontmatter(note_text)
   slug = note_path.stem
-  if product:
+  # a product's own level note is seeded from the product context even when the caller named
+  # the product; only an asset's status note drives the asset-type chain
+  if product and note_fm.get(SpecKey.ROLE) != SpecValue.ROLE_PRODUCT:
     asset_type = note_fm.get(scaffold_asset._K.ASSET_TYPE, "") or scaffold_asset._K.DESIGN_STEM
     alias_base = scaffold_asset._alias_base(asset_type, record)
     tokens = { "product": product, "product_tag": scaffold_asset._product_tag(record),
                "slug": slug, "category": asset_type }
     tmpl_path = scaffold_asset._resolve_template(
-        repo, asset_type, product,
-        scaffold_asset._template_name(repo, doc_type, product), alias_base = alias_base)
+        repo, asset_type, product, name, alias_base = alias_base, expect_type = doc_type)
   else:
-    product, tokens, tmpl_path = _root_seed_inputs(repo, note_path, note_fm, slug, doc_type)
+    product, tokens, tmpl_path = _root_seed_inputs(repo, note_path, note_fm, slug, name, doc_type)
   doc_text = scaffold_asset._substitute(tmpl_path.read_text(), tokens)
   doc_text = scaffold_asset._ensure_doc_type(doc_text, doc_type)
   # the type's own paint: the icon names the kind of document, matchers own the colour later

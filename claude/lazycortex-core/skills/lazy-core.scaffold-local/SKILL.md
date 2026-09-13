@@ -51,11 +51,11 @@ Read `~/.claude/plugins/installed_plugins.json`. Find the `lazycortex-core@lazyc
 
 > `scaffold-local: cannot resolve core CLI — lazycortex-core not installed; run /lazy-core.install first`
 
-Take the first entry's `installPath` field. The core CLI is at `<installPath>/bin/lazycortex-core`.
+Take the `installPath` of the entry with the highest `version` — the registry keeps one record per project that ever installed the plugin, so the first or last entry may name an older cache dir. `<core-cli>` is `<installPath>/bin/lazycortex-core`; every verb below runs it through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`, because the file carries no exec bit.
 
-Verify the file exists with `Bash(test -f <coreCli>)`. If not → FAIL with:
+Verify the file exists with `Bash(test -f <core-cli>)`. If not → FAIL with:
 
-> `scaffold-local: core CLI not found at <coreCli>; run /plugin update lazycortex-core@lazycortex to restore`
+> `scaffold-local: core CLI not found at <core-cli>; run /plugin update lazycortex-core@lazycortex to restore`
 
 Note: `$LAZYCORTEX_PLUGIN_DIRS` may be unset at install time — always resolve via `installed_plugins.json`.
 
@@ -157,7 +157,7 @@ AskUserQuestion: header "Template exists", question "Template .claude/templates/
 Run:
 
 ```bash
-<coreCli> scaffold list --registry <regPath>
+"${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold list --registry <regPath>
 ```
 
 Parse the JSON output. Extract `data._local` — if the key is absent, start with `{}`.
@@ -181,7 +181,7 @@ Then `Write` the JSON to that path.
 Run:
 
 ```bash
-<coreCli> scaffold upsert --plugin _local --entries @~/tmp/scaffold-local-entries-<timestamp>.json --registry <regPath>
+"${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold upsert --plugin _local --entries @~/tmp/scaffold-local-entries-<timestamp>.json --registry <regPath>
 ```
 
 Capture the JSON output. On `error` status → FAIL, surfacing the full output.
@@ -195,7 +195,7 @@ State outcome: value of `status` from the returned JSON.
 Run:
 
 ```bash
-<coreCli> scaffold list --registry <regPath>
+"${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold list --registry <regPath>
 ```
 
 Parse `data._local`. If the key is absent or the target entry is missing → FAIL with:
@@ -209,7 +209,7 @@ Remove the key `.claude/templates/<group>/<kind>-template.md` from the map.
 - If the resulting map is empty → run:
 
   ```bash
-  <coreCli> scaffold remove --plugin _local --registry <regPath>
+  "${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold remove --plugin _local --registry <regPath>
   ```
 
   Capture JSON output. On `error` → FAIL.
@@ -218,7 +218,7 @@ Remove the key `.claude/templates/<group>/<kind>-template.md` from the map.
 - If the map still has entries → write the reduced map to `~/tmp/scaffold-local-entries-<timestamp>.json`, then:
 
   ```bash
-  <coreCli> scaffold upsert --plugin _local --entries @~/tmp/scaffold-local-entries-<timestamp>.json --registry <regPath>
+  "${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold upsert --plugin _local --entries @~/tmp/scaffold-local-entries-<timestamp>.json --registry <regPath>
   ```
 
   Capture JSON output. On `error` → FAIL.
@@ -244,7 +244,7 @@ AskUserQuestion: header "Delete template file", question "Also delete the now-un
 Run:
 
 ```bash
-<coreCli> scaffold validate --registry <regPath>
+"${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold validate --registry <regPath>
 ```
 
 Parse the JSON output. Surface any `WARN` findings (e.g. `glob_overlap`) to the operator:

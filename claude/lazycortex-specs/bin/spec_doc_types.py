@@ -53,7 +53,6 @@ class DocTypeFlag:
     APPEND_ONLY: Whether the file may only be appended to, never rewritten.
     ICON: Iconize icon name a document of the type is seeded with at creation.
     COLOR: Optional iconize colour paired with the icon.
-    TEMPLATE: Optional filename of the type's linear template.
   """
 
   STAGES = "stages"
@@ -61,7 +60,6 @@ class DocTypeFlag:
   APPEND_ONLY = "append_only"
   ICON = "icon"
   COLOR = "color"
-  TEMPLATE = "template"
 
 
 # ----------------------------------------------------------------------------------------
@@ -466,10 +464,6 @@ def _rename_declaration(old: str, new: str) -> bool:
   """
   Rename one type's key in the shipped declaration file, leaving its flags untouched.
 
-  The `template` field is a filename rather than a flag: when it names the retired type's own
-  template, it follows the file `_rename_template` moves, so the declaration never points at a
-  template that is no longer there.
-
   Args:
     old: The type name being retired.
     new: The type name replacing it.
@@ -484,8 +478,6 @@ def _rename_declaration(old: str, new: str) -> bool:
   if old not in declared:
     return False
   moved = dict(declared[old])
-  if moved.get(DocTypeFlag.TEMPLATE) == f"{old}{_MD_SUFFIX}":
-    moved[DocTypeFlag.TEMPLATE] = f"{new}{_MD_SUFFIX}"
   data[_K.DOC_TYPES] = { (new if name == old else name): (moved if name == old else decl)
                          for name, decl in declared.items() }
   path.write_text(json.dumps(data, indent = 2, ensure_ascii = False) + "\n", encoding = _K.ENCODING)
@@ -571,11 +563,12 @@ def _rename_template(old: str, new: str) -> bool:
 
 def _rename_copies(repo: Path, old: str, new: str) -> int:
   """
-  Rename every per-category template copy of one type, in the plugin tree and the repo overrides.
+  Retype every template of one type across the `spec.*` families, in the plugin tree and the repo overrides.
 
-  Template resolution asks for a file named after the type across the `spec.*` override chain, so
-  a copy left under the retired name silently stops resolving and the seed falls back to the
-  linear base. Each moved copy's own `spec_doc_type` / `spec_role` values follow the rename.
+  A template named after the type moves to the new name, its own `spec_doc_type` / `spec_role`
+  values following, so a document seeded by that name still finds it. A template under any
+  other filename that declares the retired type (`spec.research/design.md` for `research-design`)
+  keeps its filename and is retyped in place.
 
   Args:
     repo: Repository root holding the `.claude/templates/` override tree.
@@ -583,11 +576,9 @@ def _rename_copies(repo: Path, old: str, new: str) -> int:
     new: The type name replacing it.
 
   Returns:
-    The number of copy files renamed. The linear `spec.docs` template in the plugin tree is
-    counted by `_rename_template`, never here — but a consumer's own linear override at
-    `.claude/templates/spec.docs/<type>.md` has no `_rename_template` counterpart, so this
-    function renames it and counts it like any other copy. A copy whose target name already
-    exists is skipped and not counted.
+    The number of template files moved or retyped in place. The plugin's own linear
+    `spec.docs/<old>.md` is `_rename_template`'s and is not counted here; every other file is.
+    A move whose target name already exists is skipped and not counted.
   """
   plugin_templates = _plugin_root() / _K.TEMPLATES_DIR
   count = 0
@@ -600,16 +591,24 @@ def _rename_copies(repo: Path, old: str, new: str) -> int:
       # guard: only spec.* families hold per-type copies, nested per-product layers included
       if not parts or not parts[0].startswith(_SPEC_TMPL_PREFIX):
         continue
-      # guard: the linear plugin dir is _rename_template's, never a copy
-      if root == plugin_templates and parts[0] == _K.DOC_TEMPLATES_DIR:
-        continue
-      # guard: this family carries no copy under the retired name
-      if f"{old}{_MD_SUFFIX}" not in filenames:
-        continue
-
-      # move the copy to the new name, its own frontmatter keys following
-      if _move_retyped(Path(dirpath) / f"{old}{_MD_SUFFIX}", Path(dirpath) / f"{new}{_MD_SUFFIX}", old, new):
-        count += 1
+      for filename in sorted(filenames):
+        # guard: only markdown templates carry a type
+        if not filename.endswith(_MD_SUFFIX):
+          continue
+        path = Path(dirpath) / filename
+        # a copy named after the retired type moves, its own frontmatter keys following
+        if filename == f"{old}{_MD_SUFFIX}":
+          # guard: the plugin's linear file is _rename_template's move, never counted twice
+          if root == plugin_templates and parts[0] == _K.DOC_TEMPLATES_DIR:
+            continue
+          if _move_retyped(path, path.with_name(f"{new}{_MD_SUFFIX}"), old, new):
+            count += 1
+          continue
+        # a template under another filename that declares the retired type is retyped in place
+        updated, typed, roled = _retype_frontmatter(path.read_text(encoding = _K.ENCODING), old, new)
+        if typed or roled:
+          path.write_text(updated, encoding = _K.ENCODING)
+          count += 1
   return count
 
 
@@ -684,9 +683,9 @@ def rename(repo: Path, old: str, new: str) -> dict:
   Returns:
     `{"declaration": bool, "docs": N, "files": M, "template": bool, "classes": K, "copies": C,
     "roles": R}` — whether the declaration moved, how many documents were retyped, how many
-    were also renamed on disk, whether a template moved, how many review classes followed,
-    how many per-category template copies were renamed, and how many documents had their
-    `spec_role` rewritten.
+    were also renamed on disk, whether the linear template moved, how many review classes
+    followed, how many other template files were moved or retyped in place, and how many
+    documents had their `spec_role` rewritten.
   """
   # Contract: idempotent, commit-free, and overwrite-free — a second run finds nothing under the
   # retired name and reports zero in every counter, and nothing is ever staged or committed:

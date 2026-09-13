@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about setting up scopes, running relinks, mirroring foreign repos, querying the wiki, the terms dictionary, the structure map, the domain-spec tree, and the tag-values canon.
-last_regen: 2026-09-11
+last_regen: 2026-09-13
 no_diagram: true
 source_skills:
   - lazy-wiki.install
@@ -13,7 +13,7 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: fc47aeeb8c042b2968809c8cef31d078ec76efaf
+source_sha: 9fef3719f81552fe26c4b661a252c8abb88120d3
 ---
 # Frequently asked questions
 

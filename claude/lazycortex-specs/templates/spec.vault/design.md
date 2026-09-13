@@ -12,13 +12,16 @@ spec_stage: draft
 spec_source_requests: []
 spec_source_docs: []
 ---
-# {{product}} — design
+# {{project}} — design
 
 ## Overview
-<!-- Opens with a reference to the sibling vision (goals and value live there, never here). What the system is and why it exists. -->
+<!-- Opens with a reference to the sibling vision (goals and value live there, never here). What the project is and why it exists. -->
 
 ## Design
 <!-- "Important, expensive, large scale or risky architecture decisions including rationales. With 'decisions' we mean selecting one alternative based on given criteria." — arc42 §9 Architecture Decisions -->
+
+## Products
+<!-- "The building block view shows the static decomposition of the system into building blocks (modules, components, subsystems, classes, interfaces, packages, libraries, frameworks, layers, ...) as well as their dependencies." — arc42 §5 Building Block View -->
 
 ## Behavior
 <!-- "The runtime view describes concrete behavior and interactions of the system's building blocks in form of scenarios." — arc42 §6 Runtime View -->

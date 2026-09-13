@@ -37,7 +37,7 @@ Asset types are an **open set**, declared rather than enumerated. Two layers dec
 - **Shipped**: the plugin, in `references/lazy-spec.asset-types.json` — five spawnable types, `feature`, `change`, `bug`, `content`, `research`, with default paths `features/` / `changes/` / `bugs/` / `content/` / `research/`. The same file also carries the `catalog` and `product` level entries: they have no `default_path`, nothing spawns into them, and they exist only to give a level note its icon and its playbook.
 - **Operator-defined**: a product, under `products[<key>].asset_types` in `.claude/lazy.settings.json` — merged over the shipped set key-by-key, so a product may replace one field of a shipped type without restating the rest.
 
-A declaration carries `{ icon, color?, playbook, alias_of?, default_path?, start_doc, default_tools?, vision? }`. `vision` is the asset-level vision contract — `mandatory` (the coordinator seeds and starts `vision.md` itself on a fresh asset, before the start document), `opt-in` (a `Write vision` launch checkbox), or `none` (the doc is illegal on the type); shipped defaults: `feature` mandatory, `change` opt-in, `bug` none, `content` and `research` opt-in; an undeclared field reads as `opt-in`. `start_doc` is the `"<file>:<doc_type>"` token naming the one document a fresh asset of the type is seeded with; `playbook` is the reference `spec.coordinator` loads on every wake of an asset of the type; `alias_of` names a base type whose playbook this one borrows when it declares none of its own — the folder, icon, colour, start document and tools stay the alias's own, and aliases never chain.
+A declaration carries `{ icon, color?, playbook, alias_of?, default_path?, start_doc, default_tools?, vision? }`. `vision` is the asset-level vision contract — `mandatory` (the coordinator seeds and starts `vision.md` itself on a fresh asset, before the start document), `opt-in` (a `Write vision` launch checkbox), or `none` (the doc is illegal on the type); shipped defaults: `feature` mandatory, `change` and `content` opt-in, `bug` and `research` none; an undeclared field reads as `opt-in`. `start_doc` is the `"<file>:<doc_type>"` token naming the one document a fresh asset of the type is seeded with; `playbook` is the reference `spec.coordinator` loads on every wake of an asset of the type; `alias_of` names a base type whose playbook this one borrows when it declares none of its own — the folder, icon, colour, start document and tools stay the alias's own, and aliases never chain.
 
 A type declared via `/lazy-spec.add-asset-type` is recognised by `lazy-spec.create-asset`, `lazy-spec.request-classify`, the coordinator, and the review daemon on their next run without a rubric or code edit. The skill writes the declaration and nothing else: **no folder is created on disk**, no folder-note is rendered, and no templates are seeded — the type's folder appears the first time an asset of it is scaffolded, and the operator-zone folder-note is theirs to author. Its design / code-plan / test-plan docs are covered by the shared behavior-keyed review classes (right-anchored `*/design.md` / `*/code-plan.md` / `*/test-plan.md` globs) — no per-type class is created.
 
@@ -46,7 +46,7 @@ An asset folder is `<spec_path>/<folder>/<slug>/`, where `<folder>` is the type'
 - the status folder-note `<slug>.md` (`spec_role: status`, flat gates, `spec_asset_type` — see [status-note](./lazy-spec.status-note-protocol.md) Part 4 and [lifecycle](./lazy-spec.lifecycle-protocol.md));
 - the document named by the type's `start_doc` — `design.md` for the shipped `feature` / `change` / `content` types and for `research` (typed `research-design` there), `bug.md` for `bug`. There is no default layout: a type with no `start_doc` cannot be scaffolded at all;
 - optionally `architecture.md` — feature/change layout only, NEVER on a bug; opt-in on disk the same way as `code-plan.md` / `test-plan.md`, but its existence tracks a coordinator judgment (code-bearing asset) rather than free operator choice — see [coordination-playbook](./lazy-spec.coordination-playbook.md) Chapter 3 and Chapter 8;
-- `vision.md` per the asset type's `vision` contract — mandatory on a feature (the coordinator seeds and starts it before `design.md`; the `Write design` row waits for its approve), opt-in on a change, on `content`, and on `research` (`Write vision` checkbox, window closes with `spec_design_done`), never on a bug;
+- `vision.md` per the asset type's `vision` contract — mandatory on a feature (the coordinator seeds and starts it before `design.md`; the `Write design` row waits for its approve), opt-in on a change and on `content` (`Write vision` checkbox, window closes with `spec_design_done`), never on a bug or a research;
 - optionally `use-cases.md` and/or `ui-design.md` — feature/change layout only, NEVER on a bug; opt-in the same way as `code-plan.md` / `test-plan.md`, each created only once its launch checkbox is ticked or the product or asset declares it mandatory — see the [feature](./lazy-spec.feature-playbook.md) and [change](./lazy-spec.change-playbook.md) playbooks;
 - optionally `code-plan.md` and/or `test-plan.md` — opt-in, scaffolded only when explicitly authored, never seeded by `lazy-spec.create-asset`;
 - optionally `code-report.md` and/or `test-report.md` — opt-in append-only execution journals, carrying no `spec_stage` and no role in any gate;
@@ -79,33 +79,27 @@ Product and asset-type folder-note **bodies are operator-zone**: the plugin does
 
 ### Template storage (per-file + per-product)
 
-Doc templates come from a **linear per-doc-type base** plus **per-asset-type specialisations**. `spec.docs/` holds one template per shipped document type and serves every asset type; a `spec.<type>/` folder carries only the structural notes that asset type owns (`asset-note.md`, `group-note.md`) plus the doc templates that genuinely diverge from the base. An asset type needs no template of its own to scaffold a document — the bases cover it — and an edit to a specialisation never affects another type:
+Doc templates come from a **linear base keyed on filename** plus **per-context specialisations**. `spec.docs/` holds one template per document filename and serves every context; a `spec.<context>/` folder — an asset type, `product`, or `vault` — carries the structural notes that context owns (`asset-note.md`, `group-note.md`, `level-note.md`) plus the documents that genuinely differ from the base under the same filename. A document's type is what its template declares in `spec_doc_type`; no declaration names a template file. An asset type needs no template of its own to scaffold a document — the bases cover it — and an edit to a specialisation never affects another context:
 
 ```
 .claude/templates/
-├── spec.docs/                                   ← LINEAR BASE: one template per shipped doc type, serves every asset type
-│   ├── vision.md
-│   ├── use-cases.md
-│   ├── design.md
-│   ├── ui-design.md
-│   ├── architecture.md
-│   ├── code-plan.md
-│   ├── test-plan.md
-│   ├── code-report.md
-│   ├── test-report.md
+├── spec.docs/                                   ← LINEAR BASE: one template per filename, shared by every context
+│   ├── vision.md  use-cases.md  design.md  ui-design.md  architecture.md
+│   ├── code-plan.md  test-plan.md  code-report.md  test-report.md
 │   ├── bug.md
-│   ├── research-design.md                       ← research asset start doc: <slug>/design.md typed research-design
-│   ├── research.md                              ← the research tool's report, typed research-report
-│   ├── system-vision.md                         ← product-level <product>/vision.md
-│   ├── system-design.md                         ← product-level <product>/design.md
-│   ├── system-tech.md                           ← product-level <product>/tech.md
-│   ├── vault-vision.md                          ← content-root vision.md
-│   ├── vault-design.md                          ← content-root design.md
-│   └── vault-tech.md                            ← content-root tech.md
+│   └── research.md                              ← the research tool's report, typed research-report
+├── spec.research/                               ← shipped research type
+│   └── design.md                                ← <slug>/design.md typed research-design (the base design.md is another document)
 ├── spec.product/                                ← product-level docs (at the product root) + the level folder-note
-│   ├── design.md                                ← specialisation: <product>/design.md diverges from the base
+│   ├── vision.md                                ← <product>/vision.md typed system-vision
+│   ├── design.md                                ← <product>/design.md typed system-design
+│   ├── tech.md                                  ← <product>/tech.md typed system-tech
 │   ├── level-note.md                            ← <product>.md level folder-note; `catalog-note backfill` renders it, at a product root and at the catalog root alike
 │   └── group-note.md                            ← group folder-note skeleton (product is the "group" of its asset types)
+├── spec.vault/                                  ← catalog-root docs; falls through to spec.product/ for the level note
+│   ├── vision.md                                ← content-root vision.md typed system-vision
+│   ├── design.md                                ← content-root design.md typed system-design
+│   └── tech.md                                  ← content-root tech.md typed system-tech
 ├── spec.feature/                                ← shipped feature type — no doc specialisations, rides the base
 │   ├── asset-note.md                            ← <slug>/<slug>.md asset status folder-note (gates + # History)
 │   └── group-note.md                            ← features/features.md type folder-note (operator-zone)
@@ -133,19 +127,26 @@ Naming convention inside an asset-type template folder:
 - **`level-note.md`** (`spec.product/` only) — the folder-note for a LEVEL: a product root (`<product>.md`) or the catalog root. Carries `spec_role: product` / `catalog`, the four level gates, `# Gates`, `# Status brief`, `# History`. Plugin-managed, and never instantiated by a scaffold — the `catalog-note backfill` verb owns it ([status-note](./lazy-spec.status-note-protocol.md) Part 4b).
 - The named docs (`design.md`, `bug.md`, `tech.md`, `code-plan.md`, `test-plan.md`, `code-report.md`, `test-report.md`) — authored content the operator + lazy-review experts fill in.
 
-**An operator-defined type ships no template folder, and none is seeded for it.** `/lazy-spec.add-asset-type` writes the type's declaration and stops — it copies no files into `.claude/templates/spec.<name>/`. A type with no folder of its own resolves every document from the plugin's linear base (`spec.docs/`) and its status folder-note from the type-agnostic base (`spec.asset/`), which is why a type needs no template to be scaffoldable. An operator who wants a specialisation creates `.claude/templates/spec.<name>/` by hand and drops in the files to override — the resolver picks them up on the next scaffold, with no registration step.
+**An operator-defined type ships no template folder, and none is seeded for it.** `/lazy-spec.add-asset-type` writes the type's declaration and stops — it copies no files into `.claude/templates/spec.<name>/`. A type with no folder of its own resolves every document from the plugin's linear base (`spec.docs/`) and its status folder-note from the type-agnostic base (`spec.asset/`), which is why a type needs no template to be scaffoldable. An operator who wants a specialisation creates `.claude/templates/spec.<name>/` by hand and drops in the files to override — the resolver picks them up on the next scaffold, with no registration step. A specialisation declares the same `spec_doc_type` the type's `start_doc` names; a file of another type under that name is refused.
 
 Diagram exemplars are owned by the `lazycortex-diagram:lazy-diagram.draw` engine (shipped by the lazycortex-diagram plugin), and this template tree has no say in them. There is **no per-product diagram-exemplar override**: the drawer's input list carries no override key, and its mermaid writer resolves each kind's exemplar from the diagram plugin's own template directory. A product that needs a different diagram house style changes the exemplar the diagram plugin ships; nothing under `.claude/templates/` is consulted for it.
 
-**Template resolution (5-layer fallback).** When `lazy-spec.create-asset` scaffolds an asset, it resolves each template file in this order, first hit wins:
+**Template resolution (context plus filename).** When a document is seeded — by `lazy-spec.create-asset`, `seed-doc`, or `catalog-note backfill` — the lookup key is the context the document is created in and its own filename, in this order, first hit wins:
 
-1. **Per-product override** — `.claude/templates/spec.<type>/<compound-key>/<file>.md` (operator-authored variant for one specific product; compound-key matches the product's settings key).
-2. **Consumer type baseline** — `.claude/templates/spec.<type>/<file>.md` (the type-level baseline in the consumer vault — where an operator's own specialisations live, for a shipped type and an operator-defined one alike).
-3. **Plugin type baseline** — `${CLAUDE_PLUGIN_ROOT}/templates/spec.<type>/<file>.md` (the plugin-shipped per-type specialisation; exists only where a shipped type genuinely diverges from the bases). Absent for operator-defined types, and for most shipped doc templates too — layers 4 and 5 cover them.
-4. **Plugin linear base** — `${CLAUDE_PLUGIN_ROOT}/templates/spec.docs/<file>.md`, one template per shipped document type. Any per-type or per-product override of the same filename still wins over it; it exists so a type needs no doc template of its own.
-5. **Plugin type-agnostic base** — `${CLAUDE_PLUGIN_ROOT}/templates/spec.asset/<file>.md`, the structural notes (`asset-note.md`) that are byte-identical across types. The LAST layer.
+1. **Per-product override** — `.claude/templates/spec.<context>/<compound-key>/<file>.md` (operator-authored variant for one specific product; compound-key matches the product's settings key; the `vault` context has no product layer).
+2. **Consumer context baseline** — `.claude/templates/spec.<context>/<file>.md` (the context-level baseline in the consumer vault — where an operator's own specialisations live, for a shipped type and an operator-defined one alike).
+3. **Plugin context baseline** — `${CLAUDE_PLUGIN_ROOT}/templates/spec.<context>/<file>.md` (the plugin-shipped specialisation; exists only where a context genuinely diverges from the base — `spec.research/design.md`, the three `spec.product/` and `spec.vault/` documents, the `spec.change/` and `spec.bug/` files).
+4. **Consumer linear base** — `.claude/templates/spec.docs/<file>.md` (one consumer file for every context that has no specialisation of that filename above it).
+5. **Plugin linear base** — `${CLAUDE_PLUGIN_ROOT}/templates/spec.docs/<file>.md`, one template per document filename. Any context or per-product override of the same filename still wins over it; it exists so a context needs no doc template of its own.
+6. **Plugin type-agnostic base** — `${CLAUDE_PLUGIN_ROOT}/templates/spec.asset/<file>.md`, the structural notes (`asset-note.md`) that are byte-identical across types. The LAST layer.
 
-When the type declares an `alias_of`, the base type's own three layers (1–3) are consulted after the alias's own three and before layer 4 — an alias-local template outranks every base layer, not only the layer matching its own.
+**Type check.** After the first hit, the resolver reads the file's own `spec_doc_type` and compares it with the type the caller expects (the type half of `start_doc` / `--doc <name>:<type>`). A file declaring another type is a `logical` refusal naming the file, its type and the expected one — a base `design.md` never stands in for a product's or a research asset's design silently. A file declaring no type (a consumer override written before typing landed) is accepted, and the caller stamps the expected type into the seeded document.
+
+`<specs-cli>` stands for the specs plugin's `bin/lazycortex-specs` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-specs/<version>/`, or `claude/lazycortex-specs/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+
+**A custom filename resolves by type.** A document may carry any name (`notes.md` typed `design`); when no layer holds that filename, the resolver walks the same layers again and takes the first template whose `spec_doc_type` is the expected type. `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> template resolve --context <ctx> [--product <key>] [--type <t>] <file>` prints the chosen file, its type and its layer — the one way a skill asks for a template path.
+
+When the type declares an `alias_of`, the base type's own three layers (1–3) are consulted after the alias's own three and before layer 4 — an alias-local template outranks every base layer, not only the layer matching its own. The `vault` context falls through to `product` the same way, which is how the two levels share one `level-note.md`.
 
 There is no settings field for this — folder + file presence is the single signal at each layer.
 

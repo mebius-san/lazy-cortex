@@ -49,6 +49,8 @@ _SETTINGS_FILES = (".claude/settings.json", ".claude/settings.local.json")
 _ENABLED_PLUGINS = "enabledPlugins"
 # waiver: external Claude Code manifest field names, not internal keys
 _INSTALL_PATH = "installPath"
+# waiver: external Claude Code manifest field name, not an internal key
+_VERSION = "version"
 # waiver: repo layout of a plugin-authoring vault, not a reusable domain key
 _DEV_ROOT, _DEV_MANIFEST = "claude", ".claude-plugin/plugin.json"
 # waiver: plugin layout, not a reusable domain key
@@ -122,22 +124,34 @@ def read_install_paths(home: Path) -> dict[str, Path]:
     home: Home directory holding `.claude/plugins/installed_plugins.json`.
 
   Returns:
-    Plugin name to the last recorded `installPath`; plugins with no record are absent.
+    Plugin name to the `installPath` of its highest recorded version; plugins with no record are absent.
   """
   # the registry nests its map under `plugins` in newer files and is the map itself in older ones
   data = _read_json(home / _INSTALLED_PLUGINS_REL)
   # waiver: external Claude Code manifest field name, not an internal key
   plugins = data.get("plugins", data)
 
-  # the last well-formed record wins — any entry resolves the same per-version cache path
+  # the highest recorded version wins — records differ by version, each naming its own cache dir,
+  # and the registry keeps a stale record for every project that last installed an older one
   out: dict[str, Path] = {}
   for key, entries in plugins.items():
-    paths = [
-        str(rec[_INSTALL_PATH]) for rec in entries or [] if isinstance(rec, dict) and rec.get(_INSTALL_PATH)
-    ]
-    if paths:
-      out[key.split("@", 1)[0]] = Path(paths[-1])
+    records = [ rec for rec in entries or [] if isinstance(rec, dict) and rec.get(_INSTALL_PATH) ]
+    if records:
+      out[key.split("@", 1)[0]] = Path(str(max(records, key = _version_key)[_INSTALL_PATH]))
   return out
+
+
+def _version_key(record: dict) -> tuple[int, ...]:
+  """
+  Order a registry record by its recorded version.
+
+  Args:
+    record: One `installed_plugins.json` record.
+
+  Returns:
+    The dotted version as integers; a missing or non-numeric segment counts as 0.
+  """
+  return tuple(int(part) if part.isdigit() else 0 for part in str(record.get(_VERSION, "")).split("."))
 
 
 def find_dev_plugins(repo: Path) -> dict[str, Path]:

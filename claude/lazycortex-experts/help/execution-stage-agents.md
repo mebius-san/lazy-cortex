@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Six execution-stage agents that carry an implementation plan or an approved design into code, data, or docs, plus a standalone literary agent.
-last_regen: 2026-09-11
+last_regen: 2026-09-13
 diagram_spec:
   anchor: "The execution-stage lineup"
   request: "Flow diagram with two subgraphs. 'Execution-stage' contains six nodes left-to-right: Implementer, Data Implementer, Docs Writer, Debugger, Reviewer, Tester — no mandatory ordering edges between them. 'Literary' contains one standalone node, Fiction Writer, with no edges to or from any other node. A dashed edge labelled 'implementation plan' arrives at Implementer from outside the subgraph (source: Planner, upstream). A dashed edge labelled 'approved design' arrives at Data Implementer from outside the subgraph (source: Designer, upstream), and another dashed edge labelled 'approved design' arrives at Docs Writer from the same outside source. Do not add a dispatching-routine node and do not fan any protocol edges out to the agents — keep this to the seven nodes plus the two upstream source labels."
@@ -13,7 +13,7 @@ source_skills:
   - lazy-experts.reviewer
   - lazy-experts.tester
   - lazy-experts.fiction-writer
-source_sha: 5745ae1a08dafec458ccc19d9c810a13a8974fa3
+source_sha: 183a0cb4d191ceb89a9670c24d9a6c0228bb8364
 ---
 # Execution-stage agents
 

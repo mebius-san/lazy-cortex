@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Seven agents that turn a raw request into a scoped design, formal use cases, an optional UI, a code-structure design, a sourced research report, and an ordered implementation plan.
-last_regen: 2026-09-11
+last_regen: 2026-09-13
 diagram_spec:
   anchor: "The design-time pipeline"
   request: "Flow diagram, five nodes in a line: Interpreter -> Use-Case Writer -> Designer -> Architect -> Planner, edges labeled 'brief', 'use cases', 'design spec', 'architecture doc (optional)'. UI Designer hangs off Designer with a single edge labeled 'approved design' (UI Designer has no edge to Architect or Planner). No other nodes."
@@ -13,7 +13,7 @@ source_skills:
   - lazy-experts.architect
   - lazy-experts.planner
   - lazy-experts.researcher
-source_sha: fc47aeeb8c042b2968809c8cef31d078ec76efaf
+source_sha: bf75c7aedc4a025e38fe7de10638c617e2a925c1
 ---
 # Design-time agents
 
@@ -31,7 +31,7 @@ Before any code, data, or documentation gets written, seven agents turn a raw re
 
 **lazy-experts.architect** — Takes an approved design — behavior already settled, never an open brief — and writes an architecture document: which modules exist, which way the dependencies point, what is public contract versus internal, what data has to migrate, and what it costs to callers that already exist. It grounds every boundary in the project's actual structure map before naming one, and classifies every touched unit as a subsystem (its own contract, state, and lifecycle) or plain service code. A document that names modules without naming the dependency direction between them, or changes stored data without naming the migration, is incomplete.
 
-**lazy-experts.researcher** — Takes an approved research design — a `design.md` typed `research-design` that states the question — and writes the research report beside it: every route it walked (the spec tree, the code, the structure map, and the wiki before it turns to the open web), a finding for every claim with the exact source it came from, the options compared when the question is one of choice, and a conclusion whose first sentence answers the question and whose second states outright whether the design's hypothesis held. Fact and interpretation never share a sentence, and a finding without a named source doesn't make it into the report. It also validates a research design during review, judging only whether the question is answerable as posed — one question, a bounded scope, a sourced known part — never doing the research itself at that stage.
+**lazy-experts.researcher** — Takes an approved research design — a `design.md` typed `research-design` that states the questions — and writes the research report beside it: every route it walked (the spec tree, the code, the structure map, and the wiki before it turns to the open web), a finding for every claim with the exact source it came from, the options compared when a question is one of choice, and a conclusion that answers each question in turn and states outright whether its hypothesis held. Fact and interpretation never share a sentence, and a finding without a named source doesn't make it into the report. It also validates a research design during review, judging only whether each question is answerable as posed — none hiding a second one with its own scope, a bounded scope, a sourced known part — never doing the research itself at that stage.
 
 **lazy-experts.planner** — Takes a design spec and produces an ordered implementation plan at file-level granularity. Every task names the exact files it touches before the steps begin, so the working-tree diff is predictable from the task header alone. Every plan includes a test command with expected output and a rollback procedure — a plan lacking either is, by the planner's own standard, incomplete. It translates decisions rather than making them: an underspecified spec gets a callout, never a guess, and no placeholder ever appears in a finished plan.
 
@@ -45,7 +45,7 @@ Two things can branch off an approved design spec, independently of each other. 
 
 Finally, your routine dispatches the planner with the design spec (and the architecture document, when one exists) and a protocol; the planner writes the ordered task list, test plan, and rollback procedure that hands off to the execution-stage agents.
 
-The researcher runs on a separate track that starts from a question rather than a feature. When a research asset's design document is approved — typed `research-design`, stating the question, scope, and what's already known — your routine dispatches the researcher; it walks the spec tree, the code, the structure map, and the wiki before turning to the open web, and writes the sourced `research.md` report beside it: every route walked, a finding for every claim with its exact source, the options compared when the question is a choice, and a conclusion whose first sentence answers the question and whose second states outright whether the hypothesis held. It also validates a research design during review, judging only whether the question is answerable as posed. An approved research report is immutable and doesn't feed forward into the designer or the planner the way the rest of the pipeline does — it exists to inform whichever decision sent someone looking for an answer.
+The researcher runs on a separate track that starts from a question rather than a feature. When a research asset's design document is approved — typed `research-design`, stating the questions, scope, and what's already known — your routine dispatches the researcher; it walks the spec tree, the code, the structure map, and the wiki before turning to the open web, and writes the sourced `research.md` report beside it: every route walked, a finding for every claim with its exact source, the options compared when a question is a choice, and a conclusion that answers each question in turn and states outright whether its hypothesis held. It also validates a research design during review, judging only whether each question is answerable as posed. An approved research report is immutable and doesn't feed forward into the designer or the planner the way the rest of the pipeline does — it exists to inform whichever decision sent someone looking for an answer.
 
 Each of the seven is independently dispatchable. If you already have a well-formed brief and want formal scenarios, dispatch the use-case writer directly. If you already have a settled brief and want to jump straight to design, dispatch the designer. If behavior is already decided and only the interface is open, dispatch the UI designer directly. If behavior is decided and only the code's shape is open, dispatch the architect directly with the design spec. If a question just needs an answer, dispatch the researcher directly with the approved research design. The five-stage sequence above is a convention, not a constraint.
 

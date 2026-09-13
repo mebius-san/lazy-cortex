@@ -1,13 +1,13 @@
 ---
 chapter_type: block
 summary: Assign model tiers to every agent, prune dead entries, and register non-Anthropic provider endpoints for expert jobs to spawn against.
-last_regen: 2026-09-11
+last_regen: 2026-09-13
 no_diagram: true
 source_skills:
   - lazy-core.agent-models
   - lazy-core.agent-models-seed
   - lazy-core.providers
-source_sha: 184997801e1412d5c2c6617e1649a1bb615298a9
+source_sha: 9fef3719f81552fe26c4b661a252c8abb88120d3
 ---
 # Per-agent model routing
 
@@ -33,7 +33,7 @@ A related registry sits next to the wizard. `/lazy-core.providers` manages named
 
 Run `/lazy-core.agent-models`. The skill loads the `agent_models` sections from both your global `~/.claude/lazy.settings.json` and the project `./.claude/lazy.settings.json`, merges them into a single lookup, and discovers every dispatchable agent across your vault — Claude Code built-ins (`Explore`, `Plan`, `general-purpose`, `statusline-setup`), globally-authored agents under `~/.claude/agents/`, project-local agents under `./.claude/agents/`, and plugin-shipped agents from the plugin cache. Any agent whose dispatch string already appears in the merged lookup — including those explicitly set to `default` — is considered decided and stays out of the wizard. An entry can look like either a bare tier string or a small object recording the tier plus the shipped default it was seeded from — install writes the object form, this wizard always writes bare strings when you make a choice here — but both forms count as decided the same way, so an install-seeded entry never resurfaces in the wizard just because it isn't a plain string. The distinction matters beyond the wizard, too: a seeded object left untouched can still change tier on its own the next time the plugin installs (see "Relationship to install" below), while a bare string — your pin, whether you set it here or hand-edited a seeded entry — never does.
 
-Plugin-shipped agents are filtered by install scope before they ever reach the missing list. The plugin cache on your machine is shared across every project, so the wizard only counts an agent from a plugin installed at user (global) scope, or installed at project scope for this exact repo. An agent belonging to a plugin some other project installed locally never surfaces here — so it can't get stuck popping up as "needs interactive" in every unrelated repo you happen to run this wizard in.
+Plugin-shipped agents pass through two filters before they ever reach the missing list. First, an install-scope filter: the plugin cache on your machine is shared across every project, so the wizard only counts an agent from a plugin installed at user (global) scope, or installed at project scope for this exact repo. An agent belonging to a plugin some other project installed locally never surfaces here — so it can't get stuck popping up as "needs interactive" in every unrelated repo you happen to run this wizard in. Second, an enablement filter: a plugin that is installed but currently disabled in this repo's settings (`enabledPlugins` in `.claude/settings.json` or `.claude/settings.local.json`) is dropped too. The install record only says where a plugin was ever installed, not whether this repo still wants it running — without this second filter, a plugin you disabled after installing it would keep having its agents seeded back into the missing list on every run.
 
 The remaining agents surface in three ordered batches. The first covers built-ins and agents from LazyCortex plugins that ship a curated tier table. For these the wizard already knows the right tier: `Explore` routes to haiku (fast, cheap navigation), `Plan` to opus (deliberate multi-step reasoning), review dispatchers and log taggers to haiku, and synthesis agents to sonnet. The second batch covers any other plugin agents not in the curated table. The third batch covers your own project agents. Each batch is a single prompt: accept all suggestions, review each agent individually, mass-set the whole batch to `default`, or skip it for now.
 
@@ -74,6 +74,8 @@ Assigning a provider to a specific expert is a separate, content-level decision 
 **After an automated rollout.** If a repo was brought current by `lazy-core.autosetup` rather than by you running the install chain by hand, expect only the curated-default agents to already have tiers. Run `/lazy-core.agent-models` yourself afterward to finish routing the rest — it picks up exactly where the automated run left off.
 
 **After removing a plugin agent.** Nothing to do by hand — the next run of `/lazy-core.agent-models` prunes that agent's now-dead tier automatically and lists it in the report as pruned, naming which of the two proofs retired it (the agent dropped from a still-installed plugin, or the plugin itself gone from every marketplace). If the report also warns that an expert still references the removed agent, update that expert's `agent` field yourself; the wizard reports the warning but will not edit your expert config. Uninstalling a plugin that another marketplace still lists does not prune its entries — you might reinstall it, so its tiers wait until the plugin is truly gone.
+
+**After disabling a plugin without uninstalling it.** Nothing to do by hand either — the wizard's enablement filter keeps that plugin's agents out of the missing list for as long as it stays disabled in this repo's settings, without pruning its already-written tiers (it might come back).
 
 **Working across multiple projects.** If the same plugin is installed project-locally in more than one repo, its agents only surface in the wizard for the repo where that install happened — the install-scope filter keeps a project-scoped plugin's agents from bleeding into an unrelated repo's wizard run. Installing the plugin at user (global) scope instead makes its agents visible everywhere in one pass.
 

@@ -8,13 +8,13 @@ The tool is declared in the shipped tool registry as `research`, carrying `playb
 
 ## What the tool delivers
 
-The deliverable of `research` is **the research report itself** — `research.md`, `spec_doc_type: research-report`, role `research`, in the asset's folder. Unlike the journals of `code`, `data`, `test` and `docs`, this report is not a log of work done elsewhere: it is the answer to the research design's question, and it is content of the catalog. It carries a stage, it is reviewed and approved like any authored document, it enters the wiki once approved, and it is never listed among the wiki's excluded journals.
+The deliverable of `research` is **the research report itself** — `research.md`, `spec_doc_type: research-report`, role `research`, in the asset's folder. Unlike the journals of `code`, `data`, `test` and `docs`, this report is not a log of work done elsewhere: it is the answer to the research design's questions, and it is content of the catalog. It carries a stage, it is reviewed and approved like any authored document, it enters the wiki once approved, and it is never listed among the wiki's excluded journals.
 
 `research` is a non-test tool: its contribution counts toward `spec_develop_done`, never toward `spec_tests_passing`.
 
 ## The plan
 
-**This tool has no plan.** The approved research design already states the question, the scope and the approach; a separate approvable plan would only add a round of acceptance. From this tool's side `spec_plan_done` always reads ready, by absence.
+**This tool has no plan.** The approved research design already states the questions, the scope and the approach; a separate approvable plan would only add a round of acceptance. From this tool's side `spec_plan_done` always reads ready, by absence.
 
 ## The implementation checkbox
 
@@ -38,7 +38,7 @@ The source of this tool's report is `design.md` (typed `research-design`). When 
 
 ## The acceptance cycle
 
-Review of `research.md` is acceptance of **the answer**: is the question answered, is every finding sourced, does the conclusion rule on the hypothesis, do the options score against the design's criteria.
+Review of `research.md` is acceptance of **the answer**: is every question answered, is every finding sourced, does the conclusion rule on each hypothesis, do the options score against the design's criteria.
 
 - A reviewer's comment means "research further and rewrite": the researcher walks the missing route, fixes the finding, rewrites the section. The report is a stage-bearing document, not a journal — it is edited in place, never appended to.
 - A finding that contradicts the research design (the question was two questions, the scope excluded the decisive route) is not fixed in the report: it is raised as a `[!question]` on the design, and the design goes back through its own review.
