@@ -941,6 +941,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 5.3.0 — 2026-09-14 UTC
+
+- Vault deployment now installs the actual theme files, not just the theme's name — resolved through Obsidian's community theme catalog and cached locally so a later redeploy works offline too.
+- Theme files are now overwritten on every deploy, just like settings, snippets, and plugins already were, so a stale or broken theme copy in the vault gets replaced automatically instead of needing manual deletion.
+
 ### 5.2.4 — 2026-09-14 UTC
 
 - Dry-run for every repaint command (`sync-paths`, `reconcile`, `reconcile-plugin`, `reconcile-dirty`, `reconcile-commit`) now only lists notes whose frontmatter would actually change, instead of listing every candidate note.

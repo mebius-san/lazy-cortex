@@ -30,6 +30,8 @@ class VaultPath:
     PLUGIN_MAIN: Per-plugin bundle entry point.
     PLUGIN_STYLES: Per-plugin optional stylesheet.
     PLUGIN_DATA: Per-plugin settings file.
+    THEME_MANIFEST: Per-theme manifest naming the theme's name and version.
+    THEME_CSS: Per-theme stylesheet, the whole theme.
     COMMUNITY_PLUGINS: List of enabled plugin ids, rebuilt by deploy.
     APPEARANCE: Theme, accent, and enabled-snippet settings.
     TMP_SUFFIX: Suffix of the scratch file every atomic write renames from.
@@ -46,6 +48,8 @@ class VaultPath:
   PLUGIN_MAIN = "main.js"
   PLUGIN_STYLES = "styles.css"
   PLUGIN_DATA = "data.json"
+  THEME_MANIFEST = "manifest.json"
+  THEME_CSS = "theme.css"
   COMMUNITY_PLUGINS = "community-plugins.json"
   APPEARANCE = "appearance.json"
   TMP_SUFFIX = ".tmp"
@@ -76,13 +80,17 @@ class CachePath:
     DEFAULT_ROOT: Fallback cache root when XDG_CACHE_HOME is unset.
     NAMESPACE: This plugin's directory inside the cache root.
     BUNDLES: Directory holding one vendored plugin bundle per id.
+    THEMES: Directory holding one vendored theme per name.
     CATALOG: Cached copy of the community-plugin catalog.
+    THEME_CATALOG: Cached copy of the community-theme catalog.
   """
 
   DEFAULT_ROOT = ".cache"
   NAMESPACE = "lazycortex-obsidian"
   BUNDLES = "plugin-bundles"
+  THEMES = "theme-bundles"
   CATALOG = "community-plugins.json"
+  THEME_CATALOG = "community-css-themes.json"
 
 
 # ----------------------------------------------------------------------------------------
@@ -132,6 +140,22 @@ class PluginKey:
 
 
 # ----------------------------------------------------------------------------------------
+class ThemeKey:
+  """
+  Keys of a theme's own manifest, and of its entry in the community-theme catalog.
+
+  Attributes:
+    NAME: Theme name as declared by the theme's own manifest and by the catalog.
+    VERSION: Theme version as declared by the theme's own manifest.
+    REPO: Owner/name of the theme's GitHub repo, as declared by the catalog.
+  """
+
+  NAME = "name"
+  VERSION = "version"
+  REPO = "repo"
+
+
+# ----------------------------------------------------------------------------------------
 class SnippetKey:
   """
   Keys of one snippet's entry in the manifest.
@@ -171,6 +195,7 @@ class BundleKey:
     MANIFEST_BYTES: Raw bytes of the plugin's manifest file.
     MAIN_BYTES: Raw bytes of the plugin's bundle entry point.
     STYLES_BYTES: Raw bytes of the plugin's stylesheet, or None when it ships none.
+    CSS_BYTES: Raw bytes of a theme's stylesheet, set only on a resolved theme.
     ERROR: Why upstream was not used, set whenever a fallback was needed.
   """
 
@@ -179,6 +204,7 @@ class BundleKey:
   MANIFEST_BYTES = "manifest_bytes"
   MAIN_BYTES = "main_bytes"
   STYLES_BYTES = "styles_bytes"
+  CSS_BYTES = "css_bytes"
   ERROR = "error"
 
 

@@ -14,7 +14,7 @@ source_skills:
   - lazy-obsidian.audit
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: f1a56b7fe545eee38ce6ac86f103b38934d0fe11
+source_sha: 1268ddde908fd66ba20f4106a5d934925e8e61fb
 ---
 # Frequently asked questions
 
@@ -150,7 +150,7 @@ Yes. The plugin update refreshes the plugin cache but does not automatically re-
 
 ## How do I share my vault's Obsidian configuration across machines or with teammates?
 
-Run `/lazy-obsidian.capture` after changing anything under `.obsidian/` — a plugin installed, a setting tweaked, a snippet added, the theme switched. It snapshots the whole `.obsidian/` surface into one tracked, reviewable file, `.obsidian.manifest.json`, and commits it. On any other checkout — a fresh clone, a machine that has never opened this vault — run `/lazy-obsidian.deploy`, which reads that manifest and rebuilds `.obsidian/`: every plugin fetched at its latest release, your captured settings layered on top, snippets, and top-level config files. A theme it only names — install that once from Obsidian's Appearance settings. Deploy always ends with a reminder to open Obsidian once, since plugins run their own settings migrations on first launch. Both skills take an optional positional argument for the repo root; omit it and they use the current repo.
+Run `/lazy-obsidian.capture` after changing anything under `.obsidian/` — a plugin installed, a setting tweaked, a snippet added, the theme switched. It snapshots the whole `.obsidian/` surface into one tracked, reviewable file, `.obsidian.manifest.json`, and commits it. On any other checkout — a fresh clone, a machine that has never opened this vault — run `/lazy-obsidian.deploy`, which reads that manifest and rebuilds `.obsidian/`: every plugin fetched at its latest release, your captured settings layered on top, snippets, the theme, and top-level config files. The theme is fetched from its own repository the way Obsidian would, replacing any copy already sitting in the vault. Deploy always ends with a reminder to open Obsidian once, since plugins run their own settings migrations on first launch. Both skills take an optional positional argument for the repo root; omit it and they use the current repo.
 
 ---
 
@@ -168,7 +168,7 @@ Not required, but recommended — a hundred-odd files, several of them rewritten
 
 ## `/lazy-obsidian.deploy` says a plugin was "served from cache" instead of the latest release. Is that a problem?
 
-Only temporarily. It means GitHub was unreachable, or the plugin's latest release lacked the expected binary assets, so deploy fell back to a vendored copy instead of failing outright. Re-run `/lazy-obsidian.deploy` later once the network is back to pull the real latest release. Nothing else about the deployed vault is affected in the meantime.
+Only temporarily. It means GitHub was unreachable, or the plugin's latest release lacked the expected binary assets, so deploy fell back to a vendored copy instead of failing outright. The same fallback applies to the theme — if its repository is unreachable, deploy serves a previously cached copy instead of leaving the vault without a theme. Re-run `/lazy-obsidian.deploy` later once the network is back to pull the real latest release. Nothing else about the deployed vault is affected in the meantime.
 
 ---
 

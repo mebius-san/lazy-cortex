@@ -33,7 +33,8 @@ from pathlib import Path
 
 from vault_keys import (
   AppearanceKey, BundleKey, BundleSourceKind, CachePath, CommandKind, Encoding, Http,
-  ManifestKey, PluginKey, ReportKey, SnippetKey, SnippetSourceKind, TemplatePath, VaultPath,
+  ManifestKey, PluginKey, ReportKey, SnippetKey, SnippetSourceKind, TemplatePath, ThemeKey,
+  VaultPath,
 )
 
 from typing import TYPE_CHECKING
@@ -89,6 +90,13 @@ COMMUNITY_LIST_URL = (
 )
 HEAD_MANIFEST_URL = "https://raw.githubusercontent.com/{repo}/HEAD/manifest.json"
 RELEASE_ASSET_URL = "https://github.com/{repo}/releases/download/{tag}/{asset}"
+
+# A theme has no releases: Obsidian installs one straight off the repo's default branch, and
+# so does this worker.
+COMMUNITY_THEMES_URL = (
+  "https://raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-css-themes.json"
+)
+THEME_ASSET_URL = "https://raw.githubusercontent.com/{repo}/HEAD/{asset}"
 CATALOG_TTL_SEC = 24 * 60 * 60
 
 ENV_CACHE_HOME = "XDG_CACHE_HOME"
@@ -410,6 +418,28 @@ def fetch_community_catalog() -> dict[str, dict]:  # waiver: catalog entries are
            if isinstance(entry, dict) and entry.get(PluginKey.ID) }
 
 
+def fetch_theme_catalog() -> dict[str, dict]:  # waiver: catalog entries are upstream JSON
+  """
+  Load the community-theme catalog, refreshing a day-old cached copy.
+
+  Returns:
+    Catalog entries keyed by theme name; empty when upstream is unreachable and nothing was
+    ever cached.
+  """
+  cached = cache_root() / CachePath.THEME_CATALOG
+  fresh = cached.is_file() and cached.stat().st_mtime + CATALOG_TTL_SEC > time.time()
+  if not fresh:
+    try:
+      write_bytes(cached, fetch_bytes(COMMUNITY_THEMES_URL))
+    except (urllib.error.URLError, OSError):
+      # guard: an unreachable catalog is survivable only when a stale copy exists
+      if not cached.is_file():
+        return {}
+  entries = load_json(cached) or []
+  return { entry[ThemeKey.NAME]: entry for entry in entries
+           if isinstance(entry, dict) and entry.get(ThemeKey.NAME) }
+
+
 def resolve_bundle(pid: str, repo: str | None) -> dict:  # waiver: mixed bytes/str envelope
   """
   Resolve a plugin's latest bundle, falling back to the vendored cache.
@@ -609,6 +639,130 @@ def _read_cache(cache_dir: Path, pid: str) -> dict | None:  # waiver: asset byte
     BundleKey.MANIFEST_BYTES: manifest_path.read_bytes(),
     BundleKey.MAIN_BYTES: main_path.read_bytes(),
     BundleKey.STYLES_BYTES: styles.read_bytes() if styles.is_file() else None,
+  }
+
+
+# ----------------------------------------------------------------------------------------
+def resolve_theme(name: str) -> dict:  # waiver: mixed bytes/str envelope
+  """
+  Resolve a theme's current files, falling back to the vendored cache.
+
+  Guarantees:
+    - Never returns files recorded under a theme name other than the one requested.
+
+  Args:
+    name: Theme name to resolve, as the manifest records it.
+
+  Returns:
+    An envelope carrying the theme's source, version, file bytes, and the upstream error
+    whenever a fallback was needed.
+  """
+
+  # Domain(obsidian.theme-bundling):
+  # # Where a theme's files come from
+  # A theme is distributed differently from a plugin: it has no release artefacts, and its two
+  # files live at the head of its repository's default branch, which is exactly where Obsidian's
+  # own theme installer reads them from. The name recorded for a vault's theme is resolved to a
+  # repository through the community-theme catalogue, the same catalogue Obsidian browses.
+  # A repository only ever serves the theme whose name its own manifest currently declares, so a
+  # repository renamed or repurposed for a different theme is treated as no longer sourcing the
+  # original one rather than as an update to it.
+
+  # Contract:
+  # Every theme this returns, whatever its source, declares the requested theme name; a
+  # repository or cache entry recorded under a different name is never returned as a match.
+
+  cache_dir = cache_root() / CachePath.THEMES / name
+  repo = (fetch_theme_catalog().get(name) or {}).get(ThemeKey.REPO)
+
+  # a theme outside the catalogue has no repository to read, so only the cache can serve it
+  if not repo:
+    # waiver: one-off diagnostic text, not a shared constant
+    error: str | None = "not in the community theme catalogue"
+  else:
+    assets, error = _fetch_theme_assets(repo, name)
+    if assets is not None:
+      _write_theme_cache(cache_dir, assets)
+      return { BundleKey.SOURCE: BundleSourceKind.UPSTREAM, **assets, BundleKey.ERROR: None }
+
+  # fall back to the copy an earlier run vendored, which is what makes a deploy work offline
+  cached = _read_theme_cache(cache_dir, name)
+  if cached is not None:
+    return { BundleKey.SOURCE: BundleSourceKind.CACHE, **cached, BundleKey.ERROR: error }
+  return {
+    BundleKey.SOURCE: BundleSourceKind.NONE, BundleKey.VERSION: "",
+    BundleKey.MANIFEST_BYTES: None, BundleKey.CSS_BYTES: None, BundleKey.ERROR: error,
+  }
+
+
+def _fetch_theme_assets(repo: str, name: str) -> tuple[dict | None, str | None]:
+  """
+  Read a theme's manifest and stylesheet off its repo's default branch.
+
+  Args:
+    repo: Owner/name of the theme's GitHub repo.
+    name: Theme name the repo's manifest must declare.
+
+  Returns:
+    The asset bytes and no error, or no assets and the reason upstream could not serve them.
+  """
+  try:
+    manifest_bytes = fetch_bytes(
+      THEME_ASSET_URL.format(repo = repo, asset = VaultPath.THEME_MANIFEST))
+    declared = json.loads(manifest_bytes)
+    # guard: the repo must declare the theme we asked for
+    if declared.get(ThemeKey.NAME) != name:
+      return None, f"{repo}: theme is {declared.get(ThemeKey.NAME)!r}"
+    css_bytes = fetch_bytes(
+      THEME_ASSET_URL.format(repo = repo, asset = VaultPath.THEME_CSS),
+      accept = Http.OCTET_STREAM)
+  except urllib.error.HTTPError as exc:
+    return None, f"{repo}: HTTP {exc.code}"
+  except (urllib.error.URLError, OSError, ValueError) as exc:
+    # waiver: exception class name as diagnostic text, not a domain class id
+    return None, f"{repo}: {type(exc).__name__}"
+  return {
+    BundleKey.VERSION: declared.get(ThemeKey.VERSION) or "",
+    BundleKey.MANIFEST_BYTES: manifest_bytes,
+    BundleKey.CSS_BYTES: css_bytes,
+  }, None
+
+
+def _write_theme_cache(cache_dir: Path, assets: dict) -> None:  # waiver: asset bytes envelope
+  """
+  Mirror a freshly fetched theme into the vendored cache.
+
+  Args:
+    cache_dir: Per-theme cache directory.
+    assets: Asset bytes as returned by a theme fetch.
+  """
+  write_bytes(cache_dir / VaultPath.THEME_MANIFEST, assets[BundleKey.MANIFEST_BYTES])
+  write_bytes(cache_dir / VaultPath.THEME_CSS, assets[BundleKey.CSS_BYTES])
+
+
+def _read_theme_cache(cache_dir: Path, name: str) -> dict | None:  # waiver: asset bytes envelope
+  """
+  Read the vendored files for a theme.
+
+  Args:
+    cache_dir: Per-theme cache directory.
+    name: Theme name the cached manifest must declare.
+
+  Returns:
+    The cached version and asset bytes, or None when the cache is absent or foreign.
+  """
+  manifest_path = cache_dir / VaultPath.THEME_MANIFEST
+  css_path = cache_dir / VaultPath.THEME_CSS
+  if not (manifest_path.is_file() and css_path.is_file()):
+    return None
+  manifest = load_json(manifest_path)
+  # guard: a cache entry that names another theme is not this theme's fallback
+  if not isinstance(manifest, dict) or manifest.get(ThemeKey.NAME) != name:
+    return None
+  return {
+    BundleKey.VERSION: manifest.get(ThemeKey.VERSION) or "",
+    BundleKey.MANIFEST_BYTES: manifest_path.read_bytes(),
+    BundleKey.CSS_BYTES: css_path.read_bytes(),
   }
 
 
@@ -1133,27 +1287,45 @@ def _install_resolved(resolved: dict, destination: Path) -> None:  # waiver: ass
 
 def _deploy_theme(vault: Path, theme: str | None, errors: list[str]) -> str | None:
   """
-  Validate the recorded theme name and flag one the vault does not carry.
+  Install the recorded theme into the vault, replacing whatever copy is already there.
 
   Args:
     vault: The vault's config directory.
     theme: Theme name recorded in the manifest, or None when the vault uses the default.
-    errors: Accumulator that gains an entry naming a theme that fails validation or is not
-      installed, for the operator to install from Obsidian.
+    errors: Accumulator that gains an entry naming a theme that fails validation or that
+      neither upstream nor the cache could serve.
 
   Returns:
     The theme name, or None when the manifest recorded none or named one this refuses to
-    join onto a path.
+    use.
   """
+
+  # Domain(obsidian.theme-bundling):
+  # # A theme is restored on the same terms as everything else in a vault
+  # Rebuilding a vault's configuration lays every part of it down from the captured record, replacing
+  # whatever the target already held: its settings files, its snippets, its plugins. The theme is not
+  # an exception to that. Treating it as one is what left vaults rendering with no theme at all, so a
+  # rebuild installs the recorded theme whether or not a copy of it is already present.
+
+  # guard: a vault on the default theme has nothing to install
   if not theme:
     return None
   # guard: a theme name that is not a plain name would escape the themes directory
   if not is_safe_name(theme):
     errors.append(f"theme {theme!r}: not a plain theme name, skipped")
     return None
-  # guard: the manifest records a theme's name, never its CSS — only Obsidian installs one
-  if not (vault / VaultPath.THEMES / theme).is_dir():
-    errors.append(f"theme {theme!r}: not installed — install it from Obsidian")
+
+  # fetch the theme the way Obsidian would, and write both its files beside each other
+  destination = vault / VaultPath.THEMES / theme
+  resolved = resolve_theme(theme)
+  # guard: an unresolvable theme is reported and skipped, never half-written
+  if resolved[BundleKey.SOURCE] == BundleSourceKind.NONE:
+    errors.append(f"theme {theme!r}: {resolved[BundleKey.ERROR]}")
+    return theme
+  write_bytes(destination / VaultPath.THEME_MANIFEST, resolved[BundleKey.MANIFEST_BYTES])
+  write_bytes(destination / VaultPath.THEME_CSS, resolved[BundleKey.CSS_BYTES])
+  if resolved[BundleKey.ERROR]:
+    errors.append(f"theme {theme!r}: served from cache ({resolved[BundleKey.ERROR]})")
   return theme
 
 

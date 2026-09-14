@@ -16,7 +16,7 @@ source_skills:
   - lazy-obsidian.audit
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: f1a56b7fe545eee38ce6ac86f103b38934d0fe11
+source_sha: 1268ddde908fd66ba20f4106a5d934925e8e61fb
 ---
 # Troubleshooting
 
@@ -260,13 +260,13 @@ source_sha: f1a56b7fe545eee38ce6ac86f103b38934d0fe11
 
 ---
 
-## `/lazy-obsidian.deploy` reports a theme `not installed`
+## `/lazy-obsidian.deploy` reports a theme it could not fetch
 
-**Symptom**: The deploy report shows the vault's theme as `not installed`.
+**Symptom**: The deploy report names the vault's theme in `errors`, and the vault renders with default heading colours.
 
-**Likely cause**: The manifest records only the theme's name, not its CSS — deploy never carries a theme's stylesheet.
+**Likely cause**: Deploy installs a theme the way Obsidian does — it looks the name up in the community theme catalogue and reads `theme.css` and `manifest.json` off that repository's default branch. The error names why that failed: the theme is not in the catalogue, the repository answered with an HTTP error, or the network was unreachable and no earlier run had cached the theme.
 
-**Fix**: Install the theme once from Obsidian's own Appearance settings; the manifest picks it up correctly on the next `/lazy-obsidian.capture`.
+**Fix**: Re-run the deploy with working network access; the first successful fetch caches the theme, so later offline deploys install it from the cache. A theme with no catalogue entry is not fetchable at all — copy its directory into `.obsidian/themes/` by hand, and deploy will then leave that copy alone.
 
 ---
 
