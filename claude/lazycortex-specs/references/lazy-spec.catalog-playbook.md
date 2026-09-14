@@ -14,7 +14,7 @@ Four system documents live loose beside the level note, and nowhere else:
 
 - **`vision.md`** (`system-vision`) — mandatory. What this level is, for whom, and what counts as success. On the catalog root it is the vault spec, and the split into products is a consequence of it; on a product root it is that product's own. `lazy-spec.install` seeds the root one, `lazy-spec.product-config` seeds each product's, so this playbook never hangs a `Write vision` row: the document is always already there.
 - **`design.md`** (`system-design`) — optional. What the level does and why, at the level's own altitude: never an asset's behaviour, and never a construction document.
-- **`ui-design.md`** (`system-ui-design`) — optional, and **the slot is inert until the type is declared**. Until a `system-ui-design` doc type exists in the resolved doc-type registry, no `Write ui-design` row hangs and the gate is simply not one of the level's declared gates. Nothing about this is a gap to report — an undeclared type is a configuration fact. No level gate takes part in the level note's paint either way: a level note keeps the icon and colour it was given when it was created, and the iconize registry reads none of the four gates (`lazy-spec.config-protocol.md` § Icon and colour).
+- **`ui-design.md`** (`system-ui-design`) — optional, **product roots only**. The product's shared look: its design system, the screen patterns that recur across assets, the navigation skeleton the assets' screens attach to — the document each asset's own `ui-design.md` refines, the way an asset design refines the product design. The catalog root never carries one: no `Write ui-design` row hangs there and its gate reads closed on absence like any optional document. No level gate takes part in the level note's paint either way: a level note keeps the icon and colour it was given when it was created, and the iconize registry reads none of the four gates (`lazy-spec.config-protocol.md` § Icon and colour).
 - **`tech.md`** (`system-tech`) — optional. A narrow document of technical requirements and infrastructure decisions: stack, platforms, constraints, infrastructure decisions, boundaries. It is not a mirror of the code, it is not generated from the code, and it changes only through its own review.
 
 **There is no sync-with-code in this ladder.** No step of this playbook reads the source tree to reconcile a system document against it, and no coordinator wake proposes such a reconciliation. A level document is written by hand or by a system-level expert, through review, full stop.
@@ -35,7 +35,7 @@ A document whose review reopened and now reads `draft` again is promoted back do
 |---|---|
 | `spec_vision_done` | `vision.md` exists and its stage is `approved` |
 | `spec_design_done` | `design.md` is ABSENT, or exists at stage `approved` |
-| `spec_ui_design_done` | the `system-ui-design` type is declared AND `ui-design.md` is ABSENT, or exists at stage `approved` |
+| `spec_ui_design_done` | `ui-design.md` is ABSENT, or exists at stage `approved` |
 | `spec_tech_done` | `tech.md` is ABSENT, or exists at stage `approved` |
 
 **A parked document holds its gate open.** `deferred` is neither absent nor approved, so a `design.md` / `ui-design.md` / `tech.md` sitting parked leaves its gate false exactly as a draft does — the level owes the document, the operator has simply set it aside. A parked `vision.md` leaves `spec_vision_done` false the same way.
@@ -55,11 +55,11 @@ Checkboxes live in the level note's `# Gates` section as `[!gate]` blocks. Recon
 | Checkbox | Appears when | On tick |
 |---|---|---|
 | `Write design` | `spec_vision_done` closed AND `design.md` doesn't exist | seed `design.md:system-design`, then seed-then-start below |
-| `Write ui-design` | `spec_vision_done` closed AND the `system-ui-design` type is declared AND `ui-design.md` doesn't exist | seed `ui-design.md:system-ui-design`, then seed-then-start below |
+| `Write ui-design` | `spec_vision_done` closed AND the level is a product root AND `ui-design.md` doesn't exist | seed `ui-design.md:system-ui-design`, then seed-then-start below |
 | `Write tech` | `spec_vision_done` closed AND `tech.md` doesn't exist | seed `tech.md:system-tech`, then seed-then-start below |
 | `Revise design` | a released asset's documents diverge from `design.md` (§ 5) | `lazy-review.submit` on `design.md`, the divergence carried in the submit's context |
 
-All three `Write` rows hang together, the moment `spec_vision_done` closes. **Their order is the operator's choice, not this playbook's** — nothing here says design before tech, and no row waits on another row's document. The vision is the only ordering constraint in the ladder.
+All three `Write` rows hang together on a product root, the moment `spec_vision_done` closes; the catalog root hangs `Write design` and `Write tech` only. **Their order is the operator's choice, not this playbook's** — nothing here says design before tech, and no row waits on another row's document. The vision is the only ordering constraint in the ladder.
 
 **A closed gate does not take its own row down.** An absent optional document reads done at § 2 and still hangs its `Write` row here, and the two say different things: the gate says the level owes nothing, the row says the operator may start the document whenever they choose. Only the document's own existence removes the row. Do not reconcile one against the other — a row hanging beside its own closed gate is the ordinary state of every level that has not written its optional documents yet.
 
@@ -75,7 +75,7 @@ No row of this ladder dispatches an expert job. `dispatch-job` and `cancel-job` 
 
 ## 4. Where the level's documents come from and what they may not do
 
-A level document is written by its review class's own writers. The coordinator seeds it, opens its review, promotes its stage, and flips the gate it feeds — it never writes into the body of any of the four, and the sibling-doc carve-out the asset coordinator has for carrying a question or a decision candidate across documents does not exist at this level.
+A level document is written by its review class's own writers. The coordinator seeds it, opens its review, promotes its stage, and flips the gate it feeds — it never writes into the body of any of them, and the sibling-doc carve-out the asset coordinator has for carrying a question or a decision candidate across documents does not exist at this level.
 
 ## 5. The event from below — a released asset (`asset-released`)
 

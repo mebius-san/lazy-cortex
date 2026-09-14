@@ -93,7 +93,7 @@ For each, record: dispatch string, target group, plugin name (if applicable), so
 1. **The agent was deleted.** The plugin is present in `~/.claude/plugins/installed_plugins.json` AND its newest cache dir has no `agents/<stem>.md` — the agent provably existed under that plugin's dispatch convention and is gone.
 2. **The plugin was retired.** The plugin appears in NEITHER `installed_plugins.json` NOR any registered marketplace's catalog (`~/.claude/plugins/marketplaces/*/.claude-plugin/marketplace.json`, the `plugins[].name` values). A plugin the operator merely uninstalled still stands in its marketplace and is left alone; one that stands nowhere no longer exists to be reinstalled, so its keys can never resolve again.
 
-Record `(source file, group, dispatch)` in the stale list. Keys that are not plugin-namespaced (built-ins, `_user`/`_project` stems, skill-shaped dispatches) are never flagged — absence can't be proven for them. Neither can it for an uninstalled plugin its marketplace still offers, which is why proof 2 requires both absences and not just the first.
+Record `(source file, group, dispatch)` in the stale list. Keys that are not plugin-namespaced (built-ins, `_user`/`_project` stems) are never flagged — absence can't be proven for them. A plugin-namespaced key whose stem names a skill rather than an agent (`superpowers:brainstorming`) is NOT exempt: the model router matches `Agent(subagent_type: …)` alone, a skill is never dispatched that way, and no seed re-creates the key, so proof 1 retires it like any other. Neither can it for an uninstalled plugin its marketplace still offers, which is why proof 2 requires both absences and not just the first.
 
 If both lists are empty → skip Steps 5–8, go to Step 9 with outcome `nothing to do`.
 

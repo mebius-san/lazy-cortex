@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Non-obvious answers on install, LLM providers, the runtime daemon and experts, routines, scaffolding, git staging, and MCP permissions.
-last_regen: 2026-09-13
+last_regen: 2026-09-14
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -32,7 +32,7 @@ source_skills:
   - lazy-expert.cancel-job
   - lazy-expert.list-jobs
   - lazy-memory.write
-source_sha: 9fef3719f81552fe26c4b661a252c8abb88120d3
+source_sha: c02247a7934dc795134e714f217ab0c7082bcdd3
 ---
 # FAQ
 
@@ -132,7 +132,7 @@ The only time hand-editing `lazy.settings.json` is appropriate is when you are d
 
 When `/lazy-core.agent-models` runs as part of a non-interactive rollout chain (no wizard, no user channel), only the curated batch behaves the same as an interactive run: entries whose dispatch string is a key in `default-tiers.json` still auto-apply at their template tier, because a plugin-shipped default is a recorded decision, not a guess. Everything else — agents with no curated default — is left missing and reported `needs-interactive`; a normal interactive run of the skill picks those up afterward.
 
-The skill also prunes automatically, on two separate proofs. First, any configured entry whose plugin agent file has since been deleted (the plugin is still installed, but its cache no longer has that agent stem) is removed with no prompt — a tier for a deleted agent is dead config, not a decision. Second, an entry is pruned the same way when the owning plugin itself has been retired rather than merely uninstalled: its name is absent both from your installed-plugins list and from every registered marketplace's catalog, so there is no path back to reinstalling it and no way the entry could ever resolve again. A plugin you simply uninstalled — but that still stands in its marketplace — keeps its entries, since reinstalling it would make the config apply again. Both proofs apply in interactive and non-interactive runs alike. If a pruned dispatch string is still referenced by an expert's `agent` field, the skill leaves that expert entry alone and reports a warning instead of guessing; you decide whether to repoint or remove it.
+The skill also prunes automatically, on two separate proofs. First, any configured entry whose plugin agent file has since been deleted (the plugin is still installed, but its cache no longer has that agent stem) is removed with no prompt — a tier for a deleted agent is dead config, not a decision. This same proof also catches a plugin-namespaced key whose stem names a skill rather than an agent (e.g. `superpowers:brainstorming`): the `lazy-core.model-router` hook only ever matches `Agent(subagent_type: …)` dispatches, so a skill is never routed through that key and no install step re-seeds it — it is pruned exactly like a deleted agent's entry, with no exemption for being skill-shaped. Second, an entry is pruned the same way when the owning plugin itself has been retired rather than merely uninstalled: its name is absent both from your installed-plugins list and from every registered marketplace's catalog, so there is no path back to reinstalling it and no way the entry could ever resolve again. A plugin you simply uninstalled — but that still stands in its marketplace — keeps its entries, since reinstalling it would make the config apply again. Both proofs apply in interactive and non-interactive runs alike. If a pruned dispatch string is still referenced by an expert's `agent` field, the skill leaves that expert entry alone and reports a warning instead of guessing; you decide whether to repoint or remove it.
 
 ---
 

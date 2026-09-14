@@ -599,6 +599,12 @@ def _resolve_icon_pair(icon_map: dict, vault: Path, rel: str) -> tuple[str | Non
   # shipped source file on every reconcile and bakes a stale icon into every note scaffolded
   # from it afterwards. Callers see the same None an unclaimed note returns.
 
+  # the vault this command resolved is the one every callback reads settings from and finds its
+  # operator overrides in — never the directory the worker happened to be started in
+  # waiver: a genuine module-level rebind, not a false positive — the resolved vault pins the cache
+  global _CALLBACK_VAULT_CACHE  # noqa: PLW0603  # pylint: disable=global-statement
+  _CALLBACK_VAULT_CACHE = vault
+
   # guard: template trees are source, not vault content — no rule may claim them
   if is_template_path(rel):
     return None
@@ -762,7 +768,8 @@ def _sync_rel_paths(vault: Path, icon_map: dict, rels: list[str], *, dry_run: bo
 
     # a dry run accumulates the plan; a real run rewrites and records what changed
     if dry_run:
-      planned.append({ ResultKey.PATH: rel, ResultKey.ICON: icon, ResultKey.COLOR: color })
+      if _would_change(note_path, icon, color):
+        planned.append({ ResultKey.PATH: rel, ResultKey.ICON: icon, ResultKey.COLOR: color })
       continue
     if rewrite_file(note_path, icon = icon, color = color):
       touched.append(rel)
@@ -830,6 +837,28 @@ def cmd_sync_paths(args: argparse.Namespace) -> int:
   # delegate to the shared rewrite-and-report walk over the normalized targets
   # waiver: subcommand-name value (canonical home is the parser+dispatch map)
   return _sync_rel_paths(vault, icon_map, rels, dry_run = args.dry_run, op = "sync-paths")
+
+
+def _would_change(note_path: Path, icon: str | None, color: str | None) -> bool:
+  """
+  Report whether repainting a note to the given pair would alter its text.
+
+  A dry run lists exactly the notes a real run would rewrite, so a note already carrying the
+  resolved pair is not planned — `rewrite_file` would leave it untouched.
+
+  Args:
+    note_path: Absolute path of the note.
+    icon: Resolved icon, or None to remove the key.
+    color: Resolved colour, or None to remove the key.
+
+  Returns:
+    True when the rewritten frontmatter differs from what is on disk.
+  """
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  from frontmatter_rewriter import rewrite_frontmatter
+  # waiver: stdlib encoding-mode idiom
+  src = note_path.read_text(encoding = "utf-8")
+  return rewrite_frontmatter(src, icon = icon, color = color) != src
 
 
 def _walk_md_files(vault: Path, prefix: str | None) -> list[str]:
@@ -907,7 +936,8 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
     icon, color = resolved
     note_path = vault / rel
     if args.dry_run:
-      planned.append({ ResultKey.PATH: rel, ResultKey.ICON: icon, ResultKey.COLOR: color })
+      if _would_change(note_path, icon, color):
+        planned.append({ ResultKey.PATH: rel, ResultKey.ICON: icon, ResultKey.COLOR: color })
       continue
     if rewrite_file(note_path, icon = icon, color = color):
       touched.append(rel)
@@ -978,7 +1008,8 @@ def cmd_reconcile_plugin(args: argparse.Namespace) -> int:
     if not note_path.is_file():
       continue
     if args.dry_run:
-      planned.append({ ResultKey.PATH: rel, ResultKey.ICON: icon, ResultKey.COLOR: color })
+      if _would_change(note_path, icon, color):
+        planned.append({ ResultKey.PATH: rel, ResultKey.ICON: icon, ResultKey.COLOR: color })
       continue
     if rewrite_file(note_path, icon = icon, color = color):
       touched.append(rel)
@@ -1126,7 +1157,8 @@ def cmd_reconcile_dirty(args: argparse.Namespace) -> int:
       icon, color = resolved
       note_path = vault / rel
       if args.dry_run:
-        planned.append({ ResultKey.PATH: rel, ResultKey.ICON: icon, ResultKey.COLOR: color })
+        if _would_change(note_path, icon, color):
+          planned.append({ ResultKey.PATH: rel, ResultKey.ICON: icon, ResultKey.COLOR: color })
         continue
       if rewrite_file(note_path, icon = icon, color = color):
         touched.append(rel)
@@ -1376,7 +1408,7 @@ def cmd_reconcile_commit(args: argparse.Namespace) -> int:
       note_path = vault / rel
       if args.dry_run:
         # only a claimed note reaches the plan — unclaimed ones will not be rewritten
-        if resolved is not None:
+        if resolved is not None and _would_change(note_path, resolved[0], resolved[1]):
           planned.append({ ResultKey.PATH: rel, ResultKey.ICON: resolved[0], ResultKey.COLOR: resolved[1] })
         continue
       # an unclaimed note is not rewritten but stays in the commit sweep — divergence
@@ -2277,7 +2309,7 @@ def _invoke_callback(callback_id: str, payload: dict) -> dict | None:
     return None
   try:
     # waiver: inline numeric literal
-    r = subprocess.run(argv, input = json.dumps(payload),
+    r = subprocess.run(argv, input = json.dumps(payload), cwd = _CALLBACK_VAULT_CACHE,
                        capture_output = True, text = True, timeout = 10, check = False)
   except subprocess.TimeoutExpired as e:
     out = "".join(

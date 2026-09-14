@@ -48,11 +48,6 @@
     "lazycortex-wiki:lazy-wiki.tag-curator": "sonnet",
     "lazycortex-wiki:lazy-wiki.terms-curator": "sonnet",
     "memory.optimise": "sonnet",
-    "statusline-setup": "default",
-    "superpowers:brainstorming": "opus",
-    "superpowers:code-reviewer": "opus",
-    "superpowers:requesting-code-review": "sonnet",
-    "superpowers:subagent-driven-development": "sonnet",
-    "superpowers:writing-plans": "opus"
+    "statusline-setup": "default"
   }
 }

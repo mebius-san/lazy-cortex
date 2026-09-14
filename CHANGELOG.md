@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 9.4.4 — 2026-09-14 UTC
+
+- `lazy-core.agent-models` no longer treats a skill-shaped plugin key (e.g. `superpowers:brainstorming`) as exempt from staleness pruning — since the model router only matches dispatched agents, never skills, the five `superpowers:*` entries are dropped from the shipped `default-tiers.json` seed and any surviving copy gets retired like any other unreachable key.
+
 ### 9.4.3 — 2026-09-13 UTC
 
 - Installing or scaffolding a plugin now resolves the core CLI from the registry entry with the highest recorded version instead of the last one written, so a stale entry left behind by another project no longer sends the install chain to an old cached copy.
@@ -660,6 +664,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 9.1.0 — 2026-09-14 UTC
+
+- New product-level `ui-design.md` document type captures the product's shared design system, screen patterns, navigation shell, and mockups above individual asset-level `ui-design.md` docs — seeded automatically by install and product registration, with the `ui-design` folder name now reserved for the product root and consistently documented across audit, install, and troubleshooting guides.
+- Fixed review-class installation for repos without a literal `products/` folder — install previously seeded path patterns that matched zero documents there; existing repos with stale paths still need manual cleanup.
+- Fixed the icon-colour callback dropping a product's own configured colour on reconcile — it now keeps the colour install/registration saved instead of reverting to the type default.
+
 ### 9.0.0 — 2026-09-13 UTC
 
 - **Breaking:** Product-level, catalog-root, and research-design template overrides move out of the shared `spec.docs/` base into their own context folders (`spec.research/`, `spec.product/`, `spec.vault/`); install now migrates any existing composite-named overrides automatically and reports conflicts instead of overwriting. A new `template resolve` CLI verb resolves a document's template by context and target filename, and doc-type rename now retypes context templates declaring the old type, not just files named after it.
@@ -930,6 +940,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial release.
 
 ## lazycortex-obsidian
+
+### 5.2.4 — 2026-09-14 UTC
+
+- Dry-run for every repaint command (`sync-paths`, `reconcile`, `reconcile-plugin`, `reconcile-dirty`, `reconcile-commit`) now only lists notes whose frontmatter would actually change, instead of listing every candidate note.
+- A repaint's callback now runs from the resolved vault root, not the worker's launch directory, so it reads the right vault's settings and operator overrides when invoked from elsewhere.
 
 ### 5.2.3 — 2026-09-12 UTC
 
@@ -1498,6 +1513,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.
 
 ## lazycortex-experts
+
+### 1.6.3 — 2026-09-14 UTC
+
+- Fixed the research aspect's mandatory opening read: experts no longer expect a `ui-design.md` at the content root — only a product root carries one, so the read now matches where documents actually live.
 
 ### 1.6.2 — 2026-09-13 UTC
 

@@ -125,7 +125,7 @@ This chapter is the gate MACHINERY and nothing else — the booleans, their orde
 
 **Downward reconciliation.** A gate already true goes stale when the thing that closed it stops holding — a governing document reappears un-accepted, a tool's implementation is reopened, a child regresses, or a document's SOURCE is re-approved after the document itself was accepted. The coordinator watches for that on every wake and flips the gate back off (`--off`, auto) the moment it fires; WHICH conditions count as a regression for a given gate is, again, the playbook that closed it. A downward flip commits atomically and the coordinator immediately re-runs its upward checks against the fresh state, so a dependent checkbox disappears the same cycle rather than lagging a tick.
 
-**Source staleness — the one rule that lowers a stage.** Every dependent document has one source, read from this table; a level document (`vision.md` / `design.md` / `tech.md` at a product root or the catalog root) is outside it.
+**Source staleness — the one rule that lowers a stage.** Every dependent document has one source, read from this table; a level document (`vision.md` / `design.md` / `tech.md` at a product root or the catalog root, and `ui-design.md` at a product root) is outside it.
 
 | Dependent document | Source | Gate that turns off |
 |---|---|---|

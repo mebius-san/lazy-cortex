@@ -464,9 +464,9 @@ If `review` section is absent, create `{_version: 1, classes: [<entry>]}`. If `c
 
 ### 6e. Review classes for spec docs
 
-The `lazy-spec.request-apply` worker scaffolds entity folders (`features/<slug>/`, `changes/<slug>/`, `bugs/<slug>/`) under each registered product's `<spec_path>` — folder + status folder-note only. Every authored doc, `design.md` included, is created later by a ticked launch checkbox: the coordinator runs `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" seed-doc`, then opens the doc's review via `lazy-review.start` when the folder-note carries source requests, or waits for the operator's own commit into the skeleton otherwise. Those docs (`design.md`, `bug.md`, the opt-in `code-plan.md` / `test-plan.md`, and the `code-report.md` / `test-report.md` journals the launch ladder later opens for review on job completion) need their own review classes so the daemon dispatches the right writer for each one — without these classes, checkbox-seeded or later-authored docs sit at `[!hint] Waiting #review/in-process` forever because no class matches their paths. The same applies to the two **system-level** classes: the product-root `design.md` / `tech.md` pair and the identical pair at the spec content-root (the project-wide spec — no config key declares it; the files' existence is the declaration) are typed `system-design` / `system-tech` and reviewed under their own classes, never under the asset-level `design` class.
+The `lazy-spec.request-apply` worker scaffolds entity folders (`features/<slug>/`, `changes/<slug>/`, `bugs/<slug>/`) under each registered product's `<spec_path>` — folder + status folder-note only. Every authored doc, `design.md` included, is created later by a ticked launch checkbox: the coordinator runs `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" seed-doc`, then opens the doc's review via `lazy-review.start` when the folder-note carries source requests, or waits for the operator's own commit into the skeleton otherwise. Those docs (`design.md`, `bug.md`, the opt-in `code-plan.md` / `test-plan.md`, and the `code-report.md` / `test-report.md` journals the launch ladder later opens for review on job completion) need their own review classes so the daemon dispatches the right writer for each one — without these classes, checkbox-seeded or later-authored docs sit at `[!hint] Waiting #review/in-process` forever because no class matches their paths. The same applies to the **system-level** classes: the product-root `design.md` / `tech.md` pair and the identical pair at the spec content-root (the project-wide spec — no config key declares it; the files' existence is the declaration) are typed `system-design` / `system-tech` and reviewed under their own classes, never under the asset-level `design` class; the product-root `ui-design.md` — the product's shared look, which the assets' own `ui-design.md` refine — is typed `system-ui-design` and reviewed under its own class the same way.
 
-Under `review.classes` append each entry below whose `class:` token no existing entry carries — coverage is judged on the token, never on `paths`, since a typed document routes by type and two classes may legitimately share a glob (`design` and `research-design` both match `*/*/design.md`). One retirement runs first: an existing entry labeled `class: research` — the one-document form an earlier release seeded, whose `research.md` type no longer exists — is removed from `review.classes` before the append, and the step states `retired-research-class`; an operator-declared class with any other label is never touched. **Each entry carries a `class:` key with the exact bare doc-kind token** (`vision`, `system-vision`, `use-cases`, `design`, `system-design`, `system-tech`, `architecture`, `ui-design`, `code-plan`, `test-plan`, `bug`, `code-report`, `test-report`, `data-report`, `docs-report`, `research-design`, `research-report`). A review class is declared by this config, not by a code-side enum: only the subset the settings-migration ladder keys off carries a token in `ReviewClassName` (`lazycortex-core`'s `bin/constants.py`) — `design`, `bug`, `architecture`, `code-plan`, `test-plan`, `code-report`, `test-report` — and the rest (`use-cases`, `system-design`, `system-tech`, `ui-design`) are review classes the older ladder steps never touch, so a matching constant is neither present nor needed; the `vision` / `system-vision` classes are seeded into existing vaults by the v10 → v11 migration step, which keys off the literal class tokens. Omitting the `class:` key, as an earlier revision of this seed did for the path-only siblings, makes a fresh install diverge from a migrated-in-place vault: `migrate_all`'s `_add_architecture_class` / `_add_planner_review_to_design` steps both search for `entry.get("class") == "<token>"` and, finding no match on a `class`-less entry, append a SECOND `architecture` class and silently skip `design`'s `planner_review` slot. Glob `<spec_path_prefix>/products/*` is illustrative — the real `paths` glob each consumer writes mirrors the `spec_path` shape they registered (e.g. `Server/products/*` for a `spec_path: Server/products/<key>` product). For a vault with multiple products, the globs cover them all uniformly because the product key is a single path segment under the same prefix.
+Under `review.classes` append each entry below whose `class:` token no existing entry carries — coverage is judged on the token, never on `paths`, since a typed document routes by type and two classes may legitimately share a glob (`design` and `research-design` both match `*/*/design.md`). One retirement runs first: an existing entry labeled `class: research` — the one-document form an earlier release seeded, whose `research.md` type no longer exists — is removed from `review.classes` before the append, and the step states `retired-research-class`; an operator-declared class with any other label is never touched. **Each entry carries a `class:` key with the exact bare doc-kind token** (`vision`, `system-vision`, `use-cases`, `design`, `system-design`, `system-tech`, `architecture`, `ui-design`, `system-ui-design`, `code-plan`, `test-plan`, `bug`, `code-report`, `test-report`, `data-report`, `docs-report`, `research-design`, `research-report`). A review class is declared by this config, not by a code-side enum: only the subset the settings-migration ladder keys off carries a token in `ReviewClassName` (`lazycortex-core`'s `bin/constants.py`) — `design`, `bug`, `architecture`, `code-plan`, `test-plan`, `code-report`, `test-report` — and the rest (`use-cases`, `system-design`, `system-tech`, `ui-design`, `system-ui-design`) are review classes the older ladder steps never touch, so a matching constant is neither present nor needed; the `vision` / `system-vision` classes are seeded into existing vaults by the v10 → v11 migration step, which keys off the literal class tokens. Omitting the `class:` key, as an earlier revision of this seed did for the path-only siblings, makes a fresh install diverge from a migrated-in-place vault: `migrate_all`'s `_add_architecture_class` / `_add_planner_review_to_design` steps both search for `entry.get("class") == "<token>"` and, finding no match on a `class`-less entry, append a SECOND `architecture` class and silently skip `design`'s `planner_review` slot. The `paths` globs are right-anchored (`PurePath.match`, same as `lazycortex-review`'s `doc_class`): `*/*/design.md` matches a `design.md` two levels below any folder, so one table serves every product regardless of the organizational folders above its `spec_path` — no literal `products/` segment and no `spec_path` prefix belongs in a `paths` value, and the table below is the same one `lazy-spec.product-config` Step 12 writes.
 
 ```yaml
 # vision.md class (asset-level) — designer writes goals/value for one feature or change; NO
@@ -475,8 +475,7 @@ Under `review.classes` append each entry below whose `class:` token no existing 
 - class: vision
   protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol", "lazycortex-specs:lazy-spec.doc-height-protocol"]
   paths:
-    - "<spec_path_prefix>/products/*/features/*/vision.md"
-    - "<spec_path_prefix>/products/*/changes/*/vision.md"
+    - "*/*/vision.md"
   context_from_frontmatter: [spec_source_requests]
   experts:
     main:
@@ -490,9 +489,7 @@ Under `review.classes` append each entry below whose `class:` token no existing 
 - class: use-cases
   protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol"]
   paths:
-    - "<spec_path_prefix>/products/*/features/*/use-cases.md"
-    - "<spec_path_prefix>/products/*/changes/*/use-cases.md"
-    - "<spec_path_prefix>/products/*/use-cases.md"
+    - "*/use-cases.md"
     - "use-cases.md"
   context_from_frontmatter: [spec_source_requests]
   experts:
@@ -508,9 +505,7 @@ Under `review.classes` append each entry below whose `class:` token no existing 
 - class: design
   protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol", "lazycortex-specs:lazy-spec.doc-height-protocol"]
   paths:
-    - "<spec_path_prefix>/products/*/features/*/design.md"
-    - "<spec_path_prefix>/products/*/changes/*/design.md"
-    - "<spec_path_prefix>/products/*/bugs/*/design.md"
+    - "*/*/design.md"
   context_from_frontmatter: [spec_source_requests]
   experts:
     main:
@@ -528,8 +523,8 @@ Under `review.classes` append each entry below whose `class:` token no existing 
 - class: system-vision
   protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol", "lazycortex-specs:lazy-spec.doc-height-protocol"]
   paths:
-    - "<spec_path_prefix>/products/*/vision.md"
-    - "<content_root>/vision.md"
+    - "*/vision.md"
+    - "vision.md"
   context_from_frontmatter: [spec_source_requests]
   experts:
     main:
@@ -537,8 +532,8 @@ Under `review.classes` append each entry below whose `class:` token no existing 
 - class: system-design
   protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol", "lazycortex-specs:lazy-spec.doc-height-protocol"]
   paths:
-    - "<spec_path_prefix>/products/*/design.md"
-    - "<content_root>/design.md"
+    - "*/design.md"
+    - "design.md"
   context_from_frontmatter: [spec_source_requests]
   experts:
     main:
@@ -553,8 +548,8 @@ Under `review.classes` append each entry below whose `class:` token no existing 
 - class: system-tech
   protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol"]
   paths:
-    - "<spec_path_prefix>/products/*/tech.md"
-    - "<content_root>/tech.md"
+    - "*/tech.md"
+    - "tech.md"
   experts:
     main:
       - name: <architect-expert>
@@ -565,8 +560,7 @@ Under `review.classes` append each entry below whose `class:` token no existing 
 - class: architecture
   protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol"]
   paths:
-    - "<spec_path_prefix>/products/*/features/*/architecture.md"
-    - "<spec_path_prefix>/products/*/changes/*/architecture.md"
+    - "*/architecture.md"
   experts:
     main:
       - name: <architect-expert>
@@ -583,8 +577,25 @@ Under `review.classes` append each entry below whose `class:` token no existing 
 - class: ui-design
   protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol"]
   paths:
-    - "<spec_path_prefix>/products/*/features/*/ui-design.md"
-    - "<spec_path_prefix>/products/*/changes/*/ui-design.md"
+    - "*/ui-design.md"
+  experts:
+    main:
+      - name: <ui-designer-expert>
+    validation:
+      architect_review:
+        name: <architect-expert>
+        section: Architect review
+        position: bottom
+# system-ui-design class — the product-root ui-design.md (the product's shared look: design
+# system, recurring screen patterns, navigation skeleton), above which the assets' own ui-design
+# docs refine. Product roots only — the content root never hangs one. The same ui-designer writes
+# it and the architect validates, as on the asset class; the doc-height protocol keeps it at the
+# product's altitude. The glob is the asset class's — a typed document routes by type, so the
+# two never collide.
+- class: system-ui-design
+  protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol", "lazycortex-specs:lazy-spec.doc-height-protocol"]
+  paths:
+    - "*/ui-design.md"
   experts:
     main:
       - name: <ui-designer-expert>
@@ -598,9 +609,7 @@ Under `review.classes` append each entry below whose `class:` token no existing 
 - class: code-plan
   protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol"]
   paths:
-    - "<spec_path_prefix>/products/*/features/*/code-plan.md"
-    - "<spec_path_prefix>/products/*/changes/*/code-plan.md"
-    - "<spec_path_prefix>/products/*/bugs/*/code-plan.md"
+    - "*/code-plan.md"
   experts:
     main:
       - name: <planner-expert>
@@ -617,9 +626,7 @@ Under `review.classes` append each entry below whose `class:` token no existing 
 - class: test-plan
   protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol"]
   paths:
-    - "<spec_path_prefix>/products/*/features/*/test-plan.md"
-    - "<spec_path_prefix>/products/*/changes/*/test-plan.md"
-    - "<spec_path_prefix>/products/*/bugs/*/test-plan.md"
+    - "*/test-plan.md"
   experts:
     main:
       - name: <tester-expert>
@@ -632,9 +639,7 @@ Under `review.classes` append each entry below whose `class:` token no existing 
 - class: code-report
   protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol"]
   paths:
-    - "<spec_path_prefix>/products/*/features/*/code-report.md"
-    - "<spec_path_prefix>/products/*/changes/*/code-report.md"
-    - "<spec_path_prefix>/products/*/bugs/*/code-report.md"
+    - "*/code-report.md"
   experts:
     main:
       - name: <developer-expert>
@@ -642,9 +647,7 @@ Under `review.classes` append each entry below whose `class:` token no existing 
 - class: test-report
   protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol"]
   paths:
-    - "<spec_path_prefix>/products/*/features/*/test-report.md"
-    - "<spec_path_prefix>/products/*/changes/*/test-report.md"
-    - "<spec_path_prefix>/products/*/bugs/*/test-report.md"
+    - "*/test-report.md"
   experts:
     main:
       - name: <tester-expert>
@@ -652,7 +655,7 @@ Under `review.classes` append each entry below whose `class:` token no existing 
 - class: data-report
   protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol"]
   paths:
-    - "<spec_path_prefix>/products/*/*/*/data-report.md"
+    - "*/data-report.md"
   experts:
     main:
       - name: <data-writer-expert>
@@ -660,7 +663,7 @@ Under `review.classes` append each entry below whose `class:` token no existing 
 - class: docs-report
   protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol"]
   paths:
-    - "<spec_path_prefix>/products/*/*/*/docs-report.md"
+    - "*/docs-report.md"
   experts:
     main:
       - name: <docs-writer-expert>
@@ -673,7 +676,7 @@ Under `review.classes` append each entry below whose `class:` token no existing 
 - class: research-design
   protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol"]
   paths:
-    - "<spec_path_prefix>/products/*/research/*/design.md"
+    - "*/*/design.md"
   context_from_frontmatter: [spec_source_requests]
   experts:
     main:
@@ -689,7 +692,7 @@ Under `review.classes` append each entry below whose `class:` token no existing 
 - class: research-report
   protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol"]
   paths:
-    - "<spec_path_prefix>/products/*/research/*/research.md"
+    - "*/research.md"
   experts:
     main:
       - name: <researcher-expert>
@@ -698,7 +701,7 @@ Under `review.classes` append each entry below whose `class:` token no existing 
 - class: bug
   protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol"]
   paths:
-    - "<spec_path_prefix>/products/*/bugs/*/bug.md"
+    - "bugs/*/bug.md"
   context_from_frontmatter: [spec_source_requests]
   experts:
     main:
@@ -710,13 +713,13 @@ Under `review.classes` append each entry below whose `class:` token no existing 
         position: bottom
 ```
 
-`<use-case-writer-expert>` / `<designer-expert>` / `<system-designer-expert>` / `<architect-expert>` / `<ui-designer-expert>` / `<planner-expert>` / `<developer-expert>` / `<tester-expert>` / `<data-writer-expert>` / `<docs-writer-expert>` / `<researcher-expert>` are placeholders for the consumer-supplied COMPOSED expert key (typically `<domain>.<role>` from `lazycortex-experts`, e.g. `claude-plugin.designer` — never a bare role word like `designer`; a project-local override expert key works the same way). `<content_root>` in the system-class globs is the spec content-root (`spec.vault_root`, default `specs`) — the project-wide pair lives loose at that root, beside `requests/`. When the consumer has not registered one of them yet, omit that class until the expert exists — without a registered `main`, the dispatcher logs a no-writer warning per-tick. The `bug` class above is that layout's own class (bug-kind layout substitutes `bug.md` for `design.md`); it carries the same `context_from_frontmatter: [spec_source_requests]` key as `design`.
+`<use-case-writer-expert>` / `<designer-expert>` / `<system-designer-expert>` / `<architect-expert>` / `<ui-designer-expert>` / `<planner-expert>` / `<developer-expert>` / `<tester-expert>` / `<data-writer-expert>` / `<docs-writer-expert>` / `<researcher-expert>` are placeholders for the consumer-supplied COMPOSED expert key (typically `<domain>.<role>` from `lazycortex-experts`, e.g. `claude-plugin.designer` — never a bare role word like `designer`; a project-local override expert key works the same way). The bare `vision.md` / `design.md` / `tech.md` entries of the system classes catch the project-wide set that lives loose at the spec content-root (`spec.vault_root`, default `specs`), beside `requests/`. When the consumer has not registered one of them yet, omit that class until the expert exists — without a registered `main`, the dispatcher logs a no-writer warning per-tick. The `bug` class above is that layout's own class (bug-kind layout substitutes `bug.md` for `design.md`); it carries the same `context_from_frontmatter: [spec_source_requests]` key as `design`.
 
 The `design` and `test-plan` classes' `main` experts carry one requirement beyond ordinary review-writing: `spec.coordinator`'s change-cascade dispatch (`lazy-spec.coordination-playbook.md` Chapter 4, wire shape in `lazy-spec.lifecycle-protocol.md` Part 4) dispatches them to fold a change's design delta into a *different* asset's own `design.md` / `test-plan.md` in place, and an in-place edit only lands a commit when the dispatched expert's own `experts.<name>` settings entry carries `can_commit_in_repo: true` — the dispatch primitive reads that flag from the expert's own registration, never from the wire bundle (a state-mutating op never takes caller-side a field its owner can read itself). Set `can_commit_in_repo: true` on whichever expert each product wired into those two classes' `main[0].name`. Skipping this leaves the cascade's edits uncommitted — the daemon's dirty-tree guard then blocks every subsequent routine on that repo.
 
 `context_from_frontmatter` is a generic class-config key (not tied to any one document origin): at main-job dispatch, the dispatcher reads each named frontmatter key off the document under review, resolves wikilink (`[[path]]`) or bare repo-relative values to repo files, and folds every resolved file into the job bundle's `context/`. `spec_source_requests` reaches a doc two ways — `lazy-spec.request-apply`'s `ensure_source_request` writer stamps it onto an attach target's primary doc, and `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" seed-doc` copies the status folder-note's union (stamped there at apply) onto every checkbox-seeded doc — so carrying the key here means the design writer's job bundle includes the originating request file(s), the same distribution pattern plan 2 uses for guideline context. An unresolvable value is never silent — it surfaces as a warning on the tick summary, never a dispatch failure.
 
-Validator composition follows one rule: the architect is the standing validator of everything design-shaped (`design`, `system-design`, `ui-design`, and `code-plan` against the architecture), the designer validates the actors/flows that precede design (`use-cases`), the developer validates the plans that will drive execution (`test-plan`) and the bug report (`bug`), the researcher validates the research design (`research-design`), and no class is validated by its own main writer. `architecture` keeps its `planner_review` slot (the planner checking whether the doc holds enough decisions to decompose into a plan). The vision classes (`vision`, `system-vision`), the report classes (`code-report`, `test-report`, `data-report`, `docs-report`), `system-tech`, and `research-report` wire no validators — their doc is approved by the operator directly through the standard review UI. No class carries a `terminal` block — these classes have no post-approve routing (the apply transition completes the request lifecycle; downstream is the per-asset gate machine, not another review round). The settings-migration ladder's older steps (`_add_architecture_class` / `_add_planner_review_to_design` in `lazycortex-core`'s `bin/lazy_settings_migrations/review.py`) predate this composition — they migrate old vaults to the pre-`system-design` shape; the current composition reaches an existing vault by manual migration, not by ladder.
+Validator composition follows one rule: the architect is the standing validator of everything design-shaped (`design`, `system-design`, `ui-design`, `system-ui-design`, and `code-plan` against the architecture), the designer validates the actors/flows that precede design (`use-cases`), the developer validates the plans that will drive execution (`test-plan`) and the bug report (`bug`), the researcher validates the research design (`research-design`), and no class is validated by its own main writer. `architecture` keeps its `planner_review` slot (the planner checking whether the doc holds enough decisions to decompose into a plan). The vision classes (`vision`, `system-vision`), the report classes (`code-report`, `test-report`, `data-report`, `docs-report`), `system-tech`, and `research-report` wire no validators — their doc is approved by the operator directly through the standard review UI. No class carries a `terminal` block — these classes have no post-approve routing (the apply transition completes the request lifecycle; downstream is the per-asset gate machine, not another review round). The settings-migration ladder's older steps (`_add_architecture_class` / `_add_planner_review_to_design` in `lazycortex-core`'s `bin/lazy_settings_migrations/review.py`) predate this composition — they migrate old vaults to the pre-`system-design` shape; the current composition reaches an existing vault by manual migration, not by ladder.
 
 **`tech.md` carries no review class, and gains no planner-validation slot here.** `ReviewClassName` (`lazycortex-core`'s `bin/constants.py`) is a closed set — `plan` (legacy), `code-plan`, `test-plan`, `code-report`, `test-report`, `design`, `bug`, `architecture` — with no `tech` token, and no `class: tech` entry exists anywhere in this seed or in the settings-migration ladder (`lazycortex-core`'s `bin/lazy_settings_migrations/review.py`). A product's `tech.md` is authored inline by `lazy-spec.create-from-code` (product-level) or by hand (feature/change-level — `lazy-spec.audit`'s own source-staleness check reads it as a plain file, never as a review-dispatched one); it is never dispatched through review, so there is no review class for a planner-validation slot to attach to. Nothing in this seed changes for `tech`.
 

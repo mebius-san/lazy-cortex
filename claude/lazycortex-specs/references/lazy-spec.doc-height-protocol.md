@@ -5,7 +5,7 @@ description: The abstraction height a spec document holds — every document kin
 ---
 # Document height protocol v2
 
-Contract for every expert dispatched against a document of the `vision`, `system-vision`, `system-design`, or `design` review class — the main writer and every validator alike. It governs one thing: at what level of abstraction this document speaks, and what to do with material that belongs a level below.
+Contract for every expert dispatched against a document of the `vision`, `system-vision`, `system-design`, `system-ui-design`, or `design` review class — the main writer and every validator alike. It governs one thing: at what level of abstraction this document speaks, and what to do with material that belongs a level below.
 
 ## The height ladder
 

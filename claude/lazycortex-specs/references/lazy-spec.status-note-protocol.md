@@ -155,5 +155,5 @@ Seven plugin-owned H1 sections, each with its `#protected/spec/<region>` tag as 
 
 What each section is for is identical to the status note's (Part 4 above), read at the level's altitude: `# Gates` holds the level's launch checkboxes, `# History` takes the level documents' own stage transitions (`lazy-spec.set-stage` writes them here — a system document's nearest folder-note is its level note, not an absent status note), and `# Attachments` registers the level's non-markdown attachments.
 
-The level's four system documents — `vision.md`, `design.md`, `ui-design.md`, `tech.md` — sit loose beside the note, exactly as [file-roles](./lazy-spec.file-roles-protocol.md) Part 2's path constraints already describe, and are the only documents the level note coordinates.
+The level's system documents — `vision.md`, `design.md`, `tech.md`, and on a product root `ui-design.md` — sit loose beside the note, exactly as [file-roles](./lazy-spec.file-roles-protocol.md) Part 2's path constraints already describe, and are the only documents the level note coordinates.
 

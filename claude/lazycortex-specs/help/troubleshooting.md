@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-09-13
+last_regen: 2026-09-14
 no_diagram: true
 source_skills:
   - lazy-spec.add-asset-type
@@ -25,7 +25,7 @@ source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
   - lazy-spec.audit
-source_sha: 10fab8e369cc16fd3f178db5a4e347eb512ab40a
+source_sha: 05f8009a289f5457ccb6994a57a0c5da79db4cb1
 ---
 # Troubleshooting
 
@@ -81,6 +81,16 @@ source_sha: 10fab8e369cc16fd3f178db5a4e347eb512ab40a
 
 ---
 
+## `/lazy-spec.product-config` refuses because the `spec_path` ends in a reserved name
+
+**Symptom**: The wizard rejects the path at Step 2, saying the final path segment collides with a reserved name.
+
+**Likely cause**: The folder leaf of `spec_path` is one of the six names reserved for the product-root documents themselves — `vision`, `design`, `ui-design`, `tech`, `use-cases`, `decisions` — because the product's own folder-note shares that leaf's basename, which would collide with the like-named document sitting beside it at the product root (the same six names `/lazy-spec.audit` Check 0 refuses on an existing product). `ui-design` joined the reserved set once the plugin gained a product-level `ui-design.md` — the shared look for the whole product, above the per-asset `ui-design.md` documents.
+
+**Fix**: Choose a `spec_path` whose final segment isn't one of those six names, then re-run `/lazy-spec.product-config`.
+
+---
+
 ## `/lazy-spec.product-config` refuses because the product key already exists
 
 **Symptom**: The wizard aborts saying the chosen key is already present in `products`.
@@ -133,11 +143,11 @@ source_sha: 10fab8e369cc16fd3f178db5a4e347eb512ab40a
 
 ## `/lazy-spec.audit` reports a reserved product slug with no fix offered
 
-**Symptom**: Check 0 fails, naming the product folder leaf as `vision`, `design`, `tech`, `use-cases`, or `decisions`, and the report names no repair verb for it.
+**Symptom**: Check 0 fails, naming the product folder leaf as `vision`, `design`, `ui-design`, `tech`, `use-cases`, or `decisions`, and the report names no repair verb for it.
 
-**Likely cause**: The product folder's basename collides with the product-level `vision.md` / `design.md` / `tech.md` / `use-cases.md` / `decisions.md` files that live at the product root — a structural naming conflict no verb resolves.
+**Likely cause**: The product folder's basename collides with the product-level `vision.md` / `design.md` / `ui-design.md` / `tech.md` / `use-cases.md` / `decisions.md` files that live at the product root — a structural naming conflict no verb resolves.
 
-**Fix**: Rename the product's folder (and its `spec_path` entry via `/lazy-spec.product-config` edit mode) to a leaf that isn't `vision`, `design`, `tech`, `use-cases`, or `decisions`, then re-run `/lazy-spec.audit`.
+**Fix**: Rename the product's folder (and its `spec_path` entry via `/lazy-spec.product-config` edit mode) to a leaf that isn't `vision`, `design`, `ui-design`, `tech`, `use-cases`, or `decisions`, then re-run `/lazy-spec.audit`.
 
 ---
 

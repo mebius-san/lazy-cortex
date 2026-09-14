@@ -147,7 +147,7 @@ Values are lists of repo-relative file paths, read literally — no glob expansi
 
 ### `products[<key>].doc_types` — project-declared document types
 
-A product record MAY carry a `doc_types` dict declaring document types beyond the nine the plugin ships in `references/lazy-spec.doc-types.json`, or adjusting the flags of a shipped one:
+A product record MAY carry a `doc_types` dict declaring document types beyond the ones the plugin ships in `references/lazy-spec.doc-types.json`, or adjusting the flags of a shipped one:
 
 ```json
 "doc_types": {

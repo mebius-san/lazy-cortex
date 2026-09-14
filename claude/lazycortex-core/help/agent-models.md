@@ -1,13 +1,13 @@
 ---
 chapter_type: block
 summary: Assign model tiers to every agent, prune dead entries, and register non-Anthropic provider endpoints for expert jobs to spawn against.
-last_regen: 2026-09-13
+last_regen: 2026-09-14
 no_diagram: true
 source_skills:
   - lazy-core.agent-models
   - lazy-core.agent-models-seed
   - lazy-core.providers
-source_sha: 9fef3719f81552fe26c4b661a252c8abb88120d3
+source_sha: c02247a7934dc795134e714f217ab0c7082bcdd3
 ---
 # Per-agent model routing
 
@@ -43,7 +43,7 @@ After the prompts, the skill writes each entry to its structurally correct file.
 
 One override cuts across all of that: if an agent is dispatchable by the runtime daemon — it is wired as an expert's `agent` in `lazy.settings.json`, or it is the built-in doctor dispatch — its entry always lands in the project settings file, regardless of group or `--scope`. The daemon reads `agent_models` from project scope only, so a globally-routed entry would be invisible to headless dispatches; the wizard writes where the stricter resolver actually looks, and flags the affected entries in the batch prompt so you know why they are routed that way.
 
-Before writing anything new, the wizard also prunes stale tiers, under either of two proofs. First: a plugin-namespaced entry (`<plugin>:<agent>`) still sits in either settings file, the plugin itself is still installed, but its newest version no longer ships that agent — you updated the plugin and it dropped an agent, or removed one yourself. Second: the plugin behind the entry is gone from *every* registered marketplace catalog, not merely uninstalled from this repo — a plugin you disabled or uninstalled here but that another marketplace still lists keeps its entries, since you might reinstall it; one that stands nowhere at all can never resolve again, so there is nothing left to keep the entry for. Either proof deletes the dead entry automatically, in both interactive and unattended runs, and the report names which proof retired it. No prompt, no confirmation: a tier for an agent that provably doesn't exist anymore is dead config, not a decision you made. The only thing the wizard won't touch on its own is an expert in `lazy.settings.json` still pointing its `agent` field at that removed dispatch — that comes back as a warning in the report instead, so you can fix the expert config yourself.
+Before writing anything new, the wizard also prunes stale tiers, under either of two proofs. First: a plugin-namespaced entry (`<plugin>:<agent>`) still sits in either settings file, the plugin itself is still installed, but its newest version no longer ships that agent — you updated the plugin and it dropped an agent, or removed one yourself. This proof also catches an entry whose plugin-namespaced key never named an agent to begin with — a dispatch string that looks like `<plugin>:<name>` but `<name>` is actually one of the plugin's skills, not an agent. The routing hook only ever matches an `Agent` dispatch, so a skill-shaped key can never fire and nothing re-creates it; the wizard prunes it the same way it prunes a genuinely deleted agent. Second: the plugin behind the entry is gone from *every* registered marketplace catalog, not merely uninstalled from this repo — a plugin you disabled or uninstalled here but that another marketplace still lists keeps its entries, since you might reinstall it; one that stands nowhere at all can never resolve again, so there is nothing left to keep the entry for. Either proof deletes the dead entry automatically, in both interactive and unattended runs, and the report names which proof retired it. No prompt, no confirmation: a tier for an agent that provably doesn't exist anymore is dead config, not a decision you made. The only thing the wizard won't touch on its own is an expert in `lazy.settings.json` still pointing its `agent` field at that removed dispatch — that comes back as a warning in the report instead, so you can fix the expert config yourself.
 
 The `lazy-core.model-router` PreToolUse hook is the runtime counterpart. It fires before every `Agent` dispatch, reads the `agent_models` section, matches the dispatch string, and injects the configured tier silently. Agents with no entry, or entries set to `default`, fall through to Claude Code's built-in model default. No restart is needed after the wizard writes new entries — the hook picks them up on the next dispatch.
 
@@ -73,7 +73,7 @@ Assigning a provider to a specific expert is a separate, content-level decision 
 
 **After an automated rollout.** If a repo was brought current by `lazy-core.autosetup` rather than by you running the install chain by hand, expect only the curated-default agents to already have tiers. Run `/lazy-core.agent-models` yourself afterward to finish routing the rest — it picks up exactly where the automated run left off.
 
-**After removing a plugin agent.** Nothing to do by hand — the next run of `/lazy-core.agent-models` prunes that agent's now-dead tier automatically and lists it in the report as pruned, naming which of the two proofs retired it (the agent dropped from a still-installed plugin, or the plugin itself gone from every marketplace). If the report also warns that an expert still references the removed agent, update that expert's `agent` field yourself; the wizard reports the warning but will not edit your expert config. Uninstalling a plugin that another marketplace still lists does not prune its entries — you might reinstall it, so its tiers wait until the plugin is truly gone.
+**After removing a plugin agent.** Nothing to do by hand — the next run of `/lazy-core.agent-models` prunes that agent's now-dead tier automatically and lists it in the report as pruned, naming which of the two proofs retired it (the agent dropped from a still-installed plugin — including a plugin-namespaced entry that turns out to name a skill rather than an agent, which can never route through the model hook — or the plugin itself gone from every marketplace). If the report also warns that an expert still references the removed agent, update that expert's `agent` field yourself; the wizard reports the warning but will not edit your expert config. Uninstalling a plugin that another marketplace still lists does not prune its entries — you might reinstall it, so its tiers wait until the plugin is truly gone.
 
 **After disabling a plugin without uninstalling it.** Nothing to do by hand either — the wizard's enablement filter keeps that plugin's agents out of the missing list for as long as it stays disabled in this repo's settings, without pruning its already-written tiers (it might come back).
 

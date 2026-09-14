@@ -57,6 +57,7 @@ class Key:
     ASSET_TYPE: Frontmatter key naming an asset's own type, read off its status note.
     DOC_TYPE: Frontmatter key naming an authored document's type.
     PRODUCT_ICON: Settings-record key by which a product names an icon of its own.
+    PRODUCT_COLOR: Settings-record key by which a product names a colour of its own.
   """
 
   OP = "op"
@@ -68,6 +69,7 @@ class Key:
   ASSET_TYPE = "spec_asset_type"
   DOC_TYPE = "spec_doc_type"
   PRODUCT_ICON = "icon"
+  PRODUCT_COLOR = "color"
 
 
 class Role:
@@ -129,13 +131,15 @@ def type_pair(root: Path, path: str, frontmatter: dict) -> tuple[str, str] | Non
   if role == Role.CATALOG:
     return asset_types.icon_color(Role.CATALOG, {})
 
-  # a product may name an icon of its own in its settings record; the colour stays the type's
+  # a product may name an icon and a colour of its own in its settings record; the shipped
+  # `product` type supplies whichever half the record leaves out — the same pair the install
+  # writes, so a reconcile never undoes what the install painted
   if role == Role.PRODUCT:
     pair = asset_types.icon_color(Role.PRODUCT, {})
     # guard: an undeclared product type leaves the record's icon with no colour to pair with
     if pair is None:
       return None
-    return record.get(Key.PRODUCT_ICON) or pair[0], pair[1]
+    return record.get(Key.PRODUCT_ICON) or pair[0], record.get(Key.PRODUCT_COLOR) or pair[1]
 
   # an asset is painted by the type it declares, resolved inside its own product's scope so a
   # product's own asset-type overrides are honoured exactly as a fresh scaffold honours them

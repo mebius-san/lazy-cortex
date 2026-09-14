@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Ingest free-form requests and route them into the spec tree: classify, find candidates, attach, spawn, or link via a deterministic worker.
-last_regen: 2026-09-13
+last_regen: 2026-09-14
 diagram_spec:
   anchor: "How the block flows"
   request: "Flow diagram showing the requests block pipeline: the catalog-root routing coordinator orchestrates — it calls lazy-spec.request-classify (returns a class token), then lazy-spec.request-find-candidates (returns a ranked candidate list), then writes only structural routing fields (verb, target, product/path/tools/targets/drop) into the routing decision — no per-target prose. Show an operator confirmation step, then a single lazy-spec.request-apply node that branches internally into attach (folds the request onto an existing entity's primary doc) or spawn (scaffolds a new entity's folder and status note only, documents seeded later per launch checkbox) — both paths converge into 'doc's own writer builds from source in its review job'."
@@ -10,7 +10,7 @@ source_skills:
   - lazy-spec.catalog-coordinator
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
-source_sha: f1a56b7fe545eee38ce6ac86f103b38934d0fe11
+source_sha: 0ebc441aeb577bb1922a1da2ee80c022369f3433
 ---
 # Requests
 
@@ -54,7 +54,7 @@ No document's prose is ever assembled from the routing decision itself. What act
 
 **A not-yet-launched feature's in-flight ladder rolls back first.** If the attach target is a feature whose planning has already started (a `code-plan.md` / `test-plan.md` exists, or a gate from `spec_plan_done` onward is already true) but hasn't launched implementation, the routing coordinator names which of the target's existing documents to remove via the attach line's `drop=` field — drawn from the target type's own playbook, and left absent means dropping nothing at all. When `drop=` names documents, the worker cancels the target's active job, stops review on the named siblings, drops them from the worktree, flips the downstream gates back off, and only then applies the attach — landing the feature back where it would be if the ladder had never started, before the fresh request's writer round revises its design.
 
-**Attach a request to a system document.** When a request is really feedback on a product's overall direction rather than on one specific feature or bug — a note about the product's `vision.md`, `design.md`, `ui-design.md`, or `tech.md`, or about the catalog root's own copies of those four — the routing coordinator writes an `attach` line naming that document's path directly instead of an asset's folder-note. Apply stamps `spec_source_requests` onto the document itself and reopens its review; there is no folder-note in between to record the source request on, since a level document's home note carries no `## Source requests` section of its own. `drop=` has no meaning on a line like this — a level's system documents are never rolled back as a set the way an in-flight feature's ladder is.
+**Attach a request to a system document.** When a request is really feedback on a product's overall direction rather than on one specific feature or bug — a note about the product's `vision.md`, `design.md`, `ui-design.md`, or `tech.md`, or about the catalog root's own `vision.md`, `design.md`, or `tech.md` — the routing coordinator writes an `attach` line naming that document's path directly instead of an asset's folder-note. Apply stamps `spec_source_requests` onto the document itself and reopens its review; there is no folder-note in between to record the source request on, since a level document's home note carries no `## Source requests` section of its own. `drop=` has no meaning on a line like this — a level's system documents are never rolled back as a set the way an in-flight feature's ladder is. `ui-design.md` exists only at a product root — the catalog root has no copy of it, so an attach line naming that filename always resolves under a product's own `spec_path`, never at the content root.
 
 ## Common adjustments
 

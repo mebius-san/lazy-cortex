@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-09-13
+last_regen: 2026-09-14
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, generic iteration loops, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys, seed data gaps), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models, plugin-path resolution, stale source paths at claim time), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources, worker import errors), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
@@ -38,7 +38,7 @@ source_skills:
   - lazy-runtime.preflight
   - lazy-runtime.recover
   - lazy-runtime.tick
-source_sha: 9fef3719f81552fe26c4b661a252c8abb88120d3
+source_sha: c02247a7934dc795134e714f217ab0c7082bcdd3
 ---
 # Troubleshooting
 
@@ -619,6 +619,26 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: Both `/lazy-core.agent-models` and `/lazy-guard.allow-mcp` only auto-apply, without a user channel, the subset of decisions that are already recorded rather than guessed. For `/lazy-core.agent-models`, that means curated tiers from `default-tiers.json` (Batch 1) land automatically, while agents with no curated tier (Batches 2 and 3) have no safe default to pick and are left missing. For `/lazy-guard.allow-mcp`, that means new `allow`/`ask` entries at a scope the skill can already infer from existing entries, and preload-hook merges into a hook that already exists, apply automatically — while an undetermined scope, an `allow`→`ask` reversal, a cross-scope leak, or the initial "install the preload hook at all?" decision all require a person's judgment and are reported rather than guessed.
 
 **Fix**: Run the interactive form of the skill directly to clear the remainder — `/lazy-core.agent-models` for the still-missing agent tiers, or `/lazy-guard.allow-mcp <server>` for the still-open MCP scope, reversal, or leak-cleanup decisions — and answer the prompts once. Both skills are idempotent: entries already applied by the non-interactive pass are left untouched, and only the reported `needs-interactive` items re-prompt.
+
+---
+
+## `/lazy-core.agent-models` keeps re-offering tiers for a plugin you removed from this repo
+
+**Symptom**: Batches 2/3 of `/lazy-core.agent-models` repeatedly prompt for model tiers on agents belonging to a plugin you disabled or stripped from this repo's `enabledPlugins`, even though you skip that batch every time — the same agents come back on the next run.
+
+**Likely cause**: Agent discovery (Step 3) originally kept a plugin's agents in scope purely from `~/.claude/plugins/installed_plugins.json`'s install-scope record. That machine-wide registry records *where a plugin was ever installed*, not whether this repo still wants it — so a repo that removed the plugin from `enabledPlugins` (tracked or local overlay) kept the stale project-scope record, and every one of that plugin's agents was re-seeded into the missing list on every run.
+
+**Fix**: Run `/plugin update lazycortex-core@lazycortex` to pick up the enablement filter — Step 3 now also drops any plugin whose merged `enabledPlugins["<plugin>@<marketplace>"]` isn't `true` for this repo, so a disabled plugin's agents stop being offered. Re-run `/lazy-core.agent-models` to confirm the batch no longer includes them. Re-enabling the plugin later makes its agents reappear normally on the next run.
+
+---
+
+## `/lazy-core.agent-models` prunes a `<plugin>:<skill-name>`-shaped `agent_models` entry
+
+**Symptom**: An `agent_models` entry keyed like `superpowers:brainstorming` — a plugin-namespaced key naming a skill rather than an agent — disappears the next time `/lazy-core.agent-models` runs, reported among the stale entries removed, even though the skill itself still works fine.
+
+**Likely cause**: The `lazy-core.model-router` hook only matches `Agent(subagent_type: …)` dispatches; a skill invoked through the `Skill` tool is never routed through `agent_models` at all, so a skill-shaped key could never actually steer anything. The staleness check in Step 4 used to leave such keys alone because it could not prove a skill's non-existence the way it proves an agent file is gone; it no longer exempts them — if the owning plugin's cache has no `agents/<stem>.md` for that stem, the key is pruned under the same "agent was deleted" proof as any other stale entry. `lazycortex-core` 9.4.4 also dropped the five built-in `superpowers:*` keys from `default-tiers.json` for the same reason — none of them were live routes.
+
+**Fix**: No action needed — a pruned skill-shaped key was inert and controlled nothing. If you actually want to pin a model tier for something a superpowers skill dispatches, find the real `Agent(subagent_type: "<name>")` call it makes and pin that agent's own dispatch string instead — `/lazy-core.agent-models` will offer it normally once it is discovered.
 
 ---
 

@@ -112,6 +112,13 @@
       "icon": "LiLayoutDashboard",
       "color": "#94a3b8"
     },
+    "system-ui-design": {
+      "stages": true,
+      "review": true,
+      "append_only": false,
+      "icon": "LiLayoutDashboard",
+      "color": "#94a3b8"
+    },
     "research-design": {
       "stages": true,
       "review": true,

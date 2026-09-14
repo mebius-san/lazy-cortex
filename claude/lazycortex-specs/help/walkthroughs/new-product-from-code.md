@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a product bound to an existing codebase, generate its vision, design, and tech docs from source, then scaffold the first feature.
-last_regen: 2026-09-13
+last_regen: 2026-09-14
 diagram_spec:
   anchor: "How the skills hand off"
   request: "Sequence diagram showing the three-skill journey: operator runs lazy-spec.product-config to register the product and write settings, then runs lazy-spec.create-from-code to scan source and produce design + tech docs, then runs lazy-spec.create-feature to scaffold the first feature asset; show the operator, each skill, and the spec vault as actors, with the key handoff points between them."
@@ -9,7 +9,7 @@ source_skills:
   - lazy-spec.product-config
   - lazy-spec.create-from-code
   - lazy-spec.create-feature
-source_sha: f1a56b7fe545eee38ce6ac86f103b38934d0fe11
+source_sha: 05f8009a289f5457ccb6994a57a0c5da79db4cb1
 ---
 # How do I get specs for a codebase that already exists?
 
@@ -24,6 +24,7 @@ After completing this walkthrough you will have:
 - A product `vision.md` — goals, requirements, and value proposition, authored first from the code survey.
 - A `design.md` — behavior-only, no source URLs, opening with a reference to the sibling vision doc — describing what the product does for its users.
 - A `tech.md` — code-grounded, with forge-correct source URLs — covering the source map, architecture, and components.
+- Optionally, once your product's `vision.md` approves, a product-root `ui-design.md` — the product's shared look (design system, recurring screen patterns, navigation skeleton) that each asset's own `ui-design.md` refines — available as a `Write ui-design` launch checkbox on the product's folder-note. It is a separate document from the three above: none of this walkthrough's three skills author it, and it is optional at the level a `design.md` / `tech.md` are not.
 - Optionally a product-level `use-cases.md` — actors and cross-feature scenarios — if you opted in when `lazy-spec.create-from-code` asked.
 - At least one feature folder under `features/<slug>/` with a scaffolded `design.md` ready for authoring (`code-plan.md` / `test-plan.md` are opt-in, authored later).
 - Review classes wired so every doc enters the review loop automatically.
@@ -66,11 +67,11 @@ The key decisions you will make:
 - **Dependencies** — the skill dispatches a read-only scan of your source paths and presents each detected dependency (internal products, cross-repo, or external packages) for you to accept or skip, one at a time.
 - **Icon** — every product gets one: pick a concrete suggestion or type your own, or decline and the product still gets the default `LiPackage` — a product never ends up icon-less in the file explorer. The product root is also the only ordinary container the wizard paints a colour on (a neutral, state-independent shade); the group folders that appear under it as you add assets carry no colour of their own.
 - **Guidelines** (optional) — per-role file paths whose contents are folded into an expert's job context whenever an operator later ticks a launch checkbox on this product's assets.
-- **Review experts** — ten roles review this product's docs: **use-case-writer** (`use-cases.md`), **designer** (asset-level `design.md`, plus a validation pass on `use-cases.md`), **system-designer** (the product's own `vision.md` / `design.md`, and the project-wide `vision.md` / `design.md`), **architect** (the product's `tech.md` plus any `architecture.md`, and a standing validator on every design-shaped doc including `ui-design.md`), **ui-designer** (`ui-design.md`), **planner** (`code-plan.md`), **developer** (`code-report.md`), **tester** (`bug.md`, `test-plan.md`, `test-report.md`), **data-writer** (`data-report.md`, only relevant if your product produces data-report docs), and **researcher** (a research asset's `research.md`, plus a validation pass on `research-design.md`, only relevant if your product uses the research asset type). If the vault already carries a shared expert set from an earlier product, you can ride it as-is or define a product-specific override; otherwise your answers here seed the vault's shared set. A vault whose shared set predates the use-case-writer, ui-designer, or researcher roles is asked for those separately, even when it rides the shared set for everything else.
+- **Review experts** — ten roles review this product's docs: **use-case-writer** (`use-cases.md`), **designer** (asset-level `design.md`, plus a validation pass on `use-cases.md`), **system-designer** (the product's own `vision.md` / `design.md`, and the project-wide `vision.md` / `design.md`), **architect** (the product's `tech.md` plus any `architecture.md`, and a standing validator on every design-shaped doc including `ui-design.md`), **ui-designer** (asset-level `ui-design.md`, plus the product-root `ui-design.md` — the shared look each asset's own `ui-design.md` refines), **planner** (`code-plan.md`), **developer** (`code-report.md`), **tester** (`bug.md`, `test-plan.md`, `test-report.md`), **data-writer** (`data-report.md`, only relevant if your product produces data-report docs), and **researcher** (a research asset's `research.md`, plus a validation pass on `research-design.md`, only relevant if your product uses the research asset type). If the vault already carries a shared expert set from an earlier product, you can ride it as-is or define a product-specific override; otherwise your answers here seed the vault's shared set. A vault whose shared set predates the use-case-writer, ui-designer, or researcher roles is asked for those separately, even when it rides the shared set for everything else.
 - **Asset types** — optional; declare any beyond the shipped feature/change/bug set now, or later via `/lazy-spec.add-asset-type`.
 - **Workflow mode** — `full` (design through implementation and testing, the default) or `spec-only` (stops after `design.md` approves, released only by an explicit operator word). Most code-bound products want `full`.
 
-When the wizard finishes, the skill writes the product record into settings, creates the product folder with its folder-note — now the level note the `spec.catalog-coordinator` owns, carrying `spec_role: product`, the four level gates (all starting `false`), and the coordinator's own sections (`# Summary`, `# Gates`, `# Status brief`, `# Coordinator rules`, `# Coordinator commands`, `# History`, `# Attachments`) alongside its précis and stats markers — plus the shared vault-root request inbox, and generates the built-in review classes — one per document type marked for review (use-cases, design, system-vision, system-design, system-tech, code-plan, test-plan, bug, plus the implementation and testing report docs) — reusing the vault's shared set when your expert choices match it. It then runs `/lazy-spec.audit` automatically and reports any issues.
+When the wizard finishes, the skill writes the product record into settings, creates the product folder with its folder-note — now the level note the `spec.catalog-coordinator` owns, carrying `spec_role: product`, the four level gates (all starting `false`), and the coordinator's own sections (`# Summary`, `# Gates`, `# Status brief`, `# Coordinator rules`, `# Coordinator commands`, `# History`, `# Attachments`) alongside its précis and stats markers — plus the shared vault-root request inbox, and generates the built-in review classes — one per document type marked for review (use-cases, design, system-vision, system-design, system-tech, system-ui-design, code-plan, test-plan, bug, plus the implementation and testing report docs) — reusing the vault's shared set when your expert choices match it. It then runs `/lazy-spec.audit` automatically and reports any issues.
 
 If `/lazy-spec.product-config` points you at `lazycortex-experts` before finishing, it means a chosen expert name is not registered. Compose the persona via `lazycortex-experts`, then re-run `/lazy-spec.product-config`.
 
@@ -96,6 +97,8 @@ After scanning, the skill authors the product's docs in order.
 Once `design.md` is written, the skill asks one question: also author the product-level `use-cases.md` (actors and cross-feature scenarios) from the same code survey? This is opt-in — decline and the doc is simply never created, with no gap to fix later.
 
 **`tech.md`** is code-grounded: the source map, architecture narrative, component breakdown, route tables (if applicable), and a dependency table with forge-correct source URLs. Like the other docs, no diagram is drawn automatically here either — request one via `/lazy-diagram.draw` against `## Architecture` or `## Components` if you want one.
+
+`lazy-spec.create-from-code` does not author the product-root `ui-design.md`. That document has its own lifecycle: once `design.md` and `tech.md` are written here and `vision.md` approves, a `Write ui-design` checkbox appears on the product's folder-note (the level note `/lazy-spec.product-config` created in Step 2), and ticking it dispatches your registered ui-designer to write it. It is optional — a product with nothing to say about shared screen patterns can leave it unwritten.
 
 Once every doc is written, the skill presents Agent D's candidate feature list and asks you what to do with each one:
 
@@ -133,6 +136,7 @@ The product is registered and its initial spec is live. From here:
 - **Add more features** — run `/lazy-spec.create-feature <compound-key> <slug>` for each new feature you want to document. You can scaffold any of the candidates Agent D surfaced, or invent a new slug for a feature the scan did not detect.
 - **Keep docs in sync with code** — when source changes land, run `/lazy-spec.sync-with-code <compound-key>` to surface behavior changes for the design doc, update branch pins if you are working on a non-default branch, and propose gate/stage corrections (e.g. flipping `spec_develop_done`) grounded in what actually shipped — always with your confirmation before anything is written.
 - **Drive assets through their gates** — use `/lazy-spec.flip-gate` to advance a feature's readiness gates (`spec_design_done` → `spec_plan_done` → …), or let `spec.coordinator` advance derived gates for you on its next wake (the `lazy-spec.gate-tick` routine itself only polls jobs and checks note structure).
+- **Write the product's shared UI look** — once `vision.md` approves, tick the `Write ui-design` checkbox on the product's folder-note if your product needs one place for its design system, recurring screen patterns, and navigation skeleton; each asset's own `ui-design.md` then refines that shared look rather than inventing its own.
 - **Re-run the doc scan** — if the codebase grows significantly, re-run `/lazy-spec.create-from-code <compound-key>` to refresh the design and tech docs. The skill reconciles existing branch pins before overwriting, and leaves an already-present `vision.md` untouched.
 - **Audit checks** — run `/lazy-spec.audit <compound-key>` at any time to audit the product tree for broken links, missing sections, role violations, and source-link staleness. It is read-only and only reports: each finding names the verb, skill, or hand edit that clears it.
 
