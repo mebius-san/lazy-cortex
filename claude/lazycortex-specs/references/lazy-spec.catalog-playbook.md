@@ -102,9 +102,11 @@ The verb writes `<content-root>/requests/<slug>.md` at `request_status: draft` a
 
 **No coordinator below is woken.** A re-approval at a level never fans out into asset wakes or product wakes: a candidate request is the whole of what flows downward, and it flows through the operator's own accept/reject, never around them. Name in `# Status brief` how many candidates this wake dropped and what they concern.
 
-## 7. Status brief
+## 7. Summary and status brief
 
-Rewrite `# Status brief` on every wake — two to four sentences of plain product-language narration: what state this level is in, why it is stalled if it is, what happens next. State, never a synopsis of a document, never wake mechanics, never engine vocabulary. Keep the HTML-comment explainer line under the section's protected tag in place and write below it.
+`# Summary` carries this level's one-line description — what this product, or this whole catalog, IS, in a single plain sentence written between the `<!-- spec:precis:start -->` and `<!-- spec:precis:end -->` markers. It is the only thing a reader sees without opening the note, so a level whose description is still empty reads as nameless in every listing. You own it: write it on the first wake that finds it empty, and rewrite it later only when the level's subject has genuinely changed — `vision.md` is the document it comes from. A description states identity, never state, so a wake that only moved a gate leaves it exactly as it stands. Never write into the `<!-- spec:stats:* -->` markers beside it — the counts there belong to the stats CLI alone.
+
+Rewrite `# Status brief` on every wake — two to four sentences of plain product-language narration: what state this level is in, why it is stalled if it is, what happens next. State, never a synopsis of a document, never wake mechanics, never engine vocabulary. Keep the HTML-comment explainer line under each section's protected tag in place and write below it.
 
 ## 8. Questions and commands
 

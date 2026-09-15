@@ -42,14 +42,15 @@ A no-op tick (nothing changed that the coordinator cares about) and automation o
 
 **The closed verb set.** The coordinator acts ONLY through these primitives, every call auditable and landing a `# History` line: `flip-gate` (including `--off` / `--halt`), `dispatch-job`, `cancel-job`, `submit` / `stop` (lazy-review), `push-question`, plus the note-owning verbs that write frontmatter/sections under validation (`set-stage`, `note-set-key`, `note-check`). It never hand-edits a folder-note's YAML or body with a text editor — every mutation is a verb call, so the mutation is validated, logged, and auditable exactly like every other primitive in this system.
 
-**What the coordinator's own pen writes.** Four surfaces, and nothing else:
+**What the coordinator's own pen writes.** Five surfaces, and nothing else:
 
+- `# Summary` — the one-line description of what this asset is, inside its `<!-- spec:precis:* -->` markers (Chapter 11).
 - `# Status brief` — its own prose, rewritten (not appended) on every invocation.
 - `[!question]` callouts with `- [ ]` options, when it needs an operator decision.
 - Locking `# Coordinator commands` blocks — writing progress marks into a mini-plan and moving the finished block to `# History` (Chapter 7).
 - `# Attachments` — the registry of the asset's non-markdown attachments, one line per file naming the file and the document that owns it, tagged `#protected/spec/attachments` (Chapter 11's attachment registry).
 
-None of these four land through a primitive verb, so none of them commit themselves — the coordinator commits each one under its own `spec.coordinator@bot.invalid` identity before the job ends. A dirty tree at exit trips the runtime's `uncommitted_changes` halt (`lazy-core.expert-runtime-contract.md`) and strands the whole daemon tick, not just this asset.
+None of these five land through a primitive verb, so none of them commit themselves — the coordinator commits each one under its own `spec.coordinator@bot.invalid` identity before the job ends. A dirty tree at exit trips the runtime's `uncommitted_changes` halt (`lazy-core.expert-runtime-contract.md`) and strands the whole daemon tick, not just this asset.
 
 **Icon repaint rides inside every hand commit.** The primitive verbs already paint the notes they commit (`iconize_inline.repaint_paths` folded into their `git add` and pathspec), but the pen surfaces are hand-committed — and a folder-note rewrite is exactly what the note's icon colour tracks. So the repaint is the LAST act before each `git commit` — strictly after every note write of the wake, because the worker reads the note's on-disk state and a repaint run before the final write paints the OLD colour. Ask the obsidian plugin's repaint worker for the paths the commit will carry: resolve `bin/lazycortex-obsidian` by walking `$LAZYCORTEX_PLUGIN_DIRS` for a directory whose path contains `lazycortex-obsidian`, run `<worker> sync-paths <repo-relative path>...`, and fold every entry of the returned JSON's `touched` array into the commit's pathspec. Best-effort by contract: plugin absent, env unset, non-zero exit, or unparseable output all mean commit without paint — never block, never retry, never report it as a failure.
 
@@ -244,7 +245,11 @@ A report entering review (opened by Chapter 6's submit call on its writing job's
 
 **Assets without tools of their own are legal — the decomposer.** An asset that builds nothing itself completes by bringing its CHILDREN to completion: its own "implementation" IS their completion. Such a decomposer asset declares `spec_depends_on` naming its children (the assets its own defining documents proposed and the coordinator materialized, Chapter 12) — the same dependency-graph mechanism above, just read reflexively against the decomposer's OWN ladder instead of gating some other asset's implementation. The exact closing rule: `spec_develop_done`(parent) flips true the moment `spec_develop_done` is true on EVERY child named in `spec_depends_on` (an AND over the graph edge, not an external DONE marker of its own); `spec_tests_passing`(parent) flips true the same way, over every child's `spec_tests_passing`. Unlike the ordinary human-signal reading of these two gates, a decomposer's copies are fully derivable from child state — the coordinator auto-flips them the instant the AND holds (Chapter 4's derived/human-signal split) — and no implementation or testing checkbox ever needs a job dispatched for a decomposer asset at all.
 
-## 11. Status brief and questions
+## 11. Summary, status brief and questions
+
+**`# Summary`** carries the asset's one-line description — what this asset IS, in a single plain sentence written directly under the section's explainer line. An asset note carries no `<!-- spec:precis:* -->` markers and no stats region; the line itself is the whole section. It is the only thing a reader sees without opening the note, since Obsidian shows it in listings and on hover. `lazy-spec.create-asset` writes the first one at scaffold time; from then on the coordinator owns it and keeps it current.
+
+**Description, never status.** The description says what the asset is about and never what stage it is at, what it waits on, or what happened last. Status is `# Status brief`'s job one section below, and a description that drifts into status goes stale on every gate flip. So rewrite it only on a wake where the asset's subject genuinely changed, and leave it exactly as it stands on a wake that merely moved a gate. Written in the note's resolved language, like every other narrative surface.
 
 **`# Status brief`** is the coordinator's own prose section on the asset folder-note — plain product-language narration of what's happening, why (if) the asset is stalled, and what happens next. It is REWRITTEN on every coordinator invocation on that asset, not appended to — the brief always reflects the current state, never a running log (that role belongs to `# History`).
 

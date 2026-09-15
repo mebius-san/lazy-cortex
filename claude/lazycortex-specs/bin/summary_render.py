@@ -46,7 +46,10 @@ def summary_skeleton_asset() -> str:
 
 def summary_skeleton_container() -> str:
   """
-  Return the empty `# Summary` section for a container note (précis + stats).
+  Return the empty `# Summary` section for a level note (description + stats).
+
+  A category container carries the stats region alone — only a product root and the
+  catalog root hold a description of their own.
 
   Returns:
     The section text with both sub-marker regions, ending with a newline.

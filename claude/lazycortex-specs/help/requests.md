@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Ingest free-form requests and route them into the spec tree: classify, find candidates, attach, spawn, or link via a deterministic worker.
-last_regen: 2026-09-14
+last_regen: 2026-09-15
 diagram_spec:
   anchor: "How the block flows"
   request: "Flow diagram showing the requests block pipeline: the catalog-root routing coordinator orchestrates — it calls lazy-spec.request-classify (returns a class token), then lazy-spec.request-find-candidates (returns a ranked candidate list), then writes only structural routing fields (verb, target, product/path/tools/targets/drop) into the routing decision — no per-target prose. Show an operator confirmation step, then a single lazy-spec.request-apply node that branches internally into attach (folds the request onto an existing entity's primary doc) or spawn (scaffolds a new entity's folder and status note only, documents seeded later per launch checkbox) — both paths converge into 'doc's own writer builds from source in its review job'."
@@ -10,7 +10,7 @@ source_skills:
   - lazy-spec.catalog-coordinator
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
-source_sha: 0ebc441aeb577bb1922a1da2ee80c022369f3433
+source_sha: cb4655cf3479bf969c86ef3ebfae3ab395ae3cfd
 ---
 # Requests
 
@@ -27,7 +27,7 @@ None of the block's members is something you invoke directly. The routing decisi
 
 ## How it fits together
 
-The pipeline starts before the routing block fires. You create a request file with `/lazy-spec.create-request`, which captures the raw body into the content root's `requests/` inbox as a plain markdown note. A daemon routine adds the `request_class`, `request_status`, and `request/<value>` mirror tag on the next tick — the create skill writes body only.
+The pipeline starts before the routing block fires. You create a request file with `/lazy-spec.create-request`, which captures the raw body into the content root's `requests/` inbox as a plain markdown note. A daemon routine adds the `request_class`, `request_status`, and `request/<value>` mirror tag on the next tick — the create skill writes body only. The inbox note itself (`requests/requests.md`) carries no description of its own, only a running count of what's inside — it's a shared shelf, not a document with a subject that could change, so there's nothing for any coordinator to write a summary of.
 
 Once the review cycle on the request file closes, the request reaches the terminal group of its own review, and the catalog-root coordinator fires its routing mode there. It works in two sub-skill calls, then surfaces its proposal for your confirmation.
 

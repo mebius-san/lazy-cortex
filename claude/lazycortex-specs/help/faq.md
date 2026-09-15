@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about products, assets, vision/design docs, gates, requests, decisions, coverage gaps, spec lookups, and the coordinator agent.
-last_regen: 2026-09-14
+last_regen: 2026-09-15
 no_diagram: true
 source_skills:
   - lazy-spec.install
@@ -31,7 +31,7 @@ source_skills:
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
   - lazy-spec.resolve-dependency
-source_sha: 05f8009a289f5457ccb6994a57a0c5da79db4cb1
+source_sha: cb4655cf3479bf969c86ef3ebfae3ab395ae3cfd
 ---
 # Frequently asked questions
 
@@ -262,6 +262,18 @@ A folder-note never carries `spec_doc_type` — not an asset's status note, not 
 `spec.coordinator` (for an asset's status note) and `spec.catalog-coordinator` (for a product or catalog-root level note) now clear it for you, the moment their own structural check reports the key as unrecognized. This closes a gap that used to leave the litter in place: the coordinator could see a stray key but had nothing in its toolset that could take it back off, so all it could do was name a "repair route" in `# Status brief` that fixed nothing on its own. It only ever removes a key that genuinely qualifies — one in the `spec_` namespace that the schema does not recognize — and refuses on a key the schema does know (that key carries real state, and state is set, never dropped) or on any key outside the `spec_` namespace at all, since another worker owns those.
 
 You don't need to run anything yourself: the cleanup lands as an ordinary commit the next time the coordinator wakes on that note. `/lazy-spec.audit` still catches the same class of stray key on a note that isn't currently under an active coordinator wake — its report points you at the same fix.
+
+---
+
+## Where does a note's one-line description come from, and why did it stay blank (or show a placeholder) on a product with no assets yet?
+
+Every product root note, the catalog root note, and every asset status note carries a one-line description in its `# Summary` section — one plain sentence saying what the product, the vault, or the asset IS, drawn from `vision.md`, never a statement of state (that's `# Status brief`'s job). It's written by whichever coordinator already owns that note: `spec.coordinator` writes an asset's line directly under the section's explainer, and `spec.catalog-coordinator` writes the product-root or catalog-root précis between that section's `<!-- spec:precis:start -->` / `<!-- spec:precis:end -->` markers. Either one writes it the first time it wakes and finds the line empty, and rewrites it later only once the note's actual subject changed — a wake that only moves a gate or a stage leaves the line untouched.
+
+Category containers (`features/`, `changes/`, `bugs/`, and any folder you add yourself) and the vault-root `requests/` inbox note carry no description at all, only a `<!-- spec:stats:* -->` counter — a collection has no subject of its own to describe, only a count of what's inside it.
+
+If a product's `# Summary` still shows nothing, or an old English placeholder, the coordinator that owns it has simply never woken on that note — a product registered with no assets under it yet is the common case, since nothing has committed a reason for `spec.catalog-coordinator` to look at it. The description used to be written as a side effect of `/lazy-spec.refresh-sources`, which only ever ran when a doc's Sources needed re-projecting — so a product with nothing to refresh never got one written, and the note sat on its placeholder indefinitely. That side effect is gone: `/lazy-spec.refresh-sources` now touches only the one doc's own `# Sources` container and nothing else, so the description is exclusively the owning coordinator's to write. To get it filled in, give the coordinator a reason to wake — commit something under the asset, or on the product's own note or system docs — or run `/lazy-spec.drive` to walk the note in a no-daemon session.
+
+`/lazy-spec.audit` checks the section's shape, not its wording: the product root's `# Summary` MUST carry both the précis marker and the stats marker, every other container MUST carry the stats marker alone (a leftover précis marker there is a WARN — a category was never meant to have one), and an asset note carries neither marker at all, since its description is a plain line rather than a marked region.
 
 ---
 

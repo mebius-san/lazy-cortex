@@ -58,10 +58,11 @@ EXPLAINER_LINE_RE = re.compile(r"^(?:\*[^*].*\*|<!--(?!\s*spec:).*-->)\s*$")
 # waiver: the RU lines carry `# noqa: RUF001` — Cyrillic in Russian UI strings is the content,
 # not a lookalike-character typo; the checker cannot distinguish deliberate Russian text
 ASSET_EXPLAINERS: dict[tuple[str, str], str] = {
-    (Section.SUMMARY, LANG_EN): "A short description. Updated automatically — do not edit by hand.",
+    (Section.SUMMARY, LANG_EN):
+        "A short description, and on a collection its counts. Written automatically — do not edit by hand.",
     (Section.SUMMARY, LANG_RU):
         # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-        "Краткое описание. Обновляется автоматически — руками не править.",  # noqa: RUF001
+        "Краткое описание, а у коллекции — её счётчик. Пишутся автоматически — руками не править.",  # noqa: RUF001
     (Section.GATES, LANG_EN): "Work stages. Tick an item — the next stage starts on its own.",
     (Section.GATES, LANG_RU):
         # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)

@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-09-14
+last_regen: 2026-09-15
 no_diagram: true
 source_skills:
   - lazy-spec.add-asset-type
@@ -25,7 +25,7 @@ source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
   - lazy-spec.audit
-source_sha: 05f8009a289f5457ccb6994a57a0c5da79db4cb1
+source_sha: cb4655cf3479bf969c86ef3ebfae3ab395ae3cfd
 ---
 # Troubleshooting
 
@@ -771,10 +771,10 @@ source_sha: 05f8009a289f5457ccb6994a57a0c5da79db4cb1
 
 ---
 
-## `/lazy-spec.refresh-sources` skips the stats refresh
+## A note's one-line description stays empty
 
-**Symptom**: The run completes and rewrites the `# Sources` sub-sections and précis, but reports that the container-stats refresh was skipped.
+**Symptom**: The `# Summary` section of a product root, a catalog root, or an asset note shows nothing under its explainer line, or shows an old placeholder.
 
-**Likely cause**: The `render-container-stats` CLI isn't on `PATH` — the specs tool isn't installed, or the shell environment can't see it.
+**Likely cause**: The description is written by the coordinator that owns the note, on a wake. A level or asset that has never been woken — a product registered but carrying no assets, for instance — has never had one written.
 
-**Fix**: Re-run `/lazy-spec.install` to restore the CLI, then re-invoke `/lazy-spec.refresh-sources` if you need the stats block refreshed too. The `# Sources` rewrite and précis already landed even without the stats step.
+**Fix**: Give the coordinator a reason to wake, or run `/lazy-spec.drive` to walk the notes in session mode. A category note (`features/`, `bugs/`, `changes/`) deliberately carries no description at all — only its counts.

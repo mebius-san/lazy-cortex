@@ -664,6 +664,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 9.1.1 — 2026-09-15 UTC
+
+- Product and asset folder-note descriptions no longer get stuck on an empty placeholder — each note's own coordinator now writes its description directly, instead of relying on the sources-update skill, which never ran for products without any asset.
+- Category and incoming-request notes dropped their description slot entirely — those are counted collections, not described ones, so only the counter remains.
+
 ### 9.1.0 — 2026-09-14 UTC
 
 - New product-level `ui-design.md` document type captures the product's shared design system, screen patterns, navigation shell, and mockups above individual asset-level `ui-design.md` docs — seeded automatically by install and product registration, with the `ui-design` folder name now reserved for the product root and consistently documented across audit, install, and troubleshooting guides.

@@ -1,11 +1,11 @@
 ---
 name: lazy-spec.refresh-sources
-description: "Use after hand-editing a spec doc's `spec_source_docs` / `spec_source_requests` frontmatter, or whenever its body `# Sources` bullets no longer match that frontmatter. Re-projects the `## Docs` / `## Requests` lists (keeping operator glosses on existing wikilinks), then regenerates the `# Summary` précis for the asset note and its category / product-root containers and refreshes their stats. One file per call — callers loop."
+description: "Use after hand-editing a spec doc's `spec_source_docs` / `spec_source_requests` frontmatter, or whenever its body `# Sources` bullets no longer match that frontmatter. Re-projects the `## Docs` / `## Requests` lists, keeping operator glosses on existing wikilinks. Touches nothing outside the doc's `# Sources` container. One file per call — callers loop."
 execution-discipline-waiver: "Single-purpose projection primitive — wraps the source-attribution reference; no multi-phase orchestration where step-skip can hide."
 ---
 # Refresh Sources
 
-Primitive skill that re-projects a doc's body `# Sources` sub-sections from its frontmatter source-of-truth keys. The operator edits `spec_source_docs:` / `spec_source_requests:` in frontmatter; this skill brings the human-readable `## Docs` / `## Requests` bullet lists back in sync without disturbing anything else. After projecting sources, the skill also regenerates the `# Summary` précis for the resolved asset note and its container hierarchy (category note, product root note), and refreshes the deterministic stats for each affected container.
+Primitive skill that re-projects a doc's body `# Sources` sub-sections from its frontmatter source-of-truth keys. The operator edits `spec_source_docs:` / `spec_source_requests:` in frontmatter; this skill brings the human-readable `## Docs` / `## Requests` bullet lists back in sync without disturbing anything else. It writes inside that one container and nowhere else — the `# Summary` section of a note belongs to the coordinator that owns the note, and its stats region to the stats CLI.
 
 The body shape (the `# Sources` H1 container, the `#protected/spec/sources` owner tag, the `## Requests` / `## Docs` sub-sections, their `<!-- auto:spec-<kind>:start --> / :end -->` marker pairs, the bullet format per kind, and the gloss-preservation rule) is owned by `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.sources-protocol.md`. This skill never restates that format — follow the reference exactly.
 
@@ -41,36 +41,15 @@ Signature: `lazy-spec.refresh-sources <file-path>`.
 - Never touch the `# Sources` H1 heading text, the `#protected/spec/sources` tag, sub-section headings, the marker comments themselves, or any unmarked sub-section under `# Sources` (operator-authored kinds). Rewrite only the bytes inside each kind's marker pair.
 - Never touch any content outside the `# Sources` container.
 
-### 5. Refresh `# Summary` précis and container stats
-
-Resolve the asset note, category container, and product root note using the path convention (never by `spec_role` — asset, category, and product notes carry no such roles):
-- **Asset note** — the status folder-note whose basename matches the enclosing asset directory: `<category>/<slug>/<slug>.md`.
-- **Category container** — `<category>/<category>.md` (e.g. `features/features.md`), resolved from the category directory that contains the asset.
-- **Product root note** — `<spec_path>/<leaf>.md`, where `<leaf>` is the basename of the product's `spec_path`.
-
-For each of the three notes (asset, category, product root) that actually exist:
-
-- Locate the `# Summary` section. It is protected under `#protected/spec/summary`. Never write outside the `<!-- spec:precis:start --> / <!-- spec:precis:end -->` marker pair within that section. Never touch the operator-authored body below the protected region, and never touch any `#protected/spec/{gates,history}` section.
-- Author one LLM-generated précis sentence that captures the meaning of the note and write it into the `<!-- spec:precis:start --> / <!-- spec:precis:end -->` region, replacing any prior précis. The précis is plain prose — no wikilinks, no markup.
-- For **container notes** (category, product root) only: after writing the précis, run `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" render-container-stats <note-path>)` to refresh the `<!-- spec:stats:start --> / <!-- spec:stats:end -->` region with deterministic counts. Never write the stats region by hand; always delegate to the CLI. Asset notes are précis-only — do not call `render-container-stats` on them.
-
-Scope guards:
-- Skip any note in the hierarchy that does not exist on disk.
-- Skip the stats refresh if `render-container-stats` is unavailable (not on PATH); log the skip in the run log.
-- Never touch the `<!-- spec:stats:* -->` region directly — it is exclusively owned by the `render-container-stats` CLI.
-
-Commit all changed notes together with the source-projection changes in one commit per the Key Rules below.
-
 ## Output
 
 - The doc's path.
 - Per sub-section: the projected bullet count (or `unchanged` when the projection matched the existing bytes byte-for-byte).
-- Per affected note (asset, category, product root): précis outcome (`written` or `skipped-not-found`) and stats outcome (`refreshed`, `skipped-asset-note`, or `skipped-unavailable`).
+- Nothing else — no other note is read or written by this skill.
 
 ## Failure modes
 
 - **`/lazy-spec.refresh-sources` refuses naming a non-authored doc** — the target's `spec_role` is `status` (folder-note), `code-report` / `test-report`, or otherwise not an authored doc that carries `spec_source_docs` → run on a stage-bearing authored doc (`design` / `code-plan` / `test-plan` / `bug` / `tech`) instead.
-- **`render-container-stats` not found on PATH** — the CLI is not installed or the shell environment is missing the specs tool. Stats refresh is skipped and logged; précis is still written. Re-run `/lazy-spec.install` to restore the CLI.
 
 ## Run Log
 
@@ -81,7 +60,6 @@ Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/lazy
 - **One primitive, one file** — never accept a list of files. Callers loop themselves.
 - **Frontmatter is the source of truth** — body is a projection of it; never write frontmatter from the body.
 - **Glosses survive re-projection** — operator-edited displays on `## Docs` / `## Requests` bullets are preserved by matching the wikilink target; only the display right of the `|` is operator-owned.
-- **Marker-scoped rewrites only** — touch only the bytes between each kind's `<!-- auto:spec-<kind>:start --> / :end -->` pair for source projection, and between `<!-- spec:precis:start --> / <!-- spec:precis:end -->` for précis; never hand-write into `<!-- spec:stats:* -->` (CLI only).
-- **Never breach the protected summary zone** — write only inside `<!-- spec:precis:start --> / <!-- spec:precis:end -->`; never touch operator body below the `# Summary` section, and never touch `#protected/spec/{gates,history}` sections.
-- **Commit all changes together** — source projection edits and précis/stats updates for all affected notes go in one atomic commit.
-- **Idempotent** — re-running on a doc already in sync is a no-op (byte-for-byte projection match for sources; unchanged précis and stats leave no diff).
+- **Marker-scoped rewrites only** — touch only the bytes between each kind's `<!-- auto:spec-<kind>:start --> / :end -->` pair. Nothing outside the `# Sources` container is this skill's to write.
+- **Never reach into another owner's section** — the `# Summary` section belongs to the note's coordinator and its stats region to the stats CLI; `#protected/spec/{gates,history}` belong to their own writers.
+- **Idempotent** — re-running on a doc already in sync is a no-op: the projection matches the existing bytes and nothing is written.
