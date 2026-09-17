@@ -554,7 +554,7 @@ def note_set_key(asset_dir: Path, key: str, raw_value: str, *, today: str | None
   # read the note's current frontmatter so the value write lands precisely
   note = asset_dir / f"{asset_dir.name}.md"
   text = note.read_text()
-  _, fm_end = flip_gate._parse_frontmatter(text)
+  _, fm_end = flip_gate.parse_frontmatter(text)
   fm_text = text[:fm_end]
 
   # apply the parsed value through the shape-appropriate writer
@@ -663,7 +663,7 @@ def note_drop_key(asset_dir: Path, key: str, *, today: str | None = None) -> dic
   # read the note's current frontmatter so the removal lands precisely
   note = asset_dir / f"{asset_dir.name}.md"
   text = note.read_text()
-  fm_values, fm_end = flip_gate._parse_frontmatter(text)
+  fm_values, fm_end = flip_gate.parse_frontmatter(text)
   # guard: the note carries no such key — nothing to remove or commit
   if key not in fm_values:
     return {_ResultKey.STATUS: _DropKeyStatus.ABSENT, _ResultKey.KEY: key}
@@ -765,7 +765,7 @@ def note_check(asset_note: Path) -> dict:
 
   # split the note into the two halves the checks below read, and open the findings list
   text = asset_note.read_text()
-  fm, fm_end = flip_gate._parse_frontmatter(text)
+  fm, fm_end = flip_gate.parse_frontmatter(text)
   body = text[fm_end:]
   violations: list[dict] = []
 
@@ -836,7 +836,7 @@ def note_check(asset_note: Path) -> dict:
       _ResultKey.NOTE: str(asset_note),
       _ResultKey.OK: not violations,
       _ResultKey.VIOLATIONS: violations,
-      _ResultKey.JOB_MARKERS: spec_job_markers.read(flip_gate._repo_root(asset_note.parent), asset_note),
+      _ResultKey.JOB_MARKERS: spec_job_markers.read(flip_gate.repo_root(asset_note.parent), asset_note),
   }
 
 

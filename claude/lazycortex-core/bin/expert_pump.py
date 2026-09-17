@@ -533,13 +533,59 @@ def _agent_is_read_only(agent_path: Path) -> bool:
   return False
 
 
+def _is_job_halt_exempt(jdir: Path) -> bool:
+  """
+  Report whether one job bundle may still be served while the system is stuck.
+
+  Args:
+    jdir: Job-bundle directory whose `config.json` is read.
+
+  Returns:
+    True when the bundle's config carries `halt_exempt: true`; False otherwise, a missing or
+    unreadable config included.
+  """
+
+  # Domain(runtime.daemon-loop):
+  # # Halt exemption is stamped by the dispatcher, never inferred from a name
+  # Which work may run through trouble is decided once, by whoever queues it: a dispatcher
+  # that knows its job is the triage of the stuck condition marks the bundle as it writes it.
+  # The pump reads that mark and nothing else — it never reconstructs the answer from the
+  # expert's name or from the routine registry, because a resemblance between two registries'
+  # naming is a coincidence, not a contract, and a job that loses the race to that coincidence
+  # is a job that never runs.
+
+  try:
+    cfg = json.loads((jdir / JobFile.CONFIG).read_text())
+  except (OSError, json.JSONDecodeError):
+    return False
+  return bool(cfg.get(JobConfigKey.HALT_EXEMPT, False))
+
+
+def _is_system_stuck(repo: Path) -> bool:
+  """
+  Report whether the runtime is in the state that narrows the pump's queue.
+
+  Mirrors the daemon loop's own `system_stuck` reading — a standing halt block, or a working
+  tree already dirty — so the pump and the loop never disagree about which condition holds.
+
+  Args:
+    repo: Repository root being checked.
+
+  Returns:
+    True when a halt stands or the working tree carries uncommitted changes.
+  """
+  return runtime_state.get_halted(repo) is not None or _check_working_tree(repo) is not None
+
+
 def _check_post_claude(repo: Path, expert_name: str, jdir: Path) -> bool:
   """
   Verify that the working tree is clean after a successful expert run.
 
-  When the working tree is dirty the job's response.json is overwritten with an
-  error outcome, the job is marked DONE, and a daemon-wide halt block is written
-  to runtime state with full attribution so subsequent ticks stop processing.
+  When the working tree is dirty a daemon-wide halt block is written to runtime state with
+  the dirty paths and the job that ran last, and the job is marked DONE with its own
+  `response.json` untouched — the expert's answer survives the halt and is collected when
+  the halt lifts. A halt block already standing is never overwritten, and a halt-exempt job
+  raises no halt at all: its dirt is the triage it was dispatched to perform.
 
   Args:
     repo: Repository root in which the expert ran.
@@ -548,7 +594,7 @@ def _check_post_claude(repo: Path, expert_name: str, jdir: Path) -> bool:
 
   Returns:
     True when the working tree was dirty (caller is expected to raise the halt exception),
-    False when the tree was clean.
+    False when the tree was clean or the job is halt-exempt.
   """
 
   # Domain(runtime.job-execution):
@@ -559,20 +605,34 @@ def _check_post_claude(repo: Path, expert_name: str, jdir: Path) -> bool:
   # job that caused it. This is the reason the shared checkout gets a daemon-wide halt where
   # an isolated worktree only fails its own job — the blast radius of the same mistake is
   # different depending on whose tree it landed in.
+  # The dirt is attributed to the job that ran last rather than proven to belong to it: the
+  # tree is shared, so the job that finished most recently is the best available signal and
+  # nothing more. That is exactly why the job's own answer is not touched — a job blamed by
+  # proximity must not also lose the work it actually delivered. For the same reason the
+  # blame only sticks once: a halt already standing was raised by whoever met the condition
+  # first and keeps its own account of it, while the job dispatched to clear that very
+  # condition is judged by whether it cleared it, never by the dirt it worked through.
 
   dirty = _check_working_tree(repo)
   # guard: working tree is clean — nothing to do
   if dirty is None:
     return False
-  (jdir / JobFile.RESPONSE).write_text(json.dumps({
-    JobResponseKey.OUTCOME: JobOutcome.ERROR,
-    JobResponseKey.ERROR: {
-      JobResponseKey.CATEGORY: JobErrorCategory.UNCOMMITTED_CHANGES,
-      JobResponseKey.MESSAGE: "expert left uncommitted changes after exit",
-      HaltKey.DIRTY_PATHS: dirty,
-    },
-  }, indent = 2))
+
+  # guard: a halt-exempt job's dirt is the triage it was sent to do, never a contract breach
+  if _is_job_halt_exempt(jdir):
+    return False
+
+  # the job's own answer is not the dirt's verdict: the response stays exactly as the expert
+  # wrote it and the bundle closes with its original outcome, so the collector lands the work
+  # once the halt lifts. The halt block below carries the attribution instead.
   (jdir / JobMarker.DONE).touch()
+
+  # guard: a halt already stands — the queue stops either way, but the earlier block's
+  # attribution is the one that named the condition first and is never clobbered
+  if runtime_state.get_halted(repo) is not None:
+    return True
+
+  # nothing stands yet, so this job's run is the first account of the condition
   runtime_state.set_halted(repo, {
     HaltKey.HALTED_SINCE: time.time(),
     HaltKey.TRIGGERED_BY: "lazy-expert.pump",
@@ -705,7 +765,9 @@ def pump(repo: Path) -> dict:
     A summary dict with counts of experts seen, jobs processed, jobs cleaned, and jobs newly
     marked dead. On a deferred tick, adds `deferred` (True) and `resets_at` (the epoch-seconds
     timestamp when the rate limit reopens) instead of processing a job. When a halt fires
-    instead, adds the offending expert and job_id.
+    instead, adds the offending expert and job_id. While a halt stands or the tree is dirty,
+    only bundles whose `config.json` carries `halt_exempt` are eligible; the rest are left
+    READY for the halt to lift.
   """
 
   # Contract:
@@ -761,6 +823,12 @@ def pump(repo: Path) -> dict:
       if not ready:
         continue
       ready_candidates.append((ready_marker.stat().st_mtime, name, jdir))
+
+  # while the system is stuck the queue narrows to the bundles their dispatcher marked
+  # halt-exempt — the triage job still reaches its spawn, every other job waits for the halt
+  if ready_candidates and _is_system_stuck(repo):
+    ready_candidates = [c for c in ready_candidates if _is_job_halt_exempt(c[2])]
+
   # process the oldest ready job, if any surfaced above
   if ready_candidates:
 

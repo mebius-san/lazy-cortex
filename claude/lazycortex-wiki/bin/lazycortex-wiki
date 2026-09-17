@@ -34,6 +34,8 @@ import doctor as _doctor      # noqa: E402
 # waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
 import domains as _domains    # noqa: E402
 # waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
+import explainers as _explainers  # noqa: E402
+# waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
 import index as _index        # noqa: E402
 # waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
 import mirror as _mirror      # noqa: E402
@@ -57,6 +59,8 @@ import axes as _axes          # noqa: E402
 # subcommand name -> one-line help; drives argparse registration and dispatch.
 _SUBCOMMANDS = {
   "resolve-scope":  "Resolve a file path to its scope id and config entry.",
+  "resolve-language": "Resolve the language wiki writers must write in (wiki.language, then repo default, then en).",
+  "text":           "Print one canonical wiki passage by key, in the resolved language.",
   "ensure-axes":    "Idempotently union axis names into the repository-wide tag_axes.",
   "ensure-scope-config": "Idempotently seed filter predicates and exclude globs on one scope.",
   "apply-node":     "Apply a curation.json result to a node file (classify or link fields).",
@@ -104,6 +108,8 @@ class Cli:
   _DEST = "command"
   _METAVAR = "subcommand"
   _CMD_RESOLVE_SCOPE  = "resolve-scope"
+  _CMD_RESOLVE_LANGUAGE = "resolve-language"
+  _CMD_TEXT           = "text"
   _CMD_ENSURE_AXES    = "ensure-axes"
   _CMD_ENSURE_SCOPE_CONFIG = "ensure-scope-config"
   _CMD_APPLY_NODE     = "apply-node"
@@ -305,6 +311,10 @@ class Cli:
     cmd = getattr(args, self._DEST)
     if cmd == self._CMD_RESOLVE_SCOPE:
       return self._cmd_resolve_scope(args)
+    if cmd == self._CMD_RESOLVE_LANGUAGE:
+      return self._cmd_resolve_language(args)
+    if cmd == self._CMD_TEXT:
+      return self._cmd_text(args)
     if cmd == self._CMD_ENSURE_AXES:
       return self._cmd_ensure_axes(args)
     if cmd == self._CMD_ENSURE_SCOPE_CONFIG:
@@ -364,6 +374,21 @@ class Cli:
       p = sub.add_parser(name, help = summary)
       if name == self._CMD_RESOLVE_SCOPE:
         p.add_argument(self._ARG_PATH, help = self._ARG_PATH_HELP)
+        p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+      elif name == self._CMD_RESOLVE_LANGUAGE:
+        p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+      elif name == self._CMD_TEXT:
+        p.add_argument(
+          "key",
+          choices = _explainers.text_keys(),
+          help = "Which canonical passage to print.",
+        )
+        p.add_argument(
+          "--lang",
+          dest = "lang",
+          default = None,
+          help = "Language code to render in; without it the repo's wiki language is resolved.",
+        )
         p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
       elif name == self._CMD_ENSURE_AXES:
         p.add_argument(self._ARG_AXES, nargs = "+", help = self._ARG_AXES_HELP)
@@ -559,6 +584,57 @@ class Cli:
     else:
       scope_id, cfg = result
       print(json.dumps({ "scope_id": scope_id, "cfg": cfg }))
+    return 0
+
+  def _cmd_resolve_language(self, args: argparse.Namespace) -> int:
+    """
+    Print the language wiki writers must write in.
+
+    Guarantees:
+      - A repository with no language key configured is answered with the `en`
+        floor as data, never as a failure; the command always exits 0.
+
+    Args:
+      args: Parsed argument namespace; must carry `.repo`.
+
+    Returns:
+      Integer exit code (always 0).
+    """
+
+    # Contract:
+    # A repository with no language key configured MUST be answered with the `en`
+    # floor rather than an error; the command always exits 0.
+
+    repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
+    print(_explainers.resolve_language(Path(repo_raw).resolve()))
+    return 0
+
+  def _cmd_text(self, args: argparse.Namespace) -> int:
+    """
+    Print one canonical wiki passage by key, in the language the repo resolves to.
+
+    Every writer that must emit fixed wording — a generated file's explainer line or
+    preamble, a message a skill reports — reads it here instead of carrying a copy,
+    so a new language is an entry in `explainers.py` and nothing else.
+
+    `--lang` serves the writer that was handed a language rather than reading one: a
+    domain doc follows the language its own tree is authored in, not the wiki's.
+
+    Args:
+      args: Parsed argument namespace; must carry `.key`, `.lang` and `.repo`.
+
+    Returns:
+      Integer exit code (always 0).
+    """
+
+    # Contract:
+    # A repository with no language key configured, and a language carrying no text of
+    # its own, MUST both be answered with the English wording rather than an error;
+    # the command always exits 0.
+
+    repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
+    lang = args.lang or _explainers.resolve_language(Path(repo_raw).resolve())
+    print(_explainers.text_for(args.key, _explainers.language_code(lang)))
     return 0
 
   def _cmd_ensure_axes(self, args: argparse.Namespace) -> int:

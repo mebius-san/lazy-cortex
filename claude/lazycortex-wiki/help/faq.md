@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
-summary: Answers to common questions about setting up scopes, running relinks, mirroring foreign repos, querying the wiki, the terms dictionary, the structure map, the domain-spec tree, and the tag-values canon.
-last_regen: 2026-09-13
+summary: Answers to common questions about setting up scopes, running relinks, mirroring foreign repos, querying the wiki, the terms dictionary, the structure map, the domain-spec tree, the tag-values canon, and the wiki's own writing language.
+last_regen: 2026-09-17
 no_diagram: true
 source_skills:
   - lazy-wiki.install
@@ -13,7 +13,7 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: 9fef3719f81552fe26c4b661a252c8abb88120d3
+source_sha: d8d333338bcd2cca2b033eeb8fd72b47fa5be8db
 ---
 # Frequently asked questions
 
@@ -55,6 +55,8 @@ Alongside the review-skip filter, every scope is seeded with `folder_note: false
 
 Run `/lazy-wiki.relink [<scope-id>]`. On a fresh scope with no anchor, the plan runs in `initial` mode and processes every node matched by the scope's path globs. The wiki curator classifies each node (summary, topic tags, connectors), the index is rebuilt once, and then each node receives its glossed See-also links. Everything is committed in a single atomic commit. For large codebases this may take a while — progress is reported step by step.
 
+The summaries and glosses the curator writes land in the wiki's resolved language — see the language question below for how that's decided.
+
 Subsequent runs are incremental: only nodes touched since the last committed anchor are re-processed.
 
 ---
@@ -87,7 +89,7 @@ If the runtime daemon is active, this happens automatically and independently of
 
 ## What does `/lazy-wiki.query` actually do, and what can it answer?
 
-`/lazy-wiki.query "<question>"` answers questions by traversing the wiki graph — the glossed See-also links and topic index entries written by the curator. It dispatches a seeker subagent per configured scope to pick entry points from `topics.md`, validates those paths, then hands them to a gatherer subagent that walks See-also links, reads relevant node bodies, and synthesises an answer. The large topic index and all traversed node bodies stay in the subagents' contexts and never load into your main session.
+`/lazy-wiki.query "<question>"` answers questions by traversing the wiki graph — the glossed See-also links and topic index entries written by the curator. It dispatches a seeker subagent per configured scope to pick entry points from `topics.md`, validates those paths, then hands them to a gatherer subagent that walks See-also links, reads relevant node bodies, and synthesises an answer. The large topic index and all traversed node bodies stay in the subagents' contexts and never load into your main session. The answer text itself comes back in the wiki's resolved language (see the language question below) — a `ru`-configured wiki answers in Russian even when you ask in English.
 
 The quality of answers depends on the wiki being well-linked. On a fresh install with no relink completed, seekers will find no entry points and the response will say so.
 
@@ -149,9 +151,19 @@ Two things trigger a canon pass: `/lazy-wiki.relink` runs it for every configure
 
 ## How do I edit the vault-wide axis vocabulary or the exclusions every scope inherits?
 
-Run `/lazy-wiki.configure vault`. It edits the two repository-wide keys of `lazy.settings.json[wiki]` that no other branch of the wizard reaches: `tag_axes`, the closed vocabulary every scope narrows from (see the tag-axes question above), and `exclude`, the glob list unioned into every scope's `exclude_paths` automatically. `docs/structure.md` is seeded into `wiki.exclude` by `/lazy-wiki.install` and should stay there — the project-structure map has no frontmatter to defend itself, and without the entry the curator would append a `# See also` block to it. The generated domain-spec tree needs no entry in either scope or vault `exclude` — it is derived from `wiki.domains.output` and excluded from every scope structurally, so `/lazy-wiki.configure` won't let you add it there.
+Run `/lazy-wiki.configure vault`. It edits the three repository-wide keys of `lazy.settings.json[wiki]` that no other branch of the wizard reaches: `tag_axes`, the closed vocabulary every scope narrows from (see the tag-axes question above); `exclude`, the glob list unioned into every scope's `exclude_paths` automatically; and `language`, the code the wiki's own writers write in — see the next question for how that resolves. `docs/structure.md` is seeded into `wiki.exclude` by `/lazy-wiki.install` and should stay there — the project-structure map has no frontmatter to defend itself, and without the entry the curator would append a `# See also` block to it. The generated domain-spec tree needs no entry in either scope or vault `exclude` — it is derived from `wiki.domains.output` and excluded from every scope structurally, so `/lazy-wiki.configure` won't let you add it there.
 
 The regular scope branch of `/lazy-wiki.configure` still collects an `exclude_paths` list per scope, but only for exclusions specific to that one scope, on top of what `wiki.exclude` already covers — you never need to repeat the vault-wide list per scope. When a scope's `paths` reach into a spec catalog managed by `lazycortex-specs` (a glob starting with the configured `spec.vault_root`, `specs` by default), the wizard skips the exclude question for that scope entirely — the catalog's own request-inbox and working-paper exclusions are seeded by `/lazy-spec.install`, so nothing is collected here.
+
+---
+
+## What language does the wiki write in, and can I set one for the wiki alone?
+
+Every file the wiki rebuilds wholesale — node summaries and topic glosses, a scope's `topics.md`, `docs/structure.md`, `/lazy-wiki.query` answers, and dictionary entries — comes back in one resolved language, decided by a fixed precedence: `wiki.language` wins when it's set, the repository-wide top-level `language` key is the fallback, and `en` is the floor when neither is set. Leaving `wiki.language` unset is the normal case, not a gap — it just means the wiki follows whatever language the rest of the project already writes in.
+
+Set a language for the wiki alone with `/lazy-wiki.configure vault`. Its language step asks whether to inherit the repo-wide language or set one just for the wiki; choosing to set one asks for the code, any ISO 639-1 tag (`ru`, `de`, …). A value already on record is never re-asked, and a free-form language name typed in instead of a code (`Russian`, `русский`, `English`) is normalized to its code automatically — you're told which code got recorded.
+
+One surface is the exception: the generated domain-spec tree (`wiki.domains`) is not resolved from `wiki.language` at all. Each group doc and the group index speak whatever language the code's own `Domain(…)` markers and the vault's authored docs are already written in, judged per group, so an index never ends up listing entries in a language its own content isn't.
 
 ---
 
@@ -207,7 +219,11 @@ The terms dictionary is a distinct file from the tag-values dictionary — a ter
 
 ## How do I look up a term, or check a name before I use it?
 
-Run `/lazy-wiki.terms` from inside a document you are writing — it matches the document's own path against the configured terms scopes and answers from the winning scope's dictionary. It has two modes: look up one term's exact definition, or check a name you are about to coin against what the dictionary already has, so you can reuse an existing term instead of inventing a synonym for it. It only ever returns the matching entries, never the whole dictionary, and it never writes anything — entering or revising a term is the terms curator's job, done later by reading the finished document.
+Run `/lazy-wiki.terms` from inside a document you are writing — it matches the document's own path against the configured terms scopes and answers from the winning scope's dictionary. It has two modes: look up one term's exact definition, or check a name you are about to coin against what the dictionary already has, so you can reuse an existing term instead of inventing a synonym for it.
+
+Checking a name is more than a yes/no match against the dictionary's headings. A dictionary term is a name, not an ordinary word, so the skill draws distinctions a plain lookup would miss. When a dictionary entry already names your concept but under its qualified form, and you were about to write only its bare head word — `field` where the dictionary already has `input field` — you take the qualified term; the bare word is the everyday meaning the qualified form exists to escape, not a shorter synonym for it. When the reverse happens — a dictionary entry is itself a bare common word chosen to stand for a project entity, the kind of heading a reader could mistake for its everyday meaning — you write the qualified form in your own document instead and list it in that document's own `## Terms` section together with the dictionary's definition and the bare heading it stands for; the terms curator reads that section later and renames the dictionary heading from it, since the dictionary itself is never yours to edit mid-document. A name that matches a neighbouring concept rather than yours means picking a different word and making the difference readable from your own text.
+
+It only ever returns the matching entries, never the whole dictionary, and it never writes anything — entering or revising a term is the terms curator's job, done later by reading the finished document.
 
 ---
 
@@ -222,6 +238,8 @@ Once you've decided a `divergence` in the dictionary's favour, one CLI verb perf
 ## What is `docs/structure.md`, and how do I build it?
 
 It is one file per repository — a compact, model-written map of what lives where and where new work belongs, distinct from the per-scope wiki topic indexes. Configure it with `/lazy-wiki.configure structure`: you define `depth_profiles` (named classes of path globs, each at depth `file`, `dir`, or `brief` — controlling how much detail that part of the tree gets) and `exclude` globs the map must never describe (`docs/structure.md` itself is always included automatically, since a map describing itself would loop). The wizard's last step checks whether `docs/structure.md` already exists and, if not, builds it for you by running `/lazy-wiki.structure rebuild` on your behalf — you never leave the wizard with the scan routines registered against a map that doesn't exist yet. Run `/lazy-wiki.structure rebuild` yourself any time afterwards to force a full resync.
+
+The directory and file descriptions the rebuild writes land in the wiki's resolved language too (see the language question above); directory names, file names, and glob patterns themselves always stay verbatim, whatever language the descriptions are in.
 
 Any agent that needs to know where something lives (an architect deciding where a new file belongs, an expert asking "where does X live in this repo") should query it with `/lazy-wiki.structure query [<path>]` rather than reading the file directly — the query returns just the slice under `<path>`, never the whole map.
 
@@ -241,7 +259,7 @@ Without the daemon, the map only updates when you run `/lazy-wiki.structure rebu
 
 Each generated doc also carries `wiki/<axis>/<value>` tags in its own frontmatter, drawn from the same repository-wide `wiki.tag_axes` vocabulary the wiki scopes use, and reusing a value already settled in the tag-values dictionary where one fits. You never set these by hand — the domain-spec writer chooses them from the group's `Domain(…)` blocks, carrying forward any tags an existing doc already had rather than re-minting them on every regeneration.
 
-Setting up `wiki.domains` for the first time only asks you for the code globs to scan; the dictionary path (`docs/guidelines/domain-groups.md`) and the output directory (`docs/domains`) are taken from their shipped defaults without a question, and the dictionary is seeded from a skeleton template the first time it's missing. Moving either path afterwards is an `/lazy-wiki.configure domains` edit-mode run, not a fresh-setup question.
+Setting up `wiki.domains` for the first time only asks you for the code globs to scan; the dictionary path (`docs/guidelines/domain-groups.md`) and the output directory (`docs/domains`) are taken from their shipped defaults without a question, and the dictionary is seeded from a skeleton template the first time it's missing. The language of the generated docs — an ISO 639-1 code — is proposed from a sample of the vault's own authored docs and asked once; moving either path, or changing the language, afterwards is an `/lazy-wiki.configure domains` edit-mode run, not a fresh-setup question. This is a separate, per-group language judgment — it does not read or follow `wiki.language`, since the domain tree stays in whatever language the code and its surrounding docs are already written in.
 
 ---
 

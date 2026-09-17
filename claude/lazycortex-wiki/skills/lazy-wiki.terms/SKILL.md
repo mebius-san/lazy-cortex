@@ -28,6 +28,8 @@ Definitions do not enter the caller's context wholesale. The headings come first
 - Decide against the definitions you read:
   - **no candidate names your concept** — it is new. Use your own word and keep writing; the curator enters it in the dictionary later, reading the finished document.
   - **a candidate names the same concept** — take the existing term exactly as written, even when your word feels better. The better word is a second name for the same thing, which is what the dictionary exists to prevent.
+  - **a candidate is the qualified name of the concept you were about to call by its bare head word** (`input field` when you were about to write `field`) — the same concept: take the qualified term. The bare word is the everyday word the term was qualified to escape, not a shorter synonym.
+  - **a candidate is a bare common word standing for a project entity** — a heading a reader could take for its everyday meaning — write the qualified form in your document and list it in your `## Terms` section with the dictionary's definition verbatim; the bare heading is not named anywhere in your document. The curator matches the verbatim definition and renames the heading from that section; the dictionary is not yours to edit.
   - **a candidate names a neighbouring concept** — pick a different word for yours, and make the difference readable from your text. Two concepts sharing one name is the same failure from the other side.
 
 **4. When it is genuinely ambiguous, take the existing term.** A dispatched expert has no operator to ask. Two definitions that drifted apart can be merged by the curator afterwards; a new synonym, once spread across documents, cannot be recalled from them.
@@ -36,4 +38,4 @@ Definitions do not enter the caller's context wholesale. The headings come first
 
 Whatever the answer, this skill and its caller only choose a word for the text being written. Entering a term, widening a definition, or splitting a name in two belongs to the terms curator, which reads the finished document. A writer editing the dictionary mid-sentence decides for the whole repository from inside one paragraph.
 
-When the dictionary and the upstream document a job carries disagree on a name, the dictionary wins — it covers the repository, the upstream chain covers one lineage, and following the chain is exactly how lineages drift apart. Say in your own document that the two disagree; do not resolve it silently.
+When the dictionary and the upstream document a job carries disagree on a name, the dictionary wins — it covers the repository, the upstream chain covers one lineage, and following the chain is exactly how lineages drift apart. Your document carries no note about it: a reader of your document has no use for another document's word, and the curator's report mode finds the upstream document on its own.

@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes during lazycortex-experts setup — symptoms, likely causes, and fixes.
-last_regen: 2026-09-14
+last_regen: 2026-09-17
 no_diagram: true
 source_skills:
   - lazy-experts.install
@@ -19,7 +19,7 @@ source_skills:
   - lazy-experts.researcher
   - lazy-experts.reviewer
   - lazy-experts.tester
-source_sha: 572aa49d47a0dac271a8f21ca9745fd4a16964e2
+source_sha: 4ce2acf18852efdc30c37eebe5c23618c5b98b26
 ---
 # Troubleshooting
 
@@ -95,11 +95,11 @@ source_sha: 572aa49d47a0dac271a8f21ca9745fd4a16964e2
 
 ## Report lists `experts.<key> (refreshed: workspace)` for entries that already existed
 
-**Symptom**: The report includes a line like `experts.game.developer (refreshed: workspace)` for an expert entry that already existed in `lazy.settings.json` before this run — you didn't touch that entry's `workspace` field.
+**Symptom**: The report includes a line like `experts.game.developer (refreshed: workspace)` or `experts.claude-plugin.debugger (refreshed: workspace)` for an expert entry that already existed in `lazy.settings.json` before this run — you didn't touch that entry's `workspace` field. For a `researcher` entry the direction can run the other way: a `refreshed: workspace` line appears and the `"workspace": "branch"` key that used to be on the entry is gone afterward.
 
-**Likely cause**: `workspace: "branch"` is seeded on every entry for the `developer`, `data-writer`, `docs-writer`, `researcher`, and `tester` roles — the acceptance-cycle roles that run their launch-checkbox job and every continuation on a job-scoped branch, so their work never lands directly on `main`. A missing `workspace` key on one of these five roles is indistinguishable from a deliberate `"main"` choice, so `/lazy-experts.install` treats the absent key as an incomplete entry (predating this backfill, or hand-authored without it) rather than an operator preference, and writes `workspace: "branch"` in.
+**Likely cause**: `workspace: "branch"` is seeded on every entry for the `developer`, `data-writer`, `docs-writer`, `debugger`, and `tester` roles — the roles whose job changes code or data in the repository and commits it itself, on a job-scoped branch, so their work never lands directly on `main`. A missing `workspace` key on one of these five roles is indistinguishable from a deliberate `"main"` choice, so `/lazy-experts.install` treats the absent key as an incomplete entry (predating this backfill, or hand-authored without it) rather than an operator preference, and writes `workspace: "branch"` in. `researcher` is deliberately NOT one of these five: its only product is a catalog document that travels back through the job's own `result/`, so an isolated branch it would never commit to fails the runtime's branch rule on every run — a `researcher` entry still carrying `"workspace": "branch"` from an earlier install (before this split existed) is a stale install-managed value, not an operator choice, and `/lazy-experts.install` removes the key on the next run.
 
-**Fix**: Nothing to fix — this brings an older or hand-authored entry in line with every other developer/data-writer/docs-writer/researcher/tester expert, which all run isolated by default. If you deliberately want one of these five roles to keep working directly on `main`, set `"workspace": "main"` explicitly on that entry — an explicit value, in either direction, is an operator choice the skill leaves untouched on every future run.
+**Fix**: Nothing to fix — this brings an older or hand-authored entry in line with the current role split: `developer`/`data-writer`/`docs-writer`/`debugger`/`tester` run isolated by default, `researcher` never does. If you deliberately want one of the five branch roles to keep working directly on `main`, set `"workspace": "main"` explicitly on that entry — an explicit value, in either direction, is an operator choice the skill leaves untouched on every future run. There's no equivalent opt-in for `researcher` — the class map never seeds `workspace` on it, so hand-adding `"branch"` back gets removed again on the next `/lazy-experts.install`.
 
 ---
 
@@ -113,13 +113,13 @@ source_sha: 572aa49d47a0dac271a8f21ca9745fd4a16964e2
 
 ---
 
-## A launch-job expert's document never lands in the tracked tree
+## A launch-job expert's branch work never lands in the tracked tree
 
-**Symptom**: An expert with a writing role (`designer`, `system-designer`, `architect`, `planner`, `use-case-writer`, `ui-designer`, `developer`, `data-writer`, `docs-writer`, `debugger`, `researcher`, or `tester`) runs a launch-checkbox job to completion, but its document never shows up in the working tree — the job strands in its own result, and whatever coordinates the job can only flag it as undelivered.
+**Symptom**: An expert running the `developer`, `data-writer`, `docs-writer`, or `tester` role finishes a launch-checkbox job, but the code, data, or documentation files it was meant to commit never show up on its job-scoped branch. The same happens to a `debugger` expert's fix — the job strands, and whatever coordinates the job can only flag it as undelivered.
 
-**Likely cause**: The expert's `lazy.settings.json[experts]` entry is missing `can_commit_in_repo: true`. Without that flag, the expert runtime treats the job as read-only and never lets the expert write its deliverable into the tracked tree. This normally happens to an entry that was seeded or hand-authored before `can_commit_in_repo` existed — it isn't a deliberate no-commit configuration, it's an incomplete entry.
+**Likely cause**: What a role may land in the tree is decided by a destination rule, not by a single flag. A document or attachment bound for the spec catalog — a `design.md`, `architecture.md`, `plan.md`, `use-cases.md`, `ui-design.md`, or `research.md` written by `designer`, `system-designer`, `architect`, `planner`, `use-case-writer`, `ui-designer`, or `researcher` — always travels back through the job's own `result/` for the collector to place, regardless of `can_commit_in_repo`. The flag governs only what lands OUTSIDE the catalog: code, data, and product documentation that `developer`, `data-writer`, `docs-writer`, and `tester` commit on their job-scoped branch, plus code the `debugger` fixes in the tree. When the expert's `lazy.settings.json[experts]` entry is missing `can_commit_in_repo: true`, the expert runtime extends the job's spawn prompt with a no-commit clause and that branch work never lands. This normally happens to an entry seeded or hand-authored before `can_commit_in_repo` existed — it isn't a deliberate no-commit configuration, it's an incomplete entry.
 
-**Fix**: Re-run `/lazy-experts.install`. Its completion pass seeds `can_commit_in_repo: true` on any writing-role entry that carries no such key at all, reported as `experts.<key> (completed: can_commit_in_repo)`. If the entry already carries an explicit `false`, that was set on purpose and the skill leaves it alone — remove it by hand if you want that expert able to commit.
+**Fix**: Re-run `/lazy-experts.install`. Its completion pass seeds `can_commit_in_repo: true` on any writing-role entry that carries no such key at all, reported as `experts.<key> (completed: can_commit_in_repo)`. If the entry already carries an explicit `false`, that was set on purpose and the skill leaves it alone — remove it by hand if you want that expert able to commit. If the missing deliverable is instead a catalog document from a `designer`, `architect`, `planner`, `use-case-writer`, `ui-designer`, or `researcher`-type role, `can_commit_in_repo` is not the cause — that document always routes through the job's `result/`, so look for a collector or review-side problem instead of an install-config one.
 
 ---
 

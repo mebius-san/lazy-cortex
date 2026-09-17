@@ -43,6 +43,14 @@ Tooling:
 
 Cross-expert reads are explicit (`Read .memory/<other>/<slug>.md`) — no ambient sharing. The global tag index just makes references discoverable.
 
+## Language
+
+`<core-cli>` stands for the core plugin's `bin/lazycortex-core` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-core/<version>/`, or `claude/lazycortex-core/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+
+Memory notes are written in the repository's storage language. Before composing a note body, run `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> resolve-language` and write the note's prose in the code it returns — never in the language of the job payload you happened to receive, and never in the language of the document you were working on. A `.memory/` tree half in one language and half in another is unreadable to the next run that globs it.
+
+Frontmatter keys and values, tag slugs, the note `slug`, file paths, expert keys, and identifiers are never translated. When updating an existing note, keep the language it is already written in.
+
 ## Obligations
 
 ### Read — before primary work (MUST, every job)

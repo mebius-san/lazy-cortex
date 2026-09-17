@@ -92,8 +92,7 @@ class _K:
     ARG_RECORD_ID: CLI positional argument name for `obsolete`'s target record id.
     ARG_REASON: CLI positional argument name for `obsolete`'s reason text.
     ARG_DOC_PATH: CLI positional argument name for `promote`'s living-doc path.
-    FLAG_WHY: CLI flag name for the `**Why.**` field.
-    FLAG_REJECTED: CLI flag name for the `**Rejected.**` field.
+    ARG_JUSTIFICATION: CLI positional argument name for a record's justification prose.
     FLAG_ORIGIN: CLI flag name for the `Origin:` field.
     FLAG_TODAY: CLI flag name overriding the recorded date.
     PROG: CLI program name shown in `--help` output.
@@ -134,8 +133,7 @@ class _K:
   ARG_RECORD_ID = "record_id"
   ARG_REASON = "reason"
   ARG_DOC_PATH = "doc_path"
-  FLAG_WHY = "--why"
-  FLAG_REJECTED = "--rejected"
+  ARG_JUSTIFICATION = "justification"
   FLAG_ORIGIN = "--origin"
   FLAG_TODAY = "--today"
   PROG = "lazycortex-specs decide"
@@ -402,7 +400,7 @@ def _split(text: str) -> tuple[str, str]:
   Returns:
     `(fm_text, body)` — `fm_text` includes the opening/closing `---` fences.
   """
-  _, fm_end = flip_gate._parse_frontmatter(text)
+  _, fm_end = flip_gate.parse_frontmatter(text)
   return text[:fm_end], text[fm_end:]
 
 
@@ -724,8 +722,8 @@ def add(decisions_path: Path, thesis: str, body: str, *,
     decisions_path: The registry file's path (asset-level or product-level; need not exist yet).
     thesis: The record's thesis line.
     body: The record's full body text, verbatim — everything below the `Origin:` line, byte-
-      preserved from its source (a `[!decision]` block's own content, or a `**Why.**` /
-      `**Rejected.**` pair composed by a manual `add`/`supersede` CLI call). Never rewritten,
+      preserved from its source (a `[!decision]` block's own content, or the justification
+      prose a manual `add`/`supersede` CLI call passed). Never rewritten,
       summarized, or reduced to a subset of its own fields.
     origin: The `Origin:` line value — a qualified+display wikilink, or `—` for a manual record
       with no source document.
@@ -1075,7 +1073,7 @@ def promote(doc_path: Path, *, today: str | None = None) -> dict:
 
   # only a living doc (the closed `_LIVING_ROLES` set) is a legal source for a promote call
   text = doc_path.read_text()
-  fm_values, fm_end = flip_gate._parse_frontmatter(text)
+  fm_values, fm_end = flip_gate.parse_frontmatter(text)
   role = fm_values.get(_K.SPEC_ROLE, "")
   # guard: only living docs are a source for promoted decisions — plans decompose already-accepted
   # decisions and reports carry only candidates (spec-decisions-design.md § on candidates sourced
@@ -1098,7 +1096,7 @@ def promote(doc_path: Path, *, today: str | None = None) -> dict:
   if ctx.asset_dir is not None:
     status_note = ctx.asset_dir / f"{ctx.slug}.md"
     if status_note.is_file():
-      note_fm, _ = flip_gate._parse_frontmatter(status_note.read_text())
+      note_fm, _ = flip_gate.parse_frontmatter(status_note.read_text())
       for flag in _HALT_FLAGS:
         # guard: the owning asset carries a terminal/halt flag — refuse the whole call
         if flip_gate._is_true(note_fm, flag):
@@ -1195,22 +1193,20 @@ def main(argv: list[str]) -> int:
   parser = argparse.ArgumentParser(prog = _K.PROG)
   sub = parser.add_subparsers(dest = _K.OP, required = True)
 
-  # `add <decisions_path> <thesis> --why --rejected [--origin] [--today]`
+  # `add <decisions_path> <thesis> <justification> [--origin] [--today]`
   p_add = sub.add_parser(_K.OP_ADD)
   p_add.add_argument(_K.ARG_DECISIONS_PATH, type = Path)
   p_add.add_argument(_K.ARG_THESIS)
-  p_add.add_argument(_K.FLAG_WHY, required = True)
-  p_add.add_argument(_K.FLAG_REJECTED, required = True)
+  p_add.add_argument(_K.ARG_JUSTIFICATION)
   p_add.add_argument(_K.FLAG_ORIGIN, default = "—")
   p_add.add_argument(_K.FLAG_TODAY, default = None)
 
-  # `supersede <decisions_path> <old_id> <thesis> --why --rejected [--origin] [--today]`
+  # `supersede <decisions_path> <old_id> <thesis> <justification> [--origin] [--today]`
   p_sup = sub.add_parser(_K.OP_SUPERSEDE)
   p_sup.add_argument(_K.ARG_DECISIONS_PATH, type = Path)
   p_sup.add_argument(_K.ARG_OLD_ID)
   p_sup.add_argument(_K.ARG_THESIS)
-  p_sup.add_argument(_K.FLAG_WHY, required = True)
-  p_sup.add_argument(_K.FLAG_REJECTED, required = True)
+  p_sup.add_argument(_K.ARG_JUSTIFICATION)
   p_sup.add_argument(_K.FLAG_ORIGIN, default = "—")
   p_sup.add_argument(_K.FLAG_TODAY, default = None)
 
@@ -1233,13 +1229,11 @@ def main(argv: list[str]) -> int:
   # traceback — the CLI's whole contract is "JSON on stdout, exit code names the outcome"
   try:
     if args.op == _K.OP_ADD:
-      result = add(args.decisions_path.resolve(), args.thesis,
-                   f"**Why.** {args.why}\n**Rejected.** {args.rejected}",
+      result = add(args.decisions_path.resolve(), args.thesis, args.justification,
                    origin = args.origin, today = args.today)
     elif args.op == _K.OP_SUPERSEDE:
       result = supersede(args.decisions_path.resolve(), args.old_id, args.thesis,
-                         f"**Why.** {args.why}\n**Rejected.** {args.rejected}",
-                         origin = args.origin, today = args.today)
+                         args.justification, origin = args.origin, today = args.today)
     elif args.op == _K.OP_OBSOLETE:
       result = obsolete(args.decisions_path.resolve(), args.record_id, args.reason)
     else:

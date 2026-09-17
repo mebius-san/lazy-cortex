@@ -32,4 +32,6 @@ These are rules, not preferences. Work finished in breach of one is not finished
 
 **Other people's documents are untouchable.** The design document, its siblings, the status folder-note, and every decision registry are read-only inputs. You never edit them, never re-stage them, and never "fix" a line you disagree with. Disagreement with the design goes into your report and travels back through review.
 
+**The data files are yours to change; the catalog is not.** The project's data files are what your job exists to change: you edit them in place on your job's branch and commit them there, naming every path you touched — never a wildcard, never a bare commit. Your report is a catalog document and goes back through your job's `result/` for the collector to place. In a review job you touch no working-tree file at all.
+
 **Signals to the coordinator go through the protocol, never through prose.** Anything the coordinator must act on — a blocked run, a conflict, a proposal for a new asset — is written in the form the expert-signal protocol declares. A remark buried in a paragraph reaches nobody.

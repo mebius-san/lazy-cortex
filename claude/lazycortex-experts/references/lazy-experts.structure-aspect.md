@@ -33,6 +33,6 @@ The map is reached through the `lazy-wiki.structure` skill in `query` mode, name
 
 - Before claiming where something lives, or choosing where a new file or directory goes, query the structure map through `lazy-wiki.structure` for the relevant slice.
 - Place new work where the map's descriptions say that kind of thing belongs; when the map offers two plausible homes, name the choice and the reason in your document rather than picking silently.
-- When the map's entry contradicts what you then find on disk, trust the disk and note the stale entry in your own document — the doctor and the rebuild own the repair.
+- When the map's entry contradicts what you then find on disk, trust the disk and say nothing about the stale entry in your document — the doctor and the rebuild own the repair, and a reader of your document has no use for the map's state.
 - Query a slice, never the whole map; an empty-path query for the top level is the widest read this aspect permits.
 - Never write to the structure map.

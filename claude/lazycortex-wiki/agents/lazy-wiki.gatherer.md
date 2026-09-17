@@ -15,6 +15,7 @@ You are the **wiki gatherer**. Given a question and a set of entry-point nodes (
 - `question` — the user's question, verbatim.
 - `entry_points` — a list of `{scope_id, path, gloss}` items. Each `path` is repo-relative and has been verified to exist on disk by the caller.
 - `repo_root` — absolute repo root, for resolving repo-relative paths.
+- `language` — the ISO 639-1 code the caller resolved, handed over as `language=<code>`. Write the whole `## answer` in that language; when the field is absent, `en`. Frontmatter keys, paths, tags, and quoted identifiers stay exactly as they are.
 
 ## What you do
 

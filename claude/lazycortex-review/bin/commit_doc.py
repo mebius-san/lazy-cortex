@@ -69,39 +69,44 @@ def _coordinator_author(repo: Path) -> dict:
   return {JobKey.NAME: author[JobKey.NAME], JobKey.EMAIL: author[JobKey.EMAIL]}
 
 
-def commit_doc(repo: Path, file_path: Path, subject: str) -> dict:
+def commit_doc(repo: Path, file_path: Path, subject: str, *, extra_paths: tuple[str, ...] = ()) -> dict:
   """
   Commit the document's working-tree state as the coordinator's single wake commit.
 
   Guarantees:
-    - Commits nothing when the document is unmodified and the icon repaint has nothing to
-      touch; a no-op wake leaves the repository's history untouched.
+    - Commits nothing when the document is unmodified, no extra path is dirty, and the icon
+      repaint has nothing to touch; a no-op wake leaves the repository's history untouched.
 
   Args:
     repo: Repository root.
     file_path: Absolute path to the review document.
     subject: Commit subject line, written verbatim.
+    extra_paths: Repo-relative paths the wake also landed — the attachments a `collect-job`
+      put beside the document — committed together with it.
 
   Returns:
     `{"committed": true, "sha": <sha>}` when a commit was made, or `{"committed": false}`
-    when the document is unmodified and the repaint touched nothing.
+    when nothing this wake touched is dirty.
   """
   rel = str(file_path.relative_to(repo))
   status = subprocess.run(
       # waiver: git CLI vocabulary
-      ["git", "-C", str(repo), "status", "--porcelain", "--", rel],
-      capture_output=True, text=True, check=False,
+      ["git", "-C", str(repo), "status", "--porcelain", "--", rel, *extra_paths],
+      capture_output = True, text = True, check = False,
   ).stdout.strip()
   extras = _git_ops.repaint_inline(repo, [rel])
 
   # Contract:
-  # A wake that leaves the document unmodified and the icon repaint untouched commits
-  # nothing; the repository's history gains no entry for a no-op wake.
+  # A wake that leaves the document unmodified, every extra path clean and the icon repaint
+  # untouched commits nothing; the repository's history gains no entry for a no-op wake.
 
   # guard: nothing changed this wake — no commit, and saying so is the verb's contract
   if not status and not extras:
     return {"committed": False}
-  sha = _git_ops.commit_mechanical(repo, file_path, author=_coordinator_author(repo), message=subject)
+  sha = _git_ops.commit_mechanical(
+      repo, file_path, author = _coordinator_author(repo), message = subject,
+      extra_paths = tuple(extra_paths),
+  )
   # waiver: 'committed'/'sha' are this verb's own wire-shape keys, printed for the coordinator to read
   return {"committed": True, "sha": sha}
 
@@ -117,14 +122,17 @@ def main(argv: list[str]) -> int:
     Exit code: `0` on success (including the clean no-op), `2` when the file does not exist
     or the subject is empty.
   """
+  # the CLI surface: one document, its subject, and the extra paths the wake also landed
   # waiver: argparse CLI signature, not a domain key
   parser = argparse.ArgumentParser(prog="lazycortex-review commit-doc")
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("file")
   # waiver: argparse CLI signature, not a domain key
-  parser.add_argument("--subject", required=True)
+  parser.add_argument("--subject", required = True)
   # waiver: argparse CLI signature, not a domain key
-  parser.add_argument("--repo", default=".")
+  parser.add_argument("--repo", default = ".")
+  # waiver: argparse CLI signature, not a domain key
+  parser.add_argument("--also", action = "append", default = None)
   args = parser.parse_args(argv)
 
   # `file` resolves against `--repo` unless it's already absolute, mirroring the other verbs
@@ -140,7 +148,7 @@ def main(argv: list[str]) -> int:
     return 2
 
   # the CLI's whole contract is this one summary line
-  print(json.dumps(commit_doc(repo, file_path, args.subject)))
+  print(json.dumps(commit_doc(repo, file_path, args.subject, extra_paths = tuple(args.also or ()))))
   return 0
 
 

@@ -32,7 +32,6 @@ from __future__ import annotations
 # pylint: disable=import-error,wrong-import-position,deprecated-module
 
 import argparse
-import json
 import re
 import subprocess
 import sys
@@ -63,13 +62,8 @@ import finalize as _finalize  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import parser as _parser  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from keys import Phase, ReviewKey, Tag  # noqa: E402
+from keys import LANG_EN as _LANG_EN, Phase, ReviewKey, Tag  # noqa: E402
 
-
-_SETTINGS_REL = Path(".claude") / "lazy.settings.json"
-_REVIEW_SECTION = "review"
-_LANGUAGE_KEY = "language"
-_LANG_EN = "en"
 
 # comment one-liner seeded under the `# History` heading (after its owner tag) so the section
 # is self-described in source without rendering; per vault language, English is the floor
@@ -80,42 +74,11 @@ _HISTORY_EXPLAINERS = {
 }
 
 
-def _resolve_language(file_path: Path) -> str:
-  """
-  Resolve the explainer language for a document from the vault settings.
-
-  Walks up from the document to the nearest `.claude/lazy.settings.json` and
-  returns the first non-empty value among `review.language`, the top-level
-  `language` key, and the floor `en`.
-
-  Args:
-    file_path: The document the language is resolved for.
-
-  Returns:
-    The resolved language tag; `en` when no settings file is found or readable.
-  """
-  # walk up to the nearest settings root; a doc outside any vault keeps the floor
-  settings = None
-  for cand in file_path.resolve().parents:
-    candidate = cand / _SETTINGS_REL
-    if candidate.is_file():
-      try:
-        settings = json.loads(candidate.read_text())
-      except (OSError, json.JSONDecodeError):
-        settings = None
-      break
-  # guard: no settings file, or an unreadable one — English is the shipped floor
-  if not isinstance(settings, dict):
-    return _LANG_EN
-
-  # first the plugin's own key, then the repo-wide default
-  review = settings.get(_REVIEW_SECTION)
-  plugin_lang = review.get(_LANGUAGE_KEY) if isinstance(review, dict) else None
-  root_lang = settings.get(_LANGUAGE_KEY)
-  for value in (plugin_lang, root_lang):
-    if isinstance(value, str) and value:
-      return value
-  return _LANG_EN
+# the resolver lives beside the banner writer so start, submit, and the paint-banner
+# verb all read one chain; start keeps the name its explainer seeding already uses
+# waiver: type: ignore — in a whole-project run mypy binds this bare `note_ops` to the specs
+# plugin's same-named module, which has no such attribute; at runtime it is review's own
+_resolve_language = _note_ops.resolve_language  # type: ignore[attr-defined]
 
 
 def _history_explainer(file_path: Path) -> str:
@@ -253,6 +216,7 @@ def open_review(file_path: Path, *, expert: str | None = None) -> bool:
     body = _banner.replace_banner(
         body, _banner.State.IN_PROCESS,
         waiting_context = context_label,
+        lang = _resolve_language(file_path),
     )
 
 # Bootstrap the review-owned `# History` section at the end of the body. It is

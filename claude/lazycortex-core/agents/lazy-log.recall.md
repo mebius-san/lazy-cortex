@@ -83,6 +83,7 @@ A natural-language query, e.g.:
 
 ## Guidelines
 
+- **Language.** Before writing a line of output, run `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" resolve-language)` and write your whole answer in the code it returns. Do not infer the language from the commits, logs, or journal entries you are reading — those carry whatever their authors typed. Commit subjects, file paths, SHAs, identifiers, and section headings you quote stay verbatim.
 - **Never guess**: if the query is ambiguous, show both interpretations rather than picking one.
 - **Honor recency**: when tiers tie, prefer more recent matches.
 - **Stay focused**: don't explain what the code does — just surface where/when the change happened. The user can run `git show <sha>` themselves.

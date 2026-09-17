@@ -33,8 +33,11 @@ The dictionary is reached through the `lazy-wiki.terms` skill, named here and ne
 
 - Before naming a concept with a word of your own, ask `lazy-wiki.terms` whether the repository already has one.
 - When the dictionary carries the concept, use its term verbatim, even when your own word reads better. A better second name is still a second name.
+- When the dictionary's heading is a qualified name and you were about to write its bare head word, that is the same concept: take the qualified term. The bare word is not a shorter synonym; it is the everyday word the term was qualified to escape.
+- When the dictionary carries a project entity under a bare common word — one a reader could take for its everyday meaning — write the qualified form in your document and list it in `## Terms` with the dictionary's definition verbatim; the bare heading is not named anywhere in your document. The curator matches the verbatim definition and renames the heading from your section; you never do.
 - When the dictionary carries a *neighbouring* concept under the name you were about to use, pick a different word for yours and make the difference readable from your text.
 - When the dictionary carries nothing matching, use your own word and keep writing. The curator enters it later, reading the finished document; nothing is expected of you.
-- When the dictionary and the job's upstream document name one concept differently, the dictionary wins — and you state the disagreement in your own document rather than resolving it silently.
+- When the dictionary and the job's upstream document name one concept differently, the dictionary wins, silently: your document carries no note about the upstream's word. The upstream document is the curator's report finding, and a reader of your document has no use for it.
 - When the choice is genuinely ambiguous, take the existing term. You have no operator to ask, two definitions that drifted apart can be merged afterwards, and a synonym already spread across documents cannot be recalled from them.
+- When the document you write carries a `## Terms` section, every term you use stands there: a dictionary term with the dictionary's definition verbatim, a term of your own with the definition you introduce it by. That section is where the curator reads your terms from, so a term missing there is a term the dictionary may never learn.
 - Never write to the terms dictionary.

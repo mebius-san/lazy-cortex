@@ -634,7 +634,7 @@ def _resolve_doc_transition(sibling_doc: Path, fm: dict) -> tuple[str, str] | No
     sibling is parked, has never carried a result, or matches the marker.
   """
   basename = sibling_doc.name
-  sibling_fm, _ = flip_gate._parse_frontmatter(sibling_doc.read_text())
+  sibling_fm, _ = flip_gate.parse_frontmatter(sibling_doc.read_text())
   # guard: a parked document's verdict transitions nothing until it returns to `draft`
   if str(sibling_fm.get(StageKey.STAGE, "")).strip() == Stage.DEFERRED:
     return None
@@ -672,7 +672,7 @@ def _is_member_signal_eligible(member: Path) -> bool:
   # guard: a member gone between scan and dispatch carries no signal
   if not member.is_file():
     return False
-  fm, _ = flip_gate._parse_frontmatter(member.read_text())
+  fm, _ = flip_gate.parse_frontmatter(member.read_text())
   return not flip_gate._is_true(fm, SpecKey.REVIEW_ACTIVE)
 
 
@@ -1040,7 +1040,7 @@ def _scan_dependents(asset_dir: Path) -> list[Path]:
       if not candidate_note.is_file():
         continue
       text = candidate_note.read_text()
-      _, fm_end = flip_gate._parse_frontmatter(text)
+      _, fm_end = flip_gate.parse_frontmatter(text)
       for token in gate_tick._read_fm_list(text[:fm_end], SpecDependsOnKey.DEPENDS_ON):
         if gate_tick._target_asset_dir(candidate_dir, token) == asset_dir:
           hits.append(candidate_note)
@@ -1669,7 +1669,7 @@ def coordinator_dispatch(
   """
   # read the current note once — every branch below decides off this one snapshot
   asset_dir = asset_note.parent
-  repo_root = flip_gate._repo_root(asset_dir)
+  repo_root = flip_gate.repo_root(asset_dir)
 
   # a manual wake (lazy-spec.drive's path-only item) carries neither `sha` nor `author_email` —
   # derive both from the newest commit touching the path, so the operator-author check, the
@@ -1689,7 +1689,7 @@ def coordinator_dispatch(
   today_str = flip_gate._today(today)
   text = asset_note.read_text()
   original_text = text
-  fm, fm_end = flip_gate._parse_frontmatter(text)
+  fm, fm_end = flip_gate.parse_frontmatter(text)
   body = text[fm_end:]
   markers = spec_job_markers.read(repo_root, asset_note)
   cursor = _read_dispatch_cursor(repo_root, asset_note)
@@ -2161,7 +2161,7 @@ def main(argv: list[str]) -> int:
     if not asset_note.is_file():
       print(json.dumps({ TickAction.ACTION: TickAction.NOOP }))
       return 0
-    fm, _ = flip_gate._parse_frontmatter(asset_note.read_text())
+    fm, _ = flip_gate.parse_frontmatter(asset_note.read_text())
     # guard: an operator-zone folder-note (never `spec_role: status`) tracks no coordinator job
     if fm.get(SpecKey.ROLE) != _SPEC_ROLE_STATUS:
       print(json.dumps({ TickAction.ACTION: TickAction.NOOP }))
@@ -2194,7 +2194,7 @@ def main(argv: list[str]) -> int:
 
   # a document basename resolves to the folder-note that owns it, by where the document lies;
   # every other match IS the folder-note the routine's own `any_of` member selected
-  repo_root = flip_gate._repo_root(changed.parent)
+  repo_root = flip_gate.repo_root(changed.parent)
   is_document = _is_tracked_document(changed) or changed.name in LevelDoc.BASENAMES
   owner = _resolve_owner_note(repo_root, changed) if is_document else changed
 
@@ -2206,7 +2206,7 @@ def main(argv: list[str]) -> int:
 
   # the owner's own role picks the ladder: an asset's status note runs the asset one, a product's
   # or the catalog root's level note the level one, and a note carrying neither is nobody's object
-  fm, _ = flip_gate._parse_frontmatter(owner.read_text())
+  fm, _ = flip_gate.parse_frontmatter(owner.read_text())
   role = fm.get(SpecKey.ROLE)
 
   # guard: a note carrying no coordination role is nobody's object

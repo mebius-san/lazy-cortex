@@ -16,6 +16,9 @@ spec_source_docs: []
 
 <!-- Written by the researcher from the approved research design beside it (`design.md`). The design is not this document's to edit: a gap there is raised as a `[!question]` callout, never filled in here. Once approved this document is immutable — a wrong conclusion is answered by a new research asset citing this one. -->
 
+## Terms
+<!-- "Glossary: The most important domain and technical terms that your stakeholders use when discussing the system." — arc42 §12 Glossary. One line per term the document uses, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, a term this document introduces is defined here first. -->
+
 ## Method
 
 <!-- Routes actually walked, in order: spec tree, code, structure map, wiki, external sources. Internal routes come before the internet, never instead of it. A route the design named but this report skipped is named with the reason. -->

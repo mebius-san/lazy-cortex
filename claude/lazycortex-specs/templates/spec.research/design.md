@@ -18,6 +18,9 @@ spec_source_docs: []
 
 <!-- What is being investigated and for whom. Opens with a reference to the sibling vision when one exists; goals live here only when there is no vision. -->
 
+## Terms
+<!-- "Glossary: The most important domain and technical terms that your stakeholders use when discussing the system." — arc42 §12 Glossary. One line per term the document uses, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, a term this document introduces is defined here first. -->
+
 ## Questions
 
 <!-- The questions the research has to answer, one per bullet, in the order the report answers them. A question that needs its own scope or its own routes is a separate research asset. When an answer to a question is already expected, it follows that question as a second sentence — the hypothesis, with what it rests on; the research report's conclusion then confirms or refutes it explicitly. -->

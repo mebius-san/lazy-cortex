@@ -41,6 +41,8 @@ AskUserQuestion: header "Relink scope", question "Which configured wiki scope sh
 
 Compute `<repo-root>` via `Bash(git rev-parse --show-toplevel)`.
 
+Resolve the language the dispatched curators write in, once, here: `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" resolve-language --repo <repo-root>)`. Carry the returned code into every curator and tag-curator dispatch prompt below as `language=<code>` — a dispatched subagent cannot read the settings for itself.
+
 Run the plan:
 
 ```
@@ -63,7 +65,7 @@ For each absolute node path in `classify[]`, dispatch the curator synchronously 
 
 ```
 Agent(subagent_type: "lazycortex-wiki:lazy-wiki.curator",
-      prompt: "kind=classify, tail=false. node_path=<abs-node-path>, scope_id=<scope-id>, repo_root=<repo-root>, tag_axes=<comma-separated effective axes>, existing_tags=<the collect-tags JSON from above>. Read the real node at node_path (and its own pin fields); choose wiki_summary, topics, connectors — anchor topic values to existing_tags (reuse a fitting existing value instead of coining a synonym); apply them to the node yourself via `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" apply-node <node_path> --from <a mktemp curation file you create>` (this writes wiki_summary, the wiki/* tags, wiki_connectors, and the wiki_src_hash backstop), then rm the temp; STOP — do NOT build-index, git, or dispatch-link. Report the outcome.")
+      prompt: "kind=classify, tail=false. node_path=<abs-node-path>, scope_id=<scope-id>, repo_root=<repo-root>, language=<code>, tag_axes=<comma-separated effective axes>, existing_tags=<the collect-tags JSON from above>. Read the real node at node_path (and its own pin fields); choose wiki_summary, topics, connectors — anchor topic values to existing_tags (reuse a fitting existing value instead of coining a synonym); apply them to the node yourself via `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" apply-node <node_path> --from <a mktemp curation file you create>` (this writes wiki_summary, the wiki/* tags, wiki_connectors, and the wiki_src_hash backstop), then rm the temp; STOP — do NOT build-index, git, or dispatch-link. Report the outcome.")
 ```
 
 The curator writes the node via `apply-node`; the skill runs no `apply-node`. If a curator reports an error, skip that node and continue. Track each curated node path for the Step 6 commit. Outcome: `classified:<n>` (or `empty-set` when `classify[]` was empty).
@@ -82,7 +84,7 @@ The canon is judged per **tag surface**: every configured `wiki.scopes` entry (r
 
    ```
    Agent(subagent_type: "lazycortex-wiki:lazy-wiki.tag-curator",
-         prompt: "kind=normalize-tags, tail=false. surface=<surface>, repo_root=<repo-root>, collected_tags=<the collect-tags JSON from step a>, tag_dictionary=<the `wiki.tags.dictionary` path from .claude/lazy.settings.json, or docs/tags.md when unset>. Judge a canonical axis-value set; build the alias map ({axis:{old-value:new-value}} — merge a synonym, nest a subtype, or keep); apply it yourself via `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" retag <surface> --from <a mktemp alias-map file you create> --repo <repo-root>`, then rm the temp; re-survey with collect-tags and rewrite the dictionary file to match; STOP — do NOT build-index or git. An empty map → skip retag, still reconcile the dictionary, report empty. Report the alias map and outcome.")
+         prompt: "kind=normalize-tags, tail=false. surface=<surface>, repo_root=<repo-root>, language=<code>, collected_tags=<the collect-tags JSON from step a>, tag_dictionary=<the `wiki.tags.dictionary` path from .claude/lazy.settings.json, or docs/tags.md when unset>. Judge a canonical axis-value set; build the alias map ({axis:{old-value:new-value}} — merge a synonym, nest a subtype, or keep); apply it yourself via `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" retag <surface> --from <a mktemp alias-map file you create> --repo <repo-root>`, then rm the temp; re-survey with collect-tags and rewrite the dictionary file to match; STOP — do NOT build-index or git. An empty map → skip retag, still reconcile the dictionary, report empty. Report the alias map and outcome.")
    ```
 
    The tag curator runs `retag` and writes the dictionary; the skill does neither. `retag` may modify any node on that surface — capture those paths (e.g. from `git status`) for the Step 6 commit alongside the classified nodes, and capture the dictionary path too (register it with `Bash(git add -N <dictionary>)` when this run created the file).
@@ -100,7 +102,7 @@ For each absolute node path in `link[]`:
 
    ```
    Agent(subagent_type: "lazycortex-wiki:lazy-wiki.curator",
-         prompt: "kind=link, tail=false. node_path=<abs-node-path>, scope_id=<scope-id>, repo_root=<repo-root>, topics_path=<repo-root>/<topics_index>, candidates=<the JSON array from step 1>. Read the real node (it now carries the classify writes) and the real topics.md (and the node's own pin fields); verify the candidates first (empty → judge from topics.md); build see_also; apply it to the node yourself via `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" apply-node <node_path> --from <a mktemp curation file you create>` (this grafts only the # See also section), then rm the temp; STOP — do NOT git. Report the outcome.")
+         prompt: "kind=link, tail=false. node_path=<abs-node-path>, scope_id=<scope-id>, repo_root=<repo-root>, language=<code>, topics_path=<repo-root>/<topics_index>, candidates=<the JSON array from step 1>. Read the real node (it now carries the classify writes) and the real topics.md (and the node's own pin fields); verify the candidates first (empty → judge from topics.md); build see_also; apply it to the node yourself via `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" apply-node <node_path> --from <a mktemp curation file you create>` (this grafts only the # See also section), then rm the temp; STOP — do NOT git. Report the outcome.")
    ```
 
 The curator writes the node via `apply-node`; the skill runs no `apply-node`. If a curator reports an error, skip that node and continue. Track each curated node path for the Step 6 commit. Outcome: `linked:<n>` (or `empty-set` when `link[]` was empty).

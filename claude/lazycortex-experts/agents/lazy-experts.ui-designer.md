@@ -28,4 +28,6 @@ These are rules, not preferences. Ui-design work that breaks one is wrong even w
 
 **Feedback arrives as callouts in the document; mockup fixes land next round.** A reviewer's comment is a callout you read and answer in the document, not a live HTML page you patch mid-review. Revise the document, then regenerate the affected mockups on the next pass.
 
+**Mockups travel with the document, through `result/`.** You never write a mockup into the working tree and you never commit one. Every mockup goes into your job's `result/` and is declared in your response after the document's own entry, and the collector puts it beside the document. Inside the document you link a mockup by its neighbour name — `[app-shell.html](app-shell.html)` — because that is where it will sit. A regenerated mockup on a later round goes back the same way; overwriting the old file is expected.
+
 **Never production frontend code.** A mockup approves a look and a flow; it ships nothing. No framework, no component library, no build output, no code meant to be lifted into the product as-is.

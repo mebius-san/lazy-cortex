@@ -70,7 +70,22 @@ Sections are **owned by individual plugins** and migrate independently. There is
 | `providers` | `provider_env.resolve_provider` | `{<name>: {base_url, token_env, models}}` — see `lazy-core.expert-runtime-schema` § Providers |
 | `hooks` | `hook_gate` | `{disabled: [<hook short name>, ...]}` — see `lazy-core.expert-runtime-schema` § Lazycortex hooks |
 
-A third root key is not a section at all: `language` is a bare string (`"language": "ru"`), read straight off the parsed JSON document by consumer plugins (`lazycortex-specs`' language chain, `lazycortex-review`'s history explainers) and never through `load_section`. The `_version` invariant does not reach it.
+A third root key is not a section at all: `language` is a bare string (`"language": "ru"`), read straight off the parsed JSON document by consumer plugins and never through `load_section`. The `_version` invariant does not reach it.
+
+**Language keys.** Every language value anywhere in the settings — and in a spec document's own frontmatter — is an ISO 639-1 code (`ru`, `en`). Free-form names are not accepted; `lazy-core.doctor` flags one and offers the rewrite.
+
+| Key | Where | Read by | Written by |
+|---|---|---|---|
+| `language` | root of `lazy.settings.json` | all three chains' resolvers, as the shared fallback | the operator; no wizard writes it |
+| `spec.language` | `spec` section | `lazycortex-specs`' `resolve-language` | `/lazy-spec.install` Step 4 |
+| `products[<key>].language` | `products` section, per product | `lazycortex-specs`' `resolve-language` | `/lazy-spec.product-config` |
+| `spec_language` | a spec document's own frontmatter | `lazycortex-specs`' `resolve-language` | the document's author |
+| `wiki.language` | `wiki` section | `lazycortex-wiki`'s `resolve-language` | `/lazy-wiki.configure vault` |
+| `wiki.domains.language` | `wiki.domains` section | the domain index caption and the domain-spec writer payload | `/lazy-wiki.configure domains` |
+
+Each chain resolves first non-empty wins, ending at the floor `en`: specs walks document frontmatter → product → `spec` section → root → `en`; wiki walks `wiki.language` → root → `en`; core reads root → `en`. `wiki.domains.language` is not part of a chain — the generated domain docs may be authored in a language of their own, so the key stands alone with `en` as its floor.
+
+`review.language` was read by `lazycortex-review` and written by nothing; it is **no longer read** anywhere. Review works in the language of the document it reviews, and takes its own fixed operator-facing strings from the root `language`. A leftover key in a settings file is inert.
 
 ---
 

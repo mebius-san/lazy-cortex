@@ -343,7 +343,7 @@ def _apply_keys(text: str, role: str, record: dict) -> tuple[str, list[str]]:
   Returns:
     A `(text, added)` pair — `added` names the keys written, in write order.
   """
-  fm, fm_end = flip_gate._parse_frontmatter(text)
+  fm, fm_end = flip_gate.parse_frontmatter(text)
   pairs = _managed_keys(role, record)
   # guard: no parseable frontmatter at all — the whole block is written from the managed set
   if fm_end == 0:
@@ -372,7 +372,7 @@ def _append_history(text: str, added: list[str], today: str | None) -> str:
   """
   detail = f"added: {', '.join(added)}" if added else _Outcome.CREATED
   line = f"- {flip_gate._today(today)} — {_ACTOR} · backfill · {detail}"
-  _fm, fm_end = flip_gate._parse_frontmatter(text)
+  _fm, fm_end = flip_gate.parse_frontmatter(text)
   return text[:fm_end] + flip_gate._append_under_heading(text[fm_end:], Section.HISTORY, line)
 
 
@@ -425,7 +425,7 @@ def backfill(repo: Path, *, product: str | None, root: bool, today: str | None =
 
   # fill in the managed frontmatter, then the missing sections — the template supplies the shape
   text, added_keys = _apply_keys(text, role, record)
-  _fm, fm_end = flip_gate._parse_frontmatter(text)
+  _fm, fm_end = flip_gate.parse_frontmatter(text)
   body, added_sections = _insert_sections(text[fm_end:], _section_blocks(seeded), lang)
   text = text[:fm_end] + body
   added = added_keys + added_sections

@@ -28,7 +28,7 @@ Field notes:
 
 ### `report` dispatch
 
-`report` carries **no job dir**: there is no `request.json`, no `source/`, no `result/`, and no `response.json`. The dispatching skill names the real files and parameters directly in the prompt — the scope id, the dictionary path, and the scope's covered-document globs plus its term-source exclusions — and the curator returns its findings as its reply. This mirrors the agentless dispatch form the wiki curator uses when a live session drives it instead of the daemon.
+`report` carries **no job dir**: there is no `request.json`, no `source/`, no `result/`, and no `response.json`. The dispatching skill names the real files and parameters directly in the prompt — the scope id, the dictionary path, and the scope's covered-document globs plus its term-source exclusions — and the curator returns its findings as its reply. This mirrors the agentless dispatch form the wiki curator uses when a live session drives it instead of the daemon. It is a call from a live session, not a queued job: the pump never sees it, so the response envelope the expert-runtime contract requires of every job does not apply — the findings are the reply itself.
 
 ## Response shape (`response.json`)
 
@@ -66,6 +66,8 @@ Outcome semantics:
 - **source/** — none. The changed document is a tracked file the curator reads at the request's `file` path in the working tree.
 - **context/** — none. The dictionary itself is a tracked file the curator reads and writes in place; a bundled copy would only invite editing the copy.
 - **result/** — `result/terms.json`: the operations the curator applied; see `## Result format` below.
+- **A term enters as a name, not a common word.** When the word has an everyday or a second technical meaning in the scope's language, the heading carries a qualifying noun taken from the definition; a bare word in the source enters under the qualified heading, and an existing bare heading is renamed. The form the documents use governs spelling and language only.
+- **The document's `## Terms` section, when it carries one, is read first.** Each `**term** — definition` line there names a candidate outright, with the definition the document gives: a term the dictionary lacks is an `add` candidate, a line whose definition disagrees with the dictionary's is a divergence to record. The rest of the body is read for terms the section omitted.
 
 ### `report`
 
@@ -78,6 +80,7 @@ Outcome semantics:
   "operations": [
     {"op": "add",    "term": "<term>",     "definition": "<definition>"},
     {"op": "extend", "term": "<term>",     "definition": "<rewritten definition>"},
+    {"op": "rename", "term": "<qualified term>", "from": "<bare heading>", "definition": "<definition>"},
     {"op": "split",  "term": "<new term>", "definition": "<definition naming the sibling term>",
      "sibling": "<existing term>", "sibling_definition": "<rewritten definition naming the new term>"}
   ]
@@ -86,8 +89,9 @@ Outcome semantics:
 
 Fields:
 
-- `op` — one of `add` (a term the dictionary did not carry), `extend` (an existing term's definition widened to cover a new shade, name unchanged), `split` (the document introduced a neighbouring concept under a name already taken: a second term is added and both definitions are reworded so the difference is explicit).
-- `term` — the section heading, written in the form the scope's documents use.
+- `op` — one of `add` (a term the dictionary did not carry), `extend` (an existing term's definition widened to cover a new shade, name unchanged), `rename` (an existing bare heading rewritten as the qualified name of the same concept, definition kept or tightened), `split` (the document introduced a neighbouring concept under a name already taken: a second term is added and both definitions are reworded so the difference is explicit).
+- `term` — the section heading, written in the form the scope's documents use and as a name: a qualifying noun whenever the bare word has an everyday or a second meaning.
+- `from` — present on `rename` only: the bare heading the section carried before.
 - `definition` — the section body. At most three physical lines.
 - `sibling` / `sibling_definition` — present on `split` only: the existing term whose definition was reworded alongside the new one. Each of the two definitions names the other term, which is how a freshly split term is told apart from a dead one.
 
@@ -97,12 +101,22 @@ An empty `operations` array is not written — a curator with nothing to apply r
 
 A `report` dispatch returns findings as its reply, one entry per finding, each naming its category, the term or document it concerns, and the two sides of the divergence. Categories:
 
-- `divergence` — a document names a concept with a word other than the dictionary's, including the case of two language forms of one concept;
+- `divergence` — a document names a concept with a word other than the dictionary's, including the case of two language forms of one concept and the case of a document using the bare head word of a qualified term;
 - `missing` — a document introduces a project entity the dictionary does not carry;
 - `duplicate` — two dictionary terms describe one concept;
 - `dead` — a term appears in no document of the scope. Never reported for a term whose definition names a sibling term: that is a freshly split term, and its own document rename is already the `divergence` finding.
 
 Format and configuration findings are the dispatching skill's own; the curator neither computes nor returns them.
+
+`<wiki-cli>` stands for the wiki plugin's `bin/lazycortex-wiki` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-wiki/<version>/`, or `claude/lazycortex-wiki/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+
+## Language
+
+Before writing any prose — a `wiki_summary`, a See-also gloss, a term definition, a directory description, a tag gloss — resolve the language the vault stores its notes in: run `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> resolve-language --repo <repo-root>` and write every line in the code the verb returns. The language never arrives in the job payload and is never inferred from the prose already around you: settings are the source of truth, and the verb is how a writer reads them.
+
+The obligation covers shipped boilerplate. A template heading, a seeded stub, or any English scaffolding you keep in the file you write is translated into the resolved language when it differs. When editing prose that already exists, keep its language — never retranslate.
+
+Never translated, in any language: frontmatter keys and values, `wiki/<axis>/<value>` tags and axis names, canonical section headings (`# Topics`, `# Domains`, `# See also`, `# History`), identifiers, file paths, and link targets. A link's display text may be translated; the path before `|` never is.
 
 ## Side-effect rules
 
@@ -110,6 +124,11 @@ Format and configuration findings are the dispatching skill's own; the curator n
 - The expert MUST NOT edit the document that triggered the job, or any other document of the scope. A document naming a concept differently from the dictionary is a `report` finding, never a silent rewrite of someone else's text.
 - The expert MUST NOT touch any tracked file except the dictionary, and `.memory/<self>/` where the persona aspect grants it.
 - On `report` the expert writes nothing at all.
+
+## Attachments
+
+This channel permits no attachments. The curator's whole output is the file it owns plus the
+deterministic apply call that writes it; there is nothing to place beside anything.
 
 ## Error categories
 

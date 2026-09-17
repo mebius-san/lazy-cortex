@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Run-log housekeeping and change-history access — clean up orphaned log directories, distill commits into themed prose, and ask "why was X changed?" across every source at once.
-last_regen: 2026-09-11
+last_regen: 2026-09-17
 diagram_spec:
   anchor: "How the members fit together"
   request: "Architecture diagram showing the two groups of members in the change-history block: (1) lazy-log.clean prunes the .logs/claude/ tree; (2) lazy-log.distill converts .logs/commits.jsonl into .logs/changelog.md; (3) lazy-log.recall, lazy-log.timeline, and lazy-log.summary read from changelog + run logs + git log + memory to answer history queries; (4) lazy-log.bullets reads git commits to produce a user-facing release block. Show the shared inputs (commits.jsonl, changelog.md, run logs) feeding the query agents."
@@ -12,7 +12,7 @@ source_skills:
   - lazy-log.timeline
   - lazy-log.summary
   - lazy-log.bullets
-source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
+source_sha: 4ce2acf18852efdc30c37eebe5c23618c5b98b26
 ---
 # Change history and run-log housekeeping
 
@@ -47,6 +47,8 @@ On the query side, the three search agents draw from the same four sources — c
 | `lazy-log.summary` | The full arc: "tell me the whole story of the logging refactor" |
 
 All three return git SHAs so you can `git show <sha>` to inspect the exact change. `lazy-log.recall` broadens its search automatically by including plural and singular variants and obvious synonyms; narrow it by passing more specific keywords in a follow-up prompt.
+
+`lazy-log.distill`, `lazy-log.recall`, `lazy-log.timeline`, and `lazy-log.summary` all write their own prose in the project's configured language — the top-level `language` key in `.claude/lazy.settings.json`, falling back to English when the key is absent — before producing a single line of output. Only quoted source material stays as-is: commit subjects, file paths, SHAs, identifiers, and section headings carry over verbatim in whatever language their original authors used, even inside a changelog paragraph or a recall/timeline/summary answer written in a different language.
 
 `lazy-log.bullets` sits outside the normal query flow. It is dispatched by the publish pipeline when drafting a release and needs the git commit range for one plugin translated into what a user installing the plugin would actually care about. Internal chore commits are filtered out automatically; what surfaces is a ready-to-paste release block.
 

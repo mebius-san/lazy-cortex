@@ -337,6 +337,8 @@ class JobConfigKey:
     GIT_AUTHOR: The git identity block for any commits the expert makes.
     MODEL: The model tier pin, or unset to inherit the CLI default.
     CAN_COMMIT_IN_REPO: Whether the expert may write and commit inside the repo it runs in.
+    HALT_EXEMPT: Whether the pump still serves this job while the system is halted or dirty;
+      written only by a dispatcher whose job is the triage of that very condition.
     MCP_CONFIG: Explicit MCP-config path(s) the spawn loads under strict mode, or unset for none.
     SETTING_SOURCES: Setting scopes the spawn loads (`user`/`project`/`local`), or unset for the hermetic default.
     WORKSPACE: The workspace mode (`main`/`branch`) the pump enforces before and after the spawn.
@@ -354,6 +356,7 @@ class JobConfigKey:
   GIT_AUTHOR = "git_author"
   MODEL = "model"
   CAN_COMMIT_IN_REPO = "can_commit_in_repo"
+  HALT_EXEMPT = "halt_exempt"
   MCP_CONFIG = "mcp_config"
   SETTING_SOURCES = "setting_sources"
   WORKSPACE = "workspace"

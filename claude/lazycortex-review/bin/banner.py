@@ -25,14 +25,20 @@ from __future__ import annotations
 # waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
 # pylint: disable=import-error,deprecated-module
 
+from typing import TypeVar
+
 import enum
 import re
 
-from keys import Phase
+from keys import LANG_EN as _LANG_EN, Bucket, Phase
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
+
+
+# one entry of a per-language string table — a template string, or a table of them
+_EntryType = TypeVar("_EntryType")
 
 
 # ----------------------------------------------------------- enums
@@ -353,31 +359,91 @@ def desired_state(
 # Spec § Top banner: the "Waiting" title is enriched with the phase the
 # document is waiting on ("Waiting: validators" / ": writer" / ": terminals").
 # Recognition keys on the `#review/in-process` TAG, never the title, so
-# enriched and bare titles both extract to `State.IN_PROCESS`.
-_WAITING_CONTEXT_LABELS = {
-    "writer":     "Waiting: writer",
-    "validators": "Waiting: validators",
-    "terminals":  "Waiting: terminals",
-    Phase.FINALIZE:   "Waiting: finalize",
+# enriched, bare, and translated titles all extract to `State.IN_PROCESS`.
+_WAITING_CONTEXT_LABELS: dict[str, dict[str, str]] = {
+    _LANG_EN: {
+        Bucket.WRITER:     "Waiting: writer",
+        Bucket.VALIDATORS: "Waiting: validators",
+        Bucket.TERMINALS:  "Waiting: terminals",
+        Phase.FINALIZE:    "Waiting: finalize",
+    },
+    # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
+    "ru": {  # noqa: RUF001
+        Bucket.WRITER:     "Ожидание: писатель",
+        Bucket.VALIDATORS: "Ожидание: валидаторы",
+        Bucket.TERMINALS:  "Ожидание: терминальные проверки",
+        Phase.FINALIZE:    "Ожидание: финализация",
+    },
 }
 
-_TEMPLATES: dict[State, str] = {
-    State.IN_PROCESS: "> [!hint] {title} #review/in-process\n",
-    State.ACTION_NEEDED: "> [!caution] Action needed #review/action-needed\n",
-    State.READY: (
-        "> [!success] Ready to approve #review/ready\n"
-        "> Tick the box below to approve the whole document.\n"
-        "> - [{tick}] approve the whole document\n"
+# Bare "Waiting" title per language — what an unknown or absent waiting context renders.
+# waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
+_WAITING_BARE: dict[str, str] = { _LANG_EN: "Waiting", "ru": "Ожидание" }  # noqa: RUF001
+
+_TEMPLATES: dict[str, dict[State, str]] = {
+    _LANG_EN: {
+        State.IN_PROCESS: "> [!hint] {title} #review/in-process\n",
+        State.ACTION_NEEDED: "> [!caution] Action needed #review/action-needed\n",
+        State.READY: (
+            "> [!success] Ready to approve #review/ready\n"
+            "> Tick the box below to approve the whole document.\n"
+            "> - [{tick}] approve the whole document\n"
+        ),
+        State.FINALIZING: "> [!hint] Waiting: finalize #review/finalizing\n",
+    },
+    # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
+    "ru": {  # noqa: RUF001
+        State.IN_PROCESS: "> [!hint] {title} #review/in-process\n",
+        State.ACTION_NEEDED: "> [!caution] Требуется действие #review/action-needed\n",
+        State.READY: (
+            "> [!success] Готово к утверждению #review/ready\n"
+            "> Отметьте галочку ниже, чтобы утвердить документ целиком.\n"
+            "> - [{tick}] утвердить документ целиком\n"
+        ),
+        State.FINALIZING: "> [!hint] Ожидание: финализация #review/finalizing\n",
+    },
+}
+
+_CONCERNS_DECISION_TEMPLATE: dict[str, str] = {
+    _LANG_EN: (
+        "> [!warning] Outstanding concerns — choose how to proceed #review/concerns-decision\n"
+        "> The validation writer raised concerns up to the configured pause threshold. "
+        "The section(s) below show them. "
+        "Tick ONE of the boxes:\n"
+        "> - [{tick_continue}] continue review cycle — "
+        "answer the concerns in the next main-writer round and re-approve\n"
+        "> - [{tick_approve}] approve with concerns — "
+        "accept the concerns recorded below as-is and finalize the document\n"
     ),
-    State.FINALIZING: "> [!hint] Waiting: finalize #review/finalizing\n",
+    # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
+    "ru": (  # noqa: RUF001
+        "> [!warning] Остались замечания — "
+        "выберите, как продолжить #review/concerns-decision\n"
+        "> Валидационный писатель поднял замечания вплоть до настроенного порога паузы. "
+        "Разделы ниже показывают их. "
+        "Отметьте ОДНУ из галочек:\n"
+        "> - [{tick_continue}] продолжить цикл ревью — "
+        "ответить на замечания в следующем раунде основного писателя и утвердить заново\n"
+        # waiver: deliberate Russian UI string — the bare one-letter word is a preposition, not a Latin lookalike (RUF001)
+        "> - [{tick_approve}] утвердить с замечаниями — "  # noqa: RUF001
+        "принять записанные ниже замечания как есть и финализировать документ\n"
+    ),
 }
 
-_CONCERNS_DECISION_TEMPLATE = (
-    "> [!warning] Outstanding concerns — choose how to proceed #review/concerns-decision\n"
-    "> The validation writer raised concerns up to the configured pause threshold. The section(s) below show them. Tick ONE of the boxes:\n"
-    "> - [{tick_continue}] continue review cycle — answer the concerns in the next main-writer round and re-approve\n"
-    "> - [{tick_approve}] approve with concerns — accept the concerns recorded below as-is and finalize the document\n"
-)
+
+def _resolve_for_language(table: dict[str, _EntryType], lang: str) -> _EntryType:
+  """
+  Resolve a table's entry for a language, falling back to the shipped English one.
+
+  Args:
+    table: One of the per-language string tables.
+    lang: Resolved language code; a code with no entry of its own falls back.
+
+  Returns:
+    The language's entry, or the English entry when the language has none.
+  """
+  # every table is complete for English, so the floor always answers
+  return table.get(lang) or table[_LANG_EN]
 
 
 def render(
@@ -387,6 +453,7 @@ def render(
     continue_review: bool = False,
     approve_with_concerns: bool = False,
     waiting_context: str | None = None,
+    lang: str = _LANG_EN,
 ) -> str:
   """
   Render the callout markdown for `state`.
@@ -408,6 +475,7 @@ def render(
     continue_review: Ticks the "continue review cycle" checkbox when rendering `State.CONCERNS_DECISION`.
     approve_with_concerns: Ticks the "approve with concerns" checkbox when rendering `State.CONCERNS_DECISION`.
     waiting_context: Phase label inserted into the `State.IN_PROCESS` title; `None` yields bare "Waiting".
+    lang: Resolved language code; a language with no table of its own renders the shipped English wording.
 
   Returns:
     Callout markdown string for the given state, ready to embed in the document body.
@@ -424,16 +492,17 @@ def render(
   # a concerns decision is still pending, or once finalizing has already started.
 
   if state is State.CONCERNS_DECISION:
-    return _CONCERNS_DECISION_TEMPLATE.format(
+    return _resolve_for_language(_CONCERNS_DECISION_TEMPLATE, lang).format(
         tick_continue = "x" if continue_review        else " ",
         tick_approve = "x" if approve_with_concerns else " ",
     )
-  template = _TEMPLATES[state]
+  template = _resolve_for_language(_TEMPLATES, lang)[state]
   if state is State.READY:
     return template.format(tick="x" if approved else " ")
   if state is State.IN_PROCESS:
     # waiver: one-off human-facing message
-    title = _WAITING_CONTEXT_LABELS.get(waiting_context or "", "Waiting")
+    labels = _resolve_for_language(_WAITING_CONTEXT_LABELS, lang)
+    title = labels.get(waiting_context or "", _resolve_for_language(_WAITING_BARE, lang))
     return template.format(title=title)
   return template
 
@@ -461,6 +530,7 @@ def replace_banner(
     continue_review: bool = False,
     approve_with_concerns: bool = False,
     waiting_context: str | None = None,
+    lang: str = _LANG_EN,
 ) -> str:
   """Return `body` with its banner replaced (or inserted, if absent).
 
@@ -508,6 +578,7 @@ def replace_banner(
       continue_review=continue_review,
       approve_with_concerns=approve_with_concerns,
       waiting_context=waiting_context,
+      lang=lang,
   ) + "\n"
   # Split a leading frontmatter block so the banner never lands above it.
   fm = _LEADING_FRONTMATTER_RE.match(body)

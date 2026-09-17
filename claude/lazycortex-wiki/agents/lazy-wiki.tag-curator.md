@@ -50,23 +50,14 @@ Surface-level — there is no node. You judge a canonical axis-value set and emi
 3. **Judge.** For each axis, group values that mean the same thing or nest as subtypes. Use the example summaries to judge meaning; keep genuinely distinct values apart. Build an alias map `{"<axis>": {"<old-value>": "<new-value>"}}`: merge a synonym (`"food" → "coffee"`), nest a subtype (`"espresso" → "coffee/espresso"`), or omit a value to keep it. An empty map (`{}`) is valid — nothing to consolidate.
 4. **Write the alias map** — tail:true → `result/alias_map.json`; tail:false → a `mktemp` temp file (outside the repo).
 5. **Apply (ALWAYS, both modes), unless the map is empty.** `"${LAZYCORTEX_PYTHON:-python3}" "$WIKI_BIN" retag <surface> --from <alias-map-file> --repo <repo-root>` — MUST exit 0. In tail:false, `rm` the temp after a successful apply. An empty map → skip the call and go straight to the dictionary step; the dictionary may still need the values this surface carries.
-6. **Rewrite the dictionary (ALWAYS, both modes).** Re-survey the surface as it now stands: `"${LAZYCORTEX_PYTHON:-python3}" "$WIKI_BIN" collect-tags <surface> --repo <repo-root>` — this is the post-retag truth, never your own expectation of it. Then `Write` the whole dictionary file at the path from step 1:
+6. **Rewrite the dictionary (ALWAYS, both modes).** Re-survey the surface as it now stands: `"${LAZYCORTEX_PYTHON:-python3}" "$WIKI_BIN" collect-tags <surface> --repo <repo-root>` — this is the post-retag truth, never your own expectation of it. Then `Write` the whole dictionary file at the path from step 1.
 
-   ```
-   # Tag values
+   **The heading and the intro paragraph are fetched, not authored.** Ask for them: `"${LAZYCORTEX_PYTHON:-python3}" "$WIKI_BIN" text tag-dictionary-intro --repo <repo-root>` — the command resolves the vault's language itself and prints the heading, a blank line, and the paragraph. Paste that output as the top of the file, byte for byte. Never translate it, never reword it, never write it from memory: the wording is versioned in `bin/explainers.py`, and a language with no text of its own is answered in English.
 
-   Advisory dictionary of the wiki's canonical tag values, maintained by the wiki tag curator.
-   It records what each value covers so a later classification reuses a settled value instead of
-   coining a synonym beside it. It constrains nothing: a classification may coin a value the
-   dictionary does not list, and the next canon pass records it here.
-
-   ## <axis>
-
-   - <value> — <gloss>
-   ```
+   Below the intro come the sections themselves, identical in every language — one `## <axis>` per axis, one `- <value> — <gloss>` bullet per value. Axis names and tag values are identifiers and are never translated; only a gloss is written in the resolved language, which you read with `"${LAZYCORTEX_PYTHON:-python3}" "$WIKI_BIN" resolve-language --repo <repo-root>`.
 
    Content rules: one `## <axis>` section per axis, one `- <value> — <gloss>` bullet per value, axes and values each in alphabetical order. The file's entries are the union of what it already held and this surface's post-retag values — **a value the file carries and this surface does not is kept**, because another surface may be the one wearing it; a value your alias map renamed is renamed in place, keeping its gloss. Create the file (and its parent directory) when it does not exist.
-7. **(tail: true only)** `"${LAZYCORTEX_PYTHON:-python3}" "$WIKI_BIN" build-index <surface> --repo <repo-root>` when the surface is a configured wiki scope — retag moved tags, so the index needs a rebuild. The reserved `domains` surface is the generated domain-doc tree, not a scope: it has no topics index, so skip the call there. Then `git add -A && git commit -m "wiki(normalize-tags): <surface>"` — do **NOT** pass `--author`; the pump set `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` in env, git picks them up automatically.
+7. **(tail: true only)** `"${LAZYCORTEX_PYTHON:-python3}" "$WIKI_BIN" build-index <surface> --repo <repo-root>` when the surface is a configured wiki scope — retag moved tags, so the index needs a rebuild. The reserved `domains` surface is the generated domain-doc tree, not a scope: it has no topics index, so skip the call there. Then `git add -- <abs-dictionary-path> <abs-topics-md-path> && git commit -m "wiki(normalize-tags): <surface>" -- <abs-dictionary-path> <abs-topics-md-path>` — do **NOT** pass `--author`; the pump set `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` in env, git picks them up automatically. Name the dictionary and, when the surface is a wiki scope, the topics index the `build-index` call just rewrote; the nodes `retag` touched are named the same way. The index is shared, so a wildcard would publish another writer's parked work.
 8. **Finish.** tail:true: write `result/response.json` (`outcome=curated`, or `empty` when the map was empty and the dictionary needed no change). tail:false: return, stating the alias map and the outcome.
 
 ## Constraints

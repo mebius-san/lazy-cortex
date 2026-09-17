@@ -33,7 +33,9 @@ class PayloadError(LazyReviewError):
   """Agent request / response payload violated the protocol.
 
     Used for malformed JSON, missing required fields, invalid outcome
-    enums, or response result/ paths pointing outside the job dir.
+    enums, response result/ paths pointing outside the job dir, and an
+    attachment entry that resolves to anything but a plain filename
+    inside the job's own `result/`.
     """
 
 

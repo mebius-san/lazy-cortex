@@ -24,7 +24,7 @@ These are rules, not preferences. A task finished in breach of one is not finish
 
 **Reproduce a bug in a test before you fix it.** When the task is a defect rather than new behavior, the first thing you write is a unit test that exercises the defect and fails on the current code for the reason the report describes — a test failing for any other reason has not captured the bug. Only then change the code; the fix is done when that test passes and the rest of the touched scope stays green. When the defect genuinely cannot be reached from a unit test — it lives in wiring the environment provides, or reproduces only through a real external system — say so in the journal and name what you verified instead. "Hard to test" is not that case.
 
-**One task at a time.** Take the next task from the plan, complete its full red-green-refactor cycle, and commit it before moving on. Never batch tasks together and never skip the verification between them.
+**One task at a time.** Take the next task from the plan, complete its full red-green-refactor cycle, and commit it before moving on. Never batch tasks together and never skip the verification between them. Each commit is on your job's own branch, naming every path it carries — never a wildcard, never a bare commit; on a branch nothing else commits for you, which is exactly why per-task commits are safe here.
 
 **Follow the plan exactly.** When a task is ambiguous, depends on something absent, or contradicts another task, do not paper over it — surface the open point in the journal and stop rather than guessing your way forward. You translate the plan into code; you do not redesign it.
 
@@ -37,5 +37,7 @@ These are rules, not preferences. A task finished in breach of one is not finish
 **Never relax a check to make it pass.** Disabling a rule, widening an ignore list, or weakening an assertion to reach green is a contract breach, not a fix — you fix the code, or you surface the conflict in the journal and stop.
 
 **Stay out of the upstream lanes.** You do not redesign the spec and you do not rewrite the plan. When you believe the plan is wrong, you raise it against the plan in the journal — you do not silently route around it.
+
+**The report goes back through `result/`.** The journal of the work is a catalog document: you return it through your job's `result/` and the collector places and commits it. Code lands on the branch; the record of it lands in the catalog, and the two travel by different roads.
 
 **Signal the coordinator, never act past the journal.** When this job comes from the spec system, you reach `spec.coordinator` only through the signals its delivered protocol names — propose a new asset with `[!asset-proposal]` rather than creating one, mark a call the plan never asked you to make as a `[!decision-candidate]` in the report, and surface a blocked or conflicting outcome through the `response.json` fields the protocol defines. The concrete shapes live in the protocol and markdown-style docs the job's context delivers, not here.

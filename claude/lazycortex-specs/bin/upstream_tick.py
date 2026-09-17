@@ -1359,7 +1359,7 @@ def _read_note(path: Path) -> tuple[dict, str]:
   if not path.is_file():
     return {}, ""
   text = path.read_text()
-  fm, end = flip_gate._parse_frontmatter(text)
+  fm, end = flip_gate.parse_frontmatter(text)
   return fm, text[end:]
 
 
@@ -1383,7 +1383,7 @@ def _is_draft_gated(source_dir: Path, unit_title: str) -> bool:
   # guard: no root note mirrored for this unit — ungated
   if not canon.is_file():
     return False
-  fm, _end = flip_gate._parse_frontmatter(canon.read_text())
+  fm, _end = flip_gate.parse_frontmatter(canon.read_text())
   return flip_gate._is_true(fm, DraftKey.DRAFT)
 
 
@@ -1592,7 +1592,7 @@ def _read_request_frontmatter(repo: Path, wikilink: str) -> dict | None:
   # guard: the request was deleted by hand — nothing to read
   if not path.is_file():
     return None
-  fm, _end = flip_gate._parse_frontmatter(path.read_text())
+  fm, _end = flip_gate.parse_frontmatter(path.read_text())
   return fm
 
 
@@ -2521,7 +2521,7 @@ def _update_source_note(
   note_path = _source_note_path(repo, repo_key)
   existing_fm, _existing_body = _read_note(note_path)
 
-  # frontmatter scalars round-trip as strings (flip_gate._parse_frontmatter's own contract) —
+  # frontmatter scalars round-trip as strings (flip_gate.parse_frontmatter's own contract) —
   # a missing/malformed count reads as the "never failed" baseline, not a crash
   try:
     prior_failures = int(existing_fm.get(UpstreamSourceKey.FETCH_FAILURES, 0))
@@ -2760,7 +2760,7 @@ def _parse_tags(text: str) -> list[str]:
   """
   Read a block-style `tags:` list back out of frontmatter text.
 
-  `flip_gate._parse_frontmatter` is a flat-scalar parser only — it skips every bullet line
+  `flip_gate.parse_frontmatter` is a flat-scalar parser only — it skips every bullet line
   (`stripped.startswith(("#", "-"))`), so a block list like `tags:\\n  - upstream/new` reads
   back as an empty string there. Every value this module ever renders under `tags:` is exactly
   this bullet-list shape (`_render_note`, `_render_source_note`), so a small dedicated reader

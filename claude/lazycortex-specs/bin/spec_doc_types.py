@@ -407,7 +407,7 @@ def backfill(repo: Path) -> dict:
       path = Path(dirpath) / name
       text = path.read_text(encoding = _K.ENCODING)
       # waiver: sibling-module frontmatter parser -- the one parser every specs primitive shares
-      fm_values, fm_end = flip_gate._parse_frontmatter(text)
+      fm_values, fm_end = flip_gate.parse_frontmatter(text)
       role = fm_values.get(_SPEC_ROLE, "")
       # a level note is the one place the key was written against its own schema, so the
       # migration that stopped deriving a type from the role also takes back what it wrote
@@ -456,7 +456,7 @@ def doc_type_of(path: Path) -> str:
   # never consulted, even when it happens to match a type name.
 
   # waiver: sibling-module frontmatter parser -- the one parser every specs primitive shares
-  fm_values, _fm_end = flip_gate._parse_frontmatter(path.read_text(encoding = _K.ENCODING))
+  fm_values, _fm_end = flip_gate.parse_frontmatter(path.read_text(encoding = _K.ENCODING))
   return fm_values.get(_K.DOC_TYPE, "")
 
 
@@ -499,7 +499,7 @@ def _retype_frontmatter(text: str, old: str, new: str) -> tuple[str, bool, bool]
   """
   # decide which of the two keys this rename is allowed to rewrite in this document
   # waiver: sibling-module frontmatter parser -- the one parser every specs primitive shares
-  fm_values, fm_end = flip_gate._parse_frontmatter(text)
+  fm_values, fm_end = flip_gate.parse_frontmatter(text)
   head = text[:fm_end]
   typed = fm_values.get(_K.DOC_TYPE) == old
   roled = fm_values.get(_SPEC_ROLE) == old

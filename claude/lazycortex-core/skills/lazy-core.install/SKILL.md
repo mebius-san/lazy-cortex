@@ -528,7 +528,7 @@ Append both to the candidate list unconditionally:
 - `agent_name`: `lazy-runtime.doctor` (expert key `runtime.doctor`) — `plugin`: `lazycortex-core`; no protocol (the doctor routine supplies its context bundle directly; there is nothing to resolve).
 - `agent_name`: `lazy-core.autocheckup` (expert key `core.autocheckup`) — `plugin`: `lazycortex-core`; no protocol (the weekly `lazy-core.autocheckup` schedule routine — seeded by Step 12's bootstrap — dispatches it with a bare `{"repo": "."}` request).
 
-Each then flows through §§ 2–4 exactly like a scanned candidate (skipped if already registered, bot `git_author`, entry `{agent, git_author}`).
+Each then flows through §§ 2–4 exactly like a scanned candidate (skipped if already registered, bot `git_author`), with one addition these two candidates carry and a scanned one does not: their entry is `{agent, git_author, can_commit_in_repo: true}`. Both exist to commit — the doctor commits the reverts and the system-noise cleanups it decides on, the autocheckup commits the mechanical fixes it applied — and without the flag the pump appends the no-commit clause and their whole output strands. Unlike the other install-managed fields, this one is seeded on creation only: an existing entry carrying an explicit `false` is the operator's choice and stays.
 
 Additionally, ensure lazycortex-core's own agent-model tiers — the doctor's included — exist in the **project** `agent_models.lazycortex` (the expert runtime resolves models from `<repo-root>/.claude/lazy.settings.json` only). Dogfood the shared seeding primitive instead of hand-rolling the SOT lookup (same pattern as Step 4 dispatching `lazy-core.scaffold-sync`):
 

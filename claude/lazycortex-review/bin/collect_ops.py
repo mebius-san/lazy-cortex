@@ -31,8 +31,12 @@ Response-payload fields this module reads (the agent's `response.json`):
 
     {
       "outcome": "edited" | "empty" | "error",
-      "result": ["result/<relpath>"]   # required when outcome == "edited"
+      "result": ["result/<document>", "result/<attachment>", ...]   # required when outcome == "edited"
     }
+
+The first `result` entry is the job's own document. Every further entry is an attachment the
+landing puts beside that document under the entry's own basename — accepted on `mode == "main"`
+only; any other mode's extra entries are dropped with a line on stderr.
 
 Only `outcome == "edited"` jobs carry content to apply. An `outcome == "empty"` job — a
 writer that finished with nothing to change — is consumed without touching the document, so
@@ -47,6 +51,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -71,6 +77,8 @@ import job_markers as _job_markers  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import parser as _parser  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import payload as _payload  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import coordinator_dispatch as _coordinator_dispatch  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import reapply as _reapply  # noqa: E402
@@ -78,6 +86,30 @@ import reapply as _reapply  # noqa: E402
 from keys import (  # noqa: E402
     BotIdentity, CoreCommand, EnvVar, JobFile, JobKey, JobMarker, JobStatus, Outcome, Paths, Phase, Plugin, Tag,
 )
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+from errors import PayloadError  # noqa: E402
+
+
+# A link target pointing into the job's own result dir — what a writer spells when it references
+# an attachment it is returning alongside the document. Four shapes carry such a target: an inline
+# link `(result/x)`, a titled inline link `(result/x "t")`, a reference definition `[a]: result/x`,
+# and an HTML source attribute `src="result/x"`. Only the opening delimiter is captured and
+# replayed, so whatever closes each shape is left exactly as the writer spelled it. Mirrors
+# `lazycortex-specs/bin/land_result.py`'s own copy across the plugin boundary.
+_RESULT_LINK_RE = re.compile(
+    r"""(?P<open>\(|\]:[ \t]*|src[ \t]*=[ \t]*["'])result/(?P<name>[^)"'\s]+)""")
+
+# `_RESULT_LINK_RE`'s capture groups: the delimiter that opened the shape, replayed verbatim,
+# and the returned file's name behind the `result/` prefix.
+_GROUP_OPEN = "open"
+_GROUP_NAME = "name"
+
+# The job bundle's own output directory, mirrored from the runtime layout.
+_RESULT_DIR = "result"
+
+# Frontmatter key marking a spec catalog's own canonical or status note — a file a landing
+# may never overwrite, whoever else's plugin owns it.
+_SPEC_ROLE_KEY = "spec_role"
 
 
 # ------------------------------------------------------------- job discovery
@@ -189,7 +221,154 @@ def _job_status(jdir: Path) -> str:
 # --------------------------------------------------------------- payload apply
 
 
-def _build_agent_body(jdir: Path, request: dict, response: dict) -> tuple[str, str, tuple[str, str] | None]:
+def _is_spec_document(path: Path) -> bool:
+  """
+  Report whether `path` is an existing markdown note carrying a spec catalog's role marker.
+
+  Args:
+    path: Absolute path of the destination an attachment would take.
+
+  Returns:
+    `True` when the file exists, is markdown, and its frontmatter carries `spec_role`;
+    `False` for every other path, including one that cannot be read.
+  """
+  # guard: only an existing markdown file can carry the frontmatter that marks a spec note
+  # waiver: the markdown suffix, spelled as start.py / submit.py / lazy_review.py already spell it
+  if path.suffix.lower() != ".md" or not path.is_file():
+    return False
+  try:
+    meta, _body = _fm.parse(path.read_text())
+  # waiver: an unreadable neighbour is simply not a spec note — the landing is not this
+  # helper's to refuse over an IO error it cannot attribute
+  except (OSError, UnicodeDecodeError):
+    return False
+  return _SPEC_ROLE_KEY in meta
+
+
+def _require_entry_lands(source: Path, dest: Path | None, document: Path) -> None:
+  """
+  Refuse one `result` entry whose bundle file, or whose destination, makes it unsafe to copy.
+
+  Args:
+    source: The entry's file inside the job bundle's `result/` directory.
+    dest: The path the entry would take beside the document, or `None` for the job's own
+      result document, which is read rather than copied out.
+    document: The review document this job targets.
+
+  Raises:
+    PayloadError: When the bundle file is a symlink or absent, or when the destination is a
+      symlink, the reviewed document itself, or a spec catalog's own note.
+  """
+
+  # Domain(review.dispatch):
+  # # A landing overwrites its own kind, never someone else's document
+  # A response's entries are files the collector copies into a directory full of documents it
+  # did not write. Re-landing an attachment the same expert produced before is the ordinary
+  # regenerate case and overwrites freely. Everything else is off limits: the reviewed document
+  # itself is the round's own output and is never an attachment's destination, and a spec
+  # catalog's canonical or status note belongs to a pipeline this collector knows nothing about.
+  # A symlink is refused at both ends before anything is read or written, because what it names
+  # is outside the checked location whatever it resolves to, and the containment the entry
+  # passed was only ever about the name: a copy onto a symlinked destination writes through it.
+
+  # guard: a symlink names a file outside the bundle whatever it resolves to
+  if source.is_symlink():
+    raise PayloadError(f"result entry is a symlink: {source.name!r}")
+  # guard: the response declared a file the writer never wrote — a malformed response
+  if not source.is_file():
+    raise PayloadError(f"result entry declared but not delivered: {source.name!r}")
+  # guard: the job's own result document is read, never copied — it has no destination to check
+  if dest is None:
+    return
+  # guard: a symlinked destination is written through, landing the file outside the folder
+  if dest.is_symlink():
+    raise PayloadError(f"attachment destination is a symlink: {source.name!r}")
+  # guard: the document an attachment rides with is never the file it overwrites
+  if dest == document:
+    raise PayloadError(f"attachment would overwrite the reviewed document: {source.name!r}")
+  # guard: a spec catalog's own note is nobody's attachment destination
+  if _is_spec_document(dest):
+    raise PayloadError(f"attachment would overwrite a spec document: {source.name!r}")
+
+
+def _attachment_names(request: dict, response: dict, jdir: Path, document: Path) -> list[str]:
+  """
+  Resolve the response's attachment entries to the basenames they take beside the document.
+
+  Args:
+    request: Parsed `request.json` contents.
+    response: Parsed `response.json` contents.
+    jdir: Job-bundle directory, named in the dropped-entry log line.
+    document: The review document this job targets, which the attachments land beside.
+
+  Returns:
+    The attachment basenames in declaration order; empty when the response carries none or
+    the dispatch's mode does not accept them.
+
+  Raises:
+    PayloadError: When an entry resolves to anything but a plain filename under `result/`,
+      names a file the job bundle never wrote or symlinked, or would land on a symlink, the
+      reviewed document, or a spec catalog's own note.
+  """
+  entries = response[JobKey.RESULT][1:]
+  # guard: only a main-writer payload may carry attachments — every other mode drops the extras
+  if request.get(JobKey.MODE) != Phase.MAIN:
+    if entries:
+      sys.stderr.write(
+          f"collect-job: {jdir.name}: {len(entries)} attachment entry(ies) dropped — "
+          f"mode {request.get(JobKey.MODE)!r} accepts none\n")
+    return []
+  names = [_payload.attachment_basename(entry) for entry in entries]
+
+  # every entry is a promise about a file and a destination; check the whole list before
+  # anything is copied, so a response with one bad entry lands nothing at all rather than a part
+  for name in names:
+    _require_entry_lands(jdir / _RESULT_DIR / name, document.parent / name, document)
+  return names
+
+
+def _fix_attachment_links(body: str, names: list[str], jdir: Path) -> str:
+  """
+  Rewrite the body's `result/<file>` links to the neighbour names the attachments will take.
+
+  Covers every shape a writer spells such a target in: an inline link, a titled inline link, a
+  reference definition, and an HTML `src` attribute.
+
+  Notes:
+    - Never raises and never drops a link: a mismatch between the links and the delivered
+      attachments is reported on stderr and the landing continues.
+
+  Args:
+    body: The writer's document body as returned.
+    names: The attachment basenames this response delivered.
+    jdir: Job-bundle directory, named in each log line.
+
+  Returns:
+    The body with every `result/<file>` link rewritten to `<file>`.
+  """
+  delivered = set(names)
+  linked: set[str] = set()
+
+  # replace one `result/<file>` link target with the bare neighbour name
+  def _neighbour(match: re.Match) -> str:
+    name = match.group(_GROUP_NAME)
+    linked.add(name)
+    # guard: the document points at a neighbour this response never delivered
+    if name not in delivered:
+      sys.stderr.write(f"collect-job: {jdir.name}: link to missing neighbour {name!r}\n")
+    return f"{match.group(_GROUP_OPEN)}{name}"
+
+  # rewrite every result/ link in one pass, then report the two mismatch directions
+  out = _RESULT_LINK_RE.sub(_neighbour, body)
+  # an attachment nobody references is still landed — the operator is told, the job is not failed
+  for name in sorted(delivered - linked):
+    sys.stderr.write(f"collect-job: {jdir.name}: attachment {name!r} is not linked from the document\n")
+  return out
+
+
+def _build_agent_body(
+    jdir: Path, request: dict, response: dict, document: Path,
+) -> tuple[str, str, tuple[str, str] | None, list[str]]:
   """
   Build the `reapply.reapply` inputs for one job's response payload.
 
@@ -197,24 +376,34 @@ def _build_agent_body(jdir: Path, request: dict, response: dict) -> tuple[str, s
     jdir: Job-bundle directory the response's `result` path resolves against.
     request: Parsed `request.json` contents.
     response: Parsed `response.json` contents.
+    document: The review document this job targets.
 
   Returns:
-    A `(agent_body, phase, owned_owner)` tuple ready to pass into `reapply.reapply`. `mode ==
-    "main"` yields a main-writer's full document body with `owned_owner` `None`; any other
-    mode (`"validation"` / `"terminal"`) yields the body wrapped in the owned section's
-    heading and ownership tag, with `owned_owner` identifying that section.
+    An `(agent_body, phase, owned_owner, attachments)` tuple — the first three ready to pass
+    into `reapply.reapply`, the fourth the attachment basenames this response delivered,
+    resolved once here so the caller never re-reads the array. `mode == "main"` yields a
+    main-writer's full document body — every `result/<file>` link already rewritten to the
+    neighbour name its attachment takes beside the document — with `owned_owner` `None`; any
+    other mode (`"validation"` / `"terminal"`) yields the body wrapped in the owned section's
+    heading and ownership tag, with `owned_owner` identifying that section and no
+    attachments.
+
+  Raises:
+    PayloadError: When any `result` entry — the document's own included — resolves to anything
+      but a plain deliverable file inside the bundle that is safe to land.
   """
-  result_entry = response[JobKey.RESULT][0]
-  result_relpath = result_entry.get(JobKey.PATH) if isinstance(result_entry, dict) else result_entry
-  # guard: a result entry that resolves to anything but a path string is a malformed response
-  if not isinstance(result_relpath, str):
-    raise KeyError("result entry carries no path")
-  result_text = (jdir / result_relpath).read_text()
+  # the document entry is contained exactly like an attachment: one plain filename inside the
+  # bundle's own result/ dir, read through the payload contract's single checker
+  result_name = _payload.attachment_basename(response[JobKey.RESULT][0])
+  result_source = jdir / _RESULT_DIR / result_name
+  _require_entry_lands(result_source, None, document)
+  attachments = _attachment_names(request, response, jdir, document)
+  result_text = result_source.read_text()
   _result_meta, result_body = _fm.parse(result_text)
 
   # guard: a main-writer payload is the full document body, no owned section
   if request.get(JobKey.MODE) == Phase.MAIN:
-    return result_body, Phase.MAIN, None
+    return _fix_attachment_links(result_body, attachments, jdir), Phase.MAIN, None, attachments
 
   # wrap the response body in the owned section's heading and ownership tag, per _reassemble_section
   section_id = request[JobKey.SECTION_ID]
@@ -224,10 +413,12 @@ def _build_agent_body(jdir: Path, request: dict, response: dict) -> tuple[str, s
   owner_tag = f"{Tag.EXPERT_PREFIX}{flat_expert}/{section_id}"
   stripped = result_body.strip("\n")
   agent_body = f"# {title}\n{owner_tag}\n\n{stripped}\n" if stripped else f"# {title}\n{owner_tag}\n"
-  return agent_body, Phase.SECTION, owner
+  return agent_body, Phase.SECTION, owner, attachments
 
 
-def _apply_one_job(text: str, jdir: Path, request: dict, response: dict) -> str | None:
+def _apply_one_job(
+    text: str, jdir: Path, request: dict, response: dict, document: Path,
+) -> tuple[str, list[str]] | None:
   """
   Apply one DONE job's response to `text`.
 
@@ -236,11 +427,14 @@ def _apply_one_job(text: str, jdir: Path, request: dict, response: dict) -> str 
     jdir: Job-bundle directory the response's `result` path resolves against.
     request: Parsed `request.json` contents.
     response: Parsed `response.json` contents.
+    document: The review document this job targets, which the attachments land beside.
 
   Returns:
-    The updated document text, or `None` when the response's outcome is not `edited`,
-    carries no `result`, or the payload is otherwise malformed — left uncollected for a
-    future pass to interpret.
+    A `(document_text, attachments)` tuple — the updated document text and the attachment
+    basenames the response delivered — or `None` when the response's outcome is not `edited`,
+    carries no `result`, or the payload is otherwise malformed (an entry that is not a plain
+    filename, one the bundle never wrote or symlinked, or one that would overwrite the
+    document or a spec note) — left uncollected for a future pass to interpret.
   """
   # guard: only a completed edit carries content to land; empty/error responses are left uncollected
   if response.get(JobKey.OUTCOME) != Outcome.EDITED:
@@ -249,22 +443,23 @@ def _apply_one_job(text: str, jdir: Path, request: dict, response: dict) -> str 
   # guard: outcome=edited without a result payload is a malformed response — leave it uncollected
   if not isinstance(result, list) or not result:
     return None
-  # a malformed request (e.g. `section_id` without a matching `expert`) leaves the job uncollected
+  # a malformed request (e.g. `section_id` without a matching `expert`) or a malformed
+  # attachment entry leaves the job uncollected
   try:
-    agent_body, phase, owner = _build_agent_body(jdir, request, response)
-  except (KeyError, OSError):
+    agent_body, phase, owner, attachments = _build_agent_body(jdir, request, response, document)
+  except (KeyError, OSError, PayloadError):
     return None
   section_layout = (
       {owner: request[JobKey.POSITION]} if owner is not None and JobKey.POSITION in request else None
   )
   # graft the response onto the operator's current document via the existing reapply pipeline
   reapply_result = _reapply.reapply(
-      operator_text=text,
-      agent_body=agent_body,
-      phase=phase,
-      agent_frontmatter_overlay={},
-      owned_owner=owner,
-      section_layout=section_layout,
+      operator_text = text,
+      agent_body = agent_body,
+      phase = phase,
+      agent_frontmatter_overlay = {},
+      owned_owner = owner,
+      section_layout = section_layout,
   )
 
   # an answered question is a settled decision the round just folded — the callout must not
@@ -274,8 +469,8 @@ def _apply_one_job(text: str, jdir: Path, request: dict, response: dict) -> str 
   stripped_body = _body.strip_answered_questions(landed_body)
   # guard: nothing answered in this round — the landed text is already final
   if stripped_body == landed_body:
-    return landed
-  return landed[:len(landed) - len(landed_body)] + stripped_body
+    return landed, attachments
+  return landed[:len(landed) - len(landed_body)] + stripped_body, attachments
 
 
 # ------------------------------------------------------------- consume (§1c)
@@ -359,8 +554,8 @@ def _consume_job(repo: Path, jdir: Path) -> None:
     try:
       proc = subprocess.run(
           [sys.executable, str(cli), CoreCommand.CONSUME_JOB],
-          input=json.dumps({JobKey.EXPERT: jdir.parent.name, JobKey.JOB_ID: jdir.name}),
-          capture_output=True, text=True, env=env, check=False,
+          input = json.dumps({JobKey.EXPERT: jdir.parent.name, JobKey.JOB_ID: jdir.name}),
+          capture_output = True, text = True, env = env, check = False,
       )
       # guard: the core CLI consumed the job — the local fallback marker is not needed
       if proc.returncode == 0:
@@ -397,7 +592,10 @@ def collect_for_file(repo: Path, file_path: Path, *, commit: bool = True) -> dic
 
   Returns:
     `{"collected": N}` — the number of jobs consumed: `edited` payloads applied plus `empty`
-    writers drained. The document and the job queue are left untouched when `N` is `0`.
+    writers drained. A batch that put attachments beside the document carries the additional
+    `"landed"` key listing their repo-relative paths; a batch that landed none omits the key
+    entirely, so a document-only landing reports the summary it always has. The document and
+    the job queue are left untouched when `N` is `0`.
   """
 
   # Domain(review.jobs):
@@ -414,6 +612,8 @@ def collect_for_file(repo: Path, file_path: Path, *, commit: bool = True) -> dic
   original = file_path.read_text()
   text = original
   applied: list[Path] = []
+  # every attachment this batch delivered, as repo-relative paths, for the commit pathspec
+  landed: list[str] = []
 
   # Contract:
   # A DONE job with `outcome == "empty"` is consumed and counted with the document left
@@ -432,16 +632,25 @@ def collect_for_file(repo: Path, file_path: Path, *, commit: bool = True) -> dic
     if response.get(JobKey.OUTCOME) == Outcome.EMPTY:
       applied.append(jdir)
       continue
-    new_text = _apply_one_job(text, jdir, request, response)
+    outcome_applied = _apply_one_job(text, jdir, request, response, file_path)
     # guard: nothing to apply for this job — leave it uncollected
-    if new_text is None:
+    if outcome_applied is None:
       continue
-    text = new_text
+    text, attachments = outcome_applied
     applied.append(jdir)
+    # the attachments ride the document: each lands beside it under its declared basename
+    for name in attachments:
+      shutil.copyfile(jdir / _RESULT_DIR / name, file_path.parent / name)
+      landed.append(str((file_path.parent / name).relative_to(repo)))
 
   # guard: nothing landed — the document and the queue stay exactly as found
   if not applied:
     return {"collected": 0}
+
+  # the landed key is additive: a batch that put no attachment beside the document reports the
+  # single-key summary it always has, so a caller reading only `collected` sees no change
+  # waiver: 'collected'/'landed' are this verb's own wire-shape keys, read by its callers
+  summary: dict = {"collected": len(applied), **({"landed": landed} if landed else {})}
 
   # drain the queue either way; the wake plumbing differs per caller below
   for jdir in applied:
@@ -453,7 +662,7 @@ def collect_for_file(repo: Path, file_path: Path, *, commit: bool = True) -> dic
     _job_markers.update(repo, file_path, { JobMarker.ACTIVE_JOB: None })
     if text != original:
       file_path.write_text(text)
-    return {"collected": len(applied)}
+    return summary
 
   # standalone shape: hand the turn back — the `active_job` marker comes off and the
   # `job-done` wake goes up in the same sidecar write, before the commit that carries it — a
@@ -466,14 +675,16 @@ def collect_for_file(repo: Path, file_path: Path, *, commit: bool = True) -> dic
   # limit: a payload that reproduces the document byte-for-byte leaves nothing to commit, so no
   # git item carries the wake and the document waits for the next commit to deliver it; give the
   # postman its own wake channel if experts start landing no-op edits routinely
-  if text != original:
-    file_path.write_text(text)
+  if text != original or landed:
+    if text != original:
+      file_path.write_text(text)
     _git_ops.commit_mechanical(
         repo, file_path,
-        author={JobKey.NAME: BotIdentity.NAME, JobKey.EMAIL: BotIdentity.EMAIL},
-        message=f"review: collect {len(applied)} job(s)",
+        author = {JobKey.NAME: BotIdentity.NAME, JobKey.EMAIL: BotIdentity.EMAIL},
+        message = f"review: collect {len(applied)} job(s)",
+        extra_paths = tuple(landed),
     )
-  return {"collected": len(applied)}
+  return summary
 
 
 # ---------------------------------------------------------------------- tick
@@ -615,7 +826,7 @@ def main_tick(argv: list[str]) -> int:
   # waiver: argparse CLI signature, not a domain key
   parser = argparse.ArgumentParser(prog="lazycortex-review collect-tick")
   # waiver: argparse CLI signature, not a domain key
-  parser.add_argument("--repo", default=".")
+  parser.add_argument("--repo", default = ".")
   args = parser.parse_args(argv)
 
   # resolve --repo then run the sweep; the CLI's whole contract is this one summary line
@@ -641,9 +852,9 @@ def main(argv: list[str]) -> int:
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("file")
   # waiver: argparse CLI signature, not a domain key
-  parser.add_argument("--repo", default=".")
+  parser.add_argument("--repo", default = ".")
   # waiver: argparse CLI signature, not a domain key
-  parser.add_argument("--no-commit", action="store_true")
+  parser.add_argument("--no-commit", action = "store_true")
   args = parser.parse_args(argv)
 
   # `file` resolves against `--repo` unless it's already absolute, mirroring the other verbs
@@ -654,7 +865,7 @@ def main(argv: list[str]) -> int:
     return 2
 
   # the CLI's whole contract is this one summary line
-  print(json.dumps(collect_for_file(repo, file_path, commit=not args.no_commit)))
+  print(json.dumps(collect_for_file(repo, file_path, commit = not args.no_commit)))
   return 0
 
 

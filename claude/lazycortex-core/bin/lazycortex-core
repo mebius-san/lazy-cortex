@@ -58,7 +58,7 @@ def _forward_if_stale() -> None:
     os.execv(sys.executable, [sys.executable, str(newer), *sys.argv[1:]])
 
 USAGE = ("usage: lazycortex-core <subcommand> [args...]\n"
-         "Subcommands: expert-pump-once, doctor-tick, runtime-tick, runtime, resume, memory-reflect-all, dispatch-job, collect-job, consume-job, cancel-job, lookup-expert, scaffold, file-sync, remote-mirror, safe-pull, error-record, error-list, settings-get, settings-set, routine-ensure-filter, permission-allow, add-protocols, detect-scope, daemon-pause, daemon-resume, daemon-list, metrics-alloc-port, metrics-scrape-file, sandbox-sync, sandbox-audit, index-guard")
+         "Subcommands: expert-pump-once, doctor-tick, runtime-tick, runtime, resume, memory-reflect-all, dispatch-job, collect-job, consume-job, cancel-job, lookup-expert, scaffold, file-sync, remote-mirror, safe-pull, error-record, error-list, settings-get, settings-set, resolve-language, routine-ensure-filter, permission-allow, add-protocols, detect-scope, daemon-pause, daemon-resume, daemon-list, metrics-alloc-port, metrics-scrape-file, sandbox-sync, sandbox-audit, index-guard")
 
 
 def _cmd_consume_job(argv: list[str]) -> int:
@@ -806,6 +806,9 @@ def main() -> int:
     elif sub == "settings-set":
         from settings_cli import cmd_settings_set
         return cmd_settings_set(sys.argv[2:])
+    elif sub == "resolve-language":
+        from language_resolver import main as _resolve_language_main
+        return _resolve_language_main(sys.argv[2:])
     elif sub == "routine-ensure-filter":
         from routine_filter import cmd_routine_ensure_filter
         return cmd_routine_ensure_filter(sys.argv[2:])

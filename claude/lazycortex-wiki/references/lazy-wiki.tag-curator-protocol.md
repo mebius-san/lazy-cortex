@@ -72,6 +72,14 @@ Outcome semantics:
 
 The map gives each in-use value its canonical form per axis: merge a synonym (`"food": "coffee"`), nest a subtype (`"espresso": "coffee/espresso"`), or omit a value to leave it unchanged. Values not listed are kept as-is. An empty object (`{}`) is valid — nothing to consolidate. The file is consumed directly by `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> retag <surface> --from result/alias_map.json`.
 
+## Language
+
+Before writing any prose — a `wiki_summary`, a See-also gloss, a term definition, a directory description, a tag gloss — resolve the language the vault stores its notes in: run `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> resolve-language --repo <repo-root>` and write every line in the code the verb returns. The language never arrives in the job payload and is never inferred from the prose already around you: settings are the source of truth, and the verb is how a writer reads them.
+
+The obligation covers shipped boilerplate. A template heading, a seeded stub, or any English scaffolding you keep in the file you write is translated into the resolved language when it differs. When editing prose that already exists, keep its language — never retranslate.
+
+Never translated, in any language: frontmatter keys and values, `wiki/<axis>/<value>` tags and axis names, canonical section headings (`# Topics`, `# Domains`, `# See also`, `# History`), identifiers, file paths, and link targets. A link's display text may be translated; the path before `|` never is.
+
 ## Side-effect rules
 
 The tag curator is a C-hybrid expert: it has Bash access and is expected to apply its own result. The sequence is:
@@ -85,6 +93,11 @@ The tag curator is a C-hybrid expert: it has Bash access and is expected to appl
 - The dictionary file named by `tag_dictionary` is the expert's own output and is written directly.
 - The expert MUST NOT touch any other file outside its job dir, except `topics.md` via `build-index` and `.memory/<self>/` (granted by the persona aspect).
 - The expert MUST NOT write back into `context/` — it holds read-only staged copies.
+
+## Attachments
+
+This channel permits no attachments. The curator's whole output is the file it owns plus the
+deterministic apply call that writes it; there is nothing to place beside anything.
 
 ## Error categories
 

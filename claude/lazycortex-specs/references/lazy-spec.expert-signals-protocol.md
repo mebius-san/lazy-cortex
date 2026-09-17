@@ -17,7 +17,7 @@ A decision the job WAS told to make is not a signal, but it has one legal form i
 
 `<specs-cli>` stands for the specs plugin's `bin/lazycortex-specs` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-specs/<version>/`, or `claude/lazycortex-specs/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
-- **`[!decision] … #spec/decision`** — a decision statement, written only for a real fork per the weight test in `${CLAUDE_PLUGIN_ROOT}/rules/spec.decisions.md` § 2 (a genuine alternative existed, reversal is expensive, the why is unrecoverable from the artifact). It stands immediately after the prose that states the decided principle. A decision written any other way — a bold bullet, a paragraph, a list item — is a description of the implementation, not a decision, and the approve-time transfer into the sibling `decisions.md` (`"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> decide promote`) does not see it. Shape (thesis line, `**Why.**`, `**Rejected.**`): `lazy-core.markdown-style.md` § Decision statement shape.
+- **`[!decision] … #spec/decision`** — a decision statement, written only for a real fork per the weight test in `${CLAUDE_PLUGIN_ROOT}/rules/spec.decisions.md` § 2 (a genuine alternative existed, reversal is expensive, the why is unrecoverable from the artifact). It stands immediately after the prose that states the decided principle. A decision written any other way — a bold bullet, a paragraph, a list item — is a description of the implementation, not a decision, and the approve-time transfer into the sibling `decisions.md` (`"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> decide promote`) does not see it. Shape (thesis line, then the justification as plain prose — no `Why` / `Rejected` labels, no list of alternatives): `lazy-core.markdown-style.md` § Decision statement shape.
 
 ## `request.json` extra fields
 
@@ -39,16 +39,16 @@ Two extra fields, both riding alongside the ordinary envelope (`outcome` / `resu
 
 ## Attachments policy
 
-This channel permits attachments — files an expert creates beside its target document rather than under `result/`.
+This channel permits attachments, and they travel exactly like the document does: the expert creates each one under `result/` and declares it in the response's `result` array after the document's own entry. The collector puts them in place and commits them. The expert never writes into the asset folder and never commits there.
 
-- **Where.** Flat in the asset folder, beside the asset's documents. There is no attachments subfolder and no other legal location.
+- **Where.** The expert writes into `result/` and nowhere else. The collector lands each attachment flat in the asset folder, beside the asset's documents, under the entry's own basename — a plain filename: no directory, no parent hop, never empty. There is no attachments subfolder and no other legal destination. Links from the document to an attachment are written by the neighbour name, as if both files already sat side by side.
 - **Naming.** Unconstrained; pick a name that says what the file is.
 - **Frontmatter of a markdown attachment.** Two keys, both written by the creating expert at creation time, neither derived later:
   - `spec_owner_doc: <owner>.md` — the sibling document the attachment belongs to. It decides which job may write to the file, and it keeps the file out of the asset's gates.
   - `spec_doc_type: <type>` — what kind of document the file is. It decides the file's review class and its stage rules.
 
   These record two different facts and are not one fact under two names. A file may be missing either one independently, and each omission is escalated on its own.
-- **A non-markdown attachment carries no frontmatter.** Its ownership is recorded instead by the coordinator, in the `# Attachments` section of the asset's status folder-note.
+- **A non-markdown attachment carries no frontmatter.** Its ownership is recorded instead by the coordinator, in the `# Attachments` section of the asset's status folder-note. The coordinator writes that registry entry on the wake the collector's own commit raises.
 
 ## Language
 
@@ -64,7 +64,7 @@ An expert dispatched against a spec asset MUST NOT, under any circumstance:
 
 - **Create an asset.** The `[!asset-proposal]` callout above is the only mechanism for proposing one; materialization is exclusively the coordinator's act, after the containing document is accepted.
 - **Touch a markdown document of another asset, or any folder-note.** A proposal, a question, or a decision-candidate marker lands only in the document the expert is itself writing or reporting into. The prohibition covers the asset's markdown documents and its status folder-note; it does not reach the expert's own attachments, which the section above authorises.
-- **Edit an attachment another document owns.** An attachment belongs to the document it was created beside — a markdown attachment records it as `spec_owner_doc` in its own frontmatter, a non-markdown one through the coordinator's registry on the folder-note. Only the job whose own result document is that owner writes to it; every other role reads it and leaves it alone.
+- **Edit an attachment another document owns.** An attachment belongs to the document it was returned alongside — a markdown attachment records it as `spec_owner_doc` in its own frontmatter, a non-markdown one through the coordinator's registry on the folder-note. Only the job whose own result document is that owner writes to it; every other role reads it and leaves it alone.
 - **Tick a launch checkbox.** Ticking a `- [ ]` / `- [x]` box in an asset's `# Gates` section is exclusively an operator gesture (or, in `lazy-spec.drive`'s no-daemon mode, the operator's own spoken word translated into a tick on their behalf) — never an expert's.
 - **Record a decision anywhere but a living doc.** `design.md`, `architecture.md`, and the product's `tech.md` are the only legal home for a decision. A plan is a decomposition of decisions already made elsewhere and a report is a journal — neither is ever a decision's source of truth, so an expert never treats writing to either as recording one.
 - **Rewrite `code-report.md` / `test-report.md` in response to review comments.** A main-writer dispatched on one of the two report kinds never edits the report's own prose to answer a reviewer's comment — a comment on a report means the underlying WORK needs redoing, not the journal's words. The coordinator's continuation dispatch (`lazy-spec.coordination-playbook.md` Chapter 8) redoes the work and appends a fresh entry to the same journal; it never rewrites what an earlier entry already said.

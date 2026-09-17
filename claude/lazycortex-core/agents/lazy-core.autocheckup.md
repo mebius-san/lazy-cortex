@@ -45,7 +45,7 @@ Outcome: `fixed: <N>, left-open: <M>`.
 
 ## Phase 4 — Commit
 
-As in `lazy-core.autosetup` Phase 4: nothing touched → `already-current`; else stage exactly the touched files and commit in one Bash chain under the repo's local identity, subject `chore(claude): lazy-core autocheckup — <one-line summary>`. No push.
+As in `lazy-core.autosetup` Phase 4: nothing touched → `already-current`; else stage exactly the files this run touched — explicit paths in both the stage and the commit, never a wildcard and never a bare commit, because the index is shared with the operator — and commit in one Bash chain under the repo's local identity, subject `chore(claude): lazy-core autocheckup — <one-line summary>`. No push. A dirty path you did NOT touch is a finding to report, never something to stage.
 
 Outcome: `committed: <sha>` / `already-current`.
 

@@ -43,7 +43,7 @@ Field notes:
 
 ### `report` dispatch
 
-`report` carries **no job dir**: no `request.json`, no `result/`, no `response.json`. The dispatching skill names the real things directly in the prompt — the map path, the configured depth profiles, and the exclusions — and the curator returns its findings as its reply. It writes nothing.
+`report` carries **no job dir**: no `request.json`, no `result/`, no `response.json`. The dispatching skill names the real things directly in the prompt — the map path, the configured depth profiles, and the exclusions — and the curator returns its findings as its reply. It writes nothing. It is a call from a live session, not a queued job: the pump never sees it, so the response envelope the expert-runtime contract requires of every job does not apply — the findings are the reply itself.
 
 ## Response shape (`response.json`)
 
@@ -118,6 +118,16 @@ A `report` dispatch returns findings as its reply, one entry per finding, each n
 
 Configuration findings (exclusions, routine wiring, profile overlaps) are the dispatching skill's own; the curator neither computes nor returns them.
 
+`<wiki-cli>` stands for the wiki plugin's `bin/lazycortex-wiki` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-wiki/<version>/`, or `claude/lazycortex-wiki/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+
+## Language
+
+Before writing any prose — a `wiki_summary`, a See-also gloss, a term definition, a directory description, a tag gloss — resolve the language the vault stores its notes in: run `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> resolve-language --repo <repo-root>` and write every line in the code the verb returns. The language never arrives in the job payload and is never inferred from the prose already around you: settings are the source of truth, and the verb is how a writer reads them.
+
+The obligation covers shipped boilerplate. A template heading, a seeded stub, or any English scaffolding you keep in the file you write is translated into the resolved language when it differs. When editing prose that already exists, keep its language — never retranslate.
+
+Never translated, in any language: frontmatter keys and values, `wiki/<axis>/<value>` tags and axis names, canonical section headings (`# Topics`, `# Domains`, `# See also`, `# History`), identifiers, file paths, and link targets. A link's display text may be translated; the path before `|` never is.
+
 ## Side-effect rules
 
 - The expert MAY edit the repository's structure map in place, and commit it under the git identity its environment carries.
@@ -125,6 +135,11 @@ Configuration findings (exclusions, routine wiring, profile overlaps) are the di
 - The expert MUST NOT create the map when it is missing: the full build belongs to the rebuild mode of the structure skill, and an incremental job against a missing map is an `error`, not an invitation.
 - The expert MUST NOT touch anything outside the job dir except the map, and `.memory/<self>/` where the persona aspect grants it.
 - On `report` the expert writes nothing at all.
+
+## Attachments
+
+This channel permits no attachments. The curator's whole output is the file it owns plus the
+deterministic apply call that writes it; there is nothing to place beside anything.
 
 ## Error categories
 

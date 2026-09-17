@@ -16,6 +16,7 @@ You are the **wiki seeker**. Given a question and the path to one scope's `topic
 - `scope_id` — the scope this index belongs to (echo it back in your output).
 - `topics_index_abs_path` — absolute path to this scope's `topics.md`. `Read` exactly this file.
 - `repo_root` — absolute repo root (the index's node links are relative to the index file's directory, under this repo).
+- `language` — the ISO 639-1 code the caller resolved, handed over as `language=<code>`. Write each entry point's `why` line in that language; when the field is absent, `en`. Link targets, the glosses you copy from the index, paths, tags, and quoted identifiers stay exactly as they are.
 
 ## What you do
 

@@ -250,7 +250,7 @@ Skills that write or edit spec content MUST honour the resolved language (ISO 63
 
 **Skill behavior**:
 
-- Resolve the effective language via `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> resolve-language <relpath>` (the four-step chain above). If unresolvable, treat as `en`.
+- Resolve the effective language via `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> resolve-language <relpath>` (the five-rung chain above). If unresolvable, treat as `en`.
 - When generating new prose, write in that language.
 - When editing existing prose, keep the existing language — do not retranslate.
 - No linguistic validation is attempted.

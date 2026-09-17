@@ -60,7 +60,7 @@ import parser as _parser  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from errors import ParseError  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from keys import Bucket, Phase, ReviewKey, Tag  # noqa: E402
+from keys import LANG_EN as _LANG_EN, Bucket, Phase, ReviewKey, Tag  # noqa: E402
 
 
 # The closed `review_*` frontmatter schema (spec § Frontmatter schema) — any `review_`-prefixed
@@ -112,6 +112,11 @@ _TICK_CHAR = "x"
 # The `[!question]` marker and `#review/question` tag value — the only callout kind whose block
 # is also scanned for ticked options.
 _QUESTION_MARKER = "question"
+
+# The vault settings file `resolve_language` walks up to and the key it reads there; the
+# shipped floor it returns when neither is found is `keys.LANG_EN`.
+_SETTINGS_REL = Path(".claude") / "lazy.settings.json"
+_LANGUAGE_KEY = "language"
 
 
 def _coerce_known_value(key: str, raw: str) -> bool | int | str:
@@ -439,7 +444,53 @@ def waiting_context_for_phase(review_phase: str | None) -> str:
   return _WAITING_CONTEXT_BY_PHASE.get(review_phase, Bucket.WRITER)
 
 
-def repaint_banner(text: str, *, job_in_flight: bool = False) -> str:
+def resolve_language(file_path: Path) -> str:
+  """
+  Resolve the language the review system's own fixed strings are written in.
+
+  Walks up from the document to the nearest `.claude/lazy.settings.json` and
+  returns the top-level `language` key, or the shipped `en` floor. Review has
+  no language key of its own — the prose it writes follows the document under
+  review, and only its fixed operator-facing strings follow this value.
+
+  Guarantees:
+    - Always returns a language tag; a document outside any vault, or an
+      unreadable settings document, resolves to `en` instead of raising.
+
+  Args:
+    file_path: The document the language is resolved for.
+
+  Returns:
+    The repo-wide language tag; `en` when no settings file is found or readable.
+  """
+
+  # Contract:
+  # Resolution MUST always yield a language tag: a document outside any vault, or
+  # an unreadable settings document, resolves to `en` rather than raising.
+
+  # walk up to the nearest settings root; a doc outside any vault keeps the floor
+  settings = None
+  for cand in file_path.resolve().parents:
+    candidate = cand / _SETTINGS_REL
+    if candidate.is_file():
+      try:
+        settings = json.loads(candidate.read_text())
+      except (OSError, json.JSONDecodeError):
+        settings = None
+      break
+  # guard: no settings file, or an unreadable one — English is the shipped floor
+  if not isinstance(settings, dict):
+    return _LANG_EN
+
+  # the repo-wide key is the only one consulted — review has no language of its own
+  value = settings.get(_LANGUAGE_KEY)
+  # guard: an absent or empty key leaves the floor in place
+  if not isinstance(value, str) or not value:
+    return _LANG_EN
+  return value
+
+
+def repaint_banner(text: str, *, job_in_flight: bool = False, lang: str = _LANG_EN) -> str:
   """
   Recompute and repaint the top banner from the document's current frontmatter state.
 
@@ -456,6 +507,8 @@ def repaint_banner(text: str, *, job_in_flight: bool = False) -> str:
     job_in_flight: Whether an expert job is currently out on this document, from the caller's
       own read of the runtime marker sidecar (`job_markers.read`). Defaults to `False`, which
       is what a caller that has just seated a document's frontmatter itself knows.
+    lang: Resolved language code for the banner's fixed strings; a language with no table of
+      its own paints the shipped English wording.
 
   Returns:
     `text` with its banner replaced (or inserted, if absent) to match the current frontmatter.
@@ -505,6 +558,7 @@ def repaint_banner(text: str, *, job_in_flight: bool = False) -> str:
       approved = approved,
       approve_with_concerns = _is_flag_true(meta, ReviewKey.APPROVED_WITH_CONCERNS),
       waiting_context = waiting_context,
+      lang = lang,
   )
   return text[: len(text) - len(body)] + new_body
 

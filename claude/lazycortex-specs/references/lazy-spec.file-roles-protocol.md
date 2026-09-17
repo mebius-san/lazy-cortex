@@ -89,9 +89,9 @@ A unit note (`<repo-root>/upstream/<repo-key>/<mount>/<unit-path>/<unit-slug>.md
 
 ### Attachments
 
-An **attachment** is any file in an asset folder that is neither one of the canonical authored docs nor the status folder-note — a mockup, a diagram, a stylesheet, a data file, an additional prose chapter. It is created by the expert writing the document it belongs to, directly in the worktree, and it rides on that job's own commit. Like `request` and `upstream-unit` above, it lives outside the closed sixteen `spec_role` values and carries no `spec_role` of its own.
+An **attachment** is any file in an asset folder that is neither one of the canonical authored docs nor the status folder-note — a mockup, a diagram, a stylesheet, a data file, an additional prose chapter. It is returned by the expert writing the document it belongs to, through that job's own `result/`, and put in place and committed by the collector — the same channel the document itself takes. Like `request` and `upstream-unit` above, it lives outside the closed sixteen `spec_role` values and carries no `spec_role` of its own.
 
-**Placement.** Flat in the asset folder (`<spec_path>/<category>/<slug>/`), beside the documents — see [layout](./lazy-spec.layout-protocol.md) Part 1.
+**Placement.** Flat in the asset folder (`<spec_path>/<category>/<slug>/`), beside the documents — see [layout](./lazy-spec.layout-protocol.md) Part 1. The expert names only the basename; where the file lands is the collector's decision, taken from where the owner document lands.
 
 **Naming.** Free. Nothing keys off an attachment's basename.
 

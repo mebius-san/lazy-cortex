@@ -2,7 +2,7 @@
 name: lazy-wiki.query
 description: "Use when a question needs material the wiki curates — 'why is it built this way', 'where is X described', 'what relates to Y', or any request whose answer lives in files a wiki scope covers. Run it BEFORE grepping or opening files in a covered scope, and whenever the user asks about a topic rather than a specific file. A research skill: given a question, it hands back a bounded matched slice of the wiki graph, never the whole topic index. With the `Agent` tool available it dispatches per-scope seekers plus one gatherer so the topic index and traversed node bodies never enter the calling context; without `Agent` (a one-shot expert job or subagent) it runs the same lookup agentless, reading the scope's topics.md directly in its own context."
 research: true
-allowed-tools: Read, Grep, Agent, Bash(test -f *), Bash(date -u *), Bash(git rev-parse *), Bash(mkdir -p *), Write
+allowed-tools: Read, Grep, Agent, Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(test -f *), Bash(date -u *), Bash(git rev-parse *), Bash(mkdir -p *), Write
 dirty-tree-waiver: "writes only its run log under .logs/ (untracked) — never a tracked file"
 ---
 # lazy-wiki.query
@@ -37,6 +37,8 @@ This skill has 5 ordered steps, run in either mode. The executing agent MUST NOT
 If the file is absent or `wiki.scopes` is empty, abort: *"No wiki scopes configured — run `/lazy-wiki.install` and `/lazy-wiki.configure` first."*
 
 Resolve the repo root via `Bash(git rev-parse --show-toplevel)`. For each scope, the index's absolute path is `<repo-root>/<topics_index>`.
+
+Resolve the answer's language once, here: `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" resolve-language --repo <repo-root>)`. Carry the returned code into every seeker and gatherer dispatch prompt as `language=<code>` — a dispatched subagent cannot read the settings for itself — and write your own Phase 4 prose in it.
 
 Outcome: `loaded` (or `no-scopes`).
 
@@ -92,7 +94,7 @@ Outcome: `gathered` | `skipped-no-entry-points`.
 
 Present to the user:
 
-1. The synthesised `## answer` and `## sources` verbatim — from the gatherer in dispatcher mode, from your own Phase 3 walk in agentless mode — or, when there were no entry points, an explicit *"No wiki material matched this question."*
+1. The synthesised `## answer` and `## sources` verbatim — from the gatherer in dispatcher mode, from your own Phase 3 walk in agentless mode — or, when there were no entry points, the no-results message. Do not write that message yourself — ask for it. `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" text query-no-results --lang <code from Phase 1>)` prints it, and a language with no text of its own is answered in English.
 2. A short **Entry points** list showing the seed the answer worked from (path + gloss per scope), plus any `dropped:` lines from Phase 2 — so the seed is visible and debuggable.
 
 Dispatcher mode: do not re-read node bodies or the index into this context — relay the subagents' results. Agentless mode: no such caller to relay to — this context already holds what it read.

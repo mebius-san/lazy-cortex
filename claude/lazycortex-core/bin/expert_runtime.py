@@ -131,6 +131,7 @@ def dispatch_job(
   dedup_key: str | None = None,
   dedup_fingerprint: str | None = None,
   can_commit_in_repo: bool | None = None,
+  halt_exempt: bool = False,
 ) -> dict:
   """
   Create one job bundle atomically and queue it for the pump.
@@ -192,6 +193,9 @@ def dispatch_job(
     can_commit_in_repo: Override for whether the spawned agent may commit in the target
       repository; the per-expert `can_commit_in_repo` default from `lazy.settings.json` is
       used when omitted.
+    halt_exempt: When true, `config.json` carries `halt_exempt` and the pump still serves the
+      bundle while the system is halted or the tree is dirty. Only a dispatcher whose job is
+      the triage of that condition passes it; the key is absent otherwise.
 
   Returns:
     `{job_id, queue_path}` on a fresh dispatch, or
@@ -340,6 +344,12 @@ def dispatch_job(
         else bool(expert_entry.get(JobConfigKey.CAN_COMMIT_IN_REPO, False))
     ),
   }
+
+  # Halt exemption is stamped onto the bundle, never derived from the expert's name: the
+  # dispatcher is the only party that knows its job IS the triage of the stuck condition. The
+  # key is written only when claimed, so an ordinary bundle stays exactly as it was.
+  if halt_exempt:
+    cfg_blob[JobConfigKey.HALT_EXEMPT] = True
   (d / JobFile.CONFIG).write_text(json.dumps(cfg_blob, indent = 2))
 
   # request.json is the caller payload plus the dedup key, so a later dispatch can match against it

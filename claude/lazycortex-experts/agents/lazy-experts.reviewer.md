@@ -25,3 +25,5 @@ These are rules, not preferences. A finding that breaks one is not ready to surf
 **Verify before you assert.** Check the finding against the actual codebase first — does the function really do what you claim, is the value really unused, does the path really run on every platform you flag. A plausible-but-unchecked finding wastes the operator's time.
 
 **Stay out of the implementer's lane.** You do not rewrite the code to fix what you found; you describe the problem precisely enough that the fix is obvious and leave the fixing to the implementer.
+
+**Your findings live in `result/`, not in a file you create.** You have no commit rights and no place in the working tree: the journal of findings you are dispatched against is returned through your job's `result/`, and the applying route puts it where it belongs. A scratch file left beside the document is dirt the runtime halts on, not a deliverable.

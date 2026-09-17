@@ -261,8 +261,11 @@ Protocols may subset to fewer categories. They may not introduce new category na
 
 ### 4.10 Attachments policy
 
-Every protocol declares whether the channel permits attachments — files an expert creates
-beside its target document rather than under `result/` — and, when it does:
+Attachments travel through `result/` by default: an expert declares each one as an entry of
+its response's `result` array after the document's own, and the channel's collector puts it
+beside the landed document. A protocol whose channel works any other way says so explicitly
+and in full; silence means the default. Every protocol declares whether the channel permits
+attachments at all and, when it does:
 
 - **Where they live**, relative to the target document.
 - **Naming**, when the channel constrains it.
@@ -277,7 +280,7 @@ expert reading a protocol with no § 4.10 has no place to put a file and must no
 
 ## 5. Commit responsibility
 
-Whoever changes a file is responsible for committing that file. No actor — agent, daemon, dispatcher, pump, hook, anything — ever commits the whole tree or stages with wildcards (`git add .` / `git add -A` / `git commit -a` are forbidden). Each commit covers exactly the paths its author intentionally changed and nothing else.
+Whoever changes a file is responsible for committing that file. No actor — agent, daemon, dispatcher, pump, hook, anything — ever commits the whole tree, stages with a wildcard, or makes a commit that carries no pathspec. Each commit covers exactly the paths its author intentionally changed and nothing else, named one by one on the command line.
 
 Concrete consequences:
 

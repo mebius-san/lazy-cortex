@@ -456,11 +456,8 @@ class HistoryEvent:
     HALTED: An asset was halted with a recorded reason.
     HALTED_CALLOUT: Tail of the persistent `[!failure]` Gates callout the same halt appends.
     JOB_DONE: A launch-checkbox expert job finished.
-    JOB_DONE_SCAN: Dedup fragment of `JOB_DONE` the stuck-draft sweep greps a body for.
     JOB_CANCELLED: A launch-checkbox expert job was cancelled.
     JOB_DEAD: A coordinator job died and its marker was cleared.
-    REVIEW_OPENED: The stuck-draft backstop submitted a doc into review.
-    REVIEW_OPENED_SCAN: Dedup fragment of `REVIEW_OPENED` the stuck-draft sweep greps for.
     REQUEST_PROCESSED: An upstream request reached its processed state.
   """
 
@@ -468,11 +465,8 @@ class HistoryEvent:
   HALTED = "halted"
   HALTED_CALLOUT = "halted-callout"
   JOB_DONE = "job-done"
-  JOB_DONE_SCAN = "job-done-scan"
   JOB_CANCELLED = "job-cancelled"
   JOB_DEAD = "job-dead"
-  REVIEW_OPENED = "review-opened"
-  REVIEW_OPENED_SCAN = "review-opened-scan"
   REQUEST_PROCESSED = "request-processed"
 
 
@@ -597,9 +591,6 @@ class TickAction:
     COORDINATOR_JOB_DEAD: A `coordinator_job` bundle carried a `DEAD` marker; the
       marker was cleared with a `# History` warning, the asset was NOT halted (the
       coordinator's own wake job is not a ladder expert job).
-    STUCK_DRAFT_SUBMITTED: One or more authored sibling docs stranded at
-      `spec_stage: draft` after their `Write <doc>` job's DONE were submitted into
-      review by the backstop sweep.
   """
 
   ACTION = "action"
@@ -618,7 +609,6 @@ class TickAction:
   CASCADE_TARGET_SKIPPED = "cascade-target-skipped"
   COORDINATOR_JOB_CONSUMED = "coordinator-job-consumed"
   COORDINATOR_JOB_DEAD = "coordinator-job-dead"
-  STUCK_DRAFT_SUBMITTED = "stuck-draft-submitted"
 
 
 # ----------------------------------------------------------------------------------------

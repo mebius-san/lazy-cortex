@@ -444,12 +444,22 @@ def commit_mechanical(
     *,
     author: Mapping[str, str],
     message: str,
+    extra_paths: tuple[str, ...] = (),
 ) -> str:
   """
   Commit a dispatcher-side mechanical edit (bootstrap, banner repaint, scaffold strip).
 
   The commit also carries the icon repaint for the committed note when the obsidian
-  plugin is available — one commit, payload and paint together.
+  plugin is available — one commit, payload and paint together — plus every path named in
+  `extra_paths`: the attachments a landing put beside the document ride the document's own
+  commit rather than a second one.
+
+  Args:
+    repo: Absolute path to the repository root.
+    path: Absolute path to the document being committed.
+    author: Mapping with `name` and `email` keys for the commit author identity.
+    message: Commit subject, written verbatim.
+    extra_paths: Repo-relative paths to commit alongside `path`.
 
   Returns:
     Full SHA of the new commit.
@@ -463,8 +473,11 @@ def commit_mechanical(
   # unrecognized identity reads as an operator edit — waking the coordinator over a change
   # nobody made. Riding the same commit keeps the repaint invisible to wake detection.
 
-  # fold the note's icon repaint into this same commit so no separate icons commit follows
-  extras = tuple(repaint_inline(repo, [str(path.relative_to(repo))]))
+  # fold the note's icon repaint and the landed attachments into this same commit so no
+  # separate commit — and no operator-edit wake off a foreign identity — follows
+  doc_rel = str(path.relative_to(repo))
+  repainted = repaint_inline(repo, [doc_rel, *extra_paths])
+  extras = tuple(dict.fromkeys([*extra_paths, *repainted]))
   for extra in extras:
     # waiver: git CLI vocabulary
     _run_git(repo, "add", "--", extra)

@@ -30,6 +30,8 @@ The user provides:
 
 ## Process
 
+**Language first.** Before composing any prose into the request file, run `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" resolve-language <request relpath>)` and write the title, the body, and every section heading you author in the code it returns — the operator's own seed text is kept verbatim in whatever language they typed it. Frontmatter keys and values, the slug, and canonical headings are never translated.
+
 ### 0. Confirm intent + collect raw idea
 
 If the raw idea was not supplied with the invocation, ask via `AskUserQuestion`:

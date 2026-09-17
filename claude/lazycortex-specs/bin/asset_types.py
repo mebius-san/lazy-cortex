@@ -347,7 +347,7 @@ def type_of(note: Path) -> str:
   # the returned type.
 
   # waiver: sibling-module frontmatter parser -- the one parser every specs primitive shares
-  fm_values, _fm_end = flip_gate._parse_frontmatter(note.read_text(encoding = _K.ENCODING))
+  fm_values, _fm_end = flip_gate.parse_frontmatter(note.read_text(encoding = _K.ENCODING))
   return fm_values.get(_TYPE_KEY, "")
 
 
@@ -448,7 +448,7 @@ def backfill(repo: Path) -> dict:
     note = folder / name
     text = note.read_text(encoding = _K.ENCODING)
     # waiver: sibling-module frontmatter parser -- the one parser every specs primitive shares
-    fm_values, fm_end = flip_gate._parse_frontmatter(text)
+    fm_values, fm_end = flip_gate.parse_frontmatter(text)
     # guard: only a status folder-note carries the asset's own type
     if fm_values.get(_K.SPEC_ROLE) != _K.STATUS_ROLE:
       continue

@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Non-obvious answers on install, LLM providers, the runtime daemon and experts, routines, scaffolding, git staging, and MCP permissions.
-last_regen: 2026-09-14
+last_regen: 2026-09-17
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -32,7 +32,7 @@ source_skills:
   - lazy-expert.cancel-job
   - lazy-expert.list-jobs
   - lazy-memory.write
-source_sha: c02247a7934dc795134e714f217ab0c7082bcdd3
+source_sha: 4ce2acf18852efdc30c37eebe5c23618c5b98b26
 ---
 # FAQ
 
@@ -409,6 +409,14 @@ Both are idempotent and silent when there is nothing new to seed. If either fail
 
 ---
 
+## Why do the `runtime.doctor` and `core.autocheckup` expert entries in `lazy.settings.json[experts]` carry `can_commit_in_repo: true`?
+
+`/lazy-core.install` registers two built-in experts you never dispatch by hand — `runtime.doctor` (the agent behind the hourly `lazy-runtime.doctor` routine, itself seeded by install) and `core.autocheckup` (behind the weekly `lazy-core.autocheckup` schedule routine). Unlike every other expert entry install seeds or discovers, these two are written with `can_commit_in_repo: true` on creation, because committing is the entire point of the job: the doctor commits the reverts and system-noise cleanups it decides on, and autocheckup commits the mechanically-derivable fixes it applies. Without the flag, the expert pump appends a no-commit clause to the job and every fix either of them makes strands uncommitted in your working tree instead of landing.
+
+This field is seeded once, when the entry is first created — install never re-asserts it on a later re-run. If you deliberately set either entry's `can_commit_in_repo` to `false` (to review their proposed changes by hand instead of letting them commit automatically), that choice is yours and stays untouched by every future `/lazy-core.install` run.
+
+---
+
 ## Does `/lazy-core.install` connect my experts to alternative LLM providers automatically?
 
 Only if you ask it to, and only once. If no `providers` block exists yet (tracked or in the gitignored local overlay), install asks a single yes/no question: connect one or more non-Anthropic endpoints for expert jobs now, or skip and add them later. Answering "No" writes nothing — every expert job keeps running against the Anthropic default with no provider entry at all, since providers are opt-in. Answering "Yes" walks you through naming provider(s) and dispatches `/lazy-core.providers add <name>` for each, which is the same wizard you'd run by hand. If a `providers` block already exists in either the tracked file or the local overlay, install skips the question silently and leaves your existing entries alone.
@@ -430,6 +438,16 @@ Before writing an `add` or `update`, it runs the same structural validation the 
 `/lazy-core.doctor` re-runs the same validation `/lazy-core.providers` applies at write time against every entry currently on record, so a provider that passed the wizard once but was later hand-edited (or whose upstream requirements changed) doesn't go unnoticed. `provider_unknown` (FAIL) means an expert's `provider` field names something not in the merged `providers` block — register the provider or fix the expert's entry. `provider_endpoint_incomplete` (FAIL) means `base_url` or `token_env` is missing or blank. `provider_tier_gap` (FAIL) means the `models` map is missing one of the four required tiers. `provider_claude_literal` (FAIL) means a tier value is a `claude-*` model name, which can't pass through a foreign endpoint. `provider_reserved_route` (FAIL) is specific to the `openai` provider — its tiers must be prefixed `rt-openai/` rather than routed as a bare `openai/*` interactive key. `provider_token_missing` (WARN, non-blocking) means the named credential variable doesn't currently resolve in the environment or `~/.claude/.env` — the entry is still structurally valid, but a job dispatched against it will fail at spawn time until the variable is set. Fix any of these by re-running `/lazy-core.providers update <name>`, which re-validates before writing.
 
 A provider-bound expert job never receives your own Anthropic credentials — every job dispatched against a provider strips `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY` from its spawn environment before the provider's own token is set, so neither of your Anthropic credentials can travel to a foreign endpoint.
+
+---
+
+## Why does `/lazy-core.doctor` warn that one of my language settings "is not an ISO 639-1 code"?
+
+`lazy.settings.json` carries several language keys — the root `language`, `spec.language`, `wiki.language`, `wiki.domains.language`, and each `products[<key>].language` — and every one of them is meant to hold a plain two- or three-letter code (`ru`, `en`), never a free-form name. The code that reads these values compares them directly against codes; a value like `"русский"` or `"russian"` doesn't match anything, and the language setting silently stops taking effect anywhere downstream, with no error to tell you.
+
+`/lazy-core.doctor` scans every one of those keys in the project's `lazy.settings.json` and flags `settings.language-not-a-code` (WARN) on any value that isn't a code. The finding names the offending key and its current value, plus a `detail:` line saying what code that value maps to under a small built-in compatibility table (`русский` / `russian` → `ru`, `english` → `en`) — or `no known mapping` if it doesn't match anything in that table. Only a value with a known mapping is offered as a fix during the doctor's per-finding walkthrough; an unmapped value is reported and left for you to correct by hand, never guessed at. An absent key is never a finding — every place that reads these keys falls back to a default.
+
+A separate `settings.language-review-key` (INFO) fires if `review.language` is still present anywhere in your settings — that key is inert now, since review derives its working language from the document itself rather than a setting. The fix is simply to remove it.
 
 ---
 

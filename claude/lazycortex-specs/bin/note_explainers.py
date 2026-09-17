@@ -90,8 +90,9 @@ ASSET_EXPLAINERS: dict[tuple[str, str], str] = {
 # narrative line templates the bin primitives land on notes — `# History` tails plus the halt
 # callout's tail — keyed by event and language; the `- <date> — <author> · ` / `> [!failure] `
 # wrappers stay at the call sites (dates, bot identities, and callout marks are
-# language-neutral). The `*-scan` keys are the dedup fragments `gate_tick`'s sweeps grep a
-# body for, bound to their written counterparts by `history_fragments`'s Contract.
+# language-neutral). A key whose rendering is a substring of another key's — `HALTED_CALLOUT`
+# under `HALTED` — is a fragment key: `history_fragments` renders it in every language so a
+# caller can recognize the event in a body regardless of how the note was authored.
 # waiver: the RU lines carry `# noqa: RUF001` — Cyrillic in Russian UI strings is the content,
 # not a lookalike-character typo; the checker cannot distinguish deliberate Russian text
 HISTORY_LINES: dict[tuple[str, str], str] = {
@@ -111,10 +112,6 @@ HISTORY_LINES: dict[tuple[str, str], str] = {
     (HistoryEvent.JOB_DONE, LANG_RU):
         # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
         "job {job_id} ({label}) завершён",  # noqa: RUF001
-    (HistoryEvent.JOB_DONE_SCAN, LANG_EN): "({label}) done",
-    (HistoryEvent.JOB_DONE_SCAN, LANG_RU):
-        # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-        "({label}) завершён",  # noqa: RUF001
     (HistoryEvent.JOB_CANCELLED, LANG_EN): "job {job_id} ({label}) cancelled",
     (HistoryEvent.JOB_CANCELLED, LANG_RU):
         # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
@@ -129,14 +126,6 @@ HISTORY_LINES: dict[tuple[str, str], str] = {
         "ассет НЕ остановлен; незавершённая правка оператора, если была, доживёт до следующего "  # noqa: RUF001
         # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
         "настоящего пробуждения",  # noqa: RUF001
-    (HistoryEvent.REVIEW_OPENED, LANG_EN): "opened review on {doc} (stuck-draft backstop)",
-    (HistoryEvent.REVIEW_OPENED, LANG_RU):
-        # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-        "открыто ревью на {doc} (страховка stuck-draft)",  # noqa: RUF001
-    (HistoryEvent.REVIEW_OPENED_SCAN, LANG_EN): "opened review on {doc}",
-    (HistoryEvent.REVIEW_OPENED_SCAN, LANG_RU):
-        # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-        "открыто ревью на {doc}",  # noqa: RUF001
     (HistoryEvent.REQUEST_PROCESSED, LANG_EN): "request [[{wikilink}]] accepted → processed",
     (HistoryEvent.REQUEST_PROCESSED, LANG_RU):
         # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
@@ -335,16 +324,15 @@ def history_fragments(key: str, **fields: str) -> list[str]:
   """
   Render one event key's dedup fragment in every language the table ships.
 
-  A sweep greps a note body with every returned variant so an event recorded under a
+  A caller greps a note body with every returned variant so an event recorded under a
   previous authoring language still counts as recorded.
 
   Guarantees:
-    - Every `*-scan` key's template stays a substring of its written counterpart's rendering in
-      every language the table ships, so scanning with the returned fragments recognizes an
-      event recorded under any authoring language.
+    - Every event key ships a template in every language the table carries, so scanning with
+      the returned fragments recognizes an event recorded under any authoring language.
 
   Args:
-    key: The event key in `HISTORY_LINES` (typically a `*-scan` key).
+    key: The event key in `HISTORY_LINES` (typically a fragment key).
     fields: Named values substituted into the template's placeholders.
 
   Returns:
@@ -361,10 +349,10 @@ def history_fragments(key: str, **fields: str) -> list[str]:
   # not only whichever language is currently in force for the note.
 
   # Contract:
-  # Every `*-scan` key's template MUST stay a substring of its written counterpart's rendering
-  # in every language the table ships, so a body scanned with the returned fragments recognizes
-  # an event recorded under any authoring language; violating this silently makes recorded
-  # events unrecognizable to the dedup sweeps.
+  # Every event key MUST carry a template in every language the table ships, so a body scanned
+  # with the returned fragments recognizes an event recorded under any authoring language;
+  # a key missing one language silently makes events recorded under it unrecognizable to the
+  # callers that scan for them.
 
   # render the key's template in each language carrying it, in table order
   return [template.format(**fields)

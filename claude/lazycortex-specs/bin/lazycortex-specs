@@ -35,6 +35,8 @@ _SUB_RESOLVE_LANGUAGE = "resolve-language"
 _SUB_FLIP_GATE = "flip-gate"
 _SUB_GATE_TICK = "gate-tick"
 # waiver: subcommand name string -- dispatch key for the CLI router
+_SUB_LAND_RESULT = "land-result"
+# waiver: subcommand name string -- dispatch key for the CLI router
 _SUB_COLLECT_TICK = "collect-tick"
 _SUB_SCAFFOLD_ASSET = "scaffold-asset"
 _SUB_SEED_DOC = "seed-doc"
@@ -62,6 +64,8 @@ _USAGE = (
     "  resolve-language <relpath>     resolve a doc's effective language\n"
     "  flip-gate <asset_dir> <gate> [--off] [--auto] [--reason TEXT]   move one gate\n"
     "  gate-tick <asset_note> [--today YYYY-MM-DD]   clear finished job markers, run structural note-check\n"
+    "  land-result <job_dir> <asset_dir> [--target <doc>]\n"
+    "                                  put one finished job's result/ in place and commit it\n"
     "  collect-tick [--repo DIR]      sweep the job-marker sidecar, gate-tick every recorded note\n"
     "  scaffold-asset <product> <type> <slug> [--doc <name>:<type> ...] [--path <dir>]\n"
     "                                  deterministic scaffold of a new asset folder\n"
@@ -86,9 +90,9 @@ _USAGE = (
     "  upstream-doctor --apply [--cwd DIR]\n"
     "                                  release every unit frozen on a request that no longer\n"
     "                                  resolves, back onto drifted/new (its only repair)\n"
-    "  decide add <decisions.md> <thesis> --why TEXT --rejected TEXT [--origin TEXT] [--today D]\n"
+    "  decide add <decisions.md> <thesis> <justification> [--origin TEXT] [--today D]\n"
     "                                  write a fresh decisions-registry record (lazily creates the file)\n"
-    "  decide supersede <decisions.md> <old-id> <thesis> --why TEXT --rejected TEXT [--origin TEXT]\n"
+    "  decide supersede <decisions.md> <old-id> <thesis> <justification> [--origin TEXT]\n"
     "                                  write a fresh record and mark an older one superseded-by it\n"
     "  decide obsolete <decisions.md> <id> <reason>   mark an existing record obsolete\n"
     "  decide promote <living-doc> [--today D]   transfer [!decision] blocks into the sibling registry\n"
@@ -144,6 +148,10 @@ def main(argv: list[str]) -> int:
     # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
     import gate_tick  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
     return gate_tick.main(rest)
+  if sub == _SUB_LAND_RESULT:
+    # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
+    import land_result  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
+    return land_result.main(rest)
   if sub == _SUB_COLLECT_TICK:
     # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
     import collect_tick  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy

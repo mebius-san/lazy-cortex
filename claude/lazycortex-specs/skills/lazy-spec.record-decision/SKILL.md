@@ -47,19 +47,21 @@ AskUserQuestion: header "Operation", question "Which decisions-registry operatio
 
 ## Step 3 — Collect the record fields
 
-- **`add`** — thesis (one line), `--why`, `--rejected`, optional `--origin` (a qualified wikilink to a source doc; default `—` for a manual entry with none).
-- **`supersede`** — the old id (`D-NNN`, named directly by the operator), then the same thesis / `--why` / `--rejected` / optional `--origin` as `add`.
+**Language first.** Before collecting any free text, run `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" resolve-language <decisions.md relpath>)` and write the thesis and the justification text in the code it returns — the operator's own words are kept verbatim in whatever language they typed them. Record ids, origins, and wikilink targets are never translated.
+
+- **`add`** — thesis (one line), justification (plain prose stating why the decision holds; no `Why` / `Rejected` labels, no list of alternatives), optional `--origin` (a qualified wikilink to a source doc; default `—` for a manual entry with none).
+- **`supersede`** — the old id (`D-NNN`, named directly by the operator), then the same thesis / justification / optional `--origin` as `add`.
 - **`obsolete`** — the record id (`D-NNN`) and a reason string.
 - **`promote`** — nothing further; the doc path from Step 2 is the only input.
 
-Before collecting an `add` or `supersede` thesis, restate the three-test weight bar from `spec.decisions.md` in one line and ask the operator to confirm a genuine fork exists — a foregone conclusion is not worth a record. Context first: where (`/lazy-spec.record-decision · Step 3 — Collect the record fields`, target `<decisions.md>`), found (the thesis as stated so far), why asking (only the operator knows whether a real alternative existed and reversal is expensive), answers (`yes, a real fork` — continue collecting `--why` / `--rejected`; `no` — stop, nothing written); header "Weight test", question "Is `<thesis>` a genuine fork — a real alternative existed, reversal is expensive, the why is unrecoverable from the artifact?".
+Before collecting an `add` or `supersede` thesis, restate the three-test weight bar from `spec.decisions.md` in one line and ask the operator to confirm a genuine fork exists — a foregone conclusion is not worth a record. Context first: where (`/lazy-spec.record-decision · Step 3 — Collect the record fields`, target `<decisions.md>`), found (the thesis as stated so far), why asking (only the operator knows whether a real alternative existed and reversal is expensive), answers (`yes, a real fork` — continue collecting the justification; `no` — stop, nothing written); header "Weight test", question "Is `<thesis>` a genuine fork — a real alternative existed, reversal is expensive, the why is unrecoverable from the artifact?".
 
 ## Step 4 — Run the primitive
 
 Subprocess the matching call, quoting every free-text argument:
 
-- `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" decide add <decisions.md> "<thesis>" --why "<why>" --rejected "<rejected>" [--origin "<origin>"])`
-- `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" decide supersede <decisions.md> <old-id> "<thesis>" --why "<why>" --rejected "<rejected>" [--origin "<origin>"])`
+- `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" decide add <decisions.md> "<thesis>" "<justification>" [--origin "<origin>"])`
+- `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" decide supersede <decisions.md> <old-id> "<thesis>" "<justification>" [--origin "<origin>"])`
 - `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" decide obsolete <decisions.md> <id> "<reason>")`
 - `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" decide promote <living-doc>)`
 

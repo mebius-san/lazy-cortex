@@ -161,7 +161,7 @@ def backfill(repo: Path) -> dict:
         continue
       path = Path(dirpath) / name
       text = path.read_text(encoding = _K.ENCODING)
-      fm_values, fm_end = flip_gate._parse_frontmatter(text)
+      fm_values, fm_end = flip_gate.parse_frontmatter(text)
       role = fm_values.get(_K.SPEC_ROLE, "")
       # guard: not a role-bearing document this primitive pins (includes `request` and group-notes)
       if role not in _PIN_ROLES:

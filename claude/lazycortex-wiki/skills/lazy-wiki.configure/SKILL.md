@@ -1,6 +1,6 @@
 ---
 name: lazy-wiki.configure
-description: "Use when the user wants to add a wiki scope, change which paths the wiki covers, edit an existing scope's globs, axes, exclusions, or topics-index path — or set up domain-spec generation (`/lazy-wiki.configure domains`: code globs, dictionary, output tree, language) — or mirror a foreign repo's markdown into a scope (`/lazy-wiki.configure mirror`: source url/branch, source globs, excludes, mirror directory) — or set up a terms dictionary (`/lazy-wiki.configure terms`: which documents it serves, where the dictionary file lives, which documents are term sources) — or configure the project-structure map (`/lazy-wiki.configure structure`: depth profiles, exclusions, the three scan routines) — or edit the vault-wide wiki keys themselves (`/lazy-wiki.configure vault`: the `tag_axes` vocabulary every scope narrows from, the `exclude` globs every scope inherits). Wizard over .claude/lazy.settings.json[wiki.scopes] / [wiki.tag_axes] / [wiki.exclude] / [wiki.domains] / [terms.scopes] / [structure], one question per turn via AskUserQuestion; also refreshes the Coverage section of the installed navigation rule."
+description: "Use when the user wants to add a wiki scope, change which paths the wiki covers, edit an existing scope's globs, axes, exclusions, or topics-index path — or set up domain-spec generation (`/lazy-wiki.configure domains`: code globs, dictionary, output tree, language) — or mirror a foreign repo's markdown into a scope (`/lazy-wiki.configure mirror`: source url/branch, source globs, excludes, mirror directory) — or set up a terms dictionary (`/lazy-wiki.configure terms`: which documents it serves, where the dictionary file lives, which documents are term sources) — or configure the project-structure map (`/lazy-wiki.configure structure`: depth profiles, exclusions, the three scan routines) — or edit the vault-wide wiki keys themselves (`/lazy-wiki.configure vault`: the `tag_axes` vocabulary every scope narrows from, the `exclude` globs every scope inherits, the `language` wiki writers write in). Wizard over .claude/lazy.settings.json[wiki.scopes] / [wiki.tag_axes] / [wiki.exclude] / [wiki.domains] / [terms.scopes] / [structure], one question per turn via AskUserQuestion; also refreshes the Coverage section of the installed navigation rule."
 allowed-tools: Read, Edit, Write, AskUserQuestion, Skill, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Bash(git ls-files *), Bash(git commit *), Bash(cp *), Bash(test *), Bash(rm *), Agent
 ---
 # lazy-wiki.configure
@@ -13,7 +13,7 @@ Prerequisite: `/lazy-wiki.install` has run (the `wiki` settings section exists).
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has six mutually exclusive branches; exactly one runs per invocation. The **scope branch** (default) has 9 ordered steps plus Report; the **domains branch** (argument `domains`, or the operator asks to configure domain specs) has 5 ordered steps plus Report; the **mirror branch** (argument `mirror`, or the operator asks to mirror a foreign repo into the wiki) has 5 ordered steps plus Report; the **terms branch** (argument `terms`, or the operator asks to set up a terms dictionary) has 7 ordered steps plus Report; the **structure branch** (argument `structure`, or the operator asks to configure the structure map) has 6 ordered steps plus Report; the **vault branch** (argument `vault`, or the operator asks to edit the axis vocabulary or the repository-wide exclusions) has 4 ordered steps plus Report. The executing agent MUST NOT skip, merge, reorder, or silently omit any step of the chosen branch. To make dropped steps structurally impossible:
+This skill has six mutually exclusive branches; exactly one runs per invocation. The **scope branch** (default) has 9 ordered steps plus Report; the **domains branch** (argument `domains`, or the operator asks to configure domain specs) has 5 ordered steps plus Report; the **mirror branch** (argument `mirror`, or the operator asks to mirror a foreign repo into the wiki) has 5 ordered steps plus Report; the **terms branch** (argument `terms`, or the operator asks to set up a terms dictionary) has 7 ordered steps plus Report; the **structure branch** (argument `structure`, or the operator asks to configure the structure map) has 6 ordered steps plus Report; the **vault branch** (argument `vault`, or the operator asks to edit the axis vocabulary, the repository-wide exclusions, or the wiki's own language) has 5 ordered steps plus Report. The executing agent MUST NOT skip, merge, reorder, or silently omit any step of the chosen branch. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, decide the branch from the invocation, then write out the step ledger — one line per step of that branch, each marked `pending` — no merging, no abbreviation, no renaming, and no entries from another branch. The scope branch's canonical list (use these titles verbatim; each other branch's list is in its own section below):
    - `Phase 1 — Verify install + load settings`
@@ -224,14 +224,16 @@ AskUserQuestion (output, edit mode only): header "Domain output dir", question "
 
 **Overlap warning:** check every `wiki.scopes` entry's `paths` globs against the chosen output directory; when a glob covers files under it, warn — *"Scope `<id>` glob `<glob>` reaches `<output>`, which is excluded from every scope regardless — the glob claims nothing there. Narrow it so the scope says what it actually covers."* Warn only. The generated tree is derived from this very setting and excluded structurally, so the warning is about a misleading glob, never about a contested file: handing the tree to the wiki is not something a scope can do.
 
-Then the language: sample a few of the vault's authored spec/doc files to judge the language they are written in, and propose it as the default.
+Then the language of the generated docs, as an ISO 639-1 code. Sample a few of the vault's authored spec/doc files to judge the language they are written in and propose its code as the default.
 
 Context (print before asking):
 - Where: Domains 4 — Collect output + language; target `wiki.domains.language`
-- Found: `<n>` authored docs sampled, written in `<detected>`; edit mode — current: `<current language>`
+- Found: `<n>` authored docs sampled, written in `<detected>` (code `<detected-code>`); edit mode — current: `<current value>`
 - Why asking: the language the generated docs are written in is an editorial choice the sample only suggests
-- Answers: a language — written to `wiki.domains.language`, every generated group doc is written in it; Enter — `<detected>` (new mode) or the current value (edit mode); re-asked only on the next edit run
-AskUserQuestion (language): header "Domain docs language", question — new mode: "Language for the generated domain docs under `<output>` (Enter for `<detected>`, the language this vault's specs are written in)?"; edit mode: "Language for the generated domain docs (current: `<current language>`; Enter to keep)?"; free text.
+- Answers: an ISO 639-1 code — written to `wiki.domains.language`, every generated group doc is written in it and the group index takes its caption from it; Enter — `<detected-code>` (new mode) or the current value (edit mode); re-asked only on the next edit run
+AskUserQuestion (language): header "Domain docs language", question — new mode: "ISO 639-1 code for the generated domain docs under `<output>` (e.g. `ru`, `en`; Enter for `<detected-code>`, the code of the language this vault's specs are written in)?"; edit mode: "ISO 639-1 code for the generated domain docs (current: `<current value>`; Enter to keep)?"; free text.
+
+**Normalise before writing.** Whatever is typed is lowercased and trimmed; a free-form language name (`Russian`, `русский`, `English`) is converted to its code before the write, and the operator is told which code was recorded. A value already on record that is still a free-form name is converted the same way on an edit run — that is the one place the wizard rewrites a value it did not just collect.
 
 Outcome: `collected` (+ `overlap-warned` when the warning fired).
 
@@ -595,12 +597,13 @@ Outcome: `logged`.
 
 ## Vault branch — `/lazy-wiki.configure vault`
 
-Configures the two repository-wide keys of `lazy.settings.json[wiki]` — `tag_axes`, the closed axis vocabulary every scope narrows from, and `exclude`, the glob list unioned into every scope's `exclude_paths`. No other branch reaches them: the scope branch only narrows the vocabulary and only adds exclusions on top of this list. Canonical task list for this branch (create these instead of the scope phases, titles verbatim):
+Configures the three repository-wide keys of `lazy.settings.json[wiki]` — `tag_axes`, the closed axis vocabulary every scope narrows from; `exclude`, the glob list unioned into every scope's `exclude_paths`; and `language`, the optional ISO 639-1 code the wiki's writers write in. No other branch reaches them: the scope branch only narrows the vocabulary and only adds exclusions on top of this list. Canonical task list for this branch (create these instead of the scope phases, titles verbatim):
 
 - `Vault 1 — Verify install + load section`
 - `Vault 2 — Collect tag_axes`
 - `Vault 3 — Collect exclude`
-- `Vault 4 — Write back + log`
+- `Vault 4 — Collect language`
+- `Vault 5 — Write back + log`
 - `Report`
 
 ### Vault 1 — Verify install + load section
@@ -644,9 +647,35 @@ Split on commas, trim, discard empties. Keep `docs/structure.md` — the project
 
 Outcome: `collected`.
 
-### Vault 4 — Write back + log
+### Vault 4 — Collect language
 
-Set `lazy.settings.json[wiki].tag_axes` and `lazy.settings.json[wiki].exclude` to the collected arrays, preserving `scopes`, `domains`, `_version`, and every other key; write with `Write`.
+The language wiki writers write in is GENUINE project config — it cannot be derived — so this step keeps its question, but read-first: a language already on record is never re-asked.
+
+**Read first.** Inspect `wiki.language` in the section loaded in Vault 1. If it already carries a non-empty value, state outcome `language-on-record:<code>` and skip the question entirely. Only when the key is absent or empty do you ask.
+
+The effective default is the repository-wide top-level `language`, and `en` below that — leaving `wiki.language` unset is the normal case, not a gap.
+
+Context (print before asking):
+- Where: /lazy-wiki.configure vault · Vault 4 — Collect language; target `lazy.settings.json[wiki].language`
+- Found: `wiki.language` `<absent | empty>`; repo-wide `language`: `<value or "absent">`
+- Why asking: whether the wiki diverges from the repo-wide language is genuine project config that cannot be derived
+- Answers: `inherit` — nothing written, outcome `language-inherited`; `set-own` — the follow-up asks the code, written as `wiki.language` in Vault 5, outcome `language-set:<code>`; a value on record is never re-asked (`language-on-record:<code>`)
+AskUserQuestion: header "Wiki language", question "Should the wiki write in a different language from the rest of this repo (repo-wide: `<value or "unset, floor en">`)? Pick `set-own` only when wiki notes diverge from everything else.", options `inherit` — leave `wiki.language` unset and follow the repo-wide key / `set-own` — record a language for the wiki alone.
+
+On `set-own`, ask the code:
+
+Context (print before asking):
+- Where: Vault 4 — language code; target `wiki.language`
+- Found: nothing on record (the operator just chose `set-own`)
+- Why asking: the code itself is the config
+- Answers: any ISO 639-1 code via "other" — written as `wiki.language` in Vault 5; never re-asked once on record
+AskUserQuestion: header "Language code", question "ISO 639-1 code the wiki writes in (e.g. `ru`, `de`)?", free text via "other".
+
+Outcome: `language-on-record:<code>`, `language-inherited`, or `language-set:<code>`.
+
+### Vault 5 — Write back + log
+
+Set `lazy.settings.json[wiki].tag_axes` and `lazy.settings.json[wiki].exclude` to the collected arrays, and `lazy.settings.json[wiki].language` to the collected code when Vault 4 collected one (a step that resolved `inherit` writes no key at all), preserving `scopes`, `domains`, `_version`, and every other key; write with `Write`.
 
 Log to `./.logs/claude/lazy-wiki.configure/<UTC-timestamp>.md` per the Phase 8 recipe (`input: "vault"`).
 
@@ -654,7 +683,7 @@ Outcome: `written` and `logged`.
 
 ## Report
 
-One line per task in the canonical list of the branch that ran, with its outcome word. Scope-branch summary line: `scope <id> <created|updated>: paths=<count>, tag_axes=[<axes>], topics_index=<path>, review-skip=<on|off>, folder_note=<value held in the filter>`. Domains-branch summary line: `wiki.domains <created|updated>: code=<count>, dictionary=<path>, output=<path>, language=<language>`. Mirror-branch summary line: `scope <id> mirror <created|updated>: url=<url>, source_paths=<count>, exclude=<count>, mirror_path=<path>`. Terms-branch summary line: `terms scope <id> <created|updated|removed>: paths=<count>, file=<path>, source_exclude=<count>, routine=<registered|re-registered|unregistered>`. Structure-branch summary line: `structure <created|updated>: classes=<count>, exclude=<count>, routines=<registered|already-present>`. Vault-branch summary line: `wiki vault updated: tag_axes=[<axes>], exclude=<count>`.
+One line per task in the canonical list of the branch that ran, with its outcome word. Scope-branch summary line: `scope <id> <created|updated>: paths=<count>, tag_axes=[<axes>], topics_index=<path>, review-skip=<on|off>, folder_note=<value held in the filter>`. Domains-branch summary line: `wiki.domains <created|updated>: code=<count>, dictionary=<path>, output=<path>, language=<code>`. Mirror-branch summary line: `scope <id> mirror <created|updated>: url=<url>, source_paths=<count>, exclude=<count>, mirror_path=<path>`. Terms-branch summary line: `terms scope <id> <created|updated|removed>: paths=<count>, file=<path>, source_exclude=<count>, routine=<registered|re-registered|unregistered>`. Structure-branch summary line: `structure <created|updated>: classes=<count>, exclude=<count>, routines=<registered|already-present>`. Vault-branch summary line: `wiki vault updated: tag_axes=[<axes>], exclude=<count>, language=<code | inherited>`.
 
 ## Failure modes
 

@@ -246,21 +246,23 @@ def _resolve_memory_bot_identity(repo: Path, expert: str) -> tuple[str, str]:
   return (f"{_MEMORY_PREFIX}{bare_name}", f"{_MEMORY_PREFIX}{bare_email_local}@{domain}")
 
 
-def _staged_diff_empty(repo: Path) -> bool:
+def _is_staged_diff_empty(repo: Path, paths: list[str]) -> bool:
   """
-  Return True when `git diff --cached --quiet` reports nothing staged.
+  Return True when the staged diff limited to `paths` reports nothing.
 
-  Used to skip the commit when the write was a true no-op (overwrite of
-  a byte-identical note, idempotent re-run, etc.).
+  Used to skip the commit when the write was a true no-op (overwrite of a byte-identical
+  note, idempotent re-run, etc.). The probe is limited to the write's own paths: the index
+  is shared, so content another writer parked there says nothing about this write.
 
   Args:
     repo: Absolute path to the repository worktree root.
+    paths: Repo-relative paths this write staged.
 
   Returns:
-    True when the index has no staged changes; False when at least one path is staged.
+    True when none of `paths` is staged; False when at least one of them is.
   """
   result = subprocess.run(
-    ["git", "diff", "--cached", "--quiet"],
+    ["git", "diff", "--cached", "--quiet", "--", *paths],
     cwd = repo, capture_output = True, check = False,
   )
   return result.returncode == 0
@@ -275,6 +277,10 @@ def _atomic_commit_memory(
   Raises `WriteError` with category `commit-failed` when `git add` or
   `git commit` exits non-zero — the staged index is left as-is so the
   operator can inspect it.
+
+  Guarantees:
+    - The commit carries exactly the write's own paths; content another writer parked in the
+      shared index stays unpublished, and a byte-identical write still makes no commit.
 
   Args:
     repo: Absolute path to the repository worktree root.
@@ -297,14 +303,17 @@ def _atomic_commit_memory(
   removed_paths = [str(p.relative_to(repo)) for p in paths if p and not p.exists()]
   if not add_paths and not removed_paths:
     return None
-  add_cmd = ["git", "add", "--", *add_paths, *removed_paths]
+  # the write's own footprint — every git verb below is limited to it, because the index is
+  # shared and whatever else sits there belongs to the operator or another routine
+  own_paths = [*add_paths, *removed_paths]
+  add_cmd = ["git", "add", "--", *own_paths]
   add = subprocess.run(add_cmd, cwd = repo, capture_output = True, check = False)
   # guard: `git add` failure aborts the commit; leave any partial staging for operator inspection
   if add.returncode != 0:
     raise WriteError(
       f"commit-failed: git add returned {add.returncode}: {add.stderr.decode('utf-8', 'replace').strip()}"
     )
-  if _staged_diff_empty(repo):
+  if _is_staged_diff_empty(repo, own_paths):
     return None
   name, email = _resolve_memory_bot_identity(repo, expert)
   commit_cmd = [
@@ -312,7 +321,7 @@ def _atomic_commit_memory(
     "-c", f"user.name={name}",
     "-c", f"user.email={email}",
     "-c", "commit.gpgsign=false",
-    "commit", "-q", "-m", f"{_MEMORY_PREFIX}{expert}: {title}",
+    "commit", "-q", "-m", f"{_MEMORY_PREFIX}{expert}: {title}", "--", *own_paths,
   ]
   commit = subprocess.run(commit_cmd, cwd = repo, capture_output = True, check = False)
   # guard: `git commit` failure leaves the index staged; surface as WriteError

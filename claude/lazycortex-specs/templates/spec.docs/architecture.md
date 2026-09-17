@@ -19,6 +19,9 @@ spec_source_docs: []
 ## Overview
 <!-- What part of the codebase this touches and why an architecture step is warranted here. -->
 
+## Terms
+<!-- "Glossary: The most important domain and technical terms that your stakeholders use when discussing the system." — arc42 §12 Glossary. One line per term the document uses, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, a term this document introduces is defined here first. -->
+
 ## Module boundaries
 <!-- "The building block view shows the static decomposition of the system into building blocks (modules, components, subsystems, classes, interfaces, packages, libraries, frameworks, layers, ...) as well as their dependencies." — arc42 §5 Building Block View -->
 

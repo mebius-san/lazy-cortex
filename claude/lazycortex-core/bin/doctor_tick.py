@@ -451,6 +451,9 @@ def doctor_tick(repo: Path) -> dict:
     source_inline = { "context.json": json.dumps(context, indent = 2) },
     # waiver: one-off dedup key for the doctor dispatch, not a reusable domain constant
     dedup_key = "doctor",
+    # the doctor's job IS the triage of the halt, so it is the one bundle the pump still
+    # serves while the system is stuck — every other job waits for the halt this one lifts
+    halt_exempt = True,
   )
   return {
     "triggered": True,

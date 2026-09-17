@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about products, assets, vision/design docs, gates, requests, decisions, coverage gaps, spec lookups, and the coordinator agent.
-last_regen: 2026-09-15
+last_regen: 2026-09-17
 no_diagram: true
 source_skills:
   - lazy-spec.install
@@ -31,7 +31,7 @@ source_skills:
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
   - lazy-spec.resolve-dependency
-source_sha: cb4655cf3479bf969c86ef3ebfae3ab395ae3cfd
+source_sha: 0e7a6138bae7004baf583efc481f058dd0779257
 ---
 # Frequently asked questions
 
@@ -187,9 +187,9 @@ The note you point it at doesn't have to be an asset's own status note — a pro
 
 ## How do I record a design decision, and does the plugin write `decisions.md` for me?
 
-Never by hand-editing `decisions.md` — always through `/lazy-spec.record-decision`, an interactive wrapper over four operations: `add` a new entry, `supersede` an older one with a new entry that marks it superseded, `obsolete` an existing entry with a reason, or `promote` — transfer decision blocks already written inline in a `vision.md` / `design.md` / `bug.md` / `tech.md` / `architecture.md` body out into a sibling `decisions.md` registry. `decisions.md` itself lives at one of three levels, resolved along a placement ladder: `<asset_dir>/decisions.md` for a feature/change/bug's own forks, `<spec_path>/decisions.md` for a product-wide decision, or `<content-root>/decisions.md` for a decision about the project as a whole (the system pair, or a cross-product concern) — the file need not exist yet at any level; the first record lazily creates it. Before recording a new decision, the skill holds you to a three-part weight test: a real fork existed, reversing it is expensive, and the "why" is unrecoverable from the artifact itself — a cheap, reversible, or self-explanatory detail isn't worth a record; per `spec.decisions.md`, the Why/Rejected reasoning belongs only in the decision record, never restated in the surrounding design prose.
+Never by hand-editing `decisions.md` — always through `/lazy-spec.record-decision`, an interactive wrapper over four operations: `add` a new entry, `supersede` an older one with a new entry that marks it superseded, `obsolete` an existing entry with a reason, or `promote` — transfer decision blocks already written inline in a `vision.md` / `design.md` / `bug.md` / `tech.md` / `architecture.md` body out into a sibling `decisions.md` registry. `decisions.md` itself lives at one of three levels, resolved along a placement ladder: `<asset_dir>/decisions.md` for a feature/change/bug's own forks, `<spec_path>/decisions.md` for a product-wide decision, or `<content-root>/decisions.md` for a decision about the project as a whole (the system pair, or a cross-product concern) — the file need not exist yet at any level; the first record lazily creates it. Before recording a new decision, the skill holds you to a three-part weight test: a real fork existed, reversing it is expensive, and the "why" is unrecoverable from the artifact itself — a cheap, reversible, or self-explanatory detail isn't worth a record; per `spec.decisions.md`, the justification belongs only in the decision record, never restated in the surrounding design prose.
 
-Most decision blocks never need the manual `add` path. `/lazy-spec.create-asset` and `/lazy-spec.create-from-code` already mark a genuine fork the clarification or the code evidence settles — while authoring `vision.md`, `design.md`, or the product-level docs — as an inline `[!decision] <thesis> #spec/decision` callout with its `**Why.**` / `**Rejected.**` lines, right where the fork was made. `promote` then happens automatically too: once a living doc (`vision.md`, `design.md`, `bug.md`, `tech.md`, `architecture.md`) is approved via `/lazy-spec.set-stage`, that step calls the same promote operation itself, lifting those inline blocks into the sibling registry without you running `/lazy-spec.record-decision` at all — the manual path exists for adding a decision straight into the registry, or for promoting a doc that skipped the usual approve step. A `promote` call refuses on a plan or report (neither originates decisions), and on a cancelled, halted, or released asset.
+Most decision blocks never need the manual `add` path. `/lazy-spec.create-asset` and `/lazy-spec.create-from-code` already mark a genuine fork the clarification or the code evidence settles — while authoring `vision.md`, `design.md`, or the product-level docs — as an inline `[!decision] <thesis> #spec/decision` callout whose body is the justification in plain prose — no `Why` / `Rejected` labels, no list of alternatives — right where the fork was made. `promote` then happens automatically too: once a living doc (`vision.md`, `design.md`, `bug.md`, `tech.md`, `architecture.md`) is approved via `/lazy-spec.set-stage`, that step calls the same promote operation itself, lifting those inline blocks into the sibling registry without you running `/lazy-spec.record-decision` at all — the manual path exists for adding a decision straight into the registry, or for promoting a doc that skipped the usual approve step. A `promote` call refuses on a plan or report (neither originates decisions), and on a cancelled, halted, or released asset.
 
 ---
 

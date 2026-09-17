@@ -17,6 +17,9 @@ spec_source_docs: []
 ## Overview
 <!-- Opens with a reference to the sibling vision (goals and value live there, never here). What the system is and why it exists. -->
 
+## Terms
+<!-- "Glossary: The most important domain and technical terms that your stakeholders use when discussing the system." — arc42 §12 Glossary. One line per term the document uses, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, a term this document introduces is defined here first. -->
+
 ## Design
 <!-- "Important, expensive, large scale or risky architecture decisions including rationales. With 'decisions' we mean selecting one alternative based on given criteria." — arc42 §9 Architecture Decisions -->
 

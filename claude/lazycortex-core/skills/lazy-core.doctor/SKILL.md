@@ -119,6 +119,11 @@ Checks the agent performs:
      - `[INFO]` env-var status — current `LAZY_AGENT_MODEL_FLOOR` value if set, plus tier-order note `haiku < sonnet < opus`.
   All non-blocking.
 
+- **Language-key checks (project scope only)** — read the raw project `lazy.settings.json` from step 1 above and inspect every language key the settings schema lists: root `language`, `spec.language`, `wiki.language`, `wiki.domains.language`, and each `products[<key>].language`. Every one holds an ISO 639-1 code; a free-form name reaches code that compares against codes and silently loses.
+  - `[WARN]` `settings.language-not-a-code` — a present key whose value is not a two- or three-letter lowercase code. Finding: `<key> holds "<value>", not an ISO 639-1 code | .claude/lazy.settings.json`; `detail:` the code the value maps to under the wiki plugin's one-release compatibility table (`русский` / `russian` → `ru`, `english` → `en`), or `no known mapping` when it maps to nothing. `fix: rewrite <key> to "<code>"` — a coordinator-owned fix (see Phase 4), applied only for a value with a known mapping and only after the per-finding ask; a value with no mapping is reported and never guessed at.
+  - `[INFO]` `settings.language-review-key` — a `review.language` key still present. It is inert: review no longer reads it. Finding: `review.language is present but no longer read | .claude/lazy.settings.json`; `fix: remove review.language`.
+  - An absent key is never a finding — every chain has a fallback and a floor.
+
 - **Providers schema checks (project scope only)** — merge `providers` (tracked `.claude/lazy.settings.json[providers]` ∪ the gitignored local overlay's `providers` section, local wins — same merge `lazy-core.providers` Step 2 uses) with the merged `experts` section:
   - `[FAIL]` `provider_unknown` — an `experts[*].provider` value that does not match any name in the merged `providers` block. Finding: `provider_unknown: expert <key> -> provider <name>`.
   - **Per-entry validation** — for each entry in the merged `providers` block, call `provider_env.validate_entry` (the same disk-free function `resolve_provider` calls at dispatch time, so this check can never drift from the runtime's):

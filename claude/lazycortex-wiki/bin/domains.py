@@ -116,6 +116,9 @@ PAYLOAD_TAG_AXES       = "tag_axes"
 PAYLOAD_EXISTING_TAGS  = "existing_tags"
 PAYLOAD_TAG_DICTIONARY = "tag_dictionary"
 
+# Domain-spec writer payload field carrying the display name of the configured language code.
+PAYLOAD_LANGUAGE_NAME  = "language_name"
+
 
 # ────────────────────────────────────────────────────────────────────────────
 class DomainConfig:
@@ -155,6 +158,15 @@ class DomainConfig:
     self.dictionary: str = dictionary
     self.output: str = output
     self.language: str = language
+
+  @property
+  def language_code(self) -> str:
+    """
+    The configured language narrowed to an ISO 639-1 code — a legacy free-form
+    name is mapped through the compatibility table, a code passes through unchanged.
+    """
+    # the raw setting may still hold a pre-code free-form name for one release
+    return _explainers.language_code(self.language)
 
   @classmethod
   def load(cls, repo: Path) -> DomainConfig | None:
@@ -725,9 +737,8 @@ class DomainIndex:
 
     # the head is engine territory; the tail is whatever prose already follows the listing.
     # The italic line under the title self-describes the file for the operator, in the same
-    # language the listed group docs are authored in (`wiki.domains.language`).
-    explainer = _explainers.explainer_line(
-        _explainers.SURFACE_DOMAINS_INDEX, _explainers.language_tag_for_name(self._cfg.language))
+    # language the listed group docs are authored in (`wiki.domains.language`, as a code).
+    explainer = _explainers.explainer_line(_explainers.SURFACE_DOMAINS_INDEX, self._cfg.language_code)
     head = self._TITLE + "\n" + explainer + "\n\n" + "\n".join(listing) + "\n"
     tail = self._preserved_tail()
     if tail:
@@ -974,7 +985,8 @@ class DomainPlanner:
 
     Returns:
       Payload dict carrying the group's own fields (`group`, `gloss`,
-      `doc_path`, `hash`, `blocks`, `contracts`), the configured `language`,
+      `doc_path`, `hash`, `blocks`, `contracts`), the configured `language` as
+      a code and its `language_name`,
       and the tag-canon inputs the writer needs (`tag_axes`, `existing_tags`,
       `tag_dictionary`) — the last three copied verbatim from `entry`, which
       `plan()` already populated.
@@ -987,7 +999,8 @@ class DomainPlanner:
     return {
       GROUP_KEY:              entry[GROUP_KEY],
       GROUP_GLOSS:            entry[GROUP_GLOSS],
-      PLAN_LANGUAGE:          self.cfg.language,
+      PLAN_LANGUAGE:          self.cfg.language_code,
+      PAYLOAD_LANGUAGE_NAME:  _explainers.LANGUAGE_NAMES.get(self.cfg.language_code, self.cfg.language_code),
       GROUP_DOC:              entry[GROUP_DOC],
       GROUP_HASH:             entry[GROUP_HASH],
       GROUP_BLOCKS:           entry[GROUP_BLOCKS],

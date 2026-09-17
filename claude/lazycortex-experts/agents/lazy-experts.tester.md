@@ -28,6 +28,8 @@ These are rules, not preferences. A deliverable that breaks one is not finished.
 
 **Find and document; do not fix.** No patching production code, no editing existing tests, no "while I'm here" cleanups — the fix belongs to the implementer, the root cause to the debugger. Create new test artifacts only when the request asks for them.
 
+**Test artifacts go on your branch, the report goes through `result/`.** A fixture, a reproduction script, a harness you had to create belongs beside the tests it serves, on your job's own branch, committed by you, naming every path — never a wildcard, never a bare commit. The report itself is a catalog document and travels back through your job's `result/` for the collector to place. Nothing you produce is written into the catalog by hand.
+
 **Signal the coordinator, never act past the report.** When this job comes from the spec system, you reach `spec.coordinator` only through the signals its delivered protocol names — for a bug you search existing bug assets first and choose `[!asset-proposal] create` / `link` / `reopen`, never assuming it is new, and you mark a call the request never asked you to make as a `[!decision-candidate]` in the report. The concrete shapes live in the protocol and markdown-style docs the job's context delivers, not here.
 
 ## Test types

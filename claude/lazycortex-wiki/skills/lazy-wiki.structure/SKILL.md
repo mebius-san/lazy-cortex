@@ -2,7 +2,7 @@
 name: lazy-wiki.structure
 description: "Use when an agent doing research (an architect deciding where a new file belongs, any expert asking 'where does X live in this repo') needs the project's structure map, or when the operator asks to resync `docs/structure.md` with the tree after files moved. Two modes: `rebuild` walks the tracked tree and rewrites the map; `query [<path>]` returns just the slice under `<path>` — the whole file is never loaded into the caller's context."
 research: true
-allowed-tools: Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, Bash(git ls-files *), Bash(git add -N *), Bash(git commit *), Bash(git rev-parse *), Bash(test -f *), Bash(mkdir -p *), Bash(date -u *)
+allowed-tools: Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(git ls-files *), Bash(git add -N *), Bash(git commit *), Bash(git rev-parse *), Bash(test -f *), Bash(mkdir -p *), Bash(date -u *)
 ---
 # lazy-wiki.structure
 
@@ -27,6 +27,8 @@ This skill has 5 ordered steps. The executing agent MUST NOT skip, merge, reorde
 `Read` `.claude/lazy.settings.json` (and `.claude/lazy.settings.local.json` when present — scalars from local override tracked, arrays union). Extract the `structure` section: `depth_profiles` (map of class name → `{paths: [<glob>, ...], depth: "file"|"dir"|"brief"}`) and `exclude` (array of glob strings never described).
 
 If the `structure` key is absent entirely, abort: *"No `structure` section — run `/lazy-wiki.install` first."* An absent or empty `depth_profiles` is valid, not an error: every tracked path defaults to `dir` depth (directory line only, no per-file entries) until `/lazy-wiki.configure structure` populates the classes.
+
+Resolve the repo root via `Bash(git rev-parse --show-toplevel)`, then resolve the language the map's own prose is written in, once, here: `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" resolve-language --repo <repo-root>)`. Carry the returned code into every `Agent(subagent_type: "Explore", …)` fan-out prompt of Phase 3 step 4 as `language=<code>` — a dispatched subagent cannot read the settings for itself — and write the directory and file descriptions you compose yourself in it. Directory names, file names, and glob patterns stay verbatim.
 
 Outcome: `loaded` or `no-section`.
 
@@ -57,7 +59,7 @@ Outcome: `resolved: <rebuild|query>`.
    - **unclassified (no `depth_profiles` entry matched)** — the directory line itself renders exactly like `dir` (one line, one to two sentences), but individual FILES underneath still get a per-file line by the SAME load-bearing judgment `file` depth uses — an unclassified directory is not exempt from surfacing its own entry points and registries just because nobody assigned it a class.
    - **`brief`** — one line for the directory, half a sentence (e.g. `tests for `<module>``), nothing else.
    Source the description from what the content already says — a module docstring, a `description:` frontmatter key, a file header, a directory's own README — before writing anything from scratch.
-4. **Fan-out on a large tree.** When more than roughly 12 top-level tracked directories exist, split them into batches of at most 4 and dispatch one `Agent(subagent_type: "Explore", mode: "dontAsk", ...)` per directory in a batch, in a single message per batch (never more than 4 concurrent dispatches — `lazy-core.skill-writing § 5`). Each agent reads only its assigned subtree and the relevant `depth_profiles` entry, and returns the markdown lines for it per step 3's shape — nothing else enters this session's context. Splice the returned blocks together, sorted by path. A small tree (≤ 12 top-level directories) is walked directly, no fan-out.
+4. **Fan-out on a large tree.** When more than roughly 12 top-level tracked directories exist, split them into batches of at most 4 and dispatch one `Agent(subagent_type: "Explore", mode: "dontAsk", ...)` per directory in a batch, in a single message per batch (never more than 4 concurrent dispatches — `lazy-core.skill-writing § 5`). Each agent reads only its assigned subtree and the relevant `depth_profiles` entry, is handed `language=<code>` from Phase 1, and returns the markdown lines for it per step 3's shape — nothing else enters this session's context. Splice the returned blocks together, sorted by path. A small tree (≤ 12 top-level directories) is walked directly, no fan-out.
 5. Assemble the lines into one nested markdown list — indentation mirrors directory nesting — and `Write` it to `docs/structure.md`. No frontmatter, no generated-index preamble: the file is markdown, self-explanatory, nothing else.
 6. Commit: if `docs/structure.md` did not exist before this run, `Bash(git add -N docs/structure.md)` first (new-file registration, per `lazy-core.git` — never a plain `git add`); then `Bash(git commit -m "docs(structure): rebuild project structure map" -- docs/structure.md)`.
 

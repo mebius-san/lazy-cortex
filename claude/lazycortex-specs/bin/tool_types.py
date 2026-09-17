@@ -213,7 +213,7 @@ def tools_of(note: Path) -> list[str] | None:
 
   text = note.read_text(encoding = _K.ENCODING)
   # waiver: sibling-module frontmatter parser -- the one parser every specs primitive shares
-  fm_values, fm_end = flip_gate._parse_frontmatter(text)
+  fm_values, fm_end = flip_gate.parse_frontmatter(text)
   # guard: an absent key is "not determined yet", which no list value can express
   if _TOOLS_KEY not in fm_values:
     return None

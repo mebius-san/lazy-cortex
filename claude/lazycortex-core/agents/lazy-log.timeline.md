@@ -82,6 +82,7 @@ If no input is given, default to "everything in the last 7 days".
 
 ## Guidelines
 
+- **Language.** Before writing a line of output, run `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" resolve-language)` and write your whole answer in the code it returns. Do not infer the language from the commits, logs, or journal entries you are reading — those carry whatever their authors typed. Commit subjects, file paths, SHAs, identifiers, and section headings you quote stay verbatim.
 - **Don't editorialize** — timeline entries are short factual references. Users who want more detail invoke `lazy-log.recall <sha>` or `git show <sha>`.
 - **Group by day** — don't group by week or month unless the range is very long (> 90 days).
 - **Include times** when available — from commit `date` field or run log frontmatter.

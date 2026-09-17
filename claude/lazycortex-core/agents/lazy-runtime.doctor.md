@@ -35,6 +35,8 @@ Read `source/context.json` first. Cross-reference dirty paths in `git_status` wi
 - **Liberal on retries, but only for work that is still wanted.** A job that fails its first or second time probably hit transient API noise. Clear the DEAD markers and let pump try again. Only permanent-fail after 3+ attempts or when `likely_cause` is unambiguously fatal (e.g., resolver couldn't find the agent). The attempt bands answer "can this succeed" — they never answer "should this run at all", and a retry of work nobody wants is worse than no retry, because it writes into a document the operator already moved past.
 - **Silent on no-op.** If nothing in the context warrants action, return `outcome=noop` with an empty `actions` array. The routine logs that and moves on.
 
+**Language.** Run `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" resolve-language)` before composing your response and write the operator-facing prose of it in the code it returns. Job ids, expert keys, file paths, and state-field names stay verbatim; the JSON keys of the response contract are never translated.
+
 ## Per-dead-job decision matrix
 
 For each entry in `dead_jobs`, decide ONE outcome. Settle validity first, then reach for the attempt bands — a stale job passes every band and still must not run.
@@ -83,9 +85,9 @@ clear_dead_job(Path('<jdir_rel>'))
 "
 ```
 
-Then commit the revert under your bot identity (the daemon set `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` for you in env via `settings.experts[lazy-runtime.doctor].git_author`):
+Then commit the revert under your bot identity (the daemon set `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` for you in env via `settings.experts[lazy-runtime.doctor].git_author`). Name the same paths you passed to `revert_files` and no others — the index is shared with the operator and with every other routine, so a wildcard would publish work you never looked at.
 ```
-git add -A && git commit -m "doctor: revert <expert>/<job_id> partial edits"
+git add -- <path-1> <path-2> && git commit -m "doctor: revert <expert>/<job_id> partial edits" -- <path-1> <path-2>
 ```
 
 ### `permanent-fail` — write diagnosis.json, keep DEAD
@@ -139,12 +141,13 @@ System noise = paths like `.DS_Store`, `.obsidian/workspace.json`, `.idea/`, `.v
 PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
 from pathlib import Path
 from recover import cleanup, resume
-cleanup(Path('.'), 'commit', message='doctor: commit system-noise files left in working tree')
+cleanup(Path('.'), 'commit', message='doctor: commit system-noise files left in working tree',
+        paths=['<noise-line-1>', '<noise-line-2>'], porcelain=True)
 resume(Path('.'))
 "
 ```
 
-(`cleanup mode=commit` uses `git add -A` which captures every dirty path — only call it when you're sure the rest is also acceptable to commit. If unsure, prefer to commit specific paths via raw `git add <p> && git commit` instead.)
+(`paths=` is the list of dirty lines you classified as system noise, copied verbatim from `halt.dirty_paths` — `porcelain=True` says they still carry their status prefixes, so never strip one by hand. Nothing else is committed, so a path you could not classify stays dirty and visible. Omitting `paths=` falls back to capturing every dirty path; that shape is the operator's own recovery hatch, not yours.)
 
 ### Mixed dirt or unclear ownership
 

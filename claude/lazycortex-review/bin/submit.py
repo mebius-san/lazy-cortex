@@ -201,7 +201,8 @@ def open_submit(
     # waiver: type: ignore — note_ops is a deferred/late-bound sibling import; mypy cannot resolve it
     new_text = _note_ops.set_key(new_text, ReviewKey.PHASE, Bucket.AWAITING_OPERATOR)  # type: ignore[attr-defined]
     # waiver: type: ignore — note_ops is a deferred/late-bound sibling import; mypy cannot resolve it
-    new_text = _note_ops.repaint_banner(new_text)  # type: ignore[attr-defined]
+    new_text = _note_ops.repaint_banner(  # type: ignore[attr-defined]
+        new_text, lang = _note_ops.resolve_language(file_path))  # type: ignore[attr-defined]
     file_path.write_text(new_text)
   if new_text == text:
     return False

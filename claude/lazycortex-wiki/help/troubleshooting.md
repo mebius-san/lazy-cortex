@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-wiki skills — symptoms, likely causes, and fixes.
-last_regen: 2026-09-13
+last_regen: 2026-09-17
 no_diagram: true
 source_skills:
   - lazy-wiki.install
@@ -13,7 +13,7 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: 9fef3719f81552fe26c4b661a252c8abb88120d3
+source_sha: d8d333338bcd2cca2b033eeb8fd72b47fa5be8db
 ---
 # Troubleshooting
 
@@ -159,6 +159,26 @@ source_sha: 9fef3719f81552fe26c4b661a252c8abb88120d3
 
 ---
 
+## `/lazy-wiki.terms` says no scope matches the document
+
+**Symptom**: Invoking `/lazy-wiki.terms` while writing a document reports that no terms scope matches the document's path, or that the `terms` section itself is missing, instead of returning a definition or a "not found" answer.
+
+**Likely cause**: The document's path doesn't match any terms scope's `paths` globs, or the project's `lazy.settings.json` has no `terms` section at all — the terms dictionary mechanism was never configured for this document's location.
+
+**Fix**: Run `/lazy-wiki.configure terms` to create a scope whose `paths` globs cover the document, or check that the document's path matches an already-configured scope's globs. If `lazy.settings.json` predates the terms mechanism entirely, run `/lazy-wiki.install` first to seed the `terms` section.
+
+---
+
+## `/lazy-wiki.terms` says the dictionary file itself is missing
+
+**Symptom**: A scope matches the document, but `/lazy-wiki.terms` reports that the dictionary file named by the scope's `file` key does not exist on disk, instead of returning a definition or a "not found" answer.
+
+**Likely cause**: `/lazy-wiki.configure terms` creates the dictionary file automatically, empty, the first time a scope is set up — so a missing file usually means it was deleted from the worktree afterward, or the scope's `file` path was hand-edited in `lazy.settings.json` to point somewhere nothing has created yet. The lookup skill deliberately never creates the file itself, so a genuinely missing dictionary is never silently reseeded empty.
+
+**Fix**: Re-run `/lazy-wiki.configure terms` in edit mode for that scope — it creates the file empty if it's still absent, and leaves an existing file untouched. Then re-run the lookup.
+
+---
+
 ## `/lazy-wiki.query` reports "No wiki scopes configured"
 
 **Symptom**: `/lazy-wiki.query "<question>"` exits immediately with "No wiki scopes configured — run `/lazy-wiki.install` and `/lazy-wiki.configure` first."
@@ -171,7 +191,7 @@ source_sha: 9fef3719f81552fe26c4b661a252c8abb88120d3
 
 ## `/lazy-wiki.query` returns "No wiki material matched this question"
 
-**Symptom**: The query completes without error but reports "No wiki material matched this question." — no answer, no sources.
+**Symptom**: The query completes without error but reports that no wiki material matched the question — no answer, no sources. The message itself comes from the wiki CLI rather than from a fixed English string, so it renders in whichever language the repo is configured to write in; a repo configured for a different language sees the equivalent message in that language, and a repo with no language of its own configured falls back to English.
 
 **Likely cause**: Either the `topics.md` file for the configured scope does not yet exist on disk (the scope was configured but never linked), or none of the topics in the index are relevant to the question.
 

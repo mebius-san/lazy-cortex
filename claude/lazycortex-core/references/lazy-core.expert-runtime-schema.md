@@ -27,7 +27,7 @@ experts:
     can_commit_in_repo: true
 ```
 
-Absent or `false`, the pump appends the foreign-execution no-commit clause to the spawn prompt: the expert must not edit the document it was given, anything under `source/`, or any other working-tree file, and must not commit — it returns such changes as data in `response.json` and the dispatcher applies them locally. Its own persona side-channels (persona memory under `.memory/<self>/`, run logs under `.logs/`) are exempt and self-commit under their own bot identity. `true` drops the clause, so the expert lands its work in the tree itself — what `/lazy-experts.install` seeds for the writing roles.
+Absent or `false`, the pump appends the foreign-execution no-commit clause to the spawn prompt: the expert must not edit the document it was given, anything under `source/`, or any other working-tree file, and must not commit — it returns such changes as data in `response.json` and the dispatcher applies them locally. Its own persona side-channels (persona memory under `.memory/<self>/`, run logs under `.logs/`) are exempt and self-commit under their own bot identity, as `lazy-core.expert-runtime-contract.md` § Working tree also states. `true` drops the clause — but it never means "write wherever you like": which files an expert may land in the tree is decided by the destination rule in that same section, and a file landing in the spec catalog goes back through `result/` whatever this flag says. The flag is what `/lazy-experts.install` seeds for the roles that change code, data or product documentation on their own branch.
 
 A dispatching routine may override the entry's value for its own jobs; today only `md-scan` does — see `lazy-core.routine-types-schema.md`.
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-09-14
+last_regen: 2026-09-17
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, generic iteration loops, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys, seed data gaps), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models, plugin-path resolution, stale source paths at claim time), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources, worker import errors), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
@@ -38,7 +38,7 @@ source_skills:
   - lazy-runtime.preflight
   - lazy-runtime.recover
   - lazy-runtime.tick
-source_sha: c02247a7934dc795134e714f217ab0c7082bcdd3
+source_sha: 4ce2acf18852efdc30c37eebe5c23618c5b98b26
 ---
 # Troubleshooting
 
@@ -551,6 +551,22 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: The `token_env` variable name recorded for that provider does not resolve in either the current environment or `~/.claude/.env` — the same two places the runtime checks when an expert actually dispatches against that provider. The entry itself is structurally valid; only the credential is missing right now.
 
 **Fix**: Export the named variable in your shell, or add it to `~/.claude/.env`, then re-run `/lazy-core.doctor` to confirm the warning clears. If the variable name itself is wrong, run `/lazy-core.providers update <name>` to correct `token_env`.
+
+---
+
+## `/lazy-core.doctor` reports a `settings.language-not-a-code` or `settings.language-review-key` finding
+
+**Symptom**: `/lazy-core.doctor` reports a WARN like "`<key> holds "<value>", not an ISO 639-1 code`" or an INFO like "`review.language is present but no longer read`" against `.claude/lazy.settings.json`.
+
+**Likely cause (`settings.language-not-a-code`)**: One of the settings schema's language keys — the root `language`, `spec.language`, `wiki.language`, `wiki.domains.language`, or a `products[<key>].language` entry — holds a free-form name (`русский`, `english`) instead of the ISO 639-1 code the code that reads it compares against. A value the wiki plugin's compatibility table can map (`русский`/`russian` → `ru`, `english` → `en`) gets a proposed rewrite in the finding's `detail:`; a value with no known mapping is reported with `detail: no known mapping` and left for you to correct by hand.
+
+**Likely cause (`settings.language-review-key`)**: `review.language` is still present in `.claude/lazy.settings.json`, but review no longer reads that key at all — it is dead configuration, not a functional problem.
+
+**Fix (`settings.language-not-a-code`)**: Re-run `/lazy-core.doctor` and accept the rewrite it offers for a mappable value — it corrects the key to the right ISO 639-1 code after you confirm. For a value with no known mapping, edit that key in `.claude/lazy.settings.json` by hand to the correct code (`ru`, `en`, etc.), then re-run `/lazy-core.doctor` to confirm the WARN clears.
+
+**Fix (`settings.language-review-key`)**: Accept the removal `/lazy-core.doctor` offers, or delete `review.language` from `.claude/lazy.settings.json` yourself — it has no effect either way.
+
+---
 
 ## `/lazy-core.agent-models` fails with "invalid --scope value"
 

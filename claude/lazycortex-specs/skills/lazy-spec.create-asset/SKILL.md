@@ -179,7 +179,7 @@ One prose pass per document the scaffold actually seeded, driven by that documen
 - **`bug`** — fill `bug.md`'s sections (`## Overview`, `## Way to reproduce`, `## Observed behavior`, `## Expected behavior`, `## Environment`, `## Related code / logs`) from the repro / observed-vs-expected / environment answers.
 - **any other seeded doc type** — author it per the sections its own template carries, grounded in the Step 3 clarification and in what the type playbook says that document is for.
 
-In every authored doc, record a real decision fork the clarification settled (per the weight test in `${CLAUDE_PLUGIN_ROOT}/rules/spec.decisions.md`) as a `[!decision] <thesis> #spec/decision` callout with `**Why.**` / `**Rejected.**` lines per `lazy-core.markdown-style` — on the document's approve these transfer automatically into the sibling `decisions.md`. Never force a fork that is not there.
+In every authored doc, record a real decision fork the clarification settled (per the weight test in `${CLAUDE_PLUGIN_ROOT}/rules/spec.decisions.md`) as a `[!decision] <thesis> #spec/decision` callout whose body is the justification in plain prose per `lazy-core.markdown-style` — on the document's approve these transfer automatically into the sibling `decisions.md`. Never force a fork that is not there.
 
 This skill never authors plan or report documents — they are not part of the scaffold (Step 4/5) and stay out of scope here too.
 

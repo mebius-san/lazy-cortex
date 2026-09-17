@@ -1,19 +1,19 @@
 ---
 chapter_type: walkthrough
-summary: Register a product bound to an existing codebase, generate its vision, design, and tech docs from source, then scaffold the first feature.
-last_regen: 2026-09-14
+summary: Register a product bound to existing code, generate vision/design/tech docs from source, then gap-scan for anything missed.
+last_regen: 2026-09-17
 diagram_spec:
   anchor: "How the skills hand off"
-  request: "Sequence diagram showing the three-skill journey: operator runs lazy-spec.product-config to register the product and write settings, then runs lazy-spec.create-from-code to scan source and produce design + tech docs, then runs lazy-spec.create-feature to scaffold the first feature asset; show the operator, each skill, and the spec vault as actors, with the key handoff points between them."
+  request: "Sequence diagram showing the three-skill journey: operator runs lazy-spec.product-config to register the product and write settings, then runs lazy-spec.create-from-code to scan source and produce vision + design + tech docs (and scaffold any candidate features), then runs lazy-spec.coverage to gap-scan the code against the spec tree and materialize anything missed; show the operator, each skill, and the spec vault as actors, with the key handoff points between them."
 source_skills:
   - lazy-spec.product-config
   - lazy-spec.create-from-code
-  - lazy-spec.create-feature
-source_sha: 05f8009a289f5457ccb6994a57a0c5da79db4cb1
+  - lazy-spec.coverage
+source_sha: 0e7a6138bae7004baf583efc481f058dd0779257
 ---
 # How do I get specs for a codebase that already exists?
 
-You have a working codebase — a service, a library, an application — and no spec to go with it. This walkthrough starts from the vault spec that has to exist before any product can be registered, then takes you through registering the product in the spec system, generating a behavior-and-source-grounded specification directly from the code, and scaffolding the first feature so the asset lifecycle can begin. Three skills carry the bulk of the work; your job is to answer their wizard questions and review what lands.
+You have a working codebase — a service, a library, an application — and no spec to go with it. This walkthrough starts from the vault spec that has to exist before any product can be registered, then takes you through registering the product in the spec system, generating a behavior-and-source-grounded specification directly from the code, and running a gap-scan to catch anything the auto-generated docs and candidate features missed. Three skills carry the bulk of the work; your job is to answer their wizard questions and review what lands.
 
 ## Outcome
 
@@ -24,9 +24,10 @@ After completing this walkthrough you will have:
 - A product `vision.md` — goals, requirements, and value proposition, authored first from the code survey.
 - A `design.md` — behavior-only, no source URLs, opening with a reference to the sibling vision doc — describing what the product does for its users.
 - A `tech.md` — code-grounded, with forge-correct source URLs — covering the source map, architecture, and components.
-- Optionally, once your product's `vision.md` approves, a product-root `ui-design.md` — the product's shared look (design system, recurring screen patterns, navigation skeleton) that each asset's own `ui-design.md` refines — available as a `Write ui-design` launch checkbox on the product's folder-note. It is a separate document from the three above: none of this walkthrough's three skills author it, and it is optional at the level a `design.md` / `tech.md` are not.
+- Optionally, once your product's `vision.md` approves, a product-root `ui-design.md` — the product's shared look (design system, recurring screen patterns, navigation skeleton) that each asset's own `ui-design.md` refines — available as a `Write ui-design` launch checkbox on the product's folder-note. It is a separate document from the three above: none of this walkthrough's skills author it, and it is optional at the level a `design.md` / `tech.md` are not.
 - Optionally a product-level `use-cases.md` — actors and cross-feature scenarios — if you opted in when `lazy-spec.create-from-code` asked.
-- At least one feature folder under `features/<slug>/` with a scaffolded `design.md` ready for authoring (`code-plan.md` / `test-plan.md` are opt-in, authored later).
+- At least one feature folder under `features/<slug>/` with a scaffolded `design.md` ready for authoring — usually from the candidate scaffolding in Step 3, sometimes added later via Step 4's gap-scan materialization.
+- A coverage report from `/lazy-spec.coverage` naming any capability the code already has that the generated docs and candidate features didn't pick up — optionally materialized as an additional feature, printed as a pasteable asset-proposal block, or skipped for a later pass.
 - Review classes wired so every doc enters the review loop automatically.
 
 None of `vision.md`, `design.md`, or `tech.md` gets a diagram automatically — the product-scan skill draws no pictures at all. If you want one, ask for it afterward via `/lazy-diagram.draw` against a heading in any of them.
@@ -37,7 +38,8 @@ None of `vision.md`, `design.md`, or `tech.md` gets a diagram automatically — 
 - `lazycortex-core` available — it provides the `settings-get` / `settings-set` CLI and the runtime daemon.
 - A local checkout of the source repo you want to document — either the same repo that holds your spec vault (`/lazy-spec.product-config` can register it with `local_path: "."`, so every checkout resolves its own root with no absolute path needed), or a separate checkout that exists on disk at a path Claude Code can read.
 - At least one expert registered in `lazy.settings.json[experts]` for each review role you plan to assign — use-case-writer, designer, system-designer, architect, ui-designer, planner, developer, and tester (plus data-writer and researcher if your product needs them) — unless this is not your first product in the vault, in which case you can ride the shared expert set an earlier product already set up. If you have not set up experts yet, run `/lazy-spec.install` — it offers to configure them — or run `lazycortex-experts` to compose the personas first.
-- `lazycortex-diagram` available — Step 4's feature scaffold draws a flow diagram automatically; Steps 2 and 3 draw nothing on their own, so it is only needed there if you choose to draw a diagram yourself afterward.
+- `lazycortex-diagram` available — a feature scaffold draws a flow diagram automatically, whether it comes from Step 3's candidate scaffolding or a gap you choose to materialize in Step 4; Steps 1, 2, and a plain gap-scan run in Step 4 draw nothing on their own.
+- `lazycortex-wiki` available *(optional)* — if its project-structure map (`docs/structure.md`) or domain-group tree is configured for this repo, Step 4's gap-scan reads them for richer signal. Without either, it falls back to a raw scan of your source paths, so this walkthrough works either way.
 
 ## The journey
 
@@ -75,7 +77,7 @@ When the wizard finishes, the skill writes the product record into settings, cre
 
 If `/lazy-spec.product-config` points you at `lazycortex-experts` before finishing, it means a chosen expert name is not registered. Compose the persona via `lazycortex-experts`, then re-run `/lazy-spec.product-config`.
 
-**Verification gate.** Before continuing, confirm that `lazy-spec.audit` in the report shows no failures. The product folder and its folder-note should exist on disk, carrying `spec_role: product` and its four level gates all `false` — `features/`, `changes/`, and `bugs/` do not appear yet: group folders are created lazily, the first time an asset lands in one (Step 4 is what creates `features/`).
+**Verification gate.** Before continuing, confirm that `lazy-spec.audit` in the report shows no failures. The product folder and its folder-note should exist on disk, carrying `spec_role: product` and its four level gates all `false` — `features/`, `changes/`, and `bugs/` do not appear yet: group folders are created lazily, the first time an asset lands in one (Step 3 is what creates `features/`).
 
 ### Step 3 — Generate the spec from code with `/lazy-spec.create-from-code`
 
@@ -102,38 +104,41 @@ Once `design.md` is written, the skill asks one question: also author the produc
 
 Once every doc is written, the skill presents Agent D's candidate feature list and asks you what to do with each one:
 
-- **scaffold feature** — delegates immediately to `lazy-spec.create-asset`, which opens its own wizard for that feature (see Step 4). Pick this for features you want to document now. Scaffolded features leave no trace in `design.md` — the folder-notes aggregate the decomposition catalog.
+- **scaffold feature** — delegates immediately to `lazy-spec.create-asset`, which opens its own wizard for that feature. Pick this for features you want to document now. Scaffolded features leave no trace in `design.md` — the folder-notes aggregate the decomposition catalog.
 - **treat as architectural area** — adds a subsection to the tech doc's `## Architectural Areas`; no feature folder is created.
 - **skip** — leaves no trace.
 
-Work through each candidate. You do not need to scaffold all of them now — you can run `/lazy-spec.create-feature` again later for any candidate you skipped.
+Work through each candidate. You do not need to scaffold all of them now — re-run this skill later to see the current candidate list again, or let Step 4's gap-scan catch anything you skipped that still has no spec asset.
 
 **Verification gate.** `vision.md`, `design.md`, and `tech.md` should exist and carry `spec_stage: draft` (`use-cases.md` too, if you opted in). The design doc must contain no source URLs and no `spec_source_branches` frontmatter. All the docs should carry the default `spec_source_docs` frontmatter and a body `# Sources` section pointing at each other.
 
-### Step 4 — Scaffold the first feature with `/lazy-spec.create-feature`
+### Step 4 — Find what's still missing with `/lazy-spec.coverage`
 
-If you chose "scaffold feature" for at least one candidate in Step 3, `lazy-spec.create-asset` already ran inside that step and your first feature folder is ready. You can skip directly to the verification gate below.
+Run `/lazy-spec.coverage <compound-key>`. This is a read-only gap-scan: it compares what the code visibly does against what the spec tree already documents, and it only ever writes to the vault when you explicitly confirm a single gap — nothing is materialized behind your back.
 
-If you deferred all candidates or want to add a feature that was not in the candidate list, run:
+The skill gathers two independent signals about the code side, both bounded queries rather than a whole-file read:
 
-```
-/lazy-spec.create-feature <compound-key> <feature-slug>
-```
+- If `lazycortex-wiki`'s project-structure map (`docs/structure.md`) is configured for this repo, it queries a bounded slice per `source.paths` entry — a directory role plus per-file lines for load-bearing files.
+- If the wiki's domain groups are configured, it greps your source paths for `Domain(...)` blocks, keeps the groups that also appear in the domain-spec tree, and pulls their Mechanics and Contracts excerpts — a Contract entry is a caller-visible guarantee the code already commits to, so it counts as a capability just like a Mechanic does.
+- When neither signal is available (or the structure map has no entry yet for a path), it falls back to a shallow scan of your source paths for sub-folders carrying their own entry point — the same heuristic Agent D used in Step 3, just applied inline rather than through a dispatched agent.
 
-The skill asks you a small set of clarifying questions about the feature's scope, who triggers it, and any edge-case behavior to capture. It then scaffolds `features/<feature-slug>/` with:
+It then compares the combined candidate list against every status folder-note already in the product's asset tree — the same `(type, path, summary)` reading `lazy-spec.lookup` does — and drops anything an existing asset already names or clearly describes, using judgment rather than a literal string match. For everything left over, it proposes a category (`feature` by default, `bug` when the evidence is a hazard or TODO comment naming a defect, `change` when it is an increment on an already-documented asset) and a lowercase-with-hyphens slug.
 
-- A status folder-note (`<feature-slug>.md`) carrying the feature icon, a `# Summary` précis, and an empty gate record.
-- `design.md` — authored from your answers, behavior-only, with a `flow` diagram drawn under the behavior section — the only doc the scaffold seeds.
+The report prints one line per phase — resolve, structure-map query, domain-group query, spec-tree enumeration, gap-compute — then the gap list and how many capabilities were already covered. When there is genuinely no code-side signal at all (no structure map, no domain groups, and the fallback scan finds nothing), it says so plainly: that is an honest "nothing to compare against yet", not a bug, and it reports `no-gaps` rather than a false "fully covered".
 
-`code-plan.md` and `test-plan.md` are opt-in — your planning and testing workflow authors them later, whenever there is dev or test work to plan; the scaffold never creates them.
+For each remaining gap, one `AskUserQuestion` at a time offers:
 
-**Verification gate.** The feature folder `features/<feature-slug>/` should contain the folder-note and `design.md` (stage `draft`). Open `design.md` and confirm the flow diagram is rendered. No `tech.md`, no `layout` doc, and no `code-plan.md` / `test-plan.md` should be present yet — those either don't exist at the asset level or are opt-in and not yet authored.
+- **materialize via lazy-spec.create-from-code** — offered only for code-bound `feature` gaps; runs `/lazy-spec.create-from-code <compound-key> feature <slug>` in feature mode right away, which delegates to `lazy-spec.create-asset` the same way Step 3's candidate scaffolding did, including its own flow diagram.
+- **print asset-proposal markup** — any category; prints a pasteable proposal block for you to drop into a living doc (`design.md`, `tech.md`, `architecture.md`) yourself, where the coordinator materializes it once that document is next approved. The skill does not write it into any document itself.
+- **skip** — no trace; the gap is re-reported the next time you run `/lazy-spec.coverage`.
+
+**Verification gate.** The report names an outcome for every phase, ending in either `no-gaps` or a gap list whose count matches the number of `AskUserQuestion` rounds you answered. Anything you chose to materialize should exist on disk under `features/<slug>/` (or the category you picked); anything you chose to print should be sitting in your own paste buffer, not yet landed in any document.
 
 ## After you're done
 
 The product is registered and its initial spec is live. From here:
 
-- **Add more features** — run `/lazy-spec.create-feature <compound-key> <slug>` for each new feature you want to document. You can scaffold any of the candidates Agent D surfaced, or invent a new slug for a feature the scan did not detect.
+- **Find more gaps** — re-run `/lazy-spec.coverage <compound-key>` whenever the codebase grows; it re-scans the current code state against whatever is already documented and only proposes what's still missing. Re-running `/lazy-spec.create-from-code <compound-key>` also re-surfaces Agent D's current candidate list from Step 3, in case a sub-area you skipped earlier now looks more feature-shaped.
 - **Keep docs in sync with code** — when source changes land, run `/lazy-spec.sync-with-code <compound-key>` to surface behavior changes for the design doc, update branch pins if you are working on a non-default branch, and propose gate/stage corrections (e.g. flipping `spec_develop_done`) grounded in what actually shipped — always with your confirmation before anything is written.
 - **Drive assets through their gates** — use `/lazy-spec.flip-gate` to advance a feature's readiness gates (`spec_design_done` → `spec_plan_done` → …), or let `spec.coordinator` advance derived gates for you on its next wake (the `lazy-spec.gate-tick` routine itself only polls jobs and checks note structure).
 - **Write the product's shared UI look** — once `vision.md` approves, tick the `Write ui-design` checkbox on the product's folder-note if your product needs one place for its design system, recurring screen patterns, and navigation skeleton; each asset's own `ui-design.md` then refines that shared look rather than inventing its own.

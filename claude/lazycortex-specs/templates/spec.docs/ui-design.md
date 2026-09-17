@@ -17,6 +17,9 @@ spec_source_docs: []
 ## Intent
 <!-- What this interface must give the user — the job the screens below exist to do, stated against the goals the approved `design.md` already settled rather than restating them. -->
 
+## Terms
+<!-- "Glossary: The most important domain and technical terms that your stakeholders use when discussing the system." — arc42 §12 Glossary. One line per term the document uses, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, a term this document introduces is defined here first. -->
+
 ## Screens
 <!-- Every screen or view the feature introduces or changes, and what each is for. -->
 

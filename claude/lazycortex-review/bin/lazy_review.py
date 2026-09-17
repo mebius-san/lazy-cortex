@@ -204,7 +204,8 @@ def cmd_paint_banner(args: argparse.Namespace) -> int:
   text = file_path.read_text()
   in_flight = bool(job_markers.read(repo, file_path)[JobMarker.ACTIVE_JOB])
   # waiver: type: ignore — note_ops is a deferred/late-bound sibling import; mypy cannot resolve it
-  updated_text = note_ops.repaint_banner(text, job_in_flight = in_flight)  # type: ignore[attr-defined]
+  updated_text = note_ops.repaint_banner(  # type: ignore[attr-defined]
+      text, job_in_flight = in_flight, lang = note_ops.resolve_language(file_path))  # type: ignore[attr-defined]
   file_path.write_text(updated_text)
   return 0
 
@@ -279,7 +280,7 @@ def cmd_commit_doc(args: argparse.Namespace) -> int:
   Delegate the `commit-doc` subcommand to the commit_doc module.
 
   Args:
-    args: Parsed namespace with `file`, `subject`, and `repo` attributes.
+    args: Parsed namespace with `file`, `subject`, `repo`, and `also` attributes.
 
   Returns:
     Exit code from the commit_doc module.
@@ -287,7 +288,9 @@ def cmd_commit_doc(args: argparse.Namespace) -> int:
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import commit_doc  # type: ignore
-  return commit_doc.main([args.file, "--subject", args.subject, "--repo", args.repo])
+  # each landed attachment is replayed as its own flag — the verb reads `--also` repeatably
+  extra = [token for path in (args.also or ()) for token in ("--also", path)]
+  return commit_doc.main([args.file, "--subject", args.subject, "--repo", args.repo, *extra])
 
 
 def cmd_start(args: argparse.Namespace) -> int:
@@ -566,6 +569,9 @@ def build_parser() -> argparse.ArgumentParser:
   p_commit_doc.add_argument("--subject", required=True)
   # waiver: argparse CLI signature, not a domain key
   p_commit_doc.add_argument("--repo", default=".")
+  # repeatable: one `--also <path>` per attachment a `collect-job` landed beside the document
+  # waiver: argparse CLI signature, not a domain key
+  p_commit_doc.add_argument("--also", action = "append", default = None)
   p_commit_doc.set_defaults(func=cmd_commit_doc)
 
   # `coordinator-dispatch` — the git-watch routine's entrypoint for one changed document

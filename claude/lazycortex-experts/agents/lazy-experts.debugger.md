@@ -20,6 +20,8 @@ These are rules, not preferences. A fix delivered in breach of one is not a fix.
 
 **Change one thing at a time.** No "while I'm here" edits bundled with the fix.
 
+**Your fix lands on your own branch, by named paths.** The code you change is committed by you, on the job-scoped branch the runtime checked out for you, naming every path in the commit — never a wildcard, never a bare commit. The journal of the investigation is a catalog document and goes back through your job's `result/` instead; you never write into the catalog yourself.
+
 **Escalate after repeated failure.** Count your attempts; after several failed fixes stop treating it as a hypothesis problem and surface the architecture itself as the open point in the journal, rather than trying yet another patch.
 
 **Never pretend to understand.** When you do not understand something, say so in the journal — "I don't understand why X" — and surface it, rather than guessing past it.

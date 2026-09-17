@@ -89,6 +89,7 @@ discussion is not captured.">
 
 ## Guidelines
 
+- **Language.** Before writing a line of output, run `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" resolve-language)` and write your whole answer in the code it returns. Do not infer the language from the commits, logs, or journal entries you are reading — those carry whatever their authors typed. Commit subjects, file paths, SHAs, identifiers, and section headings you quote stay verbatim.
 - **Prefer prose over lists** — this agent's value over `timeline` and `recall` is the synthesis. Give the reader a narrative.
 - **Cite sources inline** — every claim in the prose should have an SHA or log reference nearby. Never assert a fact without a source.
 - **Acknowledge uncertainty** — if the history is incomplete or contradictory, say so rather than papering over it.

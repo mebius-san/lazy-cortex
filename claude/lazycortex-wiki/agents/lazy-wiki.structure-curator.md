@@ -44,7 +44,7 @@ Read the mode first — it decides what you read and whether you write.
 3. **Nothing changed in what the map says** (the edit did not touch the path's role, or the file never earned an entry) → `outcome: noop`, stop. Nothing written, nothing committed.
 4. **Apply with `Edit`**, anchoring on the entry line (or the parent directory's line for an insertion). An anchor that occurs more than once in the map → `outcome: error`, category `technical` — duplicate entries are the audit's to report, and the rebuild's to repair.
 5. **Write `result/structure.json`** — the operations applied, per the structure protocol.
-6. **Commit.** `git add -A && git commit -m "wiki(structure): <path-basename>"` — do **NOT** pass `--author`; the pump put `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` in your environment and git reads them itself. Your job dir is gitignored, so the commit carries the map alone. Leave the tree clean.
+6. **Commit.** `git add -- <abs-map-path> && git commit -m "wiki(structure): <path-basename>" -- <abs-map-path>` — do **NOT** pass `--author`; the pump put `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` in your environment and git reads them itself. You name the map, so the commit carries it and nothing else — the index is shared, and a wildcard would publish another writer's parked work. Leave the tree clean.
 7. **Finish.** Write `result/response.json`: `{"outcome": "curated", "result": ["result/structure.json"]}`.
 
 ## kind = `rename`

@@ -1,10 +1,10 @@
 ---
 name: lazy-review.doc-review-protocol
-version: 8
+version: 9
 routine_protocol_candidate: true
 description: Markdown-document review protocol for lazycortex-review — minimal request/response contract for jobs dispatched to experts via lazycortex-core's expert runtime queue.
 ---
-# doc-review protocol v8
+# doc-review protocol v9
 
 Canonical contract for jobs dispatched to experts by the ``lazycortex-review`` dispatcher (or any other consumer producing doc-review-shaped jobs). The dispatcher enforces ownership-isolation in code (``reapply.py`` + ``body.py``); the agent does NOT need to self-police section boundaries — those are restored by reapply byte-for-byte. The dispatcher classifies each dispatch into a structural ``mode`` (see § Mode rules) that determines what bytes the dispatcher will accept back. Consumer-side state machine, banner vocabulary, finalize behavior, and approve-gesture flow are out of scope for this wire contract — they belong to the consumer that drives the dispatcher.
 
@@ -36,7 +36,7 @@ Field notes:
 - ``role`` — free-form string transported from the expert's config to the agent verbatim; the consumer plugin's class-configuration skill (``lazy-review.configure``) is the authoritative source of this value. The protocol does NOT enumerate values or assign semantics; the agent treats it as its own self-label and may branch on it (or ignore it). Ownership / IO contract is keyed on ``mode``, not ``role``.
 - ``source[0].path`` — relative to the job dir, points at the document the expert reads. For ``mode=main`` it is the **raw document exactly as committed** — banner, ``# History``, foreign tagged H1 sections, gesture checkboxes, and unresolved edit markup all included; nothing pre-strips it on the way in. For ``mode=validation`` / ``mode=terminal`` the dispatching consumer supplies the **markup-resolved view** (every edit annotation folded to the text it proposes) — those experts judge the document's final state. What comes back is still bounded by § Mode rules, and everything outside the mode's footprint is restored from the operator's prior state on reapply.
 - ``context[0..N].path`` — auxiliary files (e.g. a prior revision, or a related document the class declares as context). A consumer MAY stage additional materials here beyond what this protocol enumerates; the expert MUST read every file present, not only the ones this protocol names.
-- ``result[0].path`` — relative to the job dir, points at the empty file the expert writes to when ``outcome=edited``. Writer modes (``main`` / ``validation`` / ``terminal`` / ``repair``) return body content this way.
+- ``result[0].path`` — relative to the job dir, points at the empty file the expert writes to when ``outcome=edited``. Writer modes (``main`` / ``validation`` / ``terminal`` / ``repair``) return body content this way. A ``mode=main`` writer may declare further ``result`` entries of its own in the response — see § Attachments; the request only ever names the one.
 - ``edit_marker_style`` — names which annotation style is attached to the job. The agent reads this value and locates the matching block of marker rules in the ``lazy-core.markdown-style`` protocol attached to the job's ``config.json`` (one source of truth for marker shape — no per-style template duplicated in the payload). The dispatching consumer fills it from the document's pinned ``review_marker_style`` frontmatter (see § Frontmatter reserved keys), falling back to its settings only when the pin is absent.
 - ``concerns`` — present only on ``mode=main`` dispatches AND only when at least one ``mode=validation`` section currently holds non-empty content. Each entry names one validation H1 section and carries its body (heading + ownership tag stripped). The main writer cannot edit the validation section content directly (the dispatcher restores it byte-for-byte on reapply); the field exists so the main writer's agent body has access to what the validator said.
 
@@ -47,7 +47,7 @@ The response envelope — ``outcome`` / ``result`` / ``error`` — is owned by `
 - ``outcome`` — ``edited | empty | error`` for a review-kind dispatch (``mode`` one of ``main`` / ``validation`` / ``terminal``); ``edited | error`` for a repair-kind dispatch (``mode == "repair"`` — a repair produces a parseable file or fails, there is no partial-progress ``empty``).
 - ``error.category`` — ``logical`` (the input was invalid), ``transient`` (a queue or Claude-process crash), ``technical`` (a schema violation), or ``broken`` (repair-specific — see `mode == "repair"`). ``broken`` is reserved for ``mode == "repair"``; the other three apply to every mode.
 
-For ``outcome: "edited"``, every writer mode (``main`` / ``validation`` / ``terminal`` / ``repair``) returns body content via ``result/<file>`` per its own footprint (see § Mode rules); ``mode=validation`` and ``mode=terminal`` write only the markdown body of the owned section — **no H1 heading, no leading tag line** — the dispatcher emits those itself. A result file MAY open with an optional YAML frontmatter fence (``---\\n<keys>\\n---``); the dispatcher applies the fence's keys as an overlay onto the document's frontmatter (reserved keys — see § Frontmatter reserved keys — and ``tags`` are filtered out) and treats the remainder as the body. A result file without a fence is body-only — back-compat for sections that have no frontmatter updates this round.
+For ``outcome: "edited"`` the ``result`` array's FIRST entry is the job's own body content; on ``mode=main`` every further entry is an attachment (§ Attachments). Every writer mode (``main`` / ``validation`` / ``terminal`` / ``repair``) returns body content via ``result/<file>`` per its own footprint (see § Mode rules); ``mode=validation`` and ``mode=terminal`` write only the markdown body of the owned section — **no H1 heading, no leading tag line** — the dispatcher emits those itself. A result file MAY open with an optional YAML frontmatter fence (``---\\n<keys>\\n---``); the dispatcher applies the fence's keys as an overlay onto the document's frontmatter (reserved keys — see § Frontmatter reserved keys — and ``tags`` are filtered out) and treats the remainder as the body. A result file without a fence is body-only — back-compat for sections that have no frontmatter updates this round.
 
 ## Mode rules
 
@@ -122,10 +122,30 @@ Exhaustive forbidden-vocabulary list (shared by every expert that emits a ``hist
 
 The sentence is the expert's account of its own edit. Whether and how the consumer lands it under ``# History`` — the heading shape, the ordering, who writes the section — is consumer policy, out of scope for this wire contract.
 
+## Language
+
+Review is the one chain with no language of its own. Write every line of prose — the report body, edit-marker rationales, question and concern callouts, the history entry — in **the language of the document under review**, judged from the document's own existing prose, and do not consult any settings key or language-resolving verb for it. A document written in one language whose review annotations arrive in another is the failure this clause prevents.
+
+Where the document itself is empty or gives no signal, follow the language of the brief or source material the job carries. Never retranslate existing prose, and never translate the parts `lazy-core.markdown-style` keeps as identifiers: frontmatter keys and values, callout type tokens, `#review/…` tags, canonical section headings, paths, and wikilink targets.
+
+The banner callouts and the `# History` explainer line are not yours — the entry verb and the banner primitive render those from their own per-language tables, keyed by the repository's `language`.
+
+## Attachments
+
+``mode == "main"`` accepts attachments; ``validation``, ``terminal`` and ``repair`` accept none.
+
+A main writer returns its document as the first ``result`` entry and each attachment as a further entry, every entry shaped ``{"path": "result/<file>"}``. The dispatcher puts each attachment beside the landed document under that entry's own basename, which must be a plain filename — no directory, no parent hop, never empty. An entry that is not lands nothing: the response is malformed and the job stays uncollected.
+
+Links from the document to an attachment are written by the neighbour name — ``[app-shell.html](app-shell.html)`` — as if both files already sat side by side. A link spelled ``result/<file>`` is rewritten to the neighbour name on landing; a link naming a file the response did not return, and an attachment nothing links to, each raise a line in the daemon log and neither fails the job.
+
+Overwriting an existing attachment is legitimate: its body belongs to the job whose document owns it, so a later round returns the regenerated file the same way.
+
+An extra ``result`` entry on any other mode is dropped with a line in the daemon log — those modes own a section, not a folder.
+
 ## Side-effect rules
 
 - Expert MUST NOT touch any file outside its job dir.
-- Expert writes ONLY into ``result/`` (paths declared in the response's ``result`` array).
+- Expert writes ONLY into ``result/`` (paths declared in the response's ``result`` array) — the document first, attachments after it, and nothing anywhere else in the working tree.
 
 ## Frontmatter reserved keys
 

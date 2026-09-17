@@ -92,7 +92,7 @@ def _today(today: str | None) -> str:
   return datetime.now(UTC).date().isoformat()
 
 
-def _parse_frontmatter(text: str) -> tuple[dict, int]:
+def parse_frontmatter(text: str) -> tuple[dict, int]:
   """
   Parse the leading YAML frontmatter block of a file's text.
 
@@ -266,7 +266,7 @@ def _write_log(asset_dir: Path, gate: str, value: bool, reason: str) -> None:
   ts = datetime.now(UTC)
   stamp = ts.strftime("%Y-%m-%d_%H-%M-%S")
   date_str = ts.strftime("%Y-%m-%d %H:%M:%S UTC")
-  log_dir = _repo_root(cwd) / LOG_ROOT / LOG_CLAUDE / FLIP_GATE_NAME
+  log_dir = repo_root(cwd) / LOG_ROOT / LOG_CLAUDE / FLIP_GATE_NAME
   log_dir.mkdir(parents = True, exist_ok = True)
   body = (
       "---\n"
@@ -305,7 +305,7 @@ def _git_field(cwd: Path, args: list[str], fallback: str) -> str:
   return out.stdout.strip() or fallback
 
 
-def _repo_root(cwd: Path) -> Path:
+def repo_root(cwd: Path) -> Path:
   """
   Resolve the git repo root for log placement, falling back to `cwd`.
 
@@ -511,7 +511,7 @@ def flip_gate(
   # the folder-note's frontmatter carries every gate this function can flip
   note = asset_dir / f"{asset_dir.name}.md"
   text = note.read_text()
-  fm_values, fm_end = _parse_frontmatter(text)
+  fm_values, fm_end = parse_frontmatter(text)
 
   # guard: the note's own role decides which of the two ladders it runs, so a gate off that
   # ladder is refused before anything is written
@@ -664,7 +664,7 @@ def halt_asset_text(
   # historical authoring language), the call is a no-op: `fm_text` and `body` are returned
   # unchanged and `changed` is False.
 
-  fm_values, _ = _parse_frontmatter(fm_text)
+  fm_values, _ = parse_frontmatter(fm_text)
   callout = _halt_callout(reason, lang)
 
   # guard: already halted with this exact failure recorded — nothing new to say; a callout
@@ -739,7 +739,7 @@ def halt_asset(
   # the status folder-note's frontmatter carries the halt flag this function sets
   note = asset_dir / f"{asset_dir.name}.md"
   text = note.read_text()
-  _, fm_end = _parse_frontmatter(text)
+  _, fm_end = parse_frontmatter(text)
   fm_text, body, changed = halt_asset_text(
       text[:fm_end], text[fm_end:], reason, author_name = author_name, today = today,
       lang = note_explainers.lang_for_note(note),

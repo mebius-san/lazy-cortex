@@ -5,16 +5,18 @@ Invoked once per matched asset status folder-note. `spec.coordinator` (per
 `lazy-spec.coordination-playbook.md`, dispatched by the sibling `coordinator_dispatch.py` routine, not
 by this one) now owns every inter- and intra-asset sequencing decision — which gate to flip,
 which sibling doc to promote, which checkbox-equivalent job to dispatch next, whether a change
-cascades into its targets. This worker keeps only the four concerns no LLM needs to be woken for:
+cascades into its targets. This worker keeps only the three concerns no LLM needs to be woken for:
 
 - Active-job polling (`spec_job_markers.py`'s `active_job`): an asset tracking the marker has its
   job bundle's terminal marker (`DONE` / `DEAD` / `CANCELLED`, per the `lazycortex-core` job-runtime
   layout, read file-wise — never imported across the plugin boundary) checked on every tick.
-  `DONE` and `CANCELLED` clear the marker, log a `# History` line, and retire the bundle
-  (`gate_dispatch.consume_stale_job`, freeing its dedup key so the checkbox can be re-dispatched);
-  `DEAD` additionally sets `spec_halted: true` and appends a persistent `[!failure]` callout to
-  `# Gates` (un-halting is a manual operator act, out of scope here), leaving its bundle unretired
-  for diagnostics. Every clear also raises `pending_wake: job-done` in the sidecar — that flag,
+  `DONE` lands the job's `result/` into the asset folder through the `land-result` collector —
+  the only channel a job's document and attachments take into the catalog — then clears the
+  marker, logs a `# History` line, and retires the bundle (`gate_dispatch.consume_stale_job`,
+  freeing its dedup key so the checkbox can be re-dispatched); `CANCELLED` does the same without
+  the landing; `DEAD` additionally sets `spec_halted: true` and appends a persistent `[!failure]`
+  callout to `# Gates` (un-halting is a manual operator act, out of scope here), leaving its
+  bundle unretired for diagnostics. Every clear also raises `pending_wake: job-done` in the sidecar — that flag,
   not a diff of the clearing commit, is what makes the transition visible to
   `coordinator_dispatch.py`'s own `job-done` trigger. This worker opens no review itself; the
   coordinator opens it with `lazy-review.submit` on the `job-done` wake this same poll raises.
@@ -28,12 +30,6 @@ cascades into its targets. This worker keeps only the four concerns no LLM needs
   coordinator job's marker when a NEW commit wakes it, so a job that dies with no further commit
   landing would otherwise leave the marker stranded forever — this worker's periodic md-scan
   cadence catches it regardless (4a debt, plan 4b Task 5).
-- Stuck-draft backstop: an authored sibling doc (`architecture.md` / `code-plan.md` /
-  `test-plan.md`) whose `Write <doc>` job's DONE is recorded in `# History` but whose review the
-  coordinator never opened — the doc sits at `spec_stage: draft` with no review trace and no
-  tracked job left on the asset — is submitted into review via the review CLI's idempotent
-  `submit` verb (state-sanitizers-design.md; only certain cases fire, doubt reads as
-  not-a-problem).
 - Structural note-check: `note_ops.note_check`'s violations (an unrecognized or mistyped
   frontmatter key, a missing or misordered required section) are folded into this tick's own
   result — read-only, repaired by the coordinator through its pen and `note-set-key`, never by
@@ -75,30 +71,13 @@ import note_explainers  # noqa: E402
 import spec_job_markers  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from spec_keys import (  # noqa: E402
-    GateCheckbox,
     HaltReason,
     HistoryEvent,
     JobMarker,
-    PlanReview,
     Section,
-    SiblingDoc,
-    SpecHaltKey,
-    SpecKey,
-    Stage,
-    StageKey,
     TickAction,
 )
 
-
-# The authored sibling docs whose review the coordinator's own `submit` call on a `Write <doc>`
-# DONE is the only opener (lazy-spec.coordination-playbook.md Chapter 3) — the docs the stuck-draft
-# backstop sweep (`_stuck_draft_docs`) re-checks, keyed to the checkbox label whose DONE History
-# line proves a job actually wrote them.
-_AUTHORED_DOC_CHECKBOX = {
-    SiblingDoc.ARCHITECTURE: GateCheckbox.WRITE_ARCHITECTURE,
-    SiblingDoc.CODE_PLAN: GateCheckbox.WRITE_CODE_PLAN,
-    SiblingDoc.TEST_PLAN: GateCheckbox.WRITE_TEST_PLAN,
-}
 
 # Regex template for locating a frontmatter key's line, shared by `_set_fm_json` / `_del_fm_key`.
 _FM_KEY_RE_TEMPLATE = r"(?m)^{key}\s*:.*$"
@@ -115,8 +94,8 @@ _NOTE_CHECK_SUBVERB = "note-check"
 # `note_ops.note_check`'s result-dict key this worker folds into its own tick result.
 _VIOLATIONS_KEY = "violations"
 
-# The stuck-draft sweep's result-dict key listing the doc filenames it submitted into review.
-_DOCS_KEY = "docs"
+# `land_result.land_result`'s result-dict key listing the paths it wrote.
+_LANDED_KEY = "landed"
 
 
 # Mirrored job-bundle terminal-marker filenames from `lazycortex-core`'s job runtime, read
@@ -136,7 +115,7 @@ _PROMOTE_AUTHOR_NAME = "lazy-spec.gate-tick"
 _PROMOTE_AUTHOR_EMAIL = "lazy-spec.gate-tick@bot.invalid"
 
 # Regex templates for a YAML block-list frontmatter value (`key:\n  - a\n  - b\n`), shared by
-# `_read_fm_list` / `_write_fm_list`. `flip_gate._parse_frontmatter`'s flat scalar parse skips
+# `_read_fm_list` / `_write_fm_list`. `flip_gate.parse_frontmatter`'s flat scalar parse skips
 # bullet lines entirely, so a list-typed key needs its own reader/writer.
 _FM_LIST_BLOCK_RE_TEMPLATE = r"(?m)^{key}\s*:\s*\n(?:\s+-\s*.*\n)*"
 _FM_LIST_INLINE_RE_TEMPLATE = r"(?m)^{key}\s*:\s*\[\s*\]\s*$\n?"
@@ -245,113 +224,51 @@ def _find_active_job_marker(repo_root: Path, expert: str, job_id: str) -> str | 
   return None
 
 
-def _stuck_draft_docs(asset_dir: Path, *, fm_values: dict, body: str, markers: dict) -> list[str]:
+def _land_job_result(repo_root: Path, asset_dir: Path, expert: str, job_id: str) -> list[str]:
   """
-  Find authored sibling docs stranded at `spec_stage: draft` after their writing job finished.
+  Put one finished job's `result/` into the asset folder via the `land-result` collector.
 
-  The coordinator's `submit` call on a `Write <doc>` job's DONE is the only opener of review on
-  `architecture.md` / `code-plan.md` / `test-plan.md` (lazy-spec.coordination-playbook.md Chapter 3);
-  a skipped call strands the doc in draft forever. This sweep names only the certain cases: the
-  doc exists in draft with no review trace, the folder-note's `# History` proves the writing
-  job's DONE landed with no review-open record after it, and nothing on the asset is still
-  moving (no tracked job, no pending wake, not halted) — any doubt reads as not-a-problem.
-
-  Args:
-    asset_dir: The asset folder holding the sibling docs.
-    fm_values: The folder-note's parsed frontmatter values.
-    body: The folder-note's body text (post-frontmatter), holding `# History`.
-    markers: The asset's job-marker sidecar entry, as read by `spec_job_markers.read`.
-
-  Returns:
-    Bare filenames of the stranded docs, in `_AUTHORED_DOC_CHECKBOX` order; empty when nothing
-    is certainly stuck.
-  """
-
-  # Domain(spec.lifecycle):
-  # # Certainty-only backstop for stranded review
-  # A document whose writing job has already finished but whose review was never opened is meant
-  # to be caught immediately by the process that finished the job, so it should never actually
-  # reach this fallback. When it is checked here anyway, only the cases where nothing else could
-  # explain the gap are treated as truly stranded: no other work is in flight on the asset, nothing
-  # is waiting to be noticed, the asset itself is not stopped, and the document sits exactly where
-  # a finished-but-unreviewed draft would sit with no trace of a review ever having started. Any
-  # condition left uncertain is read as "not a problem" rather than acted on, because opening a
-  # review that was not actually missing is worse than leaving a genuinely stuck one for the next
-  # pass to catch.
-
-  # guard: any tracked job or pending wake means the loop is still moving — not stuck
-  if any(markers.get(key) for key in (JobMarker.ACTIVE_JOB, JobMarker.COORDINATOR_JOB, JobMarker.PENDING_WAKE)):
-    return []
-  # guard: a halted asset is out of every automatic sweep's reach
-  if flip_gate._is_true(fm_values, SpecHaltKey.HALTED):
-    return []
-
-  # a doc is certainly stuck only when every condition below holds; any miss skips it silently
-  stuck: list[str] = []
-  for doc_name, checkbox_label in _AUTHORED_DOC_CHECKBOX.items():
-    doc_path = asset_dir / doc_name
-    # guard: no doc on disk — nothing to submit
-    if not doc_path.is_file():
-      continue
-    # guard: no DONE History record for the doc's writing job — an operator hand-draft, skip;
-    # the record may have been written under any authoring language, so every variant counts
-    if not any(fragment in body
-               for fragment in note_explainers.history_fragments(HistoryEvent.JOB_DONE_SCAN,
-                                                                 label = checkbox_label)):
-      continue
-    # guard: a review-open record already landed for this doc — not stuck
-    if any(fragment in body
-           for fragment in note_explainers.history_fragments(HistoryEvent.REVIEW_OPENED_SCAN,
-                                                             doc = doc_name)):
-      continue
-    doc_fm, _ = flip_gate._parse_frontmatter(doc_path.read_text())
-    # guard: only a draft doc can be stranded pre-review
-    if doc_fm.get(StageKey.STAGE, "").strip() != Stage.DRAFT:
-      continue
-    # guard: any review trace on the doc itself (active loop, or a finalized verdict) — not stuck
-    if flip_gate._is_true(doc_fm, SpecKey.REVIEW_ACTIVE) or SpecKey.REVIEW_RESULT in doc_fm:
-      continue
-    stuck.append(doc_name)
-  return stuck
-
-
-def _submit_stuck_draft(asset_dir: Path, doc_name: str) -> bool:
-  """
-  Open review on one stranded draft doc via the review CLI's idempotent `submit` verb.
-
-  Best-effort: any failure (CLI unresolvable, timeout, non-zero exit) degrades to a False
-  return, never raises — the doc stays stranded and the next tick retries.
+  Best-effort: any failure — a bundle no longer on disk, a collector that will not import, an
+  unreadable response, a refused entry, a git command that exits non-zero — degrades to an empty
+  return, never raises. The job is then simply undelivered, which is the state the coordinator
+  already reports.
 
   Guarantees:
-    - Never raises; any failure degrades to a False return that leaves the doc stranded for
-      the next tick to retry.
+    - Never raises; every failure path returns an empty list and leaves the asset folder as
+      it was found — the collector rolls its own partial writes back before it re-raises.
 
   Args:
-    asset_dir: The asset folder holding the doc.
-    doc_name: The stranded doc's bare filename.
+    repo_root: The repository root holding the job queue.
+    asset_dir: The asset folder the job's document belongs in.
+    expert: The dispatched expert's name, the job queue's first path segment.
+    job_id: The finished job's id.
 
   Returns:
-    True when review was actually opened; False on every failure path.
+    The repo-relative paths the landing wrote and committed; empty when nothing landed.
   """
 
   # Contract:
-  # This call never raises: any failure (an unresolvable review CLI, a timeout, a non-zero
-  # exit) degrades to a False return, leaving the doc stranded for the next tick to retry.
+  # This call never raises: any failure degrades to an empty return, leaving the job
+  # undelivered for the coordinator to report rather than stopping the tick.
 
-  cli = flip_gate._resolve_review_cli()
-  # guard: review CLI not resolvable on the env path — degrade to a skip
-  if cli is None:
-    return False
+  job_dir = repo_root / _JOBS_BASE / expert / job_id
+  # guard: the bundle is gone — there is nothing to land
+  if not job_dir.is_dir():
+    return []
   try:
-    proc = subprocess.run(
-        [sys.executable, str(cli), PlanReview.SUBMIT_VERB, str((asset_dir / doc_name).resolve())],
-        capture_output = True, text = True, timeout = PlanReview.START_TIMEOUT_S, check = False,
-    )
-  # waiver: fire-and-forget backstop — ANY review-open failure (CLI crash, timeout, bad path)
-  # must degrade to a skip the next tick retries, never raise out of the sweep
-  except (OSError, subprocess.SubprocessError):
-    return False
-  return proc.returncode == 0
+    # waiver: deferred sibling import -- flat bin/ dir resolved via sys.path at runtime, not
+    # statically importable; inside the try so a failed resolution degrades like any other
+    import land_result
+    target = land_result.document_target(job_dir, asset_dir)
+    # guard: the job delivered no document — nothing to place
+    if target is None:
+      return []
+    return land_result.land_result(job_dir, target)[_LANDED_KEY]
+  # waiver: fire-and-forget collector — ANY landing failure must leave the job undelivered
+  # rather than stop the tick that also has a History line and a wake to write
+  except (ImportError, OSError, subprocess.SubprocessError, ValueError, KeyError) as exc:
+    sys.stderr.write(f"gate-tick: land-result {expert}/{job_id}: {exc}\n")
+    return []
 
 
 def _set_fm_json(fm_text: str, key: str, value: dict) -> str:
@@ -544,9 +461,14 @@ def _apply_job_marker(
   `gate_dispatch.consume_stale_job`, freeing its dedup key so the checkbox can be re-dispatched —
   the bundle's files stay on disk either way. Opening review on the report a finished job wrote
   is not this pass's business — the coordinator does it on the `job-done` wake this same call
-  raises. `DEAD` additionally sets `spec_halted: true`, appends a `[!failure]` callout to
-  `# Gates` that persists until an operator resolves it by hand (un-halting is a manual act, out
-  of scope here), and deliberately leaves the bundle unretired, kept for diagnostics. Deciding
+  raises. Putting that report in place IS this pass's business: on `DONE` the job's `result/` is
+  landed into the asset folder and committed by the `land-result` collector before the wake
+  goes up, because an expert never writes into the catalog itself, and the folder-note is
+  re-read from disk afterwards so this call's own write cannot revert what landed. A job whose
+  `result/` delivered nothing lands nothing and the coordinator reports it undelivered. `DEAD` additionally
+  sets `spec_halted: true`, appends a `[!failure]` callout to `# Gates` that persists until an
+  operator resolves it by hand (un-halting is a manual act, out of scope here), and deliberately
+  leaves the bundle unretired, kept for diagnostics. Deciding
   what happens next on the asset — dispatching a replacement job, reacting to the DEAD halt — is
   `spec.coordinator`'s call; this pass only records the terminal outcome.
 
@@ -594,6 +516,17 @@ def _apply_job_marker(
 
   # only the body/action/subject differ per marker kind
   if marker == _JOB_MARKER_DONE:
+    # the job's document and attachments arrive only through `result/`: put them in the asset
+    # folder and commit them here, so the document the coordinator submits into review on the
+    # `job-done` wake this same call raises is already tracked
+    _land_job_result(repo_root, asset_dir, job_info[JobMarker.EXPERT], job_id)
+
+    # the landing writes into the asset folder this call is about to edit, so the note text read
+    # before it is now stale — re-read it, or the write below would revert what just landed
+    text = asset_note.read_text()
+    _, fm_end = flip_gate.parse_frontmatter(text)
+    fm_text, body = text[:fm_end], text[fm_end:]
+
     # the localized narrative tail of the History line, in the note's authoring language
     done_tail = note_explainers.history_line_for_lang(note_lang, HistoryEvent.JOB_DONE,
                                                       job_id = job_id, label = checkbox_label)
@@ -772,27 +705,22 @@ def gate_tick(asset_note: Path, today: str | None = None) -> dict:
   stranding the marker forever when no further commit wakes `coordinator_dispatch.py` to notice
   (see this module's own docstring, plan 4b Task 5).
 
-  Step 0.7 — stuck-draft backstop: with no job tracked and no wake pending, any authored
-  sibling doc certainly stranded at `spec_stage: draft` (its writing job's DONE recorded, no
-  review ever opened) is submitted into review, with a `# History` line per doc.
-
   Args:
     asset_note: The status folder-note path; its parent is the asset dir.
     today: Optional ISO date forwarded into the applied job-marker's callout and history line.
 
   Returns:
     A result dict whose `action` is one of `job-done`, `job-cancelled`, `asset-halted`,
-    `coordinator-job-consumed`, `coordinator-job-dead`, `stuck-draft-submitted`, or `noop`;
-    every non-`noop` action carries the identity it acted on (`checkbox` + `job_id` for the
-    active-job branches, `trigger` + `job_id` for the coordinator-job branches, a `docs` list
-    for the stuck-draft branch); a `noop` carries an additional `violations` list when
-    `note-check` found any.
+    `coordinator-job-consumed`, `coordinator-job-dead`, or `noop`; every non-`noop` action
+    carries the identity it acted on (`checkbox` + `job_id` for the active-job branches,
+    `trigger` + `job_id` for the coordinator-job branches); a `noop` carries an additional
+    `violations` list when `note-check` found any.
   """
   asset_dir = asset_note.parent
-  repo_root = flip_gate._repo_root(asset_dir)
+  repo_root = flip_gate.repo_root(asset_dir)
   today_str = flip_gate._today(today)
   text = asset_note.read_text()
-  fm_values, fm_end = flip_gate._parse_frontmatter(text)
+  _, fm_end = flip_gate.parse_frontmatter(text)
   body = text[fm_end:]
   markers = spec_job_markers.read(repo_root, asset_note)
 
@@ -833,31 +761,6 @@ def gate_tick(asset_note: Path, today: str | None = None) -> dict:
           body = body, asset_dir = asset_dir, repo_root = repo_root,
           marker = coord_marker, job_info = coord_job_info, today_str = today_str,
       )
-
-  # Step 0.7 — stuck-draft backstop: an authored doc whose writing job's DONE landed with no
-  # review ever opened on it (the coordinator skipped its mandatory `submit` call) is submitted
-  # into review here, since no other mechanism discovers it (state-sanitizers-design.md)
-  submitted = [
-      doc_name
-      for doc_name in _stuck_draft_docs(asset_dir, fm_values = fm_values, body = body, markers = markers)
-      if _submit_stuck_draft(asset_dir, doc_name)
-  ]
-  if submitted:
-    for doc_name in submitted:
-      # the localized narrative tail of the History line, in the note's authoring language
-      opened_tail = note_explainers.history_line(asset_note, HistoryEvent.REVIEW_OPENED,
-                                                 doc = doc_name)
-      body = flip_gate._append_under_heading(
-          body, Section.HISTORY, f"- {today_str} — {_PROMOTE_AUTHOR_NAME} · {opened_tail}",
-      )
-    asset_note.write_text(text[:fm_end] + note_explainers.ensure_explainers(
-        body, note_explainers.lang_for_note(asset_note)))
-    _commit_note_change(
-        asset_dir, asset_note,
-        f"{_PROMOTE_AUTHOR_NAME}: stuck-draft backstop opened review on "
-        f"{', '.join(submitted)} ({asset_dir.name})",
-    )
-    return { TickAction.ACTION: TickAction.STUCK_DRAFT_SUBMITTED, _DOCS_KEY: submitted }
 
   # Structural check, folded into the tick result — repairing a violation is the coordinator's
   # own job (through its pen and `note-set-key`), never this worker's.

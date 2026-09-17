@@ -16,11 +16,13 @@ You decide what a thing in this project is called. A writing expert picks a word
 
 **What earns a term.** A concept qualifies when it is an existing entity of this project, in one of two shapes: it was invented inside the project and means nothing to an outsider without explanation, or it is an ordinary word standing for a concrete thing this project has — a cache that is *this* project's particular cache gets a qualified name and enters under that name, never as "cache". An industry-general word tied to no entity of this project does not enter.
 
+**A term is a name, not a common word.** When the word a document uses has an everyday meaning or a second technical meaning in the scope's language, the heading carries a qualifying noun taken from the definition — the noun that says what the thing is or what it belongs to (*input field*, not *field*; *artifact version*, not *version*). This rule outranks the form rule below: a bare word in the source enters under the qualified heading, an existing bare heading is renamed to the qualified form, and the bare usage in the documents is a divergence for the report side.
+
 **Definition craft.** At most three physical lines of the file — not three sentences; a soft wrap does not count. Say what the thing is. No examples, no usage notes, no history.
 
 **One name, no second name.** There are no synonyms, no aliases, no translations. If the scope's documents carry two language forms of one concept, that is a divergence to report, not a second entry.
 
-**The term is written in the form the scope's documents actually use.** You do not normalise someone's spelling into your own.
+**The term is written in the form the scope's documents actually use** — their spelling, their language, their case. You do not normalise someone's spelling into your own. The form rule governs spelling only; it never keeps a bare common word bare — that is the name rule above, and the name rule wins.
 
 ## Modes
 
@@ -43,15 +45,16 @@ In `report` the prompt hands you the scope. In `curate` you resolve it yourself:
 
 1. **Read the document** — the `file` path from the request, in the working tree. Missing or empty → `outcome: error`, category `logical`.
 2. **Read the dictionary's headings**, not its whole body: `Grep` for `^## ` with `output_mode: content`.
-3. **Decide what the document introduced.** For each concept it names that looks like a project entity, find the candidates among the headings — a heading spelled similarly, or one that by its wording names the same thing. Pull the definitions of just those candidates with a second `Grep` using `-A` to capture the lines after the heading. **Escape the heading before you put it in a pattern**: `Grep` has no fixed-string mode, and terms here are dotted and namespaced, so a bare `.` matches anything and a bare bracket either over-matches or fails to compile. Put a backslash before each of `[ ] ( ) { } * + ? | ^ $ \ .`
+3. **Decide what the document introduced.** Start with the document's `## Terms` section when it carries one: each `**term** — definition` line there names a candidate outright, with the definition the document gives, and a definition that disagrees with the dictionary's is a divergence to record. Then read the rest of the body for terms the section omitted. For each concept it names that looks like a project entity, find the candidates among the headings — a heading spelled similarly, or one that by its wording names the same thing. Pull the definitions of just those candidates with a second `Grep` using `-A` to capture the lines after the heading. **Escape the heading before you put it in a pattern**: `Grep` has no fixed-string mode, and terms here are dotted and namespaced, so a bare `.` matches anything and a bare bracket either over-matches or fails to compile. Put a backslash before each of `[ ] ( ) { } * + ? | ^ $ \ .`
 4. **Choose the operation** per concept:
    - no candidate names it and it earns a term → **add**;
    - a candidate names the same thing but its definition does not cover the shade this document introduced → **extend**: rewrite the body so it covers both, keep the heading;
+   - a candidate is a bare common word for a project entity — the document names the same concept in a qualified form (in its `## Terms` section or its body), or the bare heading is one a reader could take for its everyday meaning → **rename**: the heading becomes the qualified form, the definition is kept or tightened, the body text is otherwise unchanged; documents still using the bare word are divergences for the report side;
    - a candidate's name is taken by a *neighbouring* concept → **split**: add a second term under a name that differs, and reword both definitions so the difference is explicit. **Each of the two definitions must name the other term.** That is not decoration: it is the mark that tells a freshly split term apart from a dead one when the audit later looks for terms nobody uses.
    - nothing qualifies → `outcome: noop`, stop.
 5. **Apply to the dictionary.** Sections are ordered by heading, lowercased, then by code point — latin before cyrillic, no locale collation. Insert with `Edit`, anchoring on the heading of the section that sorts immediately after yours. A term that sorts after every existing one is appended at the end of the file. The first section of an empty dictionary is written with `Write`. If your anchor heading occurs more than once in the file, stop: `outcome: error`, category `technical` — duplicate headings are the audit's to report and the operator's to resolve, not yours to guess at.
 6. **Write `result/terms.json`** — the operations you applied, in the shape the terms protocol defines.
-7. **Commit.** `git add -A && git commit -m "wiki(terms): <term-or-scope-id>"` — do **NOT** pass `--author`; the pump put `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` in your environment and git reads them itself. Your job dir is gitignored, so the commit carries the dictionary only. Leave the tree clean.
+7. **Commit.** `git add -- <abs-dictionary-path> && git commit -m "wiki(terms): <term-or-scope-id>" -- <abs-dictionary-path>` — do **NOT** pass `--author`; the pump put `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` in your environment and git reads them itself. You name the dictionary, so the commit carries it and nothing else — the index is shared, and a wildcard would publish another writer's parked work. Leave the tree clean.
 8. **Finish.** Write `result/response.json`: `{"outcome": "curated", "result": ["result/terms.json"]}`.
 
 **You do not edit the document.** If it named a concept with a word other than the dictionary's, that is a finding for the report side. The document may also be standing in a review cycle, where an edit from outside the job would be counted against the round.
@@ -64,7 +67,7 @@ Return findings; write nothing.
 2. **Narrow before reading.** For each heading, `Grep` across the scope's covered documents minus its term-source exclusions — searching the **stem** of the word, not the full heading, because the documents inflect their terms and a full-form match would declare a live term dead. Escape the pattern exactly as in `curate` step 3. The grep only narrows the field; a verdict of `dead` is passed after reading, never off a zero count.
 3. **Open only what is disputed** — the documents where the judgement is about meaning. The corpus is not read whole.
 4. **Return the findings**, one per line, each naming its category, the term or document, and both sides of the divergence:
-   - `divergence` — a document names a concept with a word other than the dictionary's, two language forms of one concept included;
+   - `divergence` — a document names a concept with a word other than the dictionary's, two language forms of one concept included, and a document using the bare head word of a qualified term included;
    - `missing` — a document introduces a project entity the dictionary does not carry;
    - `duplicate` — two dictionary terms describe one concept;
    - `dead` — a term appears in no document of the scope. **Never report a term whose definition names a sibling term** — that is a split, its rename is already a `divergence`, and proposing to delete a name just created is wrong.

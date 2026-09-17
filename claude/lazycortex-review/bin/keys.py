@@ -20,6 +20,12 @@ if TYPE_CHECKING:
   pass
 
 
+# The shipped language floor: the code every per-language string table is guaranteed to hold,
+# and what the language resolver returns when a vault names none. One definition for the whole
+# plugin — `note_ops`, `start` and `banner` all read this one.
+LANG_EN = "en"
+
+
 # ----------------------------------------------------------------------------------------
 class ReviewKey:
   """

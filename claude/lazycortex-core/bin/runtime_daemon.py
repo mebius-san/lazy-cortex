@@ -534,6 +534,12 @@ def compute_sleep(time_until_next: float, polling_interval_sec: float) -> float:
   return max(0.0, min(time_until_next, polling_interval_sec))
 
 
+# The built-in pump routine's name. It ticks through a halt like an `ignore_halt` routine
+# because the queue it drives is where the halt-exempt jobs are waiting; the pump narrows
+# that queue itself (`expert_pump._is_job_halt_exempt`).
+_PUMP_ROUTINE = "lazy-expert.pump"
+
+
 def due_routines(now: float, registry: dict, last_run: dict,
                  system_stuck: bool = False) -> list[tuple[str, dict]]:
   """
@@ -547,7 +553,8 @@ def due_routines(now: float, registry: dict, last_run: dict,
     registry: Routine registry as loaded from `lazy.settings.json[routines]`, keyed by routine name.
     last_run: Mapping of routine name to its last successful run timestamp.
     system_stuck: When true, the daemon is halted or the working tree is dirty; only routines marked
-      with `ignore_halt: true` survive the filter so recovery routines can still run.
+      with `ignore_halt: true`, plus the built-in expert pump, survive the filter so recovery
+      routines and the jobs they dispatch can still run.
 
   Returns:
     A list of `(name, cfg)` pairs ordered by `priority` ascending.
@@ -561,13 +568,17 @@ def due_routines(now: float, registry: dict, last_run: dict,
   # in trouble — halted, or sitting on an unreviewed dirty tree — the eligible set narrows
   # sharply: only routines the operator has deliberately marked as safe to run through trouble
   # survive, so a recovery routine can still triage the very condition that is blocking
-  # everything else, while ordinary work waits for the trouble to clear.
+  # everything else, while ordinary work waits for the trouble to clear. The queue-driving
+  # pump counts as one of those, because the recovery routine's own work is dispatched as a
+  # queued job and reaches nothing without it.
 
   out = []
   for name, cfg in registry.items():
-    # filter out normal routines while system is stuck; recovery routines stay
-    # guard: skip the routine while the daemon is halted, unless it opts out of halt
-    if system_stuck and not cfg.get(RoutineKey.IGNORE_HALT, False):
+    # filter out normal routines while system is stuck; recovery routines stay, and so does
+    # the pump — the halt-exempt jobs reach their spawn through it and nowhere else
+    halt_exempt = cfg.get(RoutineKey.IGNORE_HALT, False) or name == _PUMP_ROUTINE
+    # guard: skip the routine while the daemon is halted, unless it is halt-exempt
+    if system_stuck and not halt_exempt:
       continue
     if cfg.get(RoutineKey.TYPE) == "schedule":
       # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
@@ -768,6 +779,8 @@ def _check_working_tree(repo_root: Path) -> list[str] | None:
     - Uses `--no-optional-locks` so the stat-cache refresh does not race the index lock — the dirty-
       tree check runs every daemon iteration and without this flag would grab the lock dozens of
       times per minute.
+    - Uses `core.quotePath=false` so a non-ASCII name arrives as itself rather than as octal byte
+      escapes, which a recovery caller would otherwise hand back to git as a literal pathspec.
 
   Args:
     repo_root: Absolute path to the repository the daemon is driving.
@@ -780,7 +793,7 @@ def _check_working_tree(repo_root: Path) -> list[str] | None:
   try:
     rc = subprocess.run(
       [ "git", "--no-optional-locks", "-c", "color.status=never",
-        "status", "--porcelain" ],
+        "-c", "core.quotePath=false", "status", "--porcelain" ],
       cwd = str(repo_root), capture_output = True, text = True, check = False,
     )
   except FileNotFoundError:

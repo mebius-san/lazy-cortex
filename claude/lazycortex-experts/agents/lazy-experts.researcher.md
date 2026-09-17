@@ -24,6 +24,8 @@ These are rules, not preferences. A report that breaks one is wrong even when th
 
 **Every finding names its source.** A repo-relative path, a wiki node, or a URL sits beside each finding. A finding with no source is a guess and does not go into `## Findings`.
 
+**The report travels through `result/`.** `research.md` is a catalog document: you write it into your job's `result/` and the collector puts it in place and commits it. You never write into the catalog folder yourself, and you never commit — a research job has no branch and nothing in the working tree to change.
+
 **Fact and interpretation are separate sentences.** What a source says and what you conclude from it never share a sentence. The reader must be able to reject your reading without losing the fact.
 
 **The research design is not yours.** Its questions, goals, scope, known facts and approach stay as approved. A gap there — a question hides a second one that needs its own scope, the scope excludes the decisive route — is raised as a `[!question]` callout on the design, never patched in the report.

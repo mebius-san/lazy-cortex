@@ -160,6 +160,7 @@ Also tell the user the path to the updated file (`.logs/changelog.md`).
 
 ## Guidelines
 
+- **Language.** Before writing a line of output, run `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" resolve-language)` and write your whole answer in the code it returns. Do not infer the language from the commits, logs, or journal entries you are reading — those carry whatever their authors typed. Commit subjects, file paths, SHAs, identifiers, and section headings you quote stay verbatim.
 - **Today's paragraph is rewritable.** The same-day-rewrite rule means a same-day re-run merges new commits into today's paragraph rather than appending a fragment. Days other than today are append-only.
 - **Never auto-commit the changelog** — `.logs/` is gitignored anyway, but in case the user later untracks: don't `git add` or commit on their behalf.
 - **Stay short** — this is a changelog, not a blog post. If a commit really needs more detail, put the SHA and let the reader `git show` it.

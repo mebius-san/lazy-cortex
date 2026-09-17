@@ -12,10 +12,10 @@ A generic agent composing this aspect holds itself to four iron laws — verific
 
 ## Side-effect rules
 
-The universal expert-runtime contract forbids writes outside the job dir. This aspect carves no exceptions.
+The universal expert-runtime contract decides where an expert may write. This aspect carves no exceptions of its own; it restates the contract's destination rule so no composing expert has to infer it.
 
-- The expert MAY write to: nothing beyond what its other aspects and the dispatching protocol already allow.
-- The expert MUST NOT write to: anything outside `result/` per the protocol delivered by its dispatching routine.
+- The expert MAY write to: its job's own `result/`, and — on a job the runtime gave its own branch — exactly the files that job exists to change, committed on that branch with every path named. Nothing beyond what its other aspects and the dispatching protocol already allow.
+- The expert MUST NOT write to: anything outside `result/`, except those branch files. Never a wildcard staging call, never a bare commit, never a file in the spec catalog.
 
 ## Kind / role / outcome additions
 

@@ -32,16 +32,17 @@ Response shape:
 
     {
       "outcome":       "edited | empty | noop | error",
-      "result":        ["result/<file>"],
+      "result":        ["result/<document>", "result/<attachment>", ...],
       "history_entry": "<one-sentence summary>",
       "error":         {"category": "...", "message": "..."}
     }
 
-For `outcome=edited` every writer returns `result: ["path"]` — main
-writers write the full document body, section writers write only the
-markdown body of their owned section (no H1 heading, no ownership tag —
-the dispatcher emits both itself). The output transport is unified;
-`response.json` carries only metadata.
+For `outcome=edited` the FIRST entry of `result` is the job's own result document — main
+writers write the full document body, section writers write only the markdown body of
+their owned section (no H1 heading, no ownership tag — the dispatcher emits both itself).
+Every FURTHER entry is an attachment the collector puts beside the landed document under
+the entry's own basename; only `mode=main` may carry them. The output transport is
+unified; `response.json` carries only metadata.
 """
 from __future__ import annotations
 # waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -161,6 +162,47 @@ def build_request(
   if concerns:
     request[Outcome.CONCERNS] = concerns
   return request
+
+
+# An attachment entry's only legal prefix: the job's own result directory.
+_RESULT_PREFIX = "result/"
+
+
+def attachment_basename(entry: object) -> str:
+  """
+  Resolve one attachment entry of a response's `result` array to its bare filename.
+
+  Args:
+    entry: One `result` array member — `{"path": "result/<file>"}` or the bare path string.
+
+  Returns:
+    The attachment's basename, the name it takes beside the landed document.
+
+  Raises:
+    PayloadError: If the entry names no path string, points outside the job's own `result/`,
+      or resolves to anything but a plain filename.
+  """
+
+  # Domain(review.dispatch):
+  # # An attachment names a neighbour, never a location
+  # What an expert declares as an attachment is only ever a file NAME: where the file ends up
+  # is the collector's decision, taken from where the document lands, never the expert's. An
+  # entry that carries any location of its own — a directory, a parent hop, a path outside the
+  # job's own output directory — is claiming a placement it has no standing to claim, so it is
+  # read as a malformed response rather than honoured, and the whole landing is refused.
+
+  path = entry.get(JobKey.PATH) if isinstance(entry, dict) else entry
+  # guard: an entry that resolves to anything but a path string names no file
+  if not isinstance(path, str):
+    raise PayloadError(f"attachment entry carries no path: {entry!r}")
+  # guard: an attachment lives under the job's own result/ dir and nowhere else
+  if not path.startswith(_RESULT_PREFIX):
+    raise PayloadError(f"attachment path outside result/: {path!r}")
+  name = path[len(_RESULT_PREFIX):]
+  # guard: the basename is a plain filename — no separator, no parent hop, never empty
+  if not name or "/" in name or "\\" in name or name in {".", ".."}:
+    raise PayloadError(f"attachment basename is not a plain filename: {path!r}")
+  return name
 
 
 # ------------------------------------------------------- validate_response

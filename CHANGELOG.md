@@ -4,6 +4,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 9.5.0 — 2026-09-17 UTC
+
+- New `resolve-language` command resolves every language setting to an ISO 639-1 code, with the root `language` key as the shared fallback across the resolver chains; `lazy-core.doctor` now flags a free-form language name and offers the fix. `review.language` is retired — review now takes its language from the document it reviews.
+- The doctor's own triage job now runs through a dirty-tree halt instead of getting stuck behind it, and a halted job's response is preserved and collected once the halt lifts, instead of being overwritten with an error.
+- Recovery after an interrupted commit now correctly parses `git status` for renamed files and filenames containing spaces or Cyrillic characters, and no longer relies on `git add -A` anywhere in the runtime — every write goes through explicit paths.
+- The decision-callout style guide drops the `Why` / `Rejected` label pair. A decision now states its thesis and its justification as plain prose, a list of rejected alternatives is a style violation rather than a required line, and `Supersedes` stays as it was.
+
 ### 9.4.4 — 2026-09-14 UTC
 
 - `lazy-core.agent-models` no longer treats a skill-shaped plugin key (e.g. `superpowers:brainstorming`) as exempt from staleness pruning — since the model router only matches dispatched agents, never skills, the five `superpowers:*` entries are dropped from the shipped `default-tiers.json` seed and any surviving copy gets retired like any other unreachable key.
@@ -664,6 +671,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 9.2.0 — 2026-09-17 UTC
+
+- Large spec document templates (architecture, design, research, UI design, use cases, tech) now open with a `## Terms` section right after the overview — one line per term with its definition — so every glossary term the document uses is declared up front.
+- New `land-result` command lands an expert's finished document and its attachments from a job's `result/` folder into the catalog with path-checked, explicit commits — cascading edits land the same way via `--target`, and the old "stuck draft" detection heuristic is gone.
+- Spec coordinators and the request/decision skills now resolve the document's language before writing a single line, keeping catalog documents in a consistent language.
+- **Breaking:** recording a decision takes its justification as one positional argument instead of the `--why` and `--rejected` flags. The decision callout drops its separate Why and Rejected lines for plain-text justification; the Supersedes line is unchanged.
+
 ### 9.1.1 — 2026-09-15 UTC
 
 - Product and asset folder-note descriptions no longer get stuck on an empty placeholder — each note's own coordinator now writes its description directly, instead of relying on the sources-update skill, which never ran for products without any asset.
@@ -1243,6 +1257,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+### 6.5.0 — 2026-09-17 UTC
+
+- A review writer can now return attachments alongside its document: further entries in the response `result` array land beside the target document under their own names, links to them are rewritten to the new neighbor paths, and the document, its attachments, and the icon repaint commit together (the plugin CLI's `commit-doc` gained a repeatable `--also` flag for this). Every entry is validated first — paths must stay inside the job bundle, symlinked sources/destinations are refused, and an attachment may replace an earlier attachment but never the document itself. Only the main-writer mode may return attachments.
+- **Breaking:** Review no longer has its own `review.language` setting — banners, the history explainer, and other operator-facing strings now follow the repo-wide `language` key instead of the removed plugin-scoped one, and render bilingually (English + Russian) where a table is shown. Reviewers themselves still write in the language of the document under review.
+
 ### 6.4.4 — 2026-09-12 UTC
 
 - Fixed review install, coordinator, and command steps that could fail with exit code 126 once the executable bit stopped being set — CLI calls now always route explicitly through the Python interpreter.
@@ -1523,6 +1542,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.
 
 ## lazycortex-experts
+
+### 1.7.0 — 2026-09-17 UTC
+
+- Expert personas now deliver catalog-bound documents, reports, and mockups back through the job's `result/` channel instead of writing them into the working tree — fixes a bug where UI-designer review mockups could halt the daemon. Code, data, and product-doc changes still commit on the job's own branch, and `lazy-experts.install` seeds the right workspace/commit settings per role automatically.
+- Generated documents with a `## Terms` section (designs, architectures, tech specs, interfaces, use cases, research reports) must now come back with a filled glossary — one alphabetical line per term, verbatim for dictionary terms, defined inline for new ones.
+- A term is now a name rather than an ordinary word. When the bare word also has an everyday meaning, the specialist writes it with a qualifying noun that says which project entity it names, and every document inheriting the term inherits the qualifier with it.
+- A generated document no longer carries notes about reconciliation. A dictionary that disagrees with the upstream document simply wins, an upstream bare word is replaced by the qualified form without comment, and a stale structure-map entry goes unmentioned.
 
 ### 1.6.3 — 2026-09-14 UTC
 
@@ -1858,6 +1884,14 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 3.1.0 — 2026-09-17 UTC
+
+- The wiki now writes in the vault's own language — query answers, the structure map, and relink's curators resolve it via a new CLI verb, and `/lazy-wiki.configure vault` lets the wiki diverge from the repo-wide language when it needs to.
+- The terms curator reads a changed document's `Terms` section first, treating each line as a term candidate and flagging any definition that disagrees with the dictionary before it scans the rest of the document.
+- Fixed wording the wiki emits into generated files now lives in one place and is fetched, not copied. A new `text` command prints a passage by key — a file's explainer line, the tag dictionary's preamble, the no-results message — in the language the repo resolves to, or in one given with `--lang`; an unknown language falls back to English. The tag curator, the domain-spec writer and the query skill ask for those passages instead of carrying their own copies, so adding a language is a single entry in the plugin's text table and changes nothing an agent reads.
+- The terms curator gained a rename operation and now treats a term as a name. A bare dictionary heading whose word has an everyday meaning is renamed to its qualified form, and a document still using the bare word is recorded as a divergence.
+- A writer no longer notes a bare dictionary heading or a dictionary disagreement inside its own document. The qualified form and the dictionary's definition go into that document's glossary section, and the curator matches and renames from there.
 
 ### 3.0.3 — 2026-09-13 UTC
 

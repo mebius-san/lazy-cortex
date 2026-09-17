@@ -8,16 +8,20 @@ This document is loaded into every expert run via `--append-system-prompt-file`.
 
 ## Working tree
 
-Your committable work is **mutations to tracked files in the worktree** — the review/request document at the path given in your request, sibling docs your protocol authorises you to touch, tracked config the protocol explicitly names, and the attachments your channel's protocol permits (see **Attachments** below). Nothing beyond those four.
+**Where a file lands decides how it gets there.** Two questions, one answer each — and one limit that holds whatever the answers are.
 
-If — and only if — you mutated such tracked files, commit at the end:
+**Does it land in the spec catalog?** Then you never write it and never commit it. The document your job produces, its attachments, its reports, a request you raise — every one of them goes back through `result/`, declared in your response's `result` array, and a collector puts it in place and commits it. This holds in every job type, every round, every mode. The catalog is not yours to write into.
+
+**Does it land anywhere else — code, data, product documentation, configuration?** Then you edit it in place and commit it yourself at the end of your job, naming every path:
 
 ```
-git add -A
-git commit -m "<expert-name>: <one-line summary>"
+git add -- <path> <path>
+git commit -m "<expert-name>: <one-line summary>" -- <path> <path>
 ```
 
-`git add -A` respects `.gitignore` and will skip your job dir automatically. That is intentional — see below.
+Never stage with a wildcard, never sweep the whole worktree into a commit, and never commit without a pathspec. The checkout's index is shared with the operator and with every other routine: a wildcard stage or a pathspec-less commit publishes work that is not yours. Your own persona memory under `.memory/<self>/` is committable too, but you never stage it by hand — the memory-write skill writes the note, its tag index and its commit as one atomic act, and running that skill is the whole of your part. Run logs under `.logs/` are the same shape.
+
+**The right stops at any file the system itself owns regions of.** A file carrying review frontmatter, a protected section, or a system-painted banner goes through the applying route (`result/`), never a direct worktree edit, for as long as it is in that state. A file you created outside that state and which later enters it stops being directly editable until it leaves again. This limit is independent of the two questions above: it reaches a code file, a data file and a configuration file exactly as it reaches a document, and a `true` commit right does not lift it.
 
 **Never commit anything under your own job dir.** Your job dir (`.experts/.jobs/<expert>/<job-id>/` — `response.json`, `result/*`, `transcript.jsonl`, `request.json`, `source/`, `context/`, `PID`, `attempts`, …) is runtime scratch space. It is gitignored. It is read by the daemon and the dispatcher; nothing about it belongs in `git log`.
 
@@ -31,7 +35,7 @@ Do **not** push. Do **not** change branches. Do **not** run `git checkout`, `git
 **Sub-skills count as your writes.** When you invoke a sub-skill (via the `Skill` tool or by running a CLI verb in `Bash`) that modifies tracked files — `lazy-review.start`, `lazy-spec.set-stage`, any helper that flips frontmatter or writes content — those writes are part of YOUR work. Two ways to keep the tree clean:
 
 1. **Sub-skill commits itself** (preferred when the skill's purpose is a self-contained mutation). The backing binary stages + commits atomically; no follow-up step from you.
-2. **You wrap the sub-skill in your own final commit**. Invoke the skill, then run `git add -A && git commit` once at the end of your job to sweep up anything the sub-skill left dirty.
+2. **You wrap the sub-skill in your own final commit**. Invoke the skill, then commit once at the end of your job, naming the paths the skill left dirty — the same explicit pathspec every other commit of yours carries.
 
 A sub-skill that writes to disk and leaves `git status --porcelain` non-empty after the skill returns is a contract violation against THIS contract — fix the sub-skill (option 1) rather than relying on option 2 as the permanent solution.
 
@@ -43,11 +47,13 @@ The user message you receive lists the concrete paths for this job: the protocol
 
 ## Attachments
 
-**You may create and edit a file beside your target document.** A mockup, a diagram, a data file, an additional prose chapter — written directly in the worktree with ordinary point edits, riding on the final commit you already make for the document. This is not routed through `result/`; nothing about an attachment goes into your job dir.
+**An attachment is returned, never placed.** A mockup, a diagram, a data file, an additional prose chapter that belongs beside your result document is written into `result/` and declared in your response: the FIRST entry of the `result` array is the document itself, and every entry after it is one attachment. Each entry is `{"path": "result/<file>"}` and nothing else — the basename is the name the file takes beside the document, and it is a plain filename: no directory, no parent hop, never empty. An entry that carries a location of its own makes the whole response malformed and the job undelivered.
 
-**The right stops at any file the system itself owns regions of.** A file carrying review frontmatter, a protected section, or a system-painted banner goes through the applying route (`result/`), never a direct worktree edit, for as long as it is in that state. A file you created outside that state and which later enters it stops being directly editable until it leaves again.
+**Link an attachment by its neighbour name.** Inside the document you write `[app-shell.html](app-shell.html)`, as if both files already sat side by side — because after the landing they do. A link spelled `result/<file>` is rewritten for you, and a link naming a file you did not return is reported in the daemon log.
 
-**Where, under what name, and with which frontmatter is your protocol's call.** Your channel's protocol says where attachments live, what they may be called, and which frontmatter keys a markdown attachment must carry — ownership, kind, or both. Read it; do not invent a location and do not omit a key it names. A protocol that permits no attachments says so, and its silence is not permission.
+**Regeneration goes the same way.** A later round that changes a mockup returns the new file through `result/` again; the collector overwrites the old one. The file's body belongs to the job whose document owns it.
+
+**Where the attachment ends up, and which frontmatter it carries, is your protocol's call.** Your channel's protocol says which frontmatter keys a markdown attachment must carry — ownership, kind, or both — and whether the channel accepts attachments at all. Read it; a protocol that permits none says so, and its silence is not permission.
 
 **No format is forbidden.** Prefer text formats you can author yourself — markup, vector graphics, stylesheets, structured data. Reach for a binary only when a generator exists that produces it.
 

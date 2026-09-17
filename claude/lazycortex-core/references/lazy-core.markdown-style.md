@@ -108,7 +108,7 @@ Grouped by the surface that writes it. Author is one of the closed set `dispatch
 
 | Role | Type + tag | Author | Mandatory elements |
 |---|---|---|---|
-| Decision statement | `[!decision] #spec/decision` | expert (review writer) | thesis-line title; `**Why.**` line; `**Rejected.**` line; optional `**Supersedes.**` line |
+| Decision statement | `[!decision] #spec/decision` | expert (review writer) | thesis-line title; justification prose; optional `**Supersedes.**` line |
 | Decision candidate | `[!decision-candidate]` | expert | one-line thesis naming the call taken; accept/reject `- [ ]` pair |
 | Gate flip record | `[!gate]` (flip form) | dispatcher | gate key, `— flipped <date> (<reason>)` |
 | Launch checkbox | `[!gate]` (checkbox form) | dispatcher | one label from a closed set; a `- [ ]` / `- [x]` line |
@@ -177,8 +177,7 @@ Inventory found no live authored use of `[!recommendation]` — the sole match u
 
 ```markdown
 > [!decision] Short thesis line #spec/decision
-> **Why.** Reason the decision follows from.
-> **Rejected.** Option X — because Y.
+> The reason the decision follows from, as plain prose — no label, no field name.
 ```
 
 A decision that supersedes an earlier one adds a `**Supersedes.**` line naming the prior record by link:
@@ -189,7 +188,7 @@ A decision that supersedes an earlier one adds a `**Supersedes.**` line naming t
 
 The tag makes the block consumer-owned scaffolding: per the edit-annotation rules above, a tagged callout is never wrapped in marker syntax, and is retired by plain deletion, never rewritten in place.
 
-**The `Why` / `Rejected` pair lives ONLY in a decision record** — a `[!decision]` callout or a `decisions.md` entry. A "Rejected …" tail inline in design prose is a style violation: the prose bullet carries the principle alone, and the rejected alternative, when worth keeping, goes into a decision record beside it. Prose that narrates what was considered and turned down without a record is deleted, not preserved.
+**The justification lives ONLY in a decision record** — a `[!decision]` callout or a `decisions.md` entry. It states why the decision holds, never a catalogue of alternatives: a "Rejected …" line, in the callout or as a tail inline in design prose, is a style violation. The prose bullet carries the principle alone, and the record beside it carries the reason. Prose that narrates what was considered and turned down is deleted, not preserved.
 
 **Placement: the callout stands immediately after its owner.** A `[!decision]` — and a `[!decision-candidate]` alike — lands directly under the bullet or paragraph whose call it records, never batched at the end of a section and never orphaned between chapters. The owner is whatever prose states the decided principle; the callout is that prose's footnote, not a sibling chapter.
 

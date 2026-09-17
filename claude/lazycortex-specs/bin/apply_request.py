@@ -1278,7 +1278,7 @@ def _is_launched_feature(fm: dict, folder_note: Path) -> bool:
 
   # signal 2 — an active job dispatched for the implementation checkbox counts as launched
   # even before spec_develop_done itself flips true
-  job_info = spec_job_markers.read(flip_gate._repo_root(folder_note.parent), folder_note)[JobMarker.ACTIVE_JOB]
+  job_info = spec_job_markers.read(flip_gate.repo_root(folder_note.parent), folder_note)[JobMarker.ACTIVE_JOB]
   if isinstance(job_info, dict) and job_info.get(JobMarker.CHECKBOX) == GateCheckbox.START_IMPLEMENTATION:
     return True
 

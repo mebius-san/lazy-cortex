@@ -228,7 +228,7 @@ All products follow this shape. No concrete names appear in this rule — skills
 
 The request inbox is a direct child of the content-root — never inside any product or operator folder.
 
-An asset folder of any category may additionally hold **attachments** — files an expert created beside the document it was writing (a mockup, a diagram, a data file, an extra prose chapter). They are not drawn in the tree above because they carry no fixed names, and they sit **flat in the asset folder**, beside the documents. There is no attachments subfolder, and no other legal location. See [file-roles](./lazy-spec.file-roles-protocol.md) Part 2 § Attachments for what an attachment is and which keys it carries.
+An asset folder of any category may additionally hold **attachments** — files an expert returned alongside the document it was writing (a mockup, a diagram, a data file, an extra prose chapter) and the `land-result` collector placed beside it. They are not drawn in the tree above because they carry no fixed names, and they sit **flat in the asset folder**, beside the documents. There is no attachments subfolder, and no other legal location. See [file-roles](./lazy-spec.file-roles-protocol.md) Part 2 § Attachments for what an attachment is and which keys it carries.
 
 ## Part 2 — File roles
 
@@ -284,7 +284,7 @@ Every plugin-managed frontmatter key and body section has exactly one writer. An
 | `# Sources` H1 section + the `#protected/spec/sources` owner tag | specs writers (`lazy-spec.request-apply`, `lazy-spec.create-asset`, `lazy-spec.refresh-sources`) — never lazy-review, never operator-bypass |
 | `decisions.md` body — all four operations (`add`, `supersede`, `obsolete`, `promote`) | the `decide` primitive (sole writer), except the `#protected/wiki/see-also` H1 section, which is owned by `lazycortex-wiki` per its `#protected/<owner>/<region>` tag |
 | `# Attachments` H1 section + the `#protected/spec/attachments` owner tag | `spec.coordinator`'s own pen — written directly, never through a verb |
-| `spec_owner_doc` / `spec_doc_type` on an attachment | the expert that creates the file, at creation time — never derived or backfilled by another writer |
+| `spec_owner_doc` / `spec_doc_type` on an attachment | the expert that writes the file into its job's `result/`, at creation time — never derived or backfilled by another writer, and never edited in place afterwards |
 | Body of an attachment | the job whose own result document is the attachment's `spec_owner_doc` — every other role reads it and leaves it alone |
 | `wiki_pinned_topics` frontmatter | the file-creation sites that render it into a template (`scaffold_asset.py`, `lazy-spec.create-from-code`, `lazy-spec.sync-with-code`), the `decide` primitive (on `decisions.md` at creation), and the `pins` verb (backfill on existing files) |
 
