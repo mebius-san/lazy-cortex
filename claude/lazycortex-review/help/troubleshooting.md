@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-review skills — symptoms, likely causes, and fixes.
-last_regen: 2026-09-17
+last_regen: 2026-09-18
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree routing on observed symptom. Top-level branches: install/bootstrap failures (settings missing, permission error, malformed JSON), configure failures (audit FAIL after wizard, section-id loop), start/submit problems (file not opted in, no-op on re-run when unexpected), status reporting nothing useful, stop/resume confusion, finalize blocked or partial, audit FAIL findings. Each leaf names the troubleshooting entry that resolves it."
@@ -15,7 +15,7 @@ source_skills:
   - lazy-review.stop
   - lazy-review.finalize
   - lazy-review.audit
-source_sha: f1a56b7fe545eee38ce6ac86f103b38934d0fe11
+source_sha: f723a0557db9ea1fc346db7cac478f05d49c7eac
 ---
 # Troubleshooting
 
@@ -146,6 +146,16 @@ source_sha: f1a56b7fe545eee38ce6ac86f103b38934d0fe11
 **Likely cause**: The document is already in finalized shape — its frontmatter carries no `review_*` key but `review_result` (finalize unsets them rather than writing them false), and all review-loop scaffolding (banner, approve checkbox, system callouts) has already been stripped in a previous finalize run.
 
 **Fix**: No action is needed. If you believe the document was not fully finalized, run `/lazy-review.status <file>` to check the current frontmatter state. If `review_active` is still `true`, the file is still in the loop and `/lazy-review.finalize` should proceed normally — re-run it.
+
+---
+
+## `/lazy-review.finalize` refuses with `unfolded operator callouts remain`
+
+**Symptom**: Running `/lazy-review.finalize <file>` exits without committing, printing something like `refused: unfolded operator callouts remain in <file> (line N: decision-candidate, …)`.
+
+**Likely cause**: The document body still carries a `[!decision-candidate]` callout — ticked or not — or a `[!todo] #review/command` callout whose mini-plan is still open. Finalize checks for both before it will strip any review markup. A ticked candidate means the main writer proposed a residual call on an ambiguous answer but never folded the operator's tick into the surrounding prose — that writer's round is unfinished. An unticked candidate is still waiting on your choice, the same as an unanswered question. An open command callout means a dispatched instruction's mini-plan never finished.
+
+**Fix**: Do not delete the callout by hand to force finalize through — that loses the record of the decision. Run `/lazy-review.status <file>` first: for a ticked candidate, the refusal itself reopens the main round (round drops back to `main`, the writer is re-dispatched to fold the candidate), so the usual fix is to let that round complete and re-run finalize afterwards. For an unticked candidate, tick the option you want inside the callout, the same way you answer a `[!question]`. For an open command callout, let the coordinator finish the mini-plan, or close it out yourself. Then re-run `/lazy-review.finalize <file>`.
 
 ---
 

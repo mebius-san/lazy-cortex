@@ -192,6 +192,8 @@ The two folder-notes `spec.catalog-coordinator` owns (`${CLAUDE_PLUGIN_ROOT}/ref
 - **Un-promoted decision block in an approved living doc (WARN)** — a `design.md` / `bug.md` / `tech.md` / `architecture.md` at `spec_stage: approved` that still carries a `[!decision] … #spec/decision` block in its body: the automatic transfer on approve never ran (or the block was added after approval). Fix: `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" decide promote <doc>` (or `/lazy-spec.record-decision`).
   - **Skip entirely** when the owning asset carries `spec_cancelled: true` or `spec_released: true` — both states freeze the automatic transfer permanently by design; a block left in place there is expected, not a finding.
   - **WARN, not skip**, when the owning asset carries `spec_halted: true` — halt is temporary, and a block that got stuck while halted needs the operator to see the debt once the flag is lifted, not silence forever.
+- **Unfolded candidate in an approved document (FAIL)** — a living doc at `spec_stage: approved`, or any document carrying `review_result: approved` / `approved-with-concerns`, whose body still holds a `[!decision-candidate]` callout, ticked or not: the writer never folded the operator's verdict and the approval shipped a questionnaire. Fix: reopen the document's review at the writer round (`lazy-review.start`) so the callout is folded; never delete it by hand.
+- **Unmaterialized asset proposal in an approved document (WARN)** — a document carrying `review_result: approved` / `approved-with-concerns`, or a report the acceptance cycle closed, whose body still holds an `[!asset-proposal]` callout: the coordinator's post-acceptance materialization never ran, or the proposal was added after acceptance. Fix: wake the asset's coordinator (a `# Coordinator commands` line naming the proposal) so it scaffolds, links, or reopens and replaces the callout with the wikilink.
   - This check is scoped to living docs only — a `[!decision-candidate]` in a tool's report document (`code-report` / `test-report` / any other declared `report_doc`) is a standing to-do, never a transfer debt; it lives there indefinitely and is never a finding.
 
 **Change-cascade fields**
@@ -306,6 +308,7 @@ scan: Check 11 vault-spec — <clean|INFO|WARN> (<0|1> findings)
 - [ ] Role violation: `source_branches:` frontmatter on `features/<feat>/design.md`
 - [ ] Unknown `spec_role`: `<file>` carries `spec_role: <value>` (closed set: vision, use-cases, design, architecture, ui-design, code-plan, test-plan, code-report, test-report, bug, research, tech, status, decisions, product, catalog)
 - [ ] Loose `changelog.md`: `<spec_path>/changelog.md` exists — the role is removed; delete the file
+- [ ] Unfolded candidate: `<spec_path>/vision.md` is `review_result: approved` but still carries a `[!decision-candidate]` callout at line `<N>`
 - [ ] Header mismatch: `features/<feat>/design.md` H1 does not match its path + role
 - [ ] Invalid `spec_stage`: `<doc>` has `spec_stage: <value>` (closed set: empty, draft, approved, rejected, cancelled, deferred)
 - [ ] Stage/tag mirror drift: `<doc>` `spec_stage: approved` but `tags:` has `spec/draft`
@@ -379,6 +382,7 @@ scan: Check 11 vault-spec — <clean|INFO|WARN> (<0|1> findings)
 - [ ] Unresolvable `spec_targets`: `changes/<chg>/<chg>.md` lists `<path>` but no asset resolves at `<spec_path>/<path>`
 - [ ] Unresolvable `spec_depends_on`: `features/<feat>/<feat>.md` lists `<path>` but no asset resolves at `<spec_path>/<path>`
 - [ ] Un-promoted decision block: `features/<feat>/design.md` is `spec_stage: approved` but still carries a `[!decision]` block in its body
+- [ ] Unmaterialized asset proposal: `features/<feat>/architecture.md` is `review_result: approved` but still carries an `[!asset-proposal]` callout
 - [ ] Decision statement in a plan: `features/<feat>/code-plan.md` carries a `[!decision]` block — raise it into `design.md` instead
 - [ ] Decision statement in a report: `features/<feat>/code-report.md` carries a `[!decision]` block — that role holds only a decision-candidate
 - [ ] Dangling `Origin` back-link: `features/<feat>/decisions.md` `## D-002` is `active` with `Origin` naming `design.md`, which has no reference-link back to it

@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-09-17
+last_regen: 2026-09-18
 no_diagram: true
 source_skills:
   - lazy-spec.add-asset-type
@@ -25,7 +25,7 @@ source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
   - lazy-spec.audit
-source_sha: 0e7a6138bae7004baf583efc481f058dd0779257
+source_sha: f723a0557db9ea1fc346db7cac478f05d49c7eac
 ---
 # Troubleshooting
 
@@ -198,6 +198,16 @@ source_sha: 0e7a6138bae7004baf583efc481f058dd0779257
 **Likely cause**: The catalog was registered before the mandatory-vault-spec contract landed, or `/lazy-spec.install` was never re-run afterward — the content-root `vision.md` that every product split is a consequence of was never seeded. If a content-root `design.md` exists but no `vision.md` sits beside it, doctor reports `[INFO] pre-vision vault` instead — a legal starting state, migrated by hand whenever you're ready, not a WARN.
 
 **Fix**: Re-run `/lazy-spec.install` — its Step 6.9 seeds a draft `vision.md` at the content-root when neither file exists — then fill it in. This is a WARN, not a FAIL: the rest of the catalog keeps working while it's absent.
+
+---
+
+## `/lazy-spec.audit` reports an unfolded decision-candidate in an approved document
+
+**Symptom**: The report includes a FAIL naming a `[!decision-candidate]` callout — ticked or not — still present in a document that is `spec_stage: approved`, or that carries `review_result: approved` / `approved-with-concerns`.
+
+**Likely cause**: The writer round never folded the operator's verdict on the candidate before the document shipped as approved, so the approval carried a live questionnaire forward into the approved text. This check is scoped to living docs — a `[!decision-candidate]` in a tool's report document (`code-report` / `test-report`, or any other declared report type) is a standing to-do, never a finding.
+
+**Fix**: Reopen the document's review at the writer round (`/lazy-review.start`) so the callout is folded into the approved text, then re-run `/lazy-spec.audit` to confirm it clears. Never delete the callout by hand — that hides the debt without resolving it.
 
 ---
 
@@ -438,6 +448,16 @@ source_sha: 0e7a6138bae7004baf583efc481f058dd0779257
 **Likely cause**: You passed a stage outside `empty | draft | approved | rejected | cancelled | deferred` — often a leftover from an older model (`review`, `done`, `wtr`).
 
 **Fix**: Pass `draft` and set `review_active: true` for a doc that's currently in review, `approved` once it's accepted, or whichever closed-set value matches your intent.
+
+---
+
+## `/lazy-spec.set-stage` refuses: document carries a decision-candidate
+
+**Symptom**: Requesting `approved` refuses, naming a `[!decision-candidate]` callout at a specific line — ticked or not.
+
+**Likely cause**: Before landing `approved`, the skill now scans the document's body outside code fences for any `[!decision-candidate]` callout. Approving with one still in place would ship an unfolded questionnaire inside the approved text — the same condition `/lazy-spec.audit` flags afterward as an unfolded-candidate FAIL.
+
+**Fix**: Fold the callout through the document's review first — reopen it at the writer round via `/lazy-review.start` — then re-invoke `/lazy-spec.set-stage <doc> approved`. Never delete the callout by hand to clear the refusal.
 
 ---
 

@@ -722,8 +722,10 @@ def strip_banner_callouts(body: str) -> str:
   return _BANNER_CALLOUT_BLOCK_RE.sub("", body)
 
 
+# The two operator-answered callout kinds a writer round folds: a tagged question and a
+# decision-candidate (which carries no `#review/` tag by design — its type token is its identity).
 _ANSWERED_QUESTION_BLOCK_RE = re.compile(
-    r"(?ms)^>\s*\[!question\][^\n]*#review/question[^\n]*\n"
+    r"(?ms)^>\s*(?:\[!question\][^\n]*#review/question|\[!decision-candidate\])[^\n]*\n"
     r"(?:>[^\n]*\n)*?"
     r">\s*-\s*\[[xX]\][^\n]*\n"
     r"(?:>[^\n]*\n)*"
@@ -733,25 +735,28 @@ _ANSWERED_QUESTION_BLOCK_RE = re.compile(
 
 def strip_answered_questions(body: str) -> str:
   """
-  Remove every `#review/question` callout whose operator answer is already ticked.
+  Remove every answered operator callout — a ticked `#review/question` or a ticked
+  `[!decision-candidate]` — from `body`.
 
   Guarantees:
-    - A question callout carrying no ticked option survives untouched — it is still awaiting
-      the operator.
-    - Only `[!question]` callouts are considered; a ticked option inside any other callout
-      (`[!warning] #review/concerns-decision` above all) is left exactly as found.
+    - A question or candidate callout carrying no ticked option survives untouched — it is
+      still awaiting the operator.
+    - Only `[!question] #review/question` and `[!decision-candidate]` callouts are considered;
+      a ticked option inside any other callout (`[!warning] #review/concerns-decision` above
+      all) is left exactly as found.
 
   Args:
     body: Document body (no frontmatter).
 
   Returns:
-    `body` with each answered question block removed, together with the blank line that
-    separated it from the next block.
+    `body` with each answered block removed, together with the blank line that separated it
+    from the next block.
   """
 
   # Contract:
-  # A `[!question]` callout carrying a ticked option MUST NOT survive this call, and a callout
-  # of any other kind — or a question with no ticked option — MUST survive byte-for-byte.
+  # A `[!question] #review/question` or `[!decision-candidate]` callout carrying a ticked
+  # option MUST NOT survive this call, and a callout of any other kind — or one with no ticked
+  # option — MUST survive byte-for-byte.
 
   return _ANSWERED_QUESTION_BLOCK_RE.sub("", body)
 

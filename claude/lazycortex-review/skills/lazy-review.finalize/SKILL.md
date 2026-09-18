@@ -19,3 +19,7 @@ Normally the dispatcher fires this branch automatically once every final writer 
 ## Report
 
 `finalized: <file> (sha=<short-sha>)` (or `already finalized: <file>` when the file is already in finalized shape).
+
+## Failure modes
+
+- **`refused: unfolded operator callouts remain in <file> (line N: decision-candidate, …)`** (exit 3) — the body still carries a `[!decision-candidate]` callout, ticked or not, or a `[!todo] #review/command` callout with a non-empty mini-plan. Nothing is written. A ticked candidate is the main writer's unfolded round: reopen the main round so the writer folds it (`lazy-review.coordination-playbook.md` § 3 Finalize); an unticked one is the operator's turn. Never delete the callout by hand to get past the refusal.

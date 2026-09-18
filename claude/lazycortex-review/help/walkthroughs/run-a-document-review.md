@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Take one document through a full review cycle from opt-in to finalize.
-last_regen: 2026-09-17
+last_regen: 2026-09-18
 diagram_spec:
   anchor: "How the review loop flows"
   request: "Sequence diagram showing: operator runs /lazy-review.start → banner inserted + commit → daemon dispatches expert jobs per section → operator reads suggestions and ticks approve → operator checks status via /lazy-review.status → all sections approved → operator runs /lazy-review.finalize → finalized commit with Doc-Review-Phase: finalize trailer"
@@ -10,7 +10,7 @@ source_skills:
   - lazy-review.start
   - lazy-review.status
   - lazy-review.finalize
-source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
+source_sha: f723a0557db9ea1fc346db7cac478f05d49c7eac
 ---
 # Run a document through the review loop
 
@@ -74,6 +74,8 @@ Once every section in the final round is approved, run `/lazy-review.finalize <f
 - Preserves the `# History` section the coordinator built up across rounds.
 - Unsets every `review_*` key in frontmatter except `review_result` — a finalized document carries no `review_active` at all, unlike a stopped one, which keeps `review_active: false`.
 - Commits with the `Doc-Review-Phase: finalize` trailer.
+
+If the body still carries an unfolded `[!decision-candidate]` callout — ticked or not — or a `[!todo] #review/command` callout whose mini-plan is still unfinished, finalize refuses instead of writing anything, naming the offending line numbers. Don't delete the callout by hand to get past this: the fold belongs to the main writer round, so the fix is letting the document reopen at the main round and re-dispatch, the same way any other unfolded round is picked back up.
 
 After this commit the document looks like an ordinary markdown file with no review scaffolding. The `# History` section remains as a human-readable summary of what changed across rounds.
 

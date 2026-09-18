@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, configuring, and running the lazycortex-review document-review loop.
-last_regen: 2026-09-17
+last_regen: 2026-09-18
 no_diagram: true
 source_skills:
   - lazy-review.install
@@ -12,7 +12,7 @@ source_skills:
   - lazy-review.stop
   - lazy-review.finalize
   - lazy-review.audit
-source_sha: f1a56b7fe545eee38ce6ac86f103b38934d0fe11
+source_sha: f723a0557db9ea1fc346db7cac478f05d49c7eac
 ---
 # Frequently asked questions
 
@@ -96,6 +96,16 @@ Yes. Write it into a `> [!todo] #review/command` callout and commit — this is 
 ## The daemon finalized my document automatically. Can I also finalize manually?
 
 Yes. `/lazy-review.finalize <file>` is the operator's hand-crank. It folds all edit-annotation markers into final text, strips the review banner and approve checkbox, removes system callouts (the `# History` section survives), sets `review_active: false`, and leaves `review_result: approved` standing as the one `review_*` key the strip does not remove — the record that the document cleared review. The commit carries a `Doc-Review-Phase: finalize` trailer. If the document is already in finalized shape the call is a no-op.
+
+---
+
+## `/lazy-review.finalize` refuses with `unfolded operator callouts remain in <file>`. What do I do?
+
+The document still carries a `[!decision-candidate]` callout — ticked or not — or a `[!todo] #review/command` callout whose mini-plan has not finished. Either one is an unfinished questionnaire, and finalize will not ship it inside an approved document: nothing is written, and the refusal names every offending line so you know where to look.
+
+A `[!decision-candidate]` is a proposal a main writer raised for you to accept or reject; ticking it is not the end of the story — the writer still owes a pass that folds your choice into the surrounding prose and removes the callout. If the candidate is already ticked, the writer simply never got that pass — reopen the document for another main-writer round (the same way an operator edit does) so it can finish the fold. If the candidate is unticked, it is waiting on you: tick `accept` or `reject`, or write your own reasoning underneath, and commit. An unfinished `#review/command` mini-plan means the coordinator's own instruction-unfolding is still mid-flight; give it another wake (a commit is enough) to complete before finalizing.
+
+Never delete the callout by hand to get past the refusal — that discards the decision instead of recording it, and the document loses the trail of what was actually chosen.
 
 ---
 

@@ -462,8 +462,9 @@ def _apply_one_job(
       section_layout = section_layout,
   )
 
-  # an answered question is a settled decision the round just folded — the callout must not
-  # survive it, or the next wake reads the same tick as fresh operator input and reopens forever
+  # an answered question or decision-candidate is a settled decision the round just folded —
+  # the callout must not survive it, or the next wake reads the same tick as fresh operator
+  # input and reopens forever, and finalize refuses a document still carrying the candidate
   landed = reapply_result.text
   _landed_meta, landed_body = _fm.parse(landed)
   stripped_body = _body.strip_answered_questions(landed_body)

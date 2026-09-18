@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 9.5.1 — 2026-09-18 UTC
+
+- Fixed the shared markdown-authoring canon: a `[!question]` callout now requires the `#review/question` tag to be recognized — an untagged one was silently treated as ordinary prose and never blocked or surfaced — and `[!decision-candidate]` callouts are documented as always stripped before a document reaches approved state, ticked or not.
+
 ### 9.5.0 — 2026-09-17 UTC
 
 - New `resolve-language` command resolves every language setting to an ISO 639-1 code, with the root `language` key as the shared fallback across the resolver chains; `lazy-core.doctor` now flags a free-form language name and offers the fix. `review.language` is retired — review now takes its language from the document it reviews.
@@ -671,6 +675,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 9.2.1 — 2026-09-18 UTC
+
+- `lazy-spec.set-stage` now refuses to promote a document to `approved` while a `[!decision-candidate]` callout is still unfolded in its body, ticked or not — fold it through the document's review first.
+- `lazy-spec.audit` gained two new checks: an unfolded `[!decision-candidate]` left in an approved document (FAIL), and an `[!asset-proposal]` callout the coordinator never materialized in an approved document (WARN).
+
 ### 9.2.0 — 2026-09-17 UTC
 
 - Large spec document templates (architecture, design, research, UI design, use cases, tech) now open with a `## Terms` section right after the overview — one line per term with its definition — so every glossary term the document uses is declared up front.
@@ -1256,6 +1265,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
 
 ## lazycortex-review
+
+### 6.5.1 — 2026-09-18 UTC
+
+- Fixed a bug where an operator-approved decision-candidate callout could survive finalization and ship inside the approved document; `finalize` now refuses (exit `3`, naming each offending line) until the candidate is folded, rather than letting it slip through.
 
 ### 6.5.0 — 2026-09-17 UTC
 

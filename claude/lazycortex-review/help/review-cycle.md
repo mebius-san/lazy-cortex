@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Control the full lifecycle of a document under review — opt in, track state, pause, and seal the result in one auditable commit chain.
-last_regen: 2026-09-17
+last_regen: 2026-09-18
 diagram_spec:
   anchor: "Document lifecycle"
   request: "State diagram of a document moving through the review loop: not-active → active (via start or submit) → stopped (via stop, resumable) → active again (via start) → finalized (via finalize); status is a read-only probe at any active state"
@@ -12,7 +12,7 @@ source_skills:
   - lazy-review.status
   - lazy-review.stop
   - lazy-review.finalize
-source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
+source_sha: f723a0557db9ea1fc346db7cac478f05d49c7eac
 ---
 # Review cycle
 
@@ -36,7 +36,7 @@ Once a document is active, `/lazy-review.status <file>` gives you a read-only JS
 
 If you need to halt the loop — to make substantial edits, hold the review, or simply park the document — run `/lazy-review.stop <file>`. The skill flips `review_active: false` and commits, leaving `review_round`, `approved`, and `# History` intact. When you are ready to resume, `/lazy-review.start <file>` on a stopped document re-enters from the same round, and repaints the Waiting banner to match whichever phase it left off in — a document parked mid-validation resumes showing the validator's waiting context, not the main-writer's. Re-entering also clears any leftover `review_result` from a prior finalize, so a document that was closed out and later reopened for a fresh pass never carries a stale verdict forward. The idempotency contract applies in both directions: calling `stop` on an already-stopped document is a no-op; calling `start` on an already-active document is a no-op.
 
-When every section is approved — either by the daemon completing its final round automatically, or by you deciding the document is ready — run `/lazy-review.finalize <file>`. The skill folds all edit-annotation markers into the final text, strips the banner and approve checkbox, removes every system callout (keeping `# History`), **unsets** every `review_*` key except `review_result`, and commits with a `Doc-Review-Phase: finalize` trailer. Note the difference from `stop`, which writes `review_active: false` and leaves the rest standing: finalize removes the keys outright, so a finalized document carries no `review_active` at all, and a frontmatter block left holding nothing is dropped with them. After that commit the document is an ordinary markdown file. The finalize commit is the audit-trail terminator: `review_result` in frontmatter and a populated `# History` section are the only evidence the review lifecycle ever ran.
+When every section is approved — either by the daemon completing its final round automatically, or by you deciding the document is ready — run `/lazy-review.finalize <file>`. The skill folds all edit-annotation markers into the final text, strips the banner and approve checkbox, removes every system callout (keeping `# History`), **unsets** every `review_*` key except `review_result`, and commits with a `Doc-Review-Phase: finalize` trailer. Note the difference from `stop`, which writes `review_active: false` and leaves the rest standing: finalize removes the keys outright, so a finalized document carries no `review_active` at all, and a frontmatter block left holding nothing is dropped with them. If the body still carries a `[!decision-candidate]` callout — a writer's proposed decision awaiting your accept/reject tick — or a `[!todo] #review/command` callout with an unfinished mini-plan, finalize refuses outright: it names every offending line and writes nothing. A ticked candidate means the main writer's fold step never ran, so reopening the main round lets the writer fold it into the text; an unticked one is simply waiting on you. Either way, never delete the callout by hand to get past the refusal — let the round finish it. After that commit the document is an ordinary markdown file. The finalize commit is the audit-trail terminator: `review_result` in frontmatter and a populated `# History` section are the only evidence the review lifecycle ever ran.
 
 ## Common adjustments
 

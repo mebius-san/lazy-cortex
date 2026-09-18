@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about products, assets, vision/design docs, gates, requests, decisions, coverage gaps, spec lookups, and the coordinator agent.
-last_regen: 2026-09-17
+last_regen: 2026-09-18
 no_diagram: true
 source_skills:
   - lazy-spec.install
@@ -31,7 +31,7 @@ source_skills:
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
   - lazy-spec.resolve-dependency
-source_sha: 0e7a6138bae7004baf583efc481f058dd0779257
+source_sha: f723a0557db9ea1fc346db7cac478f05d49c7eac
 ---
 # Frequently asked questions
 
@@ -190,6 +190,12 @@ The note you point it at doesn't have to be an asset's own status note — a pro
 Never by hand-editing `decisions.md` — always through `/lazy-spec.record-decision`, an interactive wrapper over four operations: `add` a new entry, `supersede` an older one with a new entry that marks it superseded, `obsolete` an existing entry with a reason, or `promote` — transfer decision blocks already written inline in a `vision.md` / `design.md` / `bug.md` / `tech.md` / `architecture.md` body out into a sibling `decisions.md` registry. `decisions.md` itself lives at one of three levels, resolved along a placement ladder: `<asset_dir>/decisions.md` for a feature/change/bug's own forks, `<spec_path>/decisions.md` for a product-wide decision, or `<content-root>/decisions.md` for a decision about the project as a whole (the system pair, or a cross-product concern) — the file need not exist yet at any level; the first record lazily creates it. Before recording a new decision, the skill holds you to a three-part weight test: a real fork existed, reversing it is expensive, and the "why" is unrecoverable from the artifact itself — a cheap, reversible, or self-explanatory detail isn't worth a record; per `spec.decisions.md`, the justification belongs only in the decision record, never restated in the surrounding design prose.
 
 Most decision blocks never need the manual `add` path. `/lazy-spec.create-asset` and `/lazy-spec.create-from-code` already mark a genuine fork the clarification or the code evidence settles — while authoring `vision.md`, `design.md`, or the product-level docs — as an inline `[!decision] <thesis> #spec/decision` callout whose body is the justification in plain prose — no `Why` / `Rejected` labels, no list of alternatives — right where the fork was made. `promote` then happens automatically too: once a living doc (`vision.md`, `design.md`, `bug.md`, `tech.md`, `architecture.md`) is approved via `/lazy-spec.set-stage`, that step calls the same promote operation itself, lifting those inline blocks into the sibling registry without you running `/lazy-spec.record-decision` at all — the manual path exists for adding a decision straight into the registry, or for promoting a doc that skipped the usual approve step. A `promote` call refuses on a plan or report (neither originates decisions), and on a cancelled, halted, or released asset.
+
+---
+
+## Why did `/lazy-spec.set-stage` refuse to approve my document with a "decision-candidate" message, or why does `/lazy-spec.audit` flag an approved doc as carrying an unfolded one?
+
+An expert may drop a `[!decision-candidate]` callout in the document it is itself writing when it takes a call the job wasn't told to make ("used X instead of Y") — a signal for you to accept or reject, never a decision applied on its own. Asking `/lazy-spec.set-stage <doc> approved` on a document that still carries the callout, ticked or not, is refused outright: approving would ship a questionnaire instead of a settled document. Fold it first — a document still inside its own review loop takes the candidate through the loop's ordinary rounds (your tick reopens the round, the writer folds the verdict, the loop's own finalize refuses the doc while a candidate remains); a document already finalized needs its review reopened at the writer round (`/lazy-review.start`) so the writer can fold the carried, already-answered callout before you set the stage again. `/lazy-spec.audit` catches the same gap after the fact: "Unfolded candidate in an approved document" (FAIL) on any living doc, or any document carrying `review_result: approved` / `approved-with-concerns`, that reached that state with a `[!decision-candidate]` still in its body — this check is scoped to living docs; the same marker in a tool's report (`code-report.md`, `test-report.md`, …) is a standing to-do, not a finding. A sibling check, "Unmaterialized asset proposal in an approved document" (WARN), catches the matching gap for an `[!asset-proposal]` callout the coordinator's post-acceptance materialization never picked up — wake the asset's coordinator with a `# Coordinator commands` line naming the proposal to get it scaffolded, linked, or reopened.
 
 ---
 

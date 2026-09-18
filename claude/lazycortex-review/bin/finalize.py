@@ -65,6 +65,14 @@ _BANNER_RE = re.compile(
 _SYSTEM_CALLOUT_RE = re.compile(
     r"(?ms)^>\s*\[!\w+\][^\n]*#review/[a-z-]+[^\n]*\n(?:>[^\n]*\n)*\n?"
 )
+# Operator-facing blocks finalize must never carry into an approved document. A decision-
+# candidate has no `#review/` tag, so the system-callout strip never sees it; ticked or not, it
+# is a questionnaire the writer was obliged to fold. A command callout whose body is non-empty
+# holds an operator instruction still in flight.
+_LEFTOVER_CALLOUT_RES = (
+    ("decision-candidate", re.compile(r"^>\s*\[!decision-candidate\]", re.MULTILINE)),
+    ("open command", re.compile(r"^>\s*\[!todo\][^\n]*#review/command[^\n]*\n(?=>\s*\S)", re.MULTILINE)),
+)
 _APPROVE_LINE_RE = re.compile(
     r"^>\s*-\s*\[[ x]\]\s*"
     r"(?:approve the whole document"
@@ -355,6 +363,30 @@ def finalize_text(
   return fm_text + body
 
 
+def leftover_callouts(text: str) -> list[tuple[int, str]]:
+  """
+  Report every operator-facing block that must not survive into a finalized document.
+
+  Args:
+    text: Full document text, frontmatter included.
+
+  Returns:
+    `(line, kind)` pairs, 1-based line numbers in `text`, one per `[!decision-candidate]`
+    callout (answered or not) and per `[!todo] #review/command` callout with a non-empty body,
+    both scanned outside code fences. Empty when the document is clean.
+  """
+  # waiver: deferred sibling import matching this module's established import shape
+  import parser as _parser
+  _meta, body = _fm.parse(text)
+  fm_lines = text[: len(text) - len(body)].count("\n")
+  scan_body = _parser.strip_code_fences(body)
+  found: list[tuple[int, str]] = []
+  for kind, pattern in _LEFTOVER_CALLOUT_RES:
+    for match in pattern.finditer(scan_body):
+      found.append((fm_lines + scan_body.count("\n", 0, match.start()) + 1, kind))
+  return sorted(found)
+
+
 def _status_callout_for_finalize(meta: dict, *, with_concerns: bool = False) -> dict | None:
   """
   Return the status-callout kwargs the finalize transform should stamp on a document.
@@ -440,7 +472,9 @@ def main(argv: list[str]) -> int:
     argv: Command-line arguments, excluding the program name.
 
   Returns:
-    Exit code: 0 on success or when already finalized, 2 when the file is not found.
+    Exit code: 0 on success or when already finalized, 2 when the file is not found, 3 when
+    the body still carries a decision-candidate or an open operator command (the refusal
+    names each line on stderr; nothing is written).
   """
   # waiver: argparse CLI signature, not a domain key
   parser = argparse.ArgumentParser(prog="lazy-review.finalize")
@@ -455,6 +489,13 @@ def main(argv: list[str]) -> int:
     return 2
   style = document_edit_marker_style(file_path)
   original = file_path.read_text()
+  # guard: a questionnaire the writer never folded must not ship inside an approved document
+  leftovers = leftover_callouts(original)
+  if leftovers:
+    lines = ", ".join(f"line {line}: {kind}" for line, kind in leftovers)
+    sys.stderr.write(f"refused: unfolded operator callouts remain in {file_path} ({lines})\n")
+    # waiver: process exit code, not a domain constant
+    return 3
   meta, _body_text = _fm.parse(original)
   with_concerns = str(meta.get(ReviewKey.APPROVED_WITH_CONCERNS, "")).strip().lower() in ("true", "yes", "1")
   repo = _repo_root_for(file_path)

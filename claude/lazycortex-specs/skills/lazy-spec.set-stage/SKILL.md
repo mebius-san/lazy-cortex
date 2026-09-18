@@ -19,7 +19,7 @@ The authoritative definition of per-file stage semantics lives in `${CLAUDE_PLUG
 
 ### 1. Validate the file
 
-Three checks, in order. None of them reads a filename or a path.
+Four checks, in order. None of them reads a filename or a path.
 
 1. **The document declares a type.**
 
@@ -41,6 +41,8 @@ Three checks, in order. None of them reads a filename or a path.
 2a. **The document is not an attachment.** A doc carrying `spec_owner_doc` is a markdown attachment; its `spec_stage` is a mirror of its owner's, written only by the owner's own stage cascade (step 2b below) and by the coordinator's reconciliation. Refuse: ``document is an attachment of `<owner>` — its stage mirrors the owner's; set the owner's stage instead``.
 
 3. **The requested stage is in the closed set** `empty | draft | approved | rejected | cancelled | deferred`. If the value is not in the set, refuse — name the offending value and list the closed set. For the removed values specifically: `review` → use `draft` + `review_active: true`; `done` → use `approved`; `wtr` → use `draft` or `approved` per intent. The set of TYPES is open and validated by declaration; the set of STAGES is closed and validated by this list.
+
+4. **An `approved` stage ships no questionnaire.** When the requested stage is `approved`, scan the body outside code fences for a `[!decision-candidate]` callout. Any hit — ticked or not — is a refusal: ``document carries a decision-candidate at line <N> — fold it through the document's review before approving``. The review's own finalize refuses the same document, so a hit here means the stage is being promoted around the review loop; the fix is a writer round that folds the callout, never a hand deletion.
 
 `deferred` parks a document out of the automation's reach — its approval moves nothing, no gate reads it, and nothing edits it. It is allowed on every stage-bearing type, asset-level and level alike, with no mandatoriness rule to check. Only two transitions touch it: `deferred` parks a document from wherever it stood, and `draft` is the single way back out. A caller asking for any other stage on a parked document is refused: ``document is deferred — set it to `draft` first``.
 
