@@ -10,6 +10,7 @@ source_skills:
   - lazy-review.configure
   - lazy-review.audit
 source_sha: ddcc3d531e1a77299395aa3c7f54eb3492434ea0
+surface_sha: 05981fea881267a6a1629e0ceda384fff4829ec617e3a4d575c2d5370760c468
 ---
 # Install and configure lazycortex-review
 

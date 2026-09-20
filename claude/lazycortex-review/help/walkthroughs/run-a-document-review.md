@@ -11,6 +11,7 @@ source_skills:
   - lazy-review.status
   - lazy-review.finalize
 source_sha: f723a0557db9ea1fc346db7cac478f05d49c7eac
+surface_sha: f7517f523ca7b89018b64bf3f1cd78b4a5d7d5fb8ae641b421f2951641113399
 ---
 # Run a document through the review loop
 

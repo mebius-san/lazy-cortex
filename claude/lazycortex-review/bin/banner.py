@@ -343,27 +343,19 @@ def desired_state(
 
 # Spec § Top banner: the "Waiting" title is enriched with the phase the
 # document is waiting on ("Waiting: validators" / ": writer" / ": terminals").
-# Recognition keys on the `#review/in-process` TAG, never the title, so
-# enriched, bare, and translated titles all extract to `State.IN_PROCESS`.
-_WAITING_CONTEXT_LABELS: dict[str, dict[str, str]] = {
-    _LANG_EN: {
-        Bucket.WRITER:     "Waiting: writer",
-        Bucket.VALIDATORS: "Waiting: validators",
-        Bucket.TERMINALS:  "Waiting: terminals",
-        Phase.FINALIZE:    "Waiting: finalize",
-    },
-    # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-    "ru": {  # noqa: RUF001
-        Bucket.WRITER:     "Ожидание: писатель",
-        Bucket.VALIDATORS: "Ожидание: валидаторы",
-        Bucket.TERMINALS:  "Ожидание: терминальные проверки",
-        Phase.FINALIZE:    "Ожидание: финализация",
-    },
+# A banner title is the same English label in every vault — it names the state
+# the way the tag does, and only the body prose under it follows the repository
+# language. Recognition keys on the `#review/in-process` TAG regardless, so an
+# enriched and a bare title both extract to `State.IN_PROCESS`.
+_WAITING_CONTEXT_LABELS: dict[str, str] = {
+    Bucket.WRITER:     "Waiting: writer",
+    Bucket.VALIDATORS: "Waiting: validators",
+    Bucket.TERMINALS:  "Waiting: terminals",
+    Phase.FINALIZE:    "Waiting: finalize",
 }
 
-# Bare "Waiting" title per language — what an unknown or absent waiting context renders.
-# waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-_WAITING_BARE: dict[str, str] = { _LANG_EN: "Waiting", "ru": "Ожидание" }  # noqa: RUF001
+# Bare "Waiting" title — what an unknown or absent waiting context renders.
+_WAITING_BARE = "Waiting"
 
 _TEMPLATES: dict[str, dict[State, str]] = {
     _LANG_EN: {
@@ -394,18 +386,19 @@ _TEMPLATES: dict[str, dict[State, str]] = {
             "в коллауте `[!todo] #review/command`.\n"
         ),
         State.ACTION_NEEDED: (
-            "> [!caution] Требуется действие #review/action-needed\n"
+            "> [!caution] Action needed #review/action-needed\n"
             "> Ответьте на открытый вопрос или кандидат решения ниже, отметив вариант, "
             "и закоммитьте.\n"
         ),
         State.READY: (
-            "> [!success] Готово к утверждению #review/ready\n"
+            "> [!success] Ready to approve #review/ready\n"
             "> Отметьте галочку ниже, чтобы утвердить документ целиком.\n"
             "> Чтобы отправить на доработку, поправьте текст и закоммитьте "
             "или напишите указание в коллауте `[!todo] #review/command`.\n"
             "> - [{tick}] утвердить документ целиком\n"
         ),
-        State.FINALIZING: "> [!hint] Ожидание: финализация #review/finalizing\n",
+        # a title and nothing else: no body prose exists here to carry the language
+        State.FINALIZING: "> [!hint] Waiting: finalize #review/finalizing\n",
     },
 }
 
@@ -422,8 +415,7 @@ _CONCERNS_DECISION_TEMPLATE: dict[str, str] = {
     ),
     # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
     "ru": (  # noqa: RUF001
-        "> [!warning] Остались замечания — "
-        "выберите, как продолжить #review/concerns-decision\n"
+        "> [!warning] Outstanding concerns — choose how to proceed #review/concerns-decision\n"
         "> Валидационный писатель поднял замечания вплоть до настроенного порога паузы. "
         "Разделы ниже показывают их. "
         "Отметьте ОДНУ из галочек:\n"
@@ -480,7 +472,8 @@ def render(
     continue_review: Ticks the "continue review cycle" checkbox when rendering `State.CONCERNS_DECISION`.
     approve_with_concerns: Ticks the "approve with concerns" checkbox when rendering `State.CONCERNS_DECISION`.
     waiting_context: Phase label inserted into the `State.IN_PROCESS` title; `None` yields bare "Waiting".
-    lang: Resolved language code; a language with no table of its own renders the shipped English wording.
+    lang: Resolved language code for the body prose; titles stay English, and a language with
+      no table of its own renders the shipped English wording throughout.
 
   Returns:
     Callout markdown string for the given state, ready to embed in the document body.
@@ -506,8 +499,7 @@ def render(
     return template.format(tick="x" if approved else " ")
   if state is State.IN_PROCESS:
     # waiver: one-off human-facing message
-    labels = _resolve_for_language(_WAITING_CONTEXT_LABELS, lang)
-    title = labels.get(waiting_context or "", _resolve_for_language(_WAITING_BARE, lang))
+    title = _WAITING_CONTEXT_LABELS.get(waiting_context or "", _WAITING_BARE)
     return template.format(title=title)
   return template
 

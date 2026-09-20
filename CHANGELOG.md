@@ -1295,6 +1295,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+### 6.6.1 — 2026-09-20 UTC
+
+- Fixed review status banners (`Waiting: writer` / `Action needed` / `Ready to approve` / `Outstanding concerns`) always rendering in English again — a regression had them following the vault's storage language; the hint text and checkbox labels underneath still correctly follow storage language.
+
 ### 6.6.0 — 2026-09-20 UTC
 
 - Product-scoped review classes (`<type>@<product>`) now route correctly for nested products: glob overrides with `**` match an asset at any depth below the product, the innermost product's class wins when several classes scope the same document, and the decisions-context reader resolves the owning product's decision registry by longest matching path instead of assuming a fixed two-segment layout.

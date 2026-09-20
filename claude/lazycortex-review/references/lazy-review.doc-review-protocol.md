@@ -128,7 +128,7 @@ Review is the one chain with no language of its own. Write every line of prose �
 
 Where the document itself is empty or gives no signal, follow the language of the brief or source material the job carries. Never retranslate existing prose, and never translate the parts `lazy-core.markdown-style` keeps as identifiers: frontmatter keys and values, callout type tokens, `#review/…` tags, canonical section headings, paths, and wikilink targets.
 
-The banner callouts and the `# History` explainer line are not yours — the entry verb and the banner primitive render those from their own per-language tables, keyed by the repository's `language`.
+The banner callouts and the `# History` explainer line are not yours — the entry verb and the banner primitive render those from their own per-language tables, keyed by the repository's `language`. A banner's title is excluded from that lookup: it names the state in English in every vault, exactly like the `#review/…` tag beside it, and the language reaches only the body prose under it.
 
 ## Attachments
 
