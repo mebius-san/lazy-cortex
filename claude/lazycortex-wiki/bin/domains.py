@@ -13,8 +13,6 @@ contract), so all primitives used here are imported from within this
 plugin's own `bin/`.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import ast
 import hashlib
@@ -24,8 +22,10 @@ import re
 import subprocess
 from pathlib import Path
 
-import explainers as _explainers
-import scope as _scope
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import explainers as _explainers  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import scope as _scope  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -181,12 +181,14 @@ class DomainConfig:
       or carries no usable `wiki.domains` section.
     """
     settings_file = Path(repo) / _SETTINGS_PATH
+
     # guard: settings file does not exist — domains are not configured
     if not settings_file.is_file():
       return None
     with settings_file.open(encoding = _ENCODING) as handle:
       data = json.load(handle)
     domains = data.get(_WIKI_KEY, {}).get(_DOMAINS_KEY)
+
     # guard: section absent or not a dict — domains are not configured
     if not isinstance(domains, dict) or not domains:
       return None
@@ -268,15 +270,18 @@ class DomainDictionary:
     current: str | None = None
     for raw in self._path.read_text(encoding = _ENCODING).splitlines():
       line = raw.strip()
+
       # a `## <group>` heading opens a new group entry
       if line.startswith(self._HEADING_PREFIX):
         current = line[len(self._HEADING_PREFIX):].strip()
+
         # guard: the reserved parking group is never a dictionary entry
         if current == RESERVED_GROUP:
           current = None
           continue
         result[current] = ""
         continue
+
       # guard: prose outside any group, blank lines, sub-headings, Tags: lines, comments
       if (
         current is None
@@ -284,6 +289,7 @@ class DomainDictionary:
         or line.startswith(( "#", self._TAGS_PREFIX, self._COMMENT_PREFIX ))
       ):
         continue
+
       # the first prose line under the heading is the gloss
       if not result[current]:
         result[current] = line
@@ -355,6 +361,7 @@ class DomainScanner:
       text = True,
       check = False,
     )
+
     # guard: not a git repo — nothing to scan
     if proc.returncode != 0:
       return []
@@ -399,6 +406,7 @@ class DomainScanner:
     idx = 0
     while idx < len(lines):
       match = _DOMAIN_HEADER_RE.match(lines[idx])
+
       # guard: not a block header — keep sweeping
       if not match:
         idx += 1
@@ -498,6 +506,7 @@ class DomainScanner:
       for idx, line in enumerate(lines)
       if (match := _DOMAIN_HEADER_RE.match(line))
     ]
+
     # guard: no Domain header anywhere in the file — nothing to attribute to
     if not domain_lines:
       return []
@@ -589,9 +598,11 @@ class DomainScanner:
       The innermost enclosing qualname, or `None` when no span covers the line.
     """
     covering = [ span for span in spans if span[0] <= line <= span[1] ]
+
     # guard: no enclosing function/class — module level, or unparsed source
     if not covering:
       return None
+
     # innermost = smallest span
     return min(covering, key = lambda span: span[1] - span[0])[2]
 
@@ -649,10 +660,12 @@ class DomainLayout:
       output directory, is not markdown, or is the index file.
     """
     prefix = self._output + "/"
+
     # guard: outside the output tree or not a markdown doc
     if not rel.startswith(prefix) or not rel.endswith(_MD_EXT):
       return None
     inner = rel[len(prefix):-len(_MD_EXT)]
+
     # guard: the index file is never a group doc
     if inner + _MD_EXT == INDEX_NAME:
       return None
@@ -728,6 +741,7 @@ class DomainIndex:
     listing: list[str] = []
     for group in sorted(dictionary):
       rel = self._layout.doc_rel(group)
+
       # guard: doc not generated yet — the group joins the index after its writer runs
       if not (self._cfg.repo / rel).is_file():
         continue
@@ -755,6 +769,7 @@ class DomainIndex:
     index_abs = self._cfg.repo / self.index_rel()
     rendered = self.render()
     existing = index_abs.read_text(encoding = _ENCODING) if index_abs.is_file() else None
+
     # guard: index already current — nothing to write
     if existing == rendered:
       return False
@@ -771,6 +786,7 @@ class DomainIndex:
       exist or carries no `##` section.
     """
     index_abs = self._cfg.repo / self.index_rel()
+
     # guard: no index yet — nothing to preserve
     if not index_abs.is_file():
       return ""
@@ -872,6 +888,7 @@ class DomainPlanner:
 
     # the group's Domain(…) block text alone — this is the whole digest input pre-contracts
     canonical = "\n\n".join(blk[BLOCK_TEXT] for blk in blocks)
+
     # guard: no contracts to fold in — `canonical` above is already the full digest input
     if not contracts:
       return hashlib.sha256(canonical.encode(_ENCODING)).hexdigest()
@@ -926,12 +943,14 @@ class DomainPlanner:
     changed: list[dict] = []
     for group in sorted(dictionary):
       blocks = scanned.get(group) or []
+
       # guard: no blocks left in code — the doc (if any) is an orphan, handled below
       if not blocks:
         continue
       contracts = scanned_contracts.get(group) or []
       digest = self.group_hash(blocks, contracts)
       doc_rel = layout.doc_rel(group)
+
       # guard: stored hash matches — the doc is current, zero work
       if self._stored_hash(self.cfg.repo / doc_rel) == digest:
         continue
@@ -1032,6 +1051,7 @@ class DomainPlanner:
       (`no-blocks` or `group-unlisted`); empty when no output tree exists.
     """
     output_abs = self._repo / self.cfg.output
+
     # guard: no output tree yet — nothing can be removed
     if not output_abs.is_dir():
       return {}
@@ -1051,9 +1071,11 @@ class DomainPlanner:
       for fname in files:
         rel = (Path(base) / fname).relative_to(self._repo).as_posix()
         group = layout.group_for(rel)
+
         # guard: not a group doc (index, non-markdown)
         if group is None:
           continue
+
         # a group the dictionary no longer lists is never regenerated, so its doc can only rot
         if group not in dictionary:
           removals[rel] = DOC_REASON_UNLISTED

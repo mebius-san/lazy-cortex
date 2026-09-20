@@ -58,7 +58,7 @@ def _forward_if_stale() -> None:
     os.execv(sys.executable, [sys.executable, str(newer), *sys.argv[1:]])
 
 USAGE = ("usage: lazycortex-core <subcommand> [args...]\n"
-         "Subcommands: expert-pump-once, doctor-tick, runtime-tick, runtime, resume, memory-reflect-all, dispatch-job, collect-job, consume-job, cancel-job, lookup-expert, scaffold, file-sync, remote-mirror, safe-pull, error-record, error-list, settings-get, settings-set, resolve-language, routine-ensure-filter, permission-allow, add-protocols, detect-scope, daemon-pause, daemon-resume, daemon-list, metrics-alloc-port, metrics-scrape-file, sandbox-sync, sandbox-audit, index-guard")
+         "Subcommands: expert-pump-once, doctor-tick, runtime-tick, runtime, resume, memory-reflect-all, dispatch-job, collect-job, consume-job, cancel-job, lookup-expert, scaffold, file-sync, remote-mirror, safe-pull, error-record, error-list, settings-get, settings-set, resolve-language, routine-ensure-filter, permission-allow, add-protocols, detect-scope, daemon-pause, daemon-resume, daemon-list, metrics-alloc-port, metrics-scrape-file, sandbox-sync, sandbox-audit, index-guard, history-append")
 
 
 def _cmd_consume_job(argv: list[str]) -> int:
@@ -365,6 +365,20 @@ def _cmd_error_record(argv: list[str]) -> int:
         })
     print(json.dumps({"recorded": True, "id": event_id}))
     return 0
+
+
+def _cmd_history_append(argv: list[str]) -> int:
+    """Append one bullet to a note's `# History` day-group section.
+
+    File mode rewrites the note in place; `--stdin` transforms a JSON-carried
+    text and touches no file. Delegates to `history.main`.
+
+    Returns:
+      Process exit code — 0 on success; 2 with a one-line stderr message on a
+      missing file, an empty or multi-line line, a bad date, or malformed stdin JSON.
+    """
+    from history import main as _history_main
+    return _history_main(argv)
 
 
 def _daemon_alive(repo: Path) -> bool:
@@ -837,6 +851,8 @@ def main() -> int:
     elif sub == "index-guard":
         from index_guard import main as _index_guard_main
         return _index_guard_main(sys.argv[2:])
+    elif sub == "history-append":
+        return _cmd_history_append(sys.argv[2:])
     else:
         print(f"unknown subcommand: {sub}\n{USAGE}", file=sys.stderr); return 2
 

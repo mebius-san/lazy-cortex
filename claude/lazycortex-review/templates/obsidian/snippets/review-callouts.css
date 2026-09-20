@@ -20,19 +20,9 @@
   border-left: 3px solid rgb(var(--callout-color));
 }
 
-/* [!attention] #review/concern — muted red; NOT a built-in Obsidian type, so
-   without this rule it renders as the default grey note */
-.callout[data-callout="attention"] {
-  --callout-color: 185, 80, 65;
-  --callout-icon: lucide-alert-triangle;
-  background-color: rgba(185, 80, 65, 0.08);
-  border-left: 3px solid rgb(var(--callout-color));
-}
-
 /* Title + icon follow the type color (SVG icons take currentColor) */
 .callout[data-callout="question"] > .callout-title,
-.callout[data-callout="todo"] > .callout-title,
-.callout[data-callout="attention"] > .callout-title {
+.callout[data-callout="todo"] > .callout-title {
   color: rgb(var(--callout-color));
   font-weight: 600;
 }

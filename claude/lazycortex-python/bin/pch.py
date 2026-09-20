@@ -141,6 +141,7 @@ def find_system_path() -> str | None:
   # NEVER raises when no PyCharm system directory can be found; None is returned instead of raising.
 
   caches_base = os.path.expanduser('~/Library/Caches/JetBrains')
+
   # guard: no JetBrains caches directory
   if not os.path.isdir(caches_base):
     return None
@@ -182,6 +183,7 @@ def find_config_path() -> str | None:
   # NEVER raises when no PyCharm config directory can be found; None is returned instead of raising.
 
   config_base = os.path.expanduser('~/Library/Application Support/JetBrains')
+
   # guard: no JetBrains config directory
   if not os.path.isdir(config_base):
     return None
@@ -458,6 +460,7 @@ def parse_results(output_dir: str) -> list[tuple[str, int, str, str, str]]:
       # guard: skip malformed entries
       if file_elem is None or file_elem.text is None:
         continue
+
       # guard: skip entries without description
       if description_elem is None or description_elem.text is None:
         continue
@@ -664,6 +667,7 @@ def main() -> None:
 
     # the inspector writes its XML reports into the output dir as a side effect
     ret = run_inspection(inspect_sh, project_dir, profile_path, output_dir, module_path, sandbox_dir)
+
     # guard: non-zero here means inspect.sh failed without producing results
     if ret != 0:
       print('pch: inspect.sh failed', file = sys.stderr)

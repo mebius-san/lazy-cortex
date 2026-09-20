@@ -16,8 +16,6 @@ Backs the `lazy-obsidian.capture` and `lazy-obsidian.deploy` skills.
 # skill already describes in prose is the price of that.
 
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import argparse
 import fnmatch
@@ -31,7 +29,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from vault_keys import (
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from vault_keys import (  # pylint: disable=import-error
   AppearanceKey, BundleKey, BundleSourceKind, CachePath, CommandKind, Encoding, Http,
   ManifestKey, PluginKey, ReportKey, SnippetKey, SnippetSourceKind, TemplatePath, ThemeKey,
   VaultPath,
@@ -297,6 +296,7 @@ def strip_secrets(obj: Any,  # waiver: arbitrary JSON payload — plugin setting
     out: dict[str, Any] = {}  # waiver: arbitrary JSON payload
     for key, value in obj.items():
       here = f"{path}.{key}"
+
       # guard: a credential never enters the manifest, by its key or by its own shape
       if is_secret(key, value):
         omitted.append(here)
@@ -534,10 +534,12 @@ def _head_version(head: dict | None,  # waiver: upstream manifest JSON
   if head is None:
     # waiver: one-off diagnostic text, not a shared constant
     return None, "no readable manifest at repo HEAD"
+
   # guard: id mismatch means the repo was rebranded and now ships a different plugin
   if head.get(PluginKey.ID) != pid:
     return None, f"repo HEAD manifest id is {head.get(PluginKey.ID)!r} (rebranded)"
   version = head.get(PluginKey.VERSION)
+
   # guard: an unversioned manifest cannot name a release tag
   if not version:
     # waiver: one-off diagnostic text, not a shared constant
@@ -569,6 +571,7 @@ def _fetch_release(repo: str,
   try:
     manifest_bytes = fetch_asset(VaultPath.PLUGIN_MANIFEST)
     released = json.loads(manifest_bytes)
+
     # guard: the release must declare the id we asked for
     if released.get(PluginKey.ID) != pid:
       tried.append(f"{tag}: id is {released.get(PluginKey.ID)!r}")
@@ -629,6 +632,7 @@ def _read_cache(cache_dir: Path, pid: str) -> dict | None:  # waiver: asset byte
   if not (manifest_path.is_file() and main_path.is_file()):
     return None
   manifest = load_json(manifest_path)
+
   # guard: a cache entry that names another plugin is not this plugin's fallback
   if not isinstance(manifest, dict) or manifest.get(PluginKey.ID) != pid \
       or not manifest.get(PluginKey.VERSION):
@@ -710,6 +714,7 @@ def _fetch_theme_assets(repo: str, name: str) -> tuple[dict | None, str | None]:
     manifest_bytes = fetch_bytes(
       THEME_ASSET_URL.format(repo = repo, asset = VaultPath.THEME_MANIFEST))
     declared = json.loads(manifest_bytes)
+
     # guard: the repo must declare the theme we asked for
     if declared.get(ThemeKey.NAME) != name:
       return None, f"{repo}: theme is {declared.get(ThemeKey.NAME)!r}"
@@ -756,6 +761,7 @@ def _read_theme_cache(cache_dir: Path, name: str) -> dict | None:  # waiver: ass
   if not (manifest_path.is_file() and css_path.is_file()):
     return None
   manifest = load_json(manifest_path)
+
   # guard: a cache entry that names another theme is not this theme's fallback
   if not isinstance(manifest, dict) or manifest.get(ThemeKey.NAME) != name:
     return None
@@ -788,6 +794,7 @@ def build_manifest(root: Path) -> dict:  # waiver: manifest of mixed JSON shapes
     WorkerError: When the repo root has no config directory to read.
   """
   vault = root / VaultPath.OBSIDIAN
+
   # guard: nothing to read without a config directory
   if not vault.is_dir():
     raise WorkerError(f"no {VaultPath.OBSIDIAN}/ under {root}")
@@ -872,6 +879,7 @@ def _capture_config(vault: Path, omitted: list[str]) -> dict:  # waiver: Obsidia
     if path.name in CONFIG_DENYLIST:
       continue
     data = load_json(path)
+
     # guard: an unparseable file is left to the operator, not half-captured
     if data is None:
       continue
@@ -991,6 +999,7 @@ def drift(root: Path) -> dict:  # waiver: report envelope of mixed shapes
   # reports differences for the operator to arbitrate.
 
   stored = load_json(root / VaultPath.MANIFEST)
+
   # guard: there is nothing to compare the vault against
   if not isinstance(stored, dict):
     raise WorkerError(f"no readable {VaultPath.MANIFEST} at {root}")
@@ -1086,6 +1095,7 @@ def _compare_plugins(stored: dict, live: dict, warnings: list[str]) -> list[str]
 
     # compare the version captured then against the version installed now
     captured, installed = was.get(PluginKey.CAPTURED_VERSION), now.get(PluginKey.CAPTURED_VERSION)
+
     # a settings snapshot taken under an older plugin may predate that plugin's own migration
     if captured and installed and captured != installed:
       warnings.append(f"plugins.{pid}: captured under {captured}, {installed} installed")
@@ -1112,6 +1122,7 @@ def deploy(root: Path) -> dict:  # waiver: report envelope of mixed shapes
     WorkerError: When the repo root carries no readable manifest.
   """
   manifest = load_json(root / VaultPath.MANIFEST)
+
   # guard: deploy has no other source of truth
   if not isinstance(manifest, dict):
     raise WorkerError(f"no readable {VaultPath.MANIFEST} at {root}")
@@ -1131,6 +1142,7 @@ def deploy(root: Path) -> dict:  # waiver: report envelope of mixed shapes
     # guard: derived and per-device files are rebuilt, never restored
     if name in CONFIG_DENYLIST:
       continue
+
     # guard: a name that is not a plain filename would escape the config directory
     if not is_safe_name(name):
       errors.append(f"config {name!r}: not a plain filename, skipped")
@@ -1187,6 +1199,7 @@ def _deploy_snippets(vault: Path, snippets: dict, errors: list[str]) -> list[str
     target = vault / VaultPath.SNIPPETS / name
     if entry.get(SnippetKey.SOURCE) == SnippetSourceKind.PLUGIN:
       reference = shipped / name
+
       # guard: the manifest claims this plugin ships the snippet, and it no longer does
       if not reference.is_file():
         errors.append(f"snippet {name}: recorded as plugin-shipped but this plugin has none")
@@ -1194,6 +1207,7 @@ def _deploy_snippets(vault: Path, snippets: dict, errors: list[str]) -> list[str
       write_bytes(target, reference.read_bytes())
     else:
       body = entry.get(SnippetKey.BODY)
+
       # guard: a vault-owned snippet without a body cannot be reconstructed
       if not isinstance(body, str):
         errors.append(f"snippet {name}: no body recorded")
@@ -1235,6 +1249,7 @@ def _deploy_plugins(vault: Path, plugins: dict, errors: list[str]) -> list[dict]
     else:
       repo = entry.get(PluginKey.REPO) or (catalog.get(pid) or {}).get(PluginKey.REPO)
       resolved = resolve_bundle(pid, repo)
+
       # guard: an unresolvable plugin is reported and skipped, never half-written
       if resolved[BundleKey.SOURCE] == BundleSourceKind.NONE:
         errors.append(f"plugin {pid}: {resolved[BundleKey.ERROR]}")
@@ -1310,6 +1325,7 @@ def _deploy_theme(vault: Path, theme: str | None, errors: list[str]) -> str | No
   # guard: a vault on the default theme has nothing to install
   if not theme:
     return None
+
   # guard: a theme name that is not a plain name would escape the themes directory
   if not is_safe_name(theme):
     errors.append(f"theme {theme!r}: not a plain theme name, skipped")
@@ -1318,6 +1334,7 @@ def _deploy_theme(vault: Path, theme: str | None, errors: list[str]) -> str | No
   # fetch the theme the way Obsidian would, and write both its files beside each other
   destination = vault / VaultPath.THEMES / theme
   resolved = resolve_theme(theme)
+
   # guard: an unresolvable theme is reported and skipped, never half-written
   if resolved[BundleKey.SOURCE] == BundleSourceKind.NONE:
     errors.append(f"theme {theme!r}: {resolved[BundleKey.ERROR]}")

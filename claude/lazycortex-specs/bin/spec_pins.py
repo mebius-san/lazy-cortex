@@ -13,8 +13,6 @@ that already carries `wiki_pinned_topics` is left alone. Never commits — the c
 per `dev.plugin-boundaries.md`'s no-silent-side-effects convention for a one-shot primitive.
 """
 from __future__ import annotations
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error,wrong-import-position
 
 import argparse
 import json
@@ -33,15 +31,15 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import flip_gate  # noqa: E402
+import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import spec_decisions  # noqa: E402
+import spec_decisions  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import spec_paths  # noqa: E402
+import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # ----------------------------------------------------------------------------------------
-class _K:
+class Keys:
   """
   String constants used by the `pins` backfill primitive.
 
@@ -100,7 +98,8 @@ def _pin_block(role: str, product: str | None, category: str | None) -> str:
   Returns:
     The block's lines, joined, with no leading/trailing newline.
   """
-  lines = [f"{_K.WIKI_PINNED_TOPICS}:", f"  - wiki/doc-kind/{role}"]
+  lines = [f"{Keys.WIKI_PINNED_TOPICS}:", f"  - wiki/doc-kind/{role}"]
+
   # a project-level document sits above every product — only lower levels carry the axis pins
   if product is not None:
     lines.append(f"  - wiki/product/{product}")
@@ -157,34 +156,37 @@ def backfill(repo: Path) -> dict:
   for dirpath, _dirnames, filenames in os.walk(content_root):
     for name in filenames:
       # guard: only markdown files can carry spec_role frontmatter
-      if not name.endswith(_K.MD_SUFFIX):
+      if not name.endswith(Keys.MD_SUFFIX):
         continue
       path = Path(dirpath) / name
-      text = path.read_text(encoding = _K.ENCODING)
+      text = path.read_text(encoding = Keys.ENCODING)
       fm_values, fm_end = flip_gate.parse_frontmatter(text)
-      role = fm_values.get(_K.SPEC_ROLE, "")
+      role = fm_values.get(Keys.SPEC_ROLE, "")
+
       # guard: not a role-bearing document this primitive pins (includes `request` and group-notes)
       if role not in _PIN_ROLES:
         continue
+
       # guard: already pinned — idempotent no-op
-      if _K.WIKI_PINNED_TOPICS in fm_values:
+      if Keys.WIKI_PINNED_TOPICS in fm_values:
         skipped += 1
         continue
       try:
-        ctx = spec_decisions._resolve_context(path)
+        ctx = spec_decisions.resolve_context(path)
       except ValueError:
         # guard: parent directory covered by no registered product — nothing to pin against
         skipped += 1
         continue
       fm_text = text[:fm_end]
       new_fm = _insert_pin(fm_text, role, ctx.product, ctx.category)
+
       # guard: the spec_role line could not be located for insertion — treat as skipped, not a crash
       if new_fm == fm_text:
         skipped += 1
         continue
-      path.write_text(new_fm + text[fm_end:], encoding = _K.ENCODING)
+      path.write_text(new_fm + text[fm_end:], encoding = Keys.ENCODING)
       touched += 1
-  return { _K.TOUCHED: touched, _K.SKIPPED: skipped }
+  return { Keys.TOUCHED: touched, Keys.SKIPPED: skipped }
 
 
 def main(argv: list[str]) -> int:
@@ -197,13 +199,13 @@ def main(argv: list[str]) -> int:
   Returns:
     Process exit code: always `0`.
   """
-  parser = argparse.ArgumentParser(prog = _K.PROG)
-  parser.add_argument(_K.ARG_CWD, default = None, help = _K.ARG_CWD_HELP)
+  parser = argparse.ArgumentParser(prog = Keys.PROG)
+  parser.add_argument(Keys.ARG_CWD, default = None, help = Keys.ARG_CWD_HELP)
   args = parser.parse_args(argv)
 
   # resolve the repo the same way every other lazycortex-specs subcommand does: explicit flag,
   # then the daemon-exported env var, then cwd
-  repo_raw = args.cwd or os.environ.get(_K.ENV_REPO_ROOT) or os.getcwd()
+  repo_raw = args.cwd or os.environ.get(Keys.ENV_REPO_ROOT) or os.getcwd()
   repo = Path(repo_raw).resolve()
   result = backfill(repo)
   print(json.dumps(result))

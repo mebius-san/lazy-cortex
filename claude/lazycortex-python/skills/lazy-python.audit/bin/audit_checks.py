@@ -267,6 +267,7 @@ class Check5Pyproject:
       Finding dict with `severity` (PASS, WARN, or FAIL) and a `message` string.
     """
     pyproject = self.consumer_dir / "pyproject.toml"
+
     # guard: no pyproject.toml at all, so no checker stack can be configured
     if not pyproject.exists():
       return {"severity": "FAIL", "message": "pyproject.toml not found in consumer root"}
@@ -383,6 +384,7 @@ class Check8Scaffold:
       Finding dict with `severity` (PASS or WARN) and a `message` string.
     """
     rule = self.consumer_dir / self.RULE_REL
+
     # guard: the mirrored rule file is absent, so the install never ran here
     if not rule.exists():
       return {
@@ -460,6 +462,7 @@ class Check9ClaudeMd:
       Finding dict with `severity` (PASS when a pointer is present, otherwise INFO) and a `message` string.
     """
     claude_md = self._resolve_target(self.consumer_dir)
+
     # guard: no CLAUDE.md anywhere → nothing to report; install never writes a pointer, so this is not a finding
     if claude_md is None:
       return {"severity": "INFO", "message": "no CLAUDE.md (root or .claude/) — optional; install adds none"}
@@ -498,6 +501,7 @@ class Check10Hook:
       Finding dict with `severity` (PASS, WARN, or FAIL) and a `message` string.
     """
     manifest = PLUGIN_ROOT / self.MANIFEST_REL
+
     # guard: manifest absent → engine has nothing to auto-register
     if not manifest.exists():
       return {"severity": "WARN", "message": f"{self.MANIFEST_REL} not found in plugin tree"}
@@ -541,6 +545,7 @@ class Check11Venv:
       if not bin_path.exists() or not os.access(bin_path, os.X_OK):
         return False
     python_bin = venv / "bin" / "python"
+
     # guard: pytest plugins ship no bin — verify they import in the venv's interpreter
     if not python_bin.exists() or not os.access(python_bin, os.X_OK):
       return False
@@ -560,6 +565,7 @@ class Check11Venv:
       The value as a string, or an empty string if the file is absent, unparseable, or the key is missing.
     """
     pyproject = self.consumer_dir / "pyproject.toml"
+
     # guard: no pyproject.toml, so the key cannot be configured
     if not pyproject.exists():
       return ""
@@ -568,6 +574,7 @@ class Check11Venv:
     except tomllib.TOMLDecodeError:
       return ""
     value = data.get("tool", {}).get("lazy-python", {}).get(key)
+
     # guard: key absent from the section, report it as unset
     if value is None:
       return ""
@@ -667,6 +674,7 @@ class Check12DomainDictionary:
       except (json.JSONDecodeError, OSError):
         data = {}
     configured = str(data.get("wiki", {}).get("domains", {}).get("dictionary", "") or "")
+
     # guard: nothing configured, so the conventional location is the dictionary
     if not configured:
       return self.consumer_dir / self.CONVENTIONAL_REL
@@ -715,6 +723,7 @@ class Check12DomainDictionary:
     # to resolve groups against.
 
     dictionary = self._dictionary_path()
+
     # guard: the dictionary is there, so every group in code has something to resolve against
     if dictionary.exists():
       return {"severity": "PASS", "message": f"domain-groups dictionary present ({dictionary})"}

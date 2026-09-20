@@ -45,6 +45,7 @@ _SUB_COORDINATOR_DISPATCH = "coordinator-dispatch"
 _SUB_NOTE_SET_KEY = "note-set-key"
 _SUB_NOTE_DROP_KEY = "note-drop-key"
 _SUB_NOTE_CHECK = "note-check"
+_SUB_NOTE_HISTORY = "note-history"
 _SUB_CATALOG_NOTE = "catalog-note"
 _SUB_REQUEST_DRAFT = "request-draft"
 _SUB_MARK_JOB = "mark-job"
@@ -60,7 +61,8 @@ _USAGE = (
     "usage: lazycortex-specs <subcommand> [args...]\n"
     "subcommands:\n"
     "  open-request <file>            mechanical opt-in for naked request file\n"
-    "  resolve-product <by-key|by-path> ...   resolve a product from settings\n"
+    "  resolve-product <by-key|by-path|effective|effective-by-path> ...\n"
+    "                                  resolve a product from settings, raw or with inheritance merged\n"
     "  resolve-language <relpath>     resolve a doc's effective language\n"
     "  flip-gate <asset_dir> <gate> [--off] [--auto] [--reason TEXT]   move one gate\n"
     "  gate-tick <asset_note> [--today YYYY-MM-DD]   clear finished job markers, run structural note-check\n"
@@ -79,6 +81,8 @@ _USAGE = (
     "  note-drop-key <asset_dir> <key> [--today YYYY-MM-DD]\n"
     "                                  remove an unrecognized spec_* frontmatter key the schema rejects\n"
     "  note-check <asset_note>        structural check: frontmatter schema + required section roster\n"
+    "  note-history <asset_note> --line <text> [--today YYYY-MM-DD]\n"
+    "                                  append one line under today's day group of `# History` (no commit)\n"
     "  catalog-note backfill (<product> | --root) [--today YYYY-MM-DD] [--cwd DIR]\n"
     "                                  bring a product's or the catalog root's level note up to schema\n"
     "  request-draft --source <doc> --title <text> --body <file> [--cwd DIR]\n"
@@ -184,6 +188,10 @@ def main(argv: list[str]) -> int:
     # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
     import note_ops  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
     return note_ops.main_check(rest)
+  if sub == _SUB_NOTE_HISTORY:
+    # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
+    import note_ops  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
+    return note_ops.main_history(rest)
   if sub == _SUB_CATALOG_NOTE:
     # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
     import catalog_note  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy

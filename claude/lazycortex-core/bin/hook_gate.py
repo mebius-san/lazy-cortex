@@ -22,8 +22,6 @@ malformed settings file.
 """
 
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error,wrong-import-position
 
 import os
 import subprocess
@@ -38,6 +36,7 @@ if TYPE_CHECKING:
 _BIN_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_BIN_DIR))
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# pylint: disable-next=import-error,wrong-import-position
 from constants import EnvVar, HooksKey, SettingsFile, SettingsKey  # noqa: E402
 
 
@@ -69,6 +68,7 @@ def is_enabled(name: str) -> bool:
   # in-memory check — the expert-spawn fast path exits here with no I/O.
   if allow is not None:
     return name in { item.strip() for item in allow.split(",") if item.strip() }
+
   # Interactive default: run unless the operator silenced this hook in settings.
   return name not in _disabled_hooks()
 
@@ -105,10 +105,12 @@ def _disabled_hooks() -> frozenset[str]:
   # someone said so.
 
   repo = _repo_root()
+
   # guard: not inside a git repository — nothing to disable against
   if repo is None:
     return frozenset()
   settings_path = repo / SettingsFile.REL
+
   # guard: no settings file for this repository
   if not settings_path.exists():
     return frozenset()
@@ -116,11 +118,12 @@ def _disabled_hooks() -> frozenset[str]:
   try:
     # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
     # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-    import lazy_settings  # type: ignore  # noqa: E402
+    import lazy_settings  # type: ignore  # noqa: E402  # pylint: disable=import-error
     section = lazy_settings.load_section(settings_path, SettingsKey.HOOKS)
   except Exception:
     return frozenset()
   disabled = section.get(HooksKey.DISABLED) or []
+
   # guard: malformed `disabled` value — treat as no disables
   if not isinstance(disabled, list):
     return frozenset()

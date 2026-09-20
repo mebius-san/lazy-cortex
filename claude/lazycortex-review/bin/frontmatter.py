@@ -18,12 +18,11 @@ which perform a single targeted line edit and leave every other byte
 of the document untouched.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import re
 
-from errors import ParseError
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from errors import ParseError  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -63,6 +62,7 @@ def _find_fences(text: str) -> tuple[int, int, int] | None:
   after_open = len("---\n") if text.startswith("---\n") else len("---\r\n")
   rest = text[after_open:]
   match = _FENCE_LINE.search(rest)
+
   # guard: an opening fence with no closing fence is malformed, not "no frontmatter"
   if match is None:
     raise ParseError(
@@ -73,6 +73,7 @@ def _find_fences(text: str) -> tuple[int, int, int] | None:
   # translate the match back into offsets over the original text
   close_start = after_open + match.start()
   close_end = after_open + match.end()
+
   # The fence may be followed by `\n` (typical) or end-of-file.
   if close_end < len(text) and text[close_end] == "\n":
     close_end += 1
@@ -143,6 +144,7 @@ def _key_block_span(block: str, key: str) -> tuple[int, int] | None:
   if match is None:
     return None
   start = match.start()
+
   # Walk forward line-by-line until we hit the next top-level key,
   # an empty line followed by a top-level key, or end of block.
   cursor = block.find("\n", match.end())
@@ -228,12 +230,14 @@ def read_list_field(text: str, key: str) -> list[str]:
   header, _, continuation = entry.partition("\n")
   _, _, inline_value = header.partition(":")
   inline_value = inline_value.strip()
+
   # inline array form: `key: ["a", "b"]` or `key: []`
   if inline_value.startswith("[") and inline_value.endswith("]"):
     inner = inline_value[1:-1].strip()
     if not inner:
       return []
     return [item.strip().strip('"').strip("'") for item in inner.split(",")]
+
   # block-style form: header line bare, items as indented `- value` continuation lines
   return [
       line.strip()[2:].strip().strip('"').strip("'")
@@ -286,6 +290,7 @@ def set_field(text: str, key: str, value: object) -> str:
     else:
       new_block = block + rendered + "\n"
     return text[:open_end] + new_block + text[close_start:]
+
   # Replace the whole existing entry (header + any continuation lines)
   # with a single-line scalar form. Preserve the entry's trailing
   # newline so the closing fence stays on its own line.

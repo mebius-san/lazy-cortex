@@ -14,8 +14,6 @@ failing poll is logged to stderr and folded into the summary's `error` field wit
 rest of the pass (the error-ledger contract — a failed sweep must not report success via exit 0).
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error,wrong-import-position
 
 import argparse
 import json
@@ -32,11 +30,11 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import gate_tick  # noqa: E402
+import gate_tick  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import spec_job_markers  # noqa: E402
+import spec_job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from spec_keys import TickAction  # noqa: E402
+from spec_keys import TickAction  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # waiver: 'notes'/'ticked'/'error' are this sweep's own wire-shape keys, mirroring the review
@@ -76,6 +74,7 @@ def collect_tick(repo: Path) -> dict:
   # idle repo costs one sidecar read and nothing else
   for key in sorted(spec_job_markers.entries(repo)):
     note = repo / key
+
     # guard: stale row for a deleted note — runtime scratch, skipped silently and uncounted
     if not note.is_file():
       continue

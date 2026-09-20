@@ -4,6 +4,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 9.6.0 — 2026-09-20 UTC
+
+- Git-watch routine grouping (`group_globs`) now picks the deepest matching directory glob, regardless of list order — previously the first-listed glob won a depth tie.
+- New `history-append` core verb: catalog and status note history is now written by one shared verb, grouped under day headings with single-line entries instead of a flat run of per-call dated lines.
+- Document templates can mark a section comment `Optional.` so a writer drops that section (heading and comment together) when there's nothing to say, instead of leaving it empty or padded with filler.
+
 ### 9.5.1 — 2026-09-18 UTC
 
 - Fixed the shared markdown-authoring canon: a `[!question]` callout now requires the `#review/question` tag to be recognized — an untagged one was silently treated as ordinary prose and never blocked or surfaced — and `[!decision-candidate]` callouts are documented as always stripped before a document reaches approved state, ticked or not.
@@ -675,6 +681,15 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 9.3.0 — 2026-09-20 UTC
+
+- Spec products can now nest inside each other: features, content, and research default to the product root (bugs and changes still get their own folders), nested products inherit their ancestors' settings, and the catalog, coordinator, and audit tooling track the hierarchy end to end — rollup statistics, spawn and resolve at any depth, cycle protection, and reapproving a nested product's vision or design wakes its parent.
+- `spec.create-from-code` now sorts discovered features into semantic areas and spins up nested products for them, instead of flattening everything into one product.
+- `create-asset` and `lookup` now resolve the owning product through the plugin CLI instead of hand-parsing settings, fixing a stale permission-era restriction that had been blocking the call.
+- Spec templates support optional sections — an inapplicable section now renders empty instead of being padded with filler text.
+- Folder-note history is now grouped by day, each entry written with a single verb, with approval moments called out in the header.
+- A corrupted `lazy.settings.json` now fails cleanly instead of crashing with a raw traceback.
+
 ### 9.2.1 — 2026-09-18 UTC
 
 - `lazy-spec.set-stage` now refuses to promote a document to `approved` while a `[!decision-candidate]` callout is still unfolded in its body, ticked or not — fold it through the document's review first.
@@ -1266,6 +1281,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+### 6.6.0 — 2026-09-20 UTC
+
+- Product-scoped review classes (`<type>@<product>`) now route correctly for nested products: glob overrides with `**` match an asset at any depth below the product, the innermost product's class wins when several classes scope the same document, and the decisions-context reader resolves the owning product's decision registry by longest matching path instead of assuming a fixed two-segment layout.
+- The review audit now walks class files with the same glob matcher the router uses (it no longer misses assets nested below or sitting at a product's root), warns when a product-scoped class glob carries no `**` (a fixed-depth glob silently misses group-folder assets) while exempting the level-scoped `system-*` classes, and no longer prints a malformed repair command for that warning when the flagged class label carries no product suffix.
+- Review documents' `# History` section now groups entries under day headings instead of a flat list — the coordinator hands its line to a shared verb instead of writing the section by hand.
+- Review banners now name the way back into the loop: "ready" points to both editing-and-recommitting and the command callout, "action needed" points to the open question or candidate, and "waiting" names the command callout as how to intervene or wake a stuck document. The remark callout is removed (nobody was using it since validators moved to plain prose), and an operator question can now offer an "other — my answer is in the prose below" option.
+
 ### 6.5.1 — 2026-09-18 UTC
 
 - Fixed a bug where an operator-approved decision-candidate callout could survive finalization and ship inside the approved document; `finalize` now refuses (exit `3`, naming each offending line) until the candidate is folded, rather than letting it slip through.
@@ -1556,6 +1578,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+### 1.8.0 — 2026-09-20 UTC
+
+- Template sections marked `Optional.` in their template comment can now be dropped whole (heading included) when there is nothing to say under them — enforced explicitly for the tech-writing aspect, the architect agent (its last two sections), and the designer's document-skeleton rule; the `## Terms` glossary follows suit, no longer requiring padding when a document defines no term worth explaining.
+- The research aspect's mandatory opening read now walks the full nested-product chain instead of just the immediate product — the content root's own system documents first, then every enclosing product's, outermost first, then the owning product's own.
+
 ### 1.7.0 — 2026-09-17 UTC
 
 - Expert personas now deliver catalog-bound documents, reports, and mockups back through the job's `result/` channel instead of writing them into the working tree — fixes a bug where UI-designer review mockups could halt the daemon. Code, data, and product-doc changes still commit on the job's own branch, and `lazy-experts.install` seeds the right workspace/commit settings per role automatically.
@@ -1709,6 +1736,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 4.6.0 — 2026-09-20 UTC
+
+- `chk-py` now flags cached functions (`@cache`, `@lru_cache`, `@cached_property`) that lack an `opt:` comment naming the assumption the optimization relies on.
+- The test-writer and code-reviewer agents gained a ninth test category and review checks for `opt:` / `limit:` / `Decision:` markers, including catching an `opt:` whose assumption a later change broke.
 
 ### 4.5.0 — 2026-09-11 UTC
 
@@ -1897,6 +1929,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 3.1.1 — 2026-09-20 UTC
+
+- The integrity audit now catches a folder renamed inside a scope — a topics-index entry pointing at a file that's gone, or a tagged node the index never linked — as a fixable `index-stale` finding; `doctor --apply` (and the daily `lazy-wiki.doctor-apply` routine) repairs it by rebuilding the index, and correctly commits only the rebuilt index rather than the untouched node files.
 
 ### 3.1.0 — 2026-09-17 UTC
 

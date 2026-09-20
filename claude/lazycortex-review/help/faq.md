@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, configuring, and running the lazycortex-review document-review loop.
-last_regen: 2026-09-18
+last_regen: 2026-09-20
 no_diagram: true
 source_skills:
   - lazy-review.install
@@ -12,7 +12,7 @@ source_skills:
   - lazy-review.stop
   - lazy-review.finalize
   - lazy-review.audit
-source_sha: f723a0557db9ea1fc346db7cac478f05d49c7eac
+source_sha: ddcc3d531e1a77299395aa3c7f54eb3492434ea0
 ---
 # Frequently asked questions
 
@@ -56,6 +56,12 @@ When install runs through a path with no operator to ask — an unattended rollo
 ## What does `/lazy-review.configure` actually ask me?
 
 The wizard collects the things the plugin cannot derive on its own: which file globs belong to this review class and the short identity token that names it (e.g. `design`, `request`), which experts act as main writers, which additional sections (validation or terminal) to add and who owns them, and which edit-marker style to use (`simple`, `diff`, `criticmarkup`, or `html`). Every value already persisted in `lazy.settings.json` is reused silently — re-running the wizard on a fully-configured class re-validates without asking a single question. A class may also carry a `protocols` list attached automatically by the plugin that owns the document kind; the wizard never asks about it and always preserves whatever is on record.
+
+---
+
+## Can a review class be scoped to one product, and what happens if two classes overlap?
+
+Yes. A token of the form `<type>@<product>` (e.g. `design@my-widget`) scopes a class to one product's documents of that type. When two such classes could both match the same document — a nested product and its ancestor each configuring their own class for the same type — the one whose globs anchor on the most leading literal path segments wins, because that is always the more specific, innermost product's class. The order the classes were added in `lazy.settings.json` only breaks a tie between two classes anchored at the same depth, and it is the whole matcher for a document that carries no type at all.
 
 ---
 
@@ -118,6 +124,12 @@ A review class references an expert name that is not registered in the top-level
 ## `/lazy-review.audit` reports `settings_present FAIL`. What does that mean?
 
 The audit script could not find `.claude/lazy.settings.json`. Run `/lazy-review.install` first to create and seed it, then re-run the audit.
+
+---
+
+## `/lazy-review.audit` reports `override_glob_depth WARN`. What does that mean?
+
+A product-scoped `<type>@<product>` class carries a glob that fixes the asset's depth in the path — so an asset that sits at the product root, or one nested deeper than the glob expects, falls outside the class and loses that product's own experts. This is a class configuration drift rather than a missing setting, and the fix lives in the plugin that owns the product-scoped classes: re-run `/lazy-spec.product-config <key>` in edit mode to regenerate the class's globs against the product's current shape.
 
 ---
 

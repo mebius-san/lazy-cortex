@@ -3,7 +3,7 @@
     "feature": {
       "icon": "LiRocket",
       "color": "#64748b",
-      "default_path": "features",
+      "default_path": ".",
       "start_doc": "design.md:design",
       "playbook": "lazycortex-specs:lazy-spec.feature-playbook",
       "vision": "mandatory"
@@ -27,7 +27,7 @@
     "content": {
       "icon": "LiShapes",
       "color": "#64748b",
-      "default_path": "content",
+      "default_path": ".",
       "start_doc": "design.md:design",
       "default_tools": [
         "data"
@@ -38,7 +38,7 @@
     "research": {
       "icon": "LiFlaskConical",
       "color": "#64748b",
-      "default_path": "research",
+      "default_path": ".",
       "start_doc": "design.md:research-design",
       "default_tools": [
         "research"

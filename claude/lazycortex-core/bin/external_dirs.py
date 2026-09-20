@@ -9,13 +9,12 @@ every declared path and repairs the mechanically repairable ones. Operator conte
 found in a declared slot is always reported, never touched.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import os
 from pathlib import Path
 
-from constants import (
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from constants import (  # pylint: disable=import-error
   ExternalDirAction,
   ExternalDirFindingKey,
   ExternalDirIgnore,
@@ -46,7 +45,8 @@ def _section(repo: Path) -> dict:
     The merged section dict — tracked layer with the local overlay applied.
   """
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from lazy_settings import load_section
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from lazy_settings import load_section  # pylint: disable=import-error
   return load_section(repo / SettingsFile.REL, SettingsKey.EXTERNAL_DIRS)
 
 
@@ -71,6 +71,7 @@ def _is_contained(rel: str) -> bool:
   # rather than surfaced as a broken or repairable entry.
 
   norm = os.path.normpath(rel)
+
   # guard: an absolute entry names a location of its own, not a slot in the repository
   if os.path.isabs(norm):
     return False
@@ -140,10 +141,12 @@ def source_root(repo: Path | str) -> Path | None:
 
   repo = Path(repo)
   raw = _section(repo).get(ExternalDirsKey.ROOT)
+
   # guard: no source root on record — this checkout is unconfigured
   if not raw:
     return None
   expanded = Path(os.path.expandvars(str(raw))).expanduser()
+
   # guard: a relative root would otherwise resolve against the process cwd, so the daemon and an
   # interactive install would disagree on where the same declaration points
   if not expanded.is_absolute():
@@ -192,6 +195,7 @@ def is_gitignored(repo: Path | str, rel: str) -> bool:
     tracked, unmatched, or git is unavailable.
   """
   code = _check_ignore(repo, rel)
+
   # guard: `check-ignore` exits 128 outside a working tree — reporting that as "not ignored" would
   # raise a dirty-tree warning about a tree that does not exist
   # waiver: inline numeric/default literal, not a domain constant
@@ -227,6 +231,7 @@ def ignore_state(repo: Path | str, rel: str) -> str:
     return ExternalDirIgnore.IGNORED
   name = str(rel).rstrip("/")
   code = _check_ignore(repo, f"{name}/")
+
   # 128 means the pathname led through the planted symlink, which git refuses to resolve — re-ask
   # the same question under a parent that does not exist
   # waiver: inline numeric/default literal, not a domain constant
@@ -280,6 +285,7 @@ def append_ignore_lines(repo: Path | str, lines: list[str]) -> list[str]:
   existing = path.read_text(encoding = "utf-8") if path.exists() else ""
   present = { line.strip() for line in existing.splitlines() }
   fresh = [ line for line in lines if line.strip() not in present ]
+
   # guard: nothing new to record — leave the file byte-identical
   if not fresh:
     return []
@@ -301,6 +307,7 @@ def _link_target(link: Path) -> Path:
     The link target, resolved against the link's own directory when it is relative.
   """
   raw = Path(os.readlink(link))
+
   # guard: a relative target resolves against the directory holding the link
   if not raw.is_absolute():
     return link.parent / raw
@@ -332,16 +339,20 @@ def _status_for(link: Path, source: Path) -> str:
   # guard: a symlink is diagnosed by its target, whatever else is on disk
   if link.is_symlink():
     target = _link_target(link)
+
     # guard: a broken link is the operational failure regardless of where it aimed
     if not target.exists():
       return ExternalDirStatus.DANGLING
+
     # guard: a live link aimed somewhere else is repairable by re-pointing
     if target != source:
       return ExternalDirStatus.WRONG_TARGET
     return ExternalDirStatus.OK
+
   # guard: real content in the declared slot belongs to the operator
   if link.exists():
     return ExternalDirStatus.NOT_A_SYMLINK
+
   # guard: an empty slot with no source has nothing to link to
   if not source.exists():
     return ExternalDirStatus.SOURCE_MISSING
@@ -444,15 +455,18 @@ def apply(repo: Path | str) -> list[dict]:
     rel = finding[ExternalDirFindingKey.PATH]
     status = finding[ExternalDirFindingKey.STATUS]
     raw_source = finding[ExternalDirFindingKey.SOURCE]
+
     # guard: already correct — leave it alone
     if status == ExternalDirStatus.OK:
       records.append(_record(rel, status, ExternalDirAction.UNCHANGED))
       continue
+
     # guard: operator content and an unconfigured checkout are the operator's call
     if status in (ExternalDirStatus.NOT_A_SYMLINK, ExternalDirStatus.UNCONFIGURED):
       records.append(_record(rel, status, ExternalDirAction.SKIPPED))
       continue
     source = Path(str(raw_source))
+
     # guard: nothing to point at — repair is impossible, report instead
     if not source.exists():
       records.append(_record(rel, status, ExternalDirAction.SKIPPED))

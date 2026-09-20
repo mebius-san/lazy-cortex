@@ -333,7 +333,7 @@ Same `<current-branch>` substitution as `lazy-wiki.scan`. No `filter` block — 
 }
 ```
 
-**`lazy-wiki.doctor-apply`** — daily deterministic sanitizer; applies only the `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" doctor --apply` CLI's fixable finding set (`orphan-topic`, `index-desync`, `see-also-path-base`, `broken-see-also`, `stale-gloss` — pure index/link derivations, never mirror or content findings) across every scope and commits what it repaired:
+**`lazy-wiki.doctor-apply`** — daily deterministic sanitizer; applies only the `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" doctor --apply` CLI's fixable finding set (`orphan-topic`, `index-desync`, `index-stale`, `see-also-path-base`, `broken-see-also`, `stale-gloss` — pure index/link derivations, never mirror or content findings) across every scope and commits what it repaired:
 
 ```json
 "lazy-wiki.doctor-apply": {

@@ -129,6 +129,13 @@ with pytest.raises(ValueError, match = "Matrix must be square"):
 - Aim for comprehensive test coverage.
 - Test integration between different components.
 
+## Knowledge-derived tests
+- The knowledge markers in a method body are testable claims, exactly like docstring sections. Each `Contract:` block, each `Domain(…):` block, and each `opt:` clause yields at least one test.
+- **`Contract:`** — one test per guarantee, including a block the class inherits from an interface declaration: the implementation's docstring only points at it, so read the interface. The `Guarantees` section mirrors these blocks; it is not a substitute for reading them.
+- **`Domain(…):`** — the block is the source of expected values. Work two or three inputs through the formula or rule by hand and assert the code matches; never read the expectation off the implementation. `Domain(unfiled):` counts the same — an unfiled group parks the block's name, not its test.
+- **`opt:`** — the clause names the assumption the optimization rests on. The test violates it — change the cached input after the first call, move the source a precomputed table was built from — and asserts the result stays correct or the cache is dropped. A cache with no such test is the classic latent bug: it keeps passing until the code it was built for changes.
+- When a change touches a `Contract:`, a `Domain(…):` block, or the body of a function in a file, the tests derived from every marker in that file are the re-verification: the review checks they changed with the markers, and a stale assumption fails its test instead of surviving in silence.
+
 ## Sampling and Randomness Testing Notes
 - When testing randomness (e.g., `DataRoll.reroll()`):
   - Assert value ranges (e.g., uniform samples in [0.0, 1.0]).

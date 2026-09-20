@@ -39,8 +39,6 @@ transition in one pass instead of one file at a time, and reading OPERATOR_EDIT 
 own last commit (the item's own `sha`/`author_email`) rather than a single file's.
 """
 from __future__ import annotations
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error,wrong-import-position
 
 import argparse
 import hashlib
@@ -61,36 +59,40 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import asset_types  # noqa: E402
+import asset_types  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import flip_gate  # noqa: E402
+import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import gate_dispatch  # noqa: E402
+import gate_dispatch  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import gate_tick  # noqa: E402
+import gate_tick  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import iconize_inline  # noqa: E402
+import history_journal  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import note_explainers  # noqa: E402
+import iconize_inline  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import note_ops  # noqa: E402
+import note_explainers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import resolve_product  # noqa: E402
+import note_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import spec_doc_types  # noqa: E402
+import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import spec_job_markers  # noqa: E402
+import spec_doc_types  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import spec_paths  # noqa: E402
+import spec_job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from spec_keys import (  # noqa: E402
+import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+from spec_keys import (  # noqa: E402  # pylint: disable=import-error,wrong-import-position
     LEVEL_ROLES,
     AnsweredQuestionKey,
     CoordinatorTrigger,
     Gate,
     JobMarker,
     LevelDoc,
+    ReviewResultValue,
     Section,
+    SpecCoordinatorChildWakeStateKey,
     SpecCoordinatorDocStateKey,
     SpecCoordinatorReadyStateKey,
     SpecDependsOnKey,
@@ -114,7 +116,7 @@ _COORDINATOR_EXPERT = "spec.coordinator"
 # catalog root's) is this expert's, every asset status note stays `_COORDINATOR_EXPERT`'s.
 _CATALOG_EXPERT = "spec.catalog-coordinator"
 
-# The guideline role folded into context via `gate_dispatch._collect_guideline_context`, per
+# The guideline role folded into context via `gate_dispatch.collect_guideline_paths`, per
 # `lazy-spec.coordination-playbook.md` § 2 layer 3 (`products[<key>].guidelines.coordinator` + `"*"`).
 _COORDINATOR_ROLE = "coordinator"
 
@@ -140,12 +142,12 @@ _CURSOR_TMP_SUFFIX = ".tmp"
 
 # Mirrored `spec_source_requests` frontmatter key from `apply_request.py`'s own `_K` class,
 # duplicated here rather than imported per this bin/ tree's own per-file small-constant
-# convention (see `gate_tick._write_fm_list`'s docstring).
+# convention (see `gate_tick.write_fm_list`'s docstring).
 _SPEC_SOURCE_REQUESTS = "spec_source_requests"
 
 # Bundle wire key naming the protocol references `lazycortex-core dispatch-job` unions with the
 # dispatching routine's own, duplicated here per this bin/ tree's own per-file small-constant
-# convention — `gate_dispatch._WireKey` predates the level branch, the only sender of this key.
+# convention — `gate_dispatch.WireKey` predates the level branch, the only sender of this key.
 _WIRE_PROTOCOLS = "protocols"
 
 # Settings-section keys for the vault-wide coordination-rules doc (`lazy-spec.config-protocol.md`).
@@ -177,7 +179,7 @@ _QUESTION_ATTRIBUTION = "> — spec.coordinator"
 _CATALOG_QUESTION_ATTRIBUTION = f"> — {_CATALOG_EXPERT}"
 _QUESTION_ATTRIBUTIONS = frozenset({ _QUESTION_ATTRIBUTION, _CATALOG_QUESTION_ATTRIBUTION })
 
-# ATX heading boundary, mirroring `flip_gate._append_under_heading`'s own section-end rule.
+# ATX heading boundary, mirroring `flip_gate.append_under_heading`'s own section-end rule.
 _HEADING_RE = re.compile(r"^#{1,6}\s")
 
 # HTML comment span — strips the shipped `<!-- ... -->` placeholder before the emptiness test,
@@ -253,7 +255,7 @@ def _read_section_body(body: str, heading: str) -> str:
   # scaffolding, never operator content; an operator line that happens to match some OTHER
   # section's tag still counts, so this only ever strips the tag this exact heading owns
   section_lines = lines[head_idx + 1:end]
-  if section_lines and section_lines[0].strip() == note_ops._PROTECTED_MARKERS.get(heading):
+  if section_lines and section_lines[0].strip() == note_ops.PROTECTED_MARKERS.get(heading):
     section_lines = section_lines[1:]
 
   # drop the section's own explainer line the same way — self-description, never operator content
@@ -301,9 +303,11 @@ def _is_attributed_ticked_block(ticked: bool, block_lines: list[str]) -> bool:
   # guard: an unticked block never reaches ANSWER regardless of attribution
   if not ticked:
     return False
+
   # scan backward past any trailing blank quoted line (bare `>`) to the last substantive one
   for line in reversed(block_lines):
     stripped = line.strip()
+
     # guard: a blank quote continuation carries no content to compare — keep scanning back
     if stripped == ">":
       continue
@@ -331,6 +335,7 @@ def _find_ticked_question_block(body: str) -> str | None:
   in_block = False
   ticked = False
   block_lines: list[str] = []
+
   # walk the body once, tracking whether the current line sits inside a `[!question]` block
   for line in body.splitlines():
     stripped = line.strip()
@@ -355,6 +360,7 @@ def _find_ticked_question_block(body: str) -> str | None:
     block_lines.append(line)
     if _TICKED_OPTION_RE.match(stripped):
       ticked = True
+
   # guard: the body ended while still inside an attributed-ticked block (no trailing heading)
   if in_block and _is_attributed_ticked_block(ticked, block_lines):
     return "\n".join(block_lines)
@@ -446,6 +452,7 @@ def _has_operator_authored_recently(repo_root: Path, item: dict, cursor: str | N
   for email in out.splitlines():
     if _BOT_MARK not in email:
       return True
+
     # guard: this worker's own historic wake commit proves everything older was already
     # dispatched on — the worker no longer writes such commits, but pre-cursor installs still
     # carry them, and they keep bounding the window until a cursor is stamped
@@ -517,7 +524,7 @@ def _stamp_dispatch_cursor(repo_root: Path, asset_note: Path, sha: object) -> No
   except (OSError, json.JSONDecodeError):
     data = {}
 
-  # guard: a non-object store is scratch — rebuild it rather than crash the tick
+  # a non-object store is scratch — rebuild it rather than crash the tick
   if not isinstance(data, dict):
     data = {}
 
@@ -529,25 +536,25 @@ def _stamp_dispatch_cursor(repo_root: Path, asset_note: Path, sha: object) -> No
   os.replace(tmp, path)
 
 
-def _read_marker_dict(fm: dict, key: str) -> dict:
+def _read_marker_dict(frontmatter: dict, key: str) -> dict:
   """
   Parse a worker-internal key→value JSON-dict marker off the asset note's frontmatter.
 
   Best-effort, mirroring the other worker-internal markers (`_find_ticked_question_block` and
   friends) — a missing or malformed marker reads as "nothing recorded yet" rather than raising,
-  since these keys are never operator- or persona-authored (`SpecCoordinatorDocStateKey` /
-  `SpecCoordinatorReadyStateKey`, keyed by sibling-doc basename and gate name respectively).
+  since these keys are never operator- or persona-authored (`SpecCoordinatorDocStateKey`,
+  `SpecCoordinatorReadyStateKey` and `SpecCoordinatorChildWakeStateKey`, keyed by sibling-doc
+  basename, gate name and child asset path respectively).
 
   Args:
-    fm: The asset status folder-note's parsed frontmatter.
+    frontmatter: The asset status folder-note's parsed frontmatter.
     key: The frontmatter key to read.
 
   Returns:
     The parsed dict, or `{}` when the key is absent, not valid JSON, or not a JSON object.
   """
-  raw = fm.get(key)
   # guard: no marker recorded yet
-  if not raw:
+  if not (raw := frontmatter.get(key)):
     return {}
   try:
     parsed = json.loads(raw)
@@ -556,17 +563,17 @@ def _read_marker_dict(fm: dict, key: str) -> dict:
   return parsed if isinstance(parsed, dict) else {}
 
 
-def _read_doc_state(fm: dict) -> dict:
+def _read_doc_state(frontmatter: dict) -> dict:
   """
   Parse the asset note's `spec_coordinator_doc_state` marker into a basename→value dict.
 
   Args:
-    fm: The asset status folder-note's parsed frontmatter.
+    frontmatter: The asset status folder-note's parsed frontmatter.
 
   Returns:
     The parsed dict, or `{}` when the key is absent, not valid JSON, or not a JSON object.
   """
-  return _read_marker_dict(fm, SpecCoordinatorDocStateKey.STATE)
+  return _read_marker_dict(frontmatter, SpecCoordinatorDocStateKey.STATE)
 
 
 def _is_tracked_document(path: Path, basenames: frozenset[str] | None = None) -> bool:
@@ -609,7 +616,7 @@ def _is_tracked_document(path: Path, basenames: frozenset[str] | None = None) ->
   return bool(spec_doc_types.doc_type_of(path))
 
 
-def _resolve_doc_transition(sibling_doc: Path, fm: dict) -> tuple[str, str] | None:
+def _resolve_doc_transition(sibling_doc: Path, frontmatter: dict) -> tuple[str, str] | None:
   """
   Detect a `review_result` transition on one sibling doc against the asset note's own marker.
 
@@ -625,7 +632,7 @@ def _resolve_doc_transition(sibling_doc: Path, fm: dict) -> tuple[str, str] | No
 
   Args:
     sibling_doc: The sibling doc's own path (the git-watch item's `path`, resolved to a file).
-    fm: The owning asset's status folder-note frontmatter, carrying the previously-recorded
+    frontmatter: The owning asset's status folder-note frontmatter, carrying the previously-recorded
       marker (`spec_keys.SpecCoordinatorDocStateKey.STATE`), if any.
 
   Returns:
@@ -635,18 +642,22 @@ def _resolve_doc_transition(sibling_doc: Path, fm: dict) -> tuple[str, str] | No
   """
   basename = sibling_doc.name
   sibling_fm, _ = flip_gate.parse_frontmatter(sibling_doc.read_text())
+
   # guard: a parked document's verdict transitions nothing until it returns to `draft`
   if str(sibling_fm.get(StageKey.STAGE, "")).strip() == Stage.DEFERRED:
     return None
   current = sibling_fm.get(SpecKey.REVIEW_RESULT)
-  previous = _read_doc_state(fm).get(basename)
+  previous = _read_doc_state(frontmatter).get(basename)
+
   # guard: no result now and none ever recorded — nothing has transitioned in either direction
   if current is None and not previous:
     return None
+
   # a cleared result is the document re-entering review: recorded as the empty token, so the
   # next terminal value — even the same one as before — differs from the marker and re-fires
   if current is None:
     return basename, SpecCoordinatorDocStateKey.REVIEW_REOPENED
+
   # guard: identical to what this worker already dispatched on — a re-tick, not a transition
   if current == previous:
     return None
@@ -672,8 +683,8 @@ def _is_member_signal_eligible(member: Path) -> bool:
   # guard: a member gone between scan and dispatch carries no signal
   if not member.is_file():
     return False
-  fm, _ = flip_gate.parse_frontmatter(member.read_text())
-  return not flip_gate._is_true(fm, SpecKey.REVIEW_ACTIVE)
+  frontmatter, _ = flip_gate.parse_frontmatter(member.read_text())
+  return not flip_gate.is_true(frontmatter, SpecKey.REVIEW_ACTIVE)
 
 
 def _has_group_note_changed(item: dict, asset_note: Path, repo_root: Path) -> bool:
@@ -705,15 +716,15 @@ def _has_group_note_changed(item: dict, asset_note: Path, repo_root: Path) -> bo
   return False
 
 
-def _resolve_wake_trigger(
-    repo_root: Path, fm: dict, body: str, item: dict, markers: dict, cursor: str | None,
+def resolve_wake_trigger(
+    repo_root: Path, frontmatter: dict, body: str, item: dict, markers: dict, cursor: str | None,
 ) -> str | None:
   """
   Resolve the wake trigger for this tick, honoring the halt override.
 
   Args:
     repo_root: The repository root to run `git` in.
-    fm: The folder-note's parsed frontmatter.
+    frontmatter: The folder-note's parsed frontmatter.
     body: The folder-note section text (after frontmatter).
     item: The git-watch `changed_files` item for this note (`path`, `status`, `sha`,
       `author_name`, `author_email`).
@@ -743,7 +754,7 @@ def _resolve_wake_trigger(
     return CoordinatorTrigger.COMMAND
 
   # guard: halt silences every other trigger
-  if flip_gate._is_true(fm, SpecHaltKey.HALTED):
+  if flip_gate.is_true(frontmatter, SpecHaltKey.HALTED):
     return None
 
   # a ticked question re-fires only when its content differs from the fingerprint stamped the
@@ -751,7 +762,7 @@ def _resolve_wake_trigger(
   # commit — the coordinator's own — can't resurrect an infinite re-dispatch loop)
   ticked_block = _find_ticked_question_block(body)
   if ticked_block is not None:
-    if fm.get(AnsweredQuestionKey.FINGERPRINT) != _compute_answer_fingerprint(ticked_block):
+    if frontmatter.get(AnsweredQuestionKey.FINGERPRINT) != _compute_answer_fingerprint(ticked_block):
       return CoordinatorTrigger.ANSWER
 
   # a launch-checkbox job finishing wakes the coordinator whoever authored the commit that
@@ -771,13 +782,13 @@ def _resolve_wake_trigger(
 
 
 def _resolve_group_trigger(
-    repo_root: Path, fm: dict, body: str, item: dict, markers: dict, members: list[Path],
+    repo_root: Path, frontmatter: dict, body: str, item: dict, markers: dict, members: list[Path],
     asset_note: Path, cursor: str | None,
 ) -> tuple[str | None, dict[str, str]]:
   """
   Resolve the wake trigger for a grouped git-watch item, honoring the halt override.
 
-  Mirrors `_resolve_wake_trigger`'s priority ladder (COMMAND, halt, ANSWER, JOB_DONE,
+  Mirrors `resolve_wake_trigger`'s priority ladder (COMMAND, halt, ANSWER, JOB_DONE,
   OPERATOR_EDIT), replacing its single-sibling `sibling_doc` reasoning with one pass over every
   member path: every member resolving to a genuine `review_result` transition is collected
   (basename -> new value) rather than stopping at the first, so DOC_TRANSITION fires with the
@@ -786,7 +797,7 @@ def _resolve_group_trigger(
 
   Args:
     repo_root: The repository root to run `git` in.
-    fm: The asset status folder-note's parsed frontmatter.
+    frontmatter: The asset status folder-note's parsed frontmatter.
     body: The folder-note section text (after frontmatter).
     item: The grouped git-watch item (`dir`, `paths`, `sha`, `author_name`, `author_email`).
     markers: The note's runtime marker entry, from `spec_job_markers.read`.
@@ -804,19 +815,19 @@ def _resolve_group_trigger(
     `CoordinatorTrigger.DOC_TRANSITION`.
   """
   # a non-empty commands section wakes the coordinator even on a halted asset — the same
-  # exception `_resolve_wake_trigger` grants the single-file form
+  # exception `resolve_wake_trigger` grants the single-file form
   if _read_section_body(body, Section.COORD_COMMANDS):
     return CoordinatorTrigger.COMMAND, {}
 
   # guard: halt silences every other trigger
-  if flip_gate._is_true(fm, SpecHaltKey.HALTED):
+  if flip_gate.is_true(frontmatter, SpecHaltKey.HALTED):
     return None, {}
 
   # a ticked question re-fires only when its content differs from the fingerprint stamped the
   # last time this worker dispatched on it
   ticked_block = _find_ticked_question_block(body)
   if ticked_block is not None:
-    if fm.get(AnsweredQuestionKey.FINGERPRINT) != _compute_answer_fingerprint(ticked_block):
+    if frontmatter.get(AnsweredQuestionKey.FINGERPRINT) != _compute_answer_fingerprint(ticked_block):
       return CoordinatorTrigger.ANSWER, {}
 
   # a launch-checkbox job finishing wakes the coordinator whoever authored this tick's commit
@@ -830,7 +841,7 @@ def _resolve_group_trigger(
     # silently rather than failing the whole group resolution
     if not _is_tracked_document(member):
       continue
-    resolved = _resolve_doc_transition(member, fm)
+    resolved = _resolve_doc_transition(member, frontmatter)
     if resolved is not None:
       basename, value = resolved
       transitions[basename] = value
@@ -857,6 +868,7 @@ def _resolve_group_trigger(
       _ITEM_SHA: item.get(_ITEM_SHA),
       _ITEM_PATH: item.get(_ITEM_DIR),
   }
+
   # guard: neither the item's own author nor a recent bot-buried one on the group's dir was the
   # operator
   if not _has_operator_authored_recently(repo_root, dir_item, cursor):
@@ -864,8 +876,37 @@ def _resolve_group_trigger(
   return CoordinatorTrigger.OPERATOR_EDIT, {}
 
 
+def _level_doc_transitions(frontmatter: dict, members: list[Path]) -> dict[str, str]:
+  """
+  Collect every `review_result` transition the named level documents carry.
+
+  Read on its own, outside any trigger ladder, so a caller that only needs to know what moved
+  is not subject to another trigger outranking the transition on the same tick.
+
+  Args:
+    frontmatter: The level note's parsed frontmatter, holding the recorded document state each
+      candidate value is compared against.
+    members: The level documents this tick names.
+
+  Returns:
+    Every transitioned document's basename mapped to its new `review_result` value; empty when
+    none of the named documents moved.
+  """
+  transitions: dict[str, str] = {}
+  for member in members:
+    # guard: a document gone between scan and dispatch, or not part of the level ladder, carries
+    # no transition to read
+    if not member.is_file() or member.name not in LevelDoc.BASENAMES:
+      continue
+    resolved = _resolve_doc_transition(member, frontmatter)
+    if resolved is not None:
+      basename, value = resolved
+      transitions[basename] = value
+  return transitions
+
+
 def _resolve_level_trigger(
-    repo_root: Path, fm: dict, body: str, item: dict, members: list[Path], cursor: str | None,
+    repo_root: Path, frontmatter: dict, body: str, item: dict, members: list[Path], cursor: str | None,
 ) -> tuple[str | None, dict[str, str]]:
   """
   Resolve the wake trigger for a level note, honoring the halt override.
@@ -878,7 +919,7 @@ def _resolve_level_trigger(
 
   Args:
     repo_root: The repository root to run `git` in.
-    fm: The level note's parsed frontmatter.
+    frontmatter: The level note's parsed frontmatter.
     body: The level note's section text (after frontmatter).
     item: The git-watch item for this tick.
     members: The level documents this tick names — the one changed document, every existing one
@@ -897,26 +938,17 @@ def _resolve_level_trigger(
     return CoordinatorTrigger.COMMAND, {}
 
   # guard: halt silences every other trigger
-  if flip_gate._is_true(fm, SpecHaltKey.HALTED):
+  if flip_gate.is_true(frontmatter, SpecHaltKey.HALTED):
     return None, {}
 
   # a ticked question re-fires only when its content differs from the stamped fingerprint
   ticked_block = _find_ticked_question_block(body)
   if ticked_block is not None:
-    if fm.get(AnsweredQuestionKey.FINGERPRINT) != _compute_answer_fingerprint(ticked_block):
+    if frontmatter.get(AnsweredQuestionKey.FINGERPRINT) != _compute_answer_fingerprint(ticked_block):
       return CoordinatorTrigger.ANSWER, {}
 
   # one pass over every named level document — every transition found is kept, not just the first
-  transitions: dict[str, str] = {}
-  for member in members:
-    # guard: a document gone between scan and dispatch, or not part of the level ladder, carries
-    # no transition to read
-    if not member.is_file() or member.name not in LevelDoc.BASENAMES:
-      continue
-    resolved = _resolve_doc_transition(member, fm)
-    if resolved is not None:
-      basename, value = resolved
-      transitions[basename] = value
+  transitions = _level_doc_transitions(frontmatter, members)
   if transitions:
     return CoordinatorTrigger.DOC_TRANSITION, transitions
 
@@ -948,11 +980,71 @@ def _resolve_product_note_path(repo_root: Path, product_record: dict) -> Path | 
     no usable `spec_path`.
   """
   spec_path = product_record.get(_SPEC_PATH_KEY)
+
   # guard: no usable spec_path on this record
   if not isinstance(spec_path, str) or not spec_path:
     return None
   product_dir = spec_paths.spec_content_root(repo_root) / spec_path
   return product_dir / f"{product_dir.name}.md"
+
+
+def _ancestor_note_paths(repo_root: Path, key: str | None) -> list[str]:
+  """
+  List the level notes of every product enclosing `key`'s, outermost first.
+
+  Args:
+    repo_root: The repository root the product records resolve under.
+    key: The owning product's compound-key, or None when no product owns the path.
+
+  Returns:
+    Repo-relative paths of the ancestor notes that exist on disk; a registered ancestor whose
+    note was never created contributes nothing and no warning.
+  """
+  # guard: no owning product at all — no ancestor chain to walk
+  if key is None:
+    return []
+  paths: list[str] = []
+  for ancestor_key in resolve_product.ancestor_chain(repo_root, key):
+    ancestor_record = resolve_product.resolve_product_by_key(repo_root, ancestor_key) or {}
+    ancestor_note = _resolve_product_note_path(repo_root, ancestor_record)
+    if ancestor_note is not None and ancestor_note.is_file():
+      paths.append(_to_rel_path(repo_root, ancestor_note))
+  return paths
+
+
+def _child_level_paths(repo_root: Path, key: str | None) -> list[str]:
+  """
+  List the level documents of every product nested directly inside `key`'s, children sorted.
+
+  The inverse of `_ancestor_note_paths`: a parent reads what sits below it, so its own
+  re-approval is decided against the nested products that inherit from it.
+
+  Args:
+    repo_root: The repository root the product records resolve under.
+    key: The enclosing product's compound-key, or None when no product owns the path.
+
+  Returns:
+    Repo-relative paths — each child's own level note followed by whichever of `vision.md` and
+    `design.md` that child has written so far; a registered child whose note or document is not
+    on disk contributes nothing and no warning.
+  """
+  # guard: no owning product at all — nothing is nested inside it
+  if key is None:
+    return []
+  paths: list[str] = []
+  for child_key in resolve_product.child_keys(repo_root, key):
+    child_record = resolve_product.resolve_product_by_key(repo_root, child_key) or {}
+    child_note = _resolve_product_note_path(repo_root, child_record)
+
+    # guard: a registered child whose level note was never created names nothing to read
+    if child_note is None or not child_note.is_file():
+      continue
+    paths.append(_to_rel_path(repo_root, child_note))
+    for basename in (LevelDoc.VISION, LevelDoc.DESIGN):
+      doc = child_note.parent / basename
+      if doc.is_file():
+        paths.append(_to_rel_path(repo_root, doc))
+  return paths
 
 
 def _catalog_note_path(repo_root: Path) -> Path:
@@ -967,6 +1059,105 @@ def _catalog_note_path(repo_root: Path) -> Path:
   """
   content_root = spec_paths.spec_content_root(repo_root)
   return content_root / f"{content_root.name}.md"
+
+
+def _members_by_owner(group_dir: Path, raw_paths: list) -> list[tuple[Path, Path | None]]:
+  """
+  Resolve a grouped item's member paths and pair each with the status folder-note owning it.
+
+  A group glob knows only a depth, never an asset boundary, so ownership is decided by the climb
+  from a member's own folder up to `group_dir` (inclusive): the nearest folder whose folder-note
+  carries the asset status role owns it, and a member with no such folder over it is nobody's.
+
+  Args:
+    group_dir: The group's matched directory, resolved.
+    raw_paths: The item's member paths, relative to the current directory (the repo root).
+
+  Returns:
+    `(member, owner)` pairs in first-seen order, `owner` None for an unowned member; a non-string
+    entry (a malformed wire item) names no path and is dropped.
+  """
+  pairs: list[tuple[Path, Path | None]] = []
+  for raw in raw_paths:
+    # guard: a non-string entry (a malformed wire item) can't name a path
+    if not isinstance(raw, str):
+      continue
+    member = (Path.cwd() / raw).resolve()
+    pairs.append(( member, _owner_status_note(member.parent, group_dir) ))
+  return pairs
+
+
+def _split_group_by_owner(group_dir: Path, raw_paths: list) -> dict[Path, list[Path]]:
+  """
+  Split a grouped git-watch item's member paths by the asset that owns each of them.
+
+  A group glob knows only a depth, never an asset boundary, so a nested asset's own files land
+  in its enclosing asset's group, and under a nested product the group dir may be no asset at
+  all. Each member therefore climbs from its own folder up to `group_dir` (inclusive) to the
+  nearest folder whose folder-note carries `spec_role: status`; that note owns it.
+
+  Args:
+    group_dir: The group's matched directory, resolved.
+    raw_paths: The item's member paths, relative to the current directory (the repo root).
+
+  Returns:
+    A map of owning status folder-note to its member paths (the note itself included when it
+    changed), in first-seen order; a member with no status note over it is dropped.
+  """
+  owners: dict[Path, list[Path]] = {}
+  for member, owner in _members_by_owner(group_dir, raw_paths):
+    # guard: no status folder-note between this member and the group dir — nobody's object
+    if owner is None:
+      continue
+    owners.setdefault(owner, []).append(member)
+  return owners
+
+
+def _orphan_members(group_dir: Path, raw_paths: list) -> list[Path]:
+  """
+  List a grouped item's members that no status folder-note owns.
+
+  A member with no status note between its own folder and `group_dir` is not an asset's file:
+  it is a level document of a nested product whose folder the parent's shallow glob grouped,
+  or a bare group folder's own note. Each such member is handled as the single-file item it
+  would have been ungrouped.
+
+  Args:
+    group_dir: The group's matched directory, resolved.
+    raw_paths: The item's member paths, relative to the current directory (the repo root).
+
+  Returns:
+    The orphan members, resolved, in first-seen order.
+  """
+  return [ member for member, owner in _members_by_owner(group_dir, raw_paths) if owner is None ]
+
+
+def _owner_status_note(start: Path, top: Path) -> Path | None:
+  """
+  Find the nearest status folder-note from `start` up to `top`, both inclusive.
+
+  Args:
+    start: The folder to begin at, resolved.
+    top: The highest folder to look in, resolved.
+
+  Returns:
+    The first `<dir>/<dir.name>.md` carrying `spec_role: status` on the way up, or None when
+    none does or `start` does not sit under `top`.
+  """
+  # guard: a member outside the group dir has no owner among the group's folders
+  if start != top and top not in start.parents:
+    return None
+  for candidate in (start, *start.parents):
+    note = candidate / f"{candidate.name}.md"
+    if note.is_file():
+      frontmatter, _ = flip_gate.parse_frontmatter(note.read_text())
+      if frontmatter.get(SpecKey.ROLE) == _SPEC_ROLE_STATUS:
+        return note
+
+    # guard: the group dir was the last folder to look in
+    if candidate == top:
+      return None
+  return None
 
 
 def _resolve_owner_note(repo_root: Path, changed: Path) -> Path:
@@ -1003,17 +1194,19 @@ def _resolve_owner_note(repo_root: Path, changed: Path) -> Path:
   return changed_dir / f"{changed_dir.name}.md"
 
 
-def _scan_dependents(asset_dir: Path) -> list[Path]:
+def scan_dependents(asset_dir: Path) -> list[Path]:
   """
   Find every OTHER asset's status folder-note in the product tree whose `spec_depends_on`
   names `asset_dir` (C2's reverse edge — nothing else ever wakes a dependent asset when the
   dependency it is waiting on becomes ready).
 
-  One hop only, and resolved through `gate_tick._target_asset_dir` — the same primitive
+  One hop only, and resolved through `gate_tick.target_asset_dir` — the same primitive
   `_build_bundle`'s own `spec_depends_on` fold-in uses — rather than a bare string compare, so
-  any token spelling that fold-in already accepts also wakes the dependent here. The category
-  enumeration mirrors the product's own built-in/`asset_types` folder walk used elsewhere
-  in this module.
+  any token spelling that fold-in already accepts also wakes the dependent here. The walk
+  covers the whole product tree, so a dependent nested inside another asset, or sitting straight
+  at the product root, is found like any other; the product root comes from the settings (the
+  longest matching `spec_path`, so a nested product scans its own tree only), falling back to the
+  fixed `<spec_path>/<category>/<slug>/` nesting when no product is registered.
 
   Args:
     asset_dir: The asset folder that just woke — the dependency other assets may declare.
@@ -1025,27 +1218,54 @@ def _scan_dependents(asset_dir: Path) -> list[Path]:
   # at current product sizes and cheap next to the coordinator LLM dispatch it precedes; upgrade
   # path is a repo-root reverse-dependency index (built once, invalidated on spec_depends_on
   # writes) once a product's asset count makes the per-wake scan itself a measurable cost (N9)
-  product_root = asset_dir.parent.parent
+  woken_dir = asset_dir.resolve()
+  product_root = resolve_product.owning_product_root(asset_dir) or woken_dir.parent.parent
   hits: list[Path] = []
+
   # guard: no product tree above this asset — nothing to scan
   if not product_root.is_dir():
     return hits
-  for cat_dir in sorted(p for p in product_root.iterdir() if p.is_dir()):
-    for candidate_dir in sorted(p for p in cat_dir.iterdir() if p.is_dir()):
-      # guard: never wake the asset that just woke off its own dependency list
-      if candidate_dir == asset_dir:
-        continue
-      candidate_note = candidate_dir / f"{candidate_dir.name}.md"
-      # guard: no status folder-note here — not a real asset
-      if not candidate_note.is_file():
-        continue
-      text = candidate_note.read_text()
-      _, fm_end = flip_gate.parse_frontmatter(text)
-      for token in gate_tick._read_fm_list(text[:fm_end], SpecDependsOnKey.DEPENDS_ON):
-        if gate_tick._target_asset_dir(candidate_dir, token) == asset_dir:
-          hits.append(candidate_note)
-          break
+  # waiver: markdown-suffix glob, single-source alongside every other ".md" folder-note
+  for candidate_note in sorted(product_root.rglob("*.md")):
+    candidate_dir = candidate_note.parent
+
+    # guard: only a folder-note named after its own folder marks an asset — and never the
+    # product root's own note
+    if candidate_note.stem != candidate_dir.name or candidate_dir == product_root:
+      continue
+
+    # guard: never wake the asset that just woke off its own dependency list
+    if candidate_dir == woken_dir:
+      continue
+    text = candidate_note.read_text()
+    _, fm_end = flip_gate.parse_frontmatter(text)
+    for token in gate_tick.read_fm_list(text[:fm_end], SpecDependsOnKey.DEPENDS_ON):
+      if gate_tick.target_asset_dir(candidate_dir, token) == woken_dir:
+        hits.append(candidate_note)
+        break
   return hits
+
+
+def _own_token(asset_dir: Path) -> str:
+  """
+  Render an asset's own cross-asset token: its folder's path relative to the owning product root.
+
+  The shape `spec_depends_on` / `spec_targets` carry — any number of segments, so a nested asset
+  or one at the product root names itself correctly. Without a registered product the fixed
+  `<category>/<slug>` pair is assumed.
+
+  Args:
+    asset_dir: The asset folder.
+
+  Returns:
+    The product-relative POSIX path token.
+  """
+  product_root = resolve_product.owning_product_root(asset_dir)
+
+  # guard: no registered product — fall back to the two-segment convention
+  if product_root is None:
+    return f"{asset_dir.parent.name}/{asset_dir.name}"
+  return asset_dir.resolve().relative_to(product_root).as_posix()
 
 
 def _wake_ready_dependents(asset_dir: Path, my_token: str, *, today: str | None) -> None:
@@ -1061,9 +1281,10 @@ def _wake_ready_dependents(asset_dir: Path, my_token: str, *, today: str | None)
 
   Args:
     asset_dir: The asset folder whose readiness gate just crossed to true.
-    my_token: This asset's own `<category>/<slug>` token, folded into each dependent's
+    my_token: This asset's own product-relative path token, folded into each dependent's
       `payload["dep"]`.
-    today: Optional ISO date forwarded into each dependent's own `# History` line.
+    today: Optional ISO date forwarded into each dependent's own dispatch tick, for whatever
+      dated line that tick writes.
   """
 
   # Domain(spec.lifecycle):
@@ -1077,10 +1298,10 @@ def _wake_ready_dependents(asset_dir: Path, my_token: str, *, today: str | None)
   # further downstream from there — and only fire once the asset's own change has safely landed,
   # so a failure telling a neighbour can never undo or block the change that caused it.
 
-  for dependent_note in _scan_dependents(asset_dir):
+  for dependent_note in scan_dependents(asset_dir):
     try:
       coordinator_dispatch(dependent_note, {}, today = today, dependency_wake = my_token)
-    # limit: stderr-only per the `gate_dispatch.consume_stale_job` §5 fire-and-forget precedent
+    # TODO: stderr-only per the `gate_dispatch.consume_stale_job` §5 fire-and-forget precedent
     # in this same plugin; error-ledger route blocked: the closed cause-set spec
     # (docs/specs/lazy-core.errors.functional-spec.md) is absent from this repo — upgrade path
     # is adding an `error-record` call with a real `--cause` once that spec lands
@@ -1101,7 +1322,7 @@ def _wake_product_note(repo_root: Path, asset_dir: Path, my_token: str, *, today
   Args:
     repo_root: The repository root the product records resolve under.
     asset_dir: The asset folder whose release gate just crossed to true.
-    my_token: The asset's own `<category>/<slug>` token, folded into `payload["asset"]`.
+    my_token: The asset's own product-relative path token, folded into `payload["asset"]`.
     today: Optional ISO date forwarded into the level note's own `# History` line.
   """
   # the owning product, resolved from the asset's own folder rather than from any note it carries
@@ -1116,10 +1337,49 @@ def _wake_product_note(repo_root: Path, asset_dir: Path, my_token: str, *, today
   # the upward hop itself, carrying no git item of its own — the release is the whole signal
   try:
     coordinator_dispatch(level_note, {}, today = today, asset_released = my_token)
-  # limit: stderr-only per the `_wake_ready_dependents` precedent beside it; error-ledger route
+  # TODO: stderr-only per the `_wake_ready_dependents` precedent beside it; error-ledger route
   # blocked by the same absent closed cause-set spec, with the same upgrade path
   except Exception as error:  # pragma: no cover — defensive, mirrors the reverse-dependency wake
     sys.stderr.write(f"asset-released wake failed for {level_note}: {error}\n")
+
+
+def _wake_parent_product(repo_root: Path, level_note: Path, *, today: str | None) -> None:
+  """
+  Dispatch a `CHILD_REAPPROVED` job on the level note of the product enclosing `level_note`.
+
+  One hop, best-effort, exactly like `_wake_product_note`: the owning product is resolved from
+  the note's own folder, the nearest ancestor only is woken, a missing ancestor note is logged
+  and skipped, and a failure never propagates.
+
+  Args:
+    repo_root: The repository root the product records resolve under.
+    level_note: The re-approved product's own level note.
+    today: Optional ISO date forwarded into the parent note's own `# History` line.
+  """
+  # the product owning this note, resolved from the note's own folder rather than from anything
+  # the caller carries — the same pattern `_wake_product_note` uses for the asset it wakes from
+  key, _record = resolve_product.resolve_product_by_path(repo_root, _to_rel_path(repo_root, level_note.parent))
+
+  # guard: a level note outside any registered product has no compound-key to climb from
+  if key is None:
+    return
+  chain = resolve_product.ancestor_chain(repo_root, key)
+
+  # guard: a top-level product has nothing above it but the catalog root, which reads it on its own wake
+  if not chain:
+    return
+  parent_record = resolve_product.resolve_product_by_key(repo_root, chain[-1]) or {}
+  parent_note = _resolve_product_note_path(repo_root, parent_record)
+
+  # guard: a registered parent whose level note was never created has no coordinator to wake
+  if parent_note is None or not parent_note.is_file():
+    sys.stderr.write(f"child-reapproved wake skipped: no level note for {chain[-1]} above {level_note}\n")
+    return
+  try:
+    coordinator_dispatch(parent_note, {}, today = today, child_reapproved = key)
+  # waiver: broad except mirrors `_wake_product_note`'s own best-effort upward wake
+  except Exception as error:  # pragma: no cover — defensive, mirrors the asset-released wake
+    sys.stderr.write(f"child-reapproved wake failed for {parent_note}: {error}\n")
 
 
 def _to_rel_path(repo_root: Path, target: Path) -> str:
@@ -1151,11 +1411,13 @@ def _coordination_rules_context(repo_root: Path) -> tuple[list[str], list[str]]:
     A `(context, warnings)` pair: `context` holds the doc's repo-relative path when one is
     configured and resolves to a file; `warnings` names a configured path that does not.
   """
-  rules_rel = (gate_dispatch._load_settings(repo_root).get(_SPEC_SECTION) or {}).get(_COORD_RULES_KEY)
+  rules_rel = (gate_dispatch.load_settings(repo_root).get(_SPEC_SECTION) or {}).get(_COORD_RULES_KEY)
+
   # guard: no vault-wide rules doc configured — nothing to name either way
   if not rules_rel:
     return [], []
   rules_path = repo_root / rules_rel
+
   # a configured path that does not resolve is a warning, never a silent drop
   if rules_path.is_file():
     return [ _to_rel_path(repo_root, rules_path) ], []
@@ -1165,13 +1427,21 @@ def _coordination_rules_context(repo_root: Path) -> tuple[list[str], list[str]]:
 def _build_level_bundle(
     repo_root: Path, level_note: Path, role: str, trigger: str, *,
     doc_transition: str | None = None, asset_released: str | None = None,
+    child_reapproved: str | None = None,
 ) -> tuple[list[str], list[str], list[str], dict, str, list[str]]:
   """
   Assemble the `lazycortex-core dispatch-job` wire bundle pieces for a level-note wakeup.
 
   Source names the level note itself; context names the level documents that already exist, the
-  vault-wide `spec.coordination_rules` doc, and one layer chosen by role — the catalog root's own
-  note above a product's, every registered product's note below the catalog root's. A level note
+  vault-wide `spec.coordination_rules` doc, and one layer chosen by role — a product's own note
+  reads the catalog root above it followed by every ancestor product's own note outermost first
+  (a nested product reads the rules of every product enclosing it); the catalog root's own note
+  reads every registered top-level product's note below it, never a nested one — a nested
+  product is its parent's child, not the catalog root's. A product's own note is followed by
+  every product nested directly inside it, each child's own level note and the `vision.md` /
+  `design.md` that child has written so far; an `asset-released` wake adds the released asset's
+  own folder, resolved under the product root the way a `spec_targets` token is, while the
+  documents a `child-reapproved` wake needs already ride in that child layer. A level note
   declares no asset type, no tools, no targets and no dependencies, so none of those is read;
   the playbook is resolved off the type registry by the note's role and rides the bundle as a
   protocol reference rather than as a copied file. The product's `coordinator` + `"*"` guidelines
@@ -1184,16 +1454,18 @@ def _build_level_bundle(
     trigger: The `CoordinatorTrigger` token this wakeup resolved to.
     doc_transition: The level-document basename that transitioned, when `trigger` is
       `CoordinatorTrigger.DOC_TRANSITION`; folded into `payload["doc"]`. None otherwise.
-    asset_released: The `<category>/<slug>` token of the asset whose release raised this wake,
+    asset_released: The product-relative path token of the asset whose release raised this wake,
       when `trigger` is `CoordinatorTrigger.ASSET_RELEASED`; folded into `payload["asset"]`.
       None otherwise.
+    child_reapproved: The nested product's compound-key, when `trigger` is
+      `CoordinatorTrigger.CHILD_REAPPROVED`; folded into `payload["child"]`. None otherwise.
 
   Returns:
     A `(source, context, warnings, payload, dedup_key, protocols)` tuple, where `source` and
     `context` are repo-relative path manifests and `protocols` names the level playbook the
     dispatched job reads on top of the dispatching routine's own. `payload["kind"]` is the note's
-    role; `payload["product"]`, `payload["guidelines"]`, `payload["doc"]`, `payload["asset"]` and
-    `payload["warnings"]` each appear only when they carry something.
+    role; `payload["product"]`, `payload["guidelines"]`, `payload["doc"]`, `payload["asset"]`,
+    `payload["child"]` and `payload["warnings"]` each appear only when they carry something.
   """
   relative = _to_rel_path(repo_root, level_note)
   source = [ relative ]
@@ -1212,23 +1484,49 @@ def _build_level_bundle(
   product_record: dict = {}
   guideline_paths: list[str] = []
   if role == SpecValue.ROLE_PRODUCT:
-    _key, record = resolve_product.resolve_product_by_path(repo_root, relative)
+    _key, record = resolve_product.effective_record_by_path(repo_root, relative)
     product_record = record or {}
     catalog_note = _catalog_note_path(repo_root)
     if catalog_note.is_file():
       context.append(_to_rel_path(repo_root, catalog_note))
-    guideline_paths, guideline_warnings = gate_dispatch._collect_guideline_paths(
+
+    # the ancestor products' level notes, outermost first — the same layer a nested product's
+    # own asset reads before its own note (lazy-spec.coordination-playbook § 3)
+    context.extend(_ancestor_note_paths(repo_root, _key))
+
+    # the nested products this one encloses, each child's own level note followed by the level
+    # documents it has written — a product's re-approval is decided against what sits below it,
+    # its nested products exactly as much as its assets (lazy-spec.coordination-playbook § 5)
+    context.extend(_child_level_paths(repo_root, _key))
+    guideline_paths, guideline_warnings = gate_dispatch.collect_guideline_paths(
         repo_root, product_record, _COORDINATOR_ROLE,
     )
     warnings.extend(guideline_warnings)
   else:
-    for record in resolve_product._load_products(repo_root).values():
+    for key, record in resolve_product.load_products(repo_root).items():
       # guard: a malformed product record names no note to read
       if not isinstance(record, dict):
+        continue
+
+      # guard: a nested product is its parent's child, never the catalog root's
+      if resolve_product.ancestor_chain(repo_root, key):
         continue
       product_note = _resolve_product_note_path(repo_root, record)
       if product_note is not None and product_note.is_file():
         context.append(_to_rel_path(repo_root, product_note))
+
+  # the released asset's own folder, resolved under this level's product root the way a
+  # `spec_targets` token is — the folder rather than the note alone, so the coordinator reads
+  # every document the release it is reacting to left behind
+  if asset_released is not None:
+    released_dir = resolve_product.resolve_asset_token(level_note.parent, asset_released)
+
+    # guard: a token resolving to no existing asset folder is a warning, never a hard failure
+    # of the whole context fold-in — the same terms `_build_bundle` gives an unresolved token
+    if released_dir is None:
+      warnings.append(f"released asset not found: {asset_released}")
+    else:
+      context.append(_to_rel_path(repo_root, released_dir))
 
   # the vault-wide coordination-rules doc, the same layer an asset wake reads
   rules_context, rules_warnings = _coordination_rules_context(repo_root)
@@ -1245,27 +1543,38 @@ def _build_level_bundle(
   # waiver: payload wire-key literals, single-source alongside `_build_bundle`'s own — this dict
   # IS the wire schema, not a reusable domain key
   payload: dict[str, object] = { "kind": role, "trigger": trigger }
+
   # the owning product's record, so the persona reads product config off the wire; the catalog
   # root has no product of its own and omits the field entirely
   # waiver: payload wire-key literal, same wire-schema dict as the literals above
   if product_record:
     payload["product"] = product_record
+
   # guidelines are named, never copied — the expert reads the real files in the tree
   if guideline_paths:
-    payload[gate_dispatch._PayloadKey.GUIDELINES] = guideline_paths
+    payload[gate_dispatch.PayloadKey.GUIDELINES] = guideline_paths
+
   # doc field is only meaningful for a DOC_TRANSITION wake — every other trigger omits it
   # waiver: payload wire-key literal, same wire-schema dict as the literals above
   if doc_transition is not None:
     payload["doc"] = doc_transition
+
   # asset field is only meaningful for an ASSET_RELEASED wake — it names the released asset's
   # own token, not this note
   # waiver: payload wire-key literal, same wire-schema dict as the literals above
   if asset_released is not None:
     payload["asset"] = asset_released
+
+  # child field is only meaningful for a CHILD_REAPPROVED wake — it names the nested product
+  # waiver: payload wire-key literal, same wire-schema dict as the literals above
+  if child_reapproved is not None:
+    payload["child"] = child_reapproved
+
   # an unresolved context path is visible to the dispatched job itself, not only to the caller
   # waiver: payload wire-key literal, same wire-schema dict as the literals above
   if warnings:
     payload["warnings"] = warnings
+
   # the assembled manifests, the payload, and the per-note dedup key the guard is scoped by
   return source, context, warnings, payload, f"{relative}:coordinator", protocols
 
@@ -1277,15 +1586,17 @@ def _build_bundle(
   """
   Assemble the `lazycortex-core dispatch-job` wire bundle pieces for a coordinator wakeup.
 
-  Source names the note itself; context names the owning product's folder-note, every container
-  folder-note lying strictly between the product's spec-path root and the asset folder — top-down,
-  so the layer closest to the asset lands last — the folders of every `spec_targets` asset, the
-  folders of every `spec_depends_on` dependency asset, every `spec_source_requests` file (resolved
-  via wikilink), and the vault-wide `spec.coordination_rules` doc — all as repo-relative paths the
-  pump copies when it claims the job. A container folder with no folder-note of its own contributes
-  nothing to context and is never a warning. The product's `coordinator` + `"*"` guidelines and the
-  asset's + owning product's `decisions.md` registries (`spec-decisions-design.md` § "Coordinator")
-  are never copied at all: they ride in the payload as paths the expert reads in place.
+  Source names the note itself; context names every ancestor product's own folder-note (outermost
+  first, when the owning product nests inside another), the owning product's own folder-note,
+  every container folder-note lying strictly between the product's spec-path root and the asset
+  folder — top-down, so the layer closest to the asset lands last — the folders of every
+  `spec_targets` asset, the folders of every `spec_depends_on` dependency asset, every
+  `spec_source_requests` file (resolved via wikilink), and the vault-wide `spec.coordination_rules`
+  doc — all as repo-relative paths the pump copies when it claims the job. A container folder with
+  no folder-note of its own contributes nothing to context and is never a warning. The product's
+  `coordinator` + `"*"` guidelines and the asset's + owning product's `decisions.md` registries
+  (`spec-decisions-design.md` § "Coordinator") are never copied at all: they ride in the payload
+  as paths the expert reads in place.
   A declared path that does not resolve to a file is never a silent drop — it becomes a
   warning string for the caller's `# History` line; a missing `decisions.md` is the one
   exception — it is created lazily by the first decision recorded into it, so its absence is
@@ -1300,16 +1611,17 @@ def _build_bundle(
     doc_transition: The sibling-doc basename that transitioned, when `trigger` is
       `CoordinatorTrigger.DOC_TRANSITION`; folded into `payload["doc"]` so the coordinator knows
       which sibling to walk first. None for every other trigger.
-    dependency_ready: The `<category>/<slug>` token of the dependency asset that just woke,
+    dependency_ready: The product-relative path token of the dependency asset that just woke,
       when `trigger` is `CoordinatorTrigger.DEPENDENCY_READY`; folded into `payload["dep"]` so
       the coordinator knows which dependency to re-check. None for every other trigger.
 
   Returns:
     A `(source, context, warnings, payload, dedup_key)` tuple, where `source` and `context` are
     repo-relative path manifests. `payload["product"]` always
-    carries the asset's owning product settings record verbatim (`{}` when the asset has none),
-    so the coordinator persona reads product-level config straight off the wire instead of
-    re-resolving it. `payload["guidelines"]` and `payload["decisions"]` name the files the
+    carries the asset's owning product's effective record (`{}` when the asset has none) —
+    every undeclared inheritable key already resolved from its ancestors, so the coordinator
+    persona reads product-level config straight off the wire instead of re-resolving it.
+    `payload["guidelines"]` and `payload["decisions"]` name the files the
     expert reads in place, each omitted when nothing resolved.
     `warnings` is also folded into `payload["warnings"]` when non-empty, so an
     unresolved context path (e.g. an unresolvable `spec_depends_on` token) is visible to the
@@ -1324,8 +1636,14 @@ def _build_bundle(
 
   # the owning product's own folder-note, resolved the same way `gate_tick`'s dispatch pass does
   product_rel = _to_rel_path(repo_root, asset_dir)
-  _key, product_record = resolve_product.resolve_product_by_path(repo_root, product_rel)
+  _key, product_record = resolve_product.effective_record_by_path(repo_root, product_rel)
   product_record = product_record or {}
+
+  # the ancestor products' level notes, outermost first — a nested product's asset reads the
+  # rules of every product enclosing it before its own (lazy-spec.coordination-playbook § 3)
+  context.extend(_ancestor_note_paths(repo_root, _key))
+
+  # the asset's own product note, appended last of the two so it lands closest to the asset
   product_note = _resolve_product_note_path(repo_root, product_record)
   if product_note is not None and product_note.is_file():
     context.append(_to_rel_path(repo_root, product_note))
@@ -1338,10 +1656,12 @@ def _build_bundle(
   # Container folder-notes between the product root and the asset folder MUST reach `context`
   # top-down (shallowest first), so the group-scoped `# Coordinator rules` layer closest to the
   # asset lands last; a container without a folder-note MUST contribute no entry and no warning.
+  # Preceded by every ancestor product's level note, outermost first.
 
   # the container chain itself, anchored on the product's own spec-path root
   if isinstance(spec_path := product_record.get(_SPEC_PATH_KEY), str) and spec_path:
     product_dir = spec_paths.spec_content_root(repo_root) / spec_path
+
     # an asset dispatched from outside its own product's tree has no container chain to walk
     if product_dir in asset_dir.parents:
       containers = [ ancestor for ancestor in asset_dir.parents if product_dir in ancestor.parents ]
@@ -1351,10 +1671,12 @@ def _build_bundle(
           context.append(_to_rel_path(repo_root, container_note))
 
   # every declared spec_targets asset's own folder, named by its repo-relative path — the folder
-  # rather than the note alone, so the pump lands it under `<category>-<slug>` and two categories
-  # in the same product sharing a slug (`features/x` and `bugs/x`) stay apart in the bucket (I10)
-  for token in gate_tick._read_fm_list(fm_text, SpecTargetsKey.TARGETS):
-    target_dir = gate_tick._target_asset_dir(asset_dir, token)
+  # rather than the note alone, so the pump lands it under a path-derived bucket name and two assets
+  # in the same product sharing a slug (`auth` at the root and `bugs/auth`) stay apart in the
+  # bucket (I10)
+  for token in gate_tick.read_fm_list(fm_text, SpecTargetsKey.TARGETS):
+    target_dir = gate_tick.target_asset_dir(asset_dir, token)
+
     # guard: a declared target token that resolves to no existing asset folder is a warning,
     # never a hard failure of the whole context fold-in
     if target_dir is None:
@@ -1364,8 +1686,9 @@ def _build_bundle(
 
   # every declared spec_depends_on asset's own folder — same token shape, resolution primitive,
   # and category-qualified landing as spec_targets above, just a different frontmatter key
-  for token in gate_tick._read_fm_list(fm_text, SpecDependsOnKey.DEPENDS_ON):
-    dep_dir = gate_tick._target_asset_dir(asset_dir, token)
+  for token in gate_tick.read_fm_list(fm_text, SpecDependsOnKey.DEPENDS_ON):
+    dep_dir = gate_tick.target_asset_dir(asset_dir, token)
+
     # guard: a declared dependency token that resolves to no existing asset folder is a
     # warning, never a hard failure of the whole context fold-in
     if dep_dir is None:
@@ -1374,7 +1697,7 @@ def _build_bundle(
     context.append(_to_rel_path(repo_root, dep_dir))
 
   # every declared source-request wikilink, resolved to its file
-  for raw in gate_tick._read_fm_list(fm_text, _SPEC_SOURCE_REQUESTS):
+  for raw in gate_tick.read_fm_list(fm_text, _SPEC_SOURCE_REQUESTS):
     # strip the list-write quoting first, then the `|display` gloss, then the `[[...]]` brackets
     # — each layer wraps the one before it, so unwrapping out of order leaves stray characters
     pure = raw.strip().strip('"').strip("'").split("|")[0].strip("[]")
@@ -1391,7 +1714,7 @@ def _build_bundle(
 
   # coordinator-role + wildcard guidelines, same lookup `gate_dispatch` uses for checkbox jobs —
   # named in the payload rather than staged into the bucket, since the expert reads the real files
-  guideline_paths, guideline_warnings = gate_dispatch._collect_guideline_paths(
+  guideline_paths, guideline_warnings = gate_dispatch.collect_guideline_paths(
       repo_root, product_record, _COORDINATOR_ROLE,
   )
   warnings.extend(guideline_warnings)
@@ -1399,7 +1722,7 @@ def _build_bundle(
   # the asset's and owning product's decisions registries — named beside the guideline lookup
   # rather than folded into it, since they go to every dispatched role uniformly; a missing
   # decisions.md is normal (lazily created) and never a warning, so nothing here extends `warnings`
-  decisions_paths = gate_dispatch._collect_decisions_paths(repo_root, asset_dir, product_record)
+  decisions_paths = gate_dispatch.collect_decisions_paths(repo_root, asset_dir, product_record)
 
   # dedup key scoped to this asset + the coordinator's own fixed label — one coordinator job
   # per asset, regardless of which trigger woke it
@@ -1408,19 +1731,23 @@ def _build_bundle(
   payload: dict[str, object] = {
       "kind": "coordinator", "trigger": trigger, "asset": relative, "product": product_record,
   }
+
   # guidelines and decisions are named, never copied — the expert reads the real files in the tree
   if guideline_paths:
-    payload[gate_dispatch._PayloadKey.GUIDELINES] = guideline_paths
+    payload[gate_dispatch.PayloadKey.GUIDELINES] = guideline_paths
   if decisions_paths:
-    payload[gate_dispatch._PayloadKey.DECISIONS] = decisions_paths
+    payload[gate_dispatch.PayloadKey.DECISIONS] = decisions_paths
+
   # doc field is only meaningful for a DOC_TRANSITION wake — every other trigger omits it
   # waiver: payload wire-key literal, same wire-schema dict as the literals two lines up
   if doc_transition is not None:
     payload["doc"] = doc_transition
+
   # dep field is only meaningful for a DEPENDENCY_READY wake — every other trigger omits it (C2)
   # waiver: payload wire-key literal, same wire-schema dict as the literals above
   if dependency_ready is not None:
     payload["dep"] = dependency_ready
+
   # an unresolved context path (e.g. an unresolvable spec_depends_on token) was previously
   # visible only in the caller's `# History` line, never to the dispatched job itself — folded
   # into the payload too so the coordinator persona can see what it's missing (I11)
@@ -1437,7 +1764,7 @@ def _commit(asset_dir: Path, asset_note: Path, subject: str) -> None:
   Commit the rewritten status folder-note under this worker's own bot identity, atomically.
 
   Defensive no-op when the asset is not inside a git repository, mirroring
-  `gate_tick._commit_note_change`.
+  `gate_tick.commit_note_change`.
 
   Args:
     asset_dir: The asset folder; used to resolve the enclosing repo root for the `git` cwd.
@@ -1447,7 +1774,8 @@ def _commit(asset_dir: Path, asset_note: Path, subject: str) -> None:
   Raises:
     subprocess.CalledProcessError: When `git add` or `git commit` exits non-zero.
   """
-  top = flip_gate._git_field(asset_dir, ["rev-parse", "--show-toplevel"], "")
+  top = flip_gate.git_field(asset_dir, ["rev-parse", "--show-toplevel"], "")
+
   # guard: asset is not inside a git repository — skip commit
   if not top:
     return
@@ -1478,8 +1806,8 @@ def _commit(asset_dir: Path, asset_note: Path, subject: str) -> None:
   )
 
 
-def _group_carries_wake(
-    fm: dict, body: str, item: dict, members: list[Path], *, note_changed: bool = True,
+def _has_group_wake(
+    frontmatter: dict, body: str, item: dict, members: list[Path], *, note_changed: bool = True,
     basenames: frozenset[str] | None = None,
 ) -> bool:
   """
@@ -1495,7 +1823,7 @@ def _group_carries_wake(
   watch tick during a long-running job would stamp `declined` for nothing to actually redeem.
 
   Args:
-    fm: The asset status folder-note's parsed frontmatter.
+    frontmatter: The asset status folder-note's parsed frontmatter.
     body: The folder-note section text (after frontmatter).
     item: The git-watch item for this tick — the single-file, sibling-doc, or grouped shape;
       only `_ITEM_AUTHOR_EMAIL` is read directly here.
@@ -1521,11 +1849,12 @@ def _group_carries_wake(
     return True
   ticked_block = _find_ticked_question_block(body)
   if ticked_block is not None:
-    if fm.get(AnsweredQuestionKey.FINGERPRINT) != _compute_answer_fingerprint(ticked_block):
+    if frontmatter.get(AnsweredQuestionKey.FINGERPRINT) != _compute_answer_fingerprint(ticked_block):
       return True
   for member in members:
-    if _is_tracked_document(member, basenames) and _resolve_doc_transition(member, fm) is not None:
+    if _is_tracked_document(member, basenames) and _resolve_doc_transition(member, frontmatter) is not None:
       return True
+
   # guard: a siblings-only tick (note itself unchanged) with every member under active review
   # carries no operator-edit signal to check the author against
   if not note_changed and not any(_is_member_signal_eligible(member) for member in members):
@@ -1548,16 +1877,18 @@ def _strip_legacy_pending(fm_text: str) -> str:
   Returns:
     `fm_text` with both legacy keys deleted; a no-op when neither is present.
   """
-  fm_text = gate_tick._del_fm_key(fm_text, _LEGACY_PENDING_EDIT_KEY)
-  fm_text = gate_tick._del_fm_key(fm_text, _LEGACY_PENDING_DOC_KEY)
+  fm_text = gate_tick.del_fm_key(fm_text, _LEGACY_PENDING_EDIT_KEY)
+  fm_text = gate_tick.del_fm_key(fm_text, _LEGACY_PENDING_DOC_KEY)
   return fm_text
 
 
-def coordinator_dispatch(
+# waiver: one tick function walks the whole trigger ladder end to end; splitting it would
+# scatter one coherent decision across several functions sharing the same mutable snapshot
+def coordinator_dispatch(  # pylint: disable=too-many-branches
     asset_note: Path, item: dict, *,
     today: str | None = None, sibling_doc: Path | None = None, dependency_wake: str | None = None,
     group_members: list[Path] | None = None, level_doc: Path | None = None,
-    asset_released: str | None = None,
+    asset_released: str | None = None, child_reapproved: str | None = None,
 ) -> dict:
   """
   Detect operator activity on one coordinated folder-note and dispatch its expert when it wakes.
@@ -1568,31 +1899,16 @@ def coordinator_dispatch(
   one-active-job guard, the dispatch cursor, the marker sidecar, the commit identity — is keyed
   by note path and behaves identically for both.
 
-  At most one coordinator job runs per asset at a time. While a job is still running, the note is
-  untouched unless a wakeup arrives that would otherwise be lost: any wake-worthy signal (a
-  non-empty commands section, a fresh answer, a sibling `review_result` transition, or a non-bot
-  author) stamps one sidecar flag,
-  `JobMarker.PENDING_WAKE: JobMarker.DECLINED` — no note write, no commit, and never overwriting
-  an already-raised `job-done` flag. A busy job ignores even a non-empty commands section until
-  then. Once free, a finished job's marker is cleared in the sidecar, which touches no note text
-  and so costs no commit; only a job found DEAD leaves a `# History` WARNING line behind, and
-  that line is committed even when nothing else wakes the coordinator this tick. A `job-done` or
-  `declined` sidecar flag then redeems by re-resolving triggers against the asset's CURRENT
-  on-disk state (every sibling doc in the asset directory, not only whichever member this tick's
-  own item happened to name), falling back to `JOB_DONE` / `OPERATOR_EDIT` respectively when
-  nothing specific replays — except on a halted asset, where the fallback is skipped entirely and
-  the flag survives untouched for the operator to redeem after lifting the halt (the halt override
-  every other trigger already respects). Consumption differs by flag: `job-done` is cleared only
-  when it actually wins resolution, surviving a preempting trigger for a later tick; `declined` is
-  cleared on ANY successful dispatch of this asset, whichever trigger won. A fresh wakeup queues
-  the job, stamps the asset's job marker in the sidecar, appends a `# History` line, and commits
-  under this worker's own bot identity.
+  At most one coordinator job runs per asset at a time. A wake-worthy signal that arrives while
+  one is already running is remembered rather than acted on immediately, and is redeemed once
+  the job finishes by resolving triggers fresh against the asset's current state — honoring the
+  same halt override every other trigger respects. A fresh wakeup queues the job, stamps the
+  asset's job marker in the sidecar, records the item on the dispatch cursor, and commits under
+  this worker's own bot identity whenever doing so actually changes the note.
 
-  When `sibling_doc` is given, this is a sibling-item tick — trigger resolution never reasons
-  about `item`'s own commit against `asset_note` the way the ordinary status-note tick does
-  (`item` names `sibling_doc`'s commit here, not the asset note's own); instead it compares the
-  sibling's current `review_result` against the value this worker last recorded for it, honoring
-  the same halt override every other trigger respects (`lazy-spec.coordination-playbook.md` § 1).
+  When `sibling_doc` is given, this is a sibling-item tick: the wake is decided by the sibling's
+  own `review_result` changing rather than by `item`'s commit against `asset_note`, honoring the
+  same halt override every other trigger respects (`lazy-spec.coordination-playbook.md` § 1).
 
   Guarantees:
     - At most one coordinator job runs against a given note at a time; a wake that arrives while
@@ -1619,6 +1935,11 @@ def coordinator_dispatch(
       gates are normally flipped by a bot-authored commit that wakes nothing here, so both
       crossings are evaluated before the no-trigger exit, recorded on the note together, and
       dispatched onward from that exit too.
+    - A top-level call on a product's own level note whose `vision.md` or `design.md`
+      reaches `approved` this tick dispatches one job on the enclosing product's level note,
+      on the same best-effort terms — unlike the two asset edges above, this one only ever fires
+      alongside an actual `CoordinatorTrigger.DOC_TRANSITION` on this level's own resolution, so
+      it never reaches the no-trigger exit.
 
   Args:
     asset_note: The status folder-note path; its parent is the asset dir.
@@ -1631,7 +1952,7 @@ def coordinator_dispatch(
     sibling_doc: The sibling doc's own path, when this tick's item is one of the asset's typed
       documents rather than the status folder-note itself. None for the ordinary status-note tick;
       mutually exclusive with `group_members`.
-    dependency_wake: The `<category>/<slug>` token of a dependency asset that just woke, when
+    dependency_wake: The product-relative path token of a dependency asset that just woke, when
       this call is the one-hop reverse-dependency dispatch a wake on that asset triggers (C2)
       rather than an ordinary git-watch tick. Trigger resolution short-circuits to
       `CoordinatorTrigger.DEPENDENCY_READY` (honoring the halt override like every other
@@ -1642,7 +1963,7 @@ def coordinator_dispatch(
     group_members: The group's OTHER member paths — every sibling doc a grouped `{dir, paths,
       ...}` item names, excluding the status folder-note itself. Given only for a grouped tick;
       trigger resolution then runs `_resolve_group_trigger` (one pass over every member) instead
-      of the single-file `_resolve_wake_trigger` / `sibling_doc` / `dependency_wake` branching,
+      of the single-file `resolve_wake_trigger` / `sibling_doc` / `dependency_wake` branching,
       and `item`'s own `sha`/`author_email` name the group directory's own last commit rather
       than one file's. None for every other call shape; mutually exclusive with `sibling_doc`
       and `dependency_wake`.
@@ -1650,11 +1971,16 @@ def coordinator_dispatch(
       basenames (`LevelDoc.BASENAMES`) rather than the level note itself. Given only when
       `asset_note` is a level note; a level tick naming the note itself passes None, and trigger
       resolution then reads the ordinary ladder off the note alone.
-    asset_released: The `<category>/<slug>` token of an asset whose release gate just crossed,
+    asset_released: The product-relative path token of an asset whose release gate just crossed,
       when this call is the one-hop upward dispatch that crossing raises on the owning product's
       level note. Trigger resolution short-circuits to `CoordinatorTrigger.ASSET_RELEASED`
       (honoring the halt override like every other trigger); `item` is `{}` on this path, so
       nothing is read off a commit. None for every ordinary tick.
+    child_reapproved: The nested product's compound-key, when this call is the one-hop upward
+      dispatch a re-approved `vision.md` or `design.md` raises on the enclosing product's level
+      note. Trigger resolution short-circuits to `CoordinatorTrigger.CHILD_REAPPROVED` (honoring
+      the halt override like every other trigger); `item` is `{}` on this path. None for every
+      ordinary tick.
 
   Returns:
     `{"action": "noop"}`; `{"action": "dispatch-stale", "trigger", "job_id"}` when the dispatch
@@ -1667,7 +1993,7 @@ def coordinator_dispatch(
     subprocess.CalledProcessError: When the commit of the rewritten note fails — propagated
       from `_commit`.
   """
-  # read the current note once — every branch below decides off this one snapshot
+  # the asset folder and its repo root anchor every path resolved below
   asset_dir = asset_note.parent
   repo_root = flip_gate.repo_root(asset_dir)
 
@@ -1686,16 +2012,16 @@ def coordinator_dispatch(
                _ITEM_AUTHOR_EMAIL: item.get(_ITEM_AUTHOR_EMAIL) or email }
 
   # snapshot the note once — every branch below decides off this one read
-  today_str = flip_gate._today(today)
+  today_str = flip_gate.effective_today(today)
   text = asset_note.read_text()
   original_text = text
-  fm, fm_end = flip_gate.parse_frontmatter(text)
+  frontmatter, fm_end = flip_gate.parse_frontmatter(text)
   body = text[fm_end:]
   markers = spec_job_markers.read(repo_root, asset_note)
   cursor = _read_dispatch_cursor(repo_root, asset_note)
 
   # the note's own role picks the ladder and the persona; everything else below is shared
-  role = str(fm.get(SpecKey.ROLE) or "")
+  role = str(frontmatter.get(SpecKey.ROLE) or "")
   is_level = role in LEVEL_ROLES
   expert = _CATALOG_EXPERT if is_level else _COORDINATOR_EXPERT
   doc_basenames = LevelDoc.BASENAMES if is_level else None
@@ -1723,9 +2049,10 @@ def coordinator_dispatch(
   note_dirty = False
   coordinator_job = markers[JobMarker.COORDINATOR_JOB]
   if isinstance(coordinator_job, dict):
-    marker = gate_tick._find_active_job_marker(
+    marker = gate_tick.find_active_job_marker(
         repo_root, coordinator_job[JobMarker.EXPERT], coordinator_job[JobMarker.JOB_ID],
     )
+
     # guard: bundle carries no terminal marker yet — still running
     if marker is None:
       # the git-watch cursor advances past this item regardless of the noop below, so a
@@ -1735,8 +2062,9 @@ def coordinator_dispatch(
       wake_members = group_members if group_members is not None else [
           doc for doc in ( sibling_doc, level_doc ) if doc is not None
       ]
+
       # the review-active carve-out only ever applies to a genuine grouped tick — the plain
-      # status-note and sibling-item shapes keep `_group_carries_wake`'s default `note_changed
+      # status-note and sibling-item shapes keep `_has_group_wake`'s default `note_changed
       # = True`, which is an unconditional author check exactly as before this fix
       # limit: a `Gate.RELEASED` crossing landing while a coordinator job is active is deferred
       # here with everything else — the readiness marker stays unstamped, so the next tick that
@@ -1748,28 +2076,30 @@ def coordinator_dispatch(
       )
       if (
           markers.get(JobMarker.PENDING_WAKE) is None
-          and _group_carries_wake(
-              fm, body, item, wake_members,
+          and _has_group_wake(
+              frontmatter, body, item, wake_members,
               note_changed = wake_note_changed, basenames = doc_basenames,
           )
       ):
         spec_job_markers.update(repo_root, asset_note, { JobMarker.PENDING_WAKE: JobMarker.DECLINED })
       return { TickAction.ACTION: TickAction.NOOP }
+
     # the bundle finished since the last tick — clear the slot now so a trigger firing this
     # same tick dispatches immediately instead of first colliding with the old dedup key (M1)
-    if marker == gate_tick._JOB_MARKER_DEAD:
+    if marker == gate_tick.JOB_MARKER_DEAD:
       # DEAD is not eligible for dedup matching in the first place (expert_runtime's own scan
       # excludes it), so this guard owes only the WARNING line — never consume_stale_job. Same
       # text as gate_tick's periodic sweep of this key (fix-round-1: this guard used to consume
       # DEAD identically to DONE/CANCELLED, silently dropping the line whenever it won the race)
-      body = flip_gate._append_under_heading(
-          body, Section.HISTORY,
-          gate_tick._coordinator_job_dead_warning_line(
-              _DISPATCH_AUTHOR_NAME, coordinator_job[JobMarker.TRIGGER],
-              coordinator_job[JobMarker.JOB_ID], today_str,
+      body = history_journal.append(
+          body,
+          gate_tick.coordinator_job_dead_line(
+              coordinator_job[JobMarker.TRIGGER], coordinator_job[JobMarker.JOB_ID],
               lang = note_explainers.lang_for_note(asset_note),
           ),
+          today_str, repo = repo_root,
       )
+
       # the WARNING line is the only note text this guard ever produces — the marker clear
       # itself is a sidecar write, so every other branch leaves the note byte-identical
       text = text[:fm_end] + body
@@ -1783,15 +2113,23 @@ def coordinator_dispatch(
   # declined-wake for this tick — redeemed the same way the sidecar flag is below, and stripped
   # off the note on whichever write follows (`_strip_legacy_pending`, applied to `fm_text` once
   # it's built further down)
-  legacy_pending = _LEGACY_PENDING_EDIT_KEY in fm or _LEGACY_PENDING_DOC_KEY in fm
+  legacy_pending = _LEGACY_PENDING_EDIT_KEY in frontmatter or _LEGACY_PENDING_DOC_KEY in frontmatter
 
   # resolve what woke the coordinator, honoring the halt override
   doc_transition = None
   group_transitions: dict[str, str] = {}
+
+  # the level documents this tick names, kept so the upward child edge below can read their
+  # transitions again regardless of which trigger won the ladder
+  level_members: list[Path] = (
+      list(group_members) if group_members is not None
+      else [ doc for doc in ( level_doc, ) if doc is not None ]
+  )
   if group_members is not None:
     trigger, group_transitions = _resolve_group_trigger(
-        repo_root, fm, body, item, markers, group_members, asset_note, cursor,
+        repo_root, frontmatter, body, item, markers, group_members, asset_note, cursor,
     )
+
     # the FULL set stamps into spec_coordinator_doc_state below; `doc_transition` only carries
     # the first-sorted pair so every other consumer built around a single (basename, value) —
     # the History line, the dedup match — keeps working unchanged (brief step 5)
@@ -1801,31 +2139,35 @@ def coordinator_dispatch(
   elif dependency_wake is not None:
     # halt silences a dependency-ready wake exactly like every other automation trigger
     # (playbook § 1); item/sibling_doc carry nothing to reason about on this synthetic path
-    trigger = None if flip_gate._is_true(fm, SpecHaltKey.HALTED) else CoordinatorTrigger.DEPENDENCY_READY
+    trigger = None if flip_gate.is_true(frontmatter, SpecHaltKey.HALTED) else CoordinatorTrigger.DEPENDENCY_READY
   elif asset_released is not None:
     # halt silences the upward release wake the same way; `item` is empty on this synthetic path
-    trigger = None if flip_gate._is_true(fm, SpecHaltKey.HALTED) else CoordinatorTrigger.ASSET_RELEASED
+    trigger = None if flip_gate.is_true(frontmatter, SpecHaltKey.HALTED) else CoordinatorTrigger.ASSET_RELEASED
+  elif child_reapproved is not None:
+    # halt silences the upward child wake the same way; `item` is empty on this synthetic path
+    trigger = None if flip_gate.is_true(frontmatter, SpecHaltKey.HALTED) else CoordinatorTrigger.CHILD_REAPPROVED
   elif is_level:
     # the level ladder reads its own documents rather than an asset's siblings, and resolves the
     # full transition set in one pass exactly as the grouped asset form does
     trigger, group_transitions = _resolve_level_trigger(
-        repo_root, fm, body, item, [ level_doc ] if level_doc is not None else [], cursor,
+        repo_root, frontmatter, body, item, [ level_doc ] if level_doc is not None else [], cursor,
     )
     if trigger == CoordinatorTrigger.DOC_TRANSITION:
       first = sorted(group_transitions)[0]
       doc_transition = (first, group_transitions[first])
   elif sibling_doc is not None:
-    resolved = _resolve_doc_transition(sibling_doc, fm)
+    resolved = _resolve_doc_transition(sibling_doc, frontmatter)
+
     # halt silences a doc-transition wake exactly like every other automation trigger
     # (playbook § 1) — a sibling item never carries the COMMAND exemption, since COMMAND is
     # read off the asset note's own body, not the sibling
-    if resolved is None or flip_gate._is_true(fm, SpecHaltKey.HALTED):
+    if resolved is None or flip_gate.is_true(frontmatter, SpecHaltKey.HALTED):
       trigger = None
     else:
       trigger = CoordinatorTrigger.DOC_TRANSITION
       doc_transition = resolved
   else:
-    trigger = _resolve_wake_trigger(repo_root, fm, body, item, markers, cursor)
+    trigger = resolve_wake_trigger(repo_root, frontmatter, body, item, markers, cursor)
 
   # nothing else claimed this tick — a wake the busy-guard declined (or a legacy install's
   # pending-note key) redeems by re-resolving triggers against the asset's CURRENT on-disk
@@ -1838,14 +2180,17 @@ def coordinator_dispatch(
   # declined wake was riding along on whichever trigger actually won
   redeemed_wake = markers.get(JobMarker.PENDING_WAKE)
   if trigger is None and (redeemed_wake in (JobMarker.JOB_DONE, JobMarker.DECLINED) or legacy_pending):
-    redeem_members = sorted(p for p in asset_dir.iterdir() if _is_tracked_document(p, doc_basenames))
+    redeem_members = sorted(
+        entry for entry in asset_dir.iterdir() if _is_tracked_document(entry, doc_basenames)
+    )
     if is_level:
+      level_members = redeem_members
       trigger, group_transitions = _resolve_level_trigger(
-          repo_root, fm, body, item, redeem_members, cursor,
+          repo_root, frontmatter, body, item, redeem_members, cursor,
       )
     else:
       trigger, group_transitions = _resolve_group_trigger(
-          repo_root, fm, body, item, markers, redeem_members, asset_note, cursor,
+          repo_root, frontmatter, body, item, markers, redeem_members, asset_note, cursor,
       )
     if trigger is None:
       # nothing specific replayed — the generic fallback token per the flag that forced this
@@ -1855,7 +2200,7 @@ def coordinator_dispatch(
       # would have set `trigger` above, never reaching this branch), and forcing a fallback trigger
       # anyway would both dispatch AND consume the flag below, permanently losing the wake instead
       # of leaving it for the operator to lift the halt and redeem later.
-      if not flip_gate._is_true(fm, SpecHaltKey.HALTED):
+      if not flip_gate.is_true(frontmatter, SpecHaltKey.HALTED):
         trigger = (
             CoordinatorTrigger.JOB_DONE if redeemed_wake == JobMarker.JOB_DONE
             else CoordinatorTrigger.OPERATOR_EDIT
@@ -1879,12 +2224,13 @@ def coordinator_dispatch(
   my_token = ""
   prev_ready: dict = {}
   if dependency_wake is None and not is_level:
-    prev_ready = _read_marker_dict(fm, SpecCoordinatorReadyStateKey.STATE)
+    prev_ready = _read_marker_dict(frontmatter, SpecCoordinatorReadyStateKey.STATE)
     cur_ready = {
-        Gate.DEVELOP_DONE: flip_gate._is_true(fm, Gate.DEVELOP_DONE),
-        Gate.TESTS_PASSING: flip_gate._is_true(fm, Gate.TESTS_PASSING),
-        Gate.RELEASED: flip_gate._is_true(fm, Gate.RELEASED),
+        Gate.DEVELOP_DONE: flip_gate.is_true(frontmatter, Gate.DEVELOP_DONE),
+        Gate.TESTS_PASSING: flip_gate.is_true(frontmatter, Gate.TESTS_PASSING),
+        Gate.RELEASED: flip_gate.is_true(frontmatter, Gate.RELEASED),
     }
+
     # the release gate rides the same marker but a different edge: it wakes the level coordinator
     # above, never the dependents beside — a dependent waits on readiness, not on a release
     wake_dependents = any(
@@ -1892,9 +2238,39 @@ def coordinator_dispatch(
         for key, value in cur_ready.items() if key != Gate.RELEASED
     )
     released_crossed = cur_ready[Gate.RELEASED] and not prev_ready.get(Gate.RELEASED, False)
-    my_token = f"{asset_dir.parent.name}/{asset_dir.name}"
+    my_token = _own_token(asset_dir)
 
-  # guard: nothing wakes the coordinator this tick
+  # the level ladder's own upward edge: a product's own `vision.md` or `design.md` reaching
+  # `approved` this tick reaches the enclosing product's level note, one hop, mirroring how an
+  # asset's release reaches the product owning it — unlike `released_crossed` this rides on the
+  # FULL transition set a grouped or redeemed tick may have found, not only `doc_transition`'s
+  # first-sorted pair, so a commit finalizing `{tech.md, vision.md}` together still wakes the
+  # parent on the vision transition alone. When the ladder resolved some OTHER trigger — a
+  # command or a ticked answer outranks DOC_TRANSITION and leaves the set empty — the tick's own
+  # level documents are rescanned here, because the parent's edge is not this level's trigger to
+  # lose: the commit that carried the approval passes once, and nothing replays it
+  child_wake_stamp: dict | None = None
+
+  # guard: a halted level silences every automation edge, the upward one included (playbook § 1)
+  if is_level and role == SpecValue.ROLE_PRODUCT and not flip_gate.is_true(frontmatter, SpecHaltKey.HALTED):
+    # the rescan runs outside the trigger ladder, so the SAME approval it reads here is still
+    # sitting on the document for the level's own later `DOC_TRANSITION` to consume. Its own
+    # marker therefore cannot record this hop — a second one does, keyed by the same
+    # basename+value shape, so a later tick over an unchanged document forwards nothing twice
+    forwarded = _read_marker_dict(frontmatter, SpecCoordinatorChildWakeStateKey.STATE)
+    unforwarded = {
+        name: value
+        for name, value in (group_transitions or _level_doc_transitions(frontmatter, level_members)).items()
+        if name in (LevelDoc.VISION, LevelDoc.DESIGN)
+        and value in ReviewResultValue.ACCEPTED
+        and forwarded.get(name) != value
+    }
+    if unforwarded:
+      child_wake_stamp = { **forwarded, **unforwarded }
+  child_reapproved_crossed = child_wake_stamp is not None
+
+  # no trigger this tick: record a gate crossing and the dead-job line if either landed, wake the
+  # neighbours that crossing reaches, and leave without dispatching
   if trigger is None:
     # a crossing that landed on a commit nothing else woke on still has to be recorded and
     # dispatched onward: both edges are flipped by bot-authored commits (the coordinator's own
@@ -1902,24 +2278,42 @@ def coordinator_dispatch(
     # neighbours waiting on them. The whole observed snapshot is stamped, exactly as the
     # dispatching path stamps it, so neither edge can re-fire on a later tick.
     crossed = released_crossed or wake_dependents
+    fm_head = text[:fm_end]
     if crossed and cur_ready is not None:
-      text = gate_tick._set_fm_json(
-          text[:fm_end], SpecCoordinatorReadyStateKey.STATE, cur_ready,
-      ) + text[fm_end:]
+      fm_head = gate_tick.set_fm_json(fm_head, SpecCoordinatorReadyStateKey.STATE, cur_ready)
+
+    # the forwarded child transitions are recorded BEFORE the hop below, so a later tick that
+    # finds the same document at the same value forwards nothing a second time
+    if child_wake_stamp is not None:
+      fm_head = gate_tick.set_fm_json(
+          fm_head, SpecCoordinatorChildWakeStateKey.STATE, child_wake_stamp,
+      )
+    text = fm_head + text[fm_end:]
+
     # the dead-job WARNING line above still needs to land even with nothing left to dispatch;
     # a job merely consumed left no note text behind, so that tick writes nothing at all
-    if note_dirty or crossed:
+    if note_dirty or crossed or child_wake_stamp is not None:
+      # name what actually landed: the dead-job line outranks a stamp, and a lone child-wake
+      # record is not a gate crossing — an upward hop is the only thing that moved
+      if note_dirty:
+        what = f"coordinator job died on {asset_dir.name}"
+      elif crossed:
+        what = f"recorded gate crossing on {asset_dir.name}"
+      else:
+        what = f"recorded child wake on {asset_dir.name}"
       asset_note.write_text(note_explainers.heal_note_text(asset_note, text))
-      _commit(
-          asset_dir, asset_note,
-          f"{_DISPATCH_AUTHOR_NAME}: coordinator job died on {asset_dir.name}" if note_dirty
-          else f"{_DISPATCH_AUTHOR_NAME}: recorded gate crossing on {asset_dir.name}",
-      )
+      _commit(asset_dir, asset_note, f"{_DISPATCH_AUTHOR_NAME}: {what}")
+
     # both hops run after the record lands, so a failing neighbour can't lose the stamp
     if wake_dependents:
       _wake_ready_dependents(asset_dir, my_token, today = today)
     if released_crossed:
       _wake_product_note(repo_root, asset_dir, my_token, today = today)
+
+    # a re-approved vision.md or design.md still reaches the enclosing product even when nothing
+    # woke this level itself — the edge belongs to the parent, not to this note's own wake
+    if child_reapproved_crossed:
+      _wake_parent_product(repo_root, asset_note, today = today)
     return { TickAction.ACTION: TickAction.NOOP }
 
   # assemble and queue the coordinator job's wire bundle — the level branch reads the level
@@ -1929,7 +2323,7 @@ def coordinator_dispatch(
     source, context, warnings, payload, dedup_key, protocols = _build_level_bundle(
         repo_root, asset_note, role, trigger,
         doc_transition = doc_transition[0] if doc_transition is not None else None,
-        asset_released = asset_released,
+        asset_released = asset_released, child_reapproved = child_reapproved,
     )
   else:
     source, context, warnings, payload, dedup_key = _build_bundle(
@@ -1937,6 +2331,7 @@ def coordinator_dispatch(
         doc_transition = doc_transition[0] if doc_transition is not None else None,
         dependency_ready = dependency_wake,
     )
+
   # a grouped tick's FULL transition set rides in payload too — `payload["doc"]` above already
   # names the first-sorted basename, "docs" only needs to appear when there is more than one to
   # add, so the coordinator can process every transitioned sibling in one pass (brief step 5)
@@ -1946,20 +2341,22 @@ def coordinator_dispatch(
   if len(group_transitions) > 1:
     payload["docs"] = sorted(group_transitions)
   bundle = {
-      gate_dispatch._WireKey.EXPERT: expert,
-      gate_dispatch._WireKey.PAYLOAD: payload,
-      gate_dispatch._WireKey.SOURCE: source,
-      gate_dispatch._WireKey.DEDUP_KEY: dedup_key,
+      gate_dispatch.WireKey.EXPERT: expert,
+      gate_dispatch.WireKey.PAYLOAD: payload,
+      gate_dispatch.WireKey.SOURCE: source,
+      gate_dispatch.WireKey.DEDUP_KEY: dedup_key,
   }
+
   # context is optional on the wire — only sent when there's actually something in it
   if context:
-    bundle[gate_dispatch._WireKey.CONTEXT] = context
+    bundle[gate_dispatch.WireKey.CONTEXT] = context
+
   # so is the playbook reference: core unions it with the dispatching routine's own protocols,
   # which is how one routine serves two ladders with two playbooks
   if protocols:
     bundle[_WIRE_PROTOCOLS] = protocols
-  response = gate_dispatch._core_dispatch_job(repo_root, bundle)
-  job_id = str(response.get(gate_dispatch._WireKey.JOB_ID))
+  response = gate_dispatch.core_dispatch_job(repo_root, bundle)
+  job_id = str(response.get(gate_dispatch.WireKey.JOB_ID))
 
   # consume the sidecar wake now that this tick's dispatch has landed, so the same wake cannot
   # fire a second coordinator. The two flag values consume on different terms: `job-done` only
@@ -1988,13 +2385,13 @@ def coordinator_dispatch(
   # anything, so the NEXT tick's crossing check compares against the latest state (N1) — a
   # `dependency_wake` call has no `cur_ready` to stamp, since it never runs the check itself
   if cur_ready is not None:
-    fm_text = gate_tick._set_fm_json(fm_text, SpecCoordinatorReadyStateKey.STATE, cur_ready)
+    fm_text = gate_tick.set_fm_json(fm_text, SpecCoordinatorReadyStateKey.STATE, cur_ready)
 
   # stamp the answered-question fingerprint so an identical ticked block never re-fires ANSWER
   # once this worker has already reacted to it (I1/I-D)
   answered_block = _find_ticked_question_block(body) if trigger == CoordinatorTrigger.ANSWER else None
   if answered_block is not None:
-    fm_text = note_ops._set_fm_scalar(
+    fm_text = note_ops.set_fm_scalar(
         fm_text, AnsweredQuestionKey.FINGERPRINT, _compute_answer_fingerprint(answered_block),
     )
 
@@ -2002,12 +2399,20 @@ def coordinator_dispatch(
   # DOC_TRANSITION for the same basename+value (mirrors the ANSWER fingerprint stamp above)
   if doc_transition is not None:
     basename, new_value = doc_transition
-    state = _read_doc_state(fm)
+    state = _read_doc_state(frontmatter)
+
     # a grouped (or redeemed-declined) tick may have found MORE than one sibling transition in
     # the same pass — stamp them all now so none is lost to a later tick (brief step 5); every
     # other DOC_TRANSITION path (single sibling-doc tick) always has exactly one pair here
     state.update(group_transitions or { basename: new_value })
-    fm_text = gate_tick._set_fm_json(fm_text, SpecCoordinatorDocStateKey.STATE, state)
+    fm_text = gate_tick.set_fm_json(fm_text, SpecCoordinatorDocStateKey.STATE, state)
+
+  # stamp the child transitions this tick forwards upward, on their own marker — the doc-state
+  # one above belongs to this level's own ladder and a command-won tick never reaches it
+  if child_wake_stamp is not None:
+    fm_text = gate_tick.set_fm_json(
+        fm_text, SpecCoordinatorChildWakeStateKey.STATE, child_wake_stamp,
+    )
 
   # a dedup hit matching a finished-but-unconsumed bundle is retired rather than tracked — left
   # unconsumed, the same terminal bundle would keep matching this dedup key on every future tick.
@@ -2015,10 +2420,11 @@ def coordinator_dispatch(
   # retired, not retried — the M1 consumption above (job_consumed) makes this path rare, reached
   # only by a genuine same-tick race rather than the routine steady state it used to be.
   if (
-      response.get(gate_dispatch._WireKey.STATUS) == gate_dispatch.ALREADY_QUEUED_STATUS
-      and gate_tick._find_active_job_marker(repo_root, expert, job_id) is not None
+      response.get(gate_dispatch.WireKey.STATUS) == gate_dispatch.ALREADY_QUEUED_STATUS
+      and gate_tick.find_active_job_marker(repo_root, expert, job_id) is not None
   ):
     gate_dispatch.consume_stale_job(repo_root, expert, job_id)
+
     # the retired trigger still counts as handled — the cursor moves so the same commit never
     # re-fires, and the I6 stamps persist below only when they actually changed the note
     _stamp_dispatch_cursor(repo_root, asset_note, item.get(_ITEM_SHA))
@@ -2040,8 +2446,13 @@ def coordinator_dispatch(
     if released_crossed:
       _wake_product_note(repo_root, asset_dir, my_token, today = today)
 
+    # a re-approved vision.md or design.md wakes the enclosing product's level note, on the
+    # same terms: after this level's own dispatch, one hop, best-effort
+    if child_reapproved_crossed:
+      _wake_parent_product(repo_root, asset_note, today = today)
+
     # this tick's own trigger was retired, not dispatched — see the guard above
-    return { TickAction.ACTION: TickAction.DISPATCH_STALE, "trigger": trigger, "job_id": job_id }
+    return { TickAction.ACTION: TickAction.DISPATCH_STALE, TickAction.TRIGGER: trigger, TickAction.JOB_ID: job_id }
 
   # record the dispatched job in runtime state so the active-job guard blocks a second
   # concurrent dispatch — no note write, so this stamp costs no commit of its own and nothing
@@ -2059,9 +2470,7 @@ def coordinator_dispatch(
   # is still landed, one line each, never a silent skip
   new_body = body
   for warning in warnings:
-    new_body = flip_gate._append_under_heading(
-        new_body, Section.HISTORY, f"- {today_str} — {_DISPATCH_AUTHOR_NAME} · {warning}",
-    )
+    new_body = history_journal.append(new_body, warning, today_str, repo = repo_root)
 
   # Contract:
   # The status folder-note MUST be written and committed only when the produced text differs
@@ -2090,14 +2499,75 @@ def coordinator_dispatch(
   if released_crossed:
     _wake_product_note(repo_root, asset_dir, my_token, today = today)
 
+  # a re-approved vision.md or design.md wakes the enclosing product's level note, on the same
+  # terms: after this level's own dispatch, one hop, best-effort
+  if child_reapproved_crossed:
+    _wake_parent_product(repo_root, asset_note, today = today)
+
   # the fresh dispatch this tick queued
   return {
       TickAction.ACTION: TickAction.DISPATCHED,
-      "trigger": trigger,
-      "expert": expert,
-      "job_id": job_id,
-      "warnings": warnings,
+      TickAction.TRIGGER: trigger,
+      TickAction.EXPERT: expert,
+      TickAction.JOB_ID: job_id,
+      TickAction.WARNINGS: warnings,
   }
+
+
+def _dispatch_single_path(changed: Path, item: dict, today: str | None) -> dict:
+  """
+  Run the single-file dispatch for one changed path — a document or a folder-note.
+
+  A document basename resolves to the folder-note that owns it, by where the document lies;
+  every other match IS the folder-note the routine's own `any_of` member selected. The owner's
+  own role then picks the ladder: an asset's status note runs the asset one, a product's or the
+  catalog root's level note the level one, and a note carrying neither is nobody's object.
+
+  Args:
+    changed: The changed file's absolute, resolved path.
+    item: The git-watch item the path came from (its commit fields ride into the dispatch).
+    today: Optional ISO date forwarded into the note's own `# History` line.
+
+  Returns:
+    The tick's result dict; `{"action": "noop"}` on every guard (deleted file, no owning note,
+    a note without a coordination role, a document of the other ladder).
+  """
+  # guard: the file was deleted or moved between the git-watch scan and this dispatch
+  if not changed.is_file():
+    return { TickAction.ACTION: TickAction.NOOP }
+
+  # a document basename resolves to the folder-note that owns it, by where the document lies;
+  # every other match IS the folder-note the routine's own `any_of` member selected
+  repo_root = flip_gate.repo_root(changed.parent)
+  is_document = _is_tracked_document(changed) or changed.name in LevelDoc.BASENAMES
+  owner = _resolve_owner_note(repo_root, changed) if is_document else changed
+
+  # guard: no folder-note owns this path (a bare folder, or a race with a deletion) — nothing
+  # this worker tracks a coordinator job against
+  if not owner.is_file():
+    return { TickAction.ACTION: TickAction.NOOP }
+
+  # the owner's own role picks the ladder: an asset's status note runs the asset one, a product's
+  # or the catalog root's level note the level one, and a note carrying neither is nobody's object
+  frontmatter, _ = flip_gate.parse_frontmatter(owner.read_text())
+  role = frontmatter.get(SpecKey.ROLE)
+
+  # guard: a note carrying no coordination role is nobody's object
+  if role != _SPEC_ROLE_STATUS and role not in LEVEL_ROLES:
+    return { TickAction.ACTION: TickAction.NOOP }
+
+  # guard: a document belonging to the OTHER ladder is not one this note tracks — the level set
+  # and the asset predicate overlap on `design.md` / `tech.md`, so the union that found the owner
+  # must be narrowed by the owner's own role here
+  own_basenames = LevelDoc.BASENAMES if role in LEVEL_ROLES else None
+  if is_document and not _is_tracked_document(changed, own_basenames):
+    return { TickAction.ACTION: TickAction.NOOP }
+
+  # the changed document, when the tick named one rather than the note itself
+  doc = changed if is_document else None
+  if role == _SPEC_ROLE_STATUS:
+    return coordinator_dispatch(owner, item, today = today, sibling_doc = doc)
+  return coordinator_dispatch(owner, item, today = today, level_doc = doc)
 
 
 def main(argv: list[str]) -> int:
@@ -2109,15 +2579,20 @@ def main(argv: list[str]) -> int:
   `routine_types.dispatch_git`'s `command:` sub-shape (`[*resolved_cmd, json.dumps(item)]`,
   spawned with `cwd = repo`). The item carries one of two shapes: a grouped
   `{dir, paths, sha, author_name, author_email}` item names an asset directory and every one of
-  its changed members at once and is resolved straight to that directory's own status
-  folder-note (a group without one — a bare category folder, or a race with a deletion — is
-  skipped); otherwise the routine's `filter.any_of` matches a single changed file, either a
-  status folder-note (`spec_role: status`) OR an authored document carrying a non-null
-  `spec_doc_type` — `item["path"]` names whichever one matched. A sibling-doc item is resolved to its OWNING
-  asset's status folder-note (the Obsidian folder-note convention, `<dir>/<dir>.md`) before
-  dispatch; a sibling living outside an asset folder (a product-root `tech.md` / loose
-  `design.md` — no coordinator-job tracking exists at that level) resolves the same convention
-  to a folder-note that never carries `spec_role: status`, and is skipped.
+  its changed members at once. Each member climbs from its own folder to the group's dir looking
+  for the nearest status folder-note; a member an owner is found for joins that owner's one
+  dispatch, and a member no status note owns — a nested product's own level document whose
+  folder the parent's shallow glob grouped, or a bare group folder's own note — is instead
+  dispatched one by one through the same route a changed file outside the grouping glob takes.
+  A group where every member falls into neither bucket (a bare group folder with nothing the
+  worker tracks beneath it, or a race with a deletion) is skipped. Otherwise the routine's
+  `filter.any_of` matches a single changed file, either a status folder-note (`spec_role: status`)
+  OR an authored document carrying a non-null `spec_doc_type` — `item["path"]` names whichever one
+  matched. A sibling-doc item is resolved to its OWNING asset's status folder-note (the Obsidian
+  folder-note convention, `<dir>/<dir>.md`) before dispatch; a sibling living outside an asset
+  folder (a product-root `tech.md` / loose `design.md` — no coordinator-job tracking exists at
+  that level) resolves the same convention to a folder-note that never carries `spec_role: status`,
+  and is skipped.
 
   A document parked at `spec_stage: deferred` is dispatched on like any other changed path — the
   owning note still needs its gates, brief, and launch rows put in order. What a parked document
@@ -2150,34 +2625,50 @@ def main(argv: list[str]) -> int:
     sys.stderr.write(f"malformed git-watch item JSON: {args.item_json!r}\n")
     return 2
   raw_dir = item.get(_ITEM_DIR) if isinstance(item, dict) else None
-  # guard: a grouped `{dir, paths, ...}` item resolves straight to its owning asset's status
-  # folder-note — one dispatch for the whole group; the single-file `path` form below is the
-  # fallback for a changed file outside the routine's directory-grouping glob
+
+  # a grouped `{dir, paths, ...}` item is split by owner — each member path climbs to the
+  # nearest status folder-note at or below the group's dir — and every owner gets one dispatch
+  # over its own members; the single-file `path` form below is the fallback for a changed file
+  # outside the routine's directory-grouping glob
   if isinstance(raw_dir, str) and raw_dir:
-    asset_dir = (Path.cwd() / raw_dir).resolve()
-    asset_note = asset_dir / f"{asset_dir.name}.md"
-    # guard: a group without a status folder-note (a bare category folder, or a race with a
-    # deletion) is not an asset this worker tracks
-    if not asset_note.is_file():
+    group_dir = (Path.cwd() / raw_dir).resolve()
+    raw_paths = item.get(_ITEM_PATHS, [])
+    owners = _split_group_by_owner(group_dir, raw_paths)
+
+    # a member with no status note over it is not an asset's file — a nested product's own level
+    # document, or a bare group folder's note — and is dispatched as the single-file item it
+    # would have been ungrouped
+    orphans = _orphan_members(group_dir, raw_paths)
+
+    # guard: no member has a status folder-note over it, and no member is an orphan either (a
+    # bare group folder, an operator zone, or a race with a deletion) — nothing this worker
+    # tracks a coordinator job against
+    if not owners and not orphans:
       print(json.dumps({ TickAction.ACTION: TickAction.NOOP }))
       return 0
-    fm, _ = flip_gate.parse_frontmatter(asset_note.read_text())
-    # guard: an operator-zone folder-note (never `spec_role: status`) tracks no coordinator job
-    if fm.get(SpecKey.ROLE) != _SPEC_ROLE_STATUS:
-      print(json.dumps({ TickAction.ACTION: TickAction.NOOP }))
-      return 0
-    # every OTHER member path in the group, resolved once here rather than re-derived inside
-    # `coordinator_dispatch` — the status note itself is never one of its own sibling members
-    members = [
-        (Path.cwd() / p).resolve() for p in item.get(_ITEM_PATHS, [])
-        if isinstance(p, str) and (Path.cwd() / p).resolve() != asset_note.resolve()
-    ]
-    result = coordinator_dispatch(asset_note, item, today = args.today, group_members = members)
-    print(json.dumps(result))
+    for asset_note, members in owners.items():
+      # the owner's own narrowed item: its dir and its members only, the group's commit fields kept
+      owner_item = {
+          **item,
+          _ITEM_DIR: _to_rel_path(Path.cwd(), asset_note.parent),
+          _ITEM_PATHS: [ _to_rel_path(Path.cwd(), member) for member in members ],
+      }
+
+      # the status note itself is never one of its own sibling members
+      siblings = [ member for member in members if member != asset_note ]
+      result = coordinator_dispatch(asset_note, owner_item, today = args.today, group_members = siblings)
+      print(json.dumps(result))
+    for orphan in orphans:
+      # the orphan's own repo-relative path replaces the group's member list on the item it is
+      # dispatched with: the buried-operator-commit rescue reads `path` and never `paths`, so
+      # the raw grouped item would leave it with no history to scan and no operator edit to find
+      orphan_item = { **item, _ITEM_PATH: _to_rel_path(Path.cwd(), orphan) }
+      print(json.dumps(_dispatch_single_path(orphan, orphan_item, args.today)))
     return 0
 
   # the single-file `changed_files` form — the routine's other `any_of` member
   raw_path = item.get(_ITEM_PATH) if isinstance(item, dict) else None
+
   # guard: neither shape a git-watch item takes carries anything to dispatch on
   if not isinstance(raw_path, str) or not raw_path:
     sys.stderr.write(f"git-watch item carries no {_ITEM_DIR!r} or {_ITEM_PATH!r}: {item!r}\n")
@@ -2187,50 +2678,8 @@ def main(argv: list[str]) -> int:
   # relative item path resolves against the current directory
   changed = (Path.cwd() / raw_path).resolve()
 
-  # guard: the file was deleted or moved between the git-watch scan and this dispatch
-  if not changed.is_file():
-    print(json.dumps({ TickAction.ACTION: TickAction.NOOP }))
-    return 0
-
-  # a document basename resolves to the folder-note that owns it, by where the document lies;
-  # every other match IS the folder-note the routine's own `any_of` member selected
-  repo_root = flip_gate.repo_root(changed.parent)
-  is_document = _is_tracked_document(changed) or changed.name in LevelDoc.BASENAMES
-  owner = _resolve_owner_note(repo_root, changed) if is_document else changed
-
-  # guard: no folder-note owns this path (a bare folder, or a race with a deletion) — nothing
-  # this worker tracks a coordinator job against
-  if not owner.is_file():
-    print(json.dumps({ TickAction.ACTION: TickAction.NOOP }))
-    return 0
-
-  # the owner's own role picks the ladder: an asset's status note runs the asset one, a product's
-  # or the catalog root's level note the level one, and a note carrying neither is nobody's object
-  fm, _ = flip_gate.parse_frontmatter(owner.read_text())
-  role = fm.get(SpecKey.ROLE)
-
-  # guard: a note carrying no coordination role is nobody's object
-  if role != _SPEC_ROLE_STATUS and role not in LEVEL_ROLES:
-    print(json.dumps({ TickAction.ACTION: TickAction.NOOP }))
-    return 0
-
-  # guard: a document belonging to the OTHER ladder is not one this note tracks — the level set
-  # and the asset predicate overlap on `design.md` / `tech.md`, so the union that found the owner
-  # must be narrowed by the owner's own role here
-  own_basenames = LevelDoc.BASENAMES if role in LEVEL_ROLES else None
-  if is_document and not _is_tracked_document(changed, own_basenames):
-    print(json.dumps({ TickAction.ACTION: TickAction.NOOP }))
-    return 0
-
-  # the changed document, when the tick named one rather than the note itself
-  doc = changed if is_document else None
-  if role == _SPEC_ROLE_STATUS:
-    result = coordinator_dispatch(owner, item, today = args.today, sibling_doc = doc)
-  else:
-    result = coordinator_dispatch(owner, item, today = args.today, level_doc = doc)
-
   # report the tick's result the same way every other lazycortex-specs worker does
-  print(json.dumps(result))
+  print(json.dumps(_dispatch_single_path(changed, item, args.today)))
   return 0
 
 

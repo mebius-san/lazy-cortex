@@ -106,8 +106,8 @@ Context (print before asking):
 - Where: /lazy-spec.rebase-pins · Step 6 — Propose spec_released for affected assets; target <asset-dir>/<slug>.md
 - Found: spec_released false, spec_cancelled false, spec_tests_passing true; Step 4 rewrote <doc(s)> pinned to <repo-key>:<branch>, now merged into <default-branch>; <that was the asset's only open pin | <n> pin(s) on this asset remain open>
 - Why asking: the release is a human-signal gate — the merge is evidence, the operator asserts the release; the primitive flips unconditionally once confirmed
-- Answers: `release` — runs `/lazy-spec.flip-gate <asset> spec_released` now, the folder-note's `# History` records it, never re-proposed; `skip` — gate untouched, proposed again on the next run that finds it ready
-AskUserQuestion: header "Release", question "Branch <branch> of <repo-key> merged and its pins on <product>/<category>/<slug> are rebased — flip spec_released to true?", options `release` / `skip` with descriptions.
+- Answers: `release` — runs `/lazy-spec.flip-gate <asset> spec_released` now, the folder-note's `spec_released_at` stamp records the moment, never re-proposed; `skip` — gate untouched, proposed again on the next run that finds it ready
+AskUserQuestion: header "Release", question "Branch <branch> of <repo-key> merged and its pins on <product>/<path> are rebased — flip spec_released to true?", options `release` / `skip` with descriptions.
 ```
 
 Default-recommend "release" when the rebase covered the only open pin(s) on that asset. When `spec_tests_passing` is `false`, do NOT propose — report the asset as not yet release-ready and move on; do not rely on the primitive to catch it. On confirm, invoke via the `Skill` tool:
@@ -118,7 +118,7 @@ Skill(skill: "lazycortex-specs:lazy-spec.flip-gate", args: "<asset-dir> spec_rel
 
 `flip_gate` no longer checks the `spec_released` precondition itself (`spec_tests_passing == true`, and the full ladder behind it: develop-done, plan-done, design-done) — it flips unconditionally once the operator confirms, refusing only when the asset is cancelled. This skill's own job is to check the readiness before proposing: read the status folder-note, and only surface the `AskUserQuestion` proposal when `spec_tests_passing` (and the rest of the ladder) already reads `true`. When it doesn't, skip the release for that asset instead of proposing a flip you know is premature — do NOT propose it and rely on a refusal that will not come. The rebase from Step 4 is already applied regardless; only the release flip is held back. The operator settles the stuck gate (e.g. flips `spec_tests_passing` once a green test report exists, or lets `spec.coordinator` derive it) and re-runs `/lazy-spec.rebase-pins`.
 
-If `spec_cancelled: true`, skip silently — cancelled assets never advance. Every release flip's audit trail lives in the status folder-note's `# History` section written by `lazy-spec.flip-gate`; no separate product changelog is updated.
+If `spec_cancelled: true`, skip silently — cancelled assets never advance. Every release flip's audit trail is the status folder-note's `spec_released_at` stamp and the flip's own commit; no history line and no separate product changelog is written.
 
 ## Step 7 — Verify
 

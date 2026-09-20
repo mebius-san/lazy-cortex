@@ -6,12 +6,11 @@ CLI verb. Pure functions where possible — caller (skill) owns commits + IO
 sequencing.
 """
 from __future__ import annotations
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import re
 
-from constants import MemoryFrontmatterKey, RepoDir
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from constants import MemoryFrontmatterKey, RepoDir  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -111,6 +110,7 @@ def validate_frontmatter(fm: dict) -> None:
     if field not in fm:
       raise FrontmatterError(f"missing required field: {field}")
   tags = fm[MemoryFrontmatterKey.TAGS]
+
   # guard: tags must be a non-empty list
   if not isinstance(tags, list) or not tags:
     raise FrontmatterError("tags must be a non-empty list")
@@ -118,6 +118,7 @@ def validate_frontmatter(fm: dict) -> None:
     # guard: each tag must be a string carrying the memory/ prefix
     if not isinstance(t, str) or not t.startswith(TAG_PREFIX):
       raise FrontmatterError(f"tag must be prefixed `{TAG_PREFIX}`: {t!r}")
+
   # guard: type must be drawn from the closed set
   if fm[MemoryFrontmatterKey.TYPE] not in VALID_TYPES:
     raise FrontmatterError(f"type must be one of {sorted(VALID_TYPES)}: {fm[MemoryFrontmatterKey.TYPE]!r}")
@@ -161,6 +162,7 @@ def _read_note_frontmatter(path: Path) -> dict | None:
     text = path.read_text()
   except OSError:
     return None
+
   # guard: frontmatter must open with --- on the first line
   if not text.startswith("---"):
     return None
@@ -174,26 +176,32 @@ def _read_note_frontmatter(path: Path) -> dict | None:
   pending_list_key: str | None = None
   for raw in body.splitlines():
     line = raw.rstrip()
+
     # blank line terminates an open block-list
     if not line:
       pending_list_key = None
       continue
+
     # comment line — skip
     # guard: skip comment lines
     if line.lstrip().startswith("#"):
       continue
+
     # continuation of a block-list value: `  - item`
     if pending_list_key is not None and line.lstrip().startswith("- "):
       fm[pending_list_key].append(line.lstrip()[2:].strip().strip('"\''))
       continue
+
     # anything else terminates an open block-list
     pending_list_key = None
+
     # guard: skip lines without a key/value separator
     if ":" not in line:
       continue
     key, _, value = line.partition(":")
     key = key.strip()
     value = value.strip()
+
     # inline list form: tags: [a, b]
     if value.startswith("[") and value.endswith("]"):
       inner = value[1:-1].strip()
@@ -264,10 +272,12 @@ def regen_local_tag_file(expert_dir: Path, topic: str) -> None:
   # locate the per-expert tag file this topic would live in
   tags_dir = expert_dir / RepoDir.TAGS
   tag_file = tags_dir / f"{topic}.md"
+
   # (slug, type, summary) tuples for every matching note
   matching: list[tuple[str, str, str]] = []
   for note in _iter_notes(expert_dir):
     fm = _read_note_frontmatter(note)
+
     # guard: skip notes without parseable frontmatter
     if not fm:
       continue
@@ -331,6 +341,7 @@ def regen_global_tag_file(memory_root: Path, topic: str) -> None:
       local = expert / RepoDir.TAGS / f"{topic}.md"
       if local.exists():
         holders.append(f"- `../{expert.name}/.tags/{topic}.md`")
+
   # no expert holds the topic — remove the stale global tag file if any
   if not holders:
     if global_tag_file.exists():

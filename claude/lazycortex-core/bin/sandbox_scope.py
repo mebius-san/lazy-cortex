@@ -10,14 +10,13 @@ checkout is still missing so a drifted symlink surfaces as a finding instead of 
 run of jobs that fail on every write.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import json
 import os
 from pathlib import Path
 
-from constants import RuntimeFile, SandboxKey, SandboxSyncKey
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from constants import RuntimeFile, SandboxKey, SandboxSyncKey  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -346,6 +345,7 @@ def sync(repo: Path | str, *, read: list[str] | None = None, write: list[str] | 
   sandbox = dict(sandbox) if isinstance(sandbox, dict) else {}
   filesystem = sandbox.get(SandboxKey.FILESYSTEM)
   filesystem = dict(filesystem) if isinstance(filesystem, dict) else {}
+
   # a recorded switch is the checkout's decision; only an unrecorded one is turned on here
   enabled = sandbox.get(SandboxKey.ENABLED)
   sandbox[SandboxKey.ENABLED] = enabled if isinstance(enabled, bool) else True

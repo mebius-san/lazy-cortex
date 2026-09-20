@@ -11,8 +11,6 @@ touching `lazy.settings.json` directly, so this module never duplicates core's
 atomic-write / version-stamping logic.
 """
 from __future__ import annotations
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import json
 import os
@@ -191,6 +189,7 @@ def _settings_get(repo: Path, section: str) -> dict:
     [ sys.executable, str(cli), _K.SUB_SETTINGS_GET, section, _K.ARG_CWD, str(repo) ],
     capture_output = True, text = True, check = False,
   )
+
   # guard: non-zero exit — surface stdout+stderr for diagnosis rather than a bare JSON parse error
   if proc.returncode != 0:
     raise RuntimeError(
@@ -217,6 +216,7 @@ def _settings_set(repo: Path, section: str, value: dict) -> None:
     [ sys.executable, str(cli), _K.SUB_SETTINGS_SET, section, _K.ARG_CWD, str(repo) ],
     input = json.dumps(value), capture_output = True, text = True, check = False,
   )
+
   # guard: non-zero exit — surface stdout+stderr for diagnosis
   if proc.returncode != 0:
     raise RuntimeError(
@@ -260,6 +260,7 @@ def ensure_axes(repo: Path, axes: list[str]) -> dict:
   # read the current axis vocabulary before unioning in the requested axes
   wiki = _settings_get(repo, _K.WIKI_SECTION)
   declared = wiki.get(_K.TAG_AXES)
+
   # guard: malformed `wiki.tag_axes` (e.g. an object) — report cleanly instead of unioning into it
   if declared is not None and not isinstance(declared, list):
     return { _K.ERROR: "wiki.tag_axes must be a list" }
@@ -295,6 +296,7 @@ def ensure_axes(repo: Path, axes: list[str]) -> dict:
   if not missing:
     return { _K.STATUS: _K.STATUS_UNCHANGED }
 
+  # append the missing axes and persist the section in one write
   wiki[_K.TAG_AXES] = [ *existing, *missing ]
   _settings_set(repo, _K.WIKI_SECTION, wiki)
   return { _K.STATUS: _K.STATUS_ADDED, _K.ADDED: missing }
@@ -341,6 +343,7 @@ def ensure_scope_config(
   """
   wiki = _settings_get(repo, _K.WIKI_SECTION)
   scopes = wiki.get(_K.SCOPES) or {}
+
   # guard: malformed `wiki.scopes` (e.g. a list) — report cleanly instead of crashing below
   if not isinstance(scopes, dict):
     return { _K.ERROR: "wiki.scopes must be an object" }
@@ -351,6 +354,7 @@ def ensure_scope_config(
 
   # look up the named scope; guarded below so seeding never creates one
   cfg = scopes.get(scope_id)
+
   # guard: the named scope does not exist — seeding must never create one
   if not isinstance(cfg, dict):
     return { _K.STATUS: _K.STATUS_ERROR, _K.REASON: "no such scope" }
@@ -402,6 +406,7 @@ def ensure_scope_config(
   if not changed_excludes and not changed_keys:
     return { _K.STATUS: _K.STATUS_UNCHANGED }
 
+  # fold each part that changed into the scope config
   if changed_excludes:
     cfg[_K.EXCLUDE_PATHS] = [ *existing_excludes, *changed_excludes ]
   if changed_keys:

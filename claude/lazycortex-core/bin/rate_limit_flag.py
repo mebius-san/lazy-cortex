@@ -10,8 +10,6 @@ Every read failure is fail-open: an unreadable or malformed record is treated as
 reported on stderr, never raised as an exception into the caller's flow.
 """
 from __future__ import annotations
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import hashlib
 import json
@@ -21,6 +19,8 @@ import tempfile
 import time
 from pathlib import Path
 
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+# pylint: disable-next=import-error
 from constants import DaemonKey, RateLimitGuardKey, RateLimitRecordKey, RateLimitTrigger
 
 from typing import TYPE_CHECKING
@@ -188,6 +188,7 @@ def frames(stdout: str) -> list[dict]:
   found: list[dict] = []
   for line in stdout.splitlines():
     raw = line.strip()
+
     # guard: skip the parse for every line that cannot be the frame this function wants —
     # a transcript is megabytes and only these few lines carry the marker
     # waiver: external Claude Code stream-json field name, not an internal key
@@ -197,12 +198,14 @@ def frames(stdout: str) -> list[dict]:
       frame = json.loads(raw)
     except json.JSONDecodeError:
       continue
+
     # guard: only rate-limit events carry a payload this module reads
     # waiver: external Claude Code stream-json field name, not an internal key
     if not isinstance(frame, dict) or frame.get("type") != "rate_limit_event":
       continue
     # waiver: external Claude Code stream-json field name, not an internal key
     info = frame.get("rate_limit_info")
+
     # guard: the event carried no payload object to read
     if not isinstance(info, dict):
       continue
@@ -250,9 +253,11 @@ def triggered(info: dict, cfg: dict) -> str | None:
     if isinstance(utilization, (int, float)) and float(utilization) >= threshold:
       return RateLimitTrigger.ALLOWED_WARNING
     return None
+
   # guard: the window is already closed
   if status == RateLimitTrigger.REJECTED and cfg.get(RateLimitGuardKey.ON_REJECTED, True):
     return RateLimitTrigger.REJECTED
+
   # guard: spend has crossed into paid overage — an absent field means unknown, never "no"
   # waiver: external Claude Code stream-json field name, not an internal key
   if info.get("isUsingOverage") is True and cfg.get(RateLimitGuardKey.ON_OVERAGE, True):
@@ -298,8 +303,10 @@ def record(info: dict, trigger: str, *, writer: str) -> Path:
   # forever.
 
   now = time.time()
+
   # the identity is used twice below (record field + filename) and may cost a config read
   account = account_identity()
+
   # a frame carrying no reset timestamp still bounds the record — by the shortest window
   resets = _resets_at(info, trigger)
   effective = resets if resets is not None else now + FALLBACK_TTL_SEC
@@ -314,6 +321,7 @@ def record(info: dict, trigger: str, *, writer: str) -> Path:
     RateLimitRecordKey.WRITTEN_AT:       now,
     RateLimitRecordKey.ACCOUNT:          account,
   }
+
   # a record born expired protects nothing — say so where the operator will see it
   if effective <= now:
     sys.stderr.write(
@@ -386,10 +394,12 @@ def live() -> list[dict]:
   # process on the host stuck waiting on a signal it can no longer read.
 
   base = flag_dir()
+
   # guard: no writer has ever raised the flag on this host
   if not base.is_dir():
     return []
   now = time.time()
+
   # loop-invariant: the reader's own identity, checked against every record below
   own = account_identity()
   raised: list[dict] = []
@@ -408,15 +418,18 @@ def live() -> list[dict]:
     except (OSError, json.JSONDecodeError) as e:
       sys.stderr.write(f"rate-limit flag: ignoring unreadable record {name}: {e}\n")
       continue
+
     # guard: a record that is not an object cannot carry a window
     if not isinstance(entry, dict):
       sys.stderr.write(f"rate-limit flag: ignoring malformed record {name}\n")
       continue
     resets = entry.get(RateLimitRecordKey.RESETS_AT)
+
     # guard: no usable reset timestamp, or the window has already reopened
     if not isinstance(resets, (int, float)) or now >= float(resets):
       continue
     owner = entry.get(RateLimitRecordKey.ACCOUNT)
+
     # guard: another account's window says nothing about this reader's budget; a record
     # without the field predates the scoping and stays visible to everyone
     if isinstance(owner, str) and owner and owner != own:
@@ -443,6 +456,7 @@ def resets_at() -> float | None:
     The largest reset timestamp across unexpired records, or None when nothing is raised.
   """
   raised = live()
+
   # guard: nothing raised — there is no reopening to wait for
   if not raised:
     return None
@@ -461,9 +475,11 @@ def _window_key(info: dict) -> str:
   """
   # waiver: external Claude Code stream-json field name, not an internal key
   raw = info.get("rateLimitType")
+
   # guard: absent or non-string window type files under the shared unknown stem
   if not isinstance(raw, str) or not raw:
     return UNKNOWN_KEY
+
   # a provider-supplied string becomes a path segment here — accept only the known alphabet
   if not set(raw) <= _SAFE_KEY_CHARS:
     return UNKNOWN_KEY

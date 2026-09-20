@@ -25,9 +25,6 @@ tracked file. One failing document never stops the rest of the sweep; failures a
 the summary's `error` field and the exit code, as the error-ledger contract requires.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# waiver: `import parser`-adjacent sibling modules resolved at runtime via sys.path
-# pylint: disable=import-error,wrong-import-position
 
 import argparse
 import json
@@ -45,16 +42,18 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import banner as _banner  # noqa: E402
+import banner as _banner  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import collect_ops as _collect_ops  # noqa: E402
+import collect_ops as _collect_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# pylint: disable-next=import-error,wrong-import-position
 import coordinator_dispatch as _coordinator_dispatch  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import frontmatter as _fm  # noqa: E402
+import frontmatter as _fm  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import job_markers as _job_markers  # noqa: E402
+import job_markers as _job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# pylint: disable-next=import-error,wrong-import-position
 from keys import JobFile, JobKey, JobMarker, JobStatus, Outcome, ReviewKey  # noqa: E402
 
 
@@ -91,6 +90,7 @@ def _job_bundle_dir(repo: Path, job_id: str) -> Path | None:
     The bundle directory, or None when no expert's queue holds one by that name.
   """
   jobs_root = repo / JobFile.EXPERTS_DIR / JobFile.JOBS_DIR
+
   # guard: no job queue at all — every tracked job has vanished
   if not jobs_root.is_dir():
     return None
@@ -155,6 +155,7 @@ def _repair_lost_wake(repo: Path, doc: Path, entry: dict) -> bool:
   # same result.
 
   job_id = entry.get(JobMarker.ACTIVE_JOB)
+
   # guard: no writer job tracked — nothing to lose a wake for
   if not isinstance(job_id, str) or not job_id:
     return False
@@ -163,9 +164,11 @@ def _repair_lost_wake(repo: Path, doc: Path, entry: dict) -> bool:
   jdir = _job_bundle_dir(repo, job_id)
   # waiver: type: ignore — collect_ops is a deferred/late-bound sibling import; mypy cannot resolve it
   status = _STATUS_VANISHED if jdir is None else _collect_ops._job_status(jdir)  # type: ignore[attr-defined]
+
   # guard: still running — not stuck, not this sweep's business
   if status == JobStatus.PENDING:
     return False
+
   # guard: DONE with a deliverable payload — `collect-tick`'s own minutely sweep re-raises this
   # wake itself; doubling it here would be a second mechanism for a covered case
   if status == JobStatus.DONE and jdir is not None and _done_outcome(jdir) == Outcome.EDITED:
@@ -206,16 +209,19 @@ def _is_orphaned(repo: Path, doc: Path) -> bool:
   # the operator by design — marks a review as truly stranded.
 
   entry = _job_markers.read(repo, doc)
+
   # guard: a tracked writer job or a raised wake means the loop still has a next move
   if entry.get(JobMarker.ACTIVE_JOB) or entry.get(JobMarker.PENDING_WAKE):
     return False
   coordinator_job = entry.get(JobMarker.COORDINATOR_JOB)
+
   # guard: a live coordinator job owns the turn — silence is it working
   # waiver: type: ignore — coordinator_dispatch is a deferred/late-bound sibling import; mypy cannot resolve it
   if isinstance(coordinator_job, str) and coordinator_job \
       and _coordinator_dispatch._is_job_live(repo, coordinator_job):  # type: ignore[attr-defined]
     return False
   _meta, body = _fm.parse(doc.read_text())
+
   # an operator-waiting banner makes the silence legitimate: the turn is the operator's
   return _banner.extract(body) not in _OPERATOR_WAITING_STATES
 
@@ -235,12 +241,14 @@ def _review_active_docs(repo: Path) -> list[Path]:
       ["git", "ls-files", "--", "*.md"],
       cwd = str(repo), capture_output = True, text = True, check = False,
   )
+
   # guard: not a git repository — nothing to enumerate
   if proc.returncode != 0:
     return []
   active: list[Path] = []
   for rel in proc.stdout.splitlines():
     path = repo / rel
+
     # guard: the index can name a file deleted from the worktree — nothing to read there
     if not path.is_file():
       continue
@@ -322,6 +330,7 @@ def sanitize(repo: Path) -> dict:
   # the "error" field is additive — a clean sweep's summary stays exactly the three counts
   # waiver: 'cleared'/'lost_wakes'/'orphaned' are this sweep's own wire-shape keys, not keys.py-promoted constants
   summary: dict[str, int | str] = { "cleared": cleared, "lost_wakes": lost, "orphaned": orphaned }
+
   # a sweep with failures must not report success via exit 0 (the error-ledger contract)
   if failed:
     summary[JobKey.ERROR] = f"{len(failed)} document(s) failed to sanitize: {', '.join(failed)}"

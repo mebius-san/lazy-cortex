@@ -8,15 +8,14 @@ Atomic writes via temp+os.replace — same dir as the target file so the rename
 is on the same filesystem.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import json
 import os
 import tempfile
 from pathlib import Path
 
-from constants import StateKey
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from constants import StateKey  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -61,6 +60,7 @@ def load(repo_root: Path) -> dict:
     not valid JSON.
   """
   path = _state_path(repo_root)
+
   # guard: no persisted state yet — return fresh default
   if not path.exists():
     return _empty_state()
@@ -113,6 +113,7 @@ def atomic_write_text(path: Path, text: str) -> None:
   # `path`; a reader always sees either the old content in full or the new content in full.
 
   path.parent.mkdir(parents = True, exist_ok = True)
+
   # write to a sibling temp file first so an interrupted call leaves the previous content intact
   # waiver: temp-file naming idiom, not a domain constant
   fd, tmp_name = tempfile.mkstemp(prefix = f".{path.name}.", suffix = ".tmp", dir = str(path.parent))

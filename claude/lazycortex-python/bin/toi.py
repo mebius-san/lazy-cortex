@@ -243,6 +243,7 @@ class TypeOnlyImportAnalyzer(ast.NodeVisitor):
     # visit base classes (used at runtime)
     for base in node.bases:  # type: ast.AST
       self.visit(base)  # mark names like Generic[TypeVar] as runtime-used
+
     # visit class body
     for stmt in node.body:  # type: ast.AST
       self.visit(stmt)
@@ -435,6 +436,7 @@ def _line_matches(source_lines: list[str], lineno: int, pattern: re.Pattern[str]
   prev = idx - 1
   while prev >= 0:
     stripped = source_lines[prev].strip()
+
     # guard: stop at the first non-comment line — the block ends here
     if not stripped.startswith('#'):
       break
@@ -606,6 +608,7 @@ def walk_dir(
     for fname in filenames:
       if fname.endswith('.py'):
         path = os.path.join(dirpath, fname)
+
         # guard: skip files matching any exclusion substring
         if any(sub in path for sub in all_excludes):
           continue

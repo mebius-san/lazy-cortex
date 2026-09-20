@@ -103,6 +103,7 @@ def rewrite_frontmatter(text: str, *, icon: str | None, color: str | None) -> st
   # callers can detect a no-op rewrite with a plain equality check.
 
   m = _FENCE_RE.match(text)
+
   # guard: no existing frontmatter fence — only act if we have something to add
   if m is None:
     # guard: nothing to add either — return input unchanged

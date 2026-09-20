@@ -17,16 +17,19 @@ lives in :mod:`body.reassemble`. This module's job is to:
 The graft is delegated to `body.reassemble`.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 from dataclasses import dataclass
 
-import body as _body
-import edit_markup as _edit_markup
-import frontmatter as _fm
-import payload as _payload
-from keys import Phase
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import body as _body  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import edit_markup as _edit_markup  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import frontmatter as _fm  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import payload as _payload  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from keys import Phase  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -121,9 +124,11 @@ def reapply(
   if require_fm:
     _op_meta, _ = _fm.parse(operator_text)
     _missing = set(require_fm) - (set(agent_frontmatter_overlay) | set(_op_meta))
+
     # guard: a required key absent from both overlay and operator frontmatter means classification failed — fail rather than commit silently
     if _missing:
       raise ValueError(f"missing required frontmatter keys: {sorted(_missing)}")
+
   # Defensive normalize: drop ```diff fences that only wrap whitespace
   # differences (Bug 28). Writer's whitespace reflow does not earn a
   # diff-block — the operator should see the paragraph raw.
@@ -136,6 +141,7 @@ def reapply(
     if owned_owner is None:
       raise ValueError("reapply(phase='section') requires owned_owner")
     _, op_body = _fm.parse(operator_text)
+
     # payload.check_section_writer_response still takes a flat-name
     # string; extract the first element of the pair.
     owned_expert_flat = owned_owner[0]

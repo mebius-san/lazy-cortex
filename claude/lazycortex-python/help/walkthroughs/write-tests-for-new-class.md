@@ -1,19 +1,19 @@
 ---
 chapter_type: walkthrough
-summary: Dispatch lazy-python.test-writer against a new class and get a test file that covers all seven Paranoid-Testing categories, verified by tst-py.
-last_regen: 2026-09-11
+summary: Dispatch lazy-python.test-writer against a new class and get a test file that covers all nine Paranoid-Testing categories, verified by tst-py.
+last_regen: 2026-09-20
 diagram_spec:
   anchor: "How test-writer walks a class"
-  request: "Sequence diagram showing: user invokes lazy-python.test-writer for a target class; agent reads plugin canon (testing-guidelines + checking-guidelines) then project overlay (testing_guidelines.md, checking_guidelines.md, CLAUDE.md ## Testing section); agent identifies test targets (init paths, public methods, properties, documented guarantees, exceptions, operator overloads); agent writes test file covering all 7 Paranoid-Testing categories; agent runs chk-py per file then chk-py all then tst-py on the module; agent logs the run. Show the guideline read order (canon first, overlay second, CLAUDE.md ## Testing third) and the three-step toolchain verification."
+  request: "Sequence diagram showing: user invokes lazy-python.test-writer for a target class; agent reads plugin canon (testing-guidelines + checking-guidelines) then project overlay (testing_guidelines.md, checking_guidelines.md, CLAUDE.md ## Testing section); agent identifies test targets (init paths, public methods, properties, documented guarantees, exceptions, operator overloads, Contract: blocks, Domain(...): blocks, opt: clauses); agent writes test file covering all 9 Paranoid-Testing categories; agent runs chk-py per file then chk-py all then tst-py on the module; agent logs the run. Show the guideline read order (canon first, overlay second, CLAUDE.md ## Testing third) and the three-step toolchain verification."
 source_skills:
   - lazy-python.test-writer
   - lazy-python.testing-guidelines
   - tst
-source_sha: 6a88e0ee788b304da05e4160a5a7b181dbbaf1d2
+source_sha: 672d1b9bda5f90edef93fde43a07d7981f74be83
 ---
-# Generate tests that cover all seven Paranoid-Testing categories for a new class
+# Generate tests that cover all nine Paranoid-Testing categories for a new class
 
-You've written a new class and it needs tests. The challenge isn't writing any tests — it's writing tests with a consistent shape: one that covers every corner the guidelines demand, names methods correctly, uses the right base class, and passes `chk-py` before `tst-py` ever runs. `lazy-python.test-writer` is the agent that does this: on every dispatch it reads the plugin's canonical testing and checking guidelines, then reads your project's testing overlay, then walks all seven Paranoid-Testing categories before producing the file.
+You've written a new class and it needs tests. The challenge isn't writing any tests — it's writing tests with a consistent shape: one that covers every corner the guidelines demand, names methods correctly, uses the right base class, and passes `chk-py` before `tst-py` ever runs. `lazy-python.test-writer` is the agent that does this: on every dispatch it reads the plugin's canonical testing and checking guidelines, then reads your project's testing overlay, then walks all nine Paranoid-Testing categories — driven by documented behavior in the docstrings and by the knowledge markers embedded in the code itself (`Contract:`, `Domain(…):`, `opt:`) — before producing the file.
 
 This walkthrough takes you from a freshly written class to a verified test file that satisfies every coverage requirement.
 
@@ -21,28 +21,31 @@ This walkthrough takes you from a freshly written class to a verified test file 
 
 After completing this walkthrough you have:
 
-- A test file at the mirrored path (e.g. `src/mymodule/widget.py` → `tests/mymodule/widget.py`) that covers all seven Paranoid-Testing categories.
+- A test file at the mirrored path (e.g. `src/mymodule/widget.py` → `tests/mymodule/widget.py`) that covers all nine Paranoid-Testing categories.
 - The file passing `chk-py all -q` (style + type clean) and `tst-py <module> -q` (suite green, or `# FAILS:` comments on any test the implementation does not yet satisfy).
 - A run log at `.logs/claude/lazy-python.test-writer/YYYY-MM-DD_HH-MM-SS.md` recording every action the agent took.
 
 ## What you need
 
 - `lazycortex-python` installed in your repo (`/lazy-python.install` completed). This deploys `chk-py` and `tst-py` into `cli/` — the tracked copies carry no executable bit on purpose, since a mode-blind git client (obsidian-git on Android, some Windows checkouts) can strip it silently on pull, so run them through the interpreter: `sh ./cli/chk-py` and `sh ./cli/tst-py` from the repo root. Install's Step 2b additionally deploys `~/.local/bin/chk-py` and `~/.local/bin/tst-py` — the only files this plugin ever marks executable, since they live outside any git-tracked tree and no mode-blind sync can touch their mode bit. Each one walks up from your current directory to the nearest `cli/chk-py` / `cli/tst-py` and runs it through `sh`, so once `~/.local/bin` is on your `$PATH`, the bare `chk-py` / `tst-py` commands used throughout this walkthrough work from anywhere under the repo.
-- A Python class whose public API has docstrings. The agent derives every testable claim from docstrings (Summary, Guarantees, Args, Returns, Raises) — a class without docstrings produces shallow tests. If the class has no docstrings yet, dispatch `lazy-python.docstring-writer` first.
+- A Python class whose public API has docstrings, and — where applicable — knowledge markers in its method bodies. The agent derives every testable claim from docstrings (Summary, Guarantees, Args, Returns, Raises) and from `Contract:` blocks, `Domain(…):` blocks, and `opt:` clauses wherever they appear. A class without docstrings produces shallow tests; a class with a cache or a documented formula but no marker on it simply skips the categories those markers drive — that's not a failure, just nothing to anchor to. If the class has no docstrings yet, dispatch `lazy-python.docstring-writer` first.
 - Your source tree following the standard mirrored layout (`src/<module>/<file>.py` → `tests/<module>/<file>.py`). The agent uses this convention to place the generated test file. If your project uses a different layout, declare it in `docs/guidelines/testing_guidelines.md`.
 - `docs/guidelines/testing_guidelines.md` present (created by `/lazy-python.install` Step 5). If it does not exist, re-run `/lazy-python.install` — Step 5 is idempotent and creates the stub without touching other installation artifacts.
 - If your project bootstraps secrets or provider credentials from its own shell script before tests can run, make sure `/lazy-python.install` has recorded it — the skill's Step 7 detects a bootstrap script (`cli/env`, `.env.sh`, or `scripts/env.sh`) and records it as `python.env_source` automatically. With that in place, `chk-py` and `tst-py` source the script before running, so the agent's own verification step and your later `tst-py` runs never execute against a half-configured environment.
 
 ## The journey
 
-### Step 1 — Confirm your class has docstrings
+### Step 1 — Confirm your class has docstrings and knowledge markers
 
 Open the production class file and check that each public method and the class itself has a docstring. The agent reads:
 
 - The class-level docstring for `Guarantees` bullets — each one becomes its own test.
 - Each method's `Args`, `Returns`, and `Raises` sections — each `Raises` entry gets a `pytest.raises` test; each `Returns` description drives happy-path assertions.
+- Every `Contract:` block in the file — including one the class inherits from an interface declaration, whose own docstring only points at the interface — becomes a test per guarantee.
+- Every `Domain(…):` block — the agent works two or three inputs through the formula or rule by hand and asserts the code matches, never reading the expected value off the implementation. `Domain(unfiled):` counts the same; an unfiled group parks the block's name, not its test.
+- Every `opt:` clause on a cache, memo, or precomputed table — the agent writes a test that violates the assumption the clause names (the cached input changes after the first call, the source a table was built from moves) and asserts the result stays correct or the cache is dropped.
 
-A class with only stub docstrings (`"""TODO"""`) gives the agent nothing to anchor to. Sparse docstrings produce correspondingly sparse tests.
+A class with only stub docstrings (`"""TODO"""`) gives the agent nothing to anchor to for categories 1–7. Sparse docstrings produce correspondingly sparse tests, and a cache or documented formula with no marker on it skips categories 8 and 9 entirely.
 
 If the docstrings are thin, stop here and run:
 
@@ -87,19 +90,19 @@ The agent's very first action is to create a task list — one task per step —
 The agent then runs its eight ordered steps:
 
 1. **Read guidelines** — reads the plugin canon (`lazy-python.testing-guidelines.md`, `lazy-python.checking-guidelines.md`), then your project overlay (`docs/guidelines/testing_guidelines.md`, `docs/guidelines/checking_guidelines.md`), then the `## Testing` section of `CLAUDE.md`. Outcome: `guidelines-loaded`.
-2. **Read production class** — reads the full source file. Outcome: `read`.
-3. **Identify test targets** — enumerates `__init__` paths, public methods, properties, documented guarantees, documented exceptions, and operator overloads. Outcome: `<N>-targets`.
-4. **Write tests** — writes the test file covering all 7 Paranoid-Testing categories (see Step 4 below for what that means). Outcome: `<N>-tests-written`.
+2. **Read production class** — reads the full source file, including `Contract:`, `Domain(…):`, and `opt:` markers in method bodies, and the interface's `Contract:` blocks when the class implements one. Outcome: `read`.
+3. **Identify test targets** — enumerates `__init__` paths, public methods, properties, documented guarantees, documented exceptions, operator overloads, and every `Contract:` block, `Domain(…):` block, and `opt:` clause found in Step 2. Outcome: `<N>-targets`.
+4. **Write tests** — writes the test file covering all 9 Paranoid-Testing categories (see Step 4 below for what that means). Outcome: `<N>-tests-written`.
 5. **Add class and method docstrings** — ensures every test class starts with `"Test unit for "` and every test method starts with `"Test that "`. Outcome: `done` or `already-present`.
 6. **Handle implementation-vs-spec mismatches** — if a test correctly reflects documented behavior but the implementation does not satisfy it yet, the agent adds a `# FAILS: <reason>` comment above that method and reports the divergence. It does not delete the test or fix production code. Outcome: `none` or `<N>-mismatches-flagged`.
 7. **Verify with toolchain** — runs `chk-py all <test_file>.py -q`, then `chk-py all -q` for the full project, then `tst-py <module> -q`. Guideline review (`chk-py review`) is not a step of `chk-py all` at all — it runs on its own cadence, and the agent never touches it; that decision is left to you (see Step 6). Outcome: `clean` or `<N>-violations-fixed`.
 8. **Log the run** — writes a structured log to `.logs/claude/lazy-python.test-writer/`. Outcome: `logged`.
 
-Watch for the Step 3 outcome line. It tells you the exact test targets the agent found — if the count is lower than you expect, the missing targets are likely undocumented methods.
+Watch for the Step 3 outcome line. It tells you the exact test targets the agent found — if the count is lower than you expect, the missing targets are likely undocumented methods or unmarked knowledge blocks.
 
-### Step 4 — Understand what seven-category coverage means
+### Step 4 — Understand what nine-category coverage means
 
-The agent does not stop after happy-path tests. It walks all seven Paranoid-Testing categories for the class:
+The agent does not stop after happy-path tests. It walks all nine Paranoid-Testing categories for the class:
 
 1. **Happy path** — every public method and property called with valid arguments. At least one test per public surface.
 2. **Wrong / invalid arguments** — `None`, wrong types, empty strings, empty collections, negative numbers, zero where a positive value is expected. At least two per method that accepts arguments.
@@ -107,16 +110,18 @@ The agent does not stop after happy-path tests. It walks all seven Paranoid-Test
 4. **Error conditions** — every `Raises` entry in the docstring gets its own `pytest.raises(ExceptionType, match = "...")` test. The agent tests the exact exception type and matches the message pattern.
 5. **State transitions** — if the class has lifecycle states (e.g. initialized → active → closed), the agent tests valid transitions and attempts invalid ones.
 6. **Operator overloading** — if the class defines `__add__`, `__matmul__`, `__eq__`, or any other operator, the agent tests with wrong operand types and expects `TypeError` via Python's `NotImplemented` protocol.
-7. **Documented guarantees** — every bullet in the class's `Guarantees` docstring section becomes its own test method.
+7. **Documented guarantees and contracts** — every bullet in the class's `Guarantees` docstring section, and every `Contract:` block (including one inherited from an interface declaration), becomes its own test method.
+8. **Domain mechanics** — every `Domain(…):` block stating a formula or rule gets a test whose expected values are worked out by hand from the block for two or three inputs, never read off the implementation.
+9. **Optimization assumptions** — every `opt:` clause gets a test that violates the named assumption and asserts the result stays correct or the cache is dropped. This is the test that catches a cache outliving the code it was built for.
 
-Categories 1–3 come from the public API surface. Categories 4–7 come directly from the docstring. A class with thorough docstrings produces a test file that covers all seven; a class with sparse docstrings will have thin coverage in categories 4 and 7.
+Categories 1–3 come from the public API surface. Categories 4–7 come from the docstring and the `Contract:` blocks in the code. Categories 8–9 come from the `Domain(…):` and `opt:` markers in the code — a class with no caches, memoized formulas, or documented mechanics naturally produces nothing in those two categories, and that is not a gap to chase.
 
 ### Step 5 — Review the generated file
 
 After the agent completes, open the test file at the mirrored path. Check:
 
 - **Naming**: test class is `Test<ProductionClassName>`, test methods are under 35 characters, no production class name repeated in method names.
-- **Coverage**: scan the seven categories above. Each category should have at least the minimums the guidelines require.
+- **Coverage**: scan the nine categories above. Each category should have at least the minimums the guidelines require, where the source has markers or docstring sections to drive it.
 - **`# FAILS:` comments**: any test the agent marked as failing against the current implementation. These are not errors in the test file — they are signals that the production code does not yet satisfy its own documented contract. Decide whether to fix the implementation or update the docstring.
 - **Assertion messages**: every `assert` statement should carry an f-string message showing both expected and actual values.
 
@@ -140,7 +145,7 @@ If your project aggregates its suites through re-export shims (a `test_all.py` t
 
 If your project has no such shims, no key ever repeats and the line never prints — the run behaves exactly as before.
 
-The agent's own verification runs `chk-py all` twice (Step 7) but never touches guideline review — `chk-py review` is not a step of `all`; it runs on its own cadence, mandatory at the end of a full unit of planned work and recommended after any subagent cycle that produced substantial Python (a new test file qualifies). Run it yourself once the dispatch is done: `chk-py review --base <ref>` naming the commit your work started from, so a multi-commit unit of work gets reviewed in full instead of only its tail. The command prints a manifest and exits `2` while the review is pending — dispatch `lazy-python.code-reviewer` against that manifest, then render its findings with `chk-py review --render <findings.json>`; a `FAIL` finding blocks the commit exactly like a `pcf` FAIL. Its checks reach categories no automated checker proves on the file the agent just wrote — docstring quality, contract consistency between the new tests and the production signatures they exercise, and preservation of any `TODO:` / `TMP:` / `DBG:` / `ref:` markers. Skipping this step leaves the guideline layer — the rules no AST-based checker can prove, like naming semantics and your own overlay clauses — unchecked. `/lazy-python.check-style` (Steps 3–4) covers the same manual-review categories plus the automated `chk-py` gate for a batch of edits, but it does not run `chk-py review` either — that phase is invoked directly, on its own cadence, not through any wrapping skill.
+The agent's own verification runs `chk-py all` twice (Step 7) but never touches guideline review — `chk-py review` is not a step of `all`; it runs on its own cadence, mandatory at the end of a full unit of planned work and recommended after any subagent cycle that produced substantial Python (a new test file qualifies). Run it yourself once the dispatch is done: `chk-py review --base <ref>` naming the commit your work started from, so a multi-commit unit of work gets reviewed in full instead of only its tail. The command prints a manifest and exits `2` while the review is pending — dispatch `lazy-python.code-reviewer` against that manifest, then render its findings with `chk-py review --render <findings.json>`; a `FAIL` finding blocks the commit exactly like a `pcf` FAIL. Its checks reach categories no automated checker proves on the file the agent just wrote — docstring quality, contract consistency between the new tests and the production signatures they exercise, whether a changed `Contract:`, `Domain(…):`, or `opt:` block got a matching test change, and preservation of any `TODO:` / `TMP:` / `DBG:` / `ref:` markers. Skipping this step leaves the guideline layer — the rules no AST-based checker can prove, like naming semantics and your own overlay clauses — unchecked. `/lazy-python.check-style` (Steps 3–4) covers the same manual-review categories plus the automated `chk-py` gate for a batch of edits, but it does not run `chk-py review` either — that phase is invoked directly, on its own cadence, not through any wrapping skill.
 
 A green run with no `# FAILS:` comments means the class is fully covered and the implementation satisfies its contract. A run with `# FAILS:` comments means the agent found divergences between the docstring contract and the implementation — these need your attention before the tests can be considered passing.
 
@@ -172,24 +177,26 @@ Track `docs/guidelines/testing_guidelines.md` in version control. When a teammat
 %%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
 sequenceDiagram
   participant user as User
-  participant testWriter as lazy-python.test-writer
+  participant testWriter as lazy-python.test-writer Agent
   participant docs as Guideline Docs
-  participant testFile as Test File
-  participant chkPy as chk-py
-  participant tstPy as tst-py
+  participant targetClass as Target Class
+  participant toolchain as Toolchain (chk-py / tst-py)
+  participant runLog as Run Log
 
   user->>testWriter: invoke lazy-python.test-writer for target class
-  testWriter->>docs: read plugin canon - testing-guidelines, checking-guidelines
-  docs-->>testWriter: canon rules
-  testWriter->>docs: read project overlay - testing_guidelines.md, checking_guidelines.md, CLAUDE.md Testing section
-  docs-->>testWriter: overlay rules
-  Note over testWriter: identify test targets - init paths, public methods, properties, documented guarantees, exceptions, operator overloads
-  testWriter->>testFile: write test file covering all 7 Paranoid-Testing categories
-  testWriter->>chkPy: chk-py per file
-  chkPy-->>testWriter: per-file check result
-  testWriter->>chkPy: chk-py all
-  chkPy-->>testWriter: all-check result
-  testWriter->>tstPy: tst-py on the module
-  tstPy-->>testWriter: test results
-  Note over testWriter: log the run
+  testWriter->>docs: read canon (testing-guidelines + checking-guidelines)
+  testWriter->>docs: read project overlay (testing_guidelines.md + checking_guidelines.md)
+  testWriter->>docs: read CLAUDE.md Testing section
+  docs-->>testWriter: canon + overlay + CLAUDE.md rules combined
+  testWriter->>targetClass: identify test targets
+  targetClass-->>testWriter: init paths, public methods, properties, guarantees, exceptions, operator overloads, Contract/Domain/opt clauses
+  Note over testWriter: write test file covering all 9 Paranoid-Testing categories
+  testWriter->>toolchain: chk-py per file
+  toolchain-->>testWriter: per-file check result
+  testWriter->>toolchain: chk-py all
+  toolchain-->>testWriter: full-project check result
+  testWriter->>toolchain: tst-py on module
+  toolchain-->>testWriter: test run result
+  testWriter->>runLog: log the run
+  runLog-->>testWriter: run logged
 ```

@@ -120,7 +120,7 @@ Outcome: `seeded` (any entry added) or `unchanged`.
 
 ## Step 5.6 — Install the review-callouts CSS snippet
 
-The review loop's own callouts — the banner `[!note] #review/<state-tag>`, the operator command channel `[!todo] #review/command`, escalations `[!question] #review/question`, concerns `[!attention] #review/concern` — are ordinary Obsidian callouts until the styling that tells them apart is in the vault. The snippet keys off the `#review/*` tag inside each callout, so every kind reads differently at a glance.
+The review loop's own callouts — the banner `[!note] #review/<state-tag>`, the operator command channel `[!todo] #review/command`, escalations `[!question] #review/question` — are ordinary Obsidian callouts until the styling that tells them apart is in the vault. The snippet keys off the `#review/*` tag inside each callout, so every kind reads differently at a glance.
 
 | Artifact | Target | Source |
 |---|---|---|

@@ -17,7 +17,7 @@ spec_source_docs: []
 <!-- Written by the researcher from the approved research design beside it (`design.md`). The design is not this document's to edit: a gap there is raised as a `[!question]` callout, never filled in here. Once approved this document is immutable — a wrong conclusion is answered by a new research asset citing this one. -->
 
 ## Terms
-<!-- "Glossary: The most important domain and technical terms that your stakeholders use when discussing the system." — arc42 §12 Glossary. One line per term the document uses, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, a term this document introduces is defined here first. -->
+<!-- Optional. "Glossary: The most important domain and technical terms that your stakeholders use when discussing the system." — arc42 §12 Glossary. One line per term the document uses, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, a term this document introduces is defined here first. -->
 
 ## Method
 
@@ -28,6 +28,7 @@ spec_source_docs: []
 <!-- One finding per bullet, each with its source: a repo-relative path, a wiki node, or a URL. A finding without a source is a guess and does not belong here. Fact and interpretation stay in separate sentences. -->
 
 ## Options
+<!-- Optional. The alternatives compared, when the questions admit more than one answer. -->
 
 <!-- Only when a question is a choice. The compared alternatives, the design's criteria, and how each option scores against each criterion. Leave the heading in place with `_n/a_` when no question is a choice. -->
 

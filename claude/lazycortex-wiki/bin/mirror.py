@@ -16,8 +16,6 @@ Cross-plugin Python import is forbidden (per the inter-plugin boundary contract)
 so all primitives used here are imported from within this plugin's own `bin/`.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import json
 import os
@@ -25,9 +23,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-import nodes as _nodes
-import scope as _scope
-from markers import Markers
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import nodes as _nodes  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import scope as _scope  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from markers import Markers  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -132,9 +133,11 @@ def _cached_sibling_root(name: str) -> Path | None:
     version of the sibling is cached.
   """
   own = Path(__file__).resolve()
+
   # guard: not a cached install — a dev checkout has no version directory above bin/
   if not own.parents[1].name.replace(".", "").isdigit():
     return None
+
   # the cache root sits four levels above bin/: cache/<registry>/<plugin>/<version>/bin
   try:
     cache = own.parents[4]
@@ -385,6 +388,7 @@ class MirrorSync:
       mirror_rel = f"{self.mirror_path}/{source_rel}"
       expected.add(mirror_rel)
       mirror_abs = self._repo / mirror_rel
+
       # guard: no mirror twin yet — the file is new to the mirror
       if not mirror_abs.is_file():
         synced.append(mirror_rel)
@@ -564,6 +568,7 @@ class MirrorSync:
       [ "git", "ls-files" ],
       cwd = str(self.clone_dir), capture_output = True, text = True, check = False,
     )
+
     # guard: listing failed — treat as an empty source
     if proc.returncode != 0:
       return []
@@ -585,9 +590,11 @@ class MirrorSync:
       # guard: only markdown is mirrored
       if not rel.endswith(_MD_SUFFIX):
         continue
+
       # guard: outside every source_paths glob
       if include and not any(self._matcher.match(rel, pat) for pat in include):
         continue
+
       # guard: named by an exclude glob
       if any(self._matcher.match(rel, pat) for pat in exclude):
         continue
@@ -650,6 +657,7 @@ class MirrorSync:
       directory does not exist.
     """
     mirror_abs = self._repo / self.mirror_path
+
     # guard: mirror directory not created yet
     if not mirror_abs.is_dir():
       return []

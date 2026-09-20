@@ -12,8 +12,6 @@ See claude/lazycortex-obsidian/references/lazy-obsidian.iconize-protocol.md.
 """
 
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import argparse
 import json
@@ -23,11 +21,13 @@ import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
-from icon_keys import (
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from icon_keys import (  # pylint: disable=import-error
   CallbackKey, FrontmatterKey, IconKey, InterpToken, MapKey,
   ResultKey, VersionStatus, WhenKey, YamlScalar,
 )
-from shebang_launch import ShebangError, argv_for
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from shebang_launch import ShebangError, argv_for  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -152,6 +152,7 @@ def find_vault_git_root(start: Path) -> Path | None:
   except OSError:
     # guard: git binary unavailable — no repository can be resolved
     return None
+
   # guard: not a git repository — there is no vault to resolve
   if proc.returncode != 0 or not (top := proc.stdout.strip()):
     return None
@@ -175,11 +176,13 @@ def find_vault(override: str | None) -> Path:
   # guard: explicit override path takes precedence over discovery
   if override:
     v = Path(os.path.abspath(Path(override).expanduser()))
+
     # guard: override must name an existing directory
     if not v.is_dir():
       raise IconizeError(f"vault override is not a directory: {v}")
     return v
   found = find_vault_git_root(Path.cwd())
+
   # guard: discovery failed
   if found is None:
     raise IconizeError("vault not found: not inside a git repository")
@@ -210,6 +213,7 @@ def parse_frontmatter(text: str) -> dict:
     frontmatter block is present.
   """
   m = FM_BLOCK_RE.match(text)
+
   # guard: no frontmatter block at the start of the document
   if not m:
     return {}
@@ -217,15 +221,18 @@ def parse_frontmatter(text: str) -> dict:
   for line in m.group(1).splitlines():
     # waiver: the loop variable is deliberately rebound — each line is normalised in place before use
     line = line.rstrip()  # noqa: PLW2901
+
     # guard: skip blank and comment lines
     if not line or line.startswith("#"):
       continue
+
     # guard: lines without a colon are not key/value entries
     if ":" not in line:
       continue
     k, _, v = line.partition(":")
     k = k.strip()
     v = v.strip()
+
     # guard: keys must be non-empty
     if not k:
       continue
@@ -262,18 +269,22 @@ def normalize_path(p: str) -> str:
   # guard: empty input is never valid
   if not p:
     raise IconizeError("path is empty")
+
   # guard: absolute paths are rejected — vault-relative only
   if p.startswith("/"):
     raise IconizeError(f"path must be vault-relative: {p!r}")
+
   # guard: home-relative paths are rejected
   if p.startswith("~"):
     raise IconizeError(f"path must be vault-relative, not home-relative: {p!r}")
+
   # guard: backslash separators are rejected (POSIX only)
   if "\\" in p:
     raise IconizeError(f"path must use POSIX separators: {p!r}")
   if p.startswith("./"):
     p = p[2:]
   p = p.rstrip("/")
+
   # guard: normalization must leave a non-empty path
   if not p:
     raise IconizeError("path is empty after normalization")
@@ -320,9 +331,11 @@ def validate_icon_name(name: str) -> None:
   # guard: empty, padded, or whitespace-bearing values are rejected
   if not name or name.strip() != name or any(ch.isspace() for ch in name):
     raise IconizeError(f"invalid iconName {name!r}")
+
   # guard: ASCII identifier shape passes immediately
   if ICON_NAME_RE.match(name):
     return
+
   # guard: short emoji grapheme passes as a soft fallback
   # waiver: inline numeric literal
   if len(name) <= 8:
@@ -420,15 +433,18 @@ def _resolve_icon_map_path(vault: Path, override: str | None) -> Path:
   # guard: explicit override path wins
   if override:
     return Path(override).expanduser().resolve()
+
   # Walk up from vault to find a .claude/iconize/obsidian-icon-map.json (repo root may be above vault).
   # Resolve symlinks once at entry so the walk crosses filesystem boundaries correctly.
   cur = vault.resolve()
   while True:
     # waiver: filesystem path idiom (.claude/.tmp/.md)
     cand = cur / ".claude" / "iconize" / "obsidian-icon-map.json"
+
     # guard: icon-map found at the current level
     if cand.exists():
       return cand
+
     # guard: reached filesystem root without finding the icon-map
     if cur == cur.parent:
       break
@@ -485,6 +501,7 @@ def _read_frontmatter_for(vault: Path, vault_rel: str) -> dict:
     Parsed frontmatter mapping; empty dict when the target is missing or has no frontmatter.
   """
   p = vault / vault_rel
+
   # guard: missing target yields empty frontmatter
   if not p.is_file():
     return {}
@@ -523,6 +540,7 @@ def is_template_path(rel: str) -> bool:
   # guard: a plugin's own shipped templates, `claude/<plugin>/templates/...`
   if len(parts) > 3 and parts[0] == "claude" and parts[2] == "templates":
     return True
+
   # the consumer's own override tree lives directly under `.claude/`
   # waiver: filesystem path idioms — `.claude` / `templates` are fixed layout tokens
   return len(parts) > 2 and parts[0] == ".claude" and parts[1] == "templates"
@@ -560,6 +578,7 @@ def _is_in_paint_roots(icon_map: dict, rel: str) -> bool:
   # under it as a real subdirectory, never a differently named sibling that merely shares its prefix.
 
   roots = icon_map.get(MapKey.PAINT_ROOTS)
+
   # guard: nothing declared — the whole vault stays in scope
   if not isinstance(roots, list):
     return True
@@ -693,14 +712,17 @@ def cmd_sync(args: argparse.Namespace) -> int:
   """
   vault = find_vault(args.vault)
   icon_map = _load_icon_map_or_inert(vault, args.icon_map)
+
   # guard: missing or incompatible icon-map → hook inert
   if icon_map is None or _preflight_incompatible(icon_map):
     return EXIT_OK
   rel = _vault_relative_or_none(vault, args.path)
+
   # guard: path outside the vault → no-op
   if rel is None:
     return EXIT_OK
   note_path = vault / rel
+
   # guard: nothing to rewrite — hook may fire on transient states
   if not note_path.is_file():
     return EXIT_OK
@@ -712,6 +734,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
       ResultKey.ICON: icon, ResultKey.COLOR: color,
     }, ensure_ascii = False))
     return EXIT_OK
+
   # guard: no rule claims this note — keep whatever icon keys another manager wrote
   if resolved is None:
     print(json.dumps({
@@ -720,7 +743,8 @@ def cmd_sync(args: argparse.Namespace) -> int:
     }, ensure_ascii = False))
     return EXIT_OK
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from frontmatter_rewriter import rewrite_file
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from frontmatter_rewriter import rewrite_file  # pylint: disable=import-error
   changed = rewrite_file(note_path, icon = icon, color = color)
   print(json.dumps({
     ResultKey.OP: "sync", ResultKey.PATH: rel, ResultKey.CHANGED: changed,
@@ -748,19 +772,22 @@ def _sync_rel_paths(vault: Path, icon_map: dict, rels: list[str], *, dry_run: bo
   """
   # rewriter plus the accumulators the walk fills
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from frontmatter_rewriter import rewrite_file
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from frontmatter_rewriter import rewrite_file  # pylint: disable=import-error
   touched: list[str] = []
   planned: list[dict] = []
 
   # resolve the icon for every named note and rewrite its frontmatter
   for rel in rels:
     note_path = vault / rel
+
     # guard: skip targets that do not exist (or disappeared between listing and walk)
     if not note_path.is_file():
       continue
 
     # the first matching icon-map entry decides the note's icon and color
     resolved = _resolve_icon_pair(icon_map, vault, rel)
+
     # guard: no rule claims this note — keep whatever icon keys another manager wrote
     if resolved is None:
       continue
@@ -810,6 +837,7 @@ def cmd_sync_paths(args: argparse.Namespace) -> int:
   """
   vault = find_vault(args.vault)
   icon_map = _load_icon_map_or_inert(vault, args.icon_map)
+
   # guard: missing or incompatible icon-map → op inert
   if icon_map is None or _preflight_incompatible(icon_map):
     return EXIT_OK
@@ -855,7 +883,8 @@ def _would_change(note_path: Path, icon: str | None, color: str | None) -> bool:
     True when the rewritten frontmatter differs from what is on disk.
   """
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from frontmatter_rewriter import rewrite_frontmatter
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from frontmatter_rewriter import rewrite_frontmatter  # pylint: disable=import-error
   # waiver: stdlib encoding-mode idiom
   src = note_path.read_text(encoding = "utf-8")
   return rewrite_frontmatter(src, icon = icon, color = color) != src
@@ -876,6 +905,7 @@ def _walk_md_files(vault: Path, prefix: str | None) -> list[str]:
     List of vault-relative POSIX paths.
   """
   root = vault / prefix if prefix else vault
+
   # guard: missing sub-tree yields empty list
   if not root.exists():
     return []
@@ -891,6 +921,7 @@ def _walk_md_files(vault: Path, prefix: str | None) -> list[str]:
         continue
       rel = Path(dirpath, fn).relative_to(vault)
       rel_posix = "/".join(rel.parts)
+
       # guard: template trees are source, not vault content — never enumerated for painting
       if is_template_path(rel_posix):
         continue
@@ -916,6 +947,7 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
   """
   vault = find_vault(args.vault)
   icon_map = _load_icon_map_or_inert(vault, args.icon_map)
+
   # guard: missing or incompatible icon-map → hook inert
   if icon_map is None or _preflight_incompatible(icon_map):
     return EXIT_OK
@@ -923,13 +955,15 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
 
   # rewriter plus the accumulators the vault walk fills
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from frontmatter_rewriter import rewrite_file
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from frontmatter_rewriter import rewrite_file  # pylint: disable=import-error
   touched: list[str] = []
   planned: list[dict] = []
 
   # recompute the icon for every markdown file in scope and rewrite its frontmatter
   for rel in _walk_md_files(vault, prefix or None):
     resolved = _resolve_icon_pair(icon_map, vault, rel)
+
     # guard: no rule claims this note — keep whatever icon keys another manager wrote
     if resolved is None:
       continue
@@ -984,6 +1018,7 @@ def cmd_reconcile_plugin(args: argparse.Namespace) -> int:
   """
   vault = find_vault(args.vault)
   icon_map = _load_icon_map_or_inert(vault, args.icon_map)
+
   # guard: missing or incompatible icon-map → hook inert
   if icon_map is None or _preflight_incompatible(icon_map):
     return EXIT_OK
@@ -992,18 +1027,21 @@ def cmd_reconcile_plugin(args: argparse.Namespace) -> int:
 
   # rewriter plus the accumulators the plugin-subtree walk fills
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from frontmatter_rewriter import rewrite_file
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from frontmatter_rewriter import rewrite_file  # pylint: disable=import-error
   touched: list[str] = []
   planned: list[dict] = []
 
   # repaint every note under the plugin subtree whose color depends on the bumped version
   for rel in _walk_md_files(vault, prefix):
     resolved = _resolve_icon_pair(icon_map, vault, rel)
+
     # guard: no rule claims this note — keep whatever icon keys another manager wrote
     if resolved is None:
       continue
     icon, color = resolved
     note_path = vault / rel
+
     # guard: skip targets that disappeared during the walk
     if not note_path.is_file():
       continue
@@ -1057,10 +1095,12 @@ def _dirty_md_files(vault: Path) -> list[str]:
     [ "git", "--no-optional-locks", "-C", str(vault),
       "status", "-z", "--porcelain=v1" ],
     capture_output = True, text = False, check = False)
+
   # guard: git failure → empty list (reconcile-dirty stays a safety net)
   if r.returncode != 0:
     return []
   paths: set[str] = set()
+
   # -z output: each record is `XY<space><path>` terminated by NUL. For R/C codes the
   # record is `XY<space><new>\x00<old>`, so the *following* record is the original
   # path (no preceding status bytes). We track whether the previous record was R/C.
@@ -1089,11 +1129,13 @@ def _dirty_md_files(vault: Path) -> list[str]:
     except UnicodeDecodeError:
       # skip records whose path is not valid UTF-8
       continue
+
     # guard: only markdown files participate
     # waiver: filesystem path idiom (.md)
     if not path.endswith(".md"):
       continue
     parts = PurePosixPath(path).parts
+
     # guard: drop paths inside excluded top-level directories
     if parts and parts[0] in _EXCLUDED_DIRS:
       continue
@@ -1119,12 +1161,14 @@ def cmd_reconcile_dirty(args: argparse.Namespace) -> int:
   """
   vault = find_vault(args.vault)
   icon_map = _load_icon_map_or_inert(vault, args.icon_map)
+
   # guard: missing or incompatible icon-map → hook inert
   if icon_map is None or _preflight_incompatible(icon_map):
     return EXIT_OK
 
   # dirty notes are the only place icons can have gone stale since the last turn
   paths = _dirty_md_files(vault)
+
   # guard: no dirty markdown files → silent no-op
   if not paths:
     return EXIT_OK
@@ -1143,7 +1187,8 @@ def cmd_reconcile_dirty(args: argparse.Namespace) -> int:
 
   # rewriter plus the accumulators the per-prefix walks fill
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from frontmatter_rewriter import rewrite_file
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from frontmatter_rewriter import rewrite_file  # pylint: disable=import-error
   touched: list[str] = []
   planned: list[dict] = []
 
@@ -1151,6 +1196,7 @@ def cmd_reconcile_dirty(args: argparse.Namespace) -> int:
   for prefix in prefixes:
     for rel in _walk_md_files(vault, prefix or None):
       resolved = _resolve_icon_pair(icon_map, vault, rel)
+
       # guard: no rule claims this note — keep whatever icon keys another manager wrote
       if resolved is None:
         continue
@@ -1194,6 +1240,7 @@ def parse_item_sha(item: str | None) -> str | None:
   if not item:
     return None
   stripped = item.strip()
+
   # guard: a bare sha is the hand-run shape
   if not stripped.startswith("{"):
     return stripped or None
@@ -1244,6 +1291,7 @@ def _commit_notes(vault: Path, rels: list[str]) -> str | None:
   added = subprocess.run(
     [ "git", "-C", str(vault), "-c", "core.hooksPath=/dev/null", "add", "--", *rels ],
     capture_output = True, text = True, check = False)
+
   # guard: nothing reached the index — committing now would produce an empty or partial commit
   if added.returncode != 0:
     return added.stderr.strip() or "git add failed"
@@ -1264,6 +1312,7 @@ def _commit_notes(vault: Path, rels: list[str]) -> str | None:
       "-c", f"user.name={BOT_NAME}", "-c", f"user.email={BOT_EMAIL}",
       "commit", "-m", f"{ICON_COMMIT_SUBJECT}\n\n{ICON_COMMIT_TRAILER}", "--", *rels ],
     capture_output = True, text = True, check = False)
+
   # guard: the repaint stayed uncommitted, which is exactly the dirty tree this run exists to avoid
   if committed.returncode != 0:
     return committed.stderr.strip() or "git commit failed"
@@ -1286,6 +1335,7 @@ def _commit_range_paths(vault: Path, sha: str) -> list[str]:
     [ "git", "--no-optional-locks", "-C", str(vault),
       "diff-tree", "--no-commit-id", "--name-only", "-r", "-m", "--root", sha ],
     capture_output = True, text = True, check = False)
+
   # guard: git failure — nothing to repaint from
   if proc.returncode != 0:
     return []
@@ -1307,6 +1357,7 @@ def _has_diverged_from_head(vault: Path, rel: str) -> bool:
   proc = subprocess.run(
     [ "git", "--no-optional-locks", "-C", str(vault), "status", "--porcelain=v1", "--", rel ],
     capture_output = True, text = True, check = False)
+
   # guard: git failure — treat as unchanged so a broken probe never commits blind
   if proc.returncode != 0:
     return False
@@ -1329,6 +1380,7 @@ def _has_non_icon_divergence(vault: Path, rel: str) -> bool:
   status = subprocess.run(
     [ "git", "--no-optional-locks", "-C", str(vault), "status", "--porcelain=v1", "--", rel ],
     capture_output = True, text = True, check = False)
+
   # guard: git failure, or an untracked note — someone else's in-flight file, never swept
   if status.returncode != 0 or status.stdout.startswith("??"):
     return True
@@ -1337,6 +1389,7 @@ def _has_non_icon_divergence(vault: Path, rel: str) -> bool:
   diff = subprocess.run(
     [ "git", "--no-optional-locks", "-C", str(vault), "diff", "HEAD", "--", rel ],
     capture_output = True, text = True, check = False)
+
   # guard: git failure — assume foreign content so a broken probe never sweeps blind
   if diff.returncode != 0:
     return True
@@ -1346,6 +1399,7 @@ def _has_non_icon_divergence(vault: Path, rel: str) -> bool:
     # guard: keep only content lines — context lines and the +++/--- file headers carry no change
     if not line or line[0] not in "+-" or line.startswith(("+++", "---")):
       continue
+
     # guard: a changed non-icon line proves the divergence is not this worker's to commit
     if not _ICON_LINE_RE.match(line[1:]):
       return True
@@ -1377,12 +1431,14 @@ def cmd_reconcile_commit(args: argparse.Namespace) -> int:
   """
   vault = find_vault(args.vault)
   icon_map = _load_icon_map_or_inert(vault, args.icon_map)
+
   # guard: missing or incompatible icon-map → run inert
   if icon_map is None or _preflight_incompatible(icon_map):
     return EXIT_OK
 
   # the driving routine names the commit this repaint is scoped to
   sha = parse_item_sha(args.item)
+
   # guard: the driving item names no commit — nothing to scope the repaint to
   if not sha:
     return EXIT_OK
@@ -1390,13 +1446,15 @@ def cmd_reconcile_commit(args: argparse.Namespace) -> int:
   # every path the commit carried decides which directories to repaint, markdown or not
   changed = _commit_range_paths(vault, sha)
   prefixes = sorted({ "/".join(PurePosixPath(p).parts[:-1]) for p in changed })
+
   # guard: the commit touched nothing this vault holds
   if not prefixes:
     return EXIT_OK
 
   # rewriter plus the accumulators the per-prefix walks fill
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from frontmatter_rewriter import rewrite_file
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from frontmatter_rewriter import rewrite_file  # pylint: disable=import-error
   seen: list[str] = []
   rewritten: list[str] = []
   planned: list[dict] = []
@@ -1411,6 +1469,7 @@ def cmd_reconcile_commit(args: argparse.Namespace) -> int:
         if resolved is not None and _would_change(note_path, resolved[0], resolved[1]):
           planned.append({ ResultKey.PATH: rel, ResultKey.ICON: resolved[0], ResultKey.COLOR: resolved[1] })
         continue
+
       # an unclaimed note is not rewritten but stays in the commit sweep — divergence
       # from HEAD, not this run's rewrites, decides the commit set
       if resolved is not None:
@@ -1466,6 +1525,7 @@ def cmd_reconcile_commit(args: argparse.Namespace) -> int:
   # emit the machine-readable result record for the caller
   record = { ResultKey.OP: "reconcile-commit", ResultKey.PREFIXES: prefixes,
              ResultKey.TOUCHED_COUNT: len(rewritten), ResultKey.COMMITTED: 0 if failure else len(pending) }
+
   # guard: an uncommitted repaint leaves the dirty tree this run exists to clear
   if failure:
     record[ResultKey.ERROR] = failure
@@ -1495,6 +1555,7 @@ def _parse_semver(text: str) -> tuple[int, int, int] | None:
     Triple of major, minor, patch components, or None when the value is not a triple.
   """
   m = SEMVER_RE.match(text)
+
   # guard: not a well-formed semver triple
   if not m:
     return None
@@ -1547,6 +1608,7 @@ def _preflight_incompatible(icon_map: dict) -> bool:
 
   # a missing schema_version reads as the oldest, unsupported generation
   schema = icon_map.get(MapKey.SCHEMA_VERSION, 1)
+
   # guard: unsupported schema version → hook inert
   if not isinstance(schema, int) or schema not in SUPPORTED_SCHEMA:
     sys.stderr.write(
@@ -1672,6 +1734,7 @@ def main(argv: list[str] | None = None) -> int:
       print(f"error: {e}", file = sys.stderr)
       return EXIT_VALIDATION
     return EXIT_OK
+
   # guard: no subcommand supplied → print usage and exit with validation code
   if not args.cmd:
     # waiver: one-off human-facing message
@@ -1681,6 +1744,7 @@ def main(argv: list[str] | None = None) -> int:
       file = sys.stderr)
     return EXIT_VALIDATION
   handler = DISPATCH.get(args.cmd)
+
   # guard: unknown subcommand (later tasks may land additional handlers)
   if handler is None:
     return EXIT_VALIDATION
@@ -1719,6 +1783,7 @@ def load_icon_map(path: str | Path) -> dict:
       validation.
   """
   p = Path(path)
+
   # guard: file must exist
   if not p.exists():
     raise IconizeError(f"icon-map not found at {p}", EXIT_VALIDATION)
@@ -1727,17 +1792,21 @@ def load_icon_map(path: str | Path) -> dict:
     m = json.loads(p.read_text(encoding = "utf-8"))
   except json.JSONDecodeError as e:
     raise IconizeError(f"icon-map invalid JSON: {e}", EXIT_VALIDATION) from e
+
   # guard: top-level must be an object with a 'matchers' key
   if not isinstance(m, dict) or MapKey.MATCHERS not in m:
     raise IconizeError("icon-map missing 'matchers'", EXIT_VALIDATION)
+
   # guard: matchers must be a list
   if not isinstance(m[MapKey.MATCHERS], list):
     raise IconizeError("icon-map 'matchers' must be a list", EXIT_VALIDATION)
   m.setdefault(MapKey.REGISTRIES, {})
   m.setdefault(MapKey.STAGE_COLORS, {})
+
   # guard: registries must be an object
   if not isinstance(m[MapKey.REGISTRIES], dict):
     raise IconizeError("icon-map 'registries' must be an object", EXIT_VALIDATION)
+
   # guard: stage_colors must be an object
   if not isinstance(m[MapKey.STAGE_COLORS], dict):
     raise IconizeError("icon-map 'stage_colors' must be an object", EXIT_VALIDATION)
@@ -1764,16 +1833,19 @@ def _load_registry_or_none(path: Path) -> dict | None:
   except (OSError, json.JSONDecodeError) as e:
     sys.stderr.write(f"iconize_sync: registry {path}: {e}; registry skipped.\n")
     return None
+
   # guard: top level must be an object
   if not isinstance(reg, dict):
     sys.stderr.write(f"iconize_sync: registry {path}: not an object; registry skipped.\n")
     return None
+
   # guard: unknown schema generation → the worker cannot interpret the matchers
   if reg.get(MapKey.SCHEMA_VERSION) != REGISTRY_SCHEMA_VERSION:
     sys.stderr.write(
       f"iconize_sync: registry {path}: schema_version={reg.get(MapKey.SCHEMA_VERSION)!r} "
       f"!= {REGISTRY_SCHEMA_VERSION}; registry skipped.\n")
     return None
+
   # guard: matchers must be a list
   if not isinstance(reg.get(MapKey.MATCHERS), list):
     sys.stderr.write(f"iconize_sync: registry {path}: 'matchers' must be a list; registry skipped.\n")
@@ -1810,9 +1882,11 @@ def _cached_plugin_roots() -> list[Path]:
     One root per plugin name, sorted by plugin name; empty outside a cached install.
   """
   own = Path(__file__).resolve()
+
   # guard: not a cached install — a dev checkout has no version directory above bin/
   if not own.parents[1].name.replace(".", "").isdigit():
     return []
+
   # the cache root sits four levels above bin/: cache/<registry>/<plugin>/<version>/bin
   try:
     cache = own.parents[4]
@@ -1886,12 +1960,14 @@ def load_plugin_registries(vault: Path) -> list[tuple[str, Path, dict]]:
   # the daemon-exported plugin roots decide what is visible; an operator shell sees none
   raw = os.environ.get(PLUGIN_DIRS_ENV, "")
   roots = [ Path(d) for d in raw.split(os.pathsep) if d ]
+
   # guard: outside the daemon the env is empty — fall back to the dev-vault sibling layout
   if not roots:
     # waiver: filesystem path idiom (claude/ plugin tree)
     dev = vault / "claude"
     if dev.is_dir():
       roots = [ dev / name for name in sorted(os.listdir(dev)) ]
+
   # guard: no dev-vault tree either — a consumer install reads the cache it runs from
   if not roots:
     roots = _cached_plugin_roots()
@@ -1901,6 +1977,7 @@ def load_plugin_registries(vault: Path) -> list[tuple[str, Path, dict]]:
   for root in roots:
     # waiver: filesystem path idiom (references/)
     refs = root / "references"
+
     # guard: a root without a references dir ships no registries
     if not refs.is_dir():
       continue
@@ -1962,6 +2039,7 @@ def compose_layers(icon_map: dict, registries: list[tuple[str, Path, dict]]) -> 
   # operator matchers: a missing priority floats above every plugin band
   for matcher in icon_map.get(MapKey.MATCHERS, []):
     priority = matcher.get(MapKey.PRIORITY, OPERATOR_DEFAULT_PRIORITY)
+
     # guard: a malformed operator priority falls back to the operator default
     if not isinstance(priority, int):
       priority = OPERATOR_DEFAULT_PRIORITY
@@ -1975,6 +2053,7 @@ def compose_layers(icon_map: dict, registries: list[tuple[str, Path, dict]]) -> 
       if not isinstance(matcher, dict):
         continue
       priority = matcher.get(MapKey.PRIORITY)
+
       # guard: a registry matcher outside its band does not act
       if not isinstance(priority, int) or not PRIORITY_BAND_MIN <= priority <= PRIORITY_BAND_MAX:
         sys.stderr.write(
@@ -2069,6 +2148,7 @@ def interpolate(template: str, frontmatter: dict, basename: str) -> str:
       return basename
     if ref == InterpToken.BASENAME_STEM:
       return basename.rsplit(".", 1)[0]
+
     # ref must start with "frontmatter." per INTERP_RE
     key = ref.split(".", 1)[1]
     v = frontmatter.get(key)
@@ -2119,6 +2199,7 @@ def _path_glob_to_regex(pattern: str) -> re.Pattern[str]:
     Compiled, anchored regex equivalent to the glob.
   """
   cached = _PATH_GLOB_RE_CACHE.get(pattern)
+
   # guard: return memoized compilation when available
   if cached is not None:
     return cached
@@ -2194,6 +2275,7 @@ def eval_when(when: dict, path: str, frontmatter: dict) -> bool:
       if not isinstance(expected, (list, tuple, set)):
         # waiver: reporting the type name of an arbitrary YAML-supplied value; type(x).__name__ is the right idiom here — no project class-system object to query
         raise IconizeError(f"'basename_in' must be a list, got {type(expected).__name__}")
+
       # guard: basename must be in the container
       if bn not in expected:
         return False
@@ -2206,11 +2288,13 @@ def eval_when(when: dict, path: str, frontmatter: dict) -> bool:
         return False
     elif key == WhenKey.ROLE_MATCHES_BASENAME:
       stem = bn.rsplit(".", 1)[0]
+
       # guard: frontmatter 'role' must equal the basename stem
       if frontmatter.get(FrontmatterKey.ROLE) != stem:
         return False
     elif key == WhenKey.IS_FOLDER_NOTE:
       parts = path.split("/")
+
       # guard: the note's folder-note-ness (named after its parent dir) must equal the expected
       # boolean — `is_folder_note: false` rejects folder notes, `true` rejects everything else
       if (len(parts) >= 2 and parts[-2] == bn.rsplit(".", 1)[0]) != bool(expected):
@@ -2225,6 +2309,7 @@ def eval_when(when: dict, path: str, frontmatter: dict) -> bool:
         return False
     elif key.startswith(WhenKey.FRONTMATTER_PREFIX):
       fkey = key.split(".", 1)[1]
+
       # guard: frontmatter value must equal the expected literal
       if frontmatter.get(fkey) != expected:
         return False
@@ -2299,6 +2384,7 @@ def _invoke_callback(callback_id: str, payload: dict) -> dict | None:
   if not cb_path.is_file() and _ACTIVE_CB_ROOT is not None:
     # waiver: filesystem path idiom (callbacks/)
     cb_path = _ACTIVE_CB_ROOT / "callbacks" / callback_id
+
   # guard: callback must exist; how it runs is its own first line's business
   if not cb_path.is_file():
     return None
@@ -2322,6 +2408,7 @@ def _invoke_callback(callback_id: str, payload: dict) -> dict | None:
   except OSError as e:
     sys.stderr.write(f"callback {callback_id!r} failed: {e}\n")
     return None
+
   # guard: non-zero exit → no result
   if r.returncode != 0:
     sys.stderr.write(f"callback {callback_id!r}: {r.stderr}")
@@ -2375,14 +2462,17 @@ def _resolve_field(spec: object, icon_map: dict, frontmatter: dict, basename: st
     return spec if "{{" not in spec else interpolate(spec, frontmatter, basename)
   if isinstance(spec, dict) and MapKey.FROM in spec:
     reg = lookup_dotted(icon_map, spec[MapKey.FROM])
+
     # guard: missing or non-dict registry → no value
     if not isinstance(reg, dict):
       return None
     key = interpolate(spec[MapKey.KEY], frontmatter, basename)
+
     # guard: empty key → no value
     if not key:
       return None
     val = reg.get(key)
+
     # guard: registry miss → no value
     if val is None:
       return None
@@ -2495,6 +2585,7 @@ def _callback_resolve(callback_id: str, frontmatter: dict, icon_map: dict, path:
                        { CallbackKey.OP: "resolve", CallbackKey.PATH: path,
                          CallbackKey.FRONTMATTER: frontmatter,
                          CallbackKey.ICON_MAP: icon_map })
+
   # guard: callback declined or returned no name
   if not r or not r.get(IconKey.NAME):
     return None
@@ -2546,6 +2637,7 @@ def resolve_matchers(icon_map: dict, path: str, frontmatter: dict) -> list:
 
   # the basename is shared across every matcher tried below
   basename = _basename(path)
+
   # a colour carried down from a state matcher that named no icon, awaiting the rule that names one
   borrowed_color = ""
   # waiver: a genuine module-level rebind — the callback engine reads the active matcher's plugin root from here
@@ -2556,24 +2648,29 @@ def resolve_matchers(icon_map: dict, path: str, frontmatter: dict) -> list:
     _ACTIVE_CB_ROOT = Path(cb_root) if cb_root else None
     try:
       when = matcher.get(MapKey.WHEN, {})
+
       # guard: skip entries whose when-condition does not match this path
       if not eval_when(when, path, frontmatter):
         continue
       entry = _build_entry(matcher.get(MapKey.RESOLVE, {}), icon_map, frontmatter, basename, path)
+
       # guard: matcher matched but resolution failed → return [] (no further matchers attempted)
       if not entry:
         return []
+
       # guard: a state matcher that borrows its name resolved a colour and no name — it keeps the
       # colour, and the walk goes on to the rule that owns the icon, whatever the note carries now
       if IconKey.NAME not in entry:
         borrowed_color = borrowed_color or entry.get(IconKey.COLOR, "")
         continue
+
       # the state's colour outranks the one the naming rule carries — that is what a state rule is
       if borrowed_color:
         entry = { **entry, IconKey.COLOR: borrowed_color }
       return [ (normalize_path(path), entry) ]
     finally:
       _ACTIVE_CB_ROOT = None
+
   # every rule that claimed the note only painted it; the colour stands on its own
   if borrowed_color:
     return [ (normalize_path(path), { IconKey.COLOR: borrowed_color }) ]

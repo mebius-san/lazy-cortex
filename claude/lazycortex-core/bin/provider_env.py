@@ -7,13 +7,13 @@ OpenAI- or Anthropic-compatible endpoint instead of Anthropic's own.
 """
 from __future__ import annotations
 
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 import os
 from pathlib import Path
 
-from constants import SettingsFile, SettingsKey
-from lazy_settings import load_section
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from constants import SettingsFile, SettingsKey  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from lazy_settings import load_section  # pylint: disable=import-error
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
@@ -85,9 +85,11 @@ def validate_entry(name: str, entry: object) -> dict:
   # both endpoint facts are mandatory strings — a blank one would silently spawn against Anthropic
   base_url = entry.get(ProviderKey.BASE_URL)
   token_env = entry.get(ProviderKey.TOKEN_ENV)
+
   # guard: refuse a partial endpoint declaration
   if not base_url or not isinstance(base_url, str):
     raise ProviderConfigError(f"provider {name!r}: base_url is required")
+
   # guard: refuse a provider with no named token variable
   if not token_env or not isinstance(token_env, str):
     raise ProviderConfigError(f"provider {name!r}: token_env is required")
@@ -108,6 +110,7 @@ def validate_entry(name: str, entry: object) -> dict:
   # tier leaks to the foreign endpoint under its Claude alias name
   models = entry.get(ProviderKey.MODELS) or {}
   missing = [ tier for tier in PROVIDER_TIERS if not models.get(tier) ]
+
   # guard: incomplete tier coverage
   if missing:
     raise ProviderConfigError(f"provider {name!r}: models must cover tiers {missing}")
@@ -116,6 +119,7 @@ def validate_entry(name: str, entry: object) -> dict:
   # waiver: the claude-* namespace is Anthropic's, checked as an opaque prefix — a constant
   # would restate it without adding meaning
   bad_literal = [ tier for tier in PROVIDER_TIERS if str(models[tier]).startswith("claude-") ]
+
   # guard: claude-* literals are Anthropic-only names
   if bad_literal:
     raise ProviderConfigError(f"provider {name!r}: claude-* literal in tiers {bad_literal}")
@@ -128,6 +132,7 @@ def validate_entry(name: str, entry: object) -> dict:
   if name == "openai":
     # waiver: proxy route names fixed by the LiteLLM contract, not this module's vocabulary
     off_prefix = [ tier for tier in PROVIDER_TIERS if not str(models[tier]).startswith("rt-openai/") ]
+
     # guard: runtime traffic must ride the rt-openai/ wildcard route only
     if off_prefix:
       raise ProviderConfigError(f"provider 'openai': tiers {off_prefix} must use the rt-openai/ prefix")
@@ -189,6 +194,7 @@ def resolve_token(token_env: str, *, env_file: Path | None = None) -> str | None
 
   # check process environment first
   value = os.environ.get(token_env)
+
   # guard: the process environment wins — same precedence the daemon's token gate uses
   if value:
     return value
@@ -196,6 +202,7 @@ def resolve_token(token_env: str, *, env_file: Path | None = None) -> str | None
   # resolve the env file path (override or daemon-canonical default)
   # waiver: .claude, .env paths are daemon-canonical, not config
   path = env_file if env_file is not None else Path.home() / ".claude" / ".env"
+
   # guard: no fallback file means no token
   if not path.is_file():
     return None

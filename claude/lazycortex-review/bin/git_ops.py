@@ -43,8 +43,6 @@ Phases used by each commit kind:
 with the parsed trailer, ready for the state machine to scan.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import json
 import os
@@ -53,8 +51,10 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from errors import GitOpsError
-from keys import BotIdentity, JobKey, Phase, Trailer
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from errors import GitOpsError  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from keys import BotIdentity, JobKey, Phase, Trailer  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -320,9 +320,11 @@ def _cached_sibling_root(name: str) -> Path | None:
     version of the sibling is cached.
   """
   own = Path(__file__).resolve()
+
   # guard: not a cached install — a dev checkout has no version directory above bin/
   if not own.parents[1].name.replace(".", "").isdigit():
     return None
+
   # the cache root sits four levels above bin/: cache/<registry>/<plugin>/<version>/bin
   try:
     cache = own.parents[4]
@@ -374,6 +376,7 @@ def repaint_inline(repo: Path, paths: list[str]) -> list[str]:
     if candidate.is_file():
       cli = candidate
       break
+
   # dev-vault fallback — a checkout runs the sources at hand, never an installed copy (§ 2b);
   # this file sits at claude/lazycortex-review/bin/, so the sibling tree is two levels up
   if cli is None:
@@ -381,6 +384,7 @@ def repaint_inline(repo: Path, paths: list[str]) -> list[str]:
     sibling = Path(__file__).resolve().parents[2] / "lazycortex-obsidian/bin/lazycortex-obsidian"
     if sibling.is_file():
       cli = sibling
+
   # plugin-cache fallback — a session (hook, skill) has no daemon export to walk
   if cli is None:
     # waiver: sibling plugin's on-disk CLI layout per dev.plugin-boundaries § 1c, not a domain key
@@ -388,6 +392,7 @@ def repaint_inline(repo: Path, paths: list[str]) -> list[str]:
     cached = None if root is None else root / "bin" / "lazycortex-obsidian"
     if cached is not None and cached.is_file():
       cli = cached
+
   # guard: no obsidian plugin on this host — repaint silently unavailable
   if cli is None:
     return []
@@ -399,6 +404,7 @@ def repaint_inline(repo: Path, paths: list[str]) -> list[str]:
         [sys.executable, str(cli), "sync-paths", *paths],
         cwd=repo, capture_output=True, text=True, check=False,
     )
+
     # guard: a failing worker must never block the caller's commit
     if proc.returncode != 0:
       return []
@@ -521,6 +527,7 @@ def commit_empty(
   trailers = [
       (Trailer.PHASE, _phase_trailer(phase, expert=expert, round_=round_)),
   ]
+
   # No path → don't stage; --allow-empty drives the commit through, and --only with no
   # paths pins the tree to HEAD so a concurrently staged foreign file is never published
   commit_args = [
@@ -591,6 +598,7 @@ def _parse_trailers(body: str) -> dict[str, str]:
     i -= 1
   if not collected:
     return {}
+
   # Must be preceded by a blank-line separator AND by at least one
   # non-empty content line before that blank (otherwise the
   # "trailers" are really the whole body).
@@ -631,16 +639,19 @@ def history_for_file(repo: Path, path: Path) -> list[CommitRecord]:
   if not out:
     return []
   records: list[CommitRecord] = []
+
   # Records are separated by the record-separator byte (0x1e); inside
   # one record, fields are separated by NUL (0x00).
   for chunk in out.split("\x1e"):
     # waiver: the loop variable is deliberately rebound — each chunk is normalised in place before use
     chunk = chunk.strip("\n")  # noqa: PLW2901
+
     # guard: the record-separator split yields an empty trailing chunk — skip it rather than emit an empty record
     if not chunk:
       continue
     # waiver: inline numeric literal, not a domain constant
     parts = chunk.split("\x00", 4)
+
     # guard: skip records that lack all five NUL-delimited fields — a truncated chunk would unpack-crash below
     # waiver: inline numeric literal, not a domain constant
     if len(parts) < 5:

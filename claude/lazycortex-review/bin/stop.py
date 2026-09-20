@@ -4,9 +4,6 @@ finalizing. Sets `review_active: false` and commits. Body and
 from the operator's last state.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# deferred imports below module code; position intentional (ruff E402 noqa guards it)
-# pylint: disable=import-error,wrong-import-position
 
 import argparse
 import subprocess
@@ -23,9 +20,9 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import frontmatter as _fm  # noqa: E402
+import frontmatter as _fm  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from keys import ReviewKey  # noqa: E402
+from keys import ReviewKey  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 def _atomic_commit(file_path: Path) -> None:
@@ -34,6 +31,7 @@ def _atomic_commit(file_path: Path) -> None:
       ["git", "add", "--", str(file_path.name)],
       cwd=cwd, check=True, capture_output=True,
   )
+
   # the pathspec keeps a concurrently staged foreign file out of the stop commit
   subprocess.run(
       ["git", "commit", "-q", "-m", f"review: stop {file_path.name}", "--", str(file_path.name)],

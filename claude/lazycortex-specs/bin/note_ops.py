@@ -26,8 +26,6 @@ the note's `job_markers` sidecar entry, so a reader that used to find the two ma
 frontmatter still gets them from one call.
 """
 from __future__ import annotations
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error,wrong-import-position
 
 import argparse
 import json
@@ -46,19 +44,22 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import flip_gate  # noqa: E402
+import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import gate_tick  # noqa: E402
+import gate_tick  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import iconize_inline  # noqa: E402
+import history_journal  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import note_explainers  # noqa: E402
+import iconize_inline  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import spec_job_markers  # noqa: E402
+import note_explainers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from spec_keys import (  # noqa: E402
+import spec_job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+from spec_keys import (  # noqa: E402  # pylint: disable=import-error,wrong-import-position
     BOOL_FALSE,
     BOOL_TRUE,
+    FLIPPABLE_GATES,
     LEVEL_GATES,
     LEVEL_ROLES,
     PROTECTED_ATTACHMENTS,
@@ -71,11 +72,13 @@ from spec_keys import (  # noqa: E402
     Gate,
     Section,
     SpecCascadeKey,
+    SpecCoordinatorChildWakeStateKey,
     SpecCoordinatorDocStateKey,
     SpecCoordinatorReadyStateKey,
     SpecDependsOnKey,
     SpecHaltKey,
     SpecKey,
+    SpecMomentKey,
     SpecStateKey,
     SpecTargetsKey,
 )
@@ -87,11 +90,11 @@ class _Kind:
   Frontmatter value-shape tokens used to type-check and serialize a schema key's value.
 
   Attributes:
-    BOOL: The `true`/`false` literal shape written by `flip_gate._set_bool`.
-    STR: The bare single-line scalar shape written by this module's own `_set_fm_scalar`.
+    BOOL: The `true`/`false` literal shape written by `flip_gate.set_bool`.
+    STR: The bare single-line scalar shape written by this module's own `set_fm_scalar`.
     LIST: The YAML block-list shape, or the empty inline-list shape (`key: []`), that
-      `gate_tick._write_fm_list` writes.
-    DICT: The compact single-line JSON object shape `gate_tick._set_fm_json` writes.
+      `gate_tick.write_fm_list` writes.
+    DICT: The compact single-line JSON object shape `gate_tick.set_fm_json` writes.
   """
 
   BOOL = "bool"
@@ -225,12 +228,12 @@ _WRITABLE_SCHEMA = {
     **dict.fromkeys(LEVEL_GATES, _Kind.BOOL),
 }
 
-# Member-shape regex for the two `<category>/<slug>` token lists — `spec_targets` and
+# Member-shape regex for the two product-relative path token lists — `spec_targets` and
 # `spec_depends_on` are the only `_Kind.LIST` keys whose members name another asset folder
-# (`gate_tick._target_asset_dir`'s own `raw_target.split("/")` contract); every other LIST-kind
-# key (`spec_cascade_targets_done`, `spec_tools`, `tags`, `spec_source_requests`) keeps its own
+# (`resolve_product.resolve_asset_token`'s own contract); every other LIST-kind key
+# (`spec_cascade_targets_done`, `spec_tools`, `tags`, `spec_source_requests`) keeps its own
 # shape and is unchecked here (M8).
-_CATEGORY_SLUG_TOKEN_RE = re.compile(r"^[^/]+/[^/]+$")
+_ASSET_PATH_TOKEN_RE = re.compile(r"^[^/]+(/[^/]+)*$")
 _TOKEN_LIST_KEYS = frozenset({ SpecTargetsKey.TARGETS, SpecDependsOnKey.DEPENDS_ON })
 
 
@@ -241,32 +244,37 @@ _TAGS_KEY = "tags"
 _SPEC_SOURCE_REQUESTS_KEY = "spec_source_requests"
 
 # Managed-paint and wiki-pin keys every scaffolded status note legitimately carries: the
-# iconize pair is seeded by `scaffold_asset._K.ICONIZE_*` and rewritten by the iconize worker,
-# `wiki_pinned_topics` ships in the asset-note template (`spec_pins._Key.WIKI_PINNED_TOPICS`).
-_ICONIZE_ICON_KEY = "iconize_icon"
-_ICONIZE_COLOR_KEY = "iconize_color"
+# iconize pair is seeded by `scaffold_asset.Keys.ICONIZE_*` and rewritten by the iconize worker,
+# `wiki_pinned_topics` ships in the asset-note template (`spec_pins.Keys.WIKI_PINNED_TOPICS`).
+ICONIZE_ICON_KEY = "iconize_icon"
+ICONIZE_COLOR_KEY = "iconize_color"
 _WIKI_PINNED_TOPICS_KEY = "wiki_pinned_topics"
 
 # `note-check`'s recognized-key superset: every `_WRITABLE_SCHEMA` entry plus the other
 # legitimate frontmatter keys a status folder-note carries that this verb never writes itself —
 # the scaffold-time `spec_role` / `tags`, the `spec_source_requests` slot `apply_request.py`
-# owns, and `coordinator_dispatch.py`'s own worker-internal answered-question fingerprint,
-# sibling-doc review-result marker, and readiness-gate snapshot (all three deliberately outside
-# `_WRITABLE_SCHEMA` — the coordinator persona never writes any of them itself). The busy-guard's
-# own declined/job-done wake lives in the runtime sidecar (`spec_job_markers.py`), never
-# frontmatter, so it carries no entry here. Recognizing them here means their ordinary presence
-# never reads as a "garbage key" finding.
+# owns, and `coordinator_dispatch.py`'s own four worker-internal markers — the answered-question
+# fingerprint, the sibling-doc review-result marker, the forwarded-child-wake marker, and the
+# readiness-gate snapshot (all deliberately outside `_WRITABLE_SCHEMA` — the coordinator persona
+# never writes any of them itself). The busy-guard's own declined/job-done wake lives in the
+# runtime sidecar (`spec_job_markers.py`), never frontmatter, so it carries no entry here.
+# Recognizing them here means their ordinary presence never reads as a "garbage key" finding.
 _NOTE_SCHEMA = {
     **_WRITABLE_SCHEMA,
+    # the moment beside every gate (`spec_design_done_at`, …): written by `flip-gate` when the
+    # gate turns true, dropped when it turns false, read by the staleness rule instead of the
+    # dates it used to pick out of `# History`
+    **{ f"{gate}{SpecMomentKey.AT_SUFFIX}": _Kind.STR for gate in FLIPPABLE_GATES },
     SpecKey.ROLE: _Kind.STR,
     _TAGS_KEY: _Kind.LIST,
     _SPEC_SOURCE_REQUESTS_KEY: _Kind.LIST,
     AnsweredQuestionKey.FINGERPRINT: _Kind.STR,
+    SpecCoordinatorChildWakeStateKey.STATE: _Kind.DICT,
     SpecCoordinatorDocStateKey.STATE: _Kind.DICT,
     SpecCoordinatorReadyStateKey.STATE: _Kind.DICT,
     AssetTypeKey.TYPE: _Kind.STR,
-    _ICONIZE_ICON_KEY: _Kind.STR,
-    _ICONIZE_COLOR_KEY: _Kind.STR,
+    ICONIZE_ICON_KEY: _Kind.STR,
+    ICONIZE_COLOR_KEY: _Kind.STR,
     _WIKI_PINNED_TOPICS_KEY: _Kind.LIST,
 }
 
@@ -290,7 +298,7 @@ _LEVEL_REQUIRED_SECTIONS = ( *_REQUIRED_SECTIONS, Section.ATTACHMENTS )
 
 # Sections that must carry their `#protected/<owner>/<region>` tag as the very next line
 # — a scaffolded placeholder is never a legitimate substitute.
-_PROTECTED_MARKERS = {
+PROTECTED_MARKERS = {
     Section.STATUS_BRIEF: PROTECTED_STATUS_BRIEF,
     Section.COORD_RULES: PROTECTED_COORD_RULES,
     Section.COORD_COMMANDS: PROTECTED_COORD_COMMANDS,
@@ -305,18 +313,18 @@ _OPTIONAL_PROTECTED_MARKERS = {
     Section.ATTACHMENTS: PROTECTED_ATTACHMENTS,
 }
 
-# Bot identity for this verb's own commit (frontmatter write + History line), mirroring
+# Bot identity for this verb's own commit (the frontmatter write), mirroring
 # `flip_gate`'s `_FLIP_AUTHOR_NAME` / `_FLIP_AUTHOR_EMAIL` shape. The `@bot.` substring is what
-# `coordinator_dispatch._resolve_wake_trigger`'s self-suppression check relies on to never
+# `coordinator_dispatch.resolve_wake_trigger`'s self-suppression check relies on to never
 # re-wake the coordinator on this verb's own writes.
 _AUTHOR_NAME = "lazy-spec.note-set-key"
 _AUTHOR_EMAIL = f"{_AUTHOR_NAME}@bot.invalid"
 
-# Regex template for locating a frontmatter key's line, mirroring `flip_gate._set_bool`'s own.
+# Regex template for locating a frontmatter key's line, mirroring `flip_gate.set_bool`'s own.
 _FM_KEY_RE_TEMPLATE = r"(?m)^{key}\s*:.*$"
 
 
-def _set_fm_scalar(fm_text: str, key: str, value: str) -> str:
+def set_fm_scalar(fm_text: str, key: str, value: str) -> str:
   """
   Add or replace a bare scalar `key: value` line inside a frontmatter block.
 
@@ -335,10 +343,28 @@ def _set_fm_scalar(fm_text: str, key: str, value: str) -> str:
   if pat.search(fm_text):
     return pat.sub(f"{key}: {value}", fm_text, count = 1)
   close_idx = fm_text.rfind("---\n")
+
   # guard: malformed frontmatter without a closing fence
   if close_idx < 0:
     return fm_text
   return fm_text[:close_idx] + f"{key}: {value}\n" + fm_text[close_idx:]
+
+
+def _is_asset_path_token(member: str) -> bool:
+  """
+  Judge whether a cross-asset token names a folder reachable from the product root.
+
+  Args:
+    member: One `spec_targets` / `spec_depends_on` member.
+
+  Returns:
+    True when the token is a non-empty path of non-empty segments, none of them a `.` or `..`
+    step; False otherwise.
+  """
+  # guard: an empty token, or one carrying an empty segment, anchors at no folder
+  if not _ASSET_PATH_TOKEN_RE.match(member):
+    return False
+  return not any(segment in (".", "..") for segment in member.split("/"))
 
 
 def _parse_value(kind: str, raw: str, key: str) -> tuple[object, str | None]:
@@ -350,14 +376,14 @@ def _parse_value(kind: str, raw: str, key: str) -> tuple[object, str | None]:
     raw: The raw CLI argument — `true`/`false` for `_Kind.BOOL`, a bare string for `_Kind.STR`, a
       JSON array of strings for `_Kind.LIST`.
     key: The frontmatter key being written — threaded through to the member-shape check the two
-      `<category>/<slug>` token lists carry.
+      product-relative path token lists carry.
 
   Returns:
     A `(value, error)` pair — `value` is the parsed Python object (bool / str / list[str]) on
     success with `error` None; on failure `value` is None and `error` names what was wrong.
   """
   if kind == _Kind.BOOL:
-    # guard: only the two literal tokens `flip_gate._set_bool` writes are accepted
+    # guard: only the two literal tokens `flip_gate.set_bool` writes are accepted
     if raw not in (BOOL_TRUE, BOOL_FALSE):
       return None, f"expected 'true' or 'false', got {raw!r}"
     return raw == BOOL_TRUE, None
@@ -366,29 +392,35 @@ def _parse_value(kind: str, raw: str, key: str) -> tuple[object, str | None]:
     if not raw:
       return None, "expected a non-empty string"
     return raw, None
+
   # only _Kind.LIST remains — every key in `_WRITABLE_SCHEMA` maps to one of the three kinds
   # left once the two dict-valued job markers moved to the runtime sidecar
   try:
     parsed = json.loads(raw)
   except json.JSONDecodeError:
     return None, f"expected a JSON list of strings, got {raw!r}"
+
   # guard: not a list, or a list with a non-string member — neither is a legal `spec_targets`
   if not isinstance(parsed, list) or not all(isinstance(member, str) for member in parsed):
     return None, f"expected a JSON list of strings, got {raw!r}"
 
   # Domain(spec.notes):
-  # # Cross-asset references are two-part category/slug tokens
-  # An asset points at another asset — as a cascade target or as a dependency — through a token
-  # naming the target's category and its own slug together, never a bare slug or a path. The
-  # pairing is what lets the token resolve to exactly one asset across a catalog where the same
-  # slug can legitimately recur under different categories, so a malformed token is refused here
-  # rather than accepted and silently failing to resolve later.
+  # # Cross-asset references are product-relative paths
+  # An asset points at another asset — as a cascade target or as a dependency — through the
+  # target's path from the owning product's root, however deep that is: a bare slug for an asset
+  # sitting at the product root, two segments for one under a group folder, more for one nested
+  # inside another asset. Anchoring at the product root is what lets the token resolve to exactly
+  # one asset across a catalog where the same slug can legitimately recur under different
+  # folders, so a token that anchors nowhere is refused here rather than accepted and silently
+  # failing to resolve later.
 
-  # guard: `spec_targets` / `spec_depends_on` carry `<category>/<slug>` tokens — a member
-  # missing that shape (empty, no slash, more than one slash) is refused here rather than
-  # writing clean and only surfacing as a silent context-fold-in miss later (M8)
-  if key in _TOKEN_LIST_KEYS and not all(_CATEGORY_SLUG_TOKEN_RE.match(member) for member in parsed):
-    return None, f"expected every member to match '<category>/<slug>', got {raw!r}"
+  # guard: `spec_targets` / `spec_depends_on` carry product-relative paths — a member that
+  # resolves to no folder under the product root (empty, an empty segment, a `.` / `..` step)
+  # is refused here rather than writing clean and only surfacing as a silent context-fold-in
+  # miss later (M8)
+  if key in _TOKEN_LIST_KEYS and not all(_is_asset_path_token(member) for member in parsed):
+    return None, (f"expected every member to be a path relative to the product root,"
+                  f" got {raw!r}")
   return parsed, None
 
 
@@ -409,17 +441,17 @@ def _apply_value(fm_text: str, key: str, kind: str, value: object) -> str:
     TypeError: When `value`'s runtime type does not match `kind`.
   """
   if kind == _Kind.BOOL and isinstance(value, bool):
-    return flip_gate._set_bool(fm_text, key, value)
+    return flip_gate.set_bool(fm_text, key, value)
   if kind == _Kind.STR and isinstance(value, str):
-    return _set_fm_scalar(fm_text, key, value)
+    return set_fm_scalar(fm_text, key, value)
   if kind == _Kind.LIST and isinstance(value, list):
-    return gate_tick._write_fm_list(fm_text, key, [str(item) for item in value])
+    return gate_tick.write_fm_list(fm_text, key, [str(item) for item in value])
   raise TypeError(f"value {value!r} does not match kind {kind!r}")
 
 
 def _format_value(kind: str, value: object) -> str:
   """
-  Render a parsed value back to the string form recorded in the `# History` line.
+  Render a parsed value back to the string form folded into the commit subject.
 
   Args:
     kind: The `_Kind` token naming `value`'s shape.
@@ -452,7 +484,8 @@ def _commit(asset_dir: Path, note: Path, key: str, value_str: str) -> None:
   Raises:
     subprocess.CalledProcessError: When `git add` or `git commit` exits non-zero.
   """
-  top = flip_gate._git_field(asset_dir, ["rev-parse", "--show-toplevel"], "")
+  top = flip_gate.git_field(asset_dir, ["rev-parse", "--show-toplevel"], "")
+
   # guard: asset is not inside a git repository — skip commit (test-fixture path); the file
   # write above remains and is the entire mutation the bare-fixture caller observes
   if not top:
@@ -497,8 +530,8 @@ def note_set_key(asset_dir: Path, key: str, raw_value: str, *, today: str | None
   Refuses (no file mutation) when `key` is outside the coordinator's closed writable schema, or
   when `raw_value` does not parse into the key's expected shape. A value that already matches
   what is on disk is a no-op — no write, no commit. On a genuine change, the frontmatter is
-  rewritten, one `# History` line is appended, and the note is committed under the
-  `lazy-spec.note-set-key` bot identity.
+  rewritten and the note is committed under the `lazy-spec.note-set-key` bot identity — the key
+  and its new value ride in the commit subject; no `# History` line is appended.
 
   Guarantees:
     - A key outside the coordinator's closed writable schema is always refused with no file
@@ -510,7 +543,8 @@ def note_set_key(asset_dir: Path, key: str, raw_value: str, *, today: str | None
     key: The `spec_*` frontmatter key to set.
     raw_value: The value as a CLI argument string — `true`/`false` for a bool-typed key, a bare
       string for a str-typed key, a JSON array of strings for a list-typed key.
-    today: Optional ISO date pinned into the `# History` line.
+    today: Accepted for CLI compatibility and ignored — a key write journals nothing since the
+      history redesign; the commit records it.
 
   Returns:
     `{"status": "set", "key", "value"}` on a fresh write, `{"status": "noop", "key"}` when the
@@ -521,6 +555,10 @@ def note_set_key(asset_dir: Path, key: str, raw_value: str, *, today: str | None
     subprocess.CalledProcessError: When the commit of the rewritten note fails — propagated
       from `_commit`.
   """
+
+  # the date is accepted for the callers that still pass it and discarded here, so the
+  # signature stays honest about the fact that a key write journals nothing any more
+  del today
 
   # Domain(spec.notes):
   # # Closed vocabulary for coordinator-owned frontmatter
@@ -539,14 +577,14 @@ def note_set_key(asset_dir: Path, key: str, raw_value: str, *, today: str | None
   # A value that already matches what is on disk is treated as a no-op: no frontmatter write
   # and no commit occur.
 
-  kind = _WRITABLE_SCHEMA.get(key)
   # guard: key outside the coordinator's closed writable schema — clean refusal, no write
-  if kind is None:
+  if (kind := _WRITABLE_SCHEMA.get(key)) is None:
     return {_ResultKey.STATUS: _SetKeyStatus.REFUSED, _ResultKey.KEY: key,
             _ResultKey.REASON: f"unknown key: {key}"}
 
   # validate and parse the CLI value against the key's declared shape
   value, error = _parse_value(kind, raw_value, key)
+
   # guard: value does not parse into the key's expected shape — clean refusal, no write
   if error is not None:
     return {_ResultKey.STATUS: _SetKeyStatus.REFUSED, _ResultKey.KEY: key, _ResultKey.REASON: error}
@@ -559,17 +597,19 @@ def note_set_key(asset_dir: Path, key: str, raw_value: str, *, today: str | None
 
   # apply the parsed value through the shape-appropriate writer
   new_fm_text = _apply_value(fm_text, key, kind, value)
+
   # guard: the value already matches what is on disk — nothing to write or commit
   if new_fm_text == fm_text:
     return {_ResultKey.STATUS: _SetKeyStatus.NOOP, _ResultKey.KEY: key}
 
-  # render the value, append the audit trail, and refresh the section explainers before writing
+  # render the value and refresh the section explainers before writing; a key write is the
+  # ladder's mechanics and leaves no `# History` line — the journal is for events the operator
+  # reads, and the commit below already records the write
   value_str = _format_value(kind, value)
-  hist = f"- {flip_gate._today(today)} — {_AUTHOR_NAME} · {key} → {value_str}"
-  body = flip_gate._append_under_heading(text[fm_end:], Section.HISTORY, hist)
+  body = text[fm_end:]
   note.write_text(new_fm_text + note_explainers.ensure_explainers(body, note_explainers.lang_for_note(note)))
   _commit(asset_dir, note, key, value_str)
-  return {_ResultKey.STATUS: _SetKeyStatus.SET, "key": key, "value": value_str}
+  return {_ResultKey.STATUS: _SetKeyStatus.SET, _ResultKey.KEY: key, _ResultKey.VALUE: value_str}
 
 
 def _drop_fm_key(fm_text: str, key: str) -> str:
@@ -595,6 +635,7 @@ def _drop_fm_key(fm_text: str, key: str) -> str:
     if line.startswith(f"{key}:"):
       dropping = True
       continue
+
     # guard: still inside the dropped key's block-form value — its continuation lines go too
     if dropping and (line.startswith((" ", "\t", "-"))) and line.strip():
       continue
@@ -612,8 +653,9 @@ def note_drop_key(asset_dir: Path, key: str, *, today: str | None = None) -> dic
   the only door that takes one back off. Refuses (no file mutation) when the key IS recognized —
   a recognized key holds state and changing it is `note_set_key`'s business — and when the key
   lies outside this plugin's own `spec_` namespace, since another worker owns it. On a genuine
-  removal the frontmatter is rewritten, one `# History` line is appended, and the note is
-  committed under the `lazy-spec.note-set-key` bot identity.
+  removal the frontmatter is rewritten and the note is committed under the
+  `lazy-spec.note-set-key` bot identity — the removed key rides in the commit subject; no
+  `# History` line is appended.
 
   Guarantees:
     - A key recognized by the note schema, or one outside this plugin's own `spec_` namespace,
@@ -622,7 +664,8 @@ def note_drop_key(asset_dir: Path, key: str, *, today: str | None = None) -> dic
   Args:
     asset_dir: The folder holding `<asset_dir.name>.md` — an asset's folder or a level's.
     key: The frontmatter key to remove.
-    today: Optional ISO date pinned into the `# History` line.
+    today: Accepted for CLI compatibility and ignored — a key write journals nothing since the
+      history redesign; the commit records it.
 
   Returns:
     `{"status": "dropped", "key"}` on a removal, `{"status": "absent", "key"}` when the note
@@ -633,6 +676,10 @@ def note_drop_key(asset_dir: Path, key: str, *, today: str | None = None) -> dic
     subprocess.CalledProcessError: When the commit of the rewritten note fails — propagated
       from `_commit`.
   """
+
+  # the date is accepted for the callers that still pass it and discarded here, so the
+  # signature stays honest about the fact that a key drop journals nothing any more
+  del today
 
   # Domain(spec.notes):
   # # Litter is namespace-owned before it is recognized
@@ -647,10 +694,11 @@ def note_drop_key(asset_dir: Path, key: str, *, today: str | None = None) -> dic
   # always refused with no file mutation — this verb only ever removes unrecognized litter it
   # itself owns.
 
-  # guard: a key outside this plugin's namespace belongs to another worker — never ours to remove,
-  # and this is asked FIRST because ownership outranks recognition: the schema recognizes several
+  # Decision: ownership is asked before recognition, not after — the schema recognizes several
   # foreign keys precisely so their presence reads as legitimate, and answering "recognized" there
   # would name the wrong reason for a refusal that is really about whose key it is
+
+  # guard: a key outside this plugin's namespace belongs to another worker — never ours to remove
   if not key.startswith(_SPEC_KEY_PREFIX):
     return {_ResultKey.STATUS: _DropKeyStatus.REFUSED, _ResultKey.KEY: key,
             _ResultKey.REASON: f"foreign key: {key}"}
@@ -664,14 +712,15 @@ def note_drop_key(asset_dir: Path, key: str, *, today: str | None = None) -> dic
   note = asset_dir / f"{asset_dir.name}.md"
   text = note.read_text()
   fm_values, fm_end = flip_gate.parse_frontmatter(text)
+
   # guard: the note carries no such key — nothing to remove or commit
   if key not in fm_values:
     return {_ResultKey.STATUS: _DropKeyStatus.ABSENT, _ResultKey.KEY: key}
 
-  # strip the key, append the audit trail, and refresh the section explainers before writing
+  # strip the key and refresh the section explainers before writing; no `# History` line, as
+  # for a key write — the commit records the drop
   new_fm_text = _drop_fm_key(text[:fm_end], key)
-  hist = f"- {flip_gate._today(today)} — {_AUTHOR_NAME} · {key} dropped"
-  body = flip_gate._append_under_heading(text[fm_end:], Section.HISTORY, hist)
+  body = text[fm_end:]
   note.write_text(new_fm_text + note_explainers.ensure_explainers(body, note_explainers.lang_for_note(note)))
   _commit(asset_dir, note, key, _DropKeyStatus.DROPPED)
   return {_ResultKey.STATUS: _DropKeyStatus.DROPPED, _ResultKey.KEY: key}
@@ -700,6 +749,7 @@ def _is_value_ok(raw: str, kind: str) -> bool:
     if not raw:
       return True
     return raw.startswith("[") and raw.endswith("]")
+
   # only _Kind.DICT remains
   try:
     return isinstance(json.loads(raw), dict)
@@ -765,12 +815,12 @@ def note_check(asset_note: Path) -> dict:
 
   # split the note into the two halves the checks below read, and open the findings list
   text = asset_note.read_text()
-  fm, fm_end = flip_gate.parse_frontmatter(text)
+  frontmatter, fm_end = flip_gate.parse_frontmatter(text)
   body = text[fm_end:]
   violations: list[dict] = []
 
   # check every present frontmatter key against the recognized schema
-  for key, raw in fm.items():
+  for key, raw in frontmatter.items():
     kind = _NOTE_SCHEMA.get(key)
     if kind is None:
       violations.append({ _ResultKey.KIND: _Violation.UNKNOWN_KEY, _ResultKey.KEY: key })
@@ -788,7 +838,7 @@ def note_check(asset_note: Path) -> dict:
   # section is checked only when present, never demanded.
 
   # the note's own role picks the roster: a level note owes one section more than an asset's
-  required = _LEVEL_REQUIRED_SECTIONS if fm.get(SpecKey.ROLE) in LEVEL_ROLES else _REQUIRED_SECTIONS
+  required = _LEVEL_REQUIRED_SECTIONS if frontmatter.get(SpecKey.ROLE) in LEVEL_ROLES else _REQUIRED_SECTIONS
 
   # locate each required section's line, recording its position for the order check below
   positions: dict[str, int] = {}
@@ -801,7 +851,7 @@ def note_check(asset_note: Path) -> dict:
 
   # verify each protected section's next line carries its own owner tag
   lines = body.splitlines()
-  for section, marker in _PROTECTED_MARKERS.items():
+  for section, marker in PROTECTED_MARKERS.items():
     # guard: section itself was never found — nothing to check its marker against
     if section not in positions:
       continue
@@ -817,6 +867,7 @@ def note_check(asset_note: Path) -> dict:
     if section in required:
       continue
     idx = _find_section_line_index(body, section)
+
     # guard: the optional section is absent — nothing to validate
     if idx is None:
       continue
@@ -861,10 +912,11 @@ def main_set_key(argv: list[str]) -> int:
   # waiver: argparse CLI signature -- option flag + default
   parser.add_argument("--today", default = None,
                       # waiver: one-off human-facing message -- argparse help text
-                      help = "ISO date pinned into the emitted history line")
+                      help = "accepted for compatibility; a key write journals nothing")
   args = parser.parse_args(argv)
   asset_dir: Path = args.asset_dir.resolve()
   note = asset_dir / f"{asset_dir.name}.md"
+
   # guard: asset status folder-note must exist
   if not note.is_file():
     sys.stderr.write(f"no status folder-note: {note}\n")
@@ -895,10 +947,11 @@ def main_drop_key(argv: list[str]) -> int:
   # waiver: argparse CLI signature -- option flag + default
   parser.add_argument("--today", default = None,
                       # waiver: one-off human-facing message -- argparse help text
-                      help = "ISO date pinned into the emitted history line")
+                      help = "accepted for compatibility; a key drop journals nothing")
   args = parser.parse_args(argv)
   asset_dir: Path = args.asset_dir.resolve()
   note = asset_dir / f"{asset_dir.name}.md"
+
   # guard: the folder-note must exist
   if not note.is_file():
     sys.stderr.write(f"no status folder-note: {note}\n")
@@ -925,6 +978,7 @@ def main_check(argv: list[str]) -> int:
   # waiver: argparse CLI signature -- positional argument name
   parser.add_argument("asset_note", type = Path)
   asset_note: Path = parser.parse_args(argv).asset_note.resolve()
+
   # guard: asset status folder-note must exist
   if not asset_note.is_file():
     sys.stderr.write(f"no status folder-note: {asset_note}\n")
@@ -934,3 +988,48 @@ def main_check(argv: list[str]) -> int:
   result = note_check(asset_note)
   print(json.dumps(result))
   return 0 if result[_ResultKey.OK] else 1
+
+
+def main_history(argv: list[str]) -> int:
+  """
+  Run `note-history` from the command line: append one line under today's day group.
+
+  The coordinator persona's door into `# History`. The line lands through the shared core verb,
+  so the section keeps its one shape whoever writes; nothing is committed — the coordinator's
+  own wake commit carries it, like every other edit of its pen.
+
+  Args:
+    argv: Command-line arguments, excluding the program name and subcommand.
+
+  Returns:
+    Exit code: 0 on success, 1 when the verb refuses the line, 2 when the note is missing.
+  """
+  # waiver: argparse CLI signature -- program name shown in --help / usage
+  parser = argparse.ArgumentParser(prog = "lazycortex-specs note-history")
+  # waiver: argparse CLI signature -- positional argument name
+  parser.add_argument("asset_note", type = Path)
+  # waiver: argparse CLI signature -- option flag
+  parser.add_argument("--line", required = True,
+                      # waiver: one-off human-facing message -- argparse help text
+                      help = "the line to record, without a leading bullet")
+  # waiver: argparse CLI signature -- option flag + default
+  parser.add_argument("--today", default = None,
+                      # waiver: one-off human-facing message -- argparse help text
+                      help = "ISO date pinned as the day group")
+  args = parser.parse_args(argv)
+  asset_note: Path = args.asset_note.resolve()
+
+  # guard: the folder-note must exist
+  if not asset_note.is_file():
+    sys.stderr.write(f"no status folder-note: {asset_note}\n")
+    return 2
+
+  # land the line and report the result the same way every other lazycortex-specs verb does
+  try:
+    result = history_journal.append_to_file(asset_note, args.line, args.today, repo = Path.cwd())
+  # the core verb refused the line or could not be resolved — surface the reason, exit 1
+  except RuntimeError as exc:
+    sys.stderr.write(f"{exc}\n")
+    return 1
+  print(json.dumps(result))
+  return 0

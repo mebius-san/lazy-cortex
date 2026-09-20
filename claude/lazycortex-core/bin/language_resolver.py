@@ -53,12 +53,14 @@ def resolve_language(repo: Path) -> str:
     settings = json.loads(settings_path.read_text())
   except (OSError, json.JSONDecodeError):
     return _LANGUAGE_FLOOR
+
   # guard: a malformed settings document falls back the same way a missing one does
   if not isinstance(settings, dict):
     return _LANGUAGE_FLOOR
 
   # the configured code, when the document carries one at all
   value = settings.get(_ROOT_LANGUAGE_KEY)
+
   # guard: an absent or empty key leaves the floor in place
   if not isinstance(value, str) or not value:
     return _LANGUAGE_FLOOR

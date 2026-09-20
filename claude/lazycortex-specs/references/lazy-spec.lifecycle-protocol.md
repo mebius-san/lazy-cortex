@@ -39,7 +39,7 @@ Exactly six values. The old `review`, `done`, and `wtr` are gone — "in review"
 
 Documents whose `spec_doc_type` is declared with `stages: true` (the shipped types with the flag set: `vision`, `system-vision`, `use-cases`, `design`, `system-design`, `architecture`, `ui-design`, `system-ui-design`, `code-plan`, `test-plan`, `bug`, `system-tech`, `research-design`, `research-report`). Which document kinds those are is a property of the declaration, not of a filename — see `lazy-spec.file-roles-protocol.md` § Document type. Which of them a given asset actually carries is the type playbook's declaration, not this file's: a plan document exists exactly for a tool whose `tool_types.<name>` record names a `plan_doc`, and its absence is a declared state, not a gap `lazy-spec.audit` flags.
 
-Does NOT carry `spec_stage` — every type declared `stages: false`, plus the untyped notes: the status folder-note (carries gates instead); container folder-notes (`<product>.md`, `features/features.md`, …); the append-only report journals (`code-report.md` / `test-report.md` / `data-report.md` / `docs-report.md`, and any other `report_doc` a tool declares with `append_only: true`) — they are written during execution, never approved into a stage, and carry no lifecycle state of their own; the opt-in `decisions.md` registry (product-level or asset-level) — it is an append-only registry written only by the `decide` primitive, never opted into review, and carries no lifecycle state of its own. They sit outside both layers of this protocol: no per-file stage, no role in any gate precondition. A tool whose report is declared with stages — the `research` tool's `research.md`, typed `research-report` — carries a per-file stage like any authored document and is not in this set.
+Does NOT carry `spec_stage` — every type declared `stages: false`, plus the untyped notes: the status folder-note (carries gates instead); container folder-notes (`<product>.md`, `bugs/bugs.md`, …); the append-only report journals (`code-report.md` / `test-report.md` / `data-report.md` / `docs-report.md`, and any other `report_doc` a tool declares with `append_only: true`) — they are written during execution, never approved into a stage, and carry no lifecycle state of their own; the opt-in `decisions.md` registry (product-level or asset-level) — it is an append-only registry written only by the `decide` primitive, never opted into review, and carries no lifecycle state of its own. They sit outside both layers of this protocol: no per-file stage, no role in any gate precondition. A tool whose report is declared with stages — the `research` tool's `research.md`, typed `research-report` — carries a per-file stage like any authored document and is not in this set.
 
 ### Mapping to lazycortex-review v4 flags
 
@@ -58,7 +58,7 @@ Forward: `empty → draft → approved`.
 
 `rejected` is reachable when a review or developer rejects the doc; the only path out is back to `draft` (re-open). `cancelled` is reachable from `empty`, `draft`, `rejected` and `deferred`, never from `approved`.
 
-`cancelled` is terminal. `approved` is terminal for every writer but one: `spec.coordinator` moves an approved document back to `draft` when the document's source was re-approved after it (source staleness, `lazy-spec.coordination-playbook.md` Chapter 4) — the only downward stage move in the system, always with a `# History` line naming the source. `rejected` is a re-open marker, NOT terminal.
+`cancelled` is terminal. `approved` is terminal for every writer but one: `spec.coordinator` moves an approved document back to `draft` when the document's source was re-approved after it (source staleness, `lazy-spec.coordination-playbook.md` Chapter 4) — the only downward stage move in the system, always with a `# Status brief` sentence naming the source. `rejected` is a re-open marker, NOT terminal.
 
 `deferred` is reachable from any stage on any stage-bearing type — asset-level and level documents alike — and `draft` is its single exit. Those two calls are the whole vocabulary of parking: `lazy-spec.set-stage <doc> deferred` parks, `lazy-spec.set-stage <doc> draft` unparks, and no other target stage is accepted while the document sits parked. Nothing else moves the stage on its own — a review verdict landing on a parked document is recorded on the file and read by nobody until it comes back.
 
@@ -85,7 +85,7 @@ The tag enables Obsidian queries (`#spec` for all stage-bearing docs, `#spec/app
 1. Validates the document by its declared type, never by its path or basename: it refuses a document carrying no `spec_doc_type`, refuses a type no declaration covers in the product's scope, and refuses a type declared `stages: false` (which is what excludes the status folder-note, every `report_doc` type a tool declares, and the `decisions` registry — none of them carries an independently-settable stage). It then validates the requested stage against the closed set; anything outside it — including the removed `review` / `done` / `wtr` — is refused with a clear error.
 2. Rewrites `spec_stage` in frontmatter, preserving all other keys and their order.
 3. Updates the `spec/<stage>` tag in `tags:` in the same edit (strips the old `spec/*` entry, appends `spec/<new>`).
-4. Appends one line to the nearest enclosing status folder-note's `# History`: `- <YYYY-MM-DD> — lazy-spec.set-stage · <doc>.md spec_stage <old>→<new>` (substituting a passed author for `lazy-spec.set-stage`). Product-level authored docs (`design.md` / `tech.md` at the product root) have no status folder-note in scope — the product folder-note is operator-zone — so the history append is skipped for them.
+4. When the new stage is `approved`, writes `spec_approved_at` — a quoted ISO 8601 UTC datetime, e.g. `"2026-09-19T08:11:19Z"` — onto the document's own frontmatter and leaves it in place afterwards as the last approval moment. No history line is written on any stage move; a passed author is accepted and ignored.
 
 It does NOT advance the folder-note's gates — deciding whether a gate is ready to move, and calling `lazy-spec.flip-gate` to move it, is `spec.coordinator`'s call (§ Part 2 below). The full skill contract lives at `${CLAUDE_PLUGIN_ROOT}/skills/lazy-spec.set-stage/SKILL.md`.
 
@@ -121,7 +121,7 @@ There is no `gates:` dict, no `stage:` on the folder-note, no `awaits_human:`, a
 
 **`spec_tools` distinguishes three states, and the difference is load-bearing.** An absent key means the tool set has not been determined; an empty list means it HAS been determined and the answer is "no tool at all"; a non-empty list names the tools whose playbooks (`tool_types.<name>.playbook`) govern the asset's implementation half. WHEN the list is written, and from which source, is the type playbook's declaration — the coordinator writes it through `note-set-key` like every other frontmatter key it owns.
 
-**Cross-asset tokens are paths relative to the product's `spec_path`.** Both `spec_targets` (Part 4) and `spec_depends_on` carry the same token shape: a path from `spec_path` down to the asset's own folder, so a nested asset is addressed by its full path — never by a bare slug, and never by a folder it does not actually sit under.
+**Cross-asset tokens are paths relative to the product's `spec_path`.** Both `spec_targets` (Part 4) and `spec_depends_on` carry the same token shape: a path from `spec_path` down to the asset's own folder, so every asset is addressed by its full path from `spec_path`; for an asset sitting at the product root that path is its bare slug, and never a folder it does not actually sit under.
 
 ### Linear map S0..S5
 
@@ -162,7 +162,7 @@ Each gate is still one of two kinds, a distinction the coordinator's own reasoni
 1. Reads the folder-note frontmatter.
 2. Refuses only when the asset is cancelled (`spec_cancelled: true`) — no other precondition check.
 3. Rewrites the gate boolean in frontmatter.
-4. Appends a line to `# History`. Nothing is written to `# Gates`; the reason (`--reason`, prefixed `auto:` under `--auto`) is recorded in the run log only.
+4. Writes `spec_<gate>_at` (a quoted ISO 8601 UTC datetime) beside a gate turning true and removes it when the gate turns false. Nothing is written to `# Gates` or `# History`; the reason (`--reason`, prefixed `auto:` under `--auto`) is recorded in the run log only.
 5. **Atomic git commit of the folder-note edit** under `lazy-spec.flip-gate@bot.invalid` (subject `lazy-spec.flip-gate: <gate> → <true|false> on <asset>`). Without this commit the daemon's next iteration trips its dirty-tree-skip guard and silently halts every routine on the asset. Defensive skip when the asset is not inside a git repository (test-fixture path) — the file write remains but the commit step is no-op.
 6. Writes a run log under `.logs/claude/lazy-spec.flip-gate/`.
 
@@ -174,7 +174,7 @@ CLI: `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> flip-gate <asset_dir> <gate> [
 
 `bin/gate_tick.py` is dispatched per matched status folder-note by the `lazy-spec.gate-tick` `md-scan` routine, same as before. It performs exactly two concerns now, both mechanical:
 
-1. **Active-job polling.** An asset whose runtime sidecar tracks an `active_job` has that job bundle's terminal marker (`DONE` / `DEAD` / `CANCELLED`, read file-wise from the `lazycortex-core` job-runtime layout, never imported cross-plugin) checked before anything else. Every marker clears the tracked job and raises `pending_wake: job-done` in its place — both sidecar writes, so that half costs no commit. `DONE` and `CANCELLED` then log a `# History` line each. `DEAD` sets `spec_halted: true` and appends a persistent `[!failure]` callout to `# Gates` — un-halting is a manual operator act, out of scope for this worker.
+1. **Active-job polling.** An asset whose runtime sidecar tracks an `active_job` has that job bundle's terminal marker (`DONE` / `DEAD` / `CANCELLED`, read file-wise from the `lazycortex-core` job-runtime layout, never imported cross-plugin) checked before anything else. Every marker clears the tracked job and raises `pending_wake: job-done` in its place — both sidecar writes, so that half costs no commit. `DONE` and `CANCELLED` then journal one `# History` line each (through the core `history-append` verb, never composed by hand). `DEAD` sets `spec_halted: true`, journals the halt, and appends a persistent `[!failure]` callout to `# Gates` — un-halting is a manual operator act, out of scope for this worker.
 
 **This worker opens no review.** Opening review on any freshly-written document, a job's report included, is a `lazy-review.submit` call made by the coordinator on the `job-done` wake this very pass raises (`lazy-spec.coordination-playbook.md` Chapter 6) — never a follow-up wired into the poller.
 2. **Structural note-check.** `note_ops.note_check`'s violations (an unrecognized or mistyped frontmatter key, a missing or misordered required section) are folded into the tick's own result — read-only; repairing what it finds is the coordinator's job, through its pen and `note-set-key`, never this worker's.
@@ -269,14 +269,14 @@ A `[!gate]` block a human left ticked is queued as one expert job through the `d
 
 - **`target_doc` in the payload** — every job dispatched to write a catalog document carries `target_doc` in its `request.json` payload: the repo-relative path of the document that job writes. The job returns only content, through its own `result/`; where that content belongs is settled at dispatch, by the side that knows the ladder, and travels with the job. The `land-result` collector reads the key to place the returned document, and refuses a job that declares none — nothing is landed, the document stays in the job's `result/`, and the job reads as undelivered. A declared path outside the asset's own folder is refused the same way — except a cascade job, whose target lies in another asset's folder by design and is named explicitly by the coordinator at landing time (Part 4).
 - **Expert resolution** — the dispatched expert is resolved from the review class of the checkbox's own RESULT document (its basename with `.md` stripped — for an implementation box, the tool's declared `report_doc`), read from `review.classes[<class>].experts.main[0].name` — the same class the document's own review loop uses once it exists.
-- **Guidelines context** — the product's `guidelines[<role>]` paths plus its wildcard `guidelines["*"]` paths (per `lazy-spec.config-protocol.md`) fold into the job's `context`; a declared path that does not resolve to a file becomes a `# History` warning line, never a silent drop.
+- **Guidelines context** — the product's `guidelines[<role>]` paths plus its wildcard `guidelines["*"]` paths (per `lazy-spec.config-protocol.md`) fold into the job's `context`; a declared path that does not resolve to a file is a dispatch warning journaled in `# History` as a job that failed to start, never a silent drop.
 - **Dedup key** — `<asset-slug>:<label>`, guarding a second tick of the same checkbox while the first job is still active.
-- **On success** — the coordinator removes the ticked block, marks `active_job: {"checkbox", "expert", "job_id"}` via `mark-job`, and records one `# History` line.
+- **On success** — the coordinator removes the ticked block and marks `active_job: {"checkbox", "expert", "job_id"}` via `mark-job`. Nothing is journaled for the dispatch itself — the job's finish, death, or cancellation is the history event.
 - **Guards** — a halted asset ignores every ticked checkbox; an asset already tracking an `active_job` also waits — one active job per asset at a time, checked by the coordinator before it dispatches.
 
 ### `Publish` — the one label that never dispatches a job
 
-Everything about it follows the ordinary ladder above except its outcome: a tick clears `spec_draft` (via `note-set-key <asset> spec_draft false`), which itself appends the `# History` line, then the coordinator removes the checkbox — no expert job is ever queued for this label, and it never carries an `active_job` entry. The coordinator is also the one that hangs it in the first place, at the same wake that closes the asset's terminal gate (`spec_released` flipping true) — not a separate pass. There is no automatic clearing: `spec_released` closing means the design is approved and implemented, not that the operator is ready to hand it to a downstream consumer, who may want related work finished first. An asset that reaches its terminal gate but is never ticked stays a draft, un-published, until the operator ticks it.
+Everything about it follows the ordinary ladder above except its outcome: a tick clears `spec_draft` (via `note-set-key <asset> spec_draft false`; nothing journals it), then the coordinator removes the checkbox — no expert job is ever queued for this label, and it never carries an `active_job` entry. The coordinator is also the one that hangs it in the first place, at the same wake that closes the asset's terminal gate (`spec_released` flipping true) — not a separate pass. There is no automatic clearing: `spec_released` closing means the design is approved and implemented, not that the operator is ready to hand it to a downstream consumer, who may want related work finished first. An asset that reaches its terminal gate but is never ticked stays a draft, un-published, until the operator ticks it.
 
 `spec_draft` names one downstream consumer today (another repo's own `lazy-spec.upstream-tick`, when it configures this repo as one of its `spec.upstream` sources), but its documented meaning is not tied to that path — it is "this asset is NOT yet ready for a downstream consumer to pick up" (absent or false means ready), where a downstream repo mirrors THIS repo as its own upstream (whatever mechanism that consumer uses to pull). `Publish` is the full-mode ladder's own way of clearing it; a spec-only-mode product (`lazy-spec.coordination-playbook.md` Chapter 17) clears the same flag through a different path — the coordinator, after `design.md` approves and the operator gives an explicit word — since that profile never hangs a `Publish` checkbox at all (it never reaches a terminal gate the way a full-mode asset does).
 
@@ -287,9 +287,9 @@ An asset MAY declare `spec_targets` — the existing assets its own change modif
 ### Frontmatter (on the change asset's status folder-note)
 
 ```yaml
-spec_targets: ["features/csv-export", "features/audit-log"]   # optional; paths relative to the product's spec_path
+spec_targets: ["csv-export", "audit-log"]                      # optional; paths relative to the product's spec_path
 spec_cascade_done: false                                       # true once every declared target has been folded
-spec_cascade_targets_done: ["features/csv-export"]             # tokens already folded, in fold order
+spec_cascade_targets_done: ["csv-export"]                      # tokens already folded, in fold order
 ```
 
 Tokens are paths relative to the product's `spec_path` — the same shape `spec_depends_on` carries (Part 2 § Frontmatter), so a nested target is addressed by its full path.
@@ -310,7 +310,7 @@ A cascade job reporting `conflict: true` (per `lazy-spec.expert-signals-protocol
 
 | # | `HaltReason` member | Phrase (verbatim) | Fired by |
 |---|---|---|---|
-| 1 | `JOB_DIED` | `job {job_id} ({label}) died` (format template, `job_id`/`label` substituted) | `gate_tick.py` (`_apply_job_marker`) — an asset's active job bundle carries a `DEAD` terminal marker. |
+| 1 | `JOB_DIED` | `job {job_id} ({label}) died` (format template, `job_id`/`label` substituted) | `gate_tick.py` (`apply_job_marker`) — an asset's active job bundle carries a `DEAD` terminal marker. |
 | 2 | `MERGE_CONFLICT` | `change delta could not be applied cleanly to the feature docs` | `spec.coordinator`, via `flip-gate --halt` — a change-cascade job reports `conflict: true` (Part 4; `lazy-spec.expert-signals-protocol.md`) folding its delta into a target doc. |
 | 3 | `PLAN_DROP_PARTIAL` | `plan drop left the asset half-cleaned` | `apply_request.py` (`_rollback_pre_launch_ladder`, Part 6) on a pre-launch rollback step failure; `spec.coordinator`, via `flip-gate --halt`, on a cascade's own document-drop failure or a vanished cascade target (Part 4). |
 | 4 | `GATE_PRECEDENCE` | `later gate true while an earlier gate is false` | The operator, by hand — the escalation `lazy-spec.audit` names as the alternative to turning the orphaned later gate back off on a gate-precedence FAIL. |

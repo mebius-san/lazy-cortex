@@ -45,14 +45,14 @@ the entry's own basename; only `mode=main` may carry them. The output transport 
 unified; `response.json` carries only metadata.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import re
 from dataclasses import dataclass
 
-from errors import PayloadError
-from keys import JobKey, Outcome, Phase, Tag
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from errors import PayloadError  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from keys import JobKey, Outcome, Phase, Tag  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -146,6 +146,7 @@ def build_request(
     raise PayloadError(
         f"unknown mode: {mode!r}; allowed: {sorted(_VALID_MODES)}"
     )
+
   # `kind` is no longer written to the request — see module
   # docstring. It survives as a build-time sanity input
   # (`_OUTCOMES_BY_KIND` enum gate) and as a validate_response
@@ -192,13 +193,16 @@ def attachment_basename(entry: object) -> str:
   # read as a malformed response rather than honoured, and the whole landing is refused.
 
   path = entry.get(JobKey.PATH) if isinstance(entry, dict) else entry
+
   # guard: an entry that resolves to anything but a path string names no file
   if not isinstance(path, str):
     raise PayloadError(f"attachment entry carries no path: {entry!r}")
+
   # guard: an attachment lives under the job's own result/ dir and nowhere else
   if not path.startswith(_RESULT_PREFIX):
     raise PayloadError(f"attachment path outside result/: {path!r}")
   name = path[len(_RESULT_PREFIX):]
+
   # guard: the basename is a plain filename — no separator, no parent hop, never empty
   if not name or "/" in name or "\\" in name or name in {".", ".."}:
     raise PayloadError(f"attachment basename is not a plain filename: {path!r}")
@@ -237,6 +241,7 @@ def validate_response(response: Mapping, *, kind: str) -> None:
   if not isinstance(outcome, str):
     raise PayloadError("response missing 'outcome' (must be a string)")
   valid = _OUTCOMES_BY_KIND.get(kind)
+
   # Special tolerance: kind=history may legitimately return either
   # 'noop' or 'summarized'; 'summarized' is the in-spec name, 'noop'
   # is the metadata-only signal.
@@ -299,6 +304,7 @@ def _strip_owned_section(body: str, owned_expert: str) -> str:
     line_end = body.find("\n", m.end())
     heading_len = (line_end + 1 - start) if line_end != -1 else (end - start)
     rest = section[heading_len:]
+
     # First non-empty line under heading.
     # Extract the flat name (first component of the tag) to compare
     # against owned_expert. Tag format is #expert/<flat>/<section_id>
@@ -306,6 +312,7 @@ def _strip_owned_section(body: str, owned_expert: str) -> str:
     owner_flat = None
     for raw in rest.splitlines():
       stripped = raw.strip()
+
       # guard: skip blank lines so the owner tag is read from the first line carrying content
       if not stripped:
         continue
@@ -313,6 +320,7 @@ def _strip_owned_section(body: str, owned_expert: str) -> str:
         rest_tag = stripped[len(Tag.EXPERT_PREFIX):].strip()
         owner_flat = rest_tag.split("/")[0]
       break
+
     # guard: this is the owned section being stripped — skip it so it is excluded from the kept ranges
     if owner_flat == owned_expert:
       continue  # skip — this is the owned section we want gone

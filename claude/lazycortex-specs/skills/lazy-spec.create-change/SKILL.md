@@ -1,7 +1,7 @@
 ---
 name: lazy-spec.create-change
-description: "Use when requesting a change to an existing product spec — the atomic modification unit, peer to a feature. Built-in wrapper: pins `<category>` to `change` and delegates — all clarification, scaffolding, prose, and diagrams are owned by `lazy-spec.create-asset`."
-execution-discipline-waiver: "Thin wrapper — pins the category to `change` and delegates to lazy-spec.create-asset via the Skill tool; the multi-phase orchestration where step-skip can hide lives entirely in the delegate."
+description: "Use when requesting a change to an existing product spec — the atomic modification unit, peer to a feature. Built-in wrapper: pins `<asset-type>` to `change` and delegates — all clarification, scaffolding, prose, and diagrams are owned by `lazy-spec.create-asset`."
+execution-discipline-waiver: "Thin wrapper — pins the asset type to `change` and delegates to lazy-spec.create-asset via the Skill tool; the multi-phase orchestration where step-skip can hide lives entirely in the delegate."
 logging-waiver: "pure delegator — lazy-spec.create-asset owns the log"
 ---
 # Create Change
@@ -12,8 +12,8 @@ A "change" is the smallest atomic modification unit and sits peer to a feature. 
 
 ## Input
 
-Signature: `<product> <slug> [--empty]`. The user gives the product compound-key and the change slug (lowercase-with-hyphens); pass `--empty` straight through when present.
+Signature: `<product> <slug> [--path <dir>] [--empty]`. The user gives the product compound-key and the change slug (lowercase-with-hyphens); pass `--path <dir>` and `--empty` straight through when present.
 
 ## Process
 
-Invoke `lazy-spec.create-asset` via the `Skill` tool (`skill: "lazycortex-specs:lazy-spec.create-asset"`) with args `<product> change <slug>`, appending `--empty` when the caller passed it. Report the delegate's outcome verbatim.
+Invoke `lazy-spec.create-asset` via the `Skill` tool (`skill: "lazycortex-specs:lazy-spec.create-asset"`) with args `<product> change <slug>`, appending `--path <dir>` and `--empty` when the caller passed them. Report the delegate's outcome verbatim.

@@ -25,13 +25,13 @@ Cross-plugin Python import is forbidden, so this module reads node data through
 the sibling `nodes` / `scope` bin-modules rather than reaching into core.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import re
 
-import nodes as _nodes
-import scope as _scope
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import nodes as _nodes  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import scope as _scope  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -316,6 +316,7 @@ class CandidateFinder:
       strings exactly as the operator wrote them.
     """
     node = _nodes.node_for(target)
+
     # guard: unrecognised file type carries no readable pins
     if node is None:
       return [], []
@@ -442,6 +443,7 @@ class ContentCandidateSource(CandidateSource):
       with a strictly positive overlap score; nodes with zero overlap are omitted.
     """
     target_facets = self._facets(target)
+
     # guard: target has no readable facets — no overlap can be computed
     if target_facets is None:
       return []
@@ -450,10 +452,12 @@ class ContentCandidateSource(CandidateSource):
     out: list[tuple[str, float]] = []
     for other in others:
       facets = self._facets(other)
+
       # guard: unreadable node — contributes nothing
       if facets is None:
         continue
       score = self._overlap_score(target_facets, facets)
+
       # guard: no overlap on any signal — not a candidate
       if score <= 0.0:
         continue
@@ -561,6 +565,7 @@ class ContentCandidateSource(CandidateSource):
       A `_NodeFacets` bundle, or `None` when the file type is unrecognised.
     """
     node = _nodes.node_for(path)
+
     # guard: unrecognised file type — no facets
     if node is None:
       return None
@@ -703,6 +708,7 @@ class GraphCandidateSource(CandidateSource):
     graph: dict[str, set[str]] = {}
     for node_path in self._resolver.iter_nodes(self._scope_cfg):
       node = _nodes.node_for(node_path)
+
       # guard: unrecognised file type carries no See-also edges
       if node is None:
         continue
@@ -782,11 +788,14 @@ class GraphCandidateSource(CandidateSource):
     out: set[str] = set()
     for item in items:
       stripped = item.strip()
+
       # guard: empty item — skip
       if not stripped:
         continue
+
       # The bare path runs up to the first em-dash gloss separator (or end).
       path = stripped.split(" — ", 1)[0].strip()
+
       # a plain space-hyphen gloss survives the split above — keep only the first token
       path = path.split()[0] if path else ""
       if path:
@@ -906,6 +915,7 @@ class BackCandidateFinder:
         self._repo, self._scope_cfg, self._scope_id, top_n = self._top_n,
       )
       others_top = finder.find(other)
+
       # guard: target not in this node's top-N — not attracted
       if target_rel not in others_top:
         continue

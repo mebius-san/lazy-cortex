@@ -52,15 +52,18 @@ def read_shebang(path: Path) -> list[str]:
       first = fh.readline()
   except OSError as e:
     raise ShebangError(f"{path}: cannot read: {e}") from e
+
   # guard: only a `#!` line declares an interpreter
   if not first.startswith("#!"):
     raise ShebangError(f"{path}: no shebang on line 1")
   tokens = first[2:].split()
+
   # guard: `#!` with nothing after it
   if not tokens:
     raise ShebangError(f"{path}: empty shebang")
   if Path(tokens[0]).name == _ENV_BASENAME:
     tokens = tokens[1:]
+
     # guard: `#!/usr/bin/env` naming no interpreter
     if not tokens:
       raise ShebangError(f"{path}: env shebang names no interpreter")
@@ -108,6 +111,7 @@ def argv_for(path: Path, *args: str) -> list[str]:
   if _PYTHON_NAME.match(Path(interp).name):
     return [ sys.executable, *flags, str(path), *args ]
   resolved = interp if Path(interp).is_absolute() else shutil.which(interp)
+
   # guard: the interpreter the file asks for is not installed
   if not resolved:
     raise ShebangError(f"{path}: interpreter {interp!r} not found on PATH")

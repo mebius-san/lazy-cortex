@@ -18,8 +18,6 @@ content and stay untouched, and so is any `<!-- spec:... -->` marker comment
 the tag the first content line as the protected-sections convention requires.
 """
 from __future__ import annotations
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error,wrong-import-position
 
 import re
 import sys
@@ -35,11 +33,11 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import resolve_language  # noqa: E402
+import resolve_language  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import spec_paths  # noqa: E402
+import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from spec_keys import HistoryEvent, Section  # noqa: E402
+from spec_keys import HistoryEvent, Section  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 LANG_EN = "en"
@@ -177,9 +175,11 @@ def with_explainer(section: str, lang: str, table: dict[tuple[str, str], str]) -
 
   heading, _, rest = section.partition("\n")
   note = explainer_text(heading, lang, table)
+
   # guard: a heading without a defined explainer renders exactly as before
   if not note:
     return section
+
   # replace a previous render's explainer — comment or legacy italic — instead of stacking one
   first, _, remainder = rest.partition("\n")
   if EXPLAINER_LINE_RE.match(first):
@@ -248,14 +248,17 @@ def ensure_explainers(
       idx += 1
       continue
     note = None if in_fence else explainer_text(lines[idx].strip(), lang, texts)
+
     # guard: not a known section heading — keep scanning
     if note is None:
       idx += 1
       continue
+
     # the explainer sits after the owner tag when the section carries one
     insert_at = idx + 1
     if insert_at < len(lines) and lines[insert_at].startswith(_PROTECTED_PREFIX):
       insert_at += 1
+
     # replace a line wearing the explainer shape — any non-`spec:` HTML comment, or a legacy
     # italic render; anything else (an underscore placeholder, a `spec:` marker comment,
     # operator prose) is content and the explainer is inserted above it instead
@@ -263,6 +266,7 @@ def ensure_explainers(
       lines[insert_at] = f"<!-- {note} -->"
     else:
       lines.insert(insert_at, f"<!-- {note} -->")
+
     # resume past the line just written so the scan never re-reads its own output
     idx = insert_at + 1
   return "\n".join(lines) + ("\n" if body.endswith("\n") else "")

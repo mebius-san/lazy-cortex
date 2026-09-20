@@ -22,8 +22,6 @@ This script does NOT touch `.gitignore`; the consumer is told what
 entries to add (see the install SKILL.md).
 """
 from __future__ import annotations
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import argparse
 import json
@@ -42,7 +40,7 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from keys import JobKey, Paths, ReviewKey  # noqa: E402  # pylint: disable=wrong-import-position
+from keys import JobKey, Paths, ReviewKey  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # ----------------------------------------------------------------------------------------
@@ -133,6 +131,7 @@ def _derive_watch_root(scan_paths: list[str]) -> str:
     share no such directory.
   """
   prefixes = [p for p in (_wildcard_free_prefix(g) for g in scan_paths) if p]
+
   # guard: no literal prefix at all (or none survived) means the whole repo is in scope
   if not prefixes or len(prefixes) != len(scan_paths):
     return _REPO_ROOT_WATCH
@@ -151,6 +150,7 @@ def _resolve_watch_root(existing: dict) -> str:
     routine's globs, or `.` on a greenfield install.
   """
   recorded = existing.get(JobKey.REVIEW, {}).get(_WATCH_ROOT)
+
   # guard: the operator's own value wins over any derivation
   if isinstance(recorded, str) and recorded:
     return recorded.rstrip("/") or _REPO_ROOT_WATCH
@@ -171,6 +171,7 @@ def _resolve_branch(repo: Path, existing: dict) -> str:
     else the literal fallback.
   """
   recorded = existing.get(_SettingsKey.DAEMON, {}).get(_SettingsKey.GIT, {}).get(_SettingsKey.BASE_BRANCH)
+
   # guard: the daemon's own base branch is authoritative when the consumer has one
   if isinstance(recorded, str) and recorded:
     return recorded
@@ -297,16 +298,19 @@ def _migrate(existing: dict) -> list[str]:
     already-current settings object.
   """
   migrated: list[str] = []
+
   # The md-scan routine is retired — its `process-file` consumer no longer exists, so a
   # surviving registration is a routine the daemon runs into a missing subcommand.
   if existing.get(_SettingsKey.ROUTINES, {}).pop(_RETIRED_SCAN_ROUTINE, None) is not None:
     migrated.append(f"{_SettingsKey.ROUTINES}.{_RETIRED_SCAN_ROUTINE} (removed)")
+
   # The historian is gone; the coordinator writes `# History` inline, so a `history`
   # link in a class points at an expert nothing dispatches.
   review = existing.get(JobKey.REVIEW, {})
   for idx, cls in enumerate(review.get(JobKey.CLASSES) or []):
     if cls.get(JobKey.EXPERTS, {}).pop(_HISTORY_GROUP, None) is not None:
       migrated.append(f"{JobKey.REVIEW}.{JobKey.CLASSES}[{idx}].{JobKey.EXPERTS}.{_HISTORY_GROUP} (removed)")
+
   # Both cleanups above are version-independent, and `review._version` stays untouched on purpose:
   # the ladder is `lazycortex-core`'s, and it skips any section already standing at or beyond its
   # own target, so a number written here would strand core's next step unrun.
@@ -341,11 +345,13 @@ def _merge_defaults(existing: dict, defaults: dict, added: list[str], prefix: st
   """
   for key, value in defaults.items():
     path = f"{prefix}.{key}" if prefix else key
+
     # guard: absent at this depth — write the default whole, dict or scalar alike
     if key not in existing:
       existing[key] = value
       added.append(path)
       continue
+
     # a value present at this depth on both sides recurses; anything else is the consumer's own
     if isinstance(value, dict) and isinstance(existing[key], dict):
       _merge_defaults(existing[key], value, added, path)
@@ -370,6 +376,7 @@ def _ensure_settings(repo: Path) -> dict:
     existing = json.loads(settings_path.read_text())
   else:
     existing = {}
+
   # The seed is built against what is already on disk: the watch root and branch it
   # declares are derived from the consumer's own state, so it must be built before
   # the merge and before the migration strips what it derives from.

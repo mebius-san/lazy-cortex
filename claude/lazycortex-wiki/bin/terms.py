@@ -11,15 +11,16 @@ Cross-plugin Python import is forbidden (per the inter-plugin boundary contract)
 primitives used here are imported from within this plugin's own `bin/`.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import re
 from pathlib import Path
 
-import markers as _markers
-import mirror as _mirror
-import scope as _scope
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import markers as _markers  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import mirror as _mirror  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import scope as _scope  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -118,6 +119,7 @@ def _mirror_paths(repo: Path) -> list[str]:
   out: list[str] = []
   for scope_id, cfg in resolver.load_scopes().items():
     sync = _mirror.MirrorSync(repo = repo, scope_id = scope_id, cfg = cfg)
+
     # guard: the scope mirrors nothing — it has no regenerated tree to protect
     if not sync.configured:
       continue
@@ -155,6 +157,7 @@ def _split_frontmatter(text: str) -> tuple[str, str]:
   if not text.startswith("---\n"):
     return "", text
   end = text.find("\n---\n", len("---\n") - 1)
+
   # guard: no closing fence — malformed frontmatter is treated as body, never rewritten blindly
   if end < 0:
     return "", text
@@ -177,6 +180,7 @@ def _replace_in_line(line: str, pattern: re.Pattern, replacement: str) -> tuple[
   out: list[str] = []
   last = 0
   count = 0
+
   # rewrite each gap between protected spans, and carry every span through verbatim
   for span in _PROTECTED_SPAN_RE.finditer(line):
     chunk, hits = pattern.subn(replacement, line[last:span.start()])
@@ -228,11 +232,13 @@ def _rewrite_body(body: str, pattern: re.Pattern, replacement: str) -> tuple[str
       in_fence = not in_fence
       out.append(line)
       continue
+
     # an H1 opens the protected See-also block or closes it again
     if not in_fence and _H1_RE.match(line):
       in_see_also = line.strip() == _markers.Markers.SEE_ALSO_HEADING
       out.append(line)
       continue
+
     # guard: inside a fenced block or the section another plugin's contract protects
     if in_fence or in_see_also:
       out.append(line)
@@ -294,12 +300,14 @@ def apply_term(repo: Path | str, path: Path | str, old_term: str, new_term: str)
   # guard: a blank term on either side names nothing to match or nothing to write
   if not old_term.strip() or not new_term.strip():
     return _refusal(label, _REASON_EMPTY_TERM)
+
   # guard: the document is gone — the operator's decision names a file that is not there
   if not target.is_file():
     return _refusal(label, _REASON_MISSING)
 
   # the whole-word matcher every later step shares, plus the two refusals it makes decidable
   pattern = re.compile(rf"(?<!\w){re.escape(old_term)}(?!\w)")
+
   # guard: replacing a term with a phrase containing it would re-match on the next pass
   if pattern.search(new_term):
     return _refusal(label, _REASON_GROWING)
@@ -322,12 +330,14 @@ def apply_term(repo: Path | str, path: Path | str, old_term: str, new_term: str)
   # and a region no replacement may reach
   text = target.read_text(encoding = _ENCODING)
   head, body = _split_frontmatter(text)
+
   # guard: the review loop owns the document until its round closes
   if _REVIEW_ACTIVE_RE.search(head):
     return _refusal(label, _REASON_REVIEW)
 
   # the substitution itself, written back only when it actually found something
   rewritten, count = _rewrite_body(body, pattern, new_term)
+
   # guard: nothing to replace outside the protected regions — leave the file untouched
   if count == 0:
     return { _K_STATUS: STATUS_NOOP, _K_FILE: label, _K_REPLACEMENTS: 0 }

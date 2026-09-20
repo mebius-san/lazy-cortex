@@ -12,17 +12,16 @@ The coordinator (`lazy-review.coordination-playbook.md` Chapter 4) reaches this 
 the `decisions-context` CLI verb, never by importing it directly — this plugin's own writer
 dispatch is prose the coordinator persona carries out via `Bash`, not Python code.
 
-Resolution is purely structural: an asset folder carries its own status folder-note
-(`<dir>/<dir.name>.md` with `spec_role: status`), and its owning product's `decisions.md` sits
-at the asset folder's grandparent — `<spec_path>/<category>/<slug>/`, the fixed nesting
-`lazy-spec.layout-protocol` documents for every asset. A document that sits directly at a product's
-own root (`design.md` / `tech.md` at `<spec_path>/`, no asset-level status note to key off) has
-no such structural marker of its own, so that case reads `.claude/lazy.settings.json`'s
-`spec.vault_root` and `products` map directly.
+The asset half is structural: an asset folder carries its own status folder-note
+(`<dir>/<dir.name>.md` with `spec_role: status`). The product half reads
+`.claude/lazy.settings.json`'s `spec.vault_root` and `products` map directly: the owning
+product is the one whose `spec_path` is the longest covering the folder, so an asset nested
+inside another asset, or sitting straight at the product root, still finds its product, and a
+product nested inside another resolves to the inner one. Without a registered product the legacy
+`<spec_path>/<folder>/<slug>/` nesting, kept only when no product is registered, is assumed and
+the product registry is read from the asset folder's grandparent.
 """
 from __future__ import annotations
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error,wrong-import-position
 
 import json
 import sys
@@ -38,7 +37,7 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import frontmatter as _fm  # noqa: E402
+import frontmatter as _fm  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 _DECISIONS_FILENAME = "decisions.md"
@@ -70,6 +69,7 @@ def _resolve_asset_dir(doc_path: Path) -> Path | None:
   """
   asset_dir = doc_path.parent
   status_note = asset_dir / f"{asset_dir.name}.md"
+
   # guard: no sibling status note at all — doc_path is not inside a spec asset folder
   if not status_note.is_file():
     return None
@@ -96,25 +96,25 @@ def _find_settings_root(start: Path) -> Path | None:
   return None
 
 
-def _resolve_product_root(doc_path: Path) -> Path | None:
+def _owning_product_root(start_dir: Path) -> Path | None:
   """
-  Resolve `doc_path`'s owning product's spec-content root, when `doc_path` sits directly there.
+  Resolve the root of the registered product owning `start_dir`.
 
-  Covers the product-level document case (`design.md` / `tech.md` at `<spec_path>/`), which
-  carries no asset-level status note to key off — the settings' `products` map is the only
-  record of which directory is a genuine product root.
+  The settings' `products` map is the only record of which directories are product roots; the
+  owner is the product whose `spec_path` resolves to `start_dir` itself or to an ancestor of it,
+  the longest such when products nest.
 
   Args:
-    doc_path: Absolute path to the document under review.
+    start_dir: Absolute directory to attribute — an asset folder, or a document's own folder.
 
   Returns:
-    `doc_path`'s own parent directory, when it equals a registered product's `spec_path`
-    resolved under the settings' spec content root; `None` otherwise (including when no
-    `.claude/lazy.settings.json`, `spec` section, or `products` map is found).
+    The owning product's root directory (`<content-root>/<spec_path>`); `None` when no
+    registered product covers `start_dir` (including when no `.claude/lazy.settings.json`,
+    `spec` section, or `products` map is found).
   """
-  doc_dir = doc_path.parent
-  settings_root = _find_settings_root(doc_dir)
-  # guard: no settings file above doc_dir — nothing to resolve a product against
+  settings_root = _find_settings_root(start_dir)
+
+  # guard: no settings file above start_dir — nothing to resolve a product against
   if settings_root is None:
     return None
 
@@ -132,21 +132,32 @@ def _resolve_product_root(doc_path: Path) -> Path | None:
   vault_root = spec_cfg.get(_VAULT_ROOT_KEY) if isinstance(spec_cfg, dict) else None
   content_root = settings_root / (vault_root if isinstance(vault_root, str) and vault_root else _DEFAULT_VAULT_ROOT)
 
-  # doc_dir matches a genuine product root only when some registered spec_path resolves to it
+  # a directory is owned only by a product whose registered spec_path resolves onto or above it
   products = data.get(_PRODUCTS_KEY)
-  # guard: no products map at all — nothing to match doc_dir against
+
+  # guard: no products map at all — nothing to match start_dir against
   if not isinstance(products, dict):
     return None
 
-  # scan every registered product for one whose spec_path resolves to doc_dir
+  # scan every registered product; the deepest covering root wins when products nest
+  best: Path | None = None
   for record in products.values():
     # guard: a non-dict entry can carry no spec_path field to check below
     if not isinstance(record, dict):
       continue
     spec_path = record.get(_SPEC_PATH_KEY)
-    if isinstance(spec_path, str) and spec_path and (content_root / spec_path) == doc_dir:
-      return doc_dir
-  return None
+
+    # guard: only a non-empty spec_path names a product root
+    if not isinstance(spec_path, str) or not spec_path:
+      continue
+    candidate = content_root / spec_path
+
+    # guard: this product's root neither is start_dir nor sits above it
+    if candidate != start_dir and candidate not in start_dir.parents:
+      continue
+    if best is None or len(candidate.parts) > len(best.parts):
+      best = candidate
+  return best
 
 
 def collect(doc_path: Path) -> dict[str, str]:
@@ -175,25 +186,30 @@ def collect(doc_path: Path) -> dict[str, str]:
   # not yet had a decision recorded into it is absent by design, never an error condition.
 
   asset_dir = _resolve_asset_dir(doc_path)
-  # an asset-level document: its own registry plus its owning product's, two levels up
+
+  # an asset-level document: its own registry plus its owning product's
   if asset_dir is not None:
     context: dict[str, str] = {}
     asset_decisions = asset_dir / _DECISIONS_FILENAME
     if asset_decisions.is_file():
       context[ASSET_CONTEXT_KEY] = asset_decisions.read_text()
 
-    # the owning product's registry sits at the asset folder's grandparent — the fixed
-    # `<spec_path>/<category>/<slug>/` nesting every spec asset uses
-    product_decisions = asset_dir.parent.parent / _DECISIONS_FILENAME
+    # the owning product's registry sits at the product root the settings register, however
+    # deep the asset is nested below it; without a registered product the legacy
+    # `<spec_path>/<folder>/<slug>/` nesting, kept only when no product is registered, puts it
+    # at the asset folder's grandparent
+    product_root = _owning_product_root(asset_dir) or asset_dir.parent.parent
+    product_decisions = product_root / _DECISIONS_FILENAME
     if product_decisions.is_file():
       context[PRODUCT_CONTEXT_KEY] = product_decisions.read_text()
     return context
 
   # no asset-level status note — doc_path may still be a product-level document sitting
   # directly at that product's own root, with no asset structure to key off at all
-  product_dir = _resolve_product_root(doc_path)
+  product_dir = _owning_product_root(doc_path.parent)
+
   # guard: doc_path resolves to neither an asset nor a registered product's own root
-  if product_dir is None:
+  if product_dir is None or product_dir != doc_path.parent:
     return {}
 
   # a product-root document has only the product half to resolve — no asset registry exists here

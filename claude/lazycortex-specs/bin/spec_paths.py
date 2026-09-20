@@ -55,15 +55,18 @@ def _vault_root_value(settings_root: Path) -> str:
     The configured vault-root segment, or `specs` when unset/malformed.
   """
   path = settings_root / _SETTINGS_REL
+
   # guard: no settings file — use the default root
   if not path.is_file():
     return DEFAULT_VAULT_ROOT
   data = json.loads(path.read_text())
   spec = data.get(_SPEC_SECTION)
+
   # guard: missing/malformed spec section — default
   if not isinstance(spec, dict):
     return DEFAULT_VAULT_ROOT
   value = spec.get(_VAULT_ROOT_KEY)
+
   # guard: only a non-empty string overrides the default
   if isinstance(value, str) and value:
     return value
@@ -127,9 +130,11 @@ def _cached_sibling_root(name: str) -> Path | None:
     version of the sibling is cached.
   """
   own = Path(__file__).resolve()
+
   # guard: not a cached install — a dev checkout has no version directory above bin/
   if not own.parents[1].name.replace(".", "").isdigit():
     return None
+
   # the cache root sits four levels above bin/: cache/<registry>/<plugin>/<version>/bin
   try:
     cache = own.parents[4]
@@ -177,8 +182,10 @@ def resolve_plugin_cli(name: str) -> Path | None:
     cli = Path(entry) / _BIN_DIR / name
     if cli.is_file():
       return cli
+
   # plugin-cache fallback — a session (hook, skill) has no daemon export to walk
   root = _cached_sibling_root(name)
+
   # guard: no cached sibling — nothing further to try
   if root is None:
     return None

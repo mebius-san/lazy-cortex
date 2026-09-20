@@ -9,14 +9,13 @@ config in, runs the operator's bootstrap command, and removes the worktree once 
 the branch always survives; reintegration belongs to the coordinator, never to the runtime.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import os
 import subprocess
 from pathlib import Path
 
-from lazy_install_phases import ensure_self_ignoring_dir
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from lazy_install_phases import ensure_self_ignoring_dir  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -124,6 +123,7 @@ class WorktreeTaskManager:
         start_point = self._base
       # waiver: git CLI vocabulary, not a domain constant
       add = self._git("worktree", "add", str(wt), "-b", branch, start_point)
+
     # guard: worktree add failed (dir collision, branch checked out elsewhere, git error)
     if add.returncode != 0:
       raise WorktreeStartError(f"worktree add {branch}: {add.stderr.strip()[-300:]}")
@@ -169,6 +169,7 @@ class WorktreeTaskManager:
     for rel in self._LOCAL_CONFIG:
       src = self._repo / rel
       dst = wt / rel
+
       # guard: nothing to link / already linked
       if not src.is_file() or dst.exists() or dst.is_symlink():
         continue
@@ -245,13 +246,16 @@ class WorktreeTaskManager:
       [ "sh", "-c", cmd ], cwd = str(wt),
       capture_output = True, text = True, check = False,
     )
+
     # guard: bootstrap failed — the caller fails the job rather than spawning into a broken env
     if proc.returncode != 0:
       return f"bootstrap exited {proc.returncode}: {(proc.stderr or proc.stdout).strip()[-300:]}"
     created = sorted(self._untracked(wt) - before)
+
     # guard: the command created nothing untracked — no .gitignore needed
     if not created:
       return None
+
     # the file itself is also new and untracked — list it alongside what it records so the
     # cleanliness check the caller runs afterwards never sees it as dirt
     # waiver: filesystem filename idiom + stdlib encoding idiom, not domain constants
@@ -303,6 +307,7 @@ class WorktreeTaskManager:
     # waiver: git CLI vocabulary, not a domain constant
     self._git("worktree", "prune")
     removed: list[str] = []
+
     # guard: worktree root absent — nothing to sweep
     if not self._root.is_dir():
       return removed

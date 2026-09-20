@@ -1,6 +1,6 @@
 ---
 name: lazy-spec.set-stage
-description: "Use when one authored spec doc changes stage — a draft is approved, a plan is rejected, an asset is cancelled. Accepts any document whose `spec_doc_type` is declared with `stages: true`, never a filename or a path. Every `spec.*` skill that moves a per-file `spec_stage` delegates here instead of editing frontmatter, so the `spec/<stage>` mirror tag and the folder-note `# History` line never drift."
+description: "Use when one authored spec doc changes stage — a draft is approved, a plan is rejected, an asset is cancelled. Accepts any document whose `spec_doc_type` is declared with `stages: true`, never a filename or a path. Every `spec.*` skill that moves a per-file `spec_stage` delegates here instead of editing frontmatter, so the `spec/<stage>` mirror tag and the `spec_approved_at` stamp never drift."
 execution-discipline-waiver: "Single-purpose primitive — wraps the per-file-stages reference; no multi-phase orchestration where step-skip can hide."
 ---
 # Set Per-file Stage
@@ -13,7 +13,7 @@ The authoritative definition of per-file stage semantics lives in `${CLAUDE_PLUG
 
 1. **File path** — absolute or vault-relative path to an authored doc. The doc MUST carry a `spec_doc_type` whose declaration exists in the owning product's scope and carries `stages: true`. Neither the basename nor the path takes part in this: a document named `races.md` carrying `spec_doc_type: design` is a design document. A type declared `stages: false` (the shipped `code-report` / `test-report` / `decisions`, and any project type declaring the same) carries no independently-settable stage and is rejected here.
 2. **New stage** — exactly one of the closed set `empty | draft | approved | rejected | cancelled | deferred`. Anything else (including the removed `review` / `done` / `wtr` values) is rejected with a clear error. "In review" is now expressed as `spec_stage: draft` + `review_active: true` on the doc; "accepted" is `approved`.
-3. **Optional author** — free-text name recorded in the folder-note history line. Defaults to `lazy-spec.set-stage` (the skill's own name).
+3. **Optional author** — accepted and ignored. It once named the writer of a folder-note history line; the skill writes no history line any more, and the argument stays only so existing callers' argument shape still parses.
 
 ## Process
 
@@ -79,33 +79,27 @@ The doc's markdown attachments mirror its stage: an attachment carries no lifecy
 1. Enumerate sibling `.md` files in the doc's directory whose frontmatter `spec_owner_doc` equals the doc's basename.
 2. Skip every attachment carrying `review_active: true` — the review cycle owns the file; the coordinator re-stamps it on the wake its finalize raises.
 3. For each remaining attachment, rewrite `spec_stage:` to the new stage and update the `spec/<stage>` mirror tag exactly as steps 2 and 2a did for the doc itself. Insert both keys when absent — an attachment created before the cascade existed catches up here.
-4. Fold every touched attachment into the SAME commit as the doc; no separate history line per attachment — the owner's line covers the change.
+4. Fold every touched attachment into the SAME commit as the doc.
 
 A doc with no attachments makes this a silent no-op.
 
-### 3. Append to the nearest folder-note's `# History`
+### 3. Stamp `spec_approved_at` on an approval
 
-The folder-note is the file whose basename matches the enclosing folder (e.g., `features/chapter-log/chapter-log.md`). For `design.md` / `tech.md` / `architecture.md` / `code-plan.md` / `test-plan.md` under `<spec_path>/features/<feat>/` or `<spec_path>/changes/<change-name>/`, and for `bug.md` / `code-plan.md` / `test-plan.md` under `<spec_path>/bugs/<bug-name>/`, the folder-note is in the same directory.
+When the new stage is `approved`, write `spec_approved_at` onto the document's own frontmatter in the same edit as the stage — a quoted ISO 8601 UTC datetime, e.g. `spec_approved_at: "2026-09-19T08:11:19Z"` (from `date -u +%Y-%m-%dT%H:%M:%SZ`; the quotes are mandatory, an unquoted value with colons breaks the block). The stamp records the transition: it is written when the stage actually changes to `approved`, inserted when absent and overwritten when present, so it always holds the last approval moment. A repeated call that finds the document already `approved` leaves the stamp as it is, and any other stage leaves the key exactly as it stands (a document regressed to `draft` keeps its old stamp until the next approval overwrites it). Markdown attachments never carry the key: the staleness rule compares owner documents only.
 
-A **system-level** authored doc — `vision.md` / `design.md` / `tech.md` loose at a product root (`<spec_path>/`) or at the content-root, or `ui-design.md` at a product root — has a folder-note in scope too: the level note beside it (`<spec_path>/<leaf>.md`, or `<content-root>/<basename of content-root>.md`), the one carrying `spec_role: product` or `spec_role: catalog`. Append the history line there exactly as for an asset — the level note is `spec.catalog-coordinator`'s own note, not operator-zone, and its `# History` is where a level document's stage transitions belong. Skip the history step only when no such note exists on disk (a catalog that predates the level schema; the fix is `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" catalog-note backfill`).
+No folder-note is touched. This skill writes no `# History` line on any stage move — a stage move is not a journaled event — and the source-staleness rule (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.coordination-playbook.md` Chapter 4) reads this key instead. The same holds for a **system-level** authored doc (`vision.md` / `design.md` / `tech.md` loose at a product root or at the content-root, `ui-design.md` at a product root): the stamp lands on the document itself, and the level note beside it stays untouched.
 
-When a folder-note is in scope, append one line to its `# History` section:
+### 3a. Recompute the container note stats
 
-```
-- <YYYY-MM-DD> — lazy-spec.set-stage · <doc>.md spec_stage <old>→<new>
-```
+The asset's container note is the note whose basename matches the folder that holds the asset (e.g. `bugs/bugs.md` for an asset under `bugs/<slug>/`). An asset sitting straight at the product root has no group folder above it, so its container note is the product's own level note: that note's stats region counts the product's children, and a root-level asset belongs in that count exactly as a grouped asset belongs in its group note's.
 
-`<doc>` is the doc's basename (e.g. `design`). Substitute the resolved author for `lazy-spec.set-stage` when an author was passed. Use UTC date (`date -u +%Y-%m-%d`). Do not touch existing history entries or any frontmatter of the folder-note. If the folder-note has no `# History` section, create one at the end of the body.
-
-### 3a. Recompute the category container note stats
-
-The asset's category container note is the note whose basename matches the category folder that holds the asset (e.g. `features/features.md` for an asset under `features/<slug>/`). When that container note exists, refresh its `<!-- spec:stats:* -->` region so the bucket counts reflect this stage change:
+A group folder is transparent to the stats tally — the product note reads straight through it — so one note is rarely enough. Refresh the enclosing group note, then every shelf above it up to and including the product note. A shelf is a folder whose own folder-note declares neither `spec_role: status` nor a level role (`product` / `catalog`); the climb stops at the first note that declares a level role, and the catalog root's own note is never refreshed from below. Refresh each note's `<!-- spec:stats:* -->` region so the bucket counts reflect this stage change:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" render-container-stats <category_note>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" render-container-stats <container_note>)
 ```
 
-Then `git add` the category note into the SAME commit as the doc and folder-note edits. Guard: skip silently when the category container note does not exist (a product-level authored doc with no category container, or a container carrying no stats markers — `render-container-stats` is a no-op there).
+Then `git add` every container note you refreshed into the SAME commit as the doc and folder-note edits. Guard: skip silently when there is no container note to refresh — an asset straight at the catalog root, a product-level authored doc, or a container carrying no stats markers, on which `render-container-stats` is a no-op.
 
 ### 3b. Promote decisions when the new stage is `approved` on a living doc
 
@@ -115,7 +109,7 @@ When the requested stage is `approved` AND the doc is a **living doc** — its t
 Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" decide promote <doc>)
 ```
 
-Fold its returned `touched_paths` into the SAME commit as the doc, folder-note, and category container note edits — the doc itself may be one of those paths again (the primitive rewrites `[!decision]` blocks into reference links), its sibling `decisions.md`, and, when a transferred block carried a `**Supersedes.**` command, a second `decisions.md` it stamped `superseded-by`.
+Fold its returned `touched_paths` into the SAME commit as the doc, folder-note, and container note edits — the doc itself may be one of those paths again (the primitive rewrites `[!decision]` blocks into reference links), its sibling `decisions.md`, and, when a transferred block carried a `**Supersedes.**` command, a second `decisions.md` it stamped `superseded-by`.
 
 The primitive owns its own refusal: it detects `[!decision]` blocks itself, refuses on `spec_cancelled` / `spec_halted` / `spec_released` on the owning asset, and no-ops (empty `touched_paths`) when the doc carries no blocks. A refusal here is reported to the caller exactly as any other primitive refusal in this skill — it is NEVER bypassed, retried with different arguments, or worked around by hand-editing `decisions.md`. This step does not run for any other target stage, and does not run on `code-plan` / `test-plan` (not living docs — no source blocks to transfer).
 
@@ -129,7 +123,7 @@ This primitive only edits the doc's own per-file `spec_stage`. It does NOT evalu
 
 - The file's new `spec_stage`.
 - The attachments the cascade re-stamped (or nothing when the doc has none).
-- The folder-note path + the appended history line — an asset's status note, or the level note beside a system document (or `no folder-note in scope` when the level note does not exist yet).
+- On an `approved` transition: the `spec_approved_at` value written.
 - On an `approved` transition of a living doc: the `touched_paths` returned by `decide promote`, or nothing when it no-opped (no `[!decision]` blocks) or refused (asset flag / not a living doc).
 
 ## Failure modes
@@ -157,4 +151,4 @@ Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/lazy
 - **An attachment's stage is a mirror** — a doc carrying `spec_owner_doc` is refused as a target, and every stage write on an owner cascades to its markdown attachments in the same commit, skipping only attachments in their own review.
 - **Never touch the folder-note's gate** — this primitive only edits the doc's own `spec_stage`.
 - **Promote on approve, never bypass a refusal** — landing `approved` on a living doc (`stages: true` AND `append_only: false`) always calls `decide promote`; its refusal (asset cancelled/halted/released) is reported, never worked around.
-- **Idempotent stage, recorded run** — calling with the same file + stage leaves frontmatter unchanged but still appends a history line (the line records that the skill ran; the stage itself is idempotent).
+- **Idempotent stage** — calling with the same file + stage leaves `spec_stage` and the tag unchanged and lands no history line; the run is recorded in the skill's own log only.

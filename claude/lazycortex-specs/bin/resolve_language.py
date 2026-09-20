@@ -5,7 +5,8 @@ first non-empty value wins:
 
 1. the doc's own frontmatter `spec_language` key;
 2. the owning product's `language` (resolved by attributing the doc
-   path to a product via `resolve_product_by_path`);
+   path to a product's effective record via `effective_record_by_path`,
+   inheriting from any enclosing product);
 3. the `spec` section's `language` in `lazy.settings.json`;
 4. the top-level `language` key (repo-wide default);
 5. the hardcoded floor `en`.
@@ -14,8 +15,6 @@ Settings live at `<vault>/.claude/lazy.settings.json`. Frontmatter is
 read with a minimal flat-scalar parser — no yaml dependency.
 """
 from __future__ import annotations
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error,wrong-import-position
 
 import argparse
 import json
@@ -32,7 +31,7 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: intentional suppression — bare-name sibling import resolved at runtime via sys.path
-import resolve_product  # noqa: E402
+import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 _SETTINGS_REL = Path(".claude") / "lazy.settings.json"
@@ -64,6 +63,7 @@ def _parse_frontmatter(text: str) -> dict:
     return {}
   rest = text[4:]
   end_idx = rest.find("\n---\n")
+
   # guard: no closing fence means no parseable frontmatter
   if end_idx < 0:
     return {}
@@ -71,17 +71,21 @@ def _parse_frontmatter(text: str) -> dict:
   values: dict = {}
   for line in block.splitlines():
     stripped = line.lstrip()
+
     # guard: skip blank lines and comment / bullet markers
     if not stripped or stripped.startswith(("#", "-")):
       continue
+
     # guard: skip indented (nested) lines — only top-level scalars are captured
     if line != stripped:
       continue
+
     # guard: skip lines without a key:value separator
     if ":" not in line:
       continue
     k, _, v = line.partition(":")
     k = k.strip()
+
     # guard: skip entries with an empty key
     if not k:
       continue
@@ -101,6 +105,7 @@ def _read_settings(vault: Path) -> dict:
     not valid JSON.
   """
   settings_path = vault / _SETTINGS_REL
+
   # guard: missing settings file means no configured values at all
   if not settings_path.is_file():
     return {}
@@ -136,6 +141,7 @@ def _spec_section_language(settings: dict) -> str | None:
     absent or empty.
   """
   spec = settings.get(_SPEC_SECTION)
+
   # guard: missing or malformed spec section means no configured default
   if not isinstance(spec, dict):
     return None
@@ -195,7 +201,8 @@ def resolve_spec_language(vault: Path, doc_path: str) -> str:
   # # Document language falls back through five rungs
   # A spec document's language is never asked for directly; it is settled by the first rung
   # that actually answers, in order: the document's own recorded language, the language its
-  # owning product declares, the catalog's own configured default, the repository's overall
+  # owning product declares or, failing that, the nearest product enclosing it that declares
+  # one, the catalog's own configured default, the repository's overall
   # default, and a fixed floor when nothing above ever answered. The order lets one document
   # diverge from its product, and one product diverge from the catalog, without forcing every
   # other document or product to declare a language it is otherwise happy to inherit.
@@ -205,14 +212,16 @@ def resolve_spec_language(vault: Path, doc_path: str) -> str:
   if doc_file.is_file():
     fm = _parse_frontmatter(doc_file.read_text())
     doc_lang = fm.get(_DOC_LANGUAGE_KEY)
+
     # guard: a non-empty frontmatter language is authoritative
     if doc_lang:
       return doc_lang
 
   # 2. Owning product's language.
-  _, record = resolve_product.resolve_product_by_path(vault, doc_path)
+  _, record = resolve_product.effective_record_by_path(vault, doc_path)
   if isinstance(record, dict):
     product_lang = record.get(_PRODUCT_LANGUAGE_KEY)
+
     # guard: a non-empty product language is the next fallback
     if isinstance(product_lang, str) and product_lang:
       return product_lang

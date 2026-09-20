@@ -396,3 +396,4 @@ source_sha: d8d333338bcd2cca2b033eeb8fd72b47fa5be8db
 **Likely cause**: An idempotent re-run produced no byte changes to any group doc or `domains.md`. This happens when the tree is already fully in sync with the code's `Domain(…)` blocks and the dictionary.
 
 **Fix**: No action needed. If you expected changes, confirm the code actually carries the `Domain(…)` blocks you expect, and that `/lazy-wiki.configure domains`'s code globs still reach the files you edited.
+</content>

@@ -1,11 +1,11 @@
 ---
 chapter_type: block
 summary: Run integrity checks across a wiki scope, its terms dictionary, structure map, mirrors, and domain tree — with optional auto-repair.
-last_regen: 2026-09-17
+last_regen: 2026-09-20
 no_diagram: true
 source_skills:
   - lazy-wiki.audit
-source_sha: f1a56b7fe545eee38ce6ac86f103b38934d0fe11
+source_sha: 092195a4fbb13a8c1f71552815a771ae70533efd
 ---
 # Wiki integrity audit
 
@@ -17,7 +17,7 @@ Over time a curated wiki drifts: See-also links point to renamed or deleted node
 
 ## When you'd use this
 
-- After a large batch of file renames or moves — checking that See-also links and the topic index still match reality. (Node deletions are pruned automatically as they happen — see below — so this is mainly about renames, where the old link is stale rather than gone.)
+- After a large batch of file renames or moves — checking that See-also links and the topic index still match reality. Node deletions are pruned automatically as they happen (see below), so this is mainly about renames: a folder rename keeps every node's tags and summary, but leaves the topic index pointing at files that no longer exist while the nodes at their new location go unlisted. Both halves are reported as the single fixable `index-stale` finding and cleared by the same index rebuild that repairs `orphan-topic` and `index-desync`.
 - Periodically to catch missing summaries on nodes that were added outside the curator workflow.
 - When `/lazy-wiki.query` returns unexpected results and you suspect the topic index is stale.
 - After editing tag axes in `/lazy-wiki.configure` — verifying no existing tags reference a now-unknown axis.
@@ -41,11 +41,11 @@ Structure configuration checks also cover the three scan routines' `watch` setti
 
 **Applying the repairs.** The audit stops at its report. To repair the index/link findings, run `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> doctor <scope-id> --apply` yourself — index rebuild, See-also path rewrite, broken-line drop, gloss refresh, left uncommitted in the worktree for you to inspect. The daily `lazy-wiki.doctor-apply` routine already runs the same command with `--commit` across every scope, so on a checkout with a running daemon these usually clear on their own. Terms findings are never decided for you — which side is "right", the document's wording or the dictionary's, is a judgment call, and the audit reports both sides for you to settle. Once you have settled a `divergence` in the dictionary's favour, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> terms-apply <document> --from "<the document's word>" --to "<the dictionary's term>"` carries out that substitution: whole-word, prose only, with the frontmatter, code fences, inline code spans, link targets and the `# See also` block left exactly as they are, the rewrite left uncommitted in your worktree, and a flat refusal (exit 1, reason on stderr) on a document carrying `review_active: true` or living inside a scope's mirror tree. Re-running it after it has applied reports `noop` and rewrites nothing. Every other terms finding — and the other side of a divergence, where the dictionary's term is the one that changes — stays a hand edit.
 
-Applying a fix only touches the lines that need it — the rest of a node's See-also section, or the rest of the topic index, is left exactly as it was.
+Applying a fix only touches the lines that need it — the rest of a node's See-also section, or the rest of the topic index, is left exactly as it was. An applied `index-stale` finding is the same: only the topics index is rewritten, the unlinked node file itself is never touched.
 
 ## Findings, fixable vs report-only
 
-**Repaired by `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> doctor --apply`:** `orphan-topic` and `index-desync` rebuild the topic index; `see-also-path-base` rewrites a See-also link written against a non-canonical path form; `broken-see-also` drops a dead link; `stale-gloss` refreshes an outdated gloss.
+**Repaired by `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> doctor --apply`:** `orphan-topic` and `index-desync` rebuild the topic index; `index-stale` rebuilds it too, specifically for a topics-index entry whose linked file is gone or a tagged node the index never links — the pair a folder rename produces; `see-also-path-base` rewrites a See-also link written against a non-canonical path form; `broken-see-also` drops a dead link; `stale-gloss` refreshes an outdated gloss.
 
 **Report-only** — the right fix depends on your intent, so the skill surfaces the problem and names a route rather than rewriting content for you:
 
@@ -63,6 +63,7 @@ Applying a fix only touches the lines that need it — the rest of a node's See-
 - **Resolving unknown axes** — run `/lazy-wiki.configure` to add the axis to the scope definition, or to rename the axis used in existing tags. The skill writes the settings; then re-run `/lazy-wiki.audit` to confirm the finding is cleared.
 - **Missing summaries** — these are report-only. Run `/lazy-wiki.relink` (the curation block) to have the curator fill in summaries for uncurated nodes.
 - **A `broken-see-also` finding keeps appearing after deleting a node** — if the background daemon isn't running, the automatic pruning happens on your next `/lazy-wiki.relink` rather than instantly. Run `/lazy-wiki.relink` on the affected scope, then re-run `/lazy-wiki.audit` to confirm the finding is gone.
+- **An `index-stale` finding keeps appearing after a rename sweep** — run `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> doctor <scope-id> --apply` yourself, or wait for the daily `lazy-wiki.doctor-apply` routine; either rebuilds the topics index from the nodes as they are now, without touching any node file.
 - **A `divergence` or `dead` terms finding** — the audit will not auto-apply either side; when it asks, it shows both words and names which side each answer picks, and you tell it which one wins (the document's or the dictionary's). A document with `review_active: true`, or anything under an upstream mirror tree, is never touched this way — resolve those by hand.
 - **Structure or domain drift after a rename sweep** — `missing-dir` / `missing-file` / `dead-entry` / `divergence` findings usually clear with a wholesale `/lazy-wiki.structure rebuild` rather than fixing entries one at a time; `domain-hash-stale` clears with `/lazy-wiki.domain-sync`.
 - **A structure-scan routine reports `config` right after registration** — if `docs/structure.md` doesn't exist yet, every one of the three scan routines fails its precondition until you run `/lazy-wiki.structure rebuild` once to create the map.

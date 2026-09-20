@@ -43,30 +43,34 @@ Stdout: a JSON object describing the produced asset. On error: a JSON
 object with `error` field and non-zero exit.
 """
 from __future__ import annotations
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error,wrong-import-position
 
 import argparse
-import datetime as _dt
 import json
 import os
 import re
 import sys
 from pathlib import Path
 
-import asset_types
-import note_explainers
-import spec_doc_types
-import spec_paths
-import summary_render
-from spec_keys import HistoryEvent
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import asset_types  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import note_explainers  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import resolve_product as product_registry  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import spec_doc_types  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import spec_paths  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import summary_render  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   from typing import NoReturn
 
 
-class _K:
+# ----------------------------------------------------------------------------------------
+class Keys:
   """
   String/int constants used by the scaffolder.
 
@@ -98,7 +102,6 @@ class _K:
     LAYER_PLUGIN_SHARED: Layer label — the plugin's file in the type-agnostic base.
     DOC_TYPE: Frontmatter key naming a seeded document's type.
     MD_SUFFIX: Markdown file extension, stripped to derive a document's type from its filename.
-    HISTORY_HEADING: The `# History` heading appended to a folder-note.
     DOCS_MARKER_START: Opening HTML marker delimiting the folder-note's sibling-docs block.
     DOCS_MARKER_END: Closing HTML marker delimiting the folder-note's sibling-docs block.
     CAT_LOGICAL: The error category for invalid-input failures.
@@ -158,8 +161,7 @@ class _K:
   LAYER_PLUGIN_SHARED = "plugin-shared"
   DOC_TYPE = "spec_doc_type"
   MD_SUFFIX = ".md"
-  # Body markers + headings
-  HISTORY_HEADING = "# History"
+  # Body markers
   DOCS_MARKER_START = "<!-- auto:spec-docs:start -->"
   DOCS_MARKER_END = "<!-- auto:spec-docs:end -->"
   # Error categories + outcome strings
@@ -193,7 +195,16 @@ class _K:
   GIT_DIR = ".git"
 
 
-def _repo_root(cwd: Path) -> Path:
+# The two YAML spellings of the citation key a template may carry, and the body region the
+# projection owns. All three are matched over the whole file: the key never appears outside
+# frontmatter, and the markers never outside `# Sources`.
+_FM_DOCS_INLINE_RE = re.compile(rf"(?m)^{Keys.SPEC_SOURCE_DOCS}\s*:\s*\[\s*\]\s*$\n?")
+_FM_DOCS_BLOCK_RE = re.compile(rf"(?m)^{Keys.SPEC_SOURCE_DOCS}\s*:\s*\n(?:[ \t]+- .*\n)*")
+_DOCS_BLOCK_RE = re.compile(
+    re.escape(Keys.DOCS_MARKER_START) + r".*?" + re.escape(Keys.DOCS_MARKER_END), re.DOTALL)
+
+
+def repo_root(cwd: Path) -> Path:
   """
   Resolve the repo root from a working directory, falling back to cwd when not in a repo.
 
@@ -205,7 +216,7 @@ def _repo_root(cwd: Path) -> Path:
   """
   cur = cwd.resolve()
   while cur != cur.parent:
-    if (cur / _K.GIT_DIR).exists():
+    if (cur / Keys.GIT_DIR).exists():
       return cur
     cur = cur.parent
   return cwd.resolve()
@@ -221,7 +232,7 @@ def _plugin_root() -> Path:
   return Path(__file__).resolve().parent.parent
 
 
-def _fail(category: str, message: str) -> NoReturn:
+def fail(category: str, message: str) -> NoReturn:
   """
   Print a JSON error object to stdout and exit non-zero.
 
@@ -230,45 +241,51 @@ def _fail(category: str, message: str) -> NoReturn:
       (internal failure).
     message: Single-line human-readable cause.
   """
-  print(json.dumps({ "outcome": _K.OUTCOME_ERROR,
+  print(json.dumps({ "outcome": Keys.OUTCOME_ERROR,
                      "error": { "category": category, "message": message } }))
   sys.exit(1)
 
 
-def _resolve_product(repo: Path, product: str) -> dict:
+def resolve_product(repo: Path, product: str) -> dict:
   """
-  Load and return the product record from `.claude/lazy.settings.json`.
+  Load the product's effective record — its own keys over its ancestors' (`resolve_product.effective_record`).
 
   Args:
     repo: Repository root.
     product: Product compound-key (e.g. `test`, `dashboards`).
 
   Returns:
-    The product record dict (with at least `spec_path`).
+    The merged record dict (with at least `spec_path`).
 
   Raises:
     SystemExit: When settings file is missing, malformed, the product key is
       absent, or its `spec_path` is missing.
   """
-  settings_path = repo / _K.CLAUDE_DIR / _K.SETTINGS_FILE
+  settings_path = repo / Keys.CLAUDE_DIR / Keys.SETTINGS_FILE
+
+  # guard: no settings file, no product registry to resolve against
   if not settings_path.exists():
-    _fail(_K.CAT_LOGICAL, f".claude/lazy.settings.json absent at {settings_path}")
+    fail(Keys.CAT_LOGICAL, f".claude/lazy.settings.json absent at {settings_path}")
   try:
     data = json.loads(settings_path.read_text())
   except json.JSONDecodeError as error:
-    _fail(_K.CAT_LOGICAL, f".claude/lazy.settings.json malformed: {error}")
-  products_section = data.get(_K.PRODUCTS) or {}
+    fail(Keys.CAT_LOGICAL, f".claude/lazy.settings.json malformed: {error}")
+  products_section = data.get(Keys.PRODUCTS) or {}
   record = products_section.get(product) if isinstance(products_section, dict) else None
+
+  # guard: the product is not registered, or its record is not a mapping
   if not isinstance(record, dict):
-    _fail(_K.CAT_LOGICAL,
-          f"product '{product}' not registered in lazy.settings.json[{_K.PRODUCTS}]; "
+    fail(Keys.CAT_LOGICAL,
+          f"product '{product}' not registered in lazy.settings.json[{Keys.PRODUCTS}]; "
           "run /lazy-spec.product-config")
-  if _K.SPEC_PATH not in record:
-    _fail(_K.CAT_LOGICAL, f"product '{product}' has no {_K.SPEC_PATH}")
-  return record
+
+  # guard: a product without a spec directory has nowhere to scaffold into
+  if Keys.SPEC_PATH not in record:
+    fail(Keys.CAT_LOGICAL, f"product '{product}' has no {Keys.SPEC_PATH}")
+  return product_registry.effective_record(repo, product)
 
 
-def _alias_base(asset_type: str, record: dict) -> str:
+def resolve_alias_base(asset_type: str, record: dict) -> str:
   """
   Resolve the base type an operator-declared type aliases, if any.
 
@@ -285,11 +302,11 @@ def _alias_base(asset_type: str, record: dict) -> str:
   try:
     return asset_types.alias_base(asset_type, record)
   except ValueError as err:
-    _fail(_K.CAT_LOGICAL, str(err))
+    fail(Keys.CAT_LOGICAL, str(err))
 
 
-def _template_layers(repo: Path, context: str, product: str, name: str, *,
-                     alias_base: str = "") -> list[tuple[str, Path]]:
+def template_layers(repo: Path, context: str, product: str, name: str, *,
+                     alias_base: str = "", ancestors: list[str] | None = None) -> list[tuple[str, Path]]:
   """
   List the template lookup chain for one context and filename, most specific first.
 
@@ -298,28 +315,39 @@ def _template_layers(repo: Path, context: str, product: str, name: str, *,
     context: Template context — an asset type, `product`, or `vault`.
     product: Product compound-key for the per-product layer; empty collapses it.
     name: Target filename (`design.md`, `asset-note.md`).
-    alias_base: Base context whose own three layers follow the context's, or empty.
+    alias_base: Base context whose own three layers plus one per ancestor product follow the
+      context's, or empty.
+    ancestors: The product's ancestor keys outermost first (`resolve_product.ancestor_chain`);
+      each adds an override layer between the product's own and the project-wide one.
 
   Returns:
     `(label, path)` pairs in lookup order; paths need not exist.
   """
   def chain(cat: str, prefix: str) -> list[tuple[str, Path]]:
     cat_dir = f"spec.{cat}"
-    return [
-      (prefix + _K.LAYER_PRODUCT_OVERRIDE, repo / _K.CLAUDE_DIR / _K.TEMPLATES_DIR / cat_dir / product / name),
-      (prefix + _K.LAYER_CONSUMER_CONTEXT, repo / _K.CLAUDE_DIR / _K.TEMPLATES_DIR / cat_dir / name),
-      (prefix + _K.LAYER_PLUGIN_CONTEXT, _plugin_root() / _K.TEMPLATES_DIR / cat_dir / name),
-    ]
+    tmpl_dir = repo / Keys.CLAUDE_DIR / Keys.TEMPLATES_DIR / cat_dir
+    layers = [ (prefix + Keys.LAYER_PRODUCT_OVERRIDE, tmpl_dir / product / name) ]
 
-  # the context's own three layers, the alias base's three, then the two shared floors
-  layers = chain(context, "") + (chain(alias_base, _K.LAYER_BASE_PREFIX) if alias_base else [])
-  layers.append((_K.LAYER_CONSUMER_LINEAR, repo / _K.CLAUDE_DIR / _K.TEMPLATES_DIR / _K.LINEAR_TMPL_DIR / name))
-  layers.append((_K.LAYER_PLUGIN_LINEAR, _plugin_root() / _K.TEMPLATES_DIR / _K.LINEAR_TMPL_DIR / name))
-  layers.append((_K.LAYER_PLUGIN_SHARED, _plugin_root() / _K.TEMPLATES_DIR / _K.SHARED_TMPL_DIR / name))
+    # one override layer per ancestor, innermost first, between the product's own and the project-wide one
+    layers.extend(
+        (prefix + Keys.LAYER_PRODUCT_OVERRIDE, tmpl_dir / ancestor / name)
+        for ancestor in reversed(ancestors or [])
+    )
+    layers.append((prefix + Keys.LAYER_CONSUMER_CONTEXT, tmpl_dir / name))
+    layers.append((prefix + Keys.LAYER_PLUGIN_CONTEXT, _plugin_root() / Keys.TEMPLATES_DIR / cat_dir / name))
+    return layers
+
+  # the context's own three layers plus one per ancestor product, the alias base's same set,
+  # then the three shared floors
+  layers = chain(context, "") + (chain(alias_base, Keys.LAYER_BASE_PREFIX) if alias_base else [])
+  layers.append((Keys.LAYER_CONSUMER_LINEAR,
+                 repo / Keys.CLAUDE_DIR / Keys.TEMPLATES_DIR / Keys.LINEAR_TMPL_DIR / name))
+  layers.append((Keys.LAYER_PLUGIN_LINEAR, _plugin_root() / Keys.TEMPLATES_DIR / Keys.LINEAR_TMPL_DIR / name))
+  layers.append((Keys.LAYER_PLUGIN_SHARED, _plugin_root() / Keys.TEMPLATES_DIR / Keys.SHARED_TMPL_DIR / name))
   return layers
 
 
-def _template_doc_type(path: Path) -> str:
+def template_doc_type(path: Path) -> str:
   """
   Read the `spec_doc_type` a template declares in its frontmatter.
 
@@ -329,15 +357,14 @@ def _template_doc_type(path: Path) -> str:
   Returns:
     The declared type, or an empty string when the file declares none.
   """
-  match = re.match(r"^---\n(.*?)\n---\n", path.read_text(encoding = "utf-8"), re.DOTALL)
   # guard: a structural note carries no frontmatter type
-  if not match:
+  if not (match := re.match(r"^---\n(.*?)\n---\n", path.read_text(encoding = "utf-8"), re.DOTALL)):
     return ""
   typed = re.search(r"(?m)^spec_doc_type\s*:\s*(\S+)\s*$", match.group(1))
   return typed.group(1) if typed else ""
 
 
-def _resolve_template(repo: Path, category: str, product: str, name: str, *,
+def resolve_template(repo: Path, category: str, product: str, name: str, *,
                       alias_base: str = "", expect_type: str = "") -> Path:
   """
   Pick the first existing template path across the layered override chain.
@@ -392,16 +419,18 @@ def _resolve_template(repo: Path, category: str, product: str, name: str, *,
   # not only the layer matching its own. With `expect_type` set, the file returned declares
   # that type or none — a same-named file of another type is never substituted for it.
 
-  candidates = _template_layers(repo, category, product, name, alias_base = alias_base)
+  ancestors = product_registry.ancestor_chain(repo, product) if product else []
+  candidates = template_layers(repo, category, product, name, alias_base = alias_base, ancestors = ancestors)
   for _label, candidate in candidates:
     # guard: a layer without the file is simply skipped
     if not candidate.is_file():
       continue
-    declared = _template_doc_type(candidate)
+    declared = template_doc_type(candidate)
+
     # guard: a same-named file of another type is another document — never substitute it silently;
     # an untyped consumer override written before typing landed is stamped by the caller instead
     if expect_type and declared and declared != expect_type:
-      _fail(_K.CAT_LOGICAL,
+      fail(Keys.CAT_LOGICAL,
             f"template '{candidate}' declares spec_doc_type '{declared}', expected '{expect_type}'")
     return candidate
 
@@ -414,9 +443,9 @@ def _resolve_template(repo: Path, category: str, product: str, name: str, *,
         continue
       for filename in sorted(os.listdir(candidate.parent)):
         sibling = candidate.parent / filename
-        if filename.endswith(_K.MD_SUFFIX) and sibling.is_file() and _template_doc_type(sibling) == expect_type:
+        if filename.endswith(Keys.MD_SUFFIX) and sibling.is_file() and template_doc_type(sibling) == expect_type:
           return sibling
-  _fail(_K.CAT_LOGICAL,
+  fail(Keys.CAT_LOGICAL,
         f"no template '{name}' for category '{category}' in product '{product}' "
         f"(checked: {', '.join(str(path) for _label, path in candidates)})")
 
@@ -447,9 +476,10 @@ def _type_folder(asset_type: str, record: dict, explicit: str) -> str:
   # guard: the caller named no folder — the type's own declaration decides
   if not explicit:
     return asset_types.default_path(asset_type, record)
+
   # guard: a path climbing out of the product's own tree would scatter the catalog
-  if Path(explicit).is_absolute() or _K.PARENT_SEGMENT in Path(explicit).parts:
-    _fail(_K.CAT_LOGICAL, f"--path '{explicit}' escapes the product's spec_path")
+  if Path(explicit).is_absolute() or Keys.PARENT_SEGMENT in Path(explicit).parts:
+    fail(Keys.CAT_LOGICAL, f"--path '{explicit}' escapes the product's spec_path")
   return explicit
 
 
@@ -468,15 +498,16 @@ def _icon_color(asset_type: str, record: dict) -> tuple[str, str]:
     SystemExit: When neither the plugin nor the product declares the type.
   """
   pair = asset_types.icon_color(asset_type, record)
+
   # guard: an undeclared type has no declaration to scaffold from at all
   if pair is None:
-    _fail(_K.CAT_LOGICAL,
+    fail(Keys.CAT_LOGICAL,
           f"asset type '{asset_type}' is not built-in and not declared in the product's "
-          f"{_K.ASSET_TYPES}")
+          f"{Keys.ASSET_TYPES}")
   return pair
 
 
-def _parse_doc_token(token: str) -> tuple[str, str]:
+def parse_doc_token(token: str) -> tuple[str, str]:
   """
   Split one `--doc` value into the filename and the document type it is seeded as.
 
@@ -489,10 +520,11 @@ def _parse_doc_token(token: str) -> tuple[str, str]:
   Raises:
     SystemExit: When the value does not carry exactly one separator with both halves present.
   """
-  name, sep, doc_type = token.partition(_K.DOC_TOKEN_SEP)
+  name, sep, doc_type = token.partition(Keys.DOC_TOKEN_SEP)
+
   # guard: a malformed token would otherwise seed a document under an invented type
-  if not sep or not name or not doc_type or _K.DOC_TOKEN_SEP in doc_type:
-    _fail(_K.CAT_LOGICAL, f"--doc '{token}' must have the name:type shape")
+  if not sep or not name or not doc_type or Keys.DOC_TOKEN_SEP in doc_type:
+    fail(Keys.CAT_LOGICAL, f"--doc '{token}' must have the name:type shape")
   return name, doc_type
 
 
@@ -509,7 +541,7 @@ def _initial_stage(repo: Path, doc_type: str, product: str) -> str:
     `draft` for a type declared stage-bearing, `empty` for every other.
   """
   declaration = spec_doc_types.resolve(repo, doc_type, product) or {}
-  return _K.STAGE_DRAFT if declaration.get(spec_doc_types.DocTypeFlag.STAGES) else _K.STAGE_EMPTY
+  return Keys.STAGE_DRAFT if declaration.get(spec_doc_types.DocTypeFlag.STAGES) else Keys.STAGE_EMPTY
 
 
 def _inject_note_keys(text: str, asset_type: str, tools: list[str]) -> str:
@@ -532,6 +564,7 @@ def _inject_note_keys(text: str, asset_type: str, tools: list[str]) -> str:
     Text carrying the type key, and the tools key when there were tools to write.
   """
   fm_match = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
+
   # guard: no frontmatter block to stamp into
   if not fm_match:
     return text
@@ -541,13 +574,13 @@ def _inject_note_keys(text: str, asset_type: str, tools: list[str]) -> str:
   # only when there are tools to record, never as an empty list.
 
   # stamp the type unconditionally, the tools line only when there are tools to record
-  lines = [ f"{_K.ASSET_TYPE}: {asset_type}" ]
+  lines = [ f"{Keys.ASSET_TYPE}: {asset_type}" ]
   if tools:
-    lines.append(f"{_K.SPEC_TOOLS}: [ " + ", ".join(f'"{tool}"' for tool in tools) + " ]")
+    lines.append(f"{Keys.SPEC_TOOLS}: [ " + ", ".join(f'"{tool}"' for tool in tools) + " ]")
   return f"---\n{fm_match.group(1)}\n" + "\n".join(lines) + "\n---\n" + text[fm_match.end():]
 
 
-def _product_tag(record: dict) -> str:
+def product_tag(record: dict) -> str:
   """
   Derive the product's `<product_tag>` from its `spec_path` (the leaf segment).
 
@@ -557,10 +590,10 @@ def _product_tag(record: dict) -> str:
   Returns:
     Tag string suitable for injection into the `{{product_tag}}` template token.
   """
-  return record[_K.SPEC_PATH].split("/")[-1]
+  return record[Keys.SPEC_PATH].split("/")[-1]
 
 
-def _substitute(text: str, tokens: dict) -> str:
+def substitute(text: str, tokens: dict) -> str:
   """
   Apply `{{key}}` token substitution against the provided mapping.
 
@@ -571,13 +604,13 @@ def _substitute(text: str, tokens: dict) -> str:
   Returns:
     Substituted text. Unknown tokens are left as-is.
   """
-  def repl(m: re.Match) -> str:
-    key = m.group(1).strip()
-    return tokens.get(key, m.group(0))
+  def repl(hit: re.Match) -> str:
+    key = hit.group(1).strip()
+    return tokens.get(key, hit.group(0))
   return re.sub(r"\{\{([^{}]+)\}\}", repl, text)
 
 
-def _ensure_doc_type(text: str, doc_type: str) -> str:
+def ensure_doc_type(text: str, doc_type: str) -> str:
   """
   Ensure a seeded document's frontmatter carries `spec_doc_type`.
 
@@ -592,17 +625,19 @@ def _ensure_doc_type(text: str, doc_type: str) -> str:
     Text carrying exactly one `spec_doc_type` line in its frontmatter.
   """
   fm_match = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
+
   # guard: no frontmatter block to stamp into
   if not fm_match:
     return text
   fm_body = fm_match.group(1)
+
   # guard: the template already declares the key — nothing to add
   if re.search(r"(?m)^spec_doc_type\s*:", fm_body):
     return text
-  return f"---\n{fm_body}\n{_K.DOC_TYPE}: {doc_type}\n---\n" + text[fm_match.end():]
+  return f"---\n{fm_body}\n{Keys.DOC_TYPE}: {doc_type}\n---\n" + text[fm_match.end():]
 
 
-def _inject_iconize(text: str, icon: str, color: str) -> str:
+def inject_iconize(text: str, icon: str, color: str) -> str:
   """
   Inject `iconize_icon` (and optional `iconize_color`) into a folder-note's
   YAML frontmatter block.
@@ -616,37 +651,26 @@ def _inject_iconize(text: str, icon: str, color: str) -> str:
   Returns:
     Text with the iconize keys spliced into the frontmatter.
   """
-  m = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
-  if not m:
+  # guard: no frontmatter block to splice the keys into
+  if not (fm_match := re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)):
     return text
-  fm_body = m.group(1)
-  inject = f"{_K.ICONIZE_ICON}: {icon}"
+  fm_body = fm_match.group(1)
+  inject = f"{Keys.ICONIZE_ICON}: {icon}"
   if color:
     # the colour is always double-quoted: a bare `#rrggbb` opens a YAML comment and the key
     # parses as empty (`lazy-obsidian.iconize-protocol.md`, Data model)
-    inject += f'\n{_K.ICONIZE_COLOR}: "{color}"'
+    inject += f'\n{Keys.ICONIZE_COLOR}: "{color}"'
   new_fm = fm_body + "\n" + inject
-  return f"---\n{new_fm}\n---\n" + text[m.end():]
+  return f"---\n{new_fm}\n---\n" + text[fm_match.end():]
 
 
-def _default_source_docs(_spec_path: str, _category_folder: str, _slug: str,
-                         _doc: str, _layout: list[tuple[str, str]],
-                         _product: str) -> list[tuple[str, str]]:
-  # waiver: every parameter is unused — the signature is retained for forward compat
+def _default_source_docs() -> list[tuple[str, str]]:
   """
   Return the default `spec_source_docs` list for an authored doc at scaffold time.
 
   A fresh document cites nothing. The key records only what the vault layout cannot derive —
   requests and cross-references between assets — and the documents of the asset's own level are
   read by rule rather than by link, so scaffolding one as a citation would only invite drift.
-
-  Args:
-    _spec_path: Unused; retained for forward compatibility.
-    _category_folder: Unused; retained for forward compatibility.
-    _slug: Unused; retained for forward compatibility.
-    _doc: Unused; retained for forward compatibility.
-    _layout: Unused; retained for forward compatibility.
-    _product: Unused; retained for forward compatibility.
 
   Returns:
     The empty list — a scaffolded document starts with no source documents at all.
@@ -662,15 +686,6 @@ def _default_source_docs(_spec_path: str, _category_folder: str, _slug: str,
   # assets, and a document earns those citations only once someone actually adds them.
 
   return []
-
-
-# The two YAML spellings of the citation key a template may carry, and the body region the
-# projection owns. All three are matched over the whole file: the key never appears outside
-# frontmatter, and the markers never outside `# Sources`.
-_FM_DOCS_INLINE_RE = re.compile(rf"(?m)^{_K.SPEC_SOURCE_DOCS}\s*:\s*\[\s*\]\s*$\n?")
-_FM_DOCS_BLOCK_RE = re.compile(rf"(?m)^{_K.SPEC_SOURCE_DOCS}\s*:\s*\n(?:[ \t]+- .*\n)*")
-_DOCS_BLOCK_RE = re.compile(
-    re.escape(_K.DOCS_MARKER_START) + r".*?" + re.escape(_K.DOCS_MARKER_END), re.DOTALL)
 
 
 def _set_source_docs(text: str, docs: list[tuple[str, str]]) -> str:
@@ -705,9 +720,10 @@ def _set_source_docs(text: str, docs: list[tuple[str, str]]) -> str:
   # inline list when it cited nothing
   fm_value = "\n".join(f"  - \"[[{target}]]\"" for target, _ in docs)
   fm_replacement = (
-      f"{_K.SPEC_SOURCE_DOCS}:\n{fm_value}\n" if docs
-      else f"{_K.SPEC_SOURCE_DOCS}: []\n"
+      f"{Keys.SPEC_SOURCE_DOCS}:\n{fm_value}\n" if docs
+      else f"{Keys.SPEC_SOURCE_DOCS}: []\n"
   )
+
   # both YAML spellings of the key are rewritten: the empty inline list the shipped templates
   # carry, and the block form a project override may have filled in
   if _FM_DOCS_INLINE_RE.search(text):
@@ -716,36 +732,12 @@ def _set_source_docs(text: str, docs: list[tuple[str, str]]) -> str:
     text = _FM_DOCS_BLOCK_RE.sub(fm_replacement, text, count = 1)
   body_proj = "\n".join(f"- [[{target}|{display}]]" for target, display in docs)
   body_replacement = (
-      f"{_K.DOCS_MARKER_START}\n{body_proj}\n{_K.DOCS_MARKER_END}" if docs
-      else f"{_K.DOCS_MARKER_START}\n{_K.DOCS_MARKER_END}"
+      f"{Keys.DOCS_MARKER_START}\n{body_proj}\n{Keys.DOCS_MARKER_END}" if docs
+      else f"{Keys.DOCS_MARKER_START}\n{Keys.DOCS_MARKER_END}"
   )
+
   # the whole marked region is replaced, so bullets a template shipped go with it
   return _DOCS_BLOCK_RE.sub(lambda _m: body_replacement, text, count = 1)
-
-
-def _append_history(folder_note_path: Path, lines: list[str]) -> None:
-  """
-  Append history entries to the folder-note's `# History` section.
-
-  Args:
-    folder_note_path: Path to the asset's status folder-note.
-    lines: One-line entries to append (without leading `- `).
-  """
-  text = folder_note_path.read_text()
-  if _K.HISTORY_HEADING not in text:
-    text += f"\n{_K.HISTORY_HEADING}\n"
-  insert_block = "\n".join(f"- {ln}" for ln in lines)
-  m = re.search(rf"({re.escape(_K.HISTORY_HEADING)}\n)(.*)$", text, re.DOTALL)
-  if m:
-    head, tail = m.group(1), m.group(2)
-    if tail.strip():
-      tail = tail.rstrip("\n") + "\n" + insert_block + "\n"
-    else:
-      tail = "\n" + insert_block + "\n"
-    text = text[:m.start()] + head + tail
-  else:
-    text += insert_block + "\n"
-  folder_note_path.write_text(text)
 
 
 def main(argv: list[str]) -> int:
@@ -763,32 +755,33 @@ def main(argv: list[str]) -> int:
     Process exit code: `0` on success, `1` on logical error, `2` on argparse failure.
   """
   # the three positionals name the asset; --doc names each produced document; --cwd pins the repo
-  parser = argparse.ArgumentParser(prog=_K.PROG)
-  parser.add_argument(_K.ARG_PRODUCT, help=_K.HELP_PRODUCT)
-  parser.add_argument(_K.ARG_TYPE, help=_K.HELP_TYPE)
-  parser.add_argument(_K.ARG_SLUG, help=_K.HELP_SLUG)
+  parser = argparse.ArgumentParser(prog = Keys.PROG)
+  parser.add_argument(Keys.ARG_PRODUCT, help = Keys.HELP_PRODUCT)
+  parser.add_argument(Keys.ARG_TYPE, help = Keys.HELP_TYPE)
+  parser.add_argument(Keys.ARG_SLUG, help = Keys.HELP_SLUG)
   # waiver: argparse CLI signature -- the repeatable-flag action name
-  parser.add_argument(_K.ARG_DOC, action="append", default=[], help=_K.HELP_DOC)
-  parser.add_argument(_K.ARG_PATH, default=None, help=_K.HELP_PATH)
-  parser.add_argument(_K.ARG_CWD, default=None, help=_K.HELP_CWD)
+  parser.add_argument(Keys.ARG_DOC, action = "append", default = [], help = Keys.HELP_DOC)
+  parser.add_argument(Keys.ARG_PATH, default = None, help = Keys.HELP_PATH)
+  parser.add_argument(Keys.ARG_CWD, default = None, help = Keys.HELP_CWD)
   args = parser.parse_args(argv)
 
   # an empty --doc list scaffolds the folder and its folder-note alone — documents are seeded
   # later, by the coordinator's launch checkboxes, never by the scaffold itself
-  layout = [ _parse_doc_token(token) for token in args.doc ]
+  layout = [ parse_doc_token(token) for token in args.doc ]
 
   # the product record supplies every type-scaled decision the scaffold needs
-  repo = Path(args.cwd).resolve() if args.cwd else _repo_root(Path.cwd())
-  record = _resolve_product(repo, args.product)
+  repo = Path(args.cwd).resolve() if args.cwd else repo_root(Path.cwd())
+  record = resolve_product(repo, args.product)
+
   # an alias type borrows the base's templates; folder and icon stay its own
-  alias_base = _alias_base(args.asset_type, record)
+  alias_base = resolve_alias_base(args.asset_type, record)
   icon, color = _icon_color(args.asset_type, record)
   folder = _type_folder(args.asset_type, record, args.path or "")
   tools = asset_types.default_tools(args.asset_type, record)
-  product_tag = _product_tag(record)
+  tag = product_tag(record)
 
   # scaffolding onto an existing folder would silently overwrite authored docs
-  spec_path = record[_K.SPEC_PATH]
+  spec_path = record[Keys.SPEC_PATH]
   content_root = spec_paths.spec_content_root(repo)
   target_folder = content_root / spec_path / folder / args.slug
 
@@ -798,20 +791,20 @@ def main(argv: list[str]) -> int:
 
   # guard: target folder already there, refuse rather than merge into it
   if target_folder.exists():
-    _fail(_K.CAT_LOGICAL, f"target folder already exists: {target_folder}")
-  target_folder.mkdir(parents=True, exist_ok=False)
+    fail(Keys.CAT_LOGICAL, f"target folder already exists: {target_folder}")
+  target_folder.mkdir(parents = True, exist_ok = False)
 
   # the status folder-note carries the iconize block that paints the folder in the explorer, plus
   # the asset's own type and — when the type declares any — the tools it is realised with. The
   # `category` token keeps its name for template compatibility and carries the type verbatim.
-  tokens = { "product": args.product, "product_tag": product_tag,
+  tokens = { "product": args.product, "product_tag": tag,
              "slug": args.slug, "category": args.asset_type }
 
   # the asset's own status folder-note, seeded from the type's template chain
-  note_template = _resolve_template(repo, args.asset_type, args.product, _K.FOLDER_NOTE_TMPL,
+  note_template = resolve_template(repo, args.asset_type, args.product, Keys.FOLDER_NOTE_TMPL,
                                     alias_base = alias_base)
-  note_text = _substitute(note_template.read_text(), tokens)
-  note_text = _inject_iconize(note_text, icon, color)
+  note_text = substitute(note_template.read_text(), tokens)
+  note_text = inject_iconize(note_text, icon, color)
   note_text = _inject_note_keys(note_text, args.asset_type, tools)
   note_path = target_folder / f"{args.slug}.md"
   note_path.write_text(note_explainers.heal_note_text(note_path, note_text))
@@ -819,35 +812,22 @@ def main(argv: list[str]) -> int:
   # one doc per --doc entry, each seeded with its cross-reference block and its declared stage
   produced: list[dict] = []
   for doc, doc_type in layout:
-    tmpl_path = _resolve_template(repo, args.asset_type, args.product, doc,
+    tmpl_path = resolve_template(repo, args.asset_type, args.product, doc,
                                   alias_base = alias_base, expect_type = doc_type)
-    doc_text = _substitute(tmpl_path.read_text(), tokens)
-    doc_text = _ensure_doc_type(doc_text, doc_type)
+    doc_text = substitute(tmpl_path.read_text(), tokens)
+    doc_text = ensure_doc_type(doc_text, doc_type)
+
     # the type's own paint: the icon names the kind of document, the registry's matchers own
     # the colour from the first `set-stage` onward. A journal never gets a stage and so keeps
     # this seed for life — which is why no matcher enumerates journals.
     if (doc_paint := spec_doc_types.icon_color(repo, doc_type, args.product)):
-      doc_text = _inject_iconize(doc_text, doc_paint[0], doc_paint[1] or "")
-    docs = _default_source_docs(spec_path, folder, args.slug, doc, layout, args.product)
+      doc_text = inject_iconize(doc_text, doc_paint[0], doc_paint[1] or "")
+    docs = _default_source_docs()
     doc_text = _set_source_docs(doc_text, docs)
     doc_path = target_folder / doc
     doc_path.write_text(doc_text)
-    produced.append({ _K.OUT_FILE: str(doc_path.relative_to(repo)),
-                      _K.OUT_STAGE: _initial_stage(repo, doc_type, args.product) })
-
-  # the folder-note history records the scaffold plus every doc's initial stage
-  today = _dt.datetime.now(_dt.UTC).date().isoformat()
-  history_lines = [
-      f"{today} — lazy-spec.create-asset · "
-      + note_explainers.history_line(note_path, HistoryEvent.SCAFFOLDED, asset_type = args.asset_type,
-                                     slug = args.slug, product = args.product)
-  ]
-  for p in produced:
-    history_lines.append(
-        f"{today} — lazy-spec.set-stage · {Path(p[_K.OUT_FILE]).name} "
-        f"spec_stage empty→{p[_K.OUT_STAGE]}"
-    )
-  _append_history(note_path, history_lines)
+    produced.append({ Keys.OUT_FILE: str(doc_path.relative_to(repo)),
+                      Keys.OUT_STAGE: _initial_stage(repo, doc_type, args.product) })
 
   # Domain(obsidian.icon-resolution):
   # # Container colour is the state axis
@@ -880,27 +860,27 @@ def main(argv: list[str]) -> int:
   group_note = group_dir / f"{group_dir.name}.md"
   seeded_group = ""
   if not group_note.exists() and group_dir != content_root / spec_path:
-    group_template = _resolve_template(repo, args.asset_type, args.product, _K.GROUP_NOTE_TMPL,
+    group_template = resolve_template(repo, args.asset_type, args.product, Keys.GROUP_NOTE_TMPL,
                                        alias_base = alias_base)
-    group_text = _substitute(group_template.read_text(), tokens)
+    group_text = substitute(group_template.read_text(), tokens)
     # waiver: sibling-module declaration walk -- the one merged-declaration view every specs primitive shares
-    owner = next((name for name in asset_types._declared(record)
+    owner = next((name for name in asset_types.declared(record)
                   if asset_types.default_path(name, record) == folder), "")
+
     # an ordinary container takes the owning type's icon and no colour at all: colour is the
     # state axis and a shelf has no state (the intake shelves are the deliberate exception)
     if owner and (owner_paint := asset_types.icon_color(owner, record)):
-      group_text = _inject_iconize(group_text, owner_paint[0], "")
+      group_text = inject_iconize(group_text, owner_paint[0], "")
     group_note.write_text(note_explainers.heal_note_text(group_note, group_text))
     summary_render.apply_container_stats(group_note)
     seeded_group = str(group_note.relative_to(repo))
 
   # repo-relative paths in the result so the calling skill can quote them straight back
   print(json.dumps({
-      "outcome": _K.OUTCOME_SUCCESS,
+      "outcome": Keys.OUTCOME_SUCCESS,
       "folder": str(target_folder.relative_to(repo)),
       "folder_note": str(note_path.relative_to(repo)),
       "docs": produced,
-      "history_lines": len(history_lines),
       "group_note": seeded_group,
   }))
   return 0

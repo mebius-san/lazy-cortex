@@ -15,8 +15,6 @@ judged the asset yet, an empty list means judged to need no tool at all, and a p
 the determined set.
 """
 from __future__ import annotations
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error,wrong-import-position
 
 import json
 import sys
@@ -33,11 +31,11 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import flip_gate  # noqa: E402
+import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import gate_tick  # noqa: E402
+import gate_tick  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import spec_keys  # noqa: E402
+import spec_keys  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # ----------------------------------------------------------------------------------------
@@ -88,14 +86,24 @@ def _plugin_root() -> Path:
   return Path(__file__).resolve().parent.parent
 
 
+# opt: read once per process — the shipped file never changes at runtime and callers never mutate the mapping
 @lru_cache(maxsize = 1)
 def builtin_defaults() -> dict[str, dict]:
   """
   Read the plugin's own tool declarations.
 
+  Guarantees:
+    - The returned mapping is the single instance shared by every caller in the process;
+      callers MUST treat it as read-only and copy it before mutating.
+
   Returns:
     Mapping of tool name to its declaration dict, exactly as shipped.
   """
+
+  # Contract:
+  # The returned mapping is the single instance shared by every caller in the process.
+  # Callers MUST treat it as read-only and copy it before making any mutation.
+
   path = _plugin_root() / _K.REFERENCES_DIR / _K.DEFAULTS_FILE
   return json.loads(path.read_text(encoding = _K.ENCODING)).get(_K.TOOL_TYPES) or {}
 
@@ -214,8 +222,9 @@ def tools_of(note: Path) -> list[str] | None:
   text = note.read_text(encoding = _K.ENCODING)
   # waiver: sibling-module frontmatter parser -- the one parser every specs primitive shares
   fm_values, fm_end = flip_gate.parse_frontmatter(text)
+
   # guard: an absent key is "not determined yet", which no list value can express
   if _TOOLS_KEY not in fm_values:
     return None
   # waiver: sibling-module list reader -- handles both the block and the inline list forms
-  return gate_tick._read_fm_list(text[:fm_end], _TOOLS_KEY)
+  return gate_tick.read_fm_list(text[:fm_end], _TOOLS_KEY)

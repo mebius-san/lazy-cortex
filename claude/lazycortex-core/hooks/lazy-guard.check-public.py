@@ -87,6 +87,7 @@ def main() -> None:
   if tool_name == "Bash":
     # waiver: external-format tool-input field name, not an internal key
     command = tool_input.get("command", "")
+
     # guard: ignore Bash calls with no `git commit` invocation anywhere in the command
     # (search, not match: chained commands like `git add … && git commit …` must still gate;
     # each `(?:\s+-\S+(?:\s+[^-\s]\S*)?)` tolerates one flag between `git` and `commit`, with or
@@ -105,15 +106,18 @@ def main() -> None:
 
   # the scan targets the repo the commit lands in, not necessarily the process cwd
   root = guard_checks.find_repo_root(chdir)
+
   # guard: not inside a git repository — nothing to scan
   if root is None:
     return
+
   # guard: public-marker file absent — this repo declares no public surface
   if not guard_checks.has_config(root):
     return
 
   # collect the staged diff (added lines only)
   added_lines = guard_checks.collect_staged_added_lines(root)
+
   # guard: nothing staged — nothing to scan
   if not added_lines:
     return
@@ -127,12 +131,14 @@ def main() -> None:
     added_lines = [
       (f, c) for f, c in added_lines if guard_checks.in_public_scope(f, scope_globs)
     ]
+
     # guard: nothing remains after scope filtering
     if not added_lines:
       return
 
   # advisory findings decide the branch: any survivor warns, none blocks
   warn_findings = guard_checks.scan_lines(added_lines, guard_checks.WARN_CHECKS, waivers)
+
   # guard: clean scan — nothing to surface to the user
   if not warn_findings:
     return

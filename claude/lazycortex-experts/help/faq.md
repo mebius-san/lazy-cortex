@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Common questions about installing lazycortex-experts, the class map, composing specialists, auditing the composition, and the fourteen generic agents' lane boundaries.
-last_regen: 2026-09-17
+last_regen: 2026-09-20
 no_diagram: true
 source_skills:
   - lazy-experts.install
@@ -20,7 +20,7 @@ source_skills:
   - lazy-experts.tester
   - lazy-experts.fiction-writer
   - lazy-experts.researcher
-source_sha: 4ce2acf18852efdc30c37eebe5c23618c5b98b26
+source_sha: b08ea18842928cbe682cee4ca8046f1f7a25ffe6
 ---
 # Frequently asked questions
 
@@ -102,7 +102,7 @@ The designer answers *what and why*; the planner answers *how*. The designer tak
 
 ## Why did the designer stop enforcing a fixed goals/boundaries section order?
 
-Because those were content rules baked into the designer agent itself, and they've been stripped back to a single one — never silently contradict a recorded decision. The agent used to default to a fixed overview-then-goals-then-decisions section order when no template was supplied, require a dedicated boundaries section, ban imperative voice and inline tuning numbers, and police the exact wording of goal and requirement entries. All of that content-shape prescription is gone; what's left is the agent's lane discipline (stay out of the planner's and interpreter's lane), the template-skeleton discipline (fill whatever headings the dispatching job's template declares, in the order it declares them, without renaming or reordering them), and the one content rule above. If your workflow wants a specific document shape enforced, put it in the template you dispatch the designer with — the designer no longer supplies a default shape of its own.
+Because those were content rules baked into the designer agent itself, and they've been stripped back to a single one — never silently contradict a recorded decision. The agent used to default to a fixed overview-then-goals-then-decisions section order when no template was supplied, require a dedicated boundaries section, ban imperative voice and inline tuning numbers, and police the exact wording of goal and requirement entries. All of that content-shape prescription is gone; what's left is the agent's lane discipline (stay out of the planner's and interpreter's lane), the template-skeleton discipline (fill whatever headings the dispatching job's template declares, in the order it declares them, without renaming or reordering them), and the one content rule above. If your workflow wants a specific document shape enforced, put it in the template you dispatch the designer with — the designer no longer supplies a default shape of its own. The template-skeleton discipline carries one narrow exception: a section whose template comment opens with `Optional.` can be dropped whole — heading and comment together — when the designer has nothing to say under it, and any section that cannot be filled with checkable content stays empty rather than padded with prose written only to occupy it; a mandatory section keeps its heading and comment when empty, only an optional one is removed.
 
 ---
 
@@ -114,7 +114,7 @@ Nothing in the agent itself — both keys compose the same `lazy-experts.designe
 
 ## Where does the architect fit between the designer and the planner?
 
-The architect turns an approved design — behavior already settled — into a code-structure document: which modules exist, which way the dependencies point, what is public contract versus internals, what data has to migrate, and what it costs the callers that already exist. It answers *how the code is shaped*, which sits between the designer's *what and why* and the planner's *in what order*. Dispatch it over the designer when the behavior is decided and only the shape of the code is open, and over the planner when nothing should be sequenced into tasks yet. Like the other technical-lifecycle agents, it's independently dispatchable — hand it an approved design spec and a target `architecture.md` path directly, without going through the expert runtime.
+The architect turns an approved design — behavior already settled — into a code-structure document: which modules exist, which way the dependencies point, what is public contract versus internals, what data has to migrate, and what it costs the callers that already exist. It answers *how the code is shaped*, which sits between the designer's *what and why* and the planner's *in what order*. Dispatch it over the designer when the behavior is decided and only the shape of the code is open, and over the planner when nothing should be sequenced into tasks yet. Like the other technical-lifecycle agents, it's independently dispatchable — hand it an approved design spec and a target `architecture.md` path directly, without going through the expert runtime. The architecture document it writes carries five sections — overview, module boundaries, data & contracts, dependencies & children, and migration & cost — and the last two are optional: the architect drops them whole, heading included, when the change pulls in no dependency, proposes no child module, and migrates no data, rather than padding them with content that isn't there.
 
 ---
 

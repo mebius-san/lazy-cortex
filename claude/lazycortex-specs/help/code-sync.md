@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Keep a product spec aligned with its source repo — surface in-flight behavior changes for the design doc, rebase branch pins after a merge, and gap-scan for capabilities the spec tree never documented.
-last_regen: 2026-09-17
+last_regen: 2026-09-20
 diagram_spec:
   anchor: "How the three skills relate"
   request: "Decision-tree showing when to reach for lazy-spec.sync-with-code vs lazy-spec.rebase-pins vs lazy-spec.coverage — inputs are 'code changed since last sync', 'branch just merged or deleted', and 'looking for capabilities the spec tree never documented'; outputs are design-doc behavior candidates, gate proposals, pin rewrites, spec_released proposals, and gap-candidate reports with proposed category+slug."
@@ -9,7 +9,7 @@ source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.rebase-pins
   - lazy-spec.coverage
-source_sha: f1a56b7fe545eee38ce6ac86f103b38934d0fe11
+source_sha: 8b24b4a9aa24c498a60453f619ad2ba4efaed3a5
 ---
 # Keeping specs aligned with source code
 
@@ -23,7 +23,7 @@ All three skills require a code-bound product — a product with a `source` bind
 
 **`/lazy-spec.rebase-pins`** is the post-merge cleanup skill. You run it after a branch is merged or deleted — or with `--merged` to sweep all closed branches at once. It fetches fresh refs, greps the vault for any spec whose frontmatter contains `spec_source_branches:` entries for that branch, and applies Pin Reconciliation: merged and deleted branch pins get their source URLs rewritten to the default branch and the `spec_source_branches` entry removed; open branch pins are skipped without modification. After the rebase, for each asset whose docs were touched, it proposes a `spec_released` flip — the skill's own check for whether that flip makes sense (the release ladder: `spec_tests_passing` true, which in turn wants `spec_develop_done`, `spec_plan_done`, and `spec_design_done`) still runs before it proposes, but `/lazy-spec.flip-gate` itself no longer verifies this — it flips unconditionally once you confirm, refusing only a cancelled asset. The rebase is applied regardless of the gate proposal's outcome.
 
-**`/lazy-spec.coverage`** is the gap-scanner. Where sync and finalize keep already-documented assets truthful, coverage looks for capabilities the code already has that no asset documents at all. Run it with a product key when you want to know "what's missing from the specs" or "gap-scan this product against its code." It reads the code side from two existing knowledge maps — the project's structure map and its domain-group tree, each queried for a bounded slice, never swallowed whole — and the spec side from the product's existing asset folders. It compares the two with judgment (a reworded but equivalent capability still counts as covered), then reports uncovered capabilities with a proposed category and slug. It is read-only by default: for each gap it offers to materialize a retro-spec via `/lazy-spec.create-from-code`, or prints an `[!asset-proposal]` block you paste into a living doc yourself — it never writes to the spec tree without you confirming each one. On a product with neither a synced structure map nor a domain-group tree, it falls back to a shallow scan of the source tree's top-level packages, so it still returns something rather than reporting nothing.
+**`/lazy-spec.coverage`** is the gap-scanner. Where sync and finalize keep already-documented assets truthful, coverage looks for capabilities the code already has that no asset documents at all. Run it with a product key when you want to know "what's missing from the specs" or "gap-scan this product against its code." It reads the code side from two existing knowledge maps — the project's structure map and its domain-group tree, each queried for a bounded slice, never swallowed whole — and the spec side from the product's existing asset folders. It compares the two with judgment (a reworded but equivalent capability still counts as covered), then reports uncovered capabilities with a proposed asset type and slug — placed at the product root by default (a feature, content, or research gap no longer lands in a category-named subfolder) unless the asset type's own declared location names a real folder, such as `bugs/`. It is read-only by default: for each gap it offers to materialize a retro-spec via `/lazy-spec.create-from-code` — passing the folder along only when the gap's type actually resolves to one — or prints an `[!asset-proposal]` block you paste into a living doc yourself; it never writes to the spec tree without you confirming each one. On a product with neither a synced structure map nor a domain-group tree, it falls back to a shallow scan of the source tree's top-level packages, so it still returns something rather than reporting nothing.
 
 ## How they work together
 
@@ -41,7 +41,7 @@ You can also run any of the three in isolation. Sync is for any moment source co
 
 **After sync, review doctor output.** `sync-with-code` runs `/lazy-spec.audit` at the end of each sync and reports findings without auto-fixing. Review them as a follow-up step before the next commit.
 
-**Coverage needs a code-bound product too.** A design-only product has no code side to gap-scan — `coverage` reports "no code binding — nothing to gap-scan" and stops. Attach a repo via `/lazy-spec.product-config` first if the product does have code behind it.
+**Coverage needs a code-bound product too.** A design-only product has no code side to gap-scan — `coverage` reports "no code binding — nothing to gap-scan" and stops. Attach a repo via `/lazy-spec.product-config` first if the product does have code behind it. This also applies to a nested product: coverage reads its visible asset types from its ancestor products, but a source binding is never inherited — a nested product needs its own repo attached to be code-bound, even when its parent already has one.
 
 ## Where this fits
 

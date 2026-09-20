@@ -21,7 +21,7 @@ spec_source_docs: []
 <!-- The testing mechanisms this repository actually ships — runners, fixtures, harnesses, CI targets — verified present before the tests below were written. -->
 
 ## Preconditions
-<!-- "Precondition: The required state of a test item and its environment prior to test case execution." — ISTQB Glossary -->
+<!-- Optional. "Precondition: The required state of a test item and its environment prior to test case execution." — ISTQB Glossary -->
 
 ## Exit criteria
 <!-- "Exit criteria: The set of conditions for officially completing a defined task." — ISTQB Glossary -->

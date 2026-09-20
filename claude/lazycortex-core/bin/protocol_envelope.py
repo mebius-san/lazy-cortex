@@ -52,6 +52,7 @@ def _find_rival_key(text: str) -> str | None:
     if _ANY_HEADING.match(line):
       in_section = bool(_RESPONSE_HEADING.match(line))
       continue
+
     # guard: only the response section can misdeclare the response
     if not in_section:
       continue
@@ -74,6 +75,7 @@ def _audit_file(path: Path) -> dict | None:
     text = path.read_text()
   except OSError:
     return None
+
   # guard: a protocol that never mentions the response file declares nothing about it
   if JobFile.RESPONSE not in text:
     return None
@@ -125,6 +127,7 @@ def audit(repo: Path) -> list[dict]:
   for root in ( Path(repo), Path.home() ):
     for rel in _REFERENCE_DIRS:
       ref_dir = root / rel
+
       # guard: a scope may have no references directory at all
       if not ref_dir.is_dir():
         continue

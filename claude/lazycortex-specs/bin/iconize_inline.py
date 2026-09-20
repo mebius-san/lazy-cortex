@@ -55,9 +55,11 @@ def _cached_sibling_root(name: str) -> Path | None:
     version of the sibling is cached.
   """
   own = Path(__file__).resolve()
+
   # guard: not a cached install — a dev checkout has no version directory above bin/
   if not own.parents[1].name.replace(".", "").isdigit():
     return None
+
   # the cache root sits four levels above bin/: cache/<registry>/<plugin>/<version>/bin
   try:
     cache = own.parents[4]
@@ -121,6 +123,7 @@ def repaint_paths(repo: Path, paths: list[str]) -> list[str]:
     if candidate.is_file():
       cli = candidate
       break
+
   # plugin-cache fallback — a session (hook, skill) has no daemon export to walk
   if cli is None:
     # waiver: sibling plugin's on-disk CLI layout per dev.plugin-boundaries § 1c, not a domain key
@@ -128,6 +131,7 @@ def repaint_paths(repo: Path, paths: list[str]) -> list[str]:
     cached = None if root is None else root / "bin" / "lazycortex-obsidian"
     if cached is not None and cached.is_file():
       cli = cached
+
   # guard: no obsidian plugin on this host — repaint silently unavailable
   if cli is None:
     return []
@@ -139,6 +143,7 @@ def repaint_paths(repo: Path, paths: list[str]) -> list[str]:
         [sys.executable, str(cli), "sync-paths", *paths],
         cwd = repo, capture_output = True, text = True, check = False,
     )
+
     # guard: a failing worker must never block the caller's commit
     if proc.returncode != 0:
       return []

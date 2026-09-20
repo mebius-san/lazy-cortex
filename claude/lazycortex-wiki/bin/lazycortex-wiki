@@ -1367,8 +1367,9 @@ class Cli:
     Collect the repo-relative paths one scope's applied doctor fixes touched.
 
     Node-level repairs touch the finding's own node file; an applied
-    orphan-topic / index-desync finding means the scope's topics index was
-    rebuilt, so the index path joins the set once for any of them.
+    orphan-topic / index-desync / index-stale finding means the scope's topics
+    index was rebuilt, so the index path joins the set once for any of them and
+    the node an index-stale finding names stays out — that file was not rewritten.
 
     Args:
       findings: The scope's finding dicts from `Doctor.run_all`.
@@ -1379,8 +1380,14 @@ class Cli:
       empty when nothing was applied.
     """
     applied = [ f for f in findings if f.get(self._F_APPLIED) ]
-    touched = { f[self._F_NODE] for f in applied if f.get(self._F_NODE) and f[self._F_NODE] != "-" }
-    index_checks = (_doctor.Doctor.CHECK_ORPHAN_TOPIC, _doctor.Doctor.CHECK_INDEX_DESYNC)
+    index_checks = (
+      _doctor.Doctor.CHECK_ORPHAN_TOPIC, _doctor.Doctor.CHECK_INDEX_DESYNC, _doctor.Doctor.CHECK_INDEX_STALE,
+    )
+    # an index-stale finding names the node it found unlinked, yet only the index was rewritten for it
+    touched = {
+      f[self._F_NODE] for f in applied
+      if f.get(self._F_NODE) and f[self._F_NODE] != "-" and f[self._F_CHECK] != _doctor.Doctor.CHECK_INDEX_STALE
+    }
     if any(f[self._F_CHECK] in index_checks for f in applied):
       touched.add(cfg.get(self._CFG_TOPICS_INDEX) or _doctor._DEFAULT_TOPICS_INDEX)
     return touched

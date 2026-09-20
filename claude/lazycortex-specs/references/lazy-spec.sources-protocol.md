@@ -37,7 +37,7 @@ Lives on every stage-bearing authored spec doc (`design.md`, `architecture.md`, 
 
 Defaults are written by `lazy-spec.create-asset` at scaffold time. The operator may extend or trim the list manually.
 
-Wikilinks MUST be **path-qualified** (e.g. `[[<spec_path>/<category>/<slug>/design]]`, not bare `[[design]]`) because asset slugs and doc basenames repeat across the vault — bare `[[design]]` is ambiguous.
+Wikilinks MUST be **path-qualified** (e.g. `[[<spec_path>/<slug>/design]]` for an asset at the product root, `[[<spec_path>/<folder>/<slug>/design]]` for one under a group folder, not bare `[[design]]`) because asset slugs and doc basenames repeat across the vault — bare `[[design]]` is ambiguous.
 
 Consumers (read-only):
 - `lazycortex-review` dispatcher resolves each wikilink and ships the resolved file into the expert's `context/` payload (read-only) at dispatch time;
@@ -94,7 +94,7 @@ The bullet list between `<!-- auto:spec-docs:start --> / :end -->` is a determin
 - bullet format: `- [[<doc-wikilink>|<display>]]` (no date — docs are stable references, not point-in-time events);
 - the `<display>` default is shape-aware so the rendered bullet reads sensibly without operator rewrites:
   - product-level docs (`<spec_path>/<role>`) render as `<product> — product <role>` (e.g. `[[<spec_path>/design|<product> — product design]]`);
-  - sibling-asset docs (`<spec_path>/<category>/<slug>/<role>`) render as `<slug> — <role>` (e.g. `[[<spec_path>/<category>/<slug>/design|<slug> — design]]`);
+  - sibling-asset docs (`<spec_path>/<…>/<slug>/<role>`, the asset folder at any depth under the product root — the second-to-last segment of the path) render as `<slug> — <role>` (e.g. `[[<spec_path>/<slug>/design|<slug> — design]]` for an asset at the product root, `[[<spec_path>/<folder>/<slug>/design|<slug> — design]]` under a group folder);
   - any other shape falls back to the bare last segment of the wikilink path.
   The operator may rewrite the display to a more meaningful gloss (e.g. `[[<spec_path>/design|<chapter>: product spec]]`) and the writer preserves these operator-edited displays across re-projections by matching on the wikilink path (the bytes left of the `|`);
 - duplicates dedupe on the wikilink path.

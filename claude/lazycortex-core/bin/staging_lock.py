@@ -8,8 +8,6 @@ break_lock. Defaults are module-level constants; consumer overrides go through
 """
 from __future__ import annotations
 
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 from typing import Literal
 
 import json
@@ -198,10 +196,12 @@ def resolve_session_id() -> str:
   # match and re-enters without waiting or contending.
 
   env = os.environ.get("CLAUDE_SESSION_ID", "")
+
   # guard: explicit session id provided by the harness
   if env:
     return env
   ancestor = _find_claude_ancestor_pid()
+
   # guard: a Claude Code ancestor process was located
   if ancestor is not None:
     return f"pid:{ancestor}"
@@ -219,6 +219,7 @@ def _find_claude_ancestor_pid() -> int | None:
     The process id of the matching ancestor, or None when no match was found.
   """
   pid = os.getppid()
+
   # bounded walk; never recurse forever even on cyclic / malformed process tables
   # waiver: inline numeric/default literal, not a domain constant
   for _ in range(20):
@@ -230,6 +231,7 @@ def _find_claude_ancestor_pid() -> int | None:
         [ "ps", "-p", str(pid), "-o", "command=" ],
         text = True, stderr = subprocess.DEVNULL,
       ).strip().split()
+
       # guard: ancestor argv[0] resolves to a Claude Code binary
       if argv0 and Path(argv0[0]).name in ("claude", "claude-code"):
         return pid
@@ -480,20 +482,25 @@ def _is_breakable(
   # guard: holder process no longer exists on this host
   if not _pid_alive(state.pid):
     return True, "dead_pid"
+
   # Rule 2: different host
   # guard: holder recorded a different host than the current one
   if state.host != socket.gethostname():
     return True, "different_host"
+
   # Rule 3: stale-and-idle
   age = now - state.started_at
+
   # guard: holder has exceeded the configured max-hold age
   if age > cfg.max_hold_seconds:
     current_index_mtime = _index_mtime(repo_root)
+
     # The index has not moved past last_index_mtime AND mtime itself is stale.
     index_idle = (
       current_index_mtime <= state.last_index_mtime
       and (now - max(current_index_mtime, state.last_index_mtime)) > cfg.max_idle_seconds
     )
+
     # guard: index has been idle long enough to declare the holder abandoned
     if index_idle:
       return True, "stale_and_idle"
@@ -630,6 +637,7 @@ def acquire(
 
     # Held by peer — check if breakable.
     breakable, reason = _is_breakable(repo_root, existing, cfg, now = time.time())
+
     # guard: peer lock qualifies for auto-break under the configured rules
     if breakable:
       _delete_lock(repo_root)
@@ -646,6 +654,7 @@ def acquire(
 
     # Held by live peer; check deadline.
     now = time.time()
+
     # guard: wait deadline reached without acquiring the lock
     if now >= deadline:
       return AcquireResult(
@@ -722,14 +731,17 @@ def release_if_index_empty(repo_root: Path, session_id: str) -> ReleaseResult:
   # caller-visible signal that the staging window this lock protects has genuinely closed.
 
   state = _read_lock(repo_root)
+
   # guard: no lock file currently exists for this repository
   if state is None:
     # waiver: release-outcome reason token, not an internal key
     return ReleaseResult(released = False, reason = "no_lock")
+
   # guard: lock is held by a different session and must not be released
   if state.session_id != session_id:
     # waiver: release-outcome reason token, not an internal key
     return ReleaseResult(released = False, reason = "not_our_lock")
+
   # guard: index still has staged entries — staging window is not closed
   if not _index_is_empty(repo_root):
     # waiver: release-outcome reason token, not an internal key
@@ -771,6 +783,7 @@ def load_config(repo_root: Path) -> StagingConfig:
 
   settings_path = repo_root / _SETTINGS_REL
   section: dict = {}
+
   # guard: settings file exists for this repository
   if settings_path.exists():
     # Inline the lazy_settings import so the helper has zero hard dependency on
@@ -781,7 +794,7 @@ def load_config(repo_root: Path) -> StagingConfig:
       sys.path.insert(0, str(Path(__file__).parent))
       # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
       # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
-      import lazy_settings  # type: ignore
+      import lazy_settings  # type: ignore  # pylint: disable=import-error
       section = lazy_settings.load_section(settings_path, _SECTION)
     except Exception:
       # noinspection PyBroadException

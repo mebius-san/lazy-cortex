@@ -1,11 +1,11 @@
 ---
 chapter_type: block
 summary: Answer one question against the spec tree without loading whole documents into your context.
-last_regen: 2026-09-17
+last_regen: 2026-09-20
 no_diagram: true
 source_skills:
   - lazy-spec.lookup
-source_sha: f1a56b7fe545eee38ce6ac86f103b38934d0fe11
+source_sha: 7534fc3a65c619600558c152d92d734e4534619f
 ---
 # Research: bounded lookups over the spec tree
 
@@ -13,7 +13,7 @@ When you or an agent working on your behalf needs to know where something lives 
 
 ## What's in this block
 
-- **`/lazy-spec.lookup`** — takes a free-form question or token and an optional anchor (a registered product key, a vault-relative path, or a `<category>/<slug>` pair scoped to a product) and returns the matching files with short excerpts. Give it no anchor and it searches the whole vault instead of one product's tree.
+- **`/lazy-spec.lookup`** — takes a free-form question or token and an optional anchor (a registered product key, a vault-relative path, or a product-relative path of any depth scoped to a product) and returns the matching files with short excerpts. Give it no anchor and it searches the whole vault instead of one product's tree.
 
 ## How they work together
 
@@ -21,7 +21,7 @@ There's one skill in this block, but it does its work in three separate passes s
 
 - **Up** — from an asset anchor, it reads the asset's own status note and pulls the `# Summary` line; from a product anchor, it reads `design.md` / `tech.md` and keeps only the paragraphs that mention your query token. If neither anchor form applies, it falls back to a vault-wide grep for the token.
 - **Down** — it follows the asset's declared `spec_depends_on` children and any path-qualified wikilinks in its authored docs, pulling each target's `# Summary`.
-- **Across** — it checks sibling assets in the same category folder, greps the whole vault for backlinks to the anchor's own path, and — for a change asset — pulls the summaries of its `spec_targets`.
+- **Across** — it checks sibling assets in the same folder, greps the whole vault for backlinks to the anchor's own path, and — for a change asset — pulls the summaries of its `spec_targets`.
 
 Every match is deduplicated by path, trimmed to the one line that justified it, and grouped by direction (`Up` / `Down` / `Across`) in the answer. No whole file ever lands in your context just to answer one question.
 

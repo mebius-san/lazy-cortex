@@ -140,6 +140,7 @@ class Markers:
 
     # Advance past the start marker and its trailing newline
     after_start = start_idx + len(start)
+
     # consume the newline after the start marker so the marker keeps its own line
     if after_start < len(text) and text[after_start] == "\n":
       after_start += 1
@@ -189,6 +190,7 @@ class Markers:
     # walk past the start marker to the first byte the caller actually owns
     start_idx = text.index(start)
     after_start = start_idx + len(start)
+
     # consume the newline after the start marker so it is not read as content
     if after_start < len(text) and text[after_start] == "\n":
       after_start += 1

@@ -4,7 +4,9 @@ Document→review-class resolution.
 A class's `class` label IS its identity: for a document carrying `spec_doc_type`, the label's
 part before `@` is the type it serves, and the part after it (when present) scopes the class to
 one product. Resolution is therefore type-first — among the classes serving the document's type,
-a product-scoped one whose `paths` cover the file wins, otherwise the bare-type class does.
+a product-scoped one whose `paths` cover the file wins, otherwise the bare-type class does. When
+several scoped classes cover the same file, the one anchoring on the most literal path segments
+before its first wildcard wins, and configuration order breaks an equal-depth tie.
 
 A document carrying no `spec_doc_type` is not a typed catalog document at all (a free-form
 intake file, a consumer's own document class), and falls back to first-match glob scan over
@@ -12,9 +14,8 @@ intake file, a consumer's own document class), and falls back to first-match glo
 verb that needs a document's class asks here.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error,wrong-import-position
 
+import re
 import sys
 from pathlib import Path, PurePosixPath
 
@@ -28,9 +29,9 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import frontmatter as _fm  # noqa: E402
+import frontmatter as _fm  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from keys import JobKey  # noqa: E402
+from keys import JobKey  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # The specs plugin's own frontmatter key, mirrored file-wise rather than imported — a
@@ -53,12 +54,43 @@ def _rel_for(repo: Path, file_path: Path) -> PurePosixPath | None:
     The repo-relative path, or None when the document is outside the repo or does not exist.
   """
   fp = file_path.resolve()
+
   # guard: a path outside the repo (or a vanished file) belongs to no class
   try:
     rel = PurePosixPath(fp.relative_to(repo.resolve()).as_posix())
   except ValueError:
     return None
   return rel if fp.is_file() else None
+
+
+def glob_matches(pattern: str, rel: PurePosixPath) -> bool:
+  """
+  Match one class glob against a repo-relative path.
+
+  A pattern without `**` keeps `PurePath.match` semantics: right-anchored, `*` never crossing
+  `/`. A pattern carrying `**` is matched against the whole path from the repo root, with `**`
+  spanning any number of segments (zero included) and `*` / `?` confined to one segment — the
+  shape a product-scoped override needs to cover an asset at any depth below its `spec_path`.
+
+  Args:
+    pattern: The glob from a class's `paths`.
+    rel: The document's repo-relative path.
+
+  Returns:
+    True when the glob covers the path.
+  """
+  # guard: no `**` — the plain right-anchored match every existing class relies on
+  if "**" not in pattern:
+    return rel.match(pattern)
+  parts = []
+  for segment in pattern.split("/"):
+    if segment == "**":
+      parts.append("(?:[^/]+/)*")
+      continue
+    literal = re.escape(segment).replace(r"\*", "[^/]*").replace(r"\?", "[^/]")
+    parts.append(literal + "/")
+  regex = "".join(parts).rstrip("/")
+  return re.fullmatch(regex, rel.as_posix()) is not None
 
 
 def _paths_match(class_cfg: dict, rel: PurePosixPath) -> bool:
@@ -72,7 +104,30 @@ def _paths_match(class_cfg: dict, rel: PurePosixPath) -> bool:
   Returns:
     True when at least one glob matches; False otherwise.
   """
-  return any(rel.match(pat) for pat in class_cfg.get(JobKey.PATHS) or [])
+  return any(glob_matches(pat, rel) for pat in class_cfg.get(JobKey.PATHS) or [])
+
+
+def _scope_depth(class_cfg: dict) -> int:
+  """
+  Measure how deep a scoped class's globs anchor before their first wildcard.
+
+  Args:
+    class_cfg: The class config dict.
+
+  Returns:
+    The greatest count of leading literal segments across the class's `paths`; 0 when every
+    glob starts with a wildcard.
+  """
+  best = 0
+  for pattern in class_cfg.get(JobKey.PATHS) or []:
+    depth = 0
+    for segment in str(pattern).split("/"):
+      # the first wildcard segment ends the literal prefix
+      if any(mark in segment for mark in ("*", "?")):
+        break
+      depth += 1
+    best = max(best, depth)
+  return best
 
 
 def class_for_file(settings: dict, repo: Path, file_path: Path) -> dict | None:
@@ -80,13 +135,16 @@ def class_for_file(settings: dict, repo: Path, file_path: Path) -> dict | None:
   Resolve the review class one document belongs to.
 
   A document carrying `spec_doc_type` matches by type: a `<type>@<product>` class whose `paths`
-  cover the file outranks the bare `<type>` class, and a type with no class at all resolves to
+  cover the file outranks the bare `<type>` class — the deepest literal path prefix winning
+  among several, configuration order breaking a tie — and a type with no class at all resolves to
   None (a type declared `review: false` is expected to have none). A document with no type falls
   back to the first class whose `paths` match it.
 
   Guarantees:
     - Among the classes serving a document's `spec_doc_type`, a product-scoped class whose
       `paths` cover the document always outranks the bare, type-only class.
+    - Among the product-scoped classes covering a typed document, the one whose globs anchor
+      deepest — the innermost product's — wins; equal depth falls back to configuration order.
     - A document carrying no `spec_doc_type` resolves to the first configured class whose
       `paths` cover it, in configuration order.
 
@@ -105,14 +163,19 @@ def class_for_file(settings: dict, repo: Path, file_path: Path) -> dict | None:
   # separator names the document type the class serves, and an optional segment after it
   # scopes the class to one product. Among the classes serving a document's type, the
   # product-scoped class wins whenever its paths cover the file; the bare, type-only class is
-  # the fallback otherwise. A type with no matching class at all resolves to no review class,
+  # the fallback otherwise. Where several product-scoped classes cover one document — a nested
+  # product's tree lying inside its parent's — the more specific scope wins, measured as the
+  # run of literal path segments a class anchors on before its first wildcard, so a deeper
+  # tree is never served by the broader product that merely contains it. Only when two scopes
+  # anchor equally deep does the order they were configured in settle the match. A type with no matching class at all resolves to no review class,
   # by design. A document carrying no recognized type is not a typed catalog document, and
   # instead resolves to the first configured class whose paths cover it.
 
   # Contract:
   # Among the classes serving a document's `spec_doc_type`, a product-scoped class whose
-  # `paths` cover the document always outranks the bare, type-only class; a type with no
-  # matching class resolves to `None`. A document carrying no `spec_doc_type` resolves to
+  # `paths` cover the document always outranks the bare, type-only class, and among several
+  # such scoped classes the one with the deepest literal path prefix wins, configuration order
+  # breaking an equal-depth tie; a type with no matching class resolves to `None`. A document carrying no `spec_doc_type` resolves to
   # the first configured class whose `paths` cover it, in configuration order.
 
   rel = _rel_for(repo, file_path)
@@ -133,16 +196,20 @@ def class_for_file(settings: dict, repo: Path, file_path: Path) -> dict | None:
         return class_cfg
     return None
 
-  # a typed document matches on the label, with the product-scoped entry preferred
+  # a typed document matches on the label, with the innermost product-scoped entry preferred
   fallback = None
-  for class_cfg in classes:
+  scoped: list[tuple[int, int, dict]] = []
+  for index, class_cfg in enumerate(classes):
     label = str(class_cfg.get(JobKey.CLASS) or "")
     type_part, _, scope = label.partition(_SCOPE_SEP)
+
     # guard: a class serving some other type has nothing to say about this document
     if type_part != doc_type:
       continue
     if scope and _paths_match(class_cfg, rel):
-      return class_cfg
+      scoped.append((-_scope_depth(class_cfg), index, class_cfg))
     if not scope and fallback is None:
       fallback = class_cfg
+  if scoped:
+    return min(scoped)[2]
   return fallback

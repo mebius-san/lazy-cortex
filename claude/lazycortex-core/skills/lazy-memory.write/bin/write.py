@@ -71,30 +71,36 @@ def _parse_body_frontmatter(body: str) -> tuple[dict, str]:
     end = body.index("\n---", 3)
   except ValueError as exc:
     raise WriteError("frontmatter-invalid: body missing closing `---`") from exc
+
   # extract the frontmatter text and the body that follows the closing delimiter
   fm_text = body[3:end].strip()
   # waiver: inline numeric literal, not a domain constant
   rest = body[end + 4:].lstrip("\n")
+
   # line-by-line YAML-subset parser: scalar `key: value`, inline `[a, b]`, and block lists
   fm: dict = {}
   pending_list_key: str | None = None
   for line in fm_text.splitlines():
     raw = line.rstrip()
+
     # blank line ends any pending block-list context
     if not raw:
       pending_list_key = None
       continue
+
     # block-list item belonging to the currently open key
     if raw.startswith("  - ") and pending_list_key:
       fm[pending_list_key].append(raw[4:].strip().strip('"\''))
       continue
     pending_list_key = None
+
     # guard: skip lines without a key:value separator
     if ":" not in raw:
       continue
     key, _, value = raw.partition(":")
     key = key.strip()
     value = value.strip()
+
     # inline list literal: `key: [a, b, c]`
     if value.startswith("[") and value.endswith("]"):
       inner = value[1:-1].strip()
@@ -138,6 +144,7 @@ def _is_safe_consolidate_path(repo: Path, target: Path) -> bool:
     target_resolved = target.resolve()
   except (OSError, RuntimeError):
     return False
+
   # consolidate targets are constrained to the two repo-internal trees
   # waiver: filesystem path/filename idiom, not a domain constant
   safe_roots = [ (repo / ".logs").resolve(), (repo / ".memory").resolve() ]
@@ -173,6 +180,7 @@ def _load_expert_git_author(repo: Path, expert: str) -> dict:
   """
   # waiver: filesystem path/filename idiom, not a domain constant
   settings_path = repo / ".claude" / "lazy.settings.json"
+
   # guard: settings file missing — return empty dict, caller decides
   if not settings_path.exists():
     return {}
@@ -236,6 +244,7 @@ def _resolve_memory_bot_identity(repo: Path, expert: str) -> tuple[str, str]:
     base_name  = fm.get("name")  or expert
     # waiver: memory-note frontmatter key (canonical home is the note format), not a reusable cross-module key
     base_email = fm.get("email") or f"{expert}@{_BOT_DOMAIN}"
+
   # Strip any pre-existing memory.* prefix to avoid memory.memory.foo
   # when the env vars were already memory-prefixed (operator-driven path).
   bare_name  = base_name[len(_MEMORY_PREFIX):]  if base_name.startswith(_MEMORY_PREFIX)  else base_name
@@ -297,17 +306,20 @@ def _atomic_commit_memory(
   """
   # Filter to existing paths only; skip None / missing entries gracefully
   add_paths = [str(p.relative_to(repo)) for p in paths if p and p.exists()]
+
   # Also stage deletions: include paths that no longer exist on disk but
   # were in the index (consolidated drops); `git add -A -- <path>` covers
   # both add and delete for the given path-spec.
   removed_paths = [str(p.relative_to(repo)) for p in paths if p and not p.exists()]
   if not add_paths and not removed_paths:
     return None
+
   # the write's own footprint — every git verb below is limited to it, because the index is
   # shared and whatever else sits there belongs to the operator or another routine
   own_paths = [*add_paths, *removed_paths]
   add_cmd = ["git", "add", "--", *own_paths]
   add = subprocess.run(add_cmd, cwd = repo, capture_output = True, check = False)
+
   # guard: `git add` failure aborts the commit; leave any partial staging for operator inspection
   if add.returncode != 0:
     raise WriteError(
@@ -324,6 +336,7 @@ def _atomic_commit_memory(
     "commit", "-q", "-m", f"{_MEMORY_PREFIX}{expert}: {title}", "--", *own_paths,
   ]
   commit = subprocess.run(commit_cmd, cwd = repo, capture_output = True, check = False)
+
   # guard: `git commit` failure leaves the index staged; surface as WriteError
   if commit.returncode != 0:
     raise WriteError(
@@ -386,6 +399,7 @@ def write_note(repo: Path, expert: str, body: str,
   # would escape .logs/ or .memory/.
   for c in consolidate:
     cp = Path(c) if Path(c).is_absolute() else (repo / c)
+
     # guard: refuse the whole op when any consolidate target escapes the safe roots
     if not _is_safe_consolidate_path(repo, cp):
       raise WriteError(f"consolidate-out-of-scope: {c}")
@@ -494,6 +508,7 @@ def _main(argv: list[str]) -> int:
   """
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   import argparse
+
   # parse the CLI surface — expert positional + optional slug + repeatable consolidate
   parser = argparse.ArgumentParser()
   # waiver: argparse CLI signature, not a domain key
@@ -510,6 +525,7 @@ def _main(argv: list[str]) -> int:
     help = "Skip the atomic commit step (worker leaves changes unstaged for the caller).",
   )
   args = parser.parse_args(argv)
+
   # body content arrives on stdin
   body = sys.stdin.read()
   repo = Path(args.repo)

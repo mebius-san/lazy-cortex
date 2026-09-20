@@ -45,7 +45,8 @@ The user provides one of:
 
 1. A natural-language request ("new product for X", "edit chapter settings", "add source to Tester/chapter", …).
 2. A product compound-key (new or existing) or a path under an existing product's `spec_path`.
-3. Nothing — the skill asks whether to create or edit.
+3. The caller form `create <key> at <spec_path> [source <repo-key>:<path>[,<path>]]` — a skill registering a nested product (e.g. `lazy-spec.create-from-code` Step P3b) hands the key, the spec path, and the source folder in this form. Step 2 and Step 4 take those values directly, outcome `taken-from-arg`, and ask nothing for them; every other step runs as usual, with `inherited` where the effective record already carries the value.
+4. Nothing — the skill asks whether to create or edit.
 
 ## Step 1 — Mode detection + resolve registry
 
@@ -61,6 +62,7 @@ The first prints the `products` object — each key is a compound-key, each valu
 Resolve the user's input to a mode:
 
 - If the input resolves to an existing product key (or a path under an existing product's `spec_path`) via the "Resolving a Product" protocol in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md` → **edit mode** (jump to Step 2's edit branch, then Step 11 writes the merged record).
+- An input in the `create <key> at <spec_path>` form with an unregistered `<key>` is **create mode** even when `<spec_path>` sits under an existing product's `spec_path` — that is a nested product, not an edit of the parent.
 - Otherwise → **create mode**.
 
 When intent is ambiguous (e.g. the user just says "configure product"), ask, then proceed:
@@ -76,13 +78,13 @@ AskUserQuestion: header "Create or edit", question "Configure a product in <repo
 
 **Vault-spec gate (create mode only).** Products are a consequence of the repo-wide spec: resolve the content-root (`<settings-dir>/<spec.vault_root>`, default `specs`) and check that `<content-root>/vision.md` — the vault spec — exists, OR that a pre-existing `<content-root>/design.md` without a vision does (the legal pre-vision state; documents are migrated by the operator by hand). Both absent → abort with outcome `aborted:no-vault-spec`, pointing the operator at `/lazy-spec.install` (its Step 6.9 seeds the vision draft). Presence is the whole gate; how far the document must have progressed (written / approved) is deliberately outside this contract yet. Edit mode skips the check — the registered catalog predates the gate.
 
-The products object + `repos` section drive: uniqueness of the new product key, flat-product validation (`spec_path` not nested under another product's `spec_path` per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md`), and registered-repo options.
+The products object + `repos` section drive: uniqueness of the new product key and registered-repo options. A `spec_path` under another product's `spec_path` is legal — products may nest, and the innermost owns its tree per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md`.
 
 Outcome: `create`, `edit`, or `aborted:no-vault-spec`.
 
 ## Step 2 — Product key + spec_path
 
-**Create mode.** Two questions:
+**Create mode.** When the input carried the key and the spec path in the `create <key> at <spec_path>` caller form, take both directly, outcome `taken-from-arg`, and ask neither question below. Otherwise, two questions:
 
 1. **Product key** — the product's settings key: an arbitrary stable string the operator chooses (lowercase-with-hyphens recommended, e.g. `chapter`). Validate uniqueness among existing `products` keys.
 
@@ -95,16 +97,18 @@ Outcome: `create`, `edit`, or `aborted:no-vault-spec`.
    AskUserQuestion: header "Product key", question "Settings key for the new product in <repo> (lowercase-with-hyphens, e.g. `chapter`; taken: <keys>)? It names `products[<key>]`, so pick a name that stays meaningful as the vault grows. See: ${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md", free text via "other".
    ```
 
-2. **Spec path** — `spec_path`: the content-root-relative path of the product's folder, any shape the operator likes (a top-level folder, or nested under any organizational folders — the plugin dictates no form and reads no meaning from path segments). Validate: not nested inside another product's `spec_path`; the final path segment is not one of the reserved names `vision` / `design` / `ui-design` / `tech` / `use-cases` / `decisions` (folder-note collision per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md`); the folder does not already exist on disk unless the user is registering a spec on top of a pre-created folder.
+2. **Spec path** — `spec_path`: the content-root-relative path of the product's folder, any shape the operator likes (a top-level folder, or nested under any organizational folders — the plugin dictates no form and reads no meaning from path segments). Validate: the final path segment is not one of the reserved names `vision` / `design` / `ui-design` / `tech` / `use-cases` / `decisions` (folder-note collision per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md`); the folder does not already exist on disk unless the user is registering a spec on top of a pre-created folder.
 
    ```
    Context (print before asking):
    - Where: Step 2 — Spec path; target `products[<key>].spec_path`, content-root <content-root>
    - Found: existing folders under <content-root>: <list, or "none">; registered spec_paths: <paths, or "none">
    - Why asking: where this product's specs live is layout the plugin reads no meaning from — only the operator knows it
-   - Answers: `<existing folder>` — register on top of that pre-created folder; `other — type a path` — a new content-root-relative path, scaffolded by Step 11; either is written as `products[<key>].spec_path`, the root every review-class glob hangs off, fixed thereafter (edit mode never moves it); a path nested under another product's `spec_path`, ending in a reserved name (`vision` / `design` / `ui-design` / `tech` / `use-cases` / `decisions`), or already on disk without intent to register over it is refused and re-asked
+   - Answers: `<existing folder>` — register on top of that pre-created folder; `other — type a path` — a new content-root-relative path, scaffolded by Step 11; either is written as `products[<key>].spec_path`, the root every review-class glob hangs off, fixed thereafter (edit mode never moves it); a path ending in a reserved name (`vision` / `design` / `ui-design` / `tech` / `use-cases` / `decisions`), or already on disk without intent to register over it, is refused and re-asked; a path under another product's `spec_path` is legal — products may nest, the innermost owning its tree
    AskUserQuestion: header "Spec path", question "Content-root-relative folder for product `<key>` under <content-root>? Any shape — top-level, or nested under organizational folders. See: ${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md", options: each existing folder + `other — type a path`, with the descriptions above.
    ```
+
+   A `spec_path` under another product's makes this a nested product: the wizard resolves its ancestor chain and, for every step below whose key the effective record already carries (`lazy-spec.config-protocol.md` § Effective record), records outcome `inherited` instead of asking.
 
 **Edit mode.** Confirm this is the correct product. The key and `spec_path` are FIXED in edit mode — this skill does not rename or move products. Capture the existing record fields (`spec_path`, `language`, `icon`, `source`, `dependencies`, `asset_types`, `tool_types`, `guidelines`, `mode`) to merge into; never drop a field the user does not touch.
 
@@ -120,6 +124,8 @@ AskUserQuestion: header "Confirm product", question "Edit product `<key>` (spec_
 Outcome: `collected` (create) or `confirmed` (edit).
 
 ## Step 3 — Language
+
+**Nested product:** when the effective record already carries this step's key from an ancestor, outcome `inherited`, no question; edit mode still lets the operator declare an own value, which wins.
 
 Optional override of the repo-global `spec.language`. In edit mode, default the menu to the product's current value. Capture `<language>` only when the user picks a concrete override; treat `inherit default` as absent.
 
@@ -137,6 +143,8 @@ Outcome: `set` or `inherit-default`.
 ## Step 4 — Source (repo + paths, or design-only)
 
 A product is **design-only** when it carries no `source` block (specs authored ahead of code). Otherwise `source` is `{ repo: <repo-key>, paths: [<path>, …] }`.
+
+When the input's caller form carried a `source <repo-key>:<path>[,<path>]` clause, take `has source code`, `source.repo`, and `source.paths` from it directly, outcome `taken-from-arg`, and ask none of the three questions below. A caller form with no `source` clause runs this step as usual.
 
 1. Whether this product has source code. In edit mode this is where a design-only product gains a `source` block.
 
@@ -300,6 +308,8 @@ Outcome: `iconed` or `default-icon`.
 
 ## Step 7 — Guidelines (per-role context)
 
+**Nested product:** when the effective record already carries this step's key from an ancestor, outcome `inherited`, no question; edit mode still lets the operator declare an own value, which wins.
+
 Optional per-role guideline paths folded into this product's launch-checkbox job dispatch (`spec.coordinator`, per `products[<key>].guidelines` in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md`). `guidelines` is a dict keyed by the dispatched role token (`planner`, `tester`, `developer`, `architect`) plus the wildcard `"*"`, each value a list of repo-relative file paths.
 
 ```
@@ -339,6 +349,8 @@ Outcome: `guidelines-set`, `no-guidelines`, or (edit mode) `unchanged`.
 
 ## Step 8 — Built-in review experts (use-case-writer / designer / system-designer / architect / ui-designer / planner / developer / tester / data-writer / researcher)
 
+**Nested product:** when an ancestor's `@<key>` classes already cover this product's documents by path, outcome `inherited`, no question; edit mode still lets the operator declare an own value, which wins — declaring experts here generates this product's own `@<key>` set, which wins by depth.
+
 The built-in review classes generated in Step 12 are driven by ten roles — `use-case-writer`, `designer`, `system-designer`, `architect`, `ui-designer`, `planner`, `developer`, `tester`, `data-writer`, `researcher`. These experts are **shared vault-wide**: one common set of review classes serves every product whose role-experts are identical, so a second product normally reuses the first product's experts rather than adding its own classes (see Step 12). Read the available expert names and the current review classes first:
 
 ```bash
@@ -356,7 +368,7 @@ The keys of the first printed object are the registered expert names. In the sec
   - Where: Step 8 — Review experts; target `review.classes` (shared set vs `<kind>@<key>` override)
   - Found: shared set present — experts read from its bare-label classes: use-case-writer `<…>`, designer `<…>`, system-designer `<…>`, architect `<…>`, ui-designer `<…>`, planner `<…>`, developer `<…>`, tester `<…>`, data-writer `<…>`
   - Why asking: whether this product's design / code-plan / test-plan / bug docs need a different persona than the rest of the vault is a judgement about the product, not derivable
-  - Answers: `use shared experts` — NO new review classes for this product; Step 12 reuses the shared set and collapses this product's stale `@<key>` classes (outcome `shared-set`); `define product-specific override` — the nine role questions below, then Step 12 generates product-scoped `<kind>@<key>` classes that shadow the shared set for this product only, inserted earlier in the list so first-match-wins routes this product's docs to them (outcome `override`); every other product keeps riding the shared set either way
+  - Answers: `use shared experts` — NO new review classes for this product; Step 12 reuses the shared set and collapses this product's stale `@<key>` classes (outcome `shared-set`); `define product-specific override` — the nine role questions below, then Step 12 generates product-scoped `<kind>@<key>` classes that shadow the shared set for this product only (outcome `override`). A typed document takes the scoped class whose globs anchor on the most leading literal segments — the innermost product's — so a nested product's override outranks its ancestor's; list order only breaks an equal-depth tie and drives the untyped-document fallback (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md` § Effective record); every other product keeps riding the shared set either way
   AskUserQuestion: header "Review experts", question "Product `<key>`: ride the vault's shared review experts (<experts>), or define a product-specific override? See: ${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md", options `use shared experts` / `define product-specific override` with the descriptions above.
   ```
 
@@ -394,6 +406,8 @@ Outcome: `assigned`, `shared-set`, or `override` (or abort `expert-undefined`).
 
 ## Step 9 — Asset types (delegate)
 
+**Nested product:** when the effective record already carries this step's key from an ancestor, outcome `inherited`, no question; edit mode still lets the operator declare an own value, which wins.
+
 Whether to declare any asset types of the product's own (beyond the shipped feature / change / bug / content / research set) now. An asset type is a declared kind of asset (characters / scenes / chapters / …) written into `products[<key>].asset_types.<name>`, carrying its icon, its primary document (the type's `start_doc` — the attach target; a fresh asset spawns with no documents), its default tools, the folder its assets land in by default, and the playbook the coordinator works them under.
 
 ```
@@ -411,6 +425,8 @@ AskUserQuestion: header "Asset types", question "Does product `<key>` need asset
 Outcome: `delegated` or `shipped-only`.
 
 ## Step 10 — Workflow mode (full vs spec-only)
+
+**Nested product:** when the effective record already carries this step's key from an ancestor, outcome `inherited`, no question; edit mode still lets the operator declare an own value, which wins.
 
 The product's workflow profile. In edit mode, default the menu to the product's current value (absent reads as `full`).
 
@@ -453,7 +469,7 @@ printf '%s' '<edited-products-json>' | "${LAZYCORTEX_PYTHON:-python3}" <core-cli
 
 Initialize the on-disk structure (create mode, or any missing piece in edit mode). Use two separate calls for each folder-note — `Bash(mkdir -p <dir>)` then the `Write` tool (never chain):
 
-1. **No group folders are pre-created.** `features/`, `changes/`, `bugs/`, and every declared type's folder appear lazily — the first `create-asset` landing an asset in one creates the folder and seeds its group folder-note (`lazy-spec.layout-protocol.md` Part 1). NO `backlog/`, and NO per-product `requests/` — the request inbox is a single vault-root folder, created once in step 3 below (a request may target multiple products, so it is never per-product; see `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.request-protocol.md`).
+1. **No group folders are pre-created.** `changes/`, `bugs/`, and every declared type's folder appear lazily — the first `create-asset` landing an asset in one creates the folder and seeds its group folder-note (`lazy-spec.layout-protocol.md` Part 1). NO `backlog/`, and NO per-product `requests/` — the request inbox is a single vault-root folder, created once in step 3 below (a request may target multiple products, so it is never per-product; see `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.request-protocol.md`).
 2. **Product level note** `<spec_path>/<leaf>.md` (`<leaf>` = the final segment of `spec_path`) — the folder-note `spec.catalog-coordinator` owns (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.catalog-playbook.md`). Never hand-written here: one verb creates it, or brings an existing one up to the level schema without disturbing what the operator put in it.
 
    ```bash
@@ -476,7 +492,7 @@ Initialize the on-disk structure (create mode, or any missing piece in edit mode
    "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" seed-doc --root <content_root>/<spec_path>/<leaf>.md --doc vision.md:system-vision
    ```
 
-   The primitive resolves the product from the note's folder, instantiates the `system-vision` type's template with every token filled (`{{product}}`, `{{product_tag}}`), injects the type's `iconize_icon` / `iconize_color`, sets `spec_stage: empty` and journals the seed in the note's `# History` — the same file a coordinator's launch checkbox would produce. Fold the returned `doc` path (and the note, whose history line changed) into this step's own commit. The seeding is the whole obligation — no gate and no doctor check exists at this level. Outcome: `vision-seeded`, `vision-already-present`, or `vision-skipped-pre-vision-design`.
+   The primitive resolves the product from the note's folder, instantiates the `system-vision` type's template with every token filled (`{{product}}`, `{{product_tag}}`), injects the type's `iconize_icon` / `iconize_color`, sets `spec_stage: empty` — the same file a coordinator's launch checkbox would produce; seeding journals nothing. Fold the returned `doc` path into this step's own commit. The seeding is the whole obligation — no gate and no doctor check exists at this level. Outcome: `vision-seeded`, `vision-already-present`, or `vision-skipped-pre-vision-design`.
 4. **Vault-root request inbox** (shared by every product — created once, idempotent): resolve the spec content-root `<content_root> = <repo>/<spec.vault_root>` (default `specs`; read `spec.vault_root` from `.claude/lazy.settings.json`). Ensure `<content_root>/requests/` exists (`Bash(mkdir -p <content_root>/requests)`). ALWAYS `Write` `<content_root>/requests/requests.md` when absent as the operator-zone inbox folder-note (`iconize_icon: LiInbox`, `iconize_color: "#f0abfc"` — the intake-shelf accent, double-quoted, NO `spec_role`, the `# Summary` skeleton from the group-note template with the static précis `Vault-wide request intake inbox.` filled in, then operator-zone body) and ALWAYS `git add` it so the `requests/` directory is committed and pushed even with zero request files. If it already exists, leave the body untouched (stats are refreshed by the event-driven primitive). When creating the requests inbox, run `render-container-stats` on it too:
 
    ```bash
@@ -503,7 +519,7 @@ In the parsed object, write the classes below into `review.classes` (create the 
 
 A class's label IS the name of a document type (`spec_doc_type`), and that is the class's only identity. `paths` stay in the schema, but their role has narrowed: they discriminate a product override `<type>@<key>` from the bare-type class, and they catch documents carrying no type at all. A typed document is routed by its frontmatter, never by where it sits or what it is called.
 
-Generate **one class per declared type carrying `review: true`** — the shipped types plus whatever the product declares under `products[<key>].doc_types`. The **shared set** — bare-type labels with right-anchored wildcard globs — serves every product whose role-experts match; a product with divergent experts (Step 8 outcome `override`) gets the same types re-emitted as product-scoped `<type>@<key>` classes inserted BEFORE the shared set. Globs span the product root and every category folder (built-in AND operator-defined) — so `lazy-spec.add-asset-type` never touches `review.classes`, a new category needs no new class, and a new product needs no new class when it rides the shared experts. Reusable validation dicts plus a no-validation case. **`system-designer` is never a validation writer in any class** — it appears only as a `main` writer; `designer` appears as a validation writer only on `use-cases`, never elsewhere; the `architect` is the standing validator of everything design-shaped (`design`, `system-design`, `ui-design`, `system-ui-design`, `code-plan`); no class is validated by its own main writer; the report classes carry no validation bucket, same as `system-tech`. Each checkbox in the launch ladder (`lazy-spec.lifecycle-protocol.md` Part 3) resolves its dispatched expert from the review class matching its own result document — `planner` writes `code-plan.md`, `developer` writes `code-report.md`, `tester` writes both `test-plan.md` and `test-report.md`, `data-writer` writes `data-report.md` — mirroring `lazy-spec.install` § 6e's seed template:
+Generate **one class per declared type carrying `review: true`** — the shipped types plus whatever the product declares under `products[<key>].doc_types`. The **shared set** — bare-type labels with right-anchored wildcard globs — serves every product whose role-experts match; a product with divergent experts (Step 8 outcome `override`) gets the same types re-emitted as product-scoped `<type>@<key>` classes inserted BEFORE the shared set. Globs span the product root and every group folder (built-in AND operator-defined) — so `lazy-spec.add-asset-type` never touches `review.classes`, a new group folder needs no new class, and a new product needs no new class when it rides the shared experts. Reusable validation dicts plus a no-validation case. **`system-designer` is never a validation writer in any class** — it appears only as a `main` writer; `designer` appears as a validation writer only on `use-cases`, never elsewhere; the `architect` is the standing validator of everything design-shaped (`design`, `system-design`, `ui-design`, `system-ui-design`, `code-plan`); no class is validated by its own main writer; the report classes carry no validation bucket, same as `system-tech`. Each checkbox in the launch ladder (`lazy-spec.lifecycle-protocol.md` Part 3) resolves its dispatched expert from the review class matching its own result document — `planner` writes `code-plan.md`, `developer` writes `code-report.md`, `tester` writes both `test-plan.md` and `test-report.md`, `data-writer` writes `data-report.md` — mirroring `lazy-spec.install` § 6e's seed template:
 
 - **A = architect review** — `{ "architect_review": { "name": "<architect>", "section": "Architect review", "position": "bottom" } }`.
 - **D = designer review** — `{ "designer_review": { "name": "<designer>", "section": "Designer review", "position": "bottom" } }`.
@@ -558,28 +574,28 @@ AskUserQuestion: header "<type> class", question "Validation shape for product `
 
 The `system-vision` / `system-design` / `system-tech` classes serve the **level docs** — the product-root `vision.md` / `design.md` / `tech.md` set AND the same set at the spec content-root (the project-wide spec; no config key declares it — the files' existence is the declaration, except `vision.md`, which is seeded). One expert set serves both scales. The `system-ui-design` class serves the product-root `ui-design.md` alone — the product's shared look (design system, recurring screen patterns, navigation skeleton) that the assets' own `ui-design.md` refine; the content root never carries one. It shares the asset `ui-design` class's glob and is told apart by type, exactly like the design pair. The vision classes carry NO validators — the writer and the operator close the loop. A typed document routes by its `spec_doc_type`, so the overlapping design globs are untyped-fallback tie-breakers only: the asset `design` class sits earlier in the list and wins the fallback. The `research-design` class shares the `*/*/design.md` glob for the same reason: a research asset's `design.md` carries `spec_doc_type: research-design` and routes by type.
 
-**Override set** (product-scoped labels; generated ONLY on Step 8 outcome `override`, with this product's `<spec_path>` and override experts) — shadows the shared set for one product:
+**Override set** (product-scoped labels; generated ONLY on Step 8 outcome `override`, with this product's `<spec_path>` and override experts) — shadows the shared set for one product. An asset-level override glob is `<spec_path>/*/**/<doc>.md`: at least one segment below the product root, so the product's own level document stays with its `system-*` class, then any depth, because an asset may sit straight at the product root or nested inside another asset:
 
 | `class` label | `paths` | `experts.main` | `experts.validation` |
 |---|---|---|---|
-| `use-cases@<key>` | `["<spec_path>/*/*/use-cases.md"]` | `[{ "name": "<use-case-writer>" }]` | D |
-| `design@<key>` | `["<spec_path>/*/*/design.md"]` | `[{ "name": "<designer>" }]` | A |
-| `vision@<key>` | `["<spec_path>/*/*/vision.md"]` | `[{ "name": "<designer>" }]` | NONE |
+| `use-cases@<key>` | `["<spec_path>/*/**/use-cases.md"]` | `[{ "name": "<use-case-writer>" }]` | D |
+| `design@<key>` | `["<spec_path>/*/**/design.md"]` | `[{ "name": "<designer>" }]` | A |
+| `vision@<key>` | `["<spec_path>/*/**/vision.md"]` | `[{ "name": "<designer>" }]` | NONE |
 | `system-vision@<key>` | `["<spec_path>/vision.md"]` | `[{ "name": "<system-designer>" }]` | NONE |
 | `system-design@<key>` | `["<spec_path>/design.md"]` | `[{ "name": "<system-designer>" }]` | A |
 | `system-tech@<key>` | `["<spec_path>/tech.md"]` | `[{ "name": "<architect>" }]` | NONE |
 | `system-ui-design@<key>` | `["<spec_path>/ui-design.md"]` | `[{ "name": "<ui-designer>" }]` | A |
-| `architecture@<key>` | `["<spec_path>/*/*/architecture.md"]` | `[{ "name": "<architect>" }]` | P |
-| `ui-design@<key>` | `["<spec_path>/*/*/ui-design.md"]` | `[{ "name": "<ui-designer>" }]` | A |
-| `code-plan@<key>` | `["<spec_path>/*/*/code-plan.md"]` | `[{ "name": "<planner>" }]` | TA |
-| `test-plan@<key>` | `["<spec_path>/*/*/test-plan.md"]` | `[{ "name": "<tester>" }]` | DV |
-| `bug@<key>` | `["<spec_path>/bugs/*/bug.md"]` | `[{ "name": "<tester>" }]` | DV |
-| `code-report@<key>` | `["<spec_path>/*/*/code-report.md"]` | `[{ "name": "<developer>" }]` | NONE |
-| `test-report@<key>` | `["<spec_path>/*/*/test-report.md"]` | `[{ "name": "<tester>" }]` | NONE |
-| `data-report@<key>` | `["<spec_path>/*/*/data-report.md"]` | `[{ "name": "<data-writer>" }]` | NONE |
-| `docs-report@<key>` | `["<spec_path>/*/*/docs-report.md"]` | `[{ "name": "<docs-writer>" }]` | NONE |
-| `research-design@<key>` | `["<spec_path>/*/*/design.md"]` | `[{ "name": "<designer>" }]` | R |
-| `research-report@<key>` | `["<spec_path>/*/*/research.md"]` | `[{ "name": "<researcher>" }]` | NONE |
+| `architecture@<key>` | `["<spec_path>/*/**/architecture.md"]` | `[{ "name": "<architect>" }]` | P |
+| `ui-design@<key>` | `["<spec_path>/*/**/ui-design.md"]` | `[{ "name": "<ui-designer>" }]` | A |
+| `code-plan@<key>` | `["<spec_path>/*/**/code-plan.md"]` | `[{ "name": "<planner>" }]` | TA |
+| `test-plan@<key>` | `["<spec_path>/*/**/test-plan.md"]` | `[{ "name": "<tester>" }]` | DV |
+| `bug@<key>` | `["<spec_path>/*/**/bug.md"]` | `[{ "name": "<tester>" }]` | DV |
+| `code-report@<key>` | `["<spec_path>/*/**/code-report.md"]` | `[{ "name": "<developer>" }]` | NONE |
+| `test-report@<key>` | `["<spec_path>/*/**/test-report.md"]` | `[{ "name": "<tester>" }]` | NONE |
+| `data-report@<key>` | `["<spec_path>/*/**/data-report.md"]` | `[{ "name": "<data-writer>" }]` | NONE |
+| `docs-report@<key>` | `["<spec_path>/*/**/docs-report.md"]` | `[{ "name": "<docs-writer>" }]` | NONE |
+| `research-design@<key>` | `["<spec_path>/*/**/design.md"]` | `[{ "name": "<designer>" }]` | R |
+| `research-report@<key>` | `["<spec_path>/*/**/research.md"]` | `[{ "name": "<researcher>" }]` | NONE |
 
 The content-root (project-wide) `design.md` / `tech.md` pair is never product-scoped — it belongs to no product, so only the shared `system-design` / `system-tech` classes ever cover it; a content-root `ui-design.md` does not exist at all.
 
@@ -587,7 +603,7 @@ The `class` label is the schema's only identity slot (a `class` field, not `id`)
 
 **Matching semantics.** For a document carrying `spec_doc_type`, resolution is type-first: among the classes whose label's part before `@` equals the document's type, a product-scoped one whose `paths` cover the file wins, otherwise the bare-type class does. Neither the filename nor the directory participates — a document named `races.md` typed `design` lands in the `design` class.
 
-`paths` still matter in two places. They discriminate which product an `@<key>` override applies to, and they are the whole matcher for a document carrying no `spec_doc_type` (a free-form intake file, a consumer's own document class), which falls back to first-match-wins over `paths` in list order. On that fallback path the globs use `PurePath.match` right-anchored, where `*` never crosses `/` and `**` acts as a SINGLE path segment — never write `**` into class paths expecting recursion. Right-anchoring is why the shared globs need no `<spec_path>` prefix: `*/design.md` matches BOTH the product-root `<spec_path>/design.md` (its last two segments) and every asset `<category>/<slug>/design.md`; `bugs/*/bug.md` matches `<spec_path>/bugs/<slug>/bug.md`. Discovery itself is review's own repo-wide `lazy-review.coordinator-watch` pathspec — no per-product mask bounds it, so a class's globs are the whole of the routing. A product's override globs deliberately OVERLAP the shared globs, so override classes MUST still sit earlier in `review.classes` than the shared set.
+`paths` still matter in two places. They discriminate which product an `@<key>` override applies to, and they are the whole matcher for a document carrying no `spec_doc_type` (a free-form intake file, a consumer's own document class), which falls back to first-match-wins over `paths` in list order. On that fallback path a glob without `**` uses `PurePath.match` right-anchored, where `*` never crosses `/`; a glob carrying `**` is matched against the whole repo-relative path, `**` spanning any number of segments (zero included) — that form is what the product-scoped overrides use, since a `spec_path` prefix would otherwise pin the asset's depth. Right-anchoring is why the shared globs need no `<spec_path>` prefix: `*/*/design.md` matches every asset's own `<…>/<slug>/design.md` at any depth (its last three segments), while the separate `system-design` class's `*/design.md` and `design.md` match the product-root and content-root `design.md`; `bugs/*/bug.md` matches `<spec_path>/bugs/<slug>/bug.md`. Discovery itself is review's own repo-wide `lazy-review.coordinator-watch` pathspec — no per-product mask bounds it, so a class's globs are the whole of the routing. A product's override globs deliberately OVERLAP the shared globs, so override classes MUST still sit earlier in `review.classes` than the shared set.
 
 **Reconcile, not append.** Read `review.classes` and act per Step 8's outcome:
 
@@ -618,7 +634,7 @@ printf '%s' '<edited-review-json>' | "${LAZYCORTEX_PYTHON:-python3}" <core-cli> 
 
 Then check for the retired `lazy-review.scan` routine — a leftover of the md-scan sieve model, which `/lazy-review.install` deletes on sight (its `process-file` consumer no longer exists, so a surviving registration is a routine the daemon runs into a missing subcommand). Review's live discovery surface is the repo-wide `lazy-review.coordinator-watch` git-watch routine, which its own install seeds and which carries no per-product masks — nothing here to normalize, in either routine. `Bash`-free check: **absent** → outcome `legacy-scan-routine-absent`. **Present** → do NOT touch it, and report `legacy-scan-routine-present` so the operator re-runs `/lazy-review.install`. Same posture as `/lazy-spec.install`'s Step 6f, which owns this cleanup for the install path.
 
-Then normalize the `lazy-spec.coordinator-watch` routine — but only when `routines["lazy-spec.coordinator-watch"]` is present (skip silently when absent — `/lazy-spec.install` has not run here). Resolve `<content_root>` = the `spec.vault_root` setting (default `specs`) and union this product's glob `<content_root>/<spec_path>/*/*` into the routine's `group_globs` list (create the key if absent) — `group_globs` collapses per-asset file items into one worker dispatch per asset directory (`lazy-core.routine-types-schema.md` § git `group_globs`); the glob stops at category/asset depth rather than reaching every document under the product. When `spec.vault_root` is `.`, the prefix is omitted and the glob is `<spec_path>/*/*`. Idempotent — a glob already present for this product is left untouched, and no other product's entry is ever removed.
+Then normalize the `lazy-spec.coordinator-watch` routine — but only when `routines["lazy-spec.coordinator-watch"]` is present (skip silently when absent — `/lazy-spec.install` has not run here). Resolve `<content_root>` = the `spec.vault_root` setting (default `specs`) and union this product's two globs — `<content_root>/<spec_path>/*/*` for an asset inside a folder and `<content_root>/<spec_path>/*` for an asset straight at the product root — into the routine's `group_globs` list (create the key if absent) — `group_globs` collapses per-asset file items into one worker dispatch per asset directory (`lazy-core.routine-types-schema.md` § git `group_globs`); the daemon picks the deepest matching glob, so the list is a set and its order carries nothing. When `spec.vault_root` is `.`, the prefix is omitted and the globs are `<spec_path>/*/*` and `<spec_path>/*`. Idempotent — a glob already present for this product is left untouched, and no other product's entry is ever removed.
 
 Finally, verify the generated classes by invoking `/lazy-review.audit` via the `Skill` tool (`skill: "lazycortex-review:lazy-review.audit"`) and surface its findings — report the `audit: <LEVEL> (<N> findings)` line and any FAIL/WARN detail. If the audit reports FAIL, report it; do not silently leave broken classes.
 
@@ -641,7 +657,6 @@ One line per task in the canonical list, with its outcome word. A missing line i
 - **`/lazy-spec.product-config` aborts with `aborted:no-vault-spec`** — create mode with neither `vision.md` nor a pre-vision `design.md` at the spec content-root → run `/lazy-spec.install` (its Step 6.9 seeds the vault-vision draft), fill it in, then re-run this skill.
 
 - **`/lazy-spec.product-config` aborts pointing at `lazycortex-experts`** — a chosen role expert (use-case-writer / designer / system-designer / architect / ui-designer / planner / developer / tester / data-writer / researcher) is not registered in `experts` → compose the persona via `lazycortex-experts`, then re-run this skill.
-- **`/lazy-spec.product-config` refuses because the spec_path is nested** — the chosen `spec_path` sits under another product's `spec_path` (products are flat) → choose a path outside every registered product's subtree, then re-run.
 - **`/lazy-spec.product-config` refuses because the product key already exists** — the chosen key is already a `products` key → edit that product instead, or pick a different key.
 - **`/lazy-review.audit` reports FAIL after Step 12** — a generated class references an unregistered expert or violates the section-writer schema → fix the expert assignments (re-run Step 8 with registered experts) and re-audit.
 - **`/lazy-spec.product-config` skips a declared type, leaving it with no class** — a type declared `review: true` whose experts the operator never answered for gets no class, and every document of that type then stays outside the review loop indefinitely → re-run the skill and answer the `AskUserQuestion` naming that type, or declare the type `review: false` if it genuinely should not be reviewed.

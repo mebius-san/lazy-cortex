@@ -26,7 +26,7 @@ spec_source_docs: []
 <!-- "Verification: Confirmation by examination and through provision of objective evidence that specified requirements have been fulfilled." — ISO 9000 -->
 
 ## Rollback
-<!-- How to back the change out — a revert command for a small commit, a step-by-step sequence for a migration. -->
+<!-- Optional. How to back the change out — a revert command for a small commit, a step-by-step sequence for a migration. -->
 
 # Sources
 #protected/spec/sources

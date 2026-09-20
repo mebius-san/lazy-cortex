@@ -10,14 +10,14 @@ the input byte-for-byte. Sections are pointers into the body; mutating
 helpers live elsewhere (`body.py`).
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import re
 from dataclasses import dataclass, field
 
-import frontmatter as _fm
-from keys import Tag
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import frontmatter as _fm  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from keys import Tag  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -216,6 +216,7 @@ def _detect_owner(section_body: str) -> str | None:
   """
   for raw in section_body.splitlines():
     stripped = raw.strip()
+
     # guard: skip leading blank lines so the ownership tag is matched on the first line with content
     if not stripped:
       continue
@@ -243,6 +244,7 @@ def is_historian_section(section_content: str) -> bool:
   """
   for raw in section_content.splitlines():
     stripped = raw.strip()
+
     # guard: skip leading blank lines so the History tag is matched on the first line with content
     if not stripped:
       continue
@@ -269,6 +271,7 @@ def _enumerate_sections(body: str) -> list[Section]:
   sections: list[Section] = []
   for i, m in enumerate(matches):
     title = m.group(1).strip()
+
     # Heading line includes its trailing newline if present.
     line_end = body.find("\n", m.end())
     if line_end == -1:

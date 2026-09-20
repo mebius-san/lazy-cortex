@@ -64,6 +64,7 @@ def reindex(repo: Path) -> dict:
   # waiver: filesystem path/filename idiom, not a domain constant
   memory_root = repo / ".memory"
   summary = { "experts": 0, "notes": 0, "tags": 0 }
+
   # guard: no .memory tree — nothing to reindex
   if not memory_root.is_dir():
     return summary
@@ -91,6 +92,7 @@ def reindex(repo: Path) -> dict:
       # waiver: internal counter/summary dict subkey, single-source set in this script
       summary["notes"] += 1
       fm = _read_note_frontmatter(note)
+
       # guard: note has no parseable frontmatter — skip
       if not fm:
         continue
@@ -103,6 +105,7 @@ def reindex(repo: Path) -> dict:
           all_topics.add(topic_from_tag(tag))
         except ValueError:
           continue
+
     # Also fold in existing local .tags/ files so stale ones are seen.
     # waiver: filesystem path/filename idiom, not a domain constant
     local_tags_dir = expert_dir / ".tags"

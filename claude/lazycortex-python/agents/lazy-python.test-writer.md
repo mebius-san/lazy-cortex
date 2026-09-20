@@ -37,6 +37,7 @@ Docstrings are the specification. The current implementation may be buggy, incom
 
 - Write tests that verify **documented behavior** — what the docstring says the code should do.
 - Read the class and method docstrings carefully: Summary, Scope, Guarantees, Args, Returns, Raises — each is a testable claim.
+- Read the knowledge markers in method bodies the same way: every `Contract:` block (including one on the interface declaration the class implements), every `Domain(…):` block, and every `opt:` clause is a testable claim — the guarantee, the formula or rule, the assumption the optimization rests on.
 - If a test fails, the **implementation** is suspect, not the test (see Golden Rule below).
 - Never reverse-engineer expected values from the implementation. Derive them from the documented contract.
 
@@ -88,7 +89,7 @@ If a test correctly reflects documented behavior but fails against the current i
 
 # Paranoid Testing Strategy
 
-For every class under test, cover **all 7 categories**. Do not skip any.
+For every class under test, cover **all 9 categories**. Do not skip any.
 
 1. **Happy path:** Test all public methods and properties with valid arguments. Every public method gets at least one happy-path test.
 2. **Wrong/invalid arguments:** Pass `None`, wrong types, empty strings, empty collections, negative numbers, zero where positive is expected. At least 2 per method that accepts arguments.
@@ -100,7 +101,9 @@ For every class under test, cover **all 7 categories**. Do not skip any.
    with pytest.raises(TypeError, match = "unsupported operand type"):
      obj @ "invalid"
    ```
-7. **Documented guarantees:** Every bullet in a `Guarantees` section becomes its own test. If the docstring says "indices are always aligned", write a test that verifies index alignment.
+7. **Documented guarantees and contracts:** Every bullet in a `Guarantees` section and every `Contract:` block becomes its own test — including a block the class inherits from an interface declaration, which the implementation's docstring only points at. If the docstring says "indices are always aligned", write a test that verifies index alignment.
+8. **Domain mechanics:** Every `Domain(…):` block stating a formula or rule gets a test whose expected values are worked out by hand from the block for two or three inputs, never read off the implementation. A `Domain(unfiled):` block counts the same — the group is parked, the mechanic is not.
+9. **Optimization assumptions:** Every `opt:` clause gets a test that violates the named assumption — the cached input changes after the first call, the source a precomputed table was built from moves — and asserts the result stays correct or the cache is dropped. This is the test that catches a cache outliving the code it was built for.
 
 # Coverage Requirements
 
@@ -147,15 +150,15 @@ Outcome: `guidelines-loaded`.
 
 ## Step 2 — Read production class
 
-Read the production class fully — pay special attention to docstrings (Summary, Guarantees, Args, Returns, Raises). Outcome: `read`.
+Read the production class fully — pay special attention to docstrings (Summary, Guarantees, Args, Returns, Raises) and to the `Contract:`, `Domain(…):`, and `opt:` markers in method bodies. When the class implements an interface, read the interface's abstract declarations too: the `Contract:` blocks they carry bind this implementation. Outcome: `read`.
 
 ## Step 3 — Identify test targets
 
-Enumerate init paths, public methods, properties, documented guarantees, documented exceptions, and operator overloads. Outcome: `<N>-targets`.
+Enumerate init paths, public methods, properties, documented guarantees, documented exceptions, operator overloads, and every `Contract:` block, `Domain(…):` block, and `opt:` clause found in Step 2. Outcome: `<N>-targets`.
 
 ## Step 4 — Write tests
 
-Write tests covering all 7 paranoid testing categories. Aim for at least 2 edge/error cases per method. Outcome: `<N>-tests-written`.
+Write tests covering all 9 paranoid testing categories. Aim for at least 2 edge/error cases per method. Outcome: `<N>-tests-written`.
 
 ## Step 5 — Add class and method docstrings
 

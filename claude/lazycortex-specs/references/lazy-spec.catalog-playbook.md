@@ -21,7 +21,7 @@ Four system documents live loose beside the level note, and nowhere else:
 
 ## 1. Stage promotion runs before any gate is evaluated
 
-On every wake, before evaluating a single gate or checkbox: each system document whose `review_result` reads `approved` or `approved-with-concerns` while its `spec_stage` still reads `draft` gets `Skill(lazycortex-specs:lazy-spec.set-stage, "<doc> approved")`. The history line lands in this level note.
+On every wake, before evaluating a single gate or checkbox: each system document whose `review_result` reads `approved` or `approved-with-concerns` while its `spec_stage` still reads `draft` gets `Skill(lazycortex-specs:lazy-spec.set-stage, "<doc> approved")`. No history line lands — the call stamps `spec_approved_at` on the document instead.
 
 This ordering is not a preference. Gates below are derived from stage, so a gate evaluated before the promotion reads the stale value and stays shut on a document the review already accepted — the exact way a level document sits approved-but-unstaged forever when nothing promotes it.
 
@@ -77,19 +77,21 @@ No row of this ladder dispatches an expert job. `dispatch-job` and `cancel-job` 
 
 A level document is written by its review class's own writers. The coordinator seeds it, opens its review, promotes its stage, and flips the gate it feeds — it never writes into the body of any of them, and the sibling-doc carve-out the asset coordinator has for carrying a question or a decision candidate across documents does not exist at this level.
 
-## 5. The event from below — a released asset (`asset-released`)
+## 5. The events from below — a released asset (`asset-released`) and a re-approved child product (`child-reapproved`)
 
 Only on a product level. When an asset of this product crosses `spec_released` into true, that asset's own wake dispatches one hop upward onto this note.
 
-Read the released asset's `design.md` and, when it has one, its `architecture.md`, and compare what they say the product now does against what the product's own `design.md` says. No divergence: rewrite `# Status brief` and stop — a release that changed nothing at the product's altitude is the ordinary case. A divergence: hang the `Revise design` row and name the divergence plainly in `# Status brief`, so the operator sees what changed before deciding. A tick on that row opens `design.md`'s review with `Skill(lazycortex-review:lazy-review.submit, "<design.md>")`, carrying the divergence into the review's context — the document is already written, so it needs a review round, not a writer round.
+Read the released asset's start document — `design.md`, or the document its type declaration names (a bug has no `design.md` and starts from its own report) — found in `context`, which carries the released asset's whole folder, and, when it has one, its `architecture.md`, and compare what they say the product now does against what the product's own `design.md` says. No divergence: rewrite `# Status brief` and stop — a release that changed nothing at the product's altitude is the ordinary case. A divergence: hang the `Revise design` row and name the divergence plainly in `# Status brief`, so the operator sees what changed before deciding. A tick on that row opens `design.md`'s review with `Skill(lazycortex-review:lazy-review.submit, "<design.md>")`, carrying the divergence into the review's context — the document is already written, so it needs a review round, not a writer round.
 
 One event, one action. This wake never edits an asset, never flips an asset's gate, and never wakes another coordinator.
+
+**A nested product** is a child of this level the same way an asset is. When its `vision.md` or `design.md` reaches `approved`, its wake dispatches one hop upward onto this note with `payload["child"]` naming it. The child's own level note and whichever of its `vision.md` / `design.md` exist arrive in `context`, as they do on every wake of this level — a product reads the products nested inside it the way it reads its own assets. Read the child's re-approved document and compare what it says the child now is against what this level's own `design.md` says about it. No divergence: rewrite `# Status brief` and stop. A divergence: hang `Revise design` and name it in `# Status brief`, exactly as for a released asset. Only a product level receives this wake; the catalog root reads its products through § 6.
 
 ## 6. Re-approval from above — candidate requests
 
 A `DOC_TRANSITION` landing on `vision.md` or `design.md` that already carried an `approved` value before this one is a re-approval: the level changed its mind about something it had already settled. Compare the new text against what sits below:
 
-- **On a product level** — against the product's unfinished assets: an asset is unfinished while `spec_released` is false and `spec_cancelled` is false. A finished asset is history; nothing reopens it from above.
+- **On a product level** — against the product's unfinished assets AND against each nested product's own `vision.md` and `design.md`: an asset is unfinished while `spec_released` is false and `spec_cancelled` is false. A finished asset is history; nothing reopens it from above.
 - **On the catalog root** — against each product's own `vision.md` and `design.md`.
 
 Each divergence becomes ONE candidate request:
@@ -110,7 +112,7 @@ Rewrite `# Status brief` on every wake — two to four sentences of plain produc
 
 ## 8. Questions and commands
 
-Questions and one-shot commands follow the same shapes every coordinator in this plugin uses: a `[!question]` callout with `- [ ]` options is the only channel to the operator, and it must end with `> — spec.catalog-coordinator` as its own last quoted line — the ANSWER wake keys off that exact attribution. A non-empty `# Coordinator commands` section is unfolded into a numbered mini-plan in that same section, marked `✓` / `→` / `·` while it runs, and moved whole into `# History` when it finishes. A command runs even on a halted level.
+Questions and one-shot commands follow the same shapes every coordinator in this plugin uses: a `[!question]` callout with `- [ ]` options is the only channel to the operator, and it must end with `> — spec.catalog-coordinator` as its own last quoted line — the ANSWER wake keys off that exact attribution. A non-empty `# Coordinator commands` section is unfolded into a numbered mini-plan in that same section, marked `✓` / `→` / `·` while it runs, and cleared when it finishes — one `note-history` line on the level note says what the command did. A command runs even on a halted level.
 
 When a decision does not follow unambiguously from this playbook and the rule layers below, raise a question and stop on this level. Never guess a product into existence, and never draft a candidate request from a divergence you are not sure is one.
 
@@ -122,7 +124,8 @@ From the most general to the closest, on WORKFLOW the closest wins; on PROCEDURE
 2. The vault-wide operator doc at `spec.coordination_rules`.
 3. Product guidelines, role `coordinator` — on a product level only.
 4. The catalog root note's `# Coordinator rules`.
-5. The product note's own `# Coordinator rules` — on a product level, the closest layer.
+5. Every ancestor product note's `# Coordinator rules`, outermost first — a nested product reads each enclosing product's section before its own.
+6. The product note's own `# Coordinator rules` — on a product level, the closest layer.
 
 The asset coordinator reads a product note's `# Coordinator rules` as one of its own layers too. That section serves both readers; nothing in it is scoped to one of them by default.
 

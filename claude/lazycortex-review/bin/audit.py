@@ -15,14 +15,15 @@ Checks performed (one finding per check):
   satisfy the section-schema rules (Task 4.1).
 - Every `#review/<tag>` callout across the documents matched by
   `review.classes[].paths` belongs to the closed vocabulary: `command`
-  / `question` / `concern` plus every `banner.py` state tag (Task 10).
+  / `question` plus every `banner.py` state tag (Task 10).
+- A product-scoped class (`<type>@<key>`) whose `paths` carry a glob
+  without `**` fixes the asset depth and warns, naming the class and
+  the repair.
 
 Output is a JSON record with `level` (PASS/WARN/FAIL) and a list of
 `findings`. Exit code: 0 on PASS, 1 on WARN, 2 on FAIL.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import argparse
 import json
@@ -31,12 +32,17 @@ import re
 import sys
 from pathlib import Path, PurePosixPath
 
-import banner as _banner
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import banner as _banner  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import doc_class as _doc_class  # pylint: disable=import-error
 # waiver: `claude/lazycortex-specs/bin/note_ops.py` shares this basename; in a whole-project mypy run the bare
 # `import note_ops` below resolves to that unrelated module instead (this dir's `__init__.py` makes review's
 # own copy package-qualified as `bin.note_ops`), so mypy checks the attribute against the wrong file's shape
-import note_ops as _note_ops  # type: ignore
-from keys import Bucket, JobKey, Phase, Position, ReviewStatus, Style, Tag
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import note_ops as _note_ops  # type: ignore  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from keys import Bucket, JobKey, Phase, Position, ReviewStatus, Style, Tag  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -46,6 +52,10 @@ if TYPE_CHECKING:
 _VALID_STYLES = {"simple", "diff", "criticmarkup", "html"}
 _SECTION_ID_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
 _FLAT_NAME_RE = re.compile(r"^[a-z0-9_-]+$")
+# Type-name prefix of the four level review classes (`system-vision`, `system-design`,
+# `system-ui-design`, `system-tech`) — their document is loose at a product root, so their
+# product-scoped glob names one file rather than fixing an asset depth.
+_LEVEL_TYPE_PREFIX = "system-"
 
 # Finding id for a duplicated `class` identity token. Unlike its per-entry siblings, which are
 # built as `f"class_{i}_..."`, this one names a collision between two entries and so carries no
@@ -60,7 +70,7 @@ _CHECK_CLASS_IDENTITY_DUP = "class_identity_dup"
 # instead) — but the union is kept explicit rather than trimmed to the reachable subset, so this
 # check stays correct against the vocabulary the spec defines rather than against whatever
 # `note_ops` happens to pre-filter this release.
-_VALID_CALLOUT_TAGS = {"command", "question", "concern"} | {state.value for state in _banner.State}
+_VALID_CALLOUT_TAGS = {"command", "question"} | {state.value for state in _banner.State}
 
 
 def _add(findings: list[dict], severity: str, check: str, message: str) -> None:
@@ -102,12 +112,14 @@ def _check_section_writers_new_schema(settings: dict, findings: list[dict]) -> N
     # waiver: one-off human-facing message
     class_name = class_cfg.get(JobKey.CLASS, "<unnamed>")
     experts_cfg = class_cfg.get(JobKey.EXPERTS) or {}
+
     # guard: malformed experts block (not a dict) has no umbrellas to walk
     if not isinstance(experts_cfg, dict):
       continue
     seen_section_ids: dict[str, str] = {}  # section_id → first umbrella seen
     for umbrella in (Bucket.VALIDATION, Bucket.TERMINAL):
       umbrella_cfg = experts_cfg.get(umbrella) or {}
+
       # guard: malformed umbrella block (not a dict) has no writers to validate
       if not isinstance(umbrella_cfg, dict):
         continue
@@ -118,6 +130,7 @@ def _check_section_writers_new_schema(settings: dict, findings: list[dict]) -> N
           _add(findings, ReviewStatus.FAIL,"section-id-alphabet",
                f'section-id "{section_id}" violates ^[a-z][a-z0-9_-]*$'
                f" — needed for tag parsing (#expert/<flat-name>/<section-id>)")
+
         # Rule 2: uniqueness across umbrellas
         if section_id in seen_section_ids and seen_section_ids[section_id] != umbrella:
           # waiver: one-off human-facing message
@@ -125,6 +138,7 @@ def _check_section_writers_new_schema(settings: dict, findings: list[dict]) -> N
                f'section-id "{section_id}" declared in both validation and terminal'
                f" — tag #expert/<flat-name>/{section_id} would be ambiguous")
         seen_section_ids[section_id] = umbrella
+
         # Rule 3: writer-object must be a dict with required fields
         if not isinstance(writer, dict):
           # waiver: one-off human-facing message
@@ -137,6 +151,7 @@ def _check_section_writers_new_schema(settings: dict, findings: list[dict]) -> N
             _add(findings, ReviewStatus.FAIL,"writer-missing-field",
                  f'writer at {class_name}.experts.{umbrella}.{section_id}'
                  f' missing required field "{field}"')
+
         # Rule 2 (cross-repo): repo field is deprecated; "." is silently accepted
         # waiver: external-format field name, not an internal key
         if "repo" in writer and writer["repo"] != ".":
@@ -144,6 +159,7 @@ def _check_section_writers_new_schema(settings: dict, findings: list[dict]) -> N
           _add(findings, ReviewStatus.FAIL,"repo-field-redundant",
                f'writer {writer.get(JobKey.NAME, "")!r} has `repo` field — drop it; every writer '
                f'runs in this repo (the field is deprecated; "." is silently accepted)')
+
         # Rule 4: position enum
         position = writer.get(JobKey.POSITION)
         if position is not None and position not in (Position.TOP, Position.BOTTOM):
@@ -151,6 +167,7 @@ def _check_section_writers_new_schema(settings: dict, findings: list[dict]) -> N
           _add(findings, ReviewStatus.FAIL,"position-enum",
                f'writer at {class_name}.experts.{umbrella}.{section_id}'
                f' has position="{position}" — must be "top" or "bottom"')
+
         # Rule 5: section non-empty
         section_title = writer.get(JobKey.SECTION)
         if section_title is not None and (
@@ -160,6 +177,7 @@ def _check_section_writers_new_schema(settings: dict, findings: list[dict]) -> N
           _add(findings, ReviewStatus.FAIL,"section-title-empty",
                f"writer at {class_name}.experts.{umbrella}.{section_id}"
                f" has empty section title")
+
         # Rule 6: flat-name alphabet (existing: flattened dot-name)
         name = writer.get(JobKey.NAME, "")
         if name:
@@ -169,6 +187,7 @@ def _check_section_writers_new_schema(settings: dict, findings: list[dict]) -> N
             _add(findings, ReviewStatus.FAIL,"flat-name-alphabet",
                  f'expert "{name}" flattens to "{flat}"'
                  f" which violates tag-safe alphabet ^[a-z0-9_-]+$")
+
         # Rule 7: name resolves in root experts catalog
         if name and name not in root_experts:
           # waiver: one-off human-facing message
@@ -176,6 +195,48 @@ def _check_section_writers_new_schema(settings: dict, findings: list[dict]) -> N
                f'expert "{name}" referenced in'
                f" {class_name}.experts.{umbrella}.{section_id}"
                f" is not registered in root experts catalog")
+
+
+def _check_override_globs(settings: dict, findings: list[dict]) -> None:
+  """
+  Warn on a product-scoped class whose glob fixes the asset depth.
+
+  A `<type>@<key>` class written before assets could sit at any depth carries
+  `<spec_path>/*/*/<doc>.md`; an asset at the product root or nested deeper falls out of it and
+  loses the product's own experts. The repair is the wizard's own regeneration. A `system-`
+  class is exempt: its document is a level doc loose at the product root, so its glob names
+  that one file and fixes no asset depth at all.
+
+  Args:
+    settings: Parsed `lazy.settings.json` contents.
+    findings: Mutable findings list to append to.
+  """
+  classes = settings.get(JobKey.REVIEW, {}).get(JobKey.CLASSES) or []
+  for class_cfg in classes:
+    # guard: only a dict entry carries a label and paths to judge
+    if not isinstance(class_cfg, dict):
+      continue
+    label = str(class_cfg.get(JobKey.CLASS) or "")
+    type_part, sep, key = label.partition("@")
+
+    # guard: a shared class routes by type and never fixed a depth
+    if not sep:
+      continue
+
+    # guard: a level class (`system-vision@<key>` and its three siblings) names one loose
+    # document at the product root by design — it carries no asset depth to have fixed
+    if type_part.startswith(_LEVEL_TYPE_PREFIX):
+      continue
+    paths = class_cfg.get(JobKey.PATHS) or []
+    if any(isinstance(pat, str) and "**" not in pat for pat in paths):
+      # a label whose `@` names no key (`design@`) has no argument to pass the wizard, so the
+      # repair names the bare verb rather than trailing a blank where the key would go
+      # waiver: one-off human-facing message
+      repair = f"/lazy-spec.product-config {key}".rstrip()
+      # waiver: one-off human-facing message
+      _add(findings, ReviewStatus.WARN, "override_glob_depth",
+           f"class {label!r} carries a fixed-depth glob; re-run {repair}"
+           f" in edit mode to regenerate it")
 
 
 def _collect_review_files(repo_root: Path, paths: list[str]) -> list[Path]:
@@ -200,12 +261,12 @@ def _collect_review_files(repo_root: Path, paths: list[str]) -> list[Path]:
     for name in files:
       full = Path(base) / name
       rel = full.relative_to(repo_root).as_posix()
-      # PurePosixPath.match honors shell-glob semantics where `*` does NOT cross `/`, unlike
-      # `fnmatch.fnmatch` (the recursive-glob idiom the `Path.glob`/`rglob` ban prescribes), whose `*` matches `/`
-      # too and would let a shallow class pattern (`request/*.md`) swallow files that belong to
-      # a deeper-nested class (`request/products/*/changes/*/design.md`) — same rationale as
-      # dispatcher.py's own `_iter_class_files`.
-      if any(PurePosixPath(rel).match(pat) for pat in paths):
+
+      # the same matcher the router uses: right-anchored `PurePath.match` for a plain glob, where
+      # `*` never crosses `/`, and a repo-root-anchored match with `**` spanning any number of
+      # segments for a product override glob — so the audit walks exactly the files the router
+      # would route into the class, at any asset depth
+      if any(_doc_class.glob_matches(pat, PurePosixPath(rel)) for pat in paths):
         matches.append(full)
   return matches
 
@@ -227,6 +288,7 @@ def _check_callout_tags(repo_root: Path, settings: dict, findings: list[dict]) -
     if not isinstance(class_cfg, dict):
       continue
     paths = class_cfg.get(JobKey.PATHS)
+
     # guard: a malformed/empty/non-string-entry paths list has no files to walk — the shape
     # itself is already reported by _check_all's own class_i_paths check
     if not isinstance(paths, list) or not paths or any(not isinstance(item, str) for item in paths):
@@ -246,14 +308,17 @@ def _check_callout_tags(repo_root: Path, settings: dict, findings: list[dict]) -
       # Domain(review.config):
       # # Closed vocabulary for review callout tags
       # A callout inside a review document may only carry one of the operator-facing marker
-      # tags — a command, a question, or a concern — or the tag of a state the status banner
-      # itself can render. Any other tag is a configuration error: it names a state or intent
-      # the review system has no way to act on.
+      # tags — a command or a question — or the tag of a state the status banner itself can
+      # render. Any other tag is a configuration error: it names a state or intent the review
+      # system has no way to act on. A concern tag is no longer in the set: validators write
+      # plain prose and the main writer turns their findings into questions, so a concern
+      # callout had no author and no way to be answered.
 
       # every callout not in the closed vocabulary FAILs, named by its repo-relative path and line
       # waiver: 'callouts'/'tag'/'line' are note_ops.build_report's own wire-shape keys, not keys.py-promoted constants
       for callout in report["callouts"]:
         tag = callout["tag"]
+
         # guard: known vocabulary — nothing to report
         if tag[len(Tag.REVIEW_PREFIX):] in _VALID_CALLOUT_TAGS:
           continue
@@ -332,6 +397,7 @@ def _check_all(settings: dict, findings: list[dict], *, repo_root: Path | None =
       _add(findings, ReviewStatus.FAIL,f"class_{i}_experts_shape",
            f"class #{i} 'experts' must be an object")
       continue
+
     # validation and terminal use the new dict-of-writer-object schema;
     # they are validated separately by _check_section_writers_new_schema.
     # A leftover `history` group (the retired historian chain entry, Task
@@ -378,6 +444,7 @@ def _check_all(settings: dict, findings: list[dict], *, repo_root: Path | None =
 
   # the section-writer schema has its own rules, checked as a separate pass
   _check_section_writers_new_schema(settings, findings)
+  _check_override_globs(settings, findings)
 
   # the callout-tag vocabulary check needs real files on disk; skipped when no repo_root was
   # given (a bare settings dict has no repository to resolve `review.classes[].paths` against)
@@ -413,6 +480,7 @@ def run(settings_or_path: Path | dict) -> dict:
     # waiver: one-off human-facing message
     _add(findings, ReviewStatus.FAIL,"settings_parse", f"invalid JSON: {exc}")
     return _bundle(findings)
+
   # the classic layout is <repo_root>/.claude/lazy.settings.json (Paths.CLAUDE_DIR /
   # Paths.SETTINGS_FILE), so the settings file's grandparent is the repo root
   _check_all(settings, findings, repo_root = settings_path.parent.parent)

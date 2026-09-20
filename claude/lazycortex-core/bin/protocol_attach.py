@@ -13,16 +13,16 @@ the correct layer for a read-modify-write round-trip); the write goes through
 `lazy_settings.save_section` (atomic, version-stamped, never touches the local overlay).
 """
 from __future__ import annotations
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import argparse
 import json
 import os
 from pathlib import Path
 
-from constants import RoutineKey, SettingsKey
-from lazy_settings import load_tracked_section, save_section
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from constants import RoutineKey, SettingsKey  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from lazy_settings import load_tracked_section, save_section  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -105,6 +105,7 @@ def add_protocols(routine_name: str, ids: list[str], *, cwd: Path | str | None =
     current.append(pid)
     added.append(pid)
   routine[RoutineKey.PROTOCOLS] = current
+
   # write only when something was added, so a no-op round-trip leaves the file untouched
   if added:
     save_section(path, SettingsKey.ROUTINES, routines)

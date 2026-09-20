@@ -130,6 +130,7 @@ def _banner_tag(text: str) -> str | None:
   """
   lines = text.splitlines()
   start = 0
+
   # skip the frontmatter block so the banner is the first body line examined
   if lines and lines[0].strip() == "---":
     for idx, line in enumerate(lines[1:], start = 1):
@@ -244,6 +245,7 @@ def is_in_process(path: str) -> bool:
     True when the banner carries a working state, False otherwise.
   """
   root = _vault_root()
+
   # the document itself is the source of truth; an unreadable one simply does not match
   try:
     # waiver: stdlib text-mode tokens; a named constant would only move them away from the call

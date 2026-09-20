@@ -109,6 +109,7 @@ def load_config(cwd: str | None) -> dict:
       # guard: non-dict entry is metadata (`_version: int`, future timestamp fields, etc.)
       if not isinstance(entries, dict):
         continue  # skip metadata. Filtering by shape, not name, because `_user`/`_project`/`_builtin`
+
                   # are legitimate group keys that share the underscore prefix.
       merged.setdefault(g, {}).update(entries)
   return { SettingsKey.AGENT_MODELS: merged }
@@ -134,9 +135,11 @@ def build_flat_map(cfg: dict) -> dict:
   """
   out: dict = {}
   groups = cfg.get(SettingsKey.AGENT_MODELS, {})
+
   # guard: malformed top-level — return empty flat map
   if not isinstance(groups, dict):
     return out
+
   # walk every group and merge its entries into the flat output
   for _group_name, entries in groups.items():
     # guard: malformed group — skip silently
@@ -145,9 +148,11 @@ def build_flat_map(cfg: dict) -> dict:
     for key, val in entries.items():
       # unwrap bare pin / seed object to its effective tier
       tier = resolve_agent_model_tier(val)
+
       # guard: malformed entry (no string `tier`) — skip silently
       if tier is None:
         continue
+
       # warn on cross-group collision before overwriting
       if key in out and out[key] != tier:
         print(
@@ -175,6 +180,7 @@ def main() -> None:
 
   # the hook payload carries the tool call this dispatch is about to make
   payload = json.load(sys.stdin)
+
   # guard: only Agent dispatches participate in routing
   if payload.get(HookKey.TOOL_NAME) != ToolName.AGENT:
     sys.exit(0)
@@ -182,6 +188,7 @@ def main() -> None:
   # snapshot caller-supplied tool input so any mutation stays local to this hook
   ti = dict(payload.get(HookKey.TOOL_INPUT, {}))
   subagent = ti.get(AgentToolInput.SUBAGENT_TYPE)
+
   # guard: dispatch missing subagent name — nothing to look up
   if not subagent:
     sys.exit(0)

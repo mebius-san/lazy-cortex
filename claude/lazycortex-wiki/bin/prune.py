@@ -10,15 +10,17 @@ Cross-plugin Python import is forbidden (per the inter-plugin boundary contract)
 so all primitives used here are imported from within this plugin's own `bin/`.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 from pathlib import Path
 
-import doctor as _doctor
-import index as _index
-import nodes as _nodes
-import scope as _scope
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import doctor as _doctor  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import index as _index  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import nodes as _nodes  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import scope as _scope  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -95,6 +97,7 @@ class NodePruner:
     # sweep every node in the scope, recording the ones that lost a link
     for node_path in self._resolver.iter_nodes(self._cfg):
       node = _nodes.node_for(node_path)
+
       # guard: unrecognised file type — skip
       if node is None:
         continue
@@ -146,9 +149,11 @@ class NodePruner:
     dropped = False
     for item in items:
       target, _gloss = _doctor._extract_link_target(item)
+
       # guard: empty target — nothing to resolve against the deletion
       if not target:
         continue
+
       # guard: target does not resolve to the deleted file
       if not self._points_at(node_dir, target, deleted_abs):
         continue

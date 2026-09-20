@@ -151,11 +151,14 @@ class GlobMatcher:
       escaped = escaped.replace(r"\*", "[^/]*").replace(r"\?", "[^/]")
       segs.append(escaped)
     regex = ".*".join(segs)
+
     # normalise /.*/ → zero or more path components (includes bare /)
     regex = regex.replace("/.*/", "(?:/|/.*/)")
+
     # normalise leading .*/ → optional (handles **/*.md matching top-level files)
     if regex.startswith(".*/"):
       regex = "(?:.*/)?" + regex[3:]
+
     # normalise trailing /.* → optional trailing slash+anything
     if regex.endswith("/.*"):
       regex = regex[:-3] + "(?:/.*)?"
@@ -365,6 +368,7 @@ class RemoteMirror:
     # always produces a plan with nothing left to apply.
 
     items = self.plan()
+
     # apply each classification: added/updated copy source bytes, removed deletes, the rest no-op
     for item in items:
       if item[_Key.ACTION] in ( ACTION_ADDED, ACTION_UPDATED ):
@@ -397,6 +401,7 @@ class RemoteMirror:
       # guard: include configured and this tracked file matches none of its patterns — drop it
       if self._include and not any(self._matcher.match(rel, pat) for pat in self._include):
         continue
+
       # guard: named by an exclude glob
       if any(self._matcher.match(rel, pat) for pat in self._exclude):
         continue
@@ -417,11 +422,13 @@ class RemoteMirror:
     # guard: a symlinked entry is never dereferenced and copied
     if path.is_symlink():
       return REASON_SYMLINK
+
     # guard: over the configured per-file ceiling
     if path.stat().st_size > self._max_bytes:
       return REASON_TOO_LARGE
     with path.open(_READ_BINARY) as fh:
       chunk = fh.read(_BINARY_SNIFF_BYTES)
+
     # guard: a NUL byte in the head window marks the file as non-text
     if b"\x00" in chunk:
       return REASON_BINARY
@@ -467,6 +474,7 @@ def run(payload: dict) -> dict:
     OSError: Reading a source file or writing/deleting a destination file failed.
   """
   mode = payload[_Key.MODE]
+
   # guard: mode is a closed vocabulary — an unrecognised value is a caller bug, not a fetch error
   if mode not in ( MODE_PLAN, MODE_SYNC ):
     raise ValueError(f"mode must be '{MODE_PLAN}' or '{MODE_SYNC}', got {mode!r}")
@@ -486,6 +494,7 @@ def run(payload: dict) -> dict:
   # reuse the caller's already-fetched clone when it vouches for one
   if not (payload.get(_Key.SKIP_FETCH) and (Path(payload[_Key.CACHE_DIR]) / _GIT_DIR).is_dir()):
     error = mirror.fetch()
+
     # guard: fetch failed — the caller gets just the error, clone/dest stay untouched
     if error is not None:
       return { _Key.ERROR: error }

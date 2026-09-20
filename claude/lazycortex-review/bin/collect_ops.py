@@ -44,9 +44,6 @@ the round still closes within one sweep. Every other outcome, and every malforme
 request/response, is left uncollected for a future pass to interpret.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
-# pylint: disable=import-error,wrong-import-position,deprecated-module
 
 import argparse
 import json
@@ -67,27 +64,29 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import body as _body  # noqa: E402
+import body as _body  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import frontmatter as _fm  # noqa: E402
+import frontmatter as _fm  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import git_ops as _git_ops  # noqa: E402
+import git_ops as _git_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import job_markers as _job_markers  # noqa: E402
+import job_markers as _job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import parser as _parser  # noqa: E402
+# waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
+import parser as _parser  # noqa: E402  # pylint: disable=import-error,wrong-import-position,deprecated-module
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import payload as _payload  # noqa: E402
+import payload as _payload  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# pylint: disable-next=import-error,wrong-import-position
 import coordinator_dispatch as _coordinator_dispatch  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import reapply as _reapply  # noqa: E402
+import reapply as _reapply  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from keys import (  # noqa: E402
+from keys import (  # noqa: E402  # pylint: disable=import-error,wrong-import-position
     BotIdentity, CoreCommand, EnvVar, JobFile, JobKey, JobMarker, JobStatus, Outcome, Paths, Phase, Plugin, Tag,
 )
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from errors import PayloadError  # noqa: E402
+from errors import PayloadError  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # A link target pointing into the job's own result dir — what a writer spells when it references
@@ -135,6 +134,7 @@ def _job_target(repo: Path, jdir: Path, data: dict) -> Path | None:
 
   # fallback: the mark-job marker written before dispatch still links doc to job
   key = _job_markers.doc_for_job(repo, jdir.name)
+
   # guard: no payload field and no marker entry — the job is unaddressable
   if key is None:
     return None
@@ -153,6 +153,7 @@ def _job_dirs_for_file(repo: Path, file_path: Path) -> list[Path]:
     List of job-bundle directories, in filesystem iteration order.
   """
   jobs_root = repo / JobFile.EXPERTS_DIR / JobFile.JOBS_DIR
+
   # guard: no job queue at all — nothing can target this file
   if not jobs_root.is_dir():
     return []
@@ -167,6 +168,7 @@ def _job_dirs_for_file(repo: Path, file_path: Path) -> list[Path]:
       if not jdir.is_dir():
         continue
       req = jdir / JobFile.REQUEST
+
       # guard: job dir without a request.json carries no target to match
       if not req.is_file():
         continue
@@ -175,6 +177,7 @@ def _job_dirs_for_file(repo: Path, file_path: Path) -> list[Path]:
       except (OSError, json.JSONDecodeError):
         continue
       resolved = _job_target(repo, jdir, data)
+
       # a payload target is compared verbatim (dispatchers write the same absolute string),
       # while a sidecar-recovered `repo / key` needs symlink-safe resolution to match it
       if resolved is not None and (str(resolved) == target or resolved.resolve() == file_path.resolve()):
@@ -274,18 +277,23 @@ def _require_entry_lands(source: Path, dest: Path | None, document: Path) -> Non
   # guard: a symlink names a file outside the bundle whatever it resolves to
   if source.is_symlink():
     raise PayloadError(f"result entry is a symlink: {source.name!r}")
+
   # guard: the response declared a file the writer never wrote — a malformed response
   if not source.is_file():
     raise PayloadError(f"result entry declared but not delivered: {source.name!r}")
+
   # guard: the job's own result document is read, never copied — it has no destination to check
   if dest is None:
     return
+
   # guard: a symlinked destination is written through, landing the file outside the folder
   if dest.is_symlink():
     raise PayloadError(f"attachment destination is a symlink: {source.name!r}")
+
   # guard: the document an attachment rides with is never the file it overwrites
   if dest == document:
     raise PayloadError(f"attachment would overwrite the reviewed document: {source.name!r}")
+
   # guard: a spec catalog's own note is nobody's attachment destination
   if _is_spec_document(dest):
     raise PayloadError(f"attachment would overwrite a spec document: {source.name!r}")
@@ -311,6 +319,7 @@ def _attachment_names(request: dict, response: dict, jdir: Path, document: Path)
       reviewed document, or a spec catalog's own note.
   """
   entries = response[JobKey.RESULT][1:]
+
   # guard: only a main-writer payload may carry attachments — every other mode drops the extras
   if request.get(JobKey.MODE) != Phase.MAIN:
     if entries:
@@ -353,6 +362,7 @@ def _fix_attachment_links(body: str, names: list[str], jdir: Path) -> str:
   def _neighbour(match: re.Match) -> str:
     name = match.group(_GROUP_NAME)
     linked.add(name)
+
     # guard: the document points at a neighbour this response never delivered
     if name not in delivered:
       sys.stderr.write(f"collect-job: {jdir.name}: link to missing neighbour {name!r}\n")
@@ -360,6 +370,7 @@ def _fix_attachment_links(body: str, names: list[str], jdir: Path) -> str:
 
   # rewrite every result/ link in one pass, then report the two mismatch directions
   out = _RESULT_LINK_RE.sub(_neighbour, body)
+
   # an attachment nobody references is still landed — the operator is told, the job is not failed
   for name in sorted(delivered - linked):
     sys.stderr.write(f"collect-job: {jdir.name}: attachment {name!r} is not linked from the document\n")
@@ -440,9 +451,11 @@ def _apply_one_job(
   if response.get(JobKey.OUTCOME) != Outcome.EDITED:
     return None
   result = response.get(JobKey.RESULT)
+
   # guard: outcome=edited without a result payload is a malformed response — leave it uncollected
   if not isinstance(result, list) or not result:
     return None
+
   # a malformed request (e.g. `section_id` without a matching `expert`) or a malformed
   # attachment entry leaves the job uncollected
   try:
@@ -452,6 +465,7 @@ def _apply_one_job(
   section_layout = (
       {owner: request[JobKey.POSITION]} if owner is not None and JobKey.POSITION in request else None
   )
+
   # graft the response onto the operator's current document via the existing reapply pipeline
   reapply_result = _reapply.reapply(
       operator_text = text,
@@ -468,6 +482,7 @@ def _apply_one_job(
   landed = reapply_result.text
   _landed_meta, landed_body = _fm.parse(landed)
   stripped_body = _body.strip_answered_questions(landed_body)
+
   # guard: nothing answered in this round — the landed text is already final
   if stripped_body == landed_body:
     return landed, attachments
@@ -511,6 +526,7 @@ def _resolve_core_cli() -> Path | None:
     cli = Path(d) / Paths.BIN_DIR / Plugin.CORE
     if cli.is_file():
       return cli
+
   # dev-vault stage — this file sits at claude/lazycortex-review/bin/, so core's own bin/ is two
   # levels up and back down the sibling tree; it must precede the cache (§ 2b) so a checkout runs
   # the sources at hand rather than whatever version happens to be installed
@@ -518,6 +534,7 @@ def _resolve_core_cli() -> Path | None:
   if sibling.is_file():
     return sibling
   cache = Path.home() / Paths.PLUGIN_CACHE
+
   # guard: no plugin cache on this machine — nothing further to try
   if not cache.is_dir():
     return None
@@ -527,6 +544,7 @@ def _resolve_core_cli() -> Path | None:
       if registry.is_dir() and (registry / Plugin.CORE).is_dir()
   ]
   all_versions = [v for pd in plugin_dirs for v in pd.iterdir() if v.is_dir()]
+
   # guard: no installed version found — nothing further to try
   if not all_versions:
     return None
@@ -558,6 +576,7 @@ def _consume_job(repo: Path, jdir: Path) -> None:
           input = json.dumps({JobKey.EXPERT: jdir.parent.name, JobKey.JOB_ID: jdir.name}),
           capture_output = True, text = True, env = env, check = False,
       )
+
       # guard: the core CLI consumed the job — the local fallback marker is not needed
       if proc.returncode == 0:
         return
@@ -565,6 +584,7 @@ def _consume_job(repo: Path, jdir: Path) -> None:
     # core-CLI call falls through to the local marker rather than aborting the collect pass
     except OSError:
       pass
+
   # fallback: same-repo direct marker touch when the CLI is unresolved, fails, or errors —
   # mirroring dispatcher.py's own `_core_consume_job` fallback path
   (jdir / Outcome.CONSUMED).touch()
@@ -613,6 +633,7 @@ def collect_for_file(repo: Path, file_path: Path, *, commit: bool = True) -> dic
   original = file_path.read_text()
   text = original
   applied: list[Path] = []
+
   # every attachment this batch delivered, as repo-relative paths, for the commit pathspec
   landed: list[str] = []
 
@@ -629,16 +650,19 @@ def collect_for_file(repo: Path, file_path: Path, *, commit: bool = True) -> dic
       response = json.loads((jdir / JobFile.RESPONSE).read_text())
     except (OSError, json.JSONDecodeError):
       continue
+
     # an `empty` writer finished with nothing to change — count it for consumption as-is
     if response.get(JobKey.OUTCOME) == Outcome.EMPTY:
       applied.append(jdir)
       continue
     outcome_applied = _apply_one_job(text, jdir, request, response, file_path)
+
     # guard: nothing to apply for this job — leave it uncollected
     if outcome_applied is None:
       continue
     text, attachments = outcome_applied
     applied.append(jdir)
+
     # the attachments ride the document: each lands beside it under its declared basename
     for name in attachments:
       shutil.copyfile(jdir / _RESULT_DIR / name, file_path.parent / name)
@@ -721,6 +745,7 @@ def collect_tick(repo: Path) -> dict:
     be processed (the error-ledger contract — a failed sweep must not report success via exit 0).
   """
   jobs_root = repo / JobFile.EXPERTS_DIR / JobFile.JOBS_DIR
+
   # guard: no job queue at all — nothing to sweep
   if not jobs_root.is_dir():
     return {"files": 0, "dispatched": 0}
@@ -770,12 +795,14 @@ def collect_tick(repo: Path) -> dict:
       # pipeline (every review dispatch writes one or the other), so it is skipped silently
       if resolved is None:
         continue
+
       # guard: only an outcome `collect-job` consumes is deliverable — everything else stays
       # for the pump's retry ladder or the daily sanitizer to judge
       try:
         outcome = json.loads((jdir / JobFile.RESPONSE).read_text()).get(JobKey.OUTCOME)
       except (OSError, json.JSONDecodeError):
         continue
+
       # guard: a counted-but-never-consumed bundle would re-raise this wake every sweep
       if outcome not in (Outcome.EDITED, Outcome.EMPTY):
         continue
@@ -807,6 +834,7 @@ def collect_tick(repo: Path) -> dict:
   # waiver: 'files'/'dispatched' are this sweep's own wire-shape keys, not keys.py-promoted constants
   summary: dict[str, int | str] = {"files": len(targets), "dispatched": dispatched}
   errors = broken + failed
+
   # a sweep with failures must not report success via exit 0 (the error-ledger contract)
   if errors:
     summary[JobKey.ERROR] = f"{len(errors)} job(s) failed to collect: {', '.join(errors)}"

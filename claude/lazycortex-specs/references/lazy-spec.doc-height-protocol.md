@@ -9,11 +9,11 @@ Contract for every expert dispatched against a document of the `vision`, `system
 
 ## The height ladder
 
-Documents of one kind form one vertical, whatever the kind — vision, design, use cases, tech, any future kind: the content-root document speaks of the system, a product-level document of the product, an asset-level document of the single asset. Each document writes at the level of its direct children and no deeper, and the levels of one vertical do not duplicate each other.
+Documents of one kind form one vertical, whatever the kind — vision, design, use cases, tech, any future kind: the content-root document speaks of the system, a product-level document of the product — and a product nested inside another is one of the enclosing product's children, so the vertical has one level per product in the chain — an asset-level document of the single asset. Each document writes at the level of its direct children and no deeper, and the levels of one vertical do not duplicate each other.
 
 The asset-level design is the bottom of the design vertical: the first level where the mechanics of one asset belong, still as design, never as code.
 
-One test decides placement: **behavior that lives entirely inside one child belongs at that child's level.** What must hold is this document's ceiling; the mechanism that makes it hold is the lower level's floor.
+One test decides placement: **behavior that lives entirely inside one child belongs at that child's level.** What must hold is this document's ceiling; the mechanism that makes it hold is the lower level's floor. A nested product's document speaks of that product's own assets and nested products, never of the enclosing product's other children.
 
 ## Writer obligations
 

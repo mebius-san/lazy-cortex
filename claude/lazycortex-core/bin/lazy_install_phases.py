@@ -62,6 +62,7 @@ def ensure_gitignore_lines(repo: Path | str, lines: list[str]) -> str:
   for line in lines:
     stripped = line.strip()
     variants = { stripped, stripped.rstrip("/"), stripped + "/" }
+
     # an entry absent in every variant form is the only one that still needs writing
     if not existing_set & variants:
       to_append.append(stripped)
@@ -99,6 +100,7 @@ def remove_gitignore_lines(repo: Path | str, lines: list[str]) -> str:
   repo = Path(repo)
   # waiver: filesystem filename idiom, not a domain constant
   gi = repo / ".gitignore"
+
   # guard: nothing to scrub when the file does not exist
   if not gi.exists():
     # waiver: install-phase outcome token, not a reusable domain key
@@ -153,6 +155,7 @@ def ensure_self_ignoring_dir(directory: Path | str) -> str:
   directory.mkdir(parents = True, exist_ok = True)
   # waiver: filesystem filename idiom, not a domain constant
   gi = directory / ".gitignore"
+
   # guard: an existing file — operator content or a prior run — is never touched
   if gi.exists():
     # waiver: install-phase outcome token, not a reusable domain key
@@ -241,6 +244,7 @@ def migrate_log_hooks(settings_path: Path | str) -> str:
     absent or contained no stale entries.
   """
   settings_path = Path(settings_path)
+
   # guard: nothing to migrate when the settings file does not exist
   if not settings_path.exists():
     # waiver: install-phase outcome token, not a reusable domain key
@@ -497,6 +501,7 @@ def detect_install_scope(
 
   # the shared cache is the sole proof the plugin is installed on this machine
   entries = _installed_entries(home / _INSTALLED_PLUGINS_REL, plugin_key)
+
   # guard: no install record aborts regardless of any enablement flag — there are no sources to sync
   if not entries:
     # waiver: install-scope detection signal, not a reusable domain key
@@ -563,6 +568,7 @@ def bootstrap_daemon_git(repo: Path | str) -> str:
 
   repo = Path(repo)
   branch = _git_capture(repo, [ "rev-parse", "--abbrev-ref", "HEAD" ])
+
   # guard: no branch to ride — not a repo, or a detached HEAD the daemon must not check out
   if branch is None or branch == "HEAD":
     # waiver: install-phase outcome token, not a reusable domain key
@@ -608,6 +614,7 @@ def _git_capture(repo: Path, args: list[str]) -> str | None:
     done = subprocess.run([ "git", *args ], cwd = repo, capture_output = True, text = True, check = False)
   except OSError:
     return None
+
   # guard: non-zero exit means the fact is unavailable, not empty
   if done.returncode != 0:
     return None

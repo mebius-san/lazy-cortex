@@ -15,14 +15,15 @@ MUST surface the dirty paths to the operator before they pick a mode (so the cho
 informed); this module assumes the choice was already informed.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import subprocess
 
-import error_ledger
-import runtime_state
-from constants import (
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import error_ledger  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import runtime_state  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from constants import (  # pylint: disable=import-error
   HaltKey, HaltReason, IncidentActor, IncidentKey, IncidentKind, IncidentPhase,
   IncidentResolution, JobArtifact, JobFile, JobMarker, RecoverMode,
 )
@@ -106,6 +107,7 @@ def is_clean(repo: Path) -> bool:
     )
   except FileNotFoundError:
     return True
+
   # guard: git produced a non-zero exit — treat as clean to avoid wedging recovery on transient errors
   if rc.returncode != 0:
     return True
@@ -180,14 +182,18 @@ def _pathspecs_from_dirty(lines: list[str], *, porcelain: bool) -> list[str]:
     # guard: the truncation sentinel is prose about the list, not an entry in it
     if line.startswith(_TRUNCATION_PREFIX):
       continue
+
     # guard: a line shorter than the prefix plus one character names no path at all
     if len(line) <= _PORCELAIN_PREFIX_WIDTH:
       continue
+
     # the path follows the status prefix
     path = line[_PORCELAIN_PREFIX_WIDTH:]
+
     # a rename names both sides and both belong in one commit: staging the pair records the
     # new path and the old one's removal together, so no half-applied move is left behind
     parts = path.rsplit(_RENAME_ARROW, 1) if line[0] in _RENAME_CODES else [path]
+
     # each side is quoted on its own, so unquoting follows the split rather than preceding it
     # guard: a blank entry would widen the pathspec to the whole directory
     out.extend(_unquote(p) for p in parts if p)
@@ -261,9 +267,11 @@ def cleanup(repo: Path, mode: str, message: str | None = None, *,
     # guard: commit mode demands an explicit message — refuse to invent one
     if not message:
       raise RecoverError("commit mode requires a non-empty message")
+
     # a named path set is the whole footprint; an unnamed one is the operator's capture-all
     named = list(paths or [])
     pathspec = _pathspecs_from_dirty(named, porcelain = porcelain)
+
     # guard: the caller named paths but none resolved — refuse rather than widen to capture-all
     if named and not pathspec:
       raise RecoverError(f"no committable path among: {named!r}")
@@ -334,10 +342,12 @@ def resume(repo: Path) -> None:
   # depends on the tree's state, whatever that state happens to be at the moment.
 
   halt = runtime_state.get_halted(repo)
+
   # guard: daemon is not halted — nothing to clear
   if halt is None:
     return
   reason = halt.get(HaltKey.REASON)
+
   # guard: dirty-tree halt specifically requires a clean tree before clearing
   if reason == HaltReason.UNCOMMITTED_CHANGES and not is_clean(repo):
     # re-query porcelain status so the error message names the offending paths
@@ -398,6 +408,7 @@ def revert_files(repo: Path, paths: list[str]) -> None:
     [ "git", "checkout", "HEAD", "--", *paths ],
     cwd = str(repo), check = True, capture_output = True,
   )
+
   # spec § Emit points #7 — revert resolves the halt; resume after a revert overwrites with
   # `resumed` but either resolution alone yields a closed incident
   error_ledger.resolve(
@@ -448,6 +459,7 @@ def clear_dead_job(jdir: Path) -> None:
 
   # the bundle leaves this call claimable, which is the whole meaning of a retry
   (jdir / JobMarker.READY).touch()
+
   # job dirs always live at <repo>/.experts/.jobs/<expert>/<job> — derive the repo root
   # waiver: inline numeric literal (parents-index depth), not a domain constant
   error_ledger.record(jdir.parents[3], {
@@ -472,6 +484,7 @@ def permanent_fail(jdir: Path, diagnosis: dict) -> None:
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   import json
   (jdir / JobArtifact.DIAGNOSIS_JSON).write_text(json.dumps(diagnosis, indent = 2))
+
   # job dirs always live at <repo>/.experts/.jobs/<expert>/<job> — derive the repo root
   # waiver: inline numeric literal (parents-index depth), not a domain constant
   error_ledger.record(jdir.parents[3], {

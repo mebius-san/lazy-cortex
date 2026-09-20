@@ -104,6 +104,7 @@ def _xdg_config_home() -> Path:
   """
   # waiver: external XDG env-var name, not a domain constant
   env = os.environ.get("XDG_CONFIG_HOME")
+
   # guard: explicit XDG override wins over the home-relative default
   if env:
     return Path(env)
@@ -151,6 +152,7 @@ def _unit_names(platform: str) -> list[str]:
     directory does not exist.
   """
   base = _unit_dir(platform)
+
   # guard: no unit directory means no daemons are installed on this host
   if not base.is_dir():
     return []
@@ -176,6 +178,7 @@ def parse_repo_root_from_unit(text: str) -> str | None:
     or None when the unit does not contain the shim invocation.
   """
   match = _SHIM_RE.search(text)
+
   # guard: unit without the shim path is not a lazycortex runtime unit
   if match is None:
     return None
@@ -250,11 +253,13 @@ def enumerate_local_daemons(platform: str | None = None) -> list[dict]:
       sys.stderr.write(f"daemon_registry: skipping unreadable unit {name}: {e}\n")
       continue
     root_str = parse_repo_root_from_unit(text)
+
     # guard: unit without a parseable repo root cannot be joined with settings — skip, never crash
     if root_str is None:
       sys.stderr.write(f"daemon_registry: skipping unit without shim path: {name}\n")
       continue
     repo_root = Path(root_str)
+
     # guard: repo deleted while its unit lingered — settings are gone, skip
     if not (repo_root / SettingsFile.REL).is_file():
       sys.stderr.write(f"daemon_registry: skipping unit for missing repo {root_str}: {name}\n")
@@ -331,6 +336,7 @@ def identify_holder(port: int, registry: list[dict] | None = None) -> dict | Non
     # waiver: external lsof -F field-prefix letters, not domain constants
     elif line.startswith("c") and command is None:
       command = line[1:]
+
   # guard: no listener on the port
   if pid is None:
     return None
@@ -388,6 +394,7 @@ def write_scrape_targets_file(out: Path | None = None, registry: list[dict] | No
     # guard: daemons without metrics contribute no scrape target
     if not row[RegistryRow.METRICS_ENABLED]:
       continue
+
     # a wildcard bind is scraped over loopback; anything else is scraped at its bind address
     # waiver: inline network literals, not domain constants
     address = "127.0.0.1" if row[RegistryRow.BIND] in ("0.0.0.0", "::") else row[RegistryRow.BIND]

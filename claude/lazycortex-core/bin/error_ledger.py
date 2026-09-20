@@ -175,12 +175,14 @@ def record(repo: Path, event: dict) -> None:  # type: ignore[type-arg]
     if isinstance(detail, str) and len(detail) > _DETAIL_MAX:
       ev[_F_DETAIL] = detail[:_DETAIL_MAX]
     line = json.dumps(ev, ensure_ascii = False, separators = (",", ":"))
+
     # guard: oversized event would break single-write atomicity — shed refs/detail to fit
     if len(line.encode(_UTF8)) > _LINE_MAX:
       ev.pop(_F_REFS, None)
       ev[_F_DETAIL] = (ev.get(_F_DETAIL) or "")[:200]
       line = json.dumps(ev, ensure_ascii = False, separators = (",", ":"))
     path = Path(repo) / JOURNAL_REL
+
     # the last journal line is the baseline the dedupe window compares against
     prev = _last_event(path)
 
@@ -257,6 +259,7 @@ def _last_event(path: Path) -> dict | None:  # type: ignore[type-arg]
     return None
   for raw in reversed(tail.splitlines()):
     line = raw.strip()
+
     # guard: trailing blank lines are not events — keep scanning upward
     if not line:
       continue
@@ -283,12 +286,14 @@ def _iter_journal(repo: Path) -> Iterator[dict]:  # type: ignore[type-arg]
     Event dicts from the journal, in file order.
   """
   path = Path(repo) / JOURNAL_REL
+
   # guard: missing journal is normal on a fresh repo — yield nothing
   if not path.is_file():
     return
   with open(path, encoding = _UTF8, errors = _UTF8_ERRORS_REPLACE) as f:
     for raw in f:
       line = raw.strip()
+
       # guard: blank lines between records are not events — skip silently
       if not line:
         continue
@@ -385,11 +390,14 @@ def incidents(repo: Path, *, state: str = _ST_ALL, since: str | None = None) -> 
   out = []
   for inc, last in last_by_incident.items():
     st = _fold_state([ last ])
+
     # guard: state filter — skip if caller restricted to a specific state
     if state not in (_ST_ALL, st):
       continue
+
     # ULIDs sort lexicographically by time, so the last event's id doubles as the cursor value
     last_id = last.get(_F_ID, "")
+
     # guard: skip incidents at or before the since-cursor
     if since is not None and isinstance(last_id, str) and last_id <= since:
       continue
@@ -474,6 +482,7 @@ def _gc_gone_job_incidents(repo: Path) -> int:
   closed = 0
   for inc in incidents(repo, state = _ST_OPEN) + incidents(repo, state = _ST_NEEDS_OPERATOR):
     key = inc.get(_F_INCIDENT, "")
+
     # guard: only job incidents map to a job directory
     if not key.startswith(_JOB_PREFIX):
       continue
@@ -561,6 +570,7 @@ def prune(repo: Path, retention_days: int) -> dict:  # type: ignore[type-arg]
       latest[inc] = ev
       if _event_unix(ev) >= cutoff:
         young_counts[inc] = young_counts.get(inc, 0) + 1
+
   # pass 2 — stream kept events straight to the tmp journal
   path = Path(repo) / JOURNAL_REL
   path.parent.mkdir(parents = True, exist_ok = True)
@@ -575,10 +585,12 @@ def prune(repo: Path, retention_days: int) -> dict:  # type: ignore[type-arg]
       drop = not young
       if young and inc:
         seen[inc] = seen.get(inc, 0) + 1
+
         # guard: incident cap — only the newest _MAX_EVENTS_PER_INCIDENT survive; folding reads the tail only
         drop = seen[inc] <= young_counts.get(inc, 0) - _MAX_EVENTS_PER_INCIDENT
       if drop:
         pruned += 1
+
         # guard: only `opened` events advance the all-time error counter
         if ev.get(_F_PHASE) == _PH_OPENED:
           k = ev.get(_F_KIND, _UNKNOWN_KIND)

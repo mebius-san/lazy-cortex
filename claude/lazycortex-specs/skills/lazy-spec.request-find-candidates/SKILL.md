@@ -21,17 +21,17 @@ Per the class → routing table in `lazy-spec.request-protocol.md`:
 
 | Class | Search globs (relative to vault root) |
 |---|---|
-| `feature` | `<product>/features/<slug>/<slug>.md` |
+| `feature` | `<product>/<slug>/<slug>.md` (a feature lives at the product root by default) |
 | `change` | `<product>/changes/<slug>/<slug>.md` |
 | `bug` | `<product>/bugs/<slug>/<slug>.md` |
-| `task` | `<product>/{features,changes,bugs}/<slug>/<slug>.md` |
-| `spec` | `<product>/features/<slug>/<slug>.md` |
-| `plan` | `<product>/{features,changes}/<slug>/<slug>.md` |
-| `feedback` | `<product>/{features,changes,bugs}/<slug>/<slug>.md` |
+| `task` | `<product>/<slug>/<slug>.md`, `<product>/{changes,bugs}/<slug>/<slug>.md` |
+| `spec` | `<product>/<slug>/<slug>.md` |
+| `plan` | `<product>/<slug>/<slug>.md`, `<product>/changes/<slug>/<slug>.md` |
+| `feedback` | `<product>/<slug>/<slug>.md`, `<product>/{changes,bugs}/<slug>/<slug>.md` |
 
-The folder-note filename matches its parent folder basename (per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md` — `features/csv-export/csv-export.md`, not `features/csv-export/folder-note.md`). To enumerate candidates, walk each `<product>/<kind>/` directory; for each subdir `<slug>/`, the folder-note is the file `<slug>/<slug>.md` if present.
+The folder-note filename matches its parent folder basename (per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md` — `csv-export/csv-export.md`, not `csv-export/folder-note.md`). To enumerate candidates, walk each `<product>/<kind>/` directory for a category with its own folder (`changes/`, `bugs/`); for a feature, walk `<product>/` itself — any subdirectory that is not one of the product's declared group folders is a candidate. For each subdir `<slug>/`, the folder-note is the file `<slug>/<slug>.md` if present — **keep only notes whose `spec_role` is `status`**: the root glob's shape (`<slug>/<slug>.md`) also matches a nested product's own level note (`spec_role: product`), which is never a candidate.
 
-If `product` is None, expand `<product>` to `*` (across-product search). The vault layout is `<vault-root>/<product>/{features,changes,bugs}/<slug>/<slug>.md` per the canonical convention.
+If `product` is None, expand `<product>` to `*` (across-product search). The vault layout is `<vault-root>/<product>/<slug>/<slug>.md` for a feature at the product root, or `<vault-root>/<product>/{changes,bugs}/<slug>/<slug>.md` for a change or bug, per the canonical convention.
 
 ## Ranking
 
@@ -52,8 +52,8 @@ Top-5 candidates as a JSON list, sorted by score descending. Empty list when no 
 ```json
 [
   {
-    "folder_note_path": "products/dashboards/features/csv-export/csv-export.md",
-    "wikilink": "[[products/dashboards/features/csv-export/csv-export|dashboards feature: csv-export]]",
+    "folder_note_path": "products/dashboards/csv-export/csv-export.md",
+    "wikilink": "[[products/dashboards/csv-export/csv-export|dashboards feature: csv-export]]",
     "score": 0.72,
     "rationale": "70% term overlap; design.md mentions CSV export and date filters"
   }

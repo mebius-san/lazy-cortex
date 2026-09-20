@@ -26,7 +26,7 @@ spec_source_docs: []
 <!-- "The Value Propositions Building Block describes the bundle of products and services that create value for a specific Customer Segment." — Osterwalder & Pigneur, Business Model Generation -->
 
 ## Design Concept
-<!-- "A short summary and explanation of the fundamental decisions and solution strategies, that shape the system's architecture." — arc42 §4 Solution Strategy -->
+<!-- Optional. "A short summary and explanation of the fundamental decisions and solution strategies, that shape the system's architecture." — arc42 §4 Solution Strategy -->
 
 # Sources
 #protected/spec/sources

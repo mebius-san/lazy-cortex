@@ -9,7 +9,7 @@ neither setting nor clearing one costs a commit, because the sidecar is gitignor
 Store shape — `<repo>/.runtime/lazy-specs.jobs.json`, keyed by the note's repo-relative POSIX path:
 
     {
-      "specs/my-product/features/thing/thing.md": {
+      "specs/my-product/bugs/thing/thing.md": {
         "coordinator_job": {"trigger": ..., "expert": ..., "job_id": ...} | null,
         "active_job":      {"checkbox": ..., "expert": ..., "job_id": ...} | null,
         "pending_wake":    "job-done" | "declined" | null
@@ -23,8 +23,6 @@ so an untouched note leaves no row. Writes are atomic (temp file + rename) — t
 loop is serial by contract, so nothing beyond atomicity is needed.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error,wrong-import-position
 
 import argparse
 import json
@@ -42,6 +40,7 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# pylint: disable-next=import-error,wrong-import-position
 from spec_keys import CoordinatorTrigger, JobMarker  # noqa: E402
 
 
@@ -192,6 +191,7 @@ def check_sub_schema(field: str, value: dict) -> str | None:
   # it from.
 
   sub_schema = _SUB_SCHEMAS.get(field)
+
   # guard: this field carries no closed sub-schema — nothing further to check
   if sub_schema is None:
     return None
@@ -201,6 +201,7 @@ def check_sub_schema(field: str, value: dict) -> str | None:
   for name, allowed in closed_fields.items():
     if value[name] not in allowed:
       return f"{name} must be one of {sorted(allowed)}, got {value[name]!r}"
+
   # a field with no closed set is validated for shape alone — an identifier that is not a
   # non-empty string names nothing, whatever vocabulary the playbook draws it from
   for name in sorted(required_keys - closed_fields.keys()):
@@ -238,6 +239,7 @@ def _write_store(repo: Path, store: Mapping[str, dict]) -> None:
   """
   path = sidecar_path(repo)
   path.parent.mkdir(parents = True, exist_ok = True)
+
   # write beside the target and rename over it, so a reader never observes a half-written store
   tmp = path.with_suffix(path.suffix + _TMP_SUFFIX)
   tmp.write_text(json.dumps(store, indent = 2, sort_keys = True) + "\n")
@@ -256,6 +258,7 @@ def _normalize_entry(stored: object) -> dict[str, dict | str | None]:
     in a dict field, and a blank wake token all read as `None`.
   """
   entry = empty_entry()
+
   # guard: nothing (or garbage) recorded for this note — the all-`None` entry is the answer
   if not isinstance(stored, dict):
     return entry
@@ -322,6 +325,7 @@ def update(repo: Path, note: Path, changes: Mapping[str, dict | str | None]) -> 
   # byte-identical to its state before the call — no partial write is ever persisted.
 
   unknown = [field for field in changes if field not in _FIELDS]
+
   # guard: a field outside the schema is a typo, and a typo must not become state
   if unknown:
     raise ValueError(f"mark-job: field(s) {unknown} are not in the marker schema {list(_FIELDS)}")
@@ -335,6 +339,7 @@ def update(repo: Path, note: Path, changes: Mapping[str, dict | str | None]) -> 
       if not isinstance(value, dict):
         raise ValueError(f"mark-job: {field} takes a JSON object, got {value!r}")
       error = check_sub_schema(field, value)
+
       # guard: an object that violates the field's closed sub-schema is refused just as cleanly
       if error is not None:
         raise ValueError(f"mark-job: {field} {error}")

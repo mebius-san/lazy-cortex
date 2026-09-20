@@ -8,13 +8,12 @@ and the document is processed twice. This module detects that by evidence: two s
 units registered on this host resolving to one physical inbox.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import socket
 from pathlib import Path
 
-from constants import (
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from constants import (  # pylint: disable=import-error
   DaemonKey,
   InboxGuardKey,
   InboxGuardKind,
@@ -46,7 +45,8 @@ def _inbox_routines(repo: Path) -> dict[str, Path]:
     repository registers no inbox routine or its settings cannot be read.
   """
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from lazy_settings import load_section
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from lazy_settings import load_section  # pylint: disable=import-error
   try:
     registry = load_section(repo / SettingsFile.REL, SettingsKey.ROUTINES)
   except (OSError, ValueError):
@@ -56,10 +56,12 @@ def _inbox_routines(repo: Path) -> dict[str, Path]:
     # guard: skip the _version sentinel and any non-dict routine value
     if not isinstance(cfg, dict):
       continue
+
     # guard: only an inbox routine scans a directory
     if cfg.get(RoutineKey.TYPE) != RoutineType.INBOX:
       continue
     rel = cfg.get(RoutineKey.INBOX_DIR)
+
     # guard: a routine without a string inbox path cannot be canonicalised
     if not isinstance(rel, str) or not rel:
       continue
@@ -95,15 +97,18 @@ def check_inbox_collision(repo: Path | str, platform: str | None = None) -> list
   # identical directory.
 
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from daemon_registry import RegistryRow, enumerate_local_daemons
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from daemon_registry import RegistryRow, enumerate_local_daemons  # pylint: disable=import-error
   repo = Path(repo).resolve()
   mine = _inbox_routines(repo)
+
   # guard: nothing to contest without a local inbox routine
   if not mine:
     return []
   findings: list[dict] = []
   for row in enumerate_local_daemons(platform):
     other = Path(str(row[RegistryRow.REPO_ROOT])).resolve()
+
     # guard: this checkout's own supervisor unit is not a second daemon
     if other == repo:
       continue
@@ -154,7 +159,8 @@ def check_inbox_collision_for_install(repo: Path | str, platform: str | None = N
   # of being processed twice, and no finding is reported for it.
 
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from lazy_settings import load_section
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from lazy_settings import load_section  # pylint: disable=import-error
   repo = Path(repo).resolve()
   try:
     daemon = load_section(repo / SettingsFile.REL, SettingsKey.DAEMON)

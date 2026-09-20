@@ -22,9 +22,6 @@ status callout already in place) produces byte-identical output →
 no-op.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# deferred imports below module code; position intentional (ruff E402 noqa guards it)
-# pylint: disable=import-error,wrong-import-position
 
 import argparse
 import json
@@ -42,18 +39,19 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import body as _body  # noqa: E402
+import body as _body  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import edit_markup as _edit_markup  # noqa: E402
+import edit_markup as _edit_markup  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import doc_class as _doc_class  # noqa: E402
+import doc_class as _doc_class  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import frontmatter as _fm  # noqa: E402
+import frontmatter as _fm  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import git_ops as _git_ops  # noqa: E402
+import git_ops as _git_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import job_markers as _job_markers  # noqa: E402
+import job_markers as _job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# pylint: disable-next=import-error,wrong-import-position
 from keys import Bucket, JobKey, Paths, ResultValue, ReviewKey, Style  # noqa: E402
 
 
@@ -169,6 +167,7 @@ def _load_settings(repo: Path) -> dict:
     Parsed settings dict, or `{}` when the file is absent or unparseable.
   """
   path = repo / Paths.CLAUDE_DIR / Paths.SETTINGS_FILE
+
   # guard: no settings file at all — nothing registered
   if not path.exists():
     return {}
@@ -376,7 +375,8 @@ def leftover_callouts(text: str) -> list[tuple[int, str]]:
     both scanned outside code fences. Empty when the document is clean.
   """
   # waiver: deferred sibling import matching this module's established import shape
-  import parser as _parser
+  # waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
+  import parser as _parser  # pylint: disable=deprecated-module,import-error
   _meta, body = _fm.parse(text)
   fm_lines = text[: len(text) - len(body)].count("\n")
   scan_body = _parser.strip_code_fences(body)
@@ -489,6 +489,7 @@ def main(argv: list[str]) -> int:
     return 2
   style = document_edit_marker_style(file_path)
   original = file_path.read_text()
+
   # guard: a questionnaire the writer never folded must not ship inside an approved document
   leftovers = leftover_callouts(original)
   if leftovers:
@@ -511,6 +512,7 @@ def main(argv: list[str]) -> int:
     print(f"already finalized: {file_path}")
     return 0
   file_path.write_text(new_text)
+
   # the finalized document carries no review machinery, and its runtime job markers are part
   # of that machinery — a stale one would paint the next cycle's banner from a dead job
   _job_markers.clear(repo, file_path)

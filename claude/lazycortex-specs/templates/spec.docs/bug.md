@@ -33,10 +33,12 @@ spec_source_docs: []
 <!-- "Expected result: The observable predicted behavior of a test item under specified conditions based on its test basis." — ISTQB Glossary -->
 
 ## Environment
+<!-- Optional. Where the bug shows: platform, version, configuration, data. -->
 
 <!-- "Test environment: An environment containing hardware, instrumentation, simulators, software tools, and other support elements needed to conduct a test." — ISTQB Glossary -->
 
 ## Related code / logs
+<!-- Optional. Code locations, log excerpts, and traces that point at the cause. -->
 
 <!-- Forge URLs to the suspected files / logs (use `lazy-spec.source-url` for repo links). Source URLs are permitted in this section only. -->
 

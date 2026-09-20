@@ -12,14 +12,15 @@ indexed.  The factory `node_for` selects the correct class; unrecognised
 file types are silently skipped.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 from pathlib import Path
 
-import explainers as _explainers
-import nodes as _nodes
-import scope as _scope
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import explainers as _explainers  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import nodes as _nodes  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import scope as _scope  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -208,6 +209,7 @@ class TopicIndex:
     # fold every node into each axis/value bucket its tags name
     for node_path in node_paths:
       node = _nodes.node_for(node_path)
+
       # guard: unrecognised file type — skip gracefully
       if node is None:
         continue
@@ -234,6 +236,7 @@ class TopicIndex:
       # a node appears once under each axis/value pair it is tagged with
       for tag in wiki_tags:
         axis, value_path = self._split_tag(tag)
+
         # guard: malformed tag — skip
         if axis is None or value_path is None:
           continue
@@ -285,6 +288,7 @@ class TopicIndex:
     # everything past the prefix is the axis plus its value segments
     rest = tag[len(_WIKI_TAG_PREFIX):]
     segs = rest.split("/")
+
     # guard: fewer than two segments means no value under the axis
     if len(segs) < 2:
       return None, None
@@ -348,11 +352,13 @@ class TopicIndex:
     lines: list[str] = []
     lines.append("---")
     lines.append(f"{_KEY_WIKI_ROLE}: {_VAL_WIKI_ROLE}")
+
     # carry the anchor through only when the prior index had one
     if synced_sha is not None:
       lines.append(f"{_KEY_WIKI_SYNCED_SHA}: {synced_sha}")
     lines.append("---")
     lines.append(f"# Topics — {self._scope_id}")
+
     # the file self-describes for the operator, in the vault's language
     lines.append(_explainers.explainer_line(
         _explainers.SURFACE_TOPICS, _explainers.resolve_language(self._repo)))
@@ -368,6 +374,7 @@ class TopicIndex:
             lines.append(f"- [{link_text}]({rel_link}) — {summary}")
           else:
             lines.append(f"- [{link_text}]({rel_link})")
+
           # emit the connectors sub-line only when the node has any
           if connectors:
             lines.append(f"{_CONNECTOR_PREFIX}{_CONNECTOR_SEP.join(connectors)}")

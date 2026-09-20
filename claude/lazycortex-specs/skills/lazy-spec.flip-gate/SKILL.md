@@ -11,7 +11,7 @@ Thin Claude wrapper over the gate-flip primitive `bin/flip_gate.py`. The gate mo
 
 ## Input
 
-1. **Asset** — a status folder-note path, asset directory, or any path/slug the product resolver can map to one asset folder `<spec_path>/<category>/<slug>/`. Resolve the product per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md` → Resolving a Product, then narrow to the single asset directory.
+1. **Asset** — a status folder-note path, asset directory, or any path/slug the product resolver can map to one asset folder under `<spec_path>` at any depth. Resolve the product per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md` → Resolving a Product, then narrow to the single asset directory.
 2. **Gate** — one of `spec_design_done`, `spec_plan_done`, `spec_develop_done`, `spec_tests_passing`, `spec_released`.
 3. **`--off`** (optional) — regress the gate true→false instead of flipping it on.
 4. **`--auto`** (optional) — skip the confirmation question (`spec.coordinator` and other non-interactive callers pass this). Without it, this is an interactive operator action.
@@ -31,8 +31,8 @@ Context (print before asking):
 - Where: /lazy-spec.flip-gate · Step 2 — Confirm the flip; target <asset-dir>/<slug>.md
 - Found: <gate> currently <true | false>; the other gates <the four booleans>; spec_cancelled false
 - Why asking: flipping a gate is the recorded progression signal, and the primitive performs the mutation unconditionally once confirmed — it does not itself check whether the gate's usual readiness condition holds; a human-signal gate (`spec_develop_done` / `spec_tests_passing` / `spec_released`) asserts that external work (deploy / green tests / merge) actually happened, and this confirmation is the human's own check
-- Answers: `yes` — runs the flip now, the asset advances one notch along the S0..S5 ladder (or regresses when `--off`), the folder-note's `# History` records it; `no` — no-op, asset unchanged (`skipped-per-user-choice`). See: `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.lifecycle-protocol.md`, `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.coordination-playbook.md`
-AskUserQuestion: header "Flip <gate>", question "Flip <gate> to <true | false> on <product>/<category>/<slug>?", options `yes` / `no`, each with a one-sentence consequence.
+- Answers: `yes` — runs the flip now, the asset advances one notch along the S0..S5 ladder (or regresses when `--off`), the folder-note's `spec_<gate>_at` stamp records the moment (dropped on `--off`), no history line; `no` — no-op, asset unchanged (`skipped-per-user-choice`). See: `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.lifecycle-protocol.md`, `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.coordination-playbook.md`
+AskUserQuestion: header "Flip <gate>", question "Flip <gate> to <true | false> on <product>/<path>?", options `yes` / `no`, each with a one-sentence consequence.
 ```
 
 On `no` → exit no-op (outcome `skipped-per-user-choice`). On `yes` → continue.

@@ -1,10 +1,10 @@
 """
 Job-dispatch support primitives shared by `lazycortex-specs`' own dispatch workers.
 
-`_core_dispatch_job` / `consume_stale_job` queue and retire jobs via the `lazycortex-core` CLI's
+`core_dispatch_job` / `consume_stale_job` queue and retire jobs via the `lazycortex-core` CLI's
 `dispatch-job` / `consume-job` subcommands — the § 1c inter-plugin boundary contract in
-`dev.plugin-boundaries.md`. `_collect_guideline_paths` names a product's role + wildcard
-guideline files for a dispatch bundle; `_collect_decisions_paths` names the same bundle's asset
+`dev.plugin-boundaries.md`. `collect_guideline_paths` names a product's role + wildcard
+guideline files for a dispatch bundle; `collect_decisions_paths` names the same bundle's asset
 and owning-product `decisions.md` registries beside them, per
 `spec-decisions-design.md` § "How decisions are read" — every job bundle gets both registries
 regardless of dispatched role, unlike the guideline lookup's per-role selection. No Python
@@ -14,8 +14,6 @@ itself is dispatched by the `spec.coordinator` persona directly (its own
 `Bash(lazycortex-core dispatch-job ...)` verb), not through a Python primitive here.
 """
 from __future__ import annotations
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error,wrong-import-position
 
 import json
 import os
@@ -33,13 +31,13 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from spec_keys import PlanReview  # noqa: E402
+from spec_keys import PlanReview  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import spec_paths  # noqa: E402
+import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # ----------------------------------------------------------------------------------------
-class _WireKey:
+class WireKey:
   """
   Top-level keys of the `lazycortex-core dispatch-job` stdin bundle.
 
@@ -66,7 +64,9 @@ class _WireKey:
   STATUS = "status"
 
 
-class _PayloadKey:
+
+# ----------------------------------------------------------------------------------------
+class PayloadKey:
   """
   Payload keys naming files the expert reads in place rather than receiving as copies.
 
@@ -101,7 +101,7 @@ class _SettingsKey:
 
 
 # Product-record key holding a product's vault-relative spec-content path, per this bin/ tree's
-# own per-file small-constant convention (see `gate_tick._write_fm_list`'s docstring) — mirrors
+# own per-file small-constant convention (see `gate_tick.write_fm_list`'s docstring) — mirrors
 # `resolve_product.py`'s own private `_SPEC_PATH_KEY` rather than importing it.
 _SPEC_PATH_KEY = "spec_path"
 
@@ -120,7 +120,7 @@ _CONSUME_VERB = "consume-job"
 _PLUGIN_TREE_DIR = "claude"
 
 
-def _load_settings(repo: Path) -> dict:
+def load_settings(repo: Path) -> dict:
   """
   Read `<repo>/.claude/lazy.settings.json`.
 
@@ -131,6 +131,7 @@ def _load_settings(repo: Path) -> dict:
     Parsed settings dict, or `{}` when the file is absent or unparseable.
   """
   path = repo / _SETTINGS_REL
+
   # guard: no settings file — nothing to resolve against
   if not path.is_file():
     return {}
@@ -142,7 +143,7 @@ def _load_settings(repo: Path) -> dict:
     return {}
 
 
-def _collect_guideline_paths(repo: Path, product_record: dict, role: str) -> tuple[list[str], list[str]]:
+def collect_guideline_paths(repo: Path, product_record: dict, role: str) -> tuple[list[str], list[str]]:
   """
   Resolve the product's role guidelines plus the wildcard `"*"` guidelines to repo-relative paths.
 
@@ -193,7 +194,7 @@ def _collect_guideline_paths(repo: Path, product_record: dict, role: str) -> tup
   return paths, warnings
 
 
-def _collect_decisions_paths(repo: Path, asset_dir: Path | None, product_record: dict) -> list[str]:
+def collect_decisions_paths(repo: Path, asset_dir: Path | None, product_record: dict) -> list[str]:
   """
   Resolve the asset's and owning product's `decisions.md` registries to repo-relative paths.
 
@@ -233,13 +234,14 @@ def _collect_decisions_paths(repo: Path, asset_dir: Path | None, product_record:
   # not repo-root-relative, so it resolves against spec_paths.spec_content_root(repo) the same
   # way coordinator_dispatch.py's _resolve_product_note_path does, never bare `repo / spec_path`
   spec_path = (product_record or {}).get(_SPEC_PATH_KEY)
+
   # a product record with a usable spec_path — absent or malformed simply skips this half
   if isinstance(spec_path, str) and spec_path:
     product_decisions = spec_paths.spec_content_root(repo) / spec_path / _DECISIONS_FILENAME
     if product_decisions.is_file():
       paths.append(str(product_decisions.relative_to(repo)))
 
-  # the two appends above are independent of each other — nothing left to reconcile between them
+  # the asset's registry precedes the product's — the order is what tells the two same-named files apart
   return paths
 
 
@@ -247,23 +249,18 @@ def _resolve_core_cli(repo: Path) -> Path:
   """
   Find the `lazycortex-core` CLI binary.
 
-  Two-stage lookup, per the § 1c inter-plugin boundary contract:
-
-    1. `spec_paths.resolve_plugin_cli` — `$LAZYCORTEX_PLUGIN_DIRS`, then the plugin cache
-       this plugin is itself installed from.
-    2. Dev-fallback to `<repo>/claude/lazycortex-core/bin/lazycortex-core` —
-       this dev vault carries lazycortex-core's own source tree, so a
-       session running the plugins straight from `claude/*` (not from an
-       installed plugin cache) still resolves the CLI.
+  Resolves `$LAZYCORTEX_PLUGIN_DIRS`, the plugin cache this plugin is itself installed from, and
+  this project's own dev-vault layout (a checkout carrying `lazycortex-core`'s source tree
+  alongside this plugin's), per the § 1c inter-plugin boundary contract.
 
   Args:
-    repo: The repository root the dev-fallback path is resolved against.
+    repo: The repository root the dev-vault fallback paths are resolved against.
 
   Returns:
     Absolute path to the resolved `lazycortex-core` binary.
 
   Raises:
-    RuntimeError: When both lookup stages fail to find a binary.
+    RuntimeError: When no lookup finds a binary, naming every location searched.
   """
 
   # Domain(plugin.boundaries):
@@ -278,13 +275,13 @@ def _resolve_core_cli(repo: Path) -> Path:
   # project's own layout keeps it — a fallback specific to this one tree carrying both plugins
   # side by side, not a general way installed plugin caches can be addressed.
 
-  # Stage 1 — env-declared plugin dirs (set by the daemon for every subprocess routine), then the
+  # stage 1 — env-declared plugin dirs (set by the daemon for every subprocess routine), then the
   # plugin cache a consumer install runs from.
   cli = spec_paths.resolve_plugin_cli(_CORE_CLI_NAME)
   if cli is not None:
     return cli
 
-  # Stage 2 — dev-vault-only fallback, deliberate per the task brief — this repo IS
+  # stage 2 — dev-vault-only fallback, deliberate per the task brief — this repo IS
   # lazycortex-core's own source tree, so a session with no plugin cache on the env path
   # (e.g. a direct dev run of the specs plugin) still resolves the CLI without one plugin
   # hardcoding another's installed-cache layout (dev.plugin-boundaries § 2b is about the
@@ -294,21 +291,46 @@ def _resolve_core_cli(repo: Path) -> Path:
   if fallback.is_file():
     return fallback
 
-  # neither stage found a binary — nothing left to try
+  # stage 3 — this file's own dev-vault sibling: a verb run against a repository that is NOT
+  # this checkout (a test fixture, a consumer vault opened from a dev session) still finds the
+  # neighbour that sits beside this plugin in the tree the code itself runs from — the same
+  # stage the review plugin's resolver carries
+  # waiver: sibling-plugin path reach is intentional here — see the paragraph above stage 2
+  sibling = Path(__file__).resolve().parents[2] / _CORE_CLI_NAME / _BIN_DIR / _CORE_CLI_NAME
+  if sibling.is_file():
+    return sibling
+
+  # no stage found a binary — nothing left to try
   raise RuntimeError(
-      f"lazycortex-core CLI not resolvable: ${_PLUGIN_DIRS_ENV} and the plugin cache yield no match "
-      f"and {fallback} is absent from this repo"
+      f"lazycortex-core CLI not resolvable: ${_PLUGIN_DIRS_ENV} and the plugin cache yield no match, "
+      f"{fallback} is absent from this repo and {sibling} is absent beside this plugin"
   )
 
 
-def _core_dispatch_job(repo: Path, bundle: dict) -> dict:
+def resolve_core_cli(repo: Path) -> Path:
+  """
+  Find the `lazycortex-core` CLI binary for a sibling module.
+
+  Args:
+    repo: The repository root the dev-fallback path is resolved against.
+
+  Returns:
+    Absolute path to the resolved `lazycortex-core` binary.
+
+  Raises:
+    RuntimeError: When no lookup stage finds a binary.
+  """
+  return _resolve_core_cli(repo)
+
+
+def core_dispatch_job(repo: Path, bundle: dict) -> dict:
   """
   Invoke `lazycortex-core dispatch-job` with a JSON bundle on stdin.
 
   Args:
     repo: The repository root passed to the CLI as `$LAZY_REPO_ROOT`, so it resolves settings
       and job storage against this repo rather than its own working directory.
-    bundle: The dispatch-job wire bundle (see `_WireKey`), serialized to stdin as JSON.
+    bundle: The dispatch-job wire bundle (see `WireKey`), serialized to stdin as JSON.
 
   Returns:
     Parsed JSON response dict from the CLI's stdout.
@@ -320,6 +342,7 @@ def _core_dispatch_job(repo: Path, bundle: dict) -> dict:
   cli = _resolve_core_cli(repo)
   env = os.environ.copy()
   env[_REPO_ROOT_ENV] = str(repo)
+
   # `check=False` so a non-zero exit is reported with the actual stdout/stderr below, rather
   # than losing that detail to a bare CalledProcessError
   proc = subprocess.run(
@@ -374,7 +397,7 @@ def consume_stale_job(repo: Path, expert: str, job_id: str) -> None:
   # the wire bundle is `{expert, job_id}` per the `consume-job` CLI's published contract
   env = os.environ.copy()
   env[_REPO_ROOT_ENV] = str(repo)
-  request = json.dumps({ _WireKey.EXPERT: expert, _WireKey.JOB_ID: job_id })
+  request = json.dumps({ WireKey.EXPERT: expert, WireKey.JOB_ID: job_id })
 
   # bounded by `PlanReview.START_TIMEOUT_S`, the same ceiling every other best-effort follow-up
   # subprocess in this plugin uses — a hung retirement must not stall the serial daemon loop

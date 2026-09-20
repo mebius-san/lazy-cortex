@@ -56,10 +56,12 @@ class CodeFingerprint:
     out: list[Path] = []
     for mod in list(sys.modules.values()):
       f = getattr(mod, "__file__", None)
+
       # guard: module has no source file (built-in or frozen)
       if not f:
         continue
       p = Path(f).resolve()
+
       # only modules living under a watched plugin root are our own code
       if any(str(p).startswith(str(r)) for r in self._roots):
         out.append(p)
@@ -153,6 +155,7 @@ class CodeFingerprint:
     if now_shared == base_shared:
       self._pending = None
       return False
+
     # require the same diff twice in a row (stability) before declaring a change; compare the
     # pending snapshot on the SAME shared key set so a lazy-import growing the pending dict
     # between observations does not invalidate stability.

@@ -28,18 +28,20 @@ job via `expert_runtime.dispatch_job`. Deduplication via
 doctor — one runs at a time, period.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import json
 import subprocess
 import time
 from pathlib import Path
 
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+# pylint: disable-next=import-error
 from constants import (HaltKey, HaltReason, IncidentKey, JobArtifact, JobConfigKey, JobFile, JobMarker,
                        SettingsFile, SettingsKey)
-from frontmatter_parser import parse_frontmatter
-from job_response import is_job_bundle
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from frontmatter_parser import parse_frontmatter  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from job_response import is_job_bundle  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -74,10 +76,12 @@ def _dead_jobs_needing_doctor(repo: Path) -> list[dict]:
   # back to it a second time.
 
   base = repo / JOBS_BASE
+
   # guard: jobs base directory does not exist — no dead jobs to inventory
   if not base.is_dir():
     return []
   out: list[dict] = []
+
   # walk expert directories then per-expert job directories looking for un-triaged DEAD markers
   for edir in sorted(base.iterdir()):
     # guard: skip non-directory entries under the jobs base
@@ -87,9 +91,11 @@ def _dead_jobs_needing_doctor(repo: Path) -> list[dict]:
       # guard: only real bundles are queue entries
       if not is_job_bundle(jdir):
         continue
+
       # guard: skip jobs that are not marked DEAD
       if not (jdir / JobMarker.DEAD).exists():
         continue
+
       # guard: skip jobs that have already been triaged
       if (jdir / JobArtifact.DIAGNOSIS_JSON).exists():
         continue
@@ -118,10 +124,13 @@ def _clear_probe_recoverable_halt(repo: Path) -> bool:
     the halt is younger than `DEAD_HALT_AGE_SEC`, or the remote is still unreachable.
   """
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import recover
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  import recover  # pylint: disable=import-error
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from runtime_state import get_halted
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from runtime_state import get_halted  # pylint: disable=import-error
   halt = get_halted(repo)
+
   # guard: nothing to clear
   if halt is None:
     return False
@@ -156,6 +165,7 @@ def _clear_probe_recoverable_halt(repo: Path) -> bool:
 
   # the halt must have aged past the doctor threshold before self-recovery applies
   age = time.time() - float(halt.get(HaltKey.HALTED_SINCE, 0))
+
   # guard: halt is younger than the threshold — give the operator and the daemon's own retry time
   if age < DEAD_HALT_AGE_SEC:
     return False
@@ -167,6 +177,7 @@ def _clear_probe_recoverable_halt(repo: Path) -> bool:
     )
   except (subprocess.TimeoutExpired, OSError):
     return False
+
   # guard: remote is still unreachable — leave the halt for the next tick to retry
   if probe.returncode != 0:
     return False
@@ -187,15 +198,19 @@ def _stuck_halt(repo: Path) -> dict | None:
     investigation and stay out of doctor scope.
   """
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from runtime_state import get_halted
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from runtime_state import get_halted  # pylint: disable=import-error
   halt = get_halted(repo)
+
   # guard: no halt block — daemon is not stuck
   if halt is None:
     return None
+
   # guard: halt is not a dirty-tree halt — out of doctor scope
   if halt.get(HaltKey.REASON) != HaltReason.UNCOMMITTED_CHANGES:
     return None
   age = time.time() - float(halt.get(HaltKey.HALTED_SINCE, 0))
+
   # guard: halt is younger than the threshold — give the operator more time to react
   if age < DEAD_HALT_AGE_SEC:
     return None
@@ -262,6 +277,7 @@ def _source_state(repo: Path, config_json: dict | None) -> list[dict]:
     # guard: a non-string entry is not a path this can resolve
     if not isinstance(rel, str):
       continue
+
     # a path that no longer resolves is the strongest signal the work was abandoned
     target = repo / rel
     exists = target.is_file()
@@ -311,6 +327,7 @@ def _build_context(repo: Path, halt: dict | None, dead_jobs: list[dict]) -> dict
     "git_log_recent": "",
     "git_status": "",
   }
+
   # snapshot each dead job's metadata and transcript tail for the doctor
   for entry in dead_jobs:
     # waiver: one-off dead-job context-schema field name, not a reusable domain key
@@ -338,6 +355,7 @@ def _build_context(repo: Path, halt: dict | None, dead_jobs: list[dict]) -> dict
     e["source_state"] = _source_state(repo, e["config_json"])
     # waiver: one-off doctor-context-schema field name, not a reusable domain key
     context["dead_jobs"].append(e)
+
   # capture a small slice of recent commit history for situational awareness
   try:
     # waiver: one-off doctor-context-schema field name, not a reusable domain key
@@ -347,6 +365,7 @@ def _build_context(repo: Path, halt: dict | None, dead_jobs: list[dict]) -> dict
     ).stdout
   except subprocess.CalledProcessError:
     pass
+
   # capture current working-tree status so the doctor can see what the operator left behind
   try:
     # waiver: one-off doctor-context-schema field name, not a reusable domain key
@@ -371,9 +390,11 @@ def _all_known_protocols(repo: Path) -> list[str]:
     order so prompts are byte-stable across runs.
   """
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from lazy_settings import load_section
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from lazy_settings import load_section  # pylint: disable=import-error
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from routine_types import _routine_protocols
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from routine_types import _routine_protocols  # pylint: disable=import-error
   routines = load_section(repo / SettingsFile.REL, SettingsKey.ROUTINES)
   seen: list[str] = []
   for name, cfg in routines.items():
@@ -415,11 +436,13 @@ def doctor_tick(repo: Path) -> dict:
   # newly triggered condition could ever be looked at.
 
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from expert_runtime import dispatch_job, retire_completed_jobs
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from expert_runtime import dispatch_job, retire_completed_jobs  # pylint: disable=import-error
   repo = Path(repo)
   remote_halt_cleared = _clear_probe_recoverable_halt(repo)
   halt = _stuck_halt(repo)
   dead_jobs = _dead_jobs_needing_doctor(repo)
+
   # guard: no trigger condition met — leave the queue untouched
   if not halt and not dead_jobs:
     return {

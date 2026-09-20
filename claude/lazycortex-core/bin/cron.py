@@ -67,13 +67,16 @@ def _parse_field(spec: str, lo: int, hi: int) -> set[int]:
       uses an inverted range, has a non-positive step, or expands to the empty set.
   """
   out: set[int] = set()
+
   # walk the comma-separated pieces; each piece independently contributes values to the union
   for piece in spec.split(","):
     # waiver: the loop variable is deliberately rebound — each field is normalised in place before parsing
     piece = piece.strip()  # noqa: PLW2901
+
     # guard: empty piece is a syntax error
     if not piece:
       raise CronError(f"empty piece in field {spec!r}")
+
     # split off the optional `/step` suffix before parsing the base range
     if "/" in piece:
       base, step_str = piece.split("/", 1)
@@ -81,6 +84,7 @@ def _parse_field(spec: str, lo: int, hi: int) -> set[int]:
         step = int(step_str)
       except ValueError as exc:
         raise CronError(f"bad step in {piece!r}") from exc
+
       # guard: step must be a positive integer
       if step <= 0:
         raise CronError(f"step must be > 0 in {piece!r}")
@@ -106,6 +110,7 @@ def _parse_field(spec: str, lo: int, hi: int) -> set[int]:
     # guard: interval must lie inside the field's allowed range
     if start < lo or end > hi:
       raise CronError(f"value out of range [{lo},{hi}] in {piece!r}")
+
     # guard: inverted intervals (start > end) are rejected
     if start > end:
       raise CronError(f"start > end in {piece!r}")
@@ -147,10 +152,12 @@ def parse(cron_str: str) -> CronSpec:
   # positionally relies on this order never changing.
 
   parts = cron_str.split()
+
   # guard: must have exactly five whitespace-separated fields
   # waiver: inline numeric literal (cron field count), not a domain constant
   if len(parts) != 5:
     raise CronError(f"expected 5 fields, got {len(parts)}: {cron_str!r}")
+
   # parts verified to be exactly 5 above → unpack the five parsed fields directly
   minute, hour, day, month, dow = (
     _parse_field(spec, lo, hi) for spec, (lo, hi) in zip(parts, _FIELD_BOUNDS, strict=False)
@@ -212,6 +219,7 @@ def next_fire(spec: CronSpec, after_dt: datetime) -> datetime:
   # advance to the next whole minute (cron's resolution) before scanning
   cur = after_dt.replace(second = 0, microsecond = 0) + timedelta(minutes = 1)
   end = after_dt + timedelta(days = 4 * 366)
+
   # bounded linear scan at minute granularity; four years covers every valid 5-field pattern
   while cur < end:
     if matches(spec, cur):

@@ -123,6 +123,7 @@ def sync_one(src: str, dst: str, *, copy_diverged: bool = False, chmod_x: bool =
   # a write that did not land is a failure, not a sync: the caller must never read it as applied
   if state in (STATE_INSTALLED, STATE_REFRESHED) and not _equal(src, dst):
     return STATE_FAILED
+
   # mode bits follow content: a diverged target awaiting merge judgment must not be mutated at all
   if chmod_x and state != STATE_DIVERGED:
     _ensure_exec(dst)
@@ -270,6 +271,7 @@ def main(argv: list[str]) -> int:
     "failed": failed,
   }
   print(json.dumps(receipt, indent = 2))
+
   # guard: a write that did not verify must not exit clean
   if failed:
     return EXIT_VERIFY_FAILED

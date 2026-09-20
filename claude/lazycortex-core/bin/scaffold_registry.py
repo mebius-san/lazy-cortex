@@ -47,6 +47,7 @@ def _locate_block(md: str) -> tuple[list[str], int, int]:
   """
   lines = md.splitlines()
   headings = [ idx for idx, line in enumerate(lines) if line.strip() == REGISTRY_HEADING ]
+
   # guard: exactly one Registry heading required
   if len(headings) != 1:
     raise ValueError(
@@ -60,6 +61,7 @@ def _locate_block(md: str) -> tuple[list[str], int, int]:
       break
     if lines[pos].strip() and not lines[pos].startswith("#"):
       break
+
   # guard: a ```yaml fence must follow the heading
   if open_idx is None:
     raise ValueError("no ```yaml fence found under ## Registry")
@@ -68,6 +70,7 @@ def _locate_block(md: str) -> tuple[list[str], int, int]:
     if lines[pos].strip() == _FENCE_CLOSE:
       close_idx = pos
       break
+
   # guard: the fence must be closed
   if close_idx is None:
     raise ValueError("unterminated ```yaml fence under ## Registry")
@@ -125,6 +128,7 @@ def parse_registry_block(md: str) -> dict:
       if not raw.rstrip().endswith(":"):
         raise ValueError(f"top-level line is not a 'key:' mapping: {raw!r}")
       cur_plugin = raw.rstrip()[:-1].strip()
+
       # guard: reject duplicate top-level keys
       if cur_plugin in data:
         raise ValueError(f"duplicate top-level key: {cur_plugin}")
@@ -139,6 +143,7 @@ def parse_registry_block(md: str) -> dict:
       # guard: a template path requires an enclosing plugin key to be active
       if cur_plugin is None:
         raise ValueError(f"template path before any plugin key: {raw!r}")
+
       # guard: template path line must end with ':' to be a valid mapping
       if not raw.rstrip().endswith(":"):
         raise ValueError(f"template line is not a 'path:' mapping: {raw!r}")
@@ -209,10 +214,12 @@ def _key_line_span(body_lines: list[str], plugin: str) -> tuple[int, int] | None
   start = None
   for idx, line in enumerate(body_lines):
     stripped = line.rstrip()
+
     # guard: must be at column 0, end with ':', and name the target plugin
     if line == line.lstrip() and stripped.endswith(":") and stripped[:-1].strip() == plugin:
       start = idx
       break
+
   # guard: key not present
   if start is None:
     return None
@@ -239,6 +246,7 @@ def _body_lines(md: str) -> list[str]:
   lines, open_idx, close_idx = _locate_block(md)
   body = lines[open_idx + 1 : close_idx]
   non_blank = [ line for line in body if line.strip() ]
+
   # guard: treat an empty-dict sentinel as an empty body
   if non_blank == ["{}"] or not non_blank:
     return []
@@ -351,6 +359,7 @@ def graft_registry(shipped_md: str, target_md: str) -> str:
   # every sync without losing a single registered key.
 
   body = _body_lines(target_md)
+
   # an empty consumer block carries no keys, so the shipped empty-dict sentinel stands in
   return _rewrite_block(shipped_md, body or ["{}"])
 
@@ -403,6 +412,7 @@ def validate(md: str) -> list[dict]:
           "severity": "FAIL",
           "msg": f"{plugin}: template path uses ${{CLAUDE_PLUGIN_ROOT}}: {path}",
         })
+
       # guard: glob list must be a list
       if not isinstance(globs, list):
         findings.append({
@@ -452,6 +462,7 @@ def splice_remove(md: str, plugin: str) -> str:
 
   body = _body_lines(md)
   span = _key_line_span(body, plugin)
+
   # guard: key absent — nothing to remove
   if span is None:
     return md
@@ -580,6 +591,7 @@ def _sync_rule(src: str, registry: str, *, exists: bool) -> int:
   # a write that did not land must never be reported as applied
   with open(registry, encoding = "utf-8") as fle:
     written = fle.read()
+
   # guard: a target that does not hold the intended bytes is a failure, not a sync
   if written != new_md:
     _emit({ "status": "failed", "registry": registry })
@@ -588,8 +600,7 @@ def _sync_rule(src: str, registry: str, *, exists: bool) -> int:
 
 
 # waiver: five cmd branches each with explicit early returns; linear dispatch is clearest here
-# pylint: disable=too-many-return-statements,too-many-branches
-def main(argv: list[str]) -> int:
+def main(argv: list[str]) -> int:  # pylint: disable=too-many-return-statements,too-many-branches
   """
   Entry point for the `lazycortex-core scaffold` CLI.
 
@@ -640,6 +651,7 @@ def main(argv: list[str]) -> int:
       md = fle.read()
     # waiver: external-result schema field name, not an internal key
     errs = [ fnd for fnd in validate(md) if fnd["severity"] == "FAIL" ]
+
     # guard: existing file must parse cleanly before upsert can proceed
     if errs:
       print(json.dumps({"status": "error", "findings": errs}), file = sys.stderr)

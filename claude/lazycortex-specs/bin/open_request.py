@@ -45,8 +45,6 @@ review-side opt-in shape is delegated to lazycortex-review's own CLI
 rather than duplicated by hand.
 """
 from __future__ import annotations
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error,wrong-import-position
 
 import argparse
 import re
@@ -64,11 +62,13 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# pylint: disable-next=import-error,wrong-import-position
 from spec_keys import BannerTag, Outcome, PlanReview, SpecKey, SpecValue, State  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# pylint: disable-next=import-error,wrong-import-position
 from spec_paths import find_settings_root, resolve_plugin_cli, spec_content_root  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from summary_render import apply_container_stats  # noqa: E402
+from summary_render import apply_container_stats  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 _REQUIRED_REVIEW_KEYS = (
@@ -130,14 +130,17 @@ def _parse_frontmatter(text: str) -> tuple[dict, int, int]:
   values: dict = {}
   for line in block.splitlines():
     stripped = line.lstrip()
+
     # guard: skip blank lines and comment / bullet markers
     if not stripped or stripped.startswith(("#", "-")):
       continue
+
     # guard: skip lines without a key:value separator
     if ":" not in line:
       continue
     k, _, v = line.partition(":")
     k = k.strip()
+
     # guard: skip entries with an empty key
     if not k:
       continue
@@ -166,6 +169,7 @@ def _has_banner(body: str) -> bool:
       return False  # H1 came first → no banner
     if BannerTag.IN_PROCESS in line or BannerTag.ACTION_NEEDED in line or BannerTag.READY in line:
       return True
+
   # Any other non-empty, non-H1 line — keep scanning (could be
   # blank padding, stale snippet, etc.).
   return False
@@ -206,6 +210,7 @@ def _classify(values: dict, body: str) -> str:
       # transition — re-bootstrapping here would undo the finalize.
     if values.get(SpecKey.REVIEW_RESULT):
       return State.READY_FOR_APPLY
+
   # Required review-side keys + banner = fully opted in
     missing = [k for k in _REQUIRED_REVIEW_KEYS if k not in values]
     if missing or not _has_banner(body):
@@ -236,6 +241,7 @@ def _set_field(fm_text: str, key: str, value: str) -> str:
   pat = re.compile(rf"(?m)^{re.escape(key)}\s*:.*$")
   if pat.search(fm_text):
     return pat.sub(f"{key}: {value}", fm_text, count=1)
+
 # Insert before closing ---
   close_idx = fm_text.rfind("---\n")
   if close_idx < 0:
@@ -281,6 +287,7 @@ def _ensure_tags_member(fm_text: str, member: str) -> str:
       return fm_text
     new_block = existing + f"  - {member}\n"
     return fm_text[:m.start(1)] + new_block + fm_text[m.end(1):]
+
 # No tags block — insert before closing ---
   close_idx = fm_text.rfind("---\n")
   if close_idx < 0:
@@ -299,6 +306,7 @@ def _resolve_review_cli() -> Path:
     SystemExit: When no plugin directory carries the `lazycortex-review` CLI.
   """
   cli = resolve_plugin_cli(PlanReview.REVIEW_CLI)
+
   # guard: unresolved — env var unset or no plugin dir carries the CLI
   if cli is None:
     sys.stderr.write(
@@ -336,6 +344,7 @@ def _bootstrap_review(file_path: Path) -> None:
         f"on {file_path}\n"
     )
     raise SystemExit(3) from None
+
   # guard: a failed bootstrap leaves a half-shaped document — surface it as a routine error
   if res.returncode != 0:
     sys.stderr.write(
@@ -360,11 +369,13 @@ def _repair(text: str, values: dict, fm_end: int) -> str:
   """
   fm_text = text[:fm_end]
   body = text[fm_end:]
+
   # Spec keys: only add if missing (operator may have meaningful values)
   if SpecKey.ROLE not in values:
     fm_text = _set_field(fm_text, SpecKey.ROLE, SpecValue.ROLE_REQUEST)
   if SpecKey.CLASS not in values:
     fm_text = _set_field(fm_text, SpecKey.CLASS, SpecValue.CLASS_UNKNOWN)
+
 # Clear the terminal apply-gate discriminator so re-entering the
 # review loop does not also trigger the downstream apply-gate
 # routine on the next md-scan tick. `review_result` is set only

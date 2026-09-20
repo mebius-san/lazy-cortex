@@ -42,6 +42,7 @@ def dictionary_rel(repo: Path) -> str:
     disk is not an error for this reader.
   """
   tags = ScopeResolver(repo = repo).load_wiki().get(_TAGS_KEY, {})
+
   # guard: `wiki.tags` is not a section — the dictionary path falls back to the default
   if not isinstance(tags, dict):
     return _DEFAULT_TAG_DICTIONARY
@@ -131,11 +132,14 @@ class GlobMatcher:
       escaped = escaped.replace(r"\*", "[^/]*").replace(r"\?", "[^/]")
       segs.append(escaped)
     regex = ".*".join(segs)
+
     # Normalise /.*/ → zero or more path components (includes bare /)
     regex = regex.replace("/.*/" , "(?:/|/.*/)")
+
     # Normalise leading .*/ → optional (handles **/*.md matching top-level files)
     if regex.startswith(".*/"):
       regex = "(?:.*/)?" + regex[3:]
+
     # Normalise trailing /.* → optional trailing slash+anything
     if regex.endswith("/.*"):
       regex = regex[:-3] + "(?:/.*)?"
@@ -216,15 +220,18 @@ def _parse_frontmatter(text: str) -> dict:
   if not text:
     return {}
   lines = text.splitlines()
+
   # guard: missing opening fence
   if not lines or lines[0].strip() != "---":
     return {}
+
   # locate the closing fence inside the block
   close_idx = None
   for i in range(1, len(lines)):
     if lines[i].strip() == "---":
       close_idx = i
       break
+
   # guard: no closing fence — frontmatter is malformed
   if close_idx is None:
     return {}
@@ -235,18 +242,21 @@ def _parse_frontmatter(text: str) -> dict:
   for raw in lines[1:close_idx]:
     stripped = raw.lstrip()
     indent = len(raw) - len(stripped)
+
     # indented `- item` line under the most recent key — append to its list
     if indent > 0 and stripped.startswith("- ") and current_key is not None:
       if not isinstance(result.get(current_key), list):
         result[current_key] = []
       result[current_key].append(_unquote(stripped[2:].strip()))
       continue
+
     # guard: not a key:value line
     if ":" not in raw:
       continue
     key, _, value = raw.partition(":")
     key = key.strip()
     value = value.strip()
+
     # guard: empty key after stripping
     if not key:
       continue
@@ -278,9 +288,11 @@ def _match_frontmatter_filter(flt: dict, frontmatter: dict) -> bool:
     # waiver: predicate-filter schema subkeys, not reusable domain keys
     include = pred.get("in") or []
     exclude = pred.get("not_in") or []
+
     # guard: allow-list declared and value outside it
     if include and actual not in include:
       return False
+
     # guard: deny-list declared and value inside it
     if exclude and actual in exclude:
       return False
@@ -309,6 +321,7 @@ def _match_filter(flt: dict, frontmatter: dict, path: object = None) -> bool:
     return True
   # waiver: routine-config schema field name, single source in the filter schema
   fm = flt.get("frontmatter")
+
   # guard: a frontmatter sub-filter is declared — it must pass
   if isinstance(fm, dict) and not _match_frontmatter_filter(fm, frontmatter):
     return False
@@ -317,9 +330,11 @@ def _match_filter(flt: dict, frontmatter: dict, path: object = None) -> bool:
   if isinstance(want, bool):
     _p = Path(str(path)) if path is not None else None
     is_fn = _p is not None and _p.stem == _p.parent.name
+
     # guard: want only folder-notes but this isn't one
     if want and not is_fn:
       return False
+
     # guard: forbid folder-notes but this is one
     if (not want) and is_fn:
       return False
@@ -383,9 +398,11 @@ class ScopeResolver:
       carries no `wiki` key.
     """
     settings_file = self._repo / self._SETTINGS_PATH
+
     # guard: settings file does not exist — nothing to read
     if not settings_file.is_file():
       return {}
+
     # an unreadable or malformed file is the same "no configuration" case as an absent one —
     # every caller treats the empty dict as unconfigured, never as an error to surface
     try:
@@ -394,6 +411,7 @@ class ScopeResolver:
     except (OSError, json.JSONDecodeError):
       return {}
     wiki = data.get(self._WIKI_KEY, {})
+
     # guard: section absent or malformed — treat as unconfigured
     if not isinstance(wiki, dict):
       return {}
@@ -478,6 +496,7 @@ class ScopeResolver:
     declared = self.load_wiki().get(self._TAG_AXES_KEY) or []
     axes: list[str] = [ a for a in declared if isinstance(a, str) and a ]
     narrowing = cfg.get(self._TAG_AXES_KEY) or []
+
     # guard: the scope declares no narrowing — it speaks the full vocabulary
     if not narrowing:
       return axes
@@ -494,9 +513,11 @@ class ScopeResolver:
       settings file is absent, unreadable, or carries no `wiki.scopes` key.
     """
     scopes_raw = self.load_wiki().get(self._SCOPES_KEY, {})
+
     # guard: scopes not a dict (config error) — treat as empty
     if not isinstance(scopes_raw, dict):
       return {}
+
     # Drop meta keys that are not scope definitions
     return {
       k: v
@@ -544,6 +565,7 @@ class ScopeResolver:
       scope matches.
     """
     path = Path(path)
+
     # guard: make path repo-relative; skip if outside the repo
     try:
       if path.is_absolute():
@@ -587,10 +609,12 @@ class ScopeResolver:
       # guard: path does not belong to this scope
       if not self._matches_scope(rel_posix, cfg):
         continue
+
       # guard: the node is a generated topics index, not a curated document — it belongs to
       # build-index, which rewrites it wholesale, so no curator may ever be dispatched on it
       if self._is_topics_index(cfg, rel_posix, abs_path):
         return None
+
       # guard: the home scope's frontmatter filter rejects this node (e.g. it carries
       # review_active: true) — treat it as out of scope so process-file skips it without
       # dispatching the curator. First path-match wins, mirroring the no-filter path.
@@ -644,16 +668,20 @@ class ScopeResolver:
           if not self._matcher.match(rel, pat):
             continue
           ap = full.resolve()
+
           # guard: already collected under a different glob — skip duplicate
           if ap in seen_abs:
             break
+
           # guard: excluded by an exclude_paths pattern
           if any(self._matcher.match(rel, ep) for ep in exclude_globs):
             break
+
           # guard: the scope's own generated topics index is never one of its nodes
           if self._is_topics_index(cfg, rel, full):
             break
           seen_abs.add(ap)
+
           # collect only real files that clear the scope's optional frontmatter filter — a
           # filtered node (e.g. review_active: true) drops out of the index entirely, so other
           # nodes do not link to it while the flag is set.
@@ -707,9 +735,11 @@ class ScopeResolver:
     # guard: the scope's own index path — no read needed
     if PurePath(cfg.get(self._TOPICS_INDEX_KEY) or self._DEFAULT_TOPICS_INDEX).as_posix() == rel_posix:
       return True
+
     # guard: only markdown carries the role marker
     if abs_path.suffix != self._MD_SUFFIX:
       return False
+
     # ponytail: one frontmatter read per markdown candidate; cache by mtime if a walk ever drags
     try:
       text = abs_path.read_text(encoding = self._ENCODING)
@@ -735,6 +765,7 @@ class ScopeResolver:
       rejects it.
     """
     flt = cfg.get(self._FILTER_KEY)
+
     # guard: no usable filter — accept without touching the file
     if not isinstance(flt, dict) or not flt:
       return True
@@ -772,10 +803,12 @@ class ScopeResolver:
     """
     paths_globs: list[str] = cfg.get(self._PATHS_KEY) or []
     exclude_globs = self._effective_excludes(cfg)
+
     # guard: no paths globs means the scope can never match
     if not paths_globs:
       return False
     matched = any(self._matcher.match(rel_posix, pat) for pat in paths_globs)
+
     # guard: file does not match any include glob
     if not matched:
       return False

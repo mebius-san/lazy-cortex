@@ -9,15 +9,16 @@ tags. Both operate uniformly over markdown and code nodes; the markdown-vs-code
 storage difference is hidden behind the node accessors.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import os
 from pathlib import Path
 
-import domains as _domains
-import nodes as _nodes
-import scope as _scope
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import domains as _domains  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import nodes as _nodes  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import scope as _scope  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -80,6 +81,7 @@ def dictionary_values(repo: Path) -> dict[str, list[str]]:
   # needs to anchor to. It advises rather than binds — nothing is refused for being absent from it.
 
   dictionary = Path(repo) / dictionary_rel(repo)
+
   # guard: the dictionary is advisory — an absent file simply contributes nothing
   if not dictionary.is_file():
     return {}
@@ -100,13 +102,16 @@ def dictionary_values(repo: Path) -> dict[str, list[str]]:
       axis = stripped[len(_AXIS_HEADING):].strip()
       out.setdefault(axis, [])
       continue
+
     # guard: a bullet before the first heading names no axis, and prose names no value
     if axis is None or not stripped.startswith(_VALUE_BULLET):
       continue
     parts = stripped[len(_VALUE_BULLET):].split()
+
     # guard: an empty bullet carries no value
     if not parts:
       continue
+
     # the value is the bullet's first token; the em-dash gloss after it is for human readers
     if parts[0] not in out[axis]:
       out[axis].append(parts[0])
@@ -225,6 +230,7 @@ class TagOps:
     axes: dict = {}
     for node_path in self._iter_node_paths():
       node = _nodes.node_for(node_path)
+
       # guard: unrecognised file type — skip
       if node is None:
         continue
@@ -233,6 +239,7 @@ class TagOps:
         bucket = axes.setdefault(axis, {})
         entry = bucket.setdefault(value, { self._K_COUNT: 0, self._K_EXAMPLES: [] })
         entry[self._K_COUNT] += 1
+
         # keep a few distinct example summaries as light context
         if (
           summary
@@ -302,11 +309,13 @@ class TagOps:
     tags_remapped = 0
     for node_path in self._iter_node_paths():
       node = _nodes.node_for(node_path)
+
       # guard: unrecognised file type — skip
       if node is None:
         continue
       bare = self._bare_topics(node)
       remapped, hits = self._remap(bare, alias_map)
+
       # guard: nothing changed for this node — skip the write
       if remapped == bare:
         continue
@@ -354,6 +363,7 @@ class TagOps:
     """
     output_abs = cfg.repo / cfg.output
     index_abs = output_abs / _domains.INDEX_NAME
+
     # guard: output tree not generated yet — nothing to enumerate
     if not output_abs.is_dir():
       return []
@@ -364,6 +374,7 @@ class TagOps:
         if not fname.endswith(cls._MD_EXT):
           continue
         abs_path = Path(base) / fname
+
         # guard: the index doc carries no per-group tags
         if abs_path == index_abs:
           continue
@@ -411,6 +422,7 @@ class TagOps:
     out: list[tuple[str, str]] = []
     for tag in cls._bare_topics(node):
       axis, sep, value = tag.partition("/")
+
       # collect only the tags that carry both an axis and a value
       if sep and value:
         out.append((axis, value))
@@ -435,10 +447,12 @@ class TagOps:
     for tag in bare:
       axis, sep, value = tag.partition("/")
       new_tag = tag
+
       # rewrite the value when the alias map covers this axis
       if sep and axis in alias_map and value in alias_map[axis]:
         new_tag = f"{axis}/{alias_map[axis][value]}"
         hits += 1
+
       # keep the first occurrence of each tag so a collapse cannot duplicate
       if new_tag not in seen:
         seen.add(new_tag)

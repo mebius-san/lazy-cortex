@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, causes, and fixes for lazycortex-python install, audit, style checks, the guideline-review gate, and writer agents.
-last_regen: 2026-09-11
+last_regen: 2026-09-20
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision-tree routing install/audit/check-style/review/writer failures: top-level branch on skill invoked (install vs audit vs check-style vs review vs docstring-writer vs test-writer); install branch splits on phase (source-not-found, rule-read-only, wrapper-template-missing, pyproject-absent, pch-no-inspect-sh, scaffold-sync-fails, env-source-multiple-candidates, wrapper-cannot-resolve-active-install); audit branch splits on check number (check-crash, check1 drift, check2 broken-pointer, check3 artifact-missing, check4 placeholder, check10 invalid-json, check11 venv-degraded, check12 domain-groups-dictionary-missing); check-style branch splits on step (step3-manual-vs-chk, step5-test-gate, step6-violations-persist); pcf branch splits on new-violations-after-upgrade: (a) D2/D5/D7/D9 firing on previously-passing docstrings because project-neutral defaults dropped a project's implicit Generation Rules / Value Ranges / _field_filters conventions, needing [tool.pcf] extra_docstring_sections / d2_exempt_marker_attrs / private_name_allowlist declared; (b) check_language flagging comments/docstrings written outside [tool.pcf] allowed_languages (default english-only), needing translation, allowed_languages, or a # waiver:; (c) project_package autodetection resolving to nothing on an ambiguous src/ + root layout, misclassifying first-party imports, needing [tool.pcf] project_package declared explicitly; review branch splits on: chk-py-all-no-longer-runs-review (review left chk-py all as of 4.0.0 and needs its own chk-py review dispatch, mandatory at the end of a planned-work cycle) vs chk-py-review-base-ref-unresolvable (typo'd or unfetched --base ref, fetch or use git merge-base) vs chk-py-review-render-still-fails-with-FAIL-finding (fix the code, re-run — new scope key re-manifests); docstring-writer branch (step6-chk-violations); test-writer branch (step6-fails-flag, step7-tst-py-fails); each leaf names the fix action"
@@ -19,7 +19,7 @@ source_skills:
   - lazy-python.knowledge-sweep
   - lazy-python.domain-writer
   - lazy-python.contract-writer
-source_sha: 7bb7ffdd946f6774a970182afea33d221674dd58
+source_sha: 672d1b9bda5f90edef93fde43a07d7981f74be83
 ---
 # Troubleshooting
 
@@ -146,6 +146,16 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 **Likely cause**: `pcf` used to classify "first-party" imports against a hardcoded package name. It now resolves `[tool.pcf] project_package` if the project set it, otherwise autodetects it by scanning the project root and `src/` for a single top-level directory carrying `__init__.py` (skipping hidden directories, virtualenvs, caches, and `tests/`). Autodetection only resolves when exactly one candidate is found — a `src/`-layout repo that also carries a top-level tooling or namespace package at the root, or a monorepo with more than one top-level package, autodetects to nothing, which silently disables both project-import classification and the parent-import check.
 
 **Fix**: Declare the package explicitly in `pyproject.toml`: `[tool.pcf] project_package = "<your_package_name>"`. An explicit value always wins over autodetection, so a layout that can never resolve to exactly one candidate on its own still gets correct classification. Re-run `chk-py all -q` to confirm import findings are back to the expected shape.
+
+---
+
+## `chk-py pcf` flags a `@lru_cache` / `@cache` / `@cached_property` as missing `# opt:`
+
+**Symptom**: `chk-py pcf <file>.py` (or the PostToolUse hook) reports something like `cached '<name>' has no '# opt:' clause naming what the cache assumes` against a function or property that was never flagged before — nothing about the caching itself changed.
+
+**Likely cause**: `pcf` checks every `functools.cache` / `functools.lru_cache` / `functools.cached_property` decorator for a contiguous `# opt:` comment block directly above the decorator line, naming the assumption the cache rests on — not the speed win it buys. A definition that picked up one of these decorators without ever adding the marker, or whose `# opt:` comment sits somewhere other than directly above the decorator (a blank line breaks the contiguous block), trips this finding. The marker's own required wording changed too: `# opt:` is now expected to name the assumption ("memoised per root — the project's files do not change during one run"), not the motive ("cached for speed") — a clause stating only the motive is a manual-review finding even when `pcf` itself passes it as non-empty.
+
+**Fix**: Add (or move) a `# opt:` comment directly above the decorator line, naming the specific condition that must stay true for the cached result to remain correct. Re-run `chk-py pcf <file>.py -q` to confirm the finding cleared.
 
 ---
 
@@ -353,9 +363,9 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 
 **Symptom**: After `lazy-python.test-writer` finishes, one or more test methods carry a `# FAILS: <reason>` comment above them. Running `tst-py <module> -q` confirms those tests fail.
 
-**Likely cause**: A test correctly reflects documented behaviour (what the class's docstring promises) but fails against the current implementation. The agent follows the Golden Rule: it does not alter the test to match a possibly buggy implementation, and it does not delete the test. The `# FAILS:` flag is intentional — it signals a divergence between the spec (docstring) and the code.
+**Likely cause**: A test correctly reflects documented behaviour (what the class's docstring promises, or what a `Contract:` / `Domain(…):` / `opt:` marker states) but fails against the current implementation. The agent follows the Golden Rule: it does not alter the test to match a possibly buggy implementation, and it does not delete the test. The `# FAILS:` flag is intentional — it signals a divergence between the spec (docstring or knowledge marker) and the code.
 
-**Fix**: The flagged test is a bug report, not a broken test. Investigate the production class: either the implementation has a defect (fix the code), or the docstring overstates what the class actually does (update the docstring via `lazy-python.docstring-writer` to reflect the real contract, then revisit the test). Do not remove the `# FAILS:` comment or alter the assertion to make it pass without first resolving the underlying divergence.
+**Fix**: The flagged test is a bug report, not a broken test. Investigate the production class: either the implementation has a defect (fix the code), or the docstring/marker overstates what the class actually does (update the docstring via `lazy-python.docstring-writer`, or the marker via `lazy-python.domain-writer` / `lazy-python.contract-writer`, to reflect the real contract, then revisit the test). Do not remove the `# FAILS:` comment or alter the assertion to make it pass without first resolving the underlying divergence.
 
 ---
 
@@ -426,6 +436,26 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 **Likely cause**: The reviewer's checklist treats a guarantee repeated verbatim on both an interface declaration and an implementation of the same method as redundant — the guarantee belongs on the interface, and the implementation should only trace to it through a synced `Guarantees` docstring section. This does not fire for a block that states an extra guarantee only the implementation itself adds; only an actual duplicate.
 
 **Fix**: Drop the implementation's copy of the `Contract:` block and confirm its docstring's `Guarantees` section still states the guarantee in prose (add it if the section is missing it). If the implementation genuinely enforces something extra beyond what the interface promises, a block there is fine for that additional guarantee only — never a re-statement of the interface's.
+
+---
+
+## `lazy-python.code-reviewer` reports a `FAIL` for a stale `opt:` assumption
+
+**Symptom**: A review finding names an `# opt:` clause as `FAIL`-severity, citing an assumption the current change broke — even though the marked-optimization code itself (the cache, memo, or precomputed table) was not touched by the diff.
+
+**Likely cause**: The reviewer's checklist re-reads every `opt:` clause in a file whenever the diff touches a `Contract:` block, a `Domain(…):` block, or any function body in that same file — not just the lines the `opt:` clause sits above. If the change altered something the assumption depends on (the shape of an input, a contract the cached result relies on, a domain rule the precomputed table encodes) while leaving the cache itself unchanged, the assumption is now false even though nothing about the optimization's own code moved.
+
+**Fix**: Read the cited `opt:` clause and confirm whether the assumption still holds after the change. If it does not, either fix the optimization (invalidate the cache on the new condition, recompute the table) or rewrite the `# opt:` clause to name the assumption that is actually still true. This is not a false positive — the finding exists specifically to catch a cache silently outliving the code it was built for.
+
+---
+
+## `lazy-python.code-reviewer` reports a finding for a knowledge marker with no derived test
+
+**Symptom**: A review finding cites a `Contract:`, `Domain(…):`, or `opt:` block as changed or newly added, with no matching test changed in the same diff.
+
+**Likely cause**: The canon's *Knowledge-derived tests* rule requires each of these three block kinds to have at least one test derived from it — `lazy-python.test-writer`'s Paranoid Testing strategy covers this as three of its nine categories. The reviewer's checklist enforces the same rule on review: a changed or newly-added block whose derived test did not change alongside it is a finding, on the theory that an untested marker is a claim nobody verified. This only fires against the touched region of a changed file — a pre-existing untested block elsewhere is not review debt.
+
+**Fix**: Add or update the test that exercises the cited block — for a `Contract:`, a test of the guarantee it states; for a `Domain(…):`, a test whose expected values are worked out by hand from the block's formula, never read off the implementation; for an `opt:`, a test that violates the named assumption and confirms the result stays correct or the cache is dropped. Dispatch `lazy-python.test-writer` against the file if the whole test suite needs rebuilding, or add the targeted test by hand.
 
 ---
 

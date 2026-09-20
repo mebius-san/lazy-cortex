@@ -12,7 +12,7 @@ This document is the coordinator's law for any asset whose status folder-note ca
 
 The primary document is declared by the type record as `start_doc: "design.md:design"` — a feature begins with `design.md`, of doc type `design`. Nothing seeds it at spawn: the scaffold primitive creates only the asset folder and its status folder-note (with its `## Source requests` section), and `design.md`, like every other definition document, is launched later through its own checkbox on that note.
 
-**Place is not a fact about type.** The type record carries `default_path` (`features` as shipped), and that is where a new feature lands at creation when the routing line named no explicit `path=`. But a feature is legal anywhere in the catalog, including nested under another asset's folder: an asset's boundary is a folder-note carrying `spec_role: status`, never the name of a parent directory. The type is read from the status folder-note's frontmatter and from nowhere else; where the folder sits plays no part in resolving it.
+**Place is not a fact about type.** The type record carries `default_path` (the product root, `"."`, as shipped), and that is where a new feature lands at creation when the routing line named no explicit `path=`. But a feature is legal anywhere in the catalog, including nested under another asset's folder: an asset's boundary is a folder-note carrying `spec_role: status`, never the name of a parent directory. The type is read from the status folder-note's frontmatter and from nowhere else; where the folder sits plays no part in resolving it.
 
 ## The definition documents
 

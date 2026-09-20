@@ -45,13 +45,15 @@ Every `AskUserQuestion` this skill issues is a single question (one question per
 Resolve the product record:
 
 ```bash
-"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" resolve-product by-key <product>
+"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" resolve-product effective <product>
 ```
 
-The command prints `{"key": "<product>", "record": <record-or-null>}` with `spec_path` (required, vault-relative), optional `language` (defaults to `en`), and optional `asset_types` / `tool_types`.
+The command prints `{"key": "<product>", "record": <record-or-null>}` with `spec_path` (required, vault-relative), optional `language` (defaults to `en`), and optional `asset_types` / `tool_types`. The `effective` verb merges the record with its ancestor products' (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md` § Effective record), which is what the **visible** set means on a nested product — an inherited type is already declared and must not be re-declared here.
 
 - If `record` is `null` → the product is not registered. Refuse with a message naming `<product>` and suggesting `/lazy-spec.product-config` to register it. Do NOT proceed.
-- Otherwise capture `spec_path`, `language` (default `en` when absent), the visible `asset_types` keys (the product's own merged over the shipped set), and the visible `tool_types` keys (needed by Step 5).
+- Otherwise capture `spec_path`, `language` (default `en` when absent), the visible `asset_types` keys (the effective record's, i.e. the product's own and its ancestors' merged over the shipped set), and the visible `tool_types` keys (needed by Step 5).
+
+**The write target stays the raw record.** Everything this skill writes goes into `products[<product>].asset_types` — the product's own entry, never an ancestor's. Visibility is read through `effective`; authorship is not inherited.
 
 All narrative prose this skill authors (the playbook stub of Step 8) is rendered in the product's `language`. Frontmatter keys, fixed headers, wikilinks, and settings JSON stay English.
 
@@ -59,7 +61,7 @@ Outcome: `resolved`.
 
 ## Step 2 — Ask the type name
 
-If `<type-name>` was passed as an argument, validate it against `^[a-z][a-z0-9-]*$`, confirm it is not already a key in the product's own `asset_types` (refuse and stop if it is — suggest editing the existing declaration instead), and skip the question (outcome `taken-from-arg`). A name that collides with a SHIPPED type is not a refusal — it is a per-field override of that type for this product, and the wizard says so plainly before continuing.
+If `<type-name>` was passed as an argument, validate it against `^[a-z][a-z0-9-]*$`, confirm it is not already a key in the product's own `asset_types` (refuse and stop if it is — suggest editing the existing declaration instead), and skip the question (outcome `taken-from-arg`). A name that collides with a SHIPPED type, or with one this product only **inherits** from an ancestor product, is not a refusal — it is a per-field override of that type for this product, and the wizard says so plainly before continuing. Only a key already in `products[<product>].asset_types` itself refuses.
 
 Otherwise ask for the type's key:
 
@@ -158,13 +160,13 @@ Context (print before asking):
 - Where: /lazy-spec.add-asset-type · Step 6 — Ask the default path; target products[<product>].asset_types.<name>.default_path
 - Found: folders the product's declared types already use — <type: default_path, …>
 - Why asking: the folder is a convenience for whoever creates the asset, NOT a fact of the type — type resolution reads `spec_asset_type` off the status folder-note and never a path, so an operator may put any single asset anywhere under `spec_path` (including inside another asset's folder) with `--path`, and nothing downstream breaks
-- Answers: `<plural of name>` (e.g. `characters` for `character`) — written as `default_path` in Step 7; `<folder of an existing type>` — new assets share that folder; `other (type your own)` — any folder under `spec_path`; `none — use the type's own name` — key omitted, the scaffold falls back to `<name>`. Never re-asked. See: `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`
-AskUserQuestion: header "Default folder", question "Under which folder of <product>'s spec_path should new `<name>` assets land when the caller names none?", options: the pluralised type name first, a sibling-of-an-existing-type folder drawn from the product's declared types, `other (type your own)`, `none — use the type's own name`, each with a description.
+- Answers: `the product root` — written as `"."`; the type's assets sit straight under `spec_path`, the shipped default of feature, content and research; `<plural of name>` (e.g. `characters` for `character`) — written as `default_path` in Step 7; `<folder of an existing type>` — new assets share that folder; `other (type your own)` — any folder under `spec_path`; `none — use the type's own name` — key omitted, the scaffold falls back to `<name>`. Never re-asked. See: `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`
+AskUserQuestion: header "Default place", question "Where do new `<name>` assets of <product> land when the caller names no folder?", options: `the product root` first, then the pluralised type name, a sibling-of-an-existing-type folder drawn from the product's declared types, `other (type your own)`, `none — use the type's own name`, each with a description.
 ```
 
-Capture `<default_path>` only when the operator names a folder; treat "none" as absent (the scaffold then falls back to the type's own name).
+Capture `<default_path>` when the operator names a folder or the product root (`"."`); treat "none" as absent (the scaffold then falls back to the type's own name).
 
-Outcome: `path-set` or `path-defaulted`.
+Outcome: `path-set` or `path-default`.
 
 ## Step 7 — Write the type block
 

@@ -8,8 +8,6 @@ applies to `lazy-expert.pump` is the only ceiling on a single Claude
 spawn — pump never runs more than one spawn per invocation.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import json
 import os
@@ -23,11 +21,15 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-import error_ledger
-import runtime_state
-from lazy_settings import load_section
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import error_ledger  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import runtime_state  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from lazy_settings import load_section  # pylint: disable=import-error
 # waiver: ReferenceError is reference_resolver's domain exception, not the builtin
-from reference_resolver import resolve, ReferenceError  # pylint: disable=redefined-builtin
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from reference_resolver import resolve, ReferenceError  # pylint: disable=import-error,redefined-builtin
 # Hoisted from inside `_check_post_claude` (Bug 113): the deferred import inside the
 # function was firing every job, and when a sibling editor flushed an update to
 # `constants.py` (e.g. adding a new key like `DaemonKey`) the cached `constants` module
@@ -35,12 +37,19 @@ from reference_resolver import resolve, ReferenceError  # pylint: disable=redefi
 # `runtime_daemon`'s top-level `from constants import …` then exploded with
 # `ImportError: cannot import name X from constants`. Binding the import at module load
 # means the lookup happens ONCE per process lifetime, not per job.
-from runtime_daemon import _check_working_tree, is_cache_root
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from runtime_daemon import _check_working_tree, is_cache_root  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+# pylint: disable-next=import-error
 from job_response import classify_response, is_job_bundle, outcome_tokens, read_response
-from worktree_tasks import WorktreeStartError, WorktreeTaskManager
-from provider_env import ProviderKey, build_spawn_env, resolve_token
-import rate_limit_flag
-from constants import (
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from worktree_tasks import WorktreeStartError, WorktreeTaskManager  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from provider_env import ProviderKey, build_spawn_env, resolve_token  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import rate_limit_flag  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from constants import (  # pylint: disable=import-error
   DaemonKey, EnvVar, GitConfigKey, HaltKey, HaltReason, IncidentActor, IncidentKey, IncidentKind, IncidentPhase,
   IncidentState, JobArtifact, JobConfigKey, JobErrorCategory, JobFile, JobIODir, JobLogOutcome, JobMarker,
   JobOutcome, JobRequestKey, JobResponseKey, JobStatus, RateLimitGuardKey, RateLimitRecordKey, RuntimeFile,
@@ -132,6 +141,7 @@ def _marker_mtime(jdir: Path, marker: str) -> float | None:
     The marker's modification time, or `None` when the marker is not there.
   """
   path = jdir / marker
+
   # guard: an unarmed or unclaimed bundle simply has no such marker to time
   if not path.exists():
     return None
@@ -345,6 +355,7 @@ def _detect_dead_jobs(repo: Path, *, grace_sec: float = 0.0) -> int:
   # dead, regardless of its claimant's liveness or how long it has sat unclaimed.
 
   base = Path(repo) / JOBS_BASE
+
   # guard: nothing to scan when the jobs root has not been created yet
   if not base.exists():
     return 0
@@ -359,6 +370,7 @@ def _detect_dead_jobs(repo: Path, *, grace_sec: float = 0.0) -> int:
       # guard: only real bundles are queue entries
       if not is_job_bundle(jdir):
         continue
+
       # a bundle carrying no marker at all is an abandoned dispatch rather than one still being
       # assembled: nothing will ever arm it, so it is buried once it outlives the same grace a
       # stuck claim gets, which puts it in front of the doctor and inside the collector's reach
@@ -366,18 +378,23 @@ def _detect_dead_jobs(repo: Path, *, grace_sec: float = 0.0) -> int:
         if time.time() - jdir.stat().st_mtime >= grace_sec:
           marked += _mark_dead(repo, edir.name, jdir, _build_dead_json(jdir, edir.name, jdir.name, time.time()))
         continue
+
       # guard: job never reached READY — still being assembled
       if not (jdir / JobMarker.READY).exists():
         continue
+
       # guard: job already DONE — terminal state reached
       if (jdir / JobMarker.DONE).exists():
         continue
+
       # guard: job already DEAD — skip to keep idempotent
       if (jdir / JobMarker.DEAD).exists():
         continue
+
       # guard: job CANCELLED — the operator killed its executor deliberately; not a death
       if (jdir / JobMarker.CANCELLED).exists():
         continue
+
       # guard: no PID file — job is queued, not claimed
       if not (jdir / JobMarker.PID).exists():
         continue
@@ -401,27 +418,32 @@ def _detect_dead_jobs(repo: Path, *, grace_sec: float = 0.0) -> int:
 
       # the candidate marker records when this job was first seen unclaimed
       candidate = jdir / JobMarker.DEAD_CANDIDATE
+
       # guard: claimant process is still running — leave the job alone
       if alive:
         # A live claimant means the job was re-claimed after the earlier sighting;
         # a stale marker must not shortcut the grace window on a later scan.
         candidate.unlink(missing_ok = True)
         continue
+
       # guard: claimant died after the expert finished — finalize instead of marking dead
       if (jdir / JobFile.RESPONSE).exists():
         _finalize_orphaned_job(jdir)
         _append_jobs_log(repo, edir.name, jdir.name, _classify_finished(jdir))
         continue
+
       # guard: first sighting — open the grace window instead of marking dead
       if grace_sec > 0 and not candidate.exists():
         candidate.touch()
         continue
+
       # guard: grace window still open — give a surviving subprocess time to respond
       if grace_sec > 0 and time.time() - candidate.stat().st_mtime < grace_sec:
         continue
 
       # the dead record is composed before the last-moment response check below
       blob = _build_dead_json(jdir, edir.name, jdir.name, time.time())
+
       # guard: response landed during this scan — finalize instead of marking dead
       if (jdir / JobFile.RESPONSE).exists():
         _finalize_orphaned_job(jdir)
@@ -508,23 +530,27 @@ def _agent_is_read_only(agent_path: Path) -> bool:
     text = agent_path.read_text()
   except OSError:
     return False
+
   # guard: file does not start with a frontmatter fence
   if not text.startswith("---"):
     return False
   # waiver: inline numeric/default literal, not a domain constant
   end = text.find("\n---", 4)
+
   # guard: opening fence has no matching closing fence
   if end == -1:
     return False
   frontmatter = text[4:end]
   for raw in frontmatter.splitlines():
     line = raw.strip()
+
     # guard: not the tools field — keep scanning
     # waiver: external Claude Code stream-json field name, not an internal key
     if not line.startswith("tools:"):
       continue
     # waiver: external Claude Code stream-json field name, not an internal key
     value = line[len("tools:"):].strip()
+
     # guard: tools field present but empty — treat as write-capable
     if not value:
       return False
@@ -614,6 +640,7 @@ def _check_post_claude(repo: Path, expert_name: str, jdir: Path) -> bool:
   # condition is judged by whether it cleared it, never by the dirt it worked through.
 
   dirty = _check_working_tree(repo)
+
   # guard: working tree is clean — nothing to do
   if dirty is None:
     return False
@@ -673,6 +700,7 @@ def _worktree_head(wt: Path) -> str | None:
     # waiver: git CLI vocabulary, not a domain constant
     [ "git", "rev-parse", "HEAD" ], cwd = str(wt), capture_output = True, text = True, check = False,
   )
+
   # guard: an unresolvable HEAD carries no comparable tip
   if head.returncode != 0:
     return None
@@ -710,9 +738,11 @@ def _isolated_job_failure(wt: Path, pre_spawn_tip: str | None) -> str | None:
     # waiver: git CLI vocabulary, not a domain constant
     [ "git", "status", "--porcelain" ], cwd = str(wt), capture_output = True, text = True, check = False,
   )
+
   # guard: the expert left uncommitted changes in its worktree — the commit obligation was broken
   if status.stdout.strip():
     return f"isolated job left the worktree dirty: {status.stdout.strip()[:300]}"
+
   # guard: a clean tree with the tip exactly where the spawn found it means nothing durable landed
   if pre_spawn_tip is not None and _worktree_head(wt) == pre_spawn_tip:
     # waiver: one-off human-facing message
@@ -787,12 +817,14 @@ def pump(repo: Path) -> dict:
 
   # the queue root only appears once something has been dispatched
   jobs_root = repo / JOBS_BASE
+
   # guard: no jobs tree on disk yet — return early summary
   if not jobs_root.exists():
     return { "experts": 0, "processed": 0, "cleaned": 0, "detected_dead": detected_dead }
 
   # per-tick counters the daemon folds into its metrics
   processed = cleaned = expert_count = 0
+
   # Bug 118: previous loop processed the first READY job in alphabetical order of
   # expert directories (`designer` < `historian` < `interpreter` < `planner` <
   # `planner-2` < `spec.request-router` < `spec.request-apply`). Sibling fixtures
@@ -819,6 +851,7 @@ def pump(repo: Path) -> dict:
         and not (jdir / JobMarker.DEAD).exists()
         and not (jdir / JobMarker.CANCELLED).exists()
       )
+
       # guard: only collect actually-ready jobs into the FIFO queue
       if not ready:
         continue
@@ -841,9 +874,11 @@ def pump(repo: Path) -> dict:
 
     # resolve the guard's effective triggers for this repository
     guard = rate_limit_flag.config(daemon)
+
     # one listing answers both questions — a record expiring between two reads would otherwise
     # report a deferral with no reopening time attached
     raised = rate_limit_flag.live() if guard[RateLimitGuardKey.ENABLED] else []
+
     # guard: the subscription window is closed — postpone rather than burn the call
     if raised:
       # waiver: pump-summary subkeys, mirroring the sibling `halted` summary below
@@ -900,9 +935,11 @@ def _halt_on_rate_limit(repo: Path, expert_name: str, jdir: Path) -> bool:
     True when the halt was raised by this call; False when the flag is down or a halt stood.
   """
   raised = rate_limit_flag.live()
+
   # guard: the flag is not up — nothing this run has to act on
   if not raised:
     return False
+
   # guard: a standing halt keeps its own reason; the flag alone still defers every next tick
   if runtime_state.get_halted(repo) is not None:
     return False
@@ -915,8 +952,10 @@ def _halt_on_rate_limit(repo: Path, expert_name: str, jdir: Path) -> bool:
     IncidentKey.EXPERT: expert_name,
     IncidentKey.JOB_ID: jdir.name,
   })
+
   # human-facing detail line — the machine-readable epoch stays on the halt block
   reopens = datetime.fromtimestamp(resets, tz = UTC).strftime("%Y-%m-%d %H:%M UTC")
+
   # the loud line: the routine's stderr reaches the daemon journal's stderr_tail and the
   # operator's terminal — a multi-hour stop must never be discoverable only via state.json
   sys.stderr.write(
@@ -949,15 +988,18 @@ def _record_rate_limit(repo: Path, expert_name: str, stdout: str) -> int:
     The number of rate-limit frames the buffer carried, regardless of whether any tripped.
   """
   frames = rate_limit_flag.frames(stdout or "")
+
   # guard: the run carried no rate-limit signal to act on
   if not frames:
     return 0
   cfg = rate_limit_flag.config(load_section(repo / SettingsFile.REL, SettingsKey.DAEMON))
+
   # guard: the guard is switched off in this repository — frames are counted, never acted on
   if not cfg[RateLimitGuardKey.ENABLED]:
     return len(frames)
   for info in frames:
     trigger = rate_limit_flag.triggered(info, cfg)
+
     # guard: this frame reports a healthy window
     if trigger is None:
       continue
@@ -980,6 +1022,7 @@ def _read_rejection(jdir: Path) -> str | None:
     bundle has been rejected or the record is unreadable.
   """
   record_path = jdir / JobArtifact.ERROR_JSON
+
   # guard: the common case is a bundle nobody has rejected yet
   if not record_path.exists():
     return None
@@ -1034,15 +1077,18 @@ def _materialize_io(jdir: Path, cfg: dict, work_root: Path) -> str | None:
                        ( JobConfigKey.CONTEXT_PATHS, JobIODir.CONTEXT ) ):
     for rel in cfg.get(key) or []:
       src = (work_root / rel).resolve()
+
       # guard: a `../`-bearing entry would stage files from outside the checkout into a bundle the
       # expert reads and may commit — the manifest arrives as JSON on stdin, so it is untrusted
       if not src.is_relative_to(work_root.resolve()):
         return f"{bucket}/: declared path {rel!r} escapes the work tree"
+
       # guard: the entry vanished between dispatch and claim — deterministic, retry cannot help
       if not src.exists():
         return f"{bucket}/: declared path {rel!r} does not exist at claim time"
       dst_dir = jdir / bucket
       dst_dir.mkdir(exist_ok = True)
+
       # a directory arrives whole under `<parent>-<name>`: two asset folders declared from
       # different categories share their own name and would otherwise merge into one; a file goes
       # flat, which is the layout every protocol's per-kind subdir declaration already describes
@@ -1050,6 +1096,7 @@ def _materialize_io(jdir: Path, cfg: dict, work_root: Path) -> str | None:
         shutil.copytree(src, dst_dir / f"{src.parent.name}-{src.name}", dirs_exist_ok = True)
       else:
         shutil.copy2(src, dst_dir / src.name)
+
   # every declared entry landed — the caller may proceed to the spawn
   return None
 
@@ -1099,6 +1146,7 @@ def _compose_user_prompt(jdir: Path, *, protocols: list, aspects: list, argument
     "the contradiction in your summary. A response without `outcome` is rejected, and work "
     "reported as done through any other field is read as a failure.",
   ])
+
   # a rejected previous attempt left its reason behind — the re-spawn is told what was
   # wrong with it, since repeating the same prompt would only reproduce the same answer
   rejection = _read_rejection(jdir)
@@ -1127,6 +1175,7 @@ def _spawn_settings_argv(repo: Path) -> list[str]:
     otherwise an empty list.
   """
   settings_file = repo / RuntimeFile.SANDBOX_SETTINGS
+
   # guard: sandbox settings file absent (daemon not installed here) — spawn unsandboxed
   if not settings_file.is_file():
     return []
@@ -1197,9 +1246,11 @@ def _normalize_setting_sources(setting_sources: str | list[str] | None) -> list[
     if not isinstance(s, str) or not s.strip():
       continue
     scope = s.strip().lower()
+
     # guard: keep only recognized, de-duplicated scopes
     if scope in _VALID_SETTING_SOURCES and scope not in out:
       out.append(scope)
+
   # guard: nothing valid survived filtering — fall back to the hermetic default
   if not out:
     return list(_DEFAULT_SETTING_SOURCES)
@@ -1267,6 +1318,7 @@ def build_expert_argv(repo: Path, env: dict[str, str], *, contract_path: Path,
            "--setting-sources", ",".join(_normalize_setting_sources(setting_sources)) ]
   for cfg_path in _normalize_mcp_config(mcp_config, repo):
     argv.extend([ "--mcp-config", cfg_path ])
+
   # Propagate plugin-dir flags so the spawn sees the same plugin tree as the
   # daemon; without them `claude -p` falls back to its cache and chases sibling
   # skills via slow `find` on Dropbox checkouts. Set by runtime_daemon.
@@ -1279,6 +1331,7 @@ def build_expert_argv(repo: Path, env: dict[str, str], *, contract_path: Path,
   argv.extend(_spawn_settings_argv(repo))
   if model:
     argv.extend([ "--model", model ])
+
   # `--agent` resolves by NAME (scoped `<plugin>:<name>`), never by file path — a
   # path or de-scoped name silently falls back to the body-less default assistant.
   argv.extend([ "--agent", agent_ref, prompt ])
@@ -1321,11 +1374,13 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
   idle_timeout_sec = int(daemon.get(DaemonKey.STREAM_IDLE_TIMEOUT_SEC, _STREAM_IDLE_TIMEOUT_DEFAULT))
   # waiver: small internal subkey, not a reusable domain key
   max_stall_retries = max(0, int(daemon.get("stream_max_retries", _STREAM_MAX_RETRIES_DEFAULT)))
+
   # Per-job config.json carries everything the pump needs: agent ref,
   # protocols list (declared by the routine that created this job),
   # git_author for any commits the expert makes. Routine wrote it at
   # dispatch time; pump never consults lazy.settings.json[experts].
   config_path = jdir / JobFile.CONFIG
+
   # guard: per-job config missing — write logical error and bail
   if not config_path.exists():
     _write_error(jdir, JobErrorCategory.LOGICAL, f"config.json missing in {jdir}")
@@ -1345,6 +1400,7 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
   provider       = cfg.get(JobConfigKey.PROVIDER)
   mcp_config     = cfg.get(JobConfigKey.MCP_CONFIG)
   setting_sources = cfg.get(JobConfigKey.SETTING_SOURCES)
+
   # guard: agent reference must be present in config
   if not agent_ref:
     # waiver: one-off human-facing message
@@ -1420,6 +1476,7 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     # the base branch is the fork point for a fresh job branch — without it there is nothing
     # to fork from
     base_branch = _resolve_base_branch(repo)
+
     # guard: no configured base — refuse rather than fork a job branch off an arbitrary point
     if not base_branch:
       # waiver: one-off human-facing message
@@ -1441,6 +1498,7 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
 
     # rebuild the gitignored execution environment the worktree does not materialise
     bootstrap_error = mgr.bootstrap(worktree_dir, git_cfg.get(GitConfigKey.WORKTREE_BOOTSTRAP_CMD))
+
     # guard: a broken environment must fail the job before the spawn, not confuse the agent mid-run
     if bootstrap_error is not None:
       mgr.remove(worktree_dir)
@@ -1485,6 +1543,7 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     # inside the harness leaks a Claude alias to a foreign server
     if provider:
       token = resolve_token(provider[ProviderKey.TOKEN_ENV])
+
       # guard: no token — fail the job before the spawn, with the variable named
       if token is None:
         _write_error(
@@ -1509,6 +1568,7 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     # the tree as it stands at claim, which is what makes the serial queue safe against a
     # stale snapshot
     materialize_error = _materialize_io(jdir, cfg, worktree_dir or repo)
+
     # guard: a declared path vanished or reaches outside the work tree — a logical fault the
     # owning coordinator sorts out on its next wake
     if materialize_error is not None:
@@ -1519,6 +1579,7 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     # `- protocol:` replaces the legacy `- protocol contract:` for parallelism.
     # Arguments are key-sorted for byte-stable prompts (cache hits, snapshot tests).
     prompt = _compose_user_prompt(jdir, protocols = protocol_paths, aspects = aspect_paths, arguments = arguments)
+
     # an isolated job carries its commit obligation in the prompt — the protocol files under the
     # job dir are reached by absolute paths, so the worktree cwd changes nothing else
     if worktree_dir is not None and job_branch:
@@ -1586,6 +1647,7 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
         claude_argv, env = env, cwd = worktree_dir or repo, idle_timeout_sec = idle_timeout_sec,
       )
       seen_frames += _record_rate_limit(repo, expert_name, stdout)
+
       # guard: stream produced output / exited on its own — hand off to the outcome path
       if not stalled:
         break
@@ -1594,6 +1656,7 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
         f"stream-idle-stall: {expert_name}/{jdir.name} "
         f"attempt {stall_attempt + 1}/{max_stall_retries + 1}\n"
       )
+
     # guard: every re-spawn stalled — record a transient error; the next tick re-dispatches
     if stalled:
       _write_error(
@@ -1630,6 +1693,7 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     # a clean exit still needs a usable response.json before this job can reach DONE
     if returncode == 0:
       response_path = jdir / JobFile.RESPONSE
+
       # Bug 99 fallback: agent exited cleanly but didn't write a usable response.json
       # — recover the JSON object from the final assistant text frame of
       # the stream-json transcript. LLMs sometimes describe their result in
@@ -1642,6 +1706,7 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
         recovered = _extract_response_from_stdout(stdout or "")
         if recovered is not None:
           response_path.write_text(json.dumps(recovered, indent = 2))
+
       # guard: no outcome survived the salvage — the envelope is violated, and a
       # missing discriminator must never be read as completed work
       if not outcome_tokens(read_response(jdir)):
@@ -1666,6 +1731,7 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
       if not _agent_is_read_only(agent_path):
         if worktree_dir is not None:
           failure = _isolated_job_failure(worktree_dir, pre_spawn_tip)
+
           # guard: the isolated job broke its commit obligation — fail it, keep the queue moving
           if failure is not None:
             _write_error(jdir, JobErrorCategory.LOGICAL, failure)
@@ -1673,6 +1739,7 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
         # guard: abort the tick when the expert left the shared working tree dirty
         elif _check_post_claude(repo, expert_name, jdir):
           raise _ExpertLeftDirtyTree(expert_name, jdir.name, [])
+
       # the correction landed — drop the rejection record so it cannot resurface
       # in the prompt of a later attempt on this same bundle
       (jdir / JobArtifact.ERROR_JSON).unlink(missing_ok = True)
@@ -1701,6 +1768,7 @@ def _pipe_reader(stream: IO[str], tag: str, out_q: queue.Queue) -> None:
       out_q.put((tag, line))
   finally:
     out_q.put((tag, None))
+
     # guard: best-effort close — the child owns the write end and may already be gone
     try:
       stream.close()
@@ -1731,6 +1799,7 @@ def _kill_process_group(proc: subprocess.Popen) -> None:
     return
   except subprocess.TimeoutExpired:
     pass
+
   # guard: SIGTERM ignored within the grace window — force-kill the whole group
   try:
     os.killpg(pgid, signal.SIGKILL)
@@ -1767,6 +1836,7 @@ def _spawn_with_idle_watchdog(
     text = True, start_new_session = True,
   )
   line_q: queue.Queue = queue.Queue()
+
   # Both pipes are drained on daemon threads so a full OS buffer can never deadlock the
   # read loop; the idle timer is measured on stdout only (the model's event stream).
   readers = [
@@ -1788,6 +1858,7 @@ def _spawn_with_idle_watchdog(
     while not (eof["out"] and eof["err"]):
       now = time.monotonic()
       idle = now - last_out
+
       # guard: stdout silent past the idle window while still open — treat as a freeze
       # waiver: see the "out"/"err" waiver above the enclosing while-loop
       if not eof["out"] and idle >= idle_timeout_sec:
@@ -1799,6 +1870,7 @@ def _spawn_with_idle_watchdog(
         tag, line = line_q.get(timeout = poll)
       except queue.Empty:
         continue
+
       # guard: EOF sentinel for one pipe
       if line is None:
         eof[tag] = True
@@ -1809,6 +1881,7 @@ def _spawn_with_idle_watchdog(
         last_out = time.monotonic()
       else:
         err_parts.append(line)
+
     # a stall means the child is wedged — tear down its group before reaping
     if stalled:
       _kill_process_group(proc)
@@ -1854,6 +1927,7 @@ def _extract_response_from_stdout(stdout: str) -> dict | None:
   for line in stdout.splitlines():
     # waiver: the loop variable is deliberately rebound — each line is normalised in place before use
     line = line.strip()  # noqa: PLW2901
+
     # guard: blank line between stream frames
     if not line:
       continue
@@ -1861,17 +1935,20 @@ def _extract_response_from_stdout(stdout: str) -> dict | None:
       frame = json.loads(line)
     except json.JSONDecodeError:
       continue
+
     # guard: frame must be a JSON object to carry assistant content
     # waiver: external Claude Code stream-json field name, not an internal key
     if not isinstance(frame, dict) or frame.get("type") != "assistant":
       continue
     # waiver: external Claude Code stream-json field name, not an internal key
     msg = frame.get("message", {})
+
     # guard: malformed assistant frame (missing message dict)
     if not isinstance(msg, dict):
       continue
     # waiver: external Claude Code stream-json field name, not an internal key
     content = msg.get("content", [])
+
     # guard: content is expected to be a list of typed blocks
     if not isinstance(content, list):
       continue
@@ -1882,10 +1959,12 @@ def _extract_response_from_stdout(stdout: str) -> dict | None:
         text = block.get("text", "")
         if isinstance(text, str) and text:
           texts.append(text)
+
   # guard: no assistant text frames in the transcript
   if not texts:
     return None
   decoder = json.JSONDecoder()
+
   # Search last-emitted text first; LLMs typically describe outcome in final reply.
   for text in reversed(texts):
     idx = 0
@@ -1923,6 +2002,7 @@ def _extract_usage(stdout: str) -> dict | None:
   # guard: empty or whitespace-only stdout has no frames to parse
   if not stdout or not stdout.strip():
     return None
+
   # defaults that survive a buffer carrying frames but no usage
   model = "unknown"
   final_usage: dict | None = None
@@ -1934,6 +2014,7 @@ def _extract_usage(stdout: str) -> dict | None:
     line = line.strip()  # noqa: PLW2901
     if line:
       candidates.append(line)
+
   # guard: nothing non-empty in stdout to parse
   if not candidates:
     return None
@@ -1946,6 +2027,7 @@ def _extract_usage(stdout: str) -> dict | None:
     except json.JSONDecodeError:
       continue
     parsed_any = True
+
     # guard: frame must be a JSON object to carry usage/model
     if not isinstance(frame, dict):
       continue
@@ -1969,6 +2051,7 @@ def _extract_usage(stdout: str) -> dict | None:
         final_usage = frame["usage"]
     except json.JSONDecodeError:
       return None
+
   # guard: no usage frame found in either parsing strategy
   if final_usage is None:
     return None
@@ -2176,6 +2259,7 @@ def _reject_response(jdir: Path, message: str) -> None:
     attempts = int((jdir / JobArtifact.ATTEMPTS).read_text().strip())
   except (OSError, ValueError):
     attempts = 0
+
   # guard: the retry budget is spent — a reproducing violation is the expert's contract,
   # not a bad roll, and another spawn would only burn a model call to fail identically
   if attempts > _ENVELOPE_RETRY_LIMIT:
@@ -2187,6 +2271,7 @@ def _reject_response(jdir: Path, message: str) -> None:
     JobResponseKey.MESSAGE: message,
     "attempt": attempts,
   }, indent = 2))
+
   # drop the unusable payload and release the claim: READY survives without DONE,
   # so the next pump tick re-picks this same bundle
   (jdir / JobFile.RESPONSE).unlink(missing_ok = True)
@@ -2317,6 +2402,7 @@ def _maybe_cleanup(jdir: Path, done_after: float, fail_after: float, dead_after:
   # a finished job is retained for its own window, longer when it ended in an error
   if (jdir / JobMarker.DONE).exists():
     age = time.time() - (jdir / JobMarker.DONE).stat().st_mtime
+
     # anything short of a proven success is retained on the longer failure window,
     # so an envelope-violating or deferred bundle survives long enough to be inspected
     is_error = classify_response(read_response(jdir)) != JobStatus.DONE

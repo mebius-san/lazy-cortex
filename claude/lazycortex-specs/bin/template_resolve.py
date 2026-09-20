@@ -14,7 +14,10 @@ import os
 import sys
 from pathlib import Path
 
-import scaffold_asset
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import resolve_product  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import scaffold_asset  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -57,10 +60,11 @@ def _alias_for(repo: Path, context: str, product: str) -> str:
   # guard: the catalog root shares the level note with the product context
   if context == _CONTEXT_VAULT:
     return _CONTEXT_PRODUCT
+
   # guard: only a product-scoped asset type can declare an alias base
   if not product or context == _CONTEXT_PRODUCT:
     return ""
-  return scaffold_asset._alias_base(context, scaffold_asset._resolve_product(repo, product))
+  return scaffold_asset.resolve_alias_base(context, scaffold_asset.resolve_product(repo, product))
 
 
 def main(argv: list[str]) -> int:
@@ -87,17 +91,20 @@ def main(argv: list[str]) -> int:
   args = parser.parse_args(argv)
 
   # the flag, then the daemon-exported env var, then the process cwd — like every sibling verb
-  repo = scaffold_asset._repo_root(Path(args.cwd or os.environ.get(_ENV_REPO_ROOT) or Path.cwd()))
+  repo = scaffold_asset.repo_root(Path(args.cwd or os.environ.get(_ENV_REPO_ROOT) or Path.cwd()))
   alias_base = _alias_for(repo, args.context, args.product)
-  layers = scaffold_asset._template_layers(repo, args.context, args.product, args.file, alias_base = alias_base)
-  chosen = scaffold_asset._resolve_template(repo, args.context, args.product, args.file,
+  ancestors = resolve_product.ancestor_chain(repo, args.product) if args.product else []
+  layers = scaffold_asset.template_layers(repo, args.context, args.product, args.file,
+                                           alias_base = alias_base, ancestors = ancestors)
+  chosen = scaffold_asset.resolve_template(repo, args.context, args.product, args.file,
                                             alias_base = alias_base, expect_type = args.type)
+
   # with no product the per-product layer collapses onto the consumer layer under the same path, so
   # it names nothing; a by-type fallback lands on a sibling of a layer's path, so the folder decides
   named = [ (label, path) for label, path in layers
-            if args.product or not label.endswith(scaffold_asset._K.LAYER_PRODUCT_OVERRIDE) ]
+            if args.product or not label.endswith(scaffold_asset.Keys.LAYER_PRODUCT_OVERRIDE) ]
   layer = next(label for label, path in named if path.parent == chosen.parent)
-  print(json.dumps({ _OUT_PATH: str(chosen), _OUT_DOC_TYPE: scaffold_asset._template_doc_type(chosen),
+  print(json.dumps({ _OUT_PATH: str(chosen), _OUT_DOC_TYPE: scaffold_asset.template_doc_type(chosen),
                      _OUT_LAYER: layer }))
   return 0
 

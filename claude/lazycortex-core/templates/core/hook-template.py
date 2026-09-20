@@ -175,6 +175,7 @@ def main() -> int:
   if tool_name == "Bash":
     # waiver: external-format tool-input field name, not an internal key
     command = tool_input.get("command", "")
+
     # guard: bail when the Bash command does not match the precise prefix we care about
     if not re.match(r"\s*<command-prefix>\b", command):
       return 0
@@ -192,6 +193,7 @@ def main() -> int:
     ).strip()
   except (subprocess.CalledProcessError, FileNotFoundError):
     return 0
+
   # guard: workspace shape must carry the expected marker directory at the root
   # waiver: scaffold-template placeholder, not a domain constant
   if not os.path.isdir(os.path.join(root, "<expected-marker-dir>")):

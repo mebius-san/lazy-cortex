@@ -21,8 +21,6 @@ resolves an install path only, never enablement.
 """
 
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import argparse
 import json
@@ -30,7 +28,8 @@ import os
 import sys
 from pathlib import Path
 
-from frontmatter_parser import parse_frontmatter
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from frontmatter_parser import parse_frontmatter  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:

@@ -189,6 +189,7 @@ class Markers:
 
     # Advance past the start marker and its trailing newline
     after_start = start_idx + len(start)
+
     # consume the newline right after the start marker so the marker keeps its own line
     if after_start < len(text) and text[after_start] == "\n":
       after_start += 1
@@ -239,6 +240,7 @@ class Markers:
     # step past the start marker to where the inner content actually begins
     start_idx = text.index(start)
     after_start = start_idx + len(start)
+
     # consume the newline right after the start marker so it stays out of the inner content
     if after_start < len(text) and text[after_start] == "\n":
       after_start += 1

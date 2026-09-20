@@ -182,10 +182,12 @@ def _gate(tool_name: str, tool_input: dict) -> tuple[bool, str]:
     # waiver: external-format tool-input field name, not an internal key
     cmd = tool_input.get("command", "")
     m = _GIT_INDEX_VERBS_RE.match(cmd)
+
     # guard: command does not invoke an index-mutating git verb
     if not m:
       return False, ""
     return True, m.group(1)
+
   # MCP branch: derive the verb from the trailing segment of the tool name.
   if tool_name in _MCP_INDEX_TOOLS:
     return True, tool_name.rsplit("_", 1)[-1]
@@ -288,12 +290,14 @@ def main() -> int:
 
   # Resolve the repository root; bail when not inside a repo.
   repo = _repo_root()
+
   # guard: not inside a git repository
   if repo is None:
     return 0
 
   # Load the per-repo config and respect the master kill-switch.
   cfg = staging_lock.load_config(repo)
+
   # guard: guard disabled for this repo
   if not cfg.enabled:
     return 0
@@ -317,6 +321,7 @@ def main() -> int:
 
   # Mutex row: classify by leading verb and dispatch by lifecycle phase.
   relevant, verb = _gate(tool_name, tool_input)
+
   # guard: tool call does not touch the git index
   if not relevant:
     return 0
@@ -413,6 +418,7 @@ def _handle_pre_pathspec(repo: Path, tool_name: str, tool_input: dict) -> int:
   # MCP branch: these tools cannot carry a pathspec, so only the harmless verb survives
   if tool_name in _MCP_INDEX_TOOLS:
     verb = tool_name.rsplit("_", 1)[-1]
+
     # guard: reset only ever removes entries — the operator may need it mid-session
     # waiver: git CLI vocabulary, not a domain constant
     if verb == "reset":
@@ -424,6 +430,7 @@ def _handle_pre_pathspec(repo: Path, tool_name: str, tool_input: dict) -> int:
   # waiver: external-format tool-input field name, not an internal key
   command = tool_input.get("command", "")
   segments = git_cmdline.parse_segments(command)
+
   # guard: command could not be tokenised — fail closed, but only when it plainly reaches an
   # index verb; an unrelated command that merely mentions git is not this hook's business
   if segments is None:
@@ -434,6 +441,7 @@ def _handle_pre_pathspec(repo: Path, tool_name: str, tool_input: dict) -> int:
     return 0
   for segment in segments:
     reason = _pathspec_violation(repo, segment)
+
     # guard: this segment breaks the discipline — refuse the whole command
     if reason:
       _emit_deny(reason)
@@ -477,6 +485,7 @@ def _handle_post_pathspec(repo: Path, tool_name: str, tool_input: dict) -> int:
     return 0
   # waiver: external-format tool-input field name, not an internal key
   segments = git_cmdline.parse_segments(tool_input.get("command", ""))
+
   # guard: untokenisable command — nothing to attribute a commit to, stay silent at Post
   if segments is None:
     return 0
@@ -491,17 +500,21 @@ def _handle_post_pathspec(repo: Path, tool_name: str, tool_input: dict) -> int:
     and (seg.repo_dir is None or _targets_this_repo(repo, seg.repo_dir))
     for seg in segments
   )
+
   # guard: only a commit or a history-sync verb against this repo can leave the index behind
   if not commit_ran and not sync_ran:
     return 0
   git_dir = _git_dir(repo)
+
   # guard: mid merge / rebase / cherry-pick a full index is legitimate (the verb may have failed)
   if git_dir is not None and _mid_operation(git_dir):
     return 0
   staged = _content_staged_paths(repo)
+
   # guard: index is clean — the verb left it exactly as it found it
   if not staged:
     return 0
+
   # a commit runs over a precondition-checked index, so any leftover is the swap signature
   if commit_ran:
     _emit_context(_POST_SWAP_ALARM)
@@ -533,6 +546,7 @@ def _targets_this_repo(repo: Path, repo_dir: str) -> bool:
   # waiver: git CLI vocabulary, not domain constants
   probe = _git_at(Path(repo_dir) if Path(repo_dir).is_absolute() else Path.cwd() / repo_dir,
                   "rev-parse", "--show-toplevel")
+
   # guard: cannot resolve the target — treat as a foreign repository
   if probe.returncode != 0:
     return False
@@ -582,35 +596,43 @@ def _pathspec_violation(repo: Path, segment: git_cmdline.GitSegment) -> str | No
     if not git_cmdline.adds_content(segment) or _resolves_conflicts_only(repo, segment):
       return None
     return _DENY_ADD
+
   # guard: both verbs stage as a side effect
   if segment.verb in _AUTO_STAGING_VERBS:
     return _DENY_AUTO_STAGING
+
   # guard: a file-targeting checkout rewrites the index entry alongside the worktree file. A
   # branch-targeting one does not name a path at all, so an existing path among the positionals is
   # what separates the two — `git checkout main` passes, `git checkout HEAD -- a.md` does not.
   # waiver: git CLI vocabulary, not a domain constant
   if segment.verb == "checkout":
     return _DENY_FILE_CHECKOUT if _names_existing_path(repo, segment) else None
+
   # guard: `--staged` alone un-stages (the operator's own escape hatch, like `reset`); paired with
   # `--source` it writes a revision's content INTO the index, which is staging.
   # waiver: git CLI vocabulary, not a domain constant
   if segment.verb == "restore":
     staged_from_source = "--staged" in segment.flags and "--source" in segment.flags
     return _DENY_RESTORE_STAGED_SOURCE if staged_from_source else None
+
   # guard: every other verb (reset, push, status, ...) leaves the index to the operator
   # waiver: git CLI vocabulary, not a domain constant
   if segment.verb != "commit":
     return None
   git_dir = _git_dir(repo)
+
   # guard: mid merge / rebase / cherry-pick — git itself refuses a partial commit there
   if git_dir is not None and _mid_operation(git_dir):
     return None
+
   # guard: a directory pathspec sweeps in whatever is parked beneath it
   if any((repo / p).is_dir() for p in segment.pathspecs):
     return _DENY_COMMIT_DIR
+
   # guard: every committed path is named explicitly — the clean-index precondition still applies
   if not git_cmdline.is_indexful_commit(segment):
     return _await_clean_index(repo)
+
   # guard: an amend against a clean index only rewrites the previous commit
   if git_cmdline.is_amend(segment) and not _staged_paths(repo):
     return None
@@ -667,11 +689,13 @@ def _in_linked_worktree(cwd: Path) -> bool:
   own = _git_at(cwd, "rev-parse", "--git-dir")
   # waiver: git CLI vocabulary, not domain constants
   common = _git_at(cwd, "rev-parse", "--git-common-dir")
+
   # guard: resolution failed — treat as the primary checkout so the guard stays in force
   if own.returncode != 0 or common.returncode != 0:
     return False
   own_path = Path(own.stdout.strip())
   common_path = Path(common.stdout.strip())
+
   # relative outputs resolve against the directory the probe ran in
   if not own_path.is_absolute():
     own_path = (cwd / own_path).resolve()
@@ -694,6 +718,7 @@ def _git_dir(cwd: Path) -> Path | None:
   """
   # waiver: git CLI vocabulary, not domain constants
   r = _git_at(cwd, "rev-parse", "--git-dir")
+
   # guard: cwd is not inside a git repository
   if r.returncode != 0:
     return None
@@ -715,14 +740,17 @@ def _resolves_conflicts_only(repo: Path, segment: git_cmdline.GitSegment) -> boo
     names no path at all.
   """
   git_dir = _git_dir(repo)
+
   # guard: outside a transactional operation there are no conflicts to resolve
   if git_dir is None or not _mid_operation(git_dir) or not segment.pathspecs:
     return False
   # waiver: git CLI vocabulary, not domain constants
   r = _git_at(repo, "ls-files", "--unmerged")
+
   # guard: git could not list the index — nothing is proven unmerged, so nothing passes
   if r.returncode != 0:
     return False
+
   # `ls-files --unmerged` prints one `<mode> <sha> <stage>\t<path>` line per conflict stage
   unmerged = { line.split("\t", 1)[1] for line in r.stdout.splitlines() if "\t" in line }
   return all(os.path.normpath(p) in unmerged for p in segment.pathspecs)
@@ -777,6 +805,7 @@ def _content_staged_paths(cwd: Path) -> list[str]:
   # behaviour on the 2.11..2.27 range where they would otherwise appear.
   # waiver: git CLI vocabulary, not domain constants
   r = _git_at(cwd, "diff", "--cached", "--name-only", "--ita-invisible-in-index")
+
   # guard: the flag postdates the 2.10 git floor — on the one minor below it, retry without the
   # flag (stricter: intent-to-add entries then count as content) rather than fail
   if r.returncode != 0:
@@ -857,6 +886,7 @@ def _await_clean_index(repo: Path) -> str | None:
     if not _content_staged_paths(repo):
       return None
     remaining = deadline - time.monotonic()
+
     # guard: window closed with content still staged
     if remaining <= 0:
       return _DENY_DIRTY_INDEX
@@ -877,6 +907,7 @@ def _staged_paths(cwd: Path) -> list[str]:
   """
   # waiver: git CLI vocabulary, not domain constants
   r = _git_at(cwd, "diff", "--cached", "--name-only")
+
   # guard: git invocation failed — treat as clean to avoid false positives
   if r.returncode != 0:
     return []
@@ -903,12 +934,15 @@ def _handle_stop(payload: dict) -> int:
   # the operator cwd is the only repo reference a Stop payload carries
   cwd = Path(payload.get("cwd") or ".").resolve()
   git_dir = _git_dir(cwd)
+
   # guard: not inside a git repository
   if git_dir is None:
     return 0
+
   # guard: a linked worktree's index is private — nothing here contends with the operator
   if _in_linked_worktree(cwd):
     return 0
+
   # guard: mid merge / rebase / cherry-pick / revert
   if _mid_operation(git_dir):
     return 0
@@ -916,6 +950,7 @@ def _handle_stop(payload: dict) -> int:
   # Respect the same per-repo kill-switch as the PreTool / PostTool branches.
   # waiver: git CLI vocabulary, not domain constants
   r = _git_at(cwd, "rev-parse", "--show-toplevel")
+
   # guard: cannot resolve repo root — fail open
   if r.returncode != 0:
     return 0
@@ -923,23 +958,28 @@ def _handle_stop(payload: dict) -> int:
   # this nag belongs to the mutex row alone — every other configuration ends the turn freely
   repo = Path(r.stdout.strip()).resolve()
   cfg = staging_lock.load_config(repo)
+
   # guard: guard disabled for this repo
   if not cfg.enabled:
     return 0
+
   # guard: on the pathspec row a non-empty index is operator parking, never this session's
   # unfinished work — the session never stages at all
   if cfg.pathspec_enabled:
     return 0
+
   # guard: mutex row disabled too
   if not cfg.mutex_enabled:
     return 0
 
   # only work this session staged is worth nagging about
   staged = _staged_paths(cwd)
+
   # guard: index is already clean
   if not staged:
     return 0
   lock = staging_lock.inspect(repo)
+
   # guard: staged content isn't this session's — a peer session or a manual/terminal stage owns
   # it, so ending this turn isn't leaving OUR work hanging. The Stop nag only fires when the
   # session that staged is the one about to stop.

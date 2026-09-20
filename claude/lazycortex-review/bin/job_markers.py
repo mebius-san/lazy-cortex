@@ -23,8 +23,6 @@ field is null, so an untouched document leaves no row. Writes are atomic (temp f
 — the daemon's main loop is serial by contract, so nothing beyond atomicity is needed.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error,wrong-import-position
 
 import argparse
 import json
@@ -42,7 +40,7 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from keys import JobMarker, Paths  # noqa: E402
+from keys import JobMarker, Paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # The closed field schema of one document's entry. A field outside it is refused the way
@@ -140,6 +138,7 @@ def _write_store(repo: Path, store: Mapping[str, dict]) -> None:
   """
   path = sidecar_path(repo)
   path.parent.mkdir(parents = True, exist_ok = True)
+
   # write beside the target and rename over it, so a reader never observes a half-written store
   tmp = path.with_suffix(path.suffix + _TMP_SUFFIX)
   tmp.write_text(json.dumps(store, indent = 2, sort_keys = True) + "\n")
@@ -159,6 +158,7 @@ def read(repo: Path, doc: Path) -> dict[str, str | None]:
   """
   entry = empty_entry()
   stored = _read_store(repo).get(doc_key(repo, doc))
+
   # guard: nothing recorded for this document — the all-`None` entry is the answer
   if not isinstance(stored, dict):
     return entry
@@ -228,6 +228,7 @@ def update(repo: Path, doc: Path, changes: Mapping[str, str | None]) -> dict[str
   # loop's internal bookkeeping.
 
   unknown = [field for field in changes if field not in _FIELDS]
+
   # guard: a field outside the schema is a typo, and a typo must not become state
   if unknown:
     raise ValueError(f"mark-job: field(s) {unknown} are not in the marker schema {list(_FIELDS)}")

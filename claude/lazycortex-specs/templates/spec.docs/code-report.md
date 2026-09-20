@@ -16,13 +16,13 @@ wiki_pinned_topics:
 <!-- What landed, and the evidence it works. -->
 
 ## Open questions
-<!-- Questions raised against the plan that only the operator can answer, still unanswered. -->
+<!-- Optional. Questions raised against the plan that only the operator can answer, still unanswered. -->
 
 ## Unresolved problems
-<!-- Problems that surfaced during execution and were not solved — what breaks, and what was tried. -->
+<!-- Optional. Problems that surfaced during execution and were not solved — what breaks, and what was tried. -->
 
 ## Decisions taken alone
-<!-- Decisions made without the operator because the work could not proceed otherwise — what was chosen, and on what grounds. -->
+<!-- Optional. Decisions made without the operator because the work could not proceed otherwise — what was chosen, and on what grounds. -->
 
 ## Log
 <!-- Entries appended during execution, in order. Each records what was done and what the verification returned. -->

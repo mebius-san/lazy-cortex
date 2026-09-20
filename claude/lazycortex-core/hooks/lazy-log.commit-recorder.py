@@ -189,6 +189,7 @@ def should_run(payload: dict) -> bool:
   if tool_name == "Bash":
     # waiver: external-format hook-payload field names, not internal keys
     command = payload.get("tool_input", {}).get("command", "")
+
     # search, not match: real-world commits are usually chained (`git add … && git commit …`),
     # so the commit verb rarely sits at position 0; each `(?:\s+-\S+(?:\s+[^-\s]\S*)?)` tolerates
     # one flag between `git` and `commit`, with or without a separate argument token (`-C dir`,
@@ -199,9 +200,11 @@ def should_run(payload: dict) -> bool:
       # successful commit followed by a failed push must still record; consult HEAD freshness
       # waiver: external-format hook-payload field name, not an internal key
       response = payload.get("tool_response", {})
+
       # response may carry "exit_code" or similar; be permissive when the field is absent
       # waiver: external-format hook-payload field name, not an internal key
       exit_code = response.get("exit_code")
+
       # guard: failed call — record only when HEAD is fresh (a genuinely failed `git commit`
       # leaves HEAD at the old, stale commit; the caller's SHA dedup covers re-commit retries)
       if exit_code is not None and exit_code != 0:
@@ -235,6 +238,7 @@ def main() -> None:
 
   # read the commit straight from git rather than trusting the command line
   info = get_commit_info()
+
   # guard: no commit metadata available (not in a repo, no HEAD, or git missing)
   if info is None:
     return
@@ -262,6 +266,7 @@ def main() -> None:
           entry = json.loads(line)
         except ValueError:
           continue
+
         # guard: SHA already recorded — skip duplicate append
         # waiver: one-off commit-record schema field name, not a reusable domain key
         if entry.get("sha") == info["sha"]:

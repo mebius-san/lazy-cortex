@@ -116,6 +116,7 @@ class Phase1MirrorRules:
     shipped = sorted(name for name in os.listdir(self.source_dir) if name.endswith(".md"))
     states = { name: self._mirror(name) for name in shipped }
     print(json.dumps({ "phase": "phase1", "rules": states }, indent = 2))
+
     # guard: an unverified write must not read as a successful mirror
     if "failed" in states.values():
       return 1
@@ -148,6 +149,7 @@ class Phase1MirrorRules:
     source = self.source_dir / name
     target = self.target_dir / name
     shipped = source.read_bytes()
+
     # an absent or stale target is replaced wholesale; only identical bytes are left alone
     if not target.exists():
       state = "installed"
@@ -258,6 +260,7 @@ class HomeWrappersPhase:
     # consumer_dir is unused — the home wrappers install to a fixed, repo-independent target
     self.consumer_dir: Path = consumer_dir
     self.plugin_root: Path = PLUGIN_ROOT
+
     # `HOME` is honoured so tests can redirect the target
     self.target_dir: Path = Path(os.environ.get("HOME") or Path.home()) / ".local" / "bin"
 
@@ -379,11 +382,13 @@ class Phase3Pyproject:
       if section_name in missing:
         continue
       existing_section = existing_tool[section_name]
+
       # guard: a non-mapping override (rare) has no sub-keys to complete — leave it alone
       if not isinstance(existing_section, dict):
         continue
       template_keys = self._extract_own_keys(template_text, section_name)
       missing_keys = [k for k in template_keys if k not in existing_section]
+
       # guard: every template sub-key is already present — nothing to inject
       if not missing_keys:
         continue
@@ -458,9 +463,11 @@ class Phase3Pyproject:
       if stripped == header:
         in_section = True
         continue
+
       # guard: not yet inside the target section — skip until the header line
       if not in_section:
         continue
+
       # a nested sub-table or the next top-level section ends this section's own keys
       if stripped.startswith("["):
         break
@@ -638,6 +645,7 @@ class Phase6EnvSource:
 
     # an explicit choice made by the operator outranks anything auto-detection would find
     override = os.environ.get(self.OVERRIDE_ENV)
+
     # guard: the skill passes an explicit choice back when it disambiguated multiple candidates
     if override:
       self._record(override)
@@ -646,6 +654,7 @@ class Phase6EnvSource:
 
     # auto-detection: probe the conventional bootstrap-script locations
     found = [c for c in self.CANDIDATES if (self.consumer_dir / c).is_file()]
+
     # guard: nothing to offer — leave settings untouched
     if not found:
       print("env-source-no-candidate")
@@ -694,6 +703,7 @@ class Phase6EnvSource:
     """
     data = self._load()
     section = data.get("python")
+
     # a missing or non-mapping python section starts from an empty one
     if not isinstance(section, dict):
       section = {}
@@ -770,6 +780,7 @@ class Phase7Expert:
 
     data = self._load()
     experts = data.get("experts")
+
     # a settings file with no experts section yet starts from an empty mapping
     if not isinstance(experts, dict):
       experts = {}
@@ -784,6 +795,7 @@ class Phase7Expert:
 
     # an entry on record is compared field-by-field against the shipped form, not accepted whole
     entry = experts[self.EXPERT_KEY]
+
     # a malformed existing entry (not a mapping) is replaced by a fresh one to refresh into
     if not isinstance(entry, dict):
       entry = {}

@@ -31,15 +31,14 @@ This separation prevents the daemon-self-block failure mode where an upgrade-dri
 write back dirties the tracked tree and trips the daemon's own dirty-tree halt.
 """
 from __future__ import annotations
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import json
 import os
 import tempfile
 from pathlib import Path
 
-from constants import SettingsKey
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from constants import SettingsKey  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -92,6 +91,7 @@ def resolve_agent_model_tier(value: object) -> str | None:
   # guard: bare-string pin — the value is already the tier
   if isinstance(value, str):
     return value
+
   # guard: not a seed object — nothing to unwrap
   if not isinstance(value, dict):
     return None
@@ -136,6 +136,7 @@ def migrate_root_version_to_section_version(raw: dict) -> dict:
   # a legacy root version is present — lift it into every section that lacks its own
   if SettingsKey.LEGACY_VERSION in raw:
     legacy = raw.pop(SettingsKey.LEGACY_VERSION)
+
     # propagate legacy version into every section that has no per-section version yet
     for v in raw.values():
       if isinstance(v, dict) and SettingsKey.VERSION not in v:
@@ -202,6 +203,7 @@ def _deep_merge_claude(base: object, overlay: object) -> object:
     return result
   if isinstance(base, list) and isinstance(overlay, list):
     merged = list(base)
+
     # append only entries that are not already present in the tracked list
     for item in overlay:
       if item not in merged:
@@ -243,12 +245,14 @@ def load_tracked_section(path: Path | str, section_key: str) -> dict:
   # read of whatever is already on disk.
 
   path = Path(path)
+
   # guard: no tracked file yet — return a fresh section pinned to the current version
   if not path.exists():
     return { SettingsKey.VERSION: CURRENT_VERSIONS.get(section_key, 1) }
   # waiver: stdlib encoding idiom
   raw = json.loads(path.read_text(encoding = "utf-8") or "{}")
   section = raw.get(section_key, {})
+
   # guard: section missing from on-disk file — caller sees a fresh current-version stub
   if not section:
     return { SettingsKey.VERSION: CURRENT_VERSIONS.get(section_key, 1) }
@@ -284,6 +288,7 @@ def load_local_only_section(path: Path | str, section_key: str) -> dict:
   # read of whatever is already on disk.
 
   local_path = _local_overlay_path(Path(path))
+
   # guard: no overlay file present — caller sees an empty view
   if not local_path.exists():
     return {}
@@ -326,10 +331,12 @@ def load_section(path: Path | str, section_key: str) -> dict:
   path = Path(path)
   tracked = load_tracked_section(path, section_key)
   local_section = load_local_only_section(path, section_key)
+
   # guard: no local-overlay content — tracked view is already the effective view
   if not local_section:
     return tracked
   merged = _deep_merge_claude(tracked, local_section)
+
   # a merge of two dict layers is always a dict; the fallback keeps the declared return type honest
   return merged if isinstance(merged, dict) else {}
 
@@ -375,6 +382,7 @@ def migrate_all(path: Path | str) -> dict[str, tuple[int, int]]:
 
   path = Path(path)
   result: dict[str, tuple[int, int]] = {}
+
   # guard: no file on disk → nothing to migrate; every section is implicitly at current
   if not path.exists():
     return result
@@ -384,17 +392,20 @@ def migrate_all(path: Path | str) -> dict[str, tuple[int, int]]:
   changed = False
   for k, target in CURRENT_VERSIONS.items():
     section = raw.get(k, {})
+
     # guard: section missing from on-disk file — stamp a current-version stub and continue
     if not section:
       raw[k] = { SettingsKey.VERSION: target }
       changed = True
       continue
     cur = section.get(SettingsKey.VERSION, 1)
+
     # guard: section already at or beyond the current version — nothing to walk
     if cur >= target:
       continue
     pre = cur
     ladder = _migrations(k)
+
     # walk the ladder one step at a time, stamping the new version after each migration
     while cur < target:
       # guard: a gap in the ladder cannot be walked — name the section and version rather
@@ -519,6 +530,7 @@ def _cli() -> None:
   """
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   import sys
+
   # guard: only the "migrate" subcommand is supported
   # waiver: argparse CLI signature, not a domain key
   if len(sys.argv) < 2 or sys.argv[1] != "migrate":

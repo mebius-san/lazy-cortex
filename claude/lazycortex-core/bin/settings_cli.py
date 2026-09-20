@@ -15,8 +15,6 @@ follows the same convention every other subcommand uses: the `LAZY_REPO_ROOT` en
 falling back to the process working directory, overridable per-call with `--cwd`.
 """
 from __future__ import annotations
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import argparse
 import json
@@ -24,7 +22,8 @@ import os
 import sys
 from pathlib import Path
 
-from lazy_settings import load_tracked_section, save_section
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from lazy_settings import load_tracked_section, save_section  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:

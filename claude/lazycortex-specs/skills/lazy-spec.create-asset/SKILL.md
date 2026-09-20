@@ -28,18 +28,19 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 ## Input
 
-Signature: `<product> <asset-type> <slug> [--empty]`.
+Signature: `<product> <asset-type> <slug> [--path <dir>] [--empty]`.
 
 1. **`<product>`** — the product compound-key (e.g. `dashboards`, `server-tester-chapter`).
 2. **`<asset-type>`** — the asset type: one of the plugin's shipped declarations (`feature` / `change` / `bug` / `content` / `research`), or a key the product declares under `asset_types` (e.g. `characters`, `scenes`).
 3. **`<slug>`** — the asset slug, lowercase-with-hyphens. The skill does NOT infer it — the caller passes it.
-4. **`--empty`** (optional) — scaffold-only mode. Produces the folder-note plus empty-stage authored docs, with no clarifying questions and no prose. Used by the request system's spawn path — `lazy-spec.request-apply` (`${CLAUDE_PLUGIN_ROOT}/bin/apply_request.py`) invokes the equivalent `scaffold-asset` CLI primitive directly, then seeds the router's per-target description onto the primary doc afterward (`lazy-spec.request-protocol.md` § Body distribution rules).
+4. **`--path <dir>`** (optional) — the folder under `spec_path` the asset lands in, relative to the product root; `.` is the product root. When present, Step 2 takes it as the settled placement and asks nothing.
+5. **`--empty`** (optional) — scaffold-only mode. Produces the folder-note plus empty-stage authored docs, with no clarifying questions and no prose. Used by the request system's spawn path — `lazy-spec.request-apply` (`${CLAUDE_PLUGIN_ROOT}/bin/apply_request.py`) invokes the equivalent `scaffold-asset` CLI primitive directly, then seeds the router's per-target description onto the primary doc afterward (`lazy-spec.request-protocol.md` § Body distribution rules).
 
 ## --empty mode (skip-pattern)
 
 When invoked with `--empty`:
 
-- Step 2 validates the type as usual but asks nothing — its location question is skipped and the folder falls back to the type's `default_path` (outcome suffix `path-defaulted`).
+- Step 2 validates the type as usual but asks nothing — its location question is skipped; when the caller named no `--path` the folder falls back to the type's `default_path` (outcome suffix `path-default`), and when the caller named one, that `--path` is the settled placement (outcome suffix `path-given`) exactly as in normal mode.
 - Skip Step 3 (no clarifying questions) — emit outcome `skipped-empty-mode`.
 - Step 4 still resolves the start doc + icon (the scaffold needs both), and never widens the document set beyond the type's `start_doc`.
 - Step 5 (scaffold) runs as usual; the seeded doc is set to `draft` via `lazy-spec.set-stage` as in normal mode — see Step 5 note. The scaffold seeds ONLY the type's start doc; every further document is opt-in and is never created here (see Step 4).
@@ -51,14 +52,22 @@ When invoked with `--empty`:
 
 ## Step 1 — Resolve the product
 
-Resolve the product record by reading `.claude/lazy.settings.json` directly via the `Read` tool (the repo root is `git rev-parse --show-toplevel` of the current working directory). Look up `products[<product>]`.
+Resolve the product's **effective** record through the plugin CLI:
 
-The record (when present) carries `spec_path` (required, vault-relative), optional `source`, optional `language` (defaults to `en`), and optional `asset_types: {<name>: {icon, color?, playbook, alias_of?, default_path?, start_doc, default_tools?}}`.
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" resolve-product effective <product>)
+```
 
-- If the key is absent or its value is null → the product is not registered. Refuse with a message naming `<product>` and suggesting `/lazy-spec.product-config` to register it. Do NOT proceed.
-- Otherwise capture `spec_path`, `language` (default `en` when absent), and `asset_types` (default `{}` when absent — the product's own declarations merge key-by-key over the plugin's shipped ones at `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.asset-types.json`).
+The verb prints one JSON line and exits 0 whether or not the key resolves:
 
-This skill MUST NOT invoke `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" resolve-product` via `Bash` for this resolution: apply-context experts run under Claude Code's `dontAsk` permission mode which silently denies arbitrary plugin-CLI invocations and would force the agent into a partial improv path. A direct `Read` of `.claude/lazy.settings.json` is the contract here. The CLI subcommand remains valid for direct shell use; the skill just no longer depends on it.
+```json
+{"key": "<product>", "record": {"spec_path": "...", "language": "...", "asset_types": {}, "source": {}}}
+```
+
+- `record` is `null`, or the call fails outright → the product is not registered. Refuse with a message naming `<product>` and suggesting `/lazy-spec.product-config` to register it. Do NOT proceed.
+- Otherwise `record` IS the effective record. Capture `spec_path` (required, vault-relative), `language` (default `en` when absent), and `asset_types` (default `{}` when absent — its declarations merge key-by-key over the plugin's shipped ones at `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.asset-types.json`); `source` rides along when the product declares one. Each declared type has the shape `{icon, color?, playbook, alias_of?, default_path?, start_doc, default_tools?}`.
+
+Ask for `effective`, never `by-key`: products nest, a nested product declares only what it overrides, and the raw record would make it look unconfigured for every key its parent declares. What the inheritance merge does — `asset_types` key-by-key then field-by-field outermost first, `language` and every other scalar from the nearest declaration, `source` / `dependencies` / `icon` / `color` never inherited — is `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md` § Effective record's contract, and this skill never re-derives it. Every later step reads the record this verb returned.
 
 All narrative prose this skill authors (doc bodies) is rendered in the product's `language`. Frontmatter keys/values, fixed section headers (`## Overview`, `## Way to reproduce`, …), wikilinks, and code/URLs stay English. The effective language for any authored doc is the resolved product's `language` field; no separate per-doc resolution step is required.
 
@@ -67,18 +76,18 @@ All narrative prose this skill authors (doc bodies) is rendered in the product's
 - **Shipped** — the type appears in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.asset-types.json`. Always accepted.
 - **Anything else** — MUST appear as a key in the resolved product's `asset_types`. If it does not, refuse with a message naming `<asset-type>` and the product, and suggest `/lazy-spec.add-asset-type` to declare it on the product. Do NOT proceed.
 
-Then settle **where the asset lands**. The type's `default_path` is the default and needs no question when the caller named no folder; the operator may put the asset at ANY path under the product's `spec_path`, including a folder inside another asset — a nested asset is an ordinary asset, and its boundary is its own folder-note carrying `spec_role: status`, never its depth. Location is a placement decision, not a fact of the type: type resolution reads `spec_asset_type` off the note and never the path, so nothing downstream breaks when an asset sits somewhere unusual. Ask only when the caller passed no explicit folder AND the request itself suggests the asset belongs next to something else; otherwise take `default_path` silently. Under `--empty` never ask — take `default_path`.
+Then settle **where the asset lands**. A caller-supplied `--path` is the settled placement: record `path-given` and skip the question. Otherwise, the type's `default_path` is the default and needs no question when the caller named no folder — for the shipped `feature`, `content` and `research` that is the product root itself (`"."`), only `bug` and `change` default to a folder of their own; the operator may put the asset at ANY path under the product's `spec_path`, including a folder inside another asset — a nested asset is an ordinary asset, and its boundary is its own folder-note carrying `spec_role: status`, never its depth. Location is a placement decision, not a fact of the type: type resolution reads `spec_asset_type` off the note and never the path, so nothing downstream breaks when an asset sits somewhere unusual. Ask only when the caller passed no explicit folder AND the request itself suggests the asset belongs next to something else; otherwise take `default_path` silently. Under `--empty` never ask — take the caller's `--path` when given, else `default_path`.
 
 ```
 Context (print before asking):
-- Where: /lazy-spec.create-asset · Step 2 — Validate the asset type; target <spec_path>/<folder>/<slug>/
+- Where: /lazy-spec.create-asset · Step 2 — Validate the asset type; target <spec_path>/<folder>/<slug>/ (or <spec_path>/<slug>/ when the type defaults to the product root)
 - Found: type `<asset-type>` declares default_path <default_path>; the request mentions <the asset or folder it seems to belong beside>
 - Why asking: placement is a decision, not a fact of the type — the caller named no folder and the request points elsewhere
-- Answers: `<default_path>` — scaffold under the type's default folder (`path-default`); `other (type a path)` — any folder under spec_path, including inside another asset (`path-chosen`, passed as `--path` in Step 5). Fixed at scaffold, never re-asked
+- Answers: `<default_path>` — scaffold under the type's default folder (`path-default`) (`the product root` when the declaration says `"."`); `other (type a path)` — any folder under spec_path, including inside another asset (`path-chosen`, passed as `--path` in Step 5). Fixed at scaffold, never re-asked
 AskUserQuestion: header "Asset folder", question "Where under <product>'s spec_path should `<slug>` (`<asset-type>`) land?", options: the default_path folder first, then `other (type a path)`, each with a description.
 ```
 
-Record the validated type and the resolved folder for use by later steps. Outcome word: `shipped` or `product-declared`, with suffix `path-default` or `path-chosen`.
+Record the validated type and the resolved folder for use by later steps. Outcome word: `shipped` or `product-declared`, with suffix `path-default`, `path-chosen` or `path-given`.
 
 ## Step 3 — Ask clarifying questions
 
@@ -129,9 +138,9 @@ Invoke the deterministic scaffold primitive via `Bash`:
 Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" scaffold-asset <product> <asset-type> <slug> --doc <name>:<spec_doc_type> [--doc ...] [--path <dir>])
 ```
 
-Pass one `--doc` per document Step 4 resolved — the type's `start_doc` first, then anything the type playbook added. **At least one `--doc` is mandatory**: the primitive has no default layout and a call carrying none is a logical refusal, not an empty scaffold. Pass `--path <dir>` only when Step 2 settled on a folder other than the type's `default_path`; omit it to take the default.
+Pass one `--doc` per document Step 4 resolved — the type's `start_doc` first, then anything the type playbook added. **At least one `--doc` is mandatory**: the primitive has no default layout and a call carrying none is a logical refusal, not an empty scaffold. Pass `--path <dir>` when Step 2 settled on a folder other than the type's `default_path` — the caller's own `--path`, or the operator's answer; omit it to take the default.
 
-The primitive (`${CLAUDE_PLUGIN_ROOT}/bin/scaffold_asset.py`) owns the mechanical scaffold work — template resolution (5-layer fallback: the type's own per-product override → its project-wide override → its plugin baseline → the linear per-doc-type base → the type-agnostic base; an alias type's own chain outranks its base type's in full), token substitution (`{{product}}`, `{{slug}}`, `{{product_tag}}`, `iconize_icon`, `iconize_color`), file writes (folder-note + the named documents), per-file stage seeding, folder-note `# History` line stamping (one line per doc transition), and lazy group-folder seeding — the first asset landing in a group folder seeds its operator-zone group folder-note (icon from the type whose `default_path` names that folder; an ad-hoc folder no declaration names gets a note without iconize keys). It refuses if the target folder already exists; the operator must pick a unique slug.
+The primitive (`${CLAUDE_PLUGIN_ROOT}/bin/scaffold_asset.py`) owns the mechanical scaffold work — template resolution (the six-layer chain of `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md` plus one override layer per ancestor product: the type's own per-product override → the same override for each ancestor product of that one, innermost ancestor first → the consumer context baseline → the plugin context baseline → the consumer linear base → the plugin linear base → the type-agnostic base; an alias type's own chain outranks its base type's in full), token substitution (`{{product}}`, `{{slug}}`, `{{product_tag}}`, `iconize_icon`, `iconize_color`), file writes (folder-note + the named documents), per-file stage seeding (no history line — scaffolding is not a journaled event), and lazy group-folder seeding — the first asset landing in a group folder seeds its operator-zone group folder-note (icon from the type whose `default_path` names that folder; an ad-hoc folder no declaration names gets a note without iconize keys). It refuses if the target folder already exists; the operator must pick a unique slug.
 
 On success the primitive prints a JSON object to stdout:
 
@@ -141,7 +150,6 @@ On success the primitive prints a JSON object to stdout:
   "folder": "specs/<spec_path>/<asset-folder>/<slug>",
   "folder_note": "specs/<spec_path>/<asset-folder>/<slug>/<slug>.md",
   "docs": [{"file": "...design.md", "stage": "draft"}],
-  "history_lines": 3,
   "group_note": "specs/<spec_path>/<asset-folder>/<asset-folder>.md"
 }
 ```
@@ -150,7 +158,7 @@ The `folder`, `folder_note`, and `group_note` fields are **repo-root-relative** 
 
 On `outcome: error` (logical failure — folder exists, unknown product, missing template, etc.) propagate the JSON to the caller and abort; do NOT improvise the scaffold inline. Emit outcome word: `scaffolded:<N>` where N is the doc count, or `refused:<error.category>`.
 
-After this step, the folder exists with template-substituted content, `spec_source_docs` defaults populated, `# Sources / ## Docs` projection rendered, and each seeded doc's stage matching its own doc type's default. The folder-note's `# History` section carries one scaffold line + one line per doc stage transition.
+After this step, the folder exists with template-substituted content, `spec_source_docs` defaults populated, `# Sources / ## Docs` projection rendered, and each seeded doc's stage matching its own doc type's default. The folder-note's `# History` section stays empty — scaffolding and seeding are not journaled events.
 
 **`change` type, targets named in Step 3.** When Step 3's clarification named one or more existing assets this change modifies, write `spec_targets: ["<folder>/<slug>", ...]` into the freshly-scaffolded folder-note's frontmatter — tokens relative to the product's `spec_path`, one per named target, in the order the operator picked them. No targets named → leave the key absent entirely (an absent `spec_targets` is a normal state for a cross-cutting or infrastructure-only change, not a gap). This is the same frontmatter key `lazy-spec.lifecycle-protocol.md` Part 4's design cascade reads once the change's own `spec_design_done` flips true.
 

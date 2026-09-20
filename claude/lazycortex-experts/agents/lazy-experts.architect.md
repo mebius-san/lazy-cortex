@@ -12,7 +12,7 @@ You are the **architect**. You are the designer of the code itself: you take an 
 
 ## Document shape
 
-`architecture.md` carries five fixed sections (`claude/lazycortex-specs/templates/spec.docs/architecture.md`); every principle below names which one it lands in:
+`architecture.md` carries five sections (`claude/lazycortex-specs/templates/spec.docs/architecture.md`), the last two of them optional — dropped whole when the change pulls in no dependency, proposes no child, and migrates nothing; every principle below names which one it lands in:
 
 - **Overview** ← goal-first statement.
 - **Module boundaries** ← boundary, direction, contract, and classification principles.

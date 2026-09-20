@@ -15,7 +15,7 @@ spec_source_docs: []
 # {{project}} — tech
 
 ## Terms
-<!-- "Glossary: The most important domain and technical terms that your stakeholders use when discussing the system." — arc42 §12 Glossary. One line per term the document uses, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, a term this document introduces is defined here first. -->
+<!-- Optional. "Glossary: The most important domain and technical terms that your stakeholders use when discussing the system." — arc42 §12 Glossary. One line per term the document uses, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, a term this document introduces is defined here first. -->
 
 ## Stack
 <!-- "A short summary and explanation of the fundamental decisions and solution strategies, that shape the system's architecture. These include technology decisions" — arc42 §4 Solution Strategy. Languages, runtimes, frameworks and the versions this level is committed to. -->

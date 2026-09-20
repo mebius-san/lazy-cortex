@@ -50,6 +50,24 @@ class SpecKey:
 
 
 # ----------------------------------------------------------------------------------------
+class ReviewResultValue:
+  """
+  The `review_result` verdict tokens a finalized review round stamps onto a document.
+
+  Attributes:
+    APPROVED: A round that closed with no reviewer concerns.
+    APPROVED_WITH_CONCERNS: A round that closed accepted, with concerns recorded alongside it.
+    ACCEPTED: Both terminal values that count as the document being accepted — a coordinator
+      reacting to `SpecKey.REVIEW_RESULT` treats either the same way; only a value outside this
+      set (a rejection, or the reopened token) withholds acceptance.
+  """
+
+  APPROVED = "approved"
+  APPROVED_WITH_CONCERNS = "approved-with-concerns"
+  ACCEPTED = frozenset({ APPROVED, APPROVED_WITH_CONCERNS })
+
+
+# ----------------------------------------------------------------------------------------
 class SpecValue:
   """
   Frontmatter value tokens written and compared as strings.
@@ -223,13 +241,12 @@ class Stage:
   DEFERRED = "deferred"
 
 
-# ----------------------------------------------------------------------------------------
-
 # Decision: the asset's paint state is a written key, not a matcher-computed one — `IN_REVIEW`
 # lives as `review_active` on a sibling document and `IMPLEMENTATION` / `TESTING` track a job in
 # the gitignored runtime sidecar, neither of which an iconize matcher can read from the status
 # note it paints.
 
+# ----------------------------------------------------------------------------------------
 class AssetState:
   """
   `spec_state` value tokens carried by an asset's status folder-note.
@@ -591,9 +608,17 @@ class TickAction:
     COORDINATOR_JOB_DEAD: A `coordinator_job` bundle carried a `DEAD` marker; the
       marker was cleared with a `# History` warning, the asset was NOT halted (the
       coordinator's own wake job is not a ladder expert job).
+    TRIGGER: The result-dict key carrying the wake trigger a dispatch acted on.
+    EXPERT: The result-dict key carrying the expert a dispatch went to.
+    JOB_ID: The result-dict key carrying the job id a dispatch queued or retired.
+    WARNINGS: The result-dict key carrying the dispatch warnings landed in `# History`.
   """
 
   ACTION = "action"
+  TRIGGER = "trigger"
+  EXPERT = "expert"
+  JOB_ID = "job_id"
+  WARNINGS = "warnings"
   AUTO_FLIPPED = "auto-flipped"
   READY_CALLOUT = "ready-callout"
   READINESS_WITHDRAWN = "readiness-withdrawn"
@@ -655,6 +680,26 @@ class SpecHaltKey:
   """
 
   HALTED = "spec_halted"
+
+
+# ----------------------------------------------------------------------------------------
+class SpecMomentKey:
+  """
+  Frontmatter keys recording WHEN a state was reached, for the staleness rule to compare.
+
+  A moment is an ISO 8601 UTC datetime (`2026-09-19T08:11:19Z`). These keys replace the dates
+  the coordinator used to read out of `# History` lines: the journal is for the operator, the
+  moments are for the code.
+
+  Attributes:
+    APPROVED_AT: The `spec_approved_at` key on a stage-bearing document — the last moment it
+      entered `approved`, written by `lazy-spec.set-stage`.
+    AT_SUFFIX: The suffix that turns a gate key into its moment key (`spec_design_done_at`),
+      written by `flip-gate` when the gate turns true and dropped when it turns false.
+  """
+
+  APPROVED_AT = "spec_approved_at"
+  AT_SUFFIX = "_at"
 
 
 # ----------------------------------------------------------------------------------------
@@ -743,7 +788,7 @@ class CoordinatorTrigger:
     ANSWER: A ticked option under one of the coordinator's own `[!question]` callouts.
     JOB_DONE: The sidecar's `active_job` marker was cleared and a `JobMarker.PENDING_WAKE` of
       `job-done` raised in its place — a launch-checkbox job's terminal marker was just applied
-      (`gate_tick._apply_job_marker`). Wakes the coordinator regardless of who authored the
+      (`gate_tick.apply_job_marker`). Wakes the coordinator regardless of who authored the
       commit this tick carries: the bot-suppression rule exists to ignore the coordinator's own
       idle re-triggers, not to hide a real state transition the playbook's acceptance cycle
       (Chapter 6) needs to react to — the exemption is per-transition, not per-author
@@ -763,10 +808,15 @@ class CoordinatorTrigger:
       already scans reverse dependencies; no gate of the asset's own is touched.
     DEPENDENCY_READY: A wake resolved on a dependency asset — one this asset itself names in
       its own `spec_depends_on` — reached this asset as a one-hop reverse-edge dispatch
-      (`coordinator_dispatch._scan_dependents`). Carries `payload["dep"]` naming the ready
-      dependency's `<category>/<slug>` token. Synthetic: never derived from `item`, so it
+      (`coordinator_dispatch.scan_dependents`). Carries `payload["dep"]` naming the ready
+      dependency's product-relative path token, of any depth. Synthetic: never derived from
+      `item`, so it
       carries no author of its own to check (C2). Listed as the playbook's eighth wake trigger
       (`lazy-spec.coordination-playbook.md` § 1).
+    CHILD_REAPPROVED: A nested product's `vision.md` or `design.md` reaches `approved`,
+      dispatched one hop upward onto the enclosing product's level note so it can compare its
+      own design against the child's. Carries `payload["child"]` naming the child product's
+      key. Synthetic, never derived from `item`.
   """
 
   OPERATOR_EDIT = "operator-edit"
@@ -776,6 +826,7 @@ class CoordinatorTrigger:
   DOC_TRANSITION = "doc-transition"
   DEPENDENCY_READY = "dependency-ready"
   ASSET_RELEASED = "asset-released"
+  CHILD_REAPPROVED = "child-reapproved"
 
 
 # ----------------------------------------------------------------------------------------
@@ -819,6 +870,30 @@ class SpecCoordinatorDocStateKey:
 
   STATE = "spec_coordinator_doc_state"
   REVIEW_REOPENED = ""
+
+
+# ----------------------------------------------------------------------------------------
+class SpecCoordinatorChildWakeStateKey:
+  """
+  Frontmatter key recording, on a PRODUCT level note, which of its own system documents this
+  worker has already forwarded upward as a `CoordinatorTrigger.CHILD_REAPPROVED` wake of the
+  enclosing product, per document basename.
+
+  Worker-internal bookkeeping, same convention as `SpecCoordinatorDocStateKey` — only
+  `coordinator_dispatch.py`'s own direct write path ever sets it, so the persona can't clear or
+  game it through `note-set-key`. It is a SECOND marker rather than a reuse of the doc-state
+  one because the two edges fire on different ticks: the upward edge is resolved outside the
+  trigger ladder, so a command or a ticked answer winning the tick forwards the child hop while
+  leaving the level's own `DOC_TRANSITION` still to come. Stamping the doc-state marker there
+  would consume that transition and lose the level's own stage promotion with it.
+
+  Attributes:
+    STATE: The `spec_coordinator_child_wake_state` frontmatter key. Its value is a JSON object
+      mapping a level-document basename (`vision.md`, `design.md`) to the `review_result` value
+      the wake it last forwarded for that document carried.
+  """
+
+  STATE = "spec_coordinator_child_wake_state"
 
 
 # ----------------------------------------------------------------------------------------
@@ -911,7 +986,7 @@ class SpecCascadeKey:
     DONE: The `spec_cascade_done` flag set once every declared target is accounted for in
       `TARGETS_DONE` — either folded by a completed designer/tester pair, or skipped because
       the token never resolved to an existing asset.
-    TARGETS_DONE: The `spec_cascade_targets_done` list of `<category>/<slug>` target tokens no
+    TARGETS_DONE: The `spec_cascade_targets_done` list of product-relative target path tokens no
       longer pending dispatch — most having completed their designer/tester pair, plus any
       unresolvable token `gate_tick`'s Step 0.7 gave up on (see `TickAction.CASCADE_TARGET_SKIPPED`)
       so it does not block every later target forever.
@@ -969,12 +1044,6 @@ class AssetTypeKey:
   UNKNOWN = "unknown"
   TOOLS = "spec_tools"
 
-
-# The split-repo push-question / import-drift reasons (`DESIGN_DRIFT_ON_PUSH`, `IMPORT_DRIFT`,
-# `NO_PUSH_ACCESS`, `PUSH_UNDELIVERED`, `IMPORTED_EDITED`) were removed with the
-# `push_question.py` / `import_specs.py` channel they served
-# (`docs/tasks/lazycortex-specs.upstream.md` § on the removed channel) — `spec.upstream` carries
-# no push-back channel and no read-only imported copy.
 
 # ----------------------------------------------------------------------------------------
 class HaltReason:

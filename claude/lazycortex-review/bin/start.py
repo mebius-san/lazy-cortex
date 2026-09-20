@@ -26,10 +26,6 @@ Returns 0 on success, 2 when the file doesn't exist or isn't a
 markdown file.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# deferred imports below module code; position intentional (ruff E402 noqa guards it)
-# `import parser` below is the local sibling parser.py, not the removed stdlib `parser` module
-# pylint: disable=import-error,wrong-import-position,deprecated-module
 
 import argparse
 import re
@@ -47,21 +43,23 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import banner as _banner  # noqa: E402
+import banner as _banner  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import body as _body  # noqa: E402
+import body as _body  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import frontmatter as _fm  # noqa: E402
+import frontmatter as _fm  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import note_ops as _note_ops  # type: ignore # noqa: E402
+import note_ops as _note_ops  # type: ignore # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: `claude/lazycortex-specs/bin/note_ops.py` shares this basename; in a whole-project mypy run the bare
 # `import note_ops` above resolves to that unrelated module instead (this dir's `__init__.py` makes review's
 # own copy package-qualified as `bin.note_ops`), so mypy checks the attribute against the wrong file's shape
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import finalize as _finalize  # noqa: E402
+import finalize as _finalize  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import parser as _parser  # noqa: E402
+# waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
+import parser as _parser  # noqa: E402  # pylint: disable=import-error,wrong-import-position,deprecated-module
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# pylint: disable-next=import-error,wrong-import-position
 from keys import LANG_EN as _LANG_EN, Phase, ReviewKey, Tag  # noqa: E402
 
 
@@ -118,6 +116,7 @@ def _reconcile_history_explainer(body: str, explainer: str) -> str:
     The body with exactly one explainer line under the History tag.
   """
   lines = body.splitlines()
+
   # guard: no tag line — nothing to reconcile against
   if Tag.HISTORY not in lines:
     return body
@@ -170,6 +169,7 @@ def open_review(file_path: Path, *, expert: str | None = None) -> bool:
     new_text = _fm.set_field(new_text, ReviewKey.ROUND, 1)
   if ReviewKey.APPROVED not in meta:
     new_text = _fm.set_field(new_text, ReviewKey.APPROVED, False)
+
 # Seed the phase machinery too, so the coordinator's entry wake finds a fully
 # bootstrapped document and has nothing to commit — it only dispatches the
 # opening turn (sidecar writes are free).
@@ -185,6 +185,7 @@ def open_review(file_path: Path, *, expert: str | None = None) -> bool:
     new_text = _fm.set_field(
         new_text, ReviewKey.MARKER_STYLE, _finalize.settings_edit_marker_style(file_path)
     )
+
 # Clear the terminal apply-gate discriminator if a prior finalize
 # left it on the file. Re-opening for review means the apply-gate
 # has nothing to act on yet — its trigger is the *next* finalize.
@@ -247,6 +248,7 @@ def _atomic_commit(file_path: Path) -> None:
       ["git", "add", "--", str(file_path.name)],
       cwd=cwd, check=True, capture_output=True,
   )
+
   # the pathspec keeps a concurrently staged foreign file out of the opt-in commit
   subprocess.run(
       ["git", "commit", "-q", "-m", f"review: opt-in {file_path.name}", "--", str(file_path.name)],

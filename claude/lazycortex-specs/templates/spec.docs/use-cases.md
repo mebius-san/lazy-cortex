@@ -15,7 +15,7 @@ spec_source_docs: []
 # {{slug}} — use-cases
 
 ## Terms
-<!-- "Glossary: The most important domain and technical terms that your stakeholders use when discussing the system." — arc42 §12 Glossary. One line per term the document uses, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, a term this document introduces is defined here first. -->
+<!-- Optional. "Glossary: The most important domain and technical terms that your stakeholders use when discussing the system." — arc42 §12 Glossary. One line per term the document uses, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, a term this document introduces is defined here first. -->
 
 ## Actors
 <!-- "Actor: A person in some role, a system or a technical device in the context of a subject under consideration that interacts with that subject." — IREB CPRE Glossary -->
@@ -30,7 +30,7 @@ spec_source_docs: []
 **Postconditions**: _what is true once this use case completes._
 
 ## Out of scope
-<!-- "Functional scope is what functions you choose to deliver or not deliver." — Cockburn, Writing Effective Use Cases -->
+<!-- Optional. "Functional scope is what functions you choose to deliver or not deliver." — Cockburn, Writing Effective Use Cases -->
 
 # Sources
 #protected/spec/sources

@@ -103,6 +103,7 @@ def allocate_port(repo_root: Path, registry: list[dict] | None = None) -> dict:
     # guard: a daemon with metrics off holds no port
     if not row[RegistryRow.METRICS_ENABLED]:
       continue
+
     # guard: the repo's own row supplies the reuse candidate, never a taken port
     if str(Path(row[RegistryRow.REPO_ROOT]).resolve()) == repo_key:
       recorded = row[RegistryRow.PORT]

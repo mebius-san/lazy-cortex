@@ -1,6 +1,6 @@
 ---
 name: lazy-spec.create-from-code
-description: Use when generating a specification FROM an existing codebase for an already-registered, code-bound product — fans heavy source scanning out to parallel Explore agents, then writes a behavior-only product design doc and a code-grounded product tech doc with source URLs. Product mode documents the product itself; feature mode delegates one feature-candidate to lazy-spec.create-asset. Requires the product to be registered with a `source` binding via /lazy-spec.product-config first.
+description: Use when generating a specification FROM an existing codebase for an already-registered, code-bound product — fans heavy source scanning out to parallel Explore agents, then writes a behavior-only product design doc and a code-grounded product tech doc with source URLs. Product mode documents the product itself and places candidates by semantic area, registering an area as a nested product when the operator says so; feature mode delegates one feature-candidate to lazy-spec.create-asset. Requires the product to be registered with a `source` binding via /lazy-spec.product-config first.
 allowed-tools: Read, Glob, Grep, Bash, Edit, Write, Skill, AskUserQuestion, Agent
 ---
 # Create Spec from Code
@@ -28,6 +28,7 @@ This skill has two modes (`product` + `feature`) with mode-specific step lists. 
    - `Step P1 — Detect the branch`
    - `Step P2 — Scan source code (parallel agents)`
    - `Step P3 — Create the doc structure`
+   - `Step P3b — Decide areas + register nested products`
    - `Step P4 — Author product-vision and product-design prose`
    - `Step P5 — Author product-tech prose`
    - `Step P6 — Scaffold candidate features (delegate)`
@@ -46,21 +47,25 @@ This skill has two modes (`product` + `feature`) with mode-specific step lists. 
 
 ## Input
 
+Signature: `<product> [feature <slug>] [--path <dir>] [--empty]`
+
+`--path <dir>` names the product-relative folder the asset lands in, overriding the type's `default_path`; `--empty` scaffolds the shell without authoring the design body. Both are forwarded verbatim to `lazy-spec.create-asset` in Step F2 and are meaningful in feature mode only.
+
 The user provides a product compound-key (e.g. `dashboards`, `server-tester-chapter`) or a source path under a registered product. For feature mode, the user names a feature-candidate slug (or picks one from the product-mode candidate preview). If ambiguous, ask which product or candidate they mean — context first: where (`/lazy-spec.create-from-code · Input`), found (the code-bound keys under `lazy.settings.json[products]`, or the candidate slugs the preview listed), why asking (the input maps to none or several), answers (one option per key or slug — the run continues on it; nothing persisted); then `AskUserQuestion` header "Product" or "Candidate", question naming what is being picked, one option per key or slug with a description.
 
-## Product nesting is forbidden
+## Sub-products from code
 
-Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`, a product folder MUST NOT contain another product. If the scanned source area contains a sub-area that would historically have been a sub-product, document it as an **architectural area** inside the product's tech doc (`## Architectural Areas`), never as a separate product. Promoting a sub-area to a sibling product is a deliberate `/lazy-spec.product-config` run by the operator, not an automatic action of this skill.
+A product folder may contain another product (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md` § Products may nest). A source sub-area that stands on its own — its own entry point, its own documentation or test cluster, several candidate features inside it — may become a nested product of this one; the operator decides per area in Step P3b, and this skill registers it through `/lazy-spec.product-config` rather than writing any record itself. A nested product inherits the parent's language, experts, type declarations and guidelines unless it declares its own.
 
 ## Step 0 — Resolve the product
 
 Resolve the product record:
 
 ```bash
-"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" resolve-product by-key <product>
+"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" resolve-product effective <product>
 ```
 
-The command prints `{"key": "<product>", "record": <record-or-null>}`. The record (when present) carries `spec_path` (required, vault-relative), optional `source` (`{ repo, paths }`), optional `language` (defaults to `en`), and optional `asset_types` / `tool_types` (each merged key-by-key over the plugin's shipped set).
+The `effective` verb merges the record with its ancestor products' (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md` § Effective record), so a nested product reads its parent's `asset_types`, `language` and `mode` rather than looking unconfigured. The command prints `{"key": "<product>", "record": <record-or-null>}`. The record (when present) carries `spec_path` (required, vault-relative), optional `source` (`{ repo, paths }`), optional `language` (defaults to `en`), and optional `asset_types` / `tool_types` (both merged key-by-key over the plugin's shipped set; along the ancestor chain only `asset_types` merges key-by-key — `tool_types`, like every other inheritable field, is taken whole from the nearest product that declares one).
 
 Branch on the record:
 
@@ -116,6 +121,9 @@ Word budget: "Report under 500 words." Heuristics (priority order):
 2. Route groups / command namespaces sharing a URL prefix or command root (decorators, router registrations, CLI dispatch tables).
 3. Classes or modules exposing a self-contained public API (imported as a unit by consumers).
 4. Test-file clusters naming a feature (`test_<feature>_*`, `<feature>.spec.ts`, …).
+5. The semantic area each candidate belongs to: the subsystem, package or domain its files cohere under — the nearest folder with an entry point, a route prefix, or a documented module boundary — as a lowercase-with-hyphens slug; a candidate with no area of its own reports `root`.
+
+An area is marked `sub-product-candidate: yes` when it has an entry point of its own, holds two or more candidates, and carries its own README / docs folder or test cluster; otherwise `no`. The mark is a hint for the operator, never a decision.
 
 Expected report block:
 
@@ -124,6 +132,8 @@ Expected report block:
 
 ### findings
 - [FEAT] <candidate-slug> | <one-line purpose>
+  area: <area-slug or root>
+  sub-product-candidate: <yes|no>
   evidence:
     - <file-path> — <symbol or route group>
     - <file-path> — <symbol or route group>
@@ -131,6 +141,7 @@ Expected report block:
 
 ### summary
 count: <n>
+areas: <n>
 ```
 
 `<candidate-slug>` is lowercase-with-hyphens per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md`.
@@ -143,7 +154,7 @@ Run the **Detect the current branch** primitive from "Branch handling" above. Ca
 
 ### P2 — Scan source code (parallel agents)
 
-Launch the four parallel agents (A + B + C + D) per "Parallel code scanning", scoped to the product's `source.paths`. Collect their structured summaries. Agent D's candidate list drives Step P6's per-candidate scaffold/architectural-area/skip decisions **after** the product docs are written — the operator sees the product frame first, then decides which sub-units deserve their own feature folders.
+Launch the four parallel agents (A + B + C + D) per "Parallel code scanning", scoped to the product's `source.paths`. Collect their structured summaries. Agent D's candidate list drives two decision passes: the area decisions in Step P3b, taken **before** the product docs are written so the design can name its children, and the per-candidate scaffold/architectural-area/skip decisions in Step P6, taken **after** them — the operator sees the product frame first, then decides which sub-units deserve their own feature folders.
 
 ### P3 — Create the doc structure
 
@@ -156,7 +167,24 @@ Product docs live loose at the product root (no `docs/` subfolder — `${CLAUDE_
 └── tech.md         # code-grounded — source URLs via lazy-spec.source-url
 ```
 
-Group folders (`features/` and the rest) and their operator-zone folder-notes appear lazily — the first `create-asset` landing an asset creates the folder and seeds its group note (`lazy-spec.layout-protocol.md` Part 1); the vault-root `requests/` inbox is `/lazy-spec.product-config`'s. Do NOT pre-create any of them here, do NOT create `backlog/`, do NOT author any operator-zone folder-note by hand, and do NOT create `human-tasks.md`, any `changelog.md` (the role is removed from the model), any `spec_role: layout` doc, or any `layout.excalidraw` file — those roles are removed from the model (a layout picture, when the operator asks for one, is an inline mermaid fence in `design.md`, not a doc).
+Group folders (`bugs/` and the rest) and their operator-zone folder-notes appear lazily — the first `create-asset` landing an asset creates the folder and seeds its group note (`lazy-spec.layout-protocol.md` Part 1); the vault-root `requests/` inbox is `/lazy-spec.product-config`'s. Do NOT pre-create any of them here, do NOT create `backlog/`, do NOT author any operator-zone folder-note by hand, and do NOT create `human-tasks.md`, any `changelog.md` (the role is removed from the model), any `spec_role: layout` doc, or any `layout.excalidraw` file — those roles are removed from the model (a layout picture, when the operator asks for one, is an inline mermaid fence in `design.md`, not a doc).
+
+### P3b — Decide areas + register nested products
+
+**Areas first.** Group Agent D's candidates by `area`. For every area other than `root`, one `AskUserQuestion` before any candidate question:
+
+```
+Context (print before asking):
+- Where: /lazy-spec.create-from-code · Step P3b — Decide areas + register nested products; target <spec_path>/<area>/
+- Found: area <area> — <n> candidates: <slug, slug, …>; sub-product hint: <yes|no> (<the evidence line>)
+- Why asking: whether a code area is a product of its own with its own vision and design, a folder that groups related features, or no grouping at all is the operator's decomposition call
+- Answers: `nested product` — `/lazy-spec.product-config` registers `<parent-key>-<area>` at `<spec_path>/<area>` with the area's folder as its source path, everything else inherited, and its candidates land at that product's root; `group folder` — the candidates land under `<spec_path>/<area>/` and the first one seeds the group note; `flat` — the candidates land at the product root like any other
+AskUserQuestion: header "Area <i>/<N>", question "How does the code area `<area>` of <product> (<n> candidates) enter the spec tree?", options `nested product` / `group folder` / `flat` with the descriptions above.
+```
+
+For every `nested product` answer, before any scaffold, invoke `Skill(skill: "lazycortex-specs:lazy-spec.product-config", args: "create <parent-key>-<area> at <spec_path>/<area> source <parent repo key>:<area folder>")`. This matches product-config's declared caller form (`create <key> at <spec_path> [source <repo-key>:<path>[,<path>]]`): the wizard takes the key, the spec path, and the source folder straight from the args, asking only for what the form leaves open, and its `inherited` outcomes cover language, guidelines, experts, asset types and mode. Record the new key.
+
+Record every area's decision (`nested product` with its new key, `group folder`, or `flat`) for Step P6 to read — this step decides the placement, P6 only scaffolds against it.
 
 ### P4 — Author product-vision and product-design prose
 
@@ -166,7 +194,7 @@ Group folders (`features/` and the rest) and their operator-zone folder-notes ap
 "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" seed-doc --root <spec_path>/<leaf>.md --doc vision.md:system-vision
 ```
 
-The primitive fills every template token, injects the type's `iconize_icon` / `iconize_color` and journals the seed in the note's `# History`. Then fill the seeded sections from the code evidence, following each section's own template comment, and set its stage via `lazy-spec.set-stage` → `draft`. A pre-existing `vision.md` is left untouched.
+The primitive fills every template token, injects the type's `iconize_icon` / `iconize_color`; seeding journals nothing. Then fill the seeded sections from the code evidence, following each section's own template comment, and set its stage via `lazy-spec.set-stage` → `draft`. A pre-existing `vision.md` is left untouched.
 
 The product design doc describes WHAT the product is, who uses it, and what it does — behavior terms only. NO source URLs, file paths, or class/function names. Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md` this doc MUST NOT contain source URLs, and per "Branch handling" it never carries `spec_source_branches`.
 
@@ -213,6 +241,8 @@ What the product deliberately does NOT do; the seams with neighboring products a
 # Sources
 ```
 
+The parent design names each nested product Step P3b registered as one of this product's components, at the parent's height — what it is for, never its mechanics (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.doc-height-protocol.md`).
+
 **Optional product use-cases.** After the design is written, one `AskUserQuestion`:
 
 ```
@@ -243,7 +273,7 @@ Write the default `spec_source_docs` (`<spec_path>` resolved to the product's ab
 
 Write that array into the doc's `spec_source_docs:` frontmatter key, then project the body `# Sources` section (`## Docs` from that list; `## Requests` empty — no request origin) per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.sources-protocol.md` — follow its marker boundaries, gloss/display rules, and the `#protected/spec/sources` tag exactly; do not restate the format here. Emit outcome `projected`.
 
-After writing, set the per-file stage authoritatively via the `Skill` tool (`skill: "lazycortex-specs:lazy-spec.set-stage"`) → `draft` on `design.md` (the vision already got its `draft` above; the call keeps the folder-note `# History` line and the tag mirror in sync).
+After writing, set the per-file stage authoritatively via the `Skill` tool (`skill: "lazycortex-specs:lazy-spec.set-stage"`) → `draft` on `design.md` (the vision already got its `draft` above; the call keeps the tag mirror in sync).
 
 ### P5 — Author product-tech prose
 
@@ -279,7 +309,7 @@ Brief prose: how the source tree maps to product behavior.
 Key design decisions: state management, rendering approach, data flow. Reference source files via forge URLs per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.sources-protocol.md`.
 
 ## Architectural Areas (if any)
-Sub-areas that would historically be sub-products — one subsection each, with its own source link and short description. Do NOT create a separate product spec for them.
+Sub-areas the operator kept flat or as a group folder in P3b — one subsection each, with its own source link and short description. An area registered as a nested product in P3b is not listed here: it has a product spec of its own.
 
 ## Components
 One subsection per source file or logical unit. Include: purpose, key functions/classes, data shapes (as tables).
@@ -305,14 +335,14 @@ After writing, set the per-file stage via `lazy-spec.set-stage` → `draft` on `
 
 ### P6 — Scaffold candidate features (delegate)
 
-Print Agent D's candidate list to the operator as an informational preview (no question yet). Then, **per candidate, one `AskUserQuestion`** — each iteration fills the block from that candidate:
+Print Agent D's candidate list to the operator as an informational preview (no question yet). This step reads the area decisions Step P3b already recorded — it does not ask them again. Then, **per candidate, one `AskUserQuestion`** — each iteration fills the block from that candidate, with its `target` line reading the candidate's area placement: `<spec_path>/<area>/<candidate-slug>/` for an area decided `nested product` or `group folder`, `<spec_path>/<candidate-slug>/` for a `root` candidate or an area decided `flat`:
 
 ```
 Context (print before asking):
-- Where: /lazy-spec.create-from-code · Step P6 — Scaffold candidate features (delegate); target <spec_path>/features/<candidate-slug>/
+- Where: /lazy-spec.create-from-code · Step P6 — Scaffold candidate features (delegate); target <spec_path>/<area>/<candidate-slug>/ (or <spec_path>/<candidate-slug>/ for root/flat placement)
 - Found: candidate <candidate-slug> — <one-line purpose>; evidence <file-path — symbol or route group, …>; rationale <sentence>; <no existing asset names it | already covered by <asset>>
 - Why asking: whether a code unit deserves its own feature folder, an architectural-area note, or nothing is the operator's decomposition call
-- Answers: `scaffold feature` — `lazy-spec.create-asset <product> feature <candidate-slug>` runs once every candidate is decided; `treat as architectural area` — a subsection lands under tech.md `## Architectural Areas` now; `skip` — no trace, offered again on the next product-mode run
+- Answers: `scaffold feature` — `lazy-spec.create-asset` runs once every candidate is decided, landing under the candidate's recorded area placement; `treat as architectural area` — a subsection lands under tech.md `## Architectural Areas` now; `skip` — no trace, offered again on the next product-mode run
 AskUserQuestion: header "Candidate <n>/<N>", question "How should the code unit `<candidate-slug>` (<purpose>) of <product> enter the spec tree?", options below with descriptions.
 ```
 
@@ -320,15 +350,19 @@ AskUserQuestion: header "Candidate <n>/<N>", question "How should the code unit 
 - `treat as architectural area` — append a subsection under the product tech doc's `## Architectural Areas` with the candidate's source link and short description. No feature folder.
 - `skip` — omit entirely, no trace.
 
-After every candidate is decided, run the scaffolds serially. For each `scaffold feature` candidate, invoke via the `Skill` tool:
+After every candidate is decided, run the scaffolds serially. For each `scaffold feature` candidate, invoke via the `Skill` tool one of, per the candidate's area placement recorded in Step P3b:
 
 ```
+Skill(skill: "lazycortex-specs:lazy-spec.create-asset", args: "<nested-key> feature <candidate-slug>")
+Skill(skill: "lazycortex-specs:lazy-spec.create-asset", args: "<product> feature <candidate-slug> --path <area>")
 Skill(skill: "lazycortex-specs:lazy-spec.create-asset", args: "<product> feature <candidate-slug>")
 ```
 
-Pass the candidate's source files / one-line purpose / behavior summary in the dispatch prompt so create-asset's clarifying step has grounding. Optionally pass `--empty` first (`<product> feature <candidate-slug> --empty`) when you want to scaffold the shell and populate the design body yourself afterward — but the default is the full create-asset run, which authors the design doc. For a candidate, this skill does NOT author the feature folder, does NOT scaffold a per-asset `tech.md` (removed — only the product carries `tech.md`), and does NOT seed any workflow. create-asset owns the asset scaffold.
+The first is for an area registered as a nested product (`<nested-key>` is the key P3b recorded); the second is for an area kept as a group folder; the third is for a `root` candidate or an area decided `flat`.
 
-Scaffolded candidates leave NO trace in `design.md` — the decomposition catalog is owned by the folder-notes (`<key>.md`, `features/features.md`), which aggregate the assets themselves.
+Pass the candidate's source files / one-line purpose / behavior summary in the dispatch prompt so create-asset's clarifying step has grounding. Optionally append `--empty` to the args string when you want to scaffold the shell only and populate the design body yourself afterward — but the default is the full create-asset run, which authors the design doc. For a candidate, this skill does NOT author the feature folder, does NOT scaffold a per-asset `tech.md` (removed — only the product carries `tech.md`), and does NOT seed any workflow. create-asset owns the asset scaffold.
+
+Scaffolded candidates leave NO trace in `design.md` — the decomposition catalog is owned by the folder-notes — the product's, each group folder's, each nested product's.
 
 This step emits `no-candidates` if Agent D returned an empty `findings` list.
 
@@ -340,7 +374,7 @@ This step emits `no-candidates` if Agent D returned an empty `findings` list.
 - Both product docs carry the migrated `spec_role` + `spec_stage` frontmatter and the mandatory header (frontmatter + H1) per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md`.
 - Both product docs carry `wiki_pinned_topics` — `wiki/doc-kind/design` + `wiki/product/<product>` on `design.md`, `wiki/doc-kind/tech` + `wiki/product/<product>` on `tech.md` — no `wiki/category/...` line on either (product-level docs have no category).
 - No operator-zone folder-note, no `human-tasks.md`, no `spec_role: layout` doc, no `layout.excalidraw` file, and no `backlog/` were created (those are removed roles / product-config's territory).
-- No sub-product folders were created (scaffolded candidates are **features** under `<spec_path>/features/`, delegated to create-asset, never sibling products).
+- Every nested product the operator chose carries its level note and a seeded `vision.md`, and is registered under `products` with a `spec_path` under this product's; no candidate landed under a dedicated `features` folder — candidates sit at the product root, under the group folder the operator chose, or at a nested product's root.
 - Wikilinks use path-qualified form per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md` and target existing pages.
 
 ### P8 — Log the run
@@ -353,7 +387,7 @@ Feature mode scaffolds ONE feature-candidate from code by delegating to `lazy-sp
 
 ### F1 — Determine the feature slug
 
-If the slug is obvious from the user's input or the source path, use it (lowercase-with-hyphens per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md`). Otherwise ask the user via `AskUserQuestion` — context first: where (`/lazy-spec.create-from-code · Step F1 — Determine the feature slug`, target `<spec_path>/features/<slug>/`), found (the source path or candidate the input named, and the slug(s) it suggests), why asking (the slug is the folder's permanent identity and the input fixed none), answers (each suggested slug — the folder is scaffolded under that name in F2, never re-asked; `other` — type one, lowercase-with-hyphens); header "Feature slug", question "Which slug should the feature scaffolded from `<source-path>` on `<product>` take?". If the parent product's `source` is needed for grounding, it was already captured in Step 0.
+If the slug is obvious from the user's input or the source path, use it (lowercase-with-hyphens per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md`). Otherwise ask the user via `AskUserQuestion` — context first: where (`/lazy-spec.create-from-code · Step F1 — Determine the feature slug`, target `<spec_path>/<slug>/` (or the folder the caller named with `--path`)), found (the source path or candidate the input named, and the slug(s) it suggests), why asking (the slug is the folder's permanent identity and the input fixed none), answers (each suggested slug — the folder is scaffolded under that name in F2, never re-asked; `other` — type one, lowercase-with-hyphens); header "Feature slug", question "Which slug should the feature scaffolded from `<source-path>` on `<product>` take?". If the parent product's `source` is needed for grounding, it was already captured in Step 0.
 
 ### F2 — Delegate to lazy-spec.create-asset
 
@@ -363,14 +397,14 @@ Invoke via the `Skill` tool:
 Skill(skill: "lazycortex-specs:lazy-spec.create-asset", args: "<product> feature <slug>")
 ```
 
-Pass the candidate's behavior summary / source files in the dispatch prompt so create-asset's clarifying step (Step 3) and prose step (Step 6) have code grounding. Optionally append `--empty` to scaffold the shell only, then populate the design body afterward; the default full run authors `design.md`.
+Append `--path <dir>` to the args string when the caller passed one (Step F1's target folder) — absent it, create-asset places the asset at the type's `default_path`. Pass the candidate's behavior summary / source files in the dispatch prompt so create-asset's clarifying step (Step 3) and prose step (Step 6) have code grounding. Optionally append `--empty` to scaffold the shell only, then populate the design body afterward; the default full run authors `design.md`.
 
 create-asset owns: the asset folder + status folder-note, the one authored doc it seeds (`design.md` — NO per-asset `tech.md`, NO `layout` doc, and NO `code-plan.md` / `test-plan.md` / `code-report.md` / `test-report.md`, all of which are opt-in and out of scope for the scaffold), per-file start stages, and the prose. This skill seeds NO workflow and scaffolds NO `tech.md`. Capture create-asset's report for this skill's report.
 
 ### F3 — Verify
 
 - `lazy-spec.create-asset` returned a complete report (one line per its canonical task). Surface that report.
-- The feature folder exists at `<spec_path>/features/<slug>/` with the docs create-asset scaffolds (folder-note + `design.md`); confirm NO `tech.md`, NO `layout` doc, and no opt-in `code-plan.md` / `test-plan.md` / `code-report.md` / `test-report.md` were created.
+- The feature folder exists at `<spec_path>/<slug>/`, or under the folder passed with `--path`, with the docs create-asset scaffolds (folder-note + `design.md`); confirm NO `tech.md`, NO `layout` doc, and no opt-in `code-plan.md` / `test-plan.md` / `code-report.md` / `test-report.md` were created.
 - This skill authored no folder-note and invoked no drawer — confirm `.logs/claude/lazy-diagram.draw/` gained no entries from this run.
 
 ### F4 — Log the run
@@ -386,7 +420,7 @@ One line per task in the active mode's canonical list, with its outcome word. A 
 - **Never invent behavior** — only document what the code actually does.
 - **This skill never registers products** — `/lazy-spec.product-config` owns the product record and the operator-zone folder tree. Requires a registered, code-bound product (has `source`); refuses an unregistered product, no-ops a design-only one.
 - **Strict file roles** — the product design doc NEVER contains source URLs; the product tech doc DOES (per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md`).
-- **No nested products** — sub-areas become `## Architectural Areas` subsections of the product tech doc, not separate product spec folders.
+- **Nested products are a per-area operator choice** — Step P3b asks per semantic area whether it becomes a nested product, a group folder, or flat placement; any candidate may still land as an `## Architectural Areas` subsection of the product tech doc instead of a feature folder, per its own P6 answer.
 - **Delegate heavy reads** — parallel Explore agents scan source; the main session synthesizes and decides.
 - **Feature mode delegates to create-asset** — it owns the asset scaffold and docs. No per-asset `tech.md` and no seeded workflow originate from this skill.
 - **This skill draws no diagrams.** A product picture is drawn on the operator's own `/lazy-diagram.draw` call against an existing heading, and the writing experts carry their own figures discipline (`lazy-core.markdown-style` § Figures). The removed `spec_role: layout` doc / `layout.excalidraw` file stay removed.

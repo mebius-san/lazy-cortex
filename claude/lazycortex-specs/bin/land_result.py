@@ -16,8 +16,6 @@ than imported: a cross-plugin Python import would break in a consumer install wh
 plugins live at unrelated cache paths (`dev.plugin-boundaries.md` § 2a).
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error,wrong-import-position
 
 import argparse
 import json
@@ -37,13 +35,13 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import flip_gate  # noqa: E402
+import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import iconize_inline  # noqa: E402
+import iconize_inline  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import spec_paths  # noqa: E402
+import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from spec_keys import SpecKey  # noqa: E402
+from spec_keys import SpecKey  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # Job-bundle layout, mirrored file-wise from `lazycortex-core`'s runtime rather than imported
@@ -114,6 +112,7 @@ def _entry_path(entry: object) -> str:
     LandResultError: If the entry resolves to anything but a string.
   """
   path = entry.get(_PATH_KEY) if isinstance(entry, dict) else entry
+
   # guard: an entry that resolves to anything but a path string names no file
   if not isinstance(path, str):
     raise LandResultError(f"result entry carries no path: {entry!r}")
@@ -143,10 +142,12 @@ def _basename(entry: object) -> str:
   # is refused rather than honoured, and the job stays undelivered for the operator to see.
 
   path = _entry_path(entry)
+
   # guard: a returned file lives under the job's own result/ dir and nowhere else
   if not path.startswith(_RESULT_PREFIX):
     raise LandResultError(f"result path outside result/: {path!r}")
   name = path[len(_RESULT_PREFIX):]
+
   # guard: the basename is a plain filename — no separator, no parent hop, never empty
   if not name or "/" in name or "\\" in name or name in {".", ".."}:
     raise LandResultError(f"result basename is not a plain filename: {path!r}")
@@ -205,18 +206,23 @@ def _require_entry_lands(source: Path, dest: Path | None, document: Path) -> Non
   # guard: a symlink names a file outside the bundle whatever it resolves to
   if source.is_symlink():
     raise LandResultError(f"result entry is a symlink: {source.name!r}")
+
   # guard: the response declared a file the writer never wrote — a malformed response
   if not source.is_file():
     raise LandResultError(f"result entry declared but not delivered: {source.name!r}")
+
   # guard: the result document's own destination is the caller's target, already checked
   if dest is None:
     return
+
   # guard: the document an attachment rides with is never the file it overwrites
   if dest == document:
     raise LandResultError(f"attachment would overwrite the result document: {source.name!r}")
+
   # guard: writing through a symlinked destination puts the bytes wherever it points
   if dest.is_symlink():
     raise LandResultError(f"attachment destination is a symlink: {source.name!r}")
+
   # guard: a canonical or status note of the catalog is nobody's attachment destination
   if _is_spec_document(dest):
     raise LandResultError(f"attachment would overwrite a spec document: {source.name!r}")
@@ -237,6 +243,7 @@ def _read_entries(job_dir: Path) -> list[object]:
     response = json.loads((job_dir / _RESPONSE_FILE).read_text())
   except (OSError, json.JSONDecodeError):
     return []
+
   # guard: only a completed edit carries files to land
   if response.get(_OUTCOME_KEY) != _OUTCOME_EDITED:
     return []
@@ -286,6 +293,7 @@ def document_target(job_dir: Path, asset_dir: Path) -> Path | None:
     sys.stderr.write(f"land-result: {job_dir.name}: unreadable {_REQUEST_FILE}: {exc}\n")
     return None
   raw = request.get(_TARGET_DOC_KEY) if isinstance(request, dict) else None
+
   # guard: a job that declared no target has nowhere to put its document
   if not isinstance(raw, str) or not raw:
     sys.stderr.write(f"land-result: {job_dir.name}: dispatch declares no {_TARGET_DOC_KEY!r}\n")
@@ -294,6 +302,7 @@ def document_target(job_dir: Path, asset_dir: Path) -> Path | None:
   # the declared path is repo-relative; resolving it collapses any parent hop before the
   # containment check below, which is what actually decides whether it may be written
   target = (flip_gate.repo_root(asset_dir) / raw).resolve()
+
   # guard: a launch job's document belongs in its own asset folder and nowhere else
   if not _is_inside(target, asset_dir):
     sys.stderr.write(
@@ -328,6 +337,7 @@ def _fix_links(body: str, names: list[str], job_dir: Path) -> str:
   def _neighbour(match: re.Match) -> str:
     name = match.group(_GROUP_NAME)
     linked.add(name)
+
     # guard: the document points at a neighbour this response never delivered
     if name not in delivered:
       sys.stderr.write(f"land-result: {job_dir.name}: link to missing neighbour {name!r}\n")
@@ -335,6 +345,7 @@ def _fix_links(body: str, names: list[str], job_dir: Path) -> str:
 
   # rewrite every link in one pass, then report what the two sides did not agree on
   out = _RESULT_LINK_RE.sub(_neighbour, body)
+
   # a file nobody references is still landed — the operator is told, the job is not failed
   for name in sorted(delivered - linked):
     sys.stderr.write(f"land-result: {job_dir.name}: attachment {name!r} is not linked from the document\n")
@@ -475,14 +486,17 @@ def land_result(job_dir: Path, target_doc: Path) -> dict:
   # caller.
 
   entries = _read_entries(job_dir)
+
   # guard: nothing delivered — the asset folder is left exactly as found
   if not entries:
     return {_ACTION_KEY: _ACTION_EMPTY, _LANDED_KEY: []}
   try:
     names = [_basename(entry) for entry in entries]
+
     # guard: the document lands where the caller said, never under a name the expert chose
     if names[0] != target_doc.name:
       raise LandResultError(f"result document {names[0]!r} is not the target {target_doc.name!r}")
+
     # every entry is a promise about a file and a destination: check the whole list before
     # anything is written, so one bad entry lands nothing at all rather than a part
     for index, name in enumerate(names):
@@ -566,6 +580,7 @@ def main(argv: list[str]) -> int:
   if args.target is not None:
     target: Path | None = args.target.resolve()
     catalog = spec_paths.spec_content_root(flip_gate.repo_root(asset_dir))
+
     # guard: no override may place a document outside the spec catalog
     if target is not None and not _is_inside(target, catalog):
       sys.stderr.write(f"target outside the spec catalog {catalog}: {target}\n")

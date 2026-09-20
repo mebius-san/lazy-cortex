@@ -129,6 +129,7 @@ def _elide_substitutions(command: str) -> str:
   while i < len(command):
     if command.startswith("$(", i):
       end = _matching_paren(command, i + 2)
+
       # guard: unbalanced — leave it verbatim so the tokeniser still refuses the command
       if end is None:
         return command
@@ -137,6 +138,7 @@ def _elide_substitutions(command: str) -> str:
       continue
     if command[i] == "`":
       end = command.find("`", i + 1)
+
       # guard: unterminated backtick — same fail-closed treatment
       if end < 0:
         return command
@@ -170,6 +172,7 @@ def _matching_paren(command: str, start: int) -> int | None:
       depth += 1
     elif command[i] == ")":
       depth -= 1
+
       # guard: this parenthesis closes the outermost substitution
       if depth == 0:
         return i
@@ -199,6 +202,7 @@ def _split_unquoted_lines(command: str) -> list[str]:
   i = 0
   while i < len(command):
     ch = command[i]
+
     # guard: a backslash escapes the next character outside single quotes
     if ch == "\\" and quote != "'" and i + 1 < len(command):
       current.append(command[i:i + 2])
@@ -208,6 +212,7 @@ def _split_unquoted_lines(command: str) -> list[str]:
       quote = ch
     elif ch == quote:
       quote = None
+
     # guard: an unquoted newline ends the line; a quoted one is part of the word
     if ch == "\n" and quote is None:
       lines.append("".join(current))
@@ -239,6 +244,7 @@ def _chunks(command: str) -> list[list[str]] | None:
     (unbalanced quotes).
   """
   out: list[list[str]] = []
+
   # Substitutions are elided across the whole string first — a heredoc inside one spans lines.
   for line in _split_unquoted_lines(_elide_substitutions(command)):
     lexer = shlex.shlex(line, posix = True, punctuation_chars = True)
@@ -292,6 +298,7 @@ def _strip_global_options(tokens: list[str]) -> tuple[list[str], str | None]:
   i = 0
   while i < len(rest):
     tok = rest[i]
+
     # guard: reached the subcommand
     if not tok.startswith("-"):
       return rest[i:], repo_dir
@@ -300,6 +307,7 @@ def _strip_global_options(tokens: list[str]) -> tuple[list[str], str | None]:
     # waiver: git CLI vocabulary, not a domain constant
     if name == "-C":
       repo_dir = tok.split("=", 1)[1] if attached else (rest[i + 1] if i + 1 < len(rest) else None)
+
     # `-C dir` / `-c k=v` style: the value is the next token unless attached with `=`.
     if name in _GIT_GLOBAL_WITH_ARG and not attached:
       i += 2
@@ -332,10 +340,12 @@ def _consume_options(tokens: list[str]) -> tuple[tuple[str, ...], tuple[str, ...
   i = 0
   while i < len(tokens):
     tok = tokens[i]
+
     # guard: end-of-options marker — every remaining token is a pathspec
     if tok == "--":
       paths.extend(tokens[i + 1:])
       break
+
     # guard: positional argument
     if not tok.startswith("-") or tok == "-":
       paths.append(tok)
@@ -375,6 +385,7 @@ def _consume_short_cluster(tok: str, flags: list[str]) -> int:
 
   for pos, ch in enumerate(tok[1:], start = 1):
     flags.append(f"-{ch}")
+
     # guard: this option takes a value — attached remainder, else the following token
     if ch in _SHORT_WITH_ARG:
       return 1 if tok[pos + 1:] else 2
@@ -409,6 +420,7 @@ def parse_segments(command: str) -> list[GitSegment] | None:
   # closed instead of acting on an incomplete read of the command.
 
   chunks = _chunks(command)
+
   # guard: command could not be tokenised — caller must fail closed
   if chunks is None:
     return None
@@ -426,6 +438,7 @@ def parse_segments(command: str) -> list[GitSegment] | None:
     if tokens[0].rsplit("/", 1)[-1] != "git":
       continue
     rest, repo_dir = _strip_global_options(tokens)
+
     # guard: bare `git` with no subcommand
     if not rest:
       segments.append(GitSegment(verb = "", flags = (), pathspecs = (), repo_dir = repo_dir))
@@ -477,6 +490,7 @@ def is_indexful_commit(segment: GitSegment) -> bool:
   # guard: -a / -i fold the whole index or worktree into the snapshot
   if any(f in _INDEXFUL_COMMIT_FLAGS for f in segment.flags):
     return True
+
   # guard: a whole-tree pathspec is an indexful commit in disguise
   if any(p in WHOLE_TREE_PATHSPECS for p in segment.pathspecs):
     return True

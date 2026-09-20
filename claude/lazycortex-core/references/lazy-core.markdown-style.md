@@ -69,6 +69,7 @@ Rules:
 - Options are mutually exclusive unless framing explicitly names multi-select.
 - The author never pre-ticks. The operator owns every tick.
 - A `- [ ]` row is the only answer signal a consumer can detect — a callout with no options row has no way to be marked answered and blocks silently forever. When the question is genuinely open-ended and discrete options would mislead, ask as plain body prose instead of a callout, never as a callout with no `- [ ]` rows.
+- **The escape row is the author's call.** When the listed options may not exhaust what the operator would want to say — a judgement call, a naming or wording choice, a trade-off where a third way is plausible — the last row is `- [ ] other — my answer in prose below`, and the operator's prose written under the callout is the answer. When the answer set is closed by its nature — yes or no, one of the things that already exist, a structural fork with no third shape — the row is left out: an escape on a closed question is noise. The author decides per question; nothing forces the row on, and nothing forbids it.
 
 ## Command callouts
 
@@ -143,8 +144,9 @@ State blocks the dispatcher repaints on every wake; never authored by a writer.
 | Role | Type + tag | Author | Mandatory elements |
 |---|---|---|---|
 | Operator question with answer options | `[!question] #review/question` | expert | at least one `- [ ]` option row |
-| Open concern | `[!attention] #review/concern` | expert | — |
 | Non-system commentary | `[!note]`, `[!info]` | expert | — |
+
+There is no concern callout. A validator's findings are plain prose in its own section, never operator-facing markup, and the main writer turns them into questions with options; a `[!attention]` carrying a `#review/concern` tag is outside the closed `#review/*` set and fails the review audit.
 
 ### Review — other dispatcher blocks
 
@@ -223,9 +225,10 @@ Three forms, selected by the callout's own qualifier:
 
 Fields:
 
-- `category` — the target product's declared category (any `products[<key>].asset_types` key, or a built-in `feature` / `change` / `bug`). Open set, not closed to bugs.
+- `category` — names the target product's asset TYPE (any `products[<key>].asset_types` key, or a built-in `feature` / `change` / `bug`); the field keeps its historical name, the value is a type. Open set, not closed to bugs.
 - `slug` — only on `create`. A proposed slug; the coordinator may adjust it at materialization time to avoid a collision.
-- `target` — only on `link` / `reopen`. The existing asset's `<category>/<slug>` token.
+- `path` — optional, only on `create`. The folder under the product root the asset lands in, the same hint `path=` carries on a spawn line; absent, the type's own `default_path` decides. `lazy-spec.asset-creation-playbook.md` passes it to `lazy-spec.create-asset` as `--path` at materialization.
+- `target` — only on `link` / `reopen`. The existing asset's product-relative path token — a bare slug at the product root.
 - `description` — a short seed draft in every form. On `create`, this becomes the materialized asset's initial draft content.
 
 **The three-way choice is mandatory for bugs.** A tester proposing a bug searches existing bug assets first and picks `create` (genuinely new), `link` (duplicate — points at an existing open bug), or `reopen` (regression — points at a closed one). Every other category only ever uses `create`, with one exception: an architect decomposing an asset in `architecture.md` may use `link` for any category when an existing asset already covers that part of the decomposition — `target` names the covering asset, `description` states the covering evidence. `reopen` stays bug-only.
@@ -257,6 +260,30 @@ Marks a call the expert made that its job was never told to make ("used X instea
 ```
 
 A candidate obeys the same placement discipline as a `[!decision]` (§ Decision statement shape): it stands immediately after the bullet or paragraph whose call it records, never batched at a section's end.
+
+## History sections
+
+A `# History` H1 is a journal for the operator, and the same shape serves every plugin that keeps one — the catalog's status and level notes (`#protected/spec/history`) and a document that went through review (`#protected/review/history`). The ownership tag and the HTML-comment explainer stay as the section's first lines. Entries are grouped by day under a level-4 heading, oldest day first, newest last, one blank line before each day heading; a line is one bullet with no time and no author:
+
+```
+# History
+#protected/spec/history
+<!-- What has already happened. Filled in automatically. -->
+
+#### 2026-09-07
+- operator command "move section X higher" completed
+
+#### 2026-09-12
+- asset halted: the `Write code-plan` job failed, see the `[!failure]` under Gates
+```
+
+Rules:
+
+- One writer. Every line lands through the core verb `history-append` (file mode, or the JSON-in/JSON-out mode for a writer assembling a note in memory); a plugin's own verbs and coordinators hand it the text and never place a line by hand. The verb opens the day group when the last one is another day.
+- A day heading is content, not a section boundary: sections are bounded by H1 only.
+- What a catalog note journals is a closed list: an operator command started, completed, or failed at a step; a launched expert job finished, died, or was cancelled; the operator's answer to a coordinator question with the chosen option; the asset halted or the halt lifted. Stage moves, gate flips, seeding, scaffolding, canonicalisation, status-brief refreshes and no-change wakes never appear — the frontmatter and the commit already record them.
+- A reviewed document keeps its own content rule: one line per landed round, what the document now says that it did not before, in the document's language, nothing about the process.
+- Moments the automation compares live in frontmatter (`spec_approved_at`, `spec_<gate>_at`), never in a history line.
 
 ## Checkbox rows are operator-facing only
 
@@ -325,7 +352,7 @@ When a consumer dispatches an expert under one of these styles, the expert reads
 
 **No reflow-only markers.** Whitespace-only changes (unwrapping a hard-wrapped paragraph, collapsing blank lines, fixing trailing space) do not earn a marker — they are not a content mutation. Emit the paragraph in its target form raw, without a `` ```diff `` fence or any inline marker. Consumers also defensively strip whitespace-only diff fences before reassembly, so a stray fence is dropped silently — but the rule is "do not emit it in the first place". Touching only the prose you actually mean to change is the discipline; if a paragraph reads correctly as-is, leave its line wrapping alone.
 
-**Template section comments are documentation, not text.** A shipped document template explains each section with an HTML comment (`<!-- … -->`) directly under its heading. Those comments are never rendered as text, never rewritten, and never deleted — a writer composes the section's content on the lines below the comment and leaves it standing; a section holding only its comment reads as empty.
+**Template section comments are documentation, not text.** A shipped document template explains each section with an HTML comment (`<!-- … -->`) directly under its heading. Those comments are never rendered as text, never rewritten, and never deleted — a writer composes the section's content on the lines below the comment and leaves it standing; a section holding only its comment reads as empty. A comment that opens with `Optional.` marks a section the writer may drop whole — heading and comment together — when the document has nothing to say there; a section without that word stays in the document, empty or filled. An empty section is never padded to look filled: a writer with nothing checkable to put under a heading leaves the heading empty (or drops it, when optional) rather than writing prose that only occupies the space.
 
 **Tagged callouts are never wrapped in markers.** A callout carrying a tag in any `#<namespace>/<x>` form (`#review/<x>`, `#spec/<x>`, any future consumer's namespace) is consumer-owned scaffolding — the tag itself is the signal "this block is not yours to mark up". Regardless of what edit happens to it (insertion, retention, retirement) and regardless of the configured `edit_marker_style`, a tagged callout is never wrapped in a `` ```diff `` fence, never carries inline `~~del~~` / `{--del--}` / `<del>` markup, never gets any other edit-annotation applied to its block.
 

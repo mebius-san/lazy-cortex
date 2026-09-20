@@ -14,8 +14,6 @@ Every consumer asks here instead of comparing a basename against a closed list; 
 everywhere is "a declaration for this type exists", never "this name is in the enum".
 """
 from __future__ import annotations
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error,wrong-import-position
 
 import argparse
 import json
@@ -35,11 +33,13 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import flip_gate  # noqa: E402
+import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import spec_keys  # noqa: E402
+import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import spec_paths  # noqa: E402
+import spec_keys  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # ----------------------------------------------------------------------------------------
@@ -70,7 +70,6 @@ class _K:
   Attributes:
     DOC_TYPE: Frontmatter key naming a document's type.
     DOC_TYPES: Settings key holding a product's own type declarations.
-    PRODUCTS: Settings key holding the product registry.
     REFERENCES_DIR: The plugin subdirectory holding the shipped declaration file.
     DEFAULTS_FILE: Filename of the shipped declaration file.
     SETTINGS_REL: Repo-relative path of the settings file.
@@ -85,7 +84,6 @@ class _K:
 
   DOC_TYPE = "spec_doc_type"
   DOC_TYPES = "doc_types"
-  PRODUCTS = "products"
   REFERENCES_DIR = "references"
   DEFAULTS_FILE = "lazy-spec.doc-types.json"
   SETTINGS_REL = Path(".claude") / "lazy.settings.json"
@@ -176,27 +174,31 @@ def shipped_defaults() -> dict[str, dict]:
 
 def _product_types(repo: Path, product: str | None) -> dict[str, dict]:
   """
-  Read one product's own `doc_types` declarations from settings.
+  Read one product's effective `doc_types` declarations from settings.
+
+  The record is taken through `resolve_product.effective_record`, so a product nested inside
+  another sees every type its ancestors declared alongside its own.
 
   Args:
     repo: Repository root holding `.claude/lazy.settings.json`.
     product: Product settings key, or None when the caller has no product in scope.
 
   Returns:
-    Mapping of type name to its raw declaration dict; empty when the product declares none.
+    Mapping of type name to its raw declaration dict; empty when neither the product nor any
+    ancestor declares one.
   """
   # guard: no product in scope — only the shipped set applies
   if not product:
     return {}
   path = repo / _K.SETTINGS_REL
+
   # guard: no settings file — nothing a product could have declared
   if not path.is_file():
     return {}
   try:
-    data = json.loads(path.read_text(encoding = _K.ENCODING))
+    record = resolve_product.effective_record(repo, product)
   except json.JSONDecodeError:
     return {}
-  record = (data.get(_K.PRODUCTS) or {}).get(product) or {}
   declared = record.get(_K.DOC_TYPES)
   return declared if isinstance(declared, dict) else {}
 
@@ -278,6 +280,7 @@ def icon_color(repo: Path, doc_type: str, product: str | None = None) -> tuple[s
   # which stage it is in, never by what kind it is.
 
   declaration = resolve(repo, doc_type, product)
+
   # guard: an undeclared type, or one naming no icon, has no seed to report
   if not declaration or not declaration.get(DocTypeFlag.ICON):
     return None
@@ -409,6 +412,7 @@ def backfill(repo: Path) -> dict:
       # waiver: sibling-module frontmatter parser -- the one parser every specs primitive shares
       fm_values, fm_end = flip_gate.parse_frontmatter(text)
       role = fm_values.get(_SPEC_ROLE, "")
+
       # a level note is the one place the key was written against its own schema, so the
       # migration that stopped deriving a type from the role also takes back what it wrote
       if role in spec_keys.LEVEL_ROLES:
@@ -419,14 +423,17 @@ def backfill(repo: Path) -> dict:
         cleaned += 1
         continue
       doc_type = _derive_type(path, role)
+
       # guard: nothing to derive a type from — not a candidate at all
       if not doc_type:
         continue
+
       # guard: already typed — idempotent no-op
       if _K.DOC_TYPE in fm_values:
         skipped += 1
         continue
       new_fm, count = _insert_type(text[:fm_end], doc_type)
+
       # guard: no anchor line to insert after — leave the file for the doctor to report
       if count != 1:
         skipped += 1
@@ -474,6 +481,7 @@ def _rename_declaration(old: str, new: str) -> bool:
   path = _plugin_root() / _K.REFERENCES_DIR / _K.DEFAULTS_FILE
   data = json.loads(path.read_text(encoding = _K.ENCODING))
   declared = data.get(_K.DOC_TYPES) or {}
+
   # guard: nothing declared under the old name — a second run lands here
   if old not in declared:
     return False
@@ -555,6 +563,7 @@ def _rename_template(old: str, new: str) -> bool:
   """
   templates = _plugin_root() / _K.TEMPLATES_DIR / _K.DOC_TEMPLATES_DIR
   source = templates / f"{old}{_MD_SUFFIX}"
+
   # guard: a type shipping no template has nothing to move
   if not source.is_file():
     return False
@@ -588,6 +597,7 @@ def _rename_copies(repo: Path, old: str, new: str) -> int:
       continue
     for dirpath, _dirnames, filenames in os.walk(root):
       parts = Path(dirpath).relative_to(root).parts
+
       # guard: only spec.* families hold per-type copies, nested per-product layers included
       if not parts or not parts[0].startswith(_SPEC_TMPL_PREFIX):
         continue
@@ -596,6 +606,7 @@ def _rename_copies(repo: Path, old: str, new: str) -> int:
         if not filename.endswith(_MD_SUFFIX):
           continue
         path = Path(dirpath) / filename
+
         # a copy named after the retired type moves, its own frontmatter keys following
         if filename == f"{old}{_MD_SUFFIX}":
           # guard: the plugin's linear file is _rename_template's move, never counted twice
@@ -604,6 +615,7 @@ def _rename_copies(repo: Path, old: str, new: str) -> int:
           if _move_retyped(path, path.with_name(f"{new}{_MD_SUFFIX}"), old, new):
             count += 1
           continue
+
         # a template under another filename that declares the retired type is retyped in place
         updated, typed, roled = _retype_frontmatter(path.read_text(encoding = _K.ENCODING), old, new)
         if typed or roled:
@@ -625,6 +637,7 @@ def _rename_classes(repo: Path, old: str, new: str) -> int:
     The number of class entries renamed.
   """
   path = repo / _K.SETTINGS_REL
+
   # guard: no settings file — no class registry to rewrite
   if not path.is_file():
     return 0
@@ -633,6 +646,7 @@ def _rename_classes(repo: Path, old: str, new: str) -> int:
   except json.JSONDecodeError:
     return 0
   entries = (data.get(_K.REVIEW) or {}).get(_K.CLASSES)
+
   # guard: no class registry declared at all
   if not isinstance(entries, list):
     return 0
@@ -705,15 +719,18 @@ def rename(repo: Path, old: str, new: str) -> dict:
         continue
       path = Path(dirpath) / name
       updated, typed, roled = _retype_frontmatter(path.read_text(encoding = _K.ENCODING), old, new)
+
       # guard: a document of another type and role is none of this rename's business
       if not typed and not roled:
         continue
       path.write_text(updated, encoding = _K.ENCODING)
       docs += typed
       roles += roled
+
       # a document named after its own type follows the rename; a custom name is kept
       if typed and name == f"{old}{_MD_SUFFIX}":
         renamed = path.with_name(f"{new}{_MD_SUFFIX}")
+
         # guard: never overwrite — a sibling already under the new name keeps its own content
         if not renamed.exists():
           shutil.copy2(path, renamed)
@@ -793,6 +810,7 @@ def main(argv: list[str]) -> int:
     print(json.dumps({ _OUT_TYPES: sorted(declared_types(repo, args.product)) }))
     return 0
   declaration = resolve(repo, args.doc_type, args.product)
+
   # guard: no declaration anywhere — the caller's validation fails on this exit code
   if declaration is None:
     print(json.dumps({ _OUT_DECLARED: False, _K.DOC_TYPE: args.doc_type }))

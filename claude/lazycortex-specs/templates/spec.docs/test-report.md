@@ -19,13 +19,13 @@ wiki_pinned_topics:
 <!-- "Defect report: Documentation of the occurrence, nature, and status of a defect." — ISTQB Glossary -->
 
 ## Open questions
-<!-- Questions against the plan or the spec that only the operator can answer, still unanswered. -->
+<!-- Optional. Questions against the plan or the spec that only the operator can answer, still unanswered. -->
 
 ## Unresolved problems
-<!-- What obstructed the run and was not solved — an environment that could not be reached, a step nothing could execute, a case that stayed flaky without explanation. Problems of the run, not defects of the product. -->
+<!-- Optional. What obstructed the run and was not solved — an environment that could not be reached, a step nothing could execute, a case that stayed flaky without explanation. Problems of the run, not defects of the product. -->
 
 ## Decisions taken alone
-<!-- Departures from the plan made without the operator — substituted data, a skipped step, a chosen environment — and the grounds for each. -->
+<!-- Optional. Departures from the plan made without the operator — substituted data, a skipped step, a chosen environment — and the grounds for each. -->
 
 ## Log
 <!-- "Test log: A chronological record of relevant details about the execution of tests." — ISTQB Glossary -->

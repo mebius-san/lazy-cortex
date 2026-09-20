@@ -142,6 +142,7 @@ def main(argv: list[str]) -> int:
   # fetch, then merge only a strict fast-forward — ahead or diverged is not this hook's business
   # waiver: git CLI vocabulary, not a domain constant
   fetch = _git(repo, "fetch", args.remote, args.ref)
+
   # guard: an unreachable remote is a transient the next push retries — not an error here
   if fetch.returncode != 0:
     _emit({ "outcome": _OUT_SKIPPED, "reason": "fetch_failed" })
@@ -150,12 +151,14 @@ def main(argv: list[str]) -> int:
   head = _git(repo, "rev-parse", "HEAD").stdout.strip()
   # waiver: git CLI vocabulary, not a domain constant
   fetched = _git(repo, "rev-parse", "FETCH_HEAD").stdout.strip()
+
   # guard: already at the fetched commit — nothing to merge
   if head == fetched:
     _emit({ "outcome": _OUT_NOOP })
     return 0
   # waiver: git CLI vocabulary, not a domain constant
   base = _git(repo, "merge-base", "HEAD", "FETCH_HEAD").stdout.strip()
+
   # guard: only strictly-behind fast-forwards — ahead and diverged both leave the checkout alone
   if base != head:
     _emit({ "outcome": _OUT_SKIPPED, "reason": _REASON_NOT_BEHIND })

@@ -36,14 +36,14 @@ There is no `spec.cfg-<product>.md` rule file any more — that form is removed.
 | `spec_path` | yes | Where the product's specs live, relative to vault root |
 | `source.repo` | no | Key of the repo config this product's source lives in (e.g., `backend`). Omitted for a design-only product (specs authored ahead of code) |
 | `source.paths` | no | Subdirectories within that repo the product covers. Present iff `source` is present |
-| `language` | no (default `en`) | ISO 639-1 language code overriding the repo-global `spec.language`. Skills write narrative prose in this language — see Part 3 |
+| `language` | no (default `en`) | ISO 639-1 language code overriding the repo-global `spec.language`. Skills write narrative prose in this language — see Part 3 (inherited from the nearest ancestor when absent) |
 | `icon` | no (default `LiPackage`) | Iconize identifier (Lucide name or emoji) painted on the product folder; mirrored into the product folder-note's managed `iconize_icon`. The wizard writes the default when the operator declines — every product folder-note carries an icon |
 | `color` | no (default `#64748b`) | Iconize colour of the product folder, mirrored into the managed `iconize_color`. A product root is the one ordinary container that carries a colour — the neutral one — so the products stand out from the group folders beneath them; the key exists to override that for one product. See § Container colour below |
 | `dependencies` | no | List of upstream deps (other products, repos, or external) — see [sources](./lazy-spec.sources-protocol.md) Part 3 |
-| `asset_types` | no | Per-type declarations, merged **key-by-key** over the plugin's shipped spawnable set (`feature`, `change`, `bug`, `content`, `research`; `references/lazy-spec.asset-types.json` also carries the `catalog` and `product` level entries, which have no `default_path` and spawn nothing), so a product may replace one field of a shipped type without restating the rest, or declare a type of its own. Written by `/lazy-spec.add-asset-type`. See below and [layout](./lazy-spec.layout-protocol.md) § Asset types |
+| `asset_types` | no | Per-type declarations, merged **key-by-key** over the plugin's shipped spawnable set (`feature`, `change`, `bug`, `content`, `research`; `references/lazy-spec.asset-types.json` also carries the `catalog` and `product` level entries, which have no `default_path` and spawn nothing), so a product may replace one field of a shipped type without restating the rest, or declare a type of its own. Along a nested product's ancestor chain the same merge runs over each ancestor's declarations in turn, outermost first. Written by `/lazy-spec.add-asset-type`. See below and [layout](./lazy-spec.layout-protocol.md) § Asset types |
 | `tool_types` | no | Per-tool declarations, merged key-by-key over the plugin's shipped set (`references/lazy-spec.tool-types.json` — `code`, `data`, `test`, `docs`, `research`). See below |
-| `guidelines` | no | Extra context files folded into launch-checkbox job dispatch, keyed by dispatched role token plus the wildcard `"*"`. See below |
-| `mode` | no (default full) | `"spec-only"` activates the designer-only ladder (`lazy-spec.coordination-playbook.md` Chapter 17, extracted as `lazy-spec.spec-only-playbook.md`) for every asset under this product — design.md → review → approve → `spec_design_done`, no architecture/plan/implementation/test steps. Absence means the ordinary full ladder. Written by `/lazy-spec.product-config`'s wizard. `_build_bundle` folds the owning product's whole record — `mode` included — into every coordinator job's `payload["product"]` unconditionally, so no separate settings read is needed to detect the profile. |
+| `guidelines` | no | Extra context files folded into launch-checkbox job dispatch, keyed by dispatched role token plus the wildcard `"*"` — the union along the ancestor chain, outermost first. See below |
+| `mode` | no (default full) | `"spec-only"` activates the designer-only ladder (`lazy-spec.coordination-playbook.md` Chapter 17, extracted as `lazy-spec.spec-only-playbook.md`) for every asset under this product — design.md → review → approve → `spec_design_done`, no architecture/plan/implementation/test steps. Absence means the ordinary full ladder. Written by `/lazy-spec.product-config`'s wizard. `_build_bundle` folds the owning product's whole record — `mode` included — into every coordinator job's `payload["product"]` unconditionally, so no separate settings read is needed to detect the profile. (inherited from the nearest ancestor when absent) |
 
 Example product record:
 
@@ -80,7 +80,7 @@ Colour is the state axis: an asset's folder takes its colour from its own `spec_
 | Container | Colour |
 |---|---|
 | Product root (`<spec_path>/<leaf>.md`) | Neutral `#64748b` — `products[<key>].color` overrides it |
-| Ordinary group folder (`features/`, `changes/`, `bugs/`, any declared type's `default_path`, any ad-hoc folder) | None. The note carries `iconize_icon` and no `iconize_color` at all |
+| Ordinary group folder (`changes/`, `bugs/`, any declared type's `default_path`, any ad-hoc folder) | None. The note carries `iconize_icon` and no `iconize_color` at all |
 | Intake shelf — the vault-root request inbox (`requests/requests.md`) and every upstream note (`upstream/upstream.md`, `upstream/<repo-key>/<repo-key>.md`) | Accent `#f0abfc` |
 
 The accent is deliberate and is the one place a colourless-shelf rule is broken: intake is where unprocessed material lands, so those folders have to be findable at a glance in a file explorer full of grey. `#f0abfc` is chosen to sit outside the state palette entirely, so an intake shelf can never be misread as an asset in some state.
@@ -117,7 +117,7 @@ Each key is a tool name — the value an asset's `spec_tools` list carries. Each
 
 The shipped set is `code` (`code-plan` / `code-report`), `data` (`data-report`), `test` (`test-plan` / `test-report`), `docs` (`docs-report`), and `research` (the research report written from the approved research design; its report type carries a stage).
 
-Per-product doc-template overrides are NOT declared in the record. The override signal is **folder presence** under `.claude/templates/` — a per-product override folder `spec.<type>/<compound-key>/`, and the consumer's own type baseline `spec.<type>/`. Resolution is per-file across a five-layer fallback that ends at the plugin's linear per-doc-type base (`spec.docs/`), so a type needs no template folder of its own to be scaffoldable, and an override folder may contain only the files that differ. See [layout](./lazy-spec.layout-protocol.md) Part 1 § Template storage for the full layer order.
+Per-product doc-template overrides are NOT declared in the record. The override signal is **folder presence** under `.claude/templates/` — a per-product override folder `spec.<type>/<compound-key>/`, and the consumer's own type baseline `spec.<type>/`. Resolution is per-file across a six-layer chain plus one override layer per ancestor product, so a type needs no template folder of its own to be scaffoldable, and an override folder may contain only the files that differ. See [layout](./lazy-spec.layout-protocol.md) Part 1 § Template storage for the full layer order.
 
 ### `products[<key>].guidelines` — launch-checkbox context paths
 
@@ -143,7 +143,7 @@ A product record MAY carry a `guidelines` dict supplying extra context to the jo
 | `coordinator` | Guideline paths folded into every `spec.coordinator` job dispatched for this product's assets — the third of the six rule layers the coordinator reads before deciding (see `lazy-spec.coordination-playbook.md` § 3). Distinct from a product, container, or asset folder-note's `# Coordinator rules` section: this key names files, the folder-note sections carry operator-authored prose directly. |
 | `*` | Guideline paths folded into every launch-checkbox job for this product, regardless of role. |
 
-Values are lists of repo-relative file paths, read literally — no glob expansion. Each path that resolves to a file has its contents folded into the dispatched job's context bundle, keyed by basename; a declared path that does not resolve to a file is never silently skipped — it is recorded as a warning in the dispatch result and appended to the asset's `# History` section. The key is entirely optional: a product record with no `guidelines` key dispatches launch-checkbox jobs with no extra context.
+Values are lists of repo-relative file paths, read literally — no glob expansion. Each path that resolves to a file has its contents folded into the dispatched job's context bundle, keyed by basename; a declared path that does not resolve to a file is never silently skipped — it is recorded as a warning in the dispatch result and journaled in the asset's `# History` as a job that failed to start. The key is entirely optional: a product record with no `guidelines` key dispatches launch-checkbox jobs with no extra context.
 
 ### `products[<key>].doc_types` — project-declared document types
 
@@ -206,10 +206,14 @@ Repo records DO NOT carry the repo's URL. The URL is derived at runtime from the
 
 ### Resolving a Product
 
-Product resolution goes through the `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> resolve-product` primitive, which reads the `products` settings section directly. Two modes:
+Product resolution goes through the `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> resolve-product` primitive, which reads the `products` settings section directly. Four modes — two raw, two inherited:
 
 - **by-key** — `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> resolve-product by-key <key>` returns `{"key": <key>, "record": <record-or-null>}`. A direct record fetch by the exact compound-key.
-- **by-path** — `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> resolve-product by-path <path>` returns `{"key": <owning-key-or-null>, "record": <record-or-null>}`. The `<path>` argument is resolved relative to the content-root (`<settings-dir>/<spec.vault_root>`); if the caller supplies a path that begins with the vault-root segment (e.g. `specs/Server/Tester/chapter/features/foo`), that leading segment is stripped before matching. Finds the product whose `spec_path` equals the normalised path or is a segment-wise prefix of it; when several products nest, the longest matching `spec_path` wins. Segment-wise matching means `A/B` owns `A/B/x` but not `A/Bx/...`, so it transparently covers the product's standard subtree (`<spec_path>/features/<feat>/...`, `<spec_path>/changes/<change-name>/...`, `<spec_path>/bugs/<bug-name>/...`) and the product-root files (`<spec_path>/<product>.md` folder-note, `<spec_path>/design.md`, `<spec_path>/tech.md`). Request files are NOT under a product — they live in `<content-root>/requests/` — so `resolve-product by-path` never attributes them to a product.
+- **by-path** — `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> resolve-product by-path <path>` returns `{"key": <owning-key-or-null>, "record": <record-or-null>}`. The `<path>` argument is resolved relative to the content-root (`<settings-dir>/<spec.vault_root>`); if the caller supplies a path that begins with the vault-root segment (e.g. `specs/Server/Tester/chapter/foo`), that leading segment is stripped before matching. Finds the product whose `spec_path` equals the normalised path or is a segment-wise prefix of it; when several products nest, the longest matching `spec_path` wins. Segment-wise matching means `A/B` owns `A/B/x` but not `A/Bx/...`, so it transparently covers the product's standard subtree (`<spec_path>/<feat>/...` for a feature at the product root, `<spec_path>/changes/<change-name>/...`, `<spec_path>/bugs/<bug-name>/...`) and the product-root files (`<spec_path>/<product>.md` folder-note, `<spec_path>/design.md`, `<spec_path>/tech.md`). Request files are NOT under a product — they live in `<content-root>/requests/` — so `resolve-product by-path` never attributes them to a product.
+- **effective** — `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> resolve-product effective <key>` returns the same `{"key", "record"}` shape as `by-key`, the record replaced by `resolve_product.effective_record` — every key the product does not declare taken from its nearest declaring ancestor (see § Effective record). An unregistered key still yields `{"key": <key>, "record": null}` and exit 0.
+- **effective-by-path** — `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> resolve-product effective-by-path <path>` attributes `<path>` exactly as `by-path` does and returns that product's effective record.
+
+**Which verb to use.** A reader that acts on a product's configuration — its `asset_types`, `doc_types`, `tool_types`, `guidelines`, `language`, `mode` — asks for the `effective` pair, so a nested product never looks unconfigured for a key its parent declares. The raw `by-key` / `by-path` pair is for a caller that writes the record back, where only the product's own declarations may be edited.
 
 `spec.*` skills follow this protocol:
 
@@ -217,25 +221,31 @@ Product resolution goes through the `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli>
 2. A `null` record means the product is not registered. Tell the user and suggest registering it via `/lazy-spec.product-config`.
 3. Resolve the product's `source.repo` (when present) against the repo configs via `lazy-spec.resolve-repo` to get `{local_path, branch, host, owner, repo, forge, base_url, …}`.
 
-**Products are flat**: a product's `spec_path` MUST NOT be a sub-path of another product's `spec_path`. Nested products are forbidden — group related products under a shared organizational parent folder instead (see [folder-structure](./lazy-spec.layout-protocol.md)).
+**Products may nest**: a product's `spec_path` may sit under another product's `spec_path`. Ownership of any path is the innermost product — the longest matching `spec_path` — so an enclosing product never claims a nested product's own documents or assets, and a nested product's cross-asset tokens resolve against its own root (see [folder-structure](./lazy-spec.layout-protocol.md)).
+
+### Effective record
+
+A nested product's record is read through `resolve_product.effective_record`: every key it does not declare is taken from the nearest ancestor that declares it. `asset_types` merges key-by-key from the outermost ancestor down to the product's own; `guidelines` is the per-role ordered union along the same chain; `mode` and `language` take the nearest declaration. `source`, `dependencies`, `icon` and `color` are never inherited — a code binding, a dependency list and a paint belong to one product. The ancestor chain is derived from `spec_path` prefixes (`resolve_product.ancestor_chain`, outermost first); no key records a parent. The template chain gains one per-product override layer per ancestor between the product's own and the project-wide layer, innermost first.
+
+The same innermost-wins reading governs review routing: among the `<type>@<product>` review classes whose `paths` cover a typed document, the one whose globs anchor on the most leading literal segments — the innermost product's — takes the document, so a nested product's own class outranks its ancestor's (`doc_class._scope_depth`; see [lazy-review.configure](../../lazycortex-review/skills/lazy-review.configure/SKILL.md)).
 
 ### Spec Roots
 
-Each product's `spec_path` is its spec root. Each spec root is self-contained — skills work within a single spec root at a time. Never cross-reference state files between roots.
+Each product's `spec_path` is its spec root. Self-containment holds **between sibling roots**: skills work within a single spec root at a time and never cross-reference state files sideways, between roots neither of which contains the other. A nested root does read **upward** along its ancestor chain — the ancestors' effective records, their level notes, their guidelines and their template layers — because an ancestor's tree contains its own. Upward is inheritance; sideways is the thing that never happens.
 
 ## Part 3 — Language resolution
 
 A spec doc's effective prose language is resolved through a fallback chain (first non-empty wins), via the `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> resolve-language <relpath>` primitive:
 
 1. the doc's own frontmatter `spec_language` key;
-2. the owning product's `language` field in `products[<key>]` (`lazy.settings.json`);
+2. the owning product's effective `language` — its own `language` field in `products[<key>]` (`lazy.settings.json`), else the nearest ancestor product's, as `resolve_product.effective_record` merges it;
 3. the `spec` settings section's `language` key;
 4. the top-level `language` key in `lazy.settings.json` (repo-wide default, shared with the other plugins);
 5. the hardcoded floor `en`.
 
 Skills that write or edit spec content MUST honour the resolved language (ISO 639-1).
 
-**Translated** — narrative prose: `## Overview` body, paragraph text, free-form bullets that describe behavior or rationale, the category folder-note `description`, and free-text portions of history entries.
+**Translated** — narrative prose: `## Overview` body, paragraph text, free-form bullets that describe behavior or rationale, the group folder-note `description`, and free-text portions of history entries.
 
 **NOT translated — always kept as English identifiers**:
 
@@ -277,8 +287,8 @@ this protocol uses. Configuration lives in the plugin-owned `spec` settings sect
       "mounts": {
         "designs": {
           "source_path": "designs",
-          "units": [ "features/*", "systems/*" ],
-          "exclude": [ "features/_shared" ]
+          "units": [ "quests/*", "systems/*" ],
+          "exclude": [ "quests/_shared" ]
         }
       }
     }
@@ -354,10 +364,10 @@ Example (for the `default path` question in `lazy-spec.add-asset-type`):
 
 ```
 Question stem:
-  asset_types.<name>.default_path is the folder under the product's spec_path
-  that lazy-spec.create-asset scaffolds into when the caller names no folder of
-  its own. The folder is created lazily, on the first asset of the type that
-  lands in it.
+  asset_types.<name>.default_path names WHERE lazy-spec.create-asset scaffolds
+  an asset of this type when the caller names no folder of its own: "." is the
+  product root itself, and any other value is a group folder under the
+  product's spec_path, created lazily on the first asset that lands in it.
 
 Why it matters:
   It is a convenience for whoever creates the asset, NOT a fact of the type —
@@ -366,8 +376,11 @@ Why it matters:
   inside another asset's folder) with --path and nothing downstream breaks.
 
 Options:
-  - characters        — the pluralised type name; the ordinary choice. Example:
-                        a "character" type whose assets collect under
+  - .                 — the product root itself, so the assets sit loose beside
+                        the product's own documents. Example: the shipped
+                        "feature" type, landing at <spec_path>/<slug>/.
+  - characters        — the pluralised type name, a group folder of its own.
+                        Example: a "character" type whose assets collect under
                         <spec_path>/characters/.
   - alongside scenes  — reuse a folder an already-declared type uses, when the
                         two kinds genuinely share a shelf. Example: variant

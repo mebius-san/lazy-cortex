@@ -17,14 +17,13 @@ so this module re-implements the minimal frontmatter primitives needed
 rather than importing from `lazycortex-core` or `lazycortex-review`.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import hashlib
 import os
 import re
 
-from markers import Markers
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from markers import Markers  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -133,6 +132,7 @@ def resolve_see_also_target(target: str, node_path: Path) -> Path | None:
 
   # every base is bounded by the repository, so a node outside one has nothing to resolve against
   repo = _repo_root_for(node_path)
+
   # guard: node lives outside any repository — no base to try
   if repo is None:
     return None
@@ -140,6 +140,7 @@ def resolve_see_also_target(target: str, node_path: Path) -> Path | None:
   # the canonical base is the node's own directory — try it before widening
   node_dir = node_path.resolve().parent
   candidate = (node_dir / target).resolve()
+
   # guard: already written against the canonical base, and lands inside the repository
   if candidate.is_file() and repo in candidate.parents:
     return candidate
@@ -185,6 +186,7 @@ def normalize_see_also_target(target: str, node_path: Path) -> str:
 
   # resolve first — the canonical spelling can only be derived from a real file
   abs_target = resolve_see_also_target(target, node_path)
+
   # guard: unresolvable — leave the operator's string alone
   if abs_target is None:
     return target
@@ -248,10 +250,12 @@ def repo_relative_see_also_target(target: str, node_path: Path) -> str:
 
   # resolve first — an identity form can only be derived from a real file
   abs_target = resolve_see_also_target(target, node_path)
+
   # guard: unresolvable — nothing to express
   if abs_target is None:
     return target
   repo = _repo_root_for(node_path)
+
   # guard: no repository root to anchor against
   if repo is None:
     return target
@@ -280,6 +284,7 @@ def _find_fences(text: str) -> tuple[int, int, int] | None:
   after_open = len("---\r\n") if text.startswith("---\r\n") else len("---\n")
   rest = text[after_open:]
   match = _FENCE_RE.search(rest)
+
   # guard: no closing fence — treat as no frontmatter rather than hard error
   if match is None:
     return None
@@ -287,6 +292,7 @@ def _find_fences(text: str) -> tuple[int, int, int] | None:
   # re-anchor the match offsets onto the full document
   close_start = after_open + match.start()
   close_end = after_open + match.end()
+
   # take the newline after the closing fence into the span so the body starts clean
   if close_end < len(text) and text[close_end] == "\n":
     close_end += 1
@@ -323,6 +329,7 @@ def _key_block_span(block: str, key: str) -> tuple[int, int] | None:
   """
   pattern = re.compile(rf"(?m)^{re.escape(key)}\s*:(?:\s|$)")
   match = pattern.search(block)
+
   # guard: key not present in this block
   if match is None:
     return None
@@ -330,6 +337,7 @@ def _key_block_span(block: str, key: str) -> tuple[int, int] | None:
   # the entry runs from its header line to the newline that ends it
   start = match.start()
   cursor = block.find("\n", match.end())
+
   # guard: key is on the last line with no trailing newline
   if cursor == -1:
     return start, len(block)
@@ -340,6 +348,7 @@ def _key_block_span(block: str, key: str) -> tuple[int, int] | None:
     next_nl = block.find("\n", cursor)
     line_end = next_nl if next_nl != -1 else len(block)
     line = block[cursor:line_end]
+
     # guard: next top-level key — stop here
     if _line_starts_top_level_key(line):
       break
@@ -377,6 +386,7 @@ def _parse_tags_block(block: str) -> list[str]:
   tags: list[str] = []
   for line in block.splitlines()[1:]:
     stripped = line.strip()
+
     # guard: not a list item
     if not stripped.startswith("- "):
       continue
@@ -419,24 +429,31 @@ def _yaml_needs_quote(value: str) -> bool:
   # guard: empty string is ambiguous with `null` when written plain
   if not value:
     return True
+
   # mapping ambiguity: `: ` mid-value or trailing `:` reads as a mapping key
   if ": " in value or value.endswith(":"):
     return True
+
   # comment ambiguity: ` #` starts a comment to end of line
   if " #" in value:
     return True
+
   # leading character forces a non-scalar / indicator interpretation
   if value[0] in "[]{}&*!|>'\"%@`#,?":
     return True
+
   # `- ` at start is a block-sequence item; bare `-` is also ambiguous
   if value.startswith("- ") or value == "-":
     return True
+
   # YAML 1.1 bool / null literals — quote to keep them strings
   if value.lower() in ( "true", "false", "yes", "no", "null", "~", "on", "off" ):
     return True
+
   # leading / trailing whitespace is lost without quoting
   if value != value.strip():
     return True
+
   # newlines break the single-line value contract
   if "\n" in value:
     return True
@@ -480,6 +497,7 @@ def _yaml_unquote(value: str) -> str:
   # guard: single-quoted form — unescape the doubled-quote pair
   if len(value) >= _MIN_QUOTED_LEN and value[0] == "'" and value[-1] == "'":
     return value[1:-1].replace("''", "'")
+
   # guard: double-quoted form — strip the outer quotes
   if len(value) >= _MIN_QUOTED_LEN and value[0] == '"' and value[-1] == '"':
     return value[1:-1]
@@ -527,6 +545,7 @@ def _set_scalar_field(text: str, key: str, value: str) -> str:
 
   # Replace the whole existing entry with the single-line scalar form
   start, end = existing
+
   # Preserve trailing newline so the closing fence stays on its own line
   suffix = "\n" if end > 0 and block[end - 1:end] == "\n" else ""
   new_block = block[:start] + rendered + suffix + block[end:]
@@ -550,6 +569,7 @@ def _set_tags_field(text: str, new_tags: list[str]) -> str:
     Document text with the `tags:` key updated.
   """
   span = _find_fences(text)
+
   # guard: no frontmatter — synthesise if there are tags to add, skip otherwise
   if span is None:
     if not new_tags:
@@ -567,6 +587,7 @@ def _set_tags_field(text: str, new_tags: list[str]) -> str:
     # guard: no tags and no existing key — nothing to change
     if existing is None:
       return text
+
     # Remove the existing entry entirely
     start, end = existing
     new_block = block[:start] + block[end:]
@@ -574,6 +595,7 @@ def _set_tags_field(text: str, new_tags: list[str]) -> str:
 
   # the same rendered sequence serves both the append and the replace path
   rendered = _render_tags_block(new_tags)
+
   # Rendered block already ends with `\n` so no extra suffix needed
   if existing is None:
     if block and not block.endswith("\n"):
@@ -584,6 +606,7 @@ def _set_tags_field(text: str, new_tags: list[str]) -> str:
 
   # swap the old entry for the new one, leaving neighbouring keys exactly as they were
   start, end = existing
+
   # Preserve any whitespace suffix so subsequent keys stay on their own lines
   tail = block[end:]
   new_block = block[:start] + rendered + tail
@@ -638,6 +661,7 @@ def _set_block_seq_field(text: str, key: str, new_values: list[str]) -> str:
     Document text with the `key` entry updated.
   """
   span = _find_fences(text)
+
   # guard: no frontmatter — synthesise if there are values to add, skip otherwise
   if span is None:
     if not new_values:
@@ -661,6 +685,7 @@ def _set_block_seq_field(text: str, key: str, new_values: list[str]) -> str:
 
   # the same rendered sequence serves both the append and the replace path
   rendered = _render_block_seq(key, new_values)
+
   # Rendered block already ends with `\n` so no extra suffix needed
   if existing is None:
     if block and not block.endswith("\n"):
@@ -689,6 +714,7 @@ def _get_scalar_field(text: str, key: str) -> str | None:
     header line, or `None` when absent or blank.
   """
   span = _find_fences(text)
+
   # guard: no frontmatter
   if span is None:
     return None
@@ -697,6 +723,7 @@ def _get_scalar_field(text: str, key: str) -> str | None:
   open_end, close_start, _ = span
   block = text[open_end:close_start]
   existing = _key_block_span(block, key)
+
   # guard: key not found
   if existing is None:
     return None
@@ -706,6 +733,7 @@ def _get_scalar_field(text: str, key: str) -> str | None:
   entry = block[start:end]
   header_line = entry.split("\n")[0]
   after_colon = header_line.partition(":")[2].strip()
+
   # guard: empty post-colon means the key has no scalar value on its header line
   if not after_colon:
     return None
@@ -726,6 +754,7 @@ def _get_array_field(text: str, key: str) -> list[str]:
     List of tag/item strings, or an empty list when absent or blank.
   """
   span = _find_fences(text)
+
   # guard: no frontmatter
   if span is None:
     return []
@@ -734,6 +763,7 @@ def _get_array_field(text: str, key: str) -> list[str]:
   open_end, close_start, _ = span
   block = text[open_end:close_start]
   existing = _key_block_span(block, key)
+
   # guard: key not found
   if existing is None:
     return []
@@ -760,9 +790,11 @@ def _normalise_for_hash(text: str) -> str:
     Newline-joined text, each line right-stripped, no leading/trailing blanks.
   """
   lines = [ line.rstrip() for line in text.splitlines() ]
+
   # Drop leading blank lines.
   while lines and not lines[0]:
     lines.pop(0)
+
   # Drop trailing blank lines.
   while lines and not lines[-1]:
     lines.pop()
@@ -814,14 +846,18 @@ def _strip_managed_md(text: str) -> str:
   # Drop the managed scalar keys outright.
   out = _drop_key(text, _KEY_WIKI_SUMMARY)
   out = _drop_key(out, _KEY_SRC_HASH)
+
   # Drop the managed connectors block (curator-written, excluded from the hash).
   out = _drop_key(out, _KEY_CONNECTORS)
+
   # Keep only the non-wiki/* subset of tags (drop the key when none remain).
   non_wiki = [ t for t in _get_array_field(out, _KEY_TAGS) if not t.startswith(MarkdownNode._WIKI_TAG_PREFIX) ]
   out = _set_tags_field(out, non_wiki)
+
   # Collapse a now-empty frontmatter block so curation of a frontmatter-free
   # node hashes identically before and after.
   out = _drop_empty_frontmatter(out)
+
   # Remove the See-also managed section from the body.
   return _drop_see_also_section(out)
 
@@ -838,13 +874,16 @@ def _drop_empty_frontmatter(text: str) -> str:
     block is absent or still carries keys.
   """
   span = _find_fences(text)
+
   # guard: no frontmatter at all
   if span is None:
     return text
   open_end, close_start, close_end = span
+
   # guard: block still carries operator keys — keep it
   if text[open_end:close_start].strip():
     return text
+
   # The opening fence always begins at offset 0 (see _find_fences); dropping
   # the whole fenced span leaves just the body.
   return text[close_end:]
@@ -862,12 +901,14 @@ def _drop_key(text: str, key: str) -> str:
     Document text with the key entry removed; unchanged when absent.
   """
   span = _find_fences(text)
+
   # guard: no frontmatter — nothing to drop
   if span is None:
     return text
   open_end, close_start, _ = span
   block = text[open_end:close_start]
   existing = _key_block_span(block, key)
+
   # guard: key not present
   if existing is None:
     return text
@@ -889,11 +930,13 @@ def _drop_see_also_section(text: str) -> str:
   """
   start_marker = f"<!-- auto:{Markers.SEE_ALSO_MARKER_ID}:start -->"
   end_marker = f"<!-- auto:{Markers.SEE_ALSO_MARKER_ID}:end -->"
+
   # guard: markers absent — nothing to strip
   if start_marker not in text or end_marker not in text:
     return text
   start_idx = text.index(start_marker)
   end_idx = text.index(end_marker, start_idx) + len(end_marker)
+
   # Pull the cut back over a preceding See-also heading (and its owner-tag line) if present.
   heading = Markers.SEE_ALSO_HEADING
   head_idx = text.rfind(heading, 0, start_idx)
@@ -1072,6 +1115,7 @@ class MarkdownNode:
     # so the same target file compares equal whichever node states the link to it.
 
     inner = self.see_also_inner
+
     # guard: no See-also section — no outgoing edges
     if not inner:
       return set()
@@ -1280,6 +1324,7 @@ class MarkdownNode:
       text is returned.
     """
     span = _find_fences(self._text)
+
     # guard: no frontmatter — entire text is the body
     if span is None:
       return self._text
@@ -1402,10 +1447,12 @@ def _strip_comment_prefix(line: str, prefix: str) -> str | None:
     or `None` when the prefix is absent.
   """
   stripped = line.strip()
+
   # guard: line does not start with the expected prefix
   if not stripped.startswith(prefix):
     return None
   after = stripped[len(prefix):]
+
   # strip at most one leading space (matches `# text` vs `#text`)
   if after.startswith(" "):
     after = after[1:]
@@ -1448,21 +1495,27 @@ def _locate_header_end(lines: list[str], prefix: str) -> int:
     Zero-based index of the first line after the header region.
   """
   i = 0
+
   # skip shebang
   if lines and _SHEBANG_RE.match(lines[0]):
     i = 1
+
   # guard: block-comment language has no line prefix to detect
   if prefix == _BLOCK_COMMENT_SENTINEL:
     return i
+
   # skip contiguous line-comment header (license / encoding) that precedes code
   while i < len(lines):
     line = lines[i].rstrip("\n").rstrip("\r")
     stripped = line.strip()
+
     # guard: stop at blank line or non-comment line
     if not stripped or not stripped.startswith(prefix):
       break
+
     # a wiki tag in the header run means the header already ended here
     inner = _strip_comment_prefix(line.rstrip("\n").rstrip("\r"), prefix)
+
     # guard: stop if this is already a wiki open tag (shouldn't happen on fresh files)
     if inner is not None and inner.strip() == _WIKI_OPEN_TAG:
       break
@@ -1509,6 +1562,7 @@ def _find_wiki_block_line_comment(
   for i, raw in enumerate(lines):
     line = raw.rstrip("\n").rstrip("\r")
     inner = _strip_comment_prefix(line, prefix)
+
     # guard: not a comment line
     if inner is None:
       continue
@@ -1573,6 +1627,7 @@ def _parse_wiki_block(
 
   # the delimiter lines themselves are not field content
   interior = [ raw.rstrip("\n").rstrip("\r") for raw in lines[start + 1:end] ]
+
   # Block-comment interior lines carry no comment prefix but may share a common
   # leading indent (an indented `/* … */` block).  Dedent by that common base so
   # field headers land at column 0 while see-also items keep their relative `  - `
@@ -1589,6 +1644,7 @@ def _parse_wiki_block(
       content = line[base_indent:].rstrip()
     else:
       content_or_none = _strip_comment_prefix(line, prefix)
+
       # guard: not a comment line inside the block — skip
       if content_or_none is None:
         continue
@@ -1630,6 +1686,7 @@ def _parse_wiki_block(
         fields[_FK_SRC_HASH] = val
     elif content.startswith(_FH_SEE_ALSO):
       in_see_also = True
+
       # save any partial see_also collected so far
       fields[_FK_SEE_ALSO] = see_also_list
     elif content.startswith(_FH_PINNED_TOPICS):
@@ -1771,6 +1828,7 @@ def _code_source_for_hash(lines: list[str], prefix: str) -> str:
   else:
     start, end = span
     after = end + 1
+
     # the writer adds a blank separator after the block — exclude it from the hash too
     if after < len(lines) and lines[after].strip() == "":
       after += 1
@@ -1866,6 +1924,7 @@ class CodeNode:
     Current `summary:` value from the `<wiki>` block, or `None` when absent.
     """
     block = self._read_block()
+
     # guard: no block present
     if block is None:
       return None
@@ -1878,6 +1937,7 @@ class CodeNode:
     Current `topics:` value from the `<wiki>` block as a list of strings.
     """
     block = self._read_block()
+
     # guard: no block present
     if block is None:
       return []
@@ -1892,6 +1952,7 @@ class CodeNode:
     Current `connectors:` value from the `<wiki>` block as a list of strings.
     """
     block = self._read_block()
+
     # guard: no block present
     if block is None:
       return []
@@ -1906,6 +1967,7 @@ class CodeNode:
     Current `see-also:` items from the `<wiki>` block as a list of strings.
     """
     block = self._read_block()
+
     # guard: no block present
     if block is None:
       return []
@@ -1969,6 +2031,7 @@ class CodeNode:
     Current `src-hash:` value from the `<wiki>` block, or `None` when absent.
     """
     block = self._read_block()
+
     # guard: no block present
     if block is None:
       return None
@@ -2076,6 +2139,7 @@ class CodeNode:
     # merge onto the existing block so fields this phase does not own survive
     current = self._read_block() or {}
     current[_FK_SUMMARY] = wiki_summary
+
     # Code topics are stored BARE (`<axis>/<value>`) — strip the `wiki/` prefix
     # the curator emits.  build-index re-adds `wiki/` for code nodes, so storing
     # the prefixed form here would double it (`wiki/wiki/<axis>/…`).
@@ -2083,6 +2147,7 @@ class CodeNode:
       t[len(_WIKI_TAG_PREFIX):] if t.startswith(_WIKI_TAG_PREFIX) else t
       for t in topics
     ]
+
     # a None means "leave connectors as they are"; an empty list clears them
     if connectors is not None:
       current[_FK_CONNECTORS] = connectors
@@ -2114,6 +2179,7 @@ class CodeNode:
 
     # merge onto the existing block so fields this phase does not own survive
     current = self._read_block() or {}
+
     # Code see-also is stored bare — strip the leading markdown list bullet the
     # curator emits (`- [name](path) — gloss`) so the block renderer's own `  - `
     # is the only bullet (mirrors the bare-topics strip in apply_classify).
@@ -2136,6 +2202,7 @@ class CodeNode:
       String value or empty string when absent.
     """
     block = self._read_block()
+
     # guard: no block
     if block is None:
       return ""
@@ -2150,6 +2217,7 @@ class CodeNode:
       Parsed field dict, or `None` when no block is present.
     """
     span = _find_wiki_block(self._lines, self._prefix)
+
     # guard: no block present
     if span is None:
       return None
@@ -2168,8 +2236,10 @@ class CodeNode:
       fields: Dict of field name → value to emit.
     """
     block_lines = _render_wiki_block_lines(fields, self._prefix)
+
     # Add trailing newlines to each rendered line
     block_with_nl = [ ln + "\n" for ln in block_lines ]
+
     # Ensure a blank separator line after the block (before code)
     block_with_nl.append("\n")
 
@@ -2177,9 +2247,11 @@ class CodeNode:
     span = _find_wiki_block(self._lines, self._prefix)
     if span is not None:
       start, end = span
+
       # Replace lines[start:end+1] with the new block lines
       # Preserve the separator blank line that may already follow the block
       after_block = end + 1
+
       # consume the existing separator so the rewrite does not double it
       if after_block < len(self._lines) and self._lines[after_block].strip() == "":
         after_block += 1
@@ -2263,6 +2335,7 @@ def node_for(path: Path) -> MarkdownNode | CodeNode | None:
   if ext == _MD_SUFFIX:
     return MarkdownNode(path = path)
   style = _comment_style(ext)
+
   # guard: unrecognised extension — not a supported code node
   if style is None:
     return None

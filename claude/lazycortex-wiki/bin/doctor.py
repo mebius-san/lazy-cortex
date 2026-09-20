@@ -11,8 +11,6 @@ Cross-plugin Python import is forbidden (per the inter-plugin boundary contract)
 so all primitives used here are imported from within this plugin's own `bin/`.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import json
 import os
@@ -20,11 +18,16 @@ import re
 import time
 from pathlib import Path
 
-import domains as _domains
-import index as _index
-import mirror as _mirror
-import nodes as _nodes
-import scope as _scope
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import domains as _domains  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import index as _index  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import mirror as _mirror  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import nodes as _nodes  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import scope as _scope  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -87,6 +90,9 @@ _MSG_CLOSE_NO_OPEN    = "</wiki> close marker found but <wiki> open marker missi
 
 # Message string constant for missing-summary.
 _MSG_NO_SUMMARY       = "node has no summary (dispatch curator to classify)"
+
+# Message string constant for an index-stale finding on a node the index never links.
+_MSG_NODE_UNLINKED    = "node carries wiki tags but topics.md never links it (index out of sync)"
 
 # Settings path and keys read by the domain checks.
 _SETTINGS_PATH        = ".claude/lazy.settings.json"
@@ -246,6 +252,30 @@ def _read_topics_md_tags(index_path: Path) -> set[str] | None:
   return _parse_topics_md(content)
 
 
+def _read_topics_md_links(index_path: Path) -> list[str] | None:
+  """
+  Return the link targets of every entry line in `topics.md`, or `None`.
+
+  Args:
+    index_path: Absolute path to the `topics.md` file.
+
+  Returns:
+    Link targets exactly as written (relative to the index's own directory),
+    in file order, or `None` when the file does not exist.
+  """
+  # guard: index file absent
+  if not index_path.is_file():
+    return None
+
+  # every entry line is a list item carrying one markdown link; headings and sub-lines carry none
+  links: list[str] = []
+  for raw_line in index_path.read_text(encoding = _ENCODING).splitlines():
+    match = _MD_LINK_RE.match(raw_line)
+    if match:
+      links.append(match.group(2))
+  return links
+
+
 def _see_also_lines_from_node(
   node: _nodes.MarkdownNode | _nodes.CodeNode,
 ) -> list[str]:
@@ -271,6 +301,7 @@ def _see_also_lines_from_node(
       if stripped.startswith("- "):
         lines.append(stripped[2:].strip())
     return lines
+
   # CodeNode
   return list(node.see_also)
 
@@ -330,11 +361,13 @@ def _drop_see_also_line(node: _nodes.MarkdownNode, broken_target: str) -> None:
       continue
     item_text = stripped[2:].strip()
     target, _ = _extract_link_target(item_text)
+
     # guard: this line has the broken target — drop it
     if target == broken_target:
       continue
     kept_lines.append(ln)
   new_inner = "\n".join(kept_lines)
+
   # Keep the full `- [text](target) — gloss` list-item strings: apply_link grafts
   # see_also_lines verbatim (ready-to-graft, per the curator protocol).
   kept_items = [ ln.strip() for ln in new_inner.splitlines() if ln.strip().startswith("- ") ]
@@ -353,6 +386,7 @@ def _drop_code_see_also_line(node: _nodes.CodeNode, broken_target: str) -> None:
   kept = []
   for item in items:
     target, _ = _extract_link_target(item)
+
     # guard: this item has the broken target — drop it
     if target == broken_target:
       continue
@@ -392,6 +426,7 @@ def _refresh_gloss_markdown(
           new_lines.append(f"- {target} — {new_gloss}")
         continue
     new_lines.append(stripped)
+
   # Keep the full `- …` list-item strings: apply_link grafts them verbatim.
   items = [ ln for ln in new_lines if ln.startswith("- ") ]
   node.apply_link(see_also_lines = items)
@@ -440,6 +475,8 @@ class Doctor:
     CHECK_PATH_BASE: Check identifier for a See-also link written against a non-canonical base.
     CHECK_DANGLING_AT: Check identifier for a See-also link carrying a leftover `@` prefix.
     CHECK_INDEX_DESYNC: Check identifier for a topics-index tag no node currently carries.
+    CHECK_INDEX_STALE: Check identifier for a topics-index link whose file no longer exists, or a
+      tagged node the index never links.
     CHECK_MISSING_SUMMARY: Check identifier for a node with no summary.
     CHECK_STALE_GLOSS: Check identifier for a See-also gloss that no longer matches its
       target's current summary.
@@ -464,6 +501,7 @@ class Doctor:
   CHECK_PATH_BASE       = "see-also-path-base"
   CHECK_DANGLING_AT     = "dangling-at-prefix"
   CHECK_INDEX_DESYNC    = "index-desync"
+  CHECK_INDEX_STALE     = "index-stale"
   CHECK_MISSING_SUMMARY = "missing-summary"
   CHECK_STALE_GLOSS     = "stale-gloss"
   CHECK_UNKNOWN_AXIS    = "unknown-axis"
@@ -540,6 +578,7 @@ class Doctor:
     nodes: list[tuple[Path, _nodes.MarkdownNode | _nodes.CodeNode]] = []
     for p in node_paths:
       nd = _nodes.node_for(p)
+
       # guard: unrecognised file type — skip
       if nd is None:
         continue
@@ -564,6 +603,7 @@ class Doctor:
 
     # Scope-level checks.
     all_findings += self._check_index_desync(nodes, index_path)
+    all_findings += self._check_index_stale(nodes, index_path)
     all_findings += self._check_dup_branch(nodes)
     all_findings += self._check_broken_wiki_block(node_paths)
     all_findings += self._check_scope_overlap(node_paths)
@@ -593,7 +633,7 @@ class Doctor:
         # guard: finding is not fixable — skip
         if not f[_FK_FIXABLE]:
           continue
-        if f[_FK_CHECK] in (self.CHECK_ORPHAN_TOPIC, self.CHECK_INDEX_DESYNC):
+        if f[_FK_CHECK] in (self.CHECK_ORPHAN_TOPIC, self.CHECK_INDEX_DESYNC, self.CHECK_INDEX_STALE):
           needs_index_rebuild = True
           f[_FK_APPLIED] = True
         elif f[_FK_CHECK] == self.CHECK_BROKEN_SEE_ALSO:
@@ -645,6 +685,7 @@ class Doctor:
     """
     findings: list[dict] = []
     index_tags = _read_topics_md_tags(index_path)
+
     # guard: index does not exist yet — nothing to cross-check against
     if index_tags is None:
       return findings
@@ -712,6 +753,7 @@ class Doctor:
     # a leftover @-prefixed link and a local link fail in different ways, so each is checked apart
     for item in items:
       target, gloss = _extract_link_target(item)
+
       # guard: empty target — skip
       if not target:
         continue
@@ -801,6 +843,7 @@ class Doctor:
       Zero or one finding.
     """
     target_node = _nodes.node_for(abs_path)
+
     # guard: target node type unrecognised — skip stale-gloss check
     if target_node is None:
       return []
@@ -822,9 +865,11 @@ class Doctor:
     # guard: no summary on target — nothing to compare
     if not current_summary:
       return []
+
     # guard: gloss matches current summary — no finding
     if gloss == current_summary:
       return []
+
     # guard: gloss is empty — not a stale gloss, just missing (curator's job to fill)
     if not gloss:
       return []
@@ -864,6 +909,7 @@ class Doctor:
     """
     findings: list[dict] = []
     index_tags = _read_topics_md_tags(index_path)
+
     # guard: no index yet — nothing to check
     if not index_tags:
       return findings
@@ -880,6 +926,72 @@ class Doctor:
         severity = SEV_WARN,
         message  = f"topics.md declares '{tag}' but no node carries it",
         node     = "-",
+        fixable  = True,
+      ))
+    return findings
+
+  # ── check: index-stale ────────────────────────────────────────────────────
+
+  def _check_index_stale(
+    self,
+    nodes: list[tuple[Path, _nodes.MarkdownNode | _nodes.CodeNode]],
+    index_path: Path,
+  ) -> list[dict]:
+    """
+    Report `topics.md` links whose file is gone and tagged nodes the index never links.
+
+    Args:
+      nodes: List of `(path, node)` pairs for all scope nodes.
+      index_path: Absolute path to `topics.md`.
+
+    Returns:
+      List of findings.
+    """
+    findings: list[dict] = []
+    index_links = _read_topics_md_links(index_path)
+
+    # guard: no index yet — nothing to check
+    if index_links is None:
+      return findings
+
+    # Domain(wiki.taxonomy):
+    # # The topic index must point at the nodes where they are now
+    # The tag headings alone cannot tell a moved node from an unchanged one: a folder rename keeps every tag and
+    # every summary, yet every entry under those tags now names a file that no longer exists, and the nodes at
+    # their new place are listed nowhere. Both halves are the same staleness and the same cure — the index is
+    # rebuilt from the nodes; no node is touched.
+
+    # every entry line names a file relative to the index's own folder; a target that is gone is stale
+    linked: set[Path] = set()
+    for link in index_links:
+      target = (index_path.parent / link).resolve()
+      linked.add(target)
+
+      # guard: the linked file is still there
+      if target.is_file():
+        continue
+      findings.append(_finding(
+        check    = self.CHECK_INDEX_STALE,
+        severity = SEV_WARN,
+        message  = f"topics.md links '{link}' but no file exists there",
+        node     = "-",
+        fixable  = True,
+      ))
+
+    # a tagged node the index never mentions was moved or added after the last build
+    for node_path, node in nodes:
+      # guard: untagged nodes have no entry to miss
+      if not self._node_wiki_tags(node):
+        continue
+
+      # guard: the node is linked from the index
+      if node_path.resolve() in linked:
+        continue
+      findings.append(_finding(
+        check    = self.CHECK_INDEX_STALE,
+        severity = SEV_WARN,
+        message  = _MSG_NODE_UNLINKED,
+        node     = node_path.relative_to(self._repo).as_posix(),
         fixable  = True,
       ))
     return findings
@@ -905,6 +1017,7 @@ class Doctor:
       summary = node.wiki_summary
     else:
       summary = node.summary
+
     # guard: summary present — no finding
     if summary:
       return []
@@ -936,6 +1049,7 @@ class Doctor:
       List of findings.
     """
     findings: list[dict] = []
+
     # guard: no axes configured — every tag would be flagged; skip
     if not tag_axes:
       return findings
@@ -956,6 +1070,7 @@ class Doctor:
       # tag is `wiki/<axis>/<value...>`
       rest = tag[len(_WIKI_TAG_PREFIX):]
       axis = rest.split("/")[0] if "/" in rest else rest
+
       # guard: axis is known
       if axis in axes_set:
         continue
@@ -992,12 +1107,14 @@ class Doctor:
       List of `WARN` findings, one per detected near-duplicate pair.
     """
     findings: list[dict] = []
+
     # Collect all distinct values per axis across the scope.
     axis_values: dict[str, set[str]] = {}
     for _, node in nodes:
       for tag in self._node_wiki_tags(node):
         rest = tag[len(_WIKI_TAG_PREFIX):]
         parts = rest.split("/", 1)
+
         # guard: tag has no value under the axis
         if len(parts) < 2:
           continue
@@ -1038,6 +1155,7 @@ class Doctor:
           # order-independent pair key so the same duplicate is reported only once
           if is_dup:
             pair = (min(a, b), max(a, b))
+
             # guard: already reported this pair
             if pair in reported:
               continue
@@ -1076,9 +1194,11 @@ class Doctor:
         continue
       ext = p.suffix.lower()
       style = _nodes._comment_style(ext)
+
       # guard: unrecognised extension — not a code node
       if style is None:
         continue
+
       # guard: unreadable file — report it instead of aborting the whole sweep
       rel = p.relative_to(self._repo).as_posix()
       try:
@@ -1185,6 +1305,7 @@ class Doctor:
     """
     findings: list[dict] = []
     all_scopes = self._resolver.load_scopes()
+
     # guard: only one scope defined — overlap is impossible
     if len(all_scopes) < 2:
       return findings
@@ -1320,6 +1441,7 @@ class Doctor:
     for source_rel in sync.source_files():
       mirror_rel = f"{mirror_path}/{source_rel}"
       mirror_abs = self._repo / mirror_rel
+
       # guard: not mirrored yet — nothing to drift
       if not mirror_abs.is_file():
         continue
@@ -1357,6 +1479,7 @@ class Doctor:
         return candidate.stat().st_mtime
       except OSError:
         continue
+
     # nothing stat-able — treat as never fetched
     return 0.0
 
@@ -1371,14 +1494,17 @@ class Doctor:
     """
     rel     = finding.get(_FK_NODE, "")
     target  = finding.get(_FK_TARGET, "")
+
     # guard: missing node path or target
     if not rel or rel == "-" or not target:
       return
     abs_path = self._repo / rel
+
     # guard: file absent
     if not abs_path.is_file():
       return
     node = _nodes.node_for(abs_path)
+
     # guard: unrecognised type
     if node is None:
       return
@@ -1399,14 +1525,17 @@ class Doctor:
       finding: The finding dict; must carry `"node"` (rel path).
     """
     rel = finding.get(_FK_NODE, "")
+
     # guard: missing node path
     if not rel or rel == "-":
       return
     abs_path = self._repo / rel
+
     # guard: file absent
     if not abs_path.is_file():
       return
     node = _nodes.node_for(abs_path)
+
     # guard: unrecognised type
     if node is None:
       return
@@ -1427,6 +1556,7 @@ class Doctor:
     node      = finding.get(_FK_NODE_OBJ)
     target    = finding.get(_FK_TARGET, "")
     new_gloss = finding.get(_FK_NEW_GLOSS, "")
+
     # guard: missing data
     if node is None or not target or not new_gloss:
       return
@@ -1466,6 +1596,7 @@ class Doctor:
     """
     if isinstance(node, _nodes.MarkdownNode):
       return node.wiki_tags
+
     # CodeNode topics are stored without the `wiki/` prefix.
     return [ f"{_WIKI_TAG_PREFIX}{t}" for t in node.topics ]
 
@@ -1634,6 +1765,7 @@ class DomainDoctor:
       One `WARN` finding per group whose gloss is empty.
     """
     cfg = self._cfg
+
     # guard: unreachable without config — content checks run only when configured
     if cfg is None:
       return []
@@ -1667,10 +1799,12 @@ class DomainDoctor:
       misleading glob rather than a contested file.
     """
     cfg = self._cfg
+
     # guard: unreachable without config — content checks run only when configured
     if cfg is None:
       return []
     output_abs = self._repo / cfg.output
+
     # guard: no output tree yet — no file exists for two writers to fight over
     if not output_abs.is_dir():
       return []
@@ -1691,6 +1825,7 @@ class DomainDoctor:
     docs = self._output_docs(output_abs)
     for sid, scfg in _scope.ScopeResolver(repo = self._repo).load_scopes().items():
       claimed = next(( rel for rel in docs if self._is_claimed_by_scope(scfg, rel, matcher) ), None)
+
       # guard: this scope claims nothing under the output tree
       if claimed is None:
         continue
@@ -1755,10 +1890,12 @@ class DomainDoctor:
       One `WARN` finding per foreign file (the index itself is exempt).
     """
     cfg = self._cfg
+
     # guard: unreachable without config — content checks run only when configured
     if cfg is None:
       return []
     output_abs = self._repo / cfg.output
+
     # guard: no output tree yet — nothing to check
     if not output_abs.is_dir():
       return []
@@ -1768,10 +1905,12 @@ class DomainDoctor:
     for base, _dirs, files in os.walk(str(output_abs)):
       for fname in files:
         rel = (Path(base) / fname).relative_to(self._repo).as_posix()
+
         # guard: the index file is engine-owned and always legal
         if rel == f"{cfg.output}/{_domains.INDEX_NAME}":
           continue
         group = layout.group_for(rel)
+
         # guard: a doc of a listed group is legal
         if group is not None and group in dictionary:
           continue
@@ -1805,6 +1944,7 @@ class DomainDoctor:
     findings: list[dict] = []
     for group in sorted(dictionary):
       blocks = scanned.get(group) or []
+
       # guard: no blocks in code — nothing to be stale against
       if not blocks:
         continue
@@ -1812,6 +1952,7 @@ class DomainDoctor:
       # waiver: planner's protected hash reader reused — one frontmatter notation across the engine
       stored = _domains.DomainPlanner._stored_hash(self._repo / doc_rel)
       digest = _domains.DomainPlanner.group_hash(blocks)
+
       # guard: doc current — no finding
       if stored == digest:
         continue
@@ -1846,6 +1987,7 @@ class DomainDoctor:
       be flagged.
     """
     tag_axes = self._tag_axes()
+
     # guard: no axes configured — every tag would be flagged; skip
     if not tag_axes:
       return []
@@ -1862,6 +2004,7 @@ class DomainDoctor:
           continue
         rest = tag[len(_WIKI_TAG_PREFIX):]
         axis = rest.split("/")[0] if "/" in rest else rest
+
         # guard: axis is known
         if axis in axes_set:
           continue
@@ -1947,6 +2090,7 @@ class DomainDoctor:
       Parsed settings, or an empty dict when the file is absent or invalid.
     """
     settings_file = self._repo / _SETTINGS_PATH
+
     # guard: settings file does not exist
     if not settings_file.is_file():
       return {}

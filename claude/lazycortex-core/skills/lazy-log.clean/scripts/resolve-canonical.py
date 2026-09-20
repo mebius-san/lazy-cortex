@@ -54,11 +54,13 @@ def _extract_frontmatter_block(path: Path) -> str | None:
     text = path.read_text(encoding = "utf-8", errors = "replace")
   except OSError:
     return None
+
   # guard: file must open with a frontmatter delimiter
   if not text.startswith("---"):
     return None
   # waiver: inline numeric literal, not a domain constant
   end = text.find("\n---", 3)
+
   # guard: closing delimiter must exist for the block to be valid
   if end < 0:
     return None
@@ -77,6 +79,7 @@ def read_frontmatter_name(path: Path) -> str | None:
     `name:` declaration inside it.
   """
   block = _extract_frontmatter_block(path)
+
   # guard: no frontmatter — nothing to extract
   if block is None:
     return None
@@ -96,6 +99,7 @@ def read_frontmatter_waiver(path: Path) -> str | None:
     `logging-waiver:` declaration.
   """
   block = _extract_frontmatter_block(path)
+
   # guard: no frontmatter — nothing to extract
   if block is None:
     return None
@@ -123,6 +127,7 @@ def harvest_root(
     under the corresponding subdirectory.
   """
   found: dict[ str, set[str] ] = { "skill": set(), "agent": set(), "command": set() }
+
   # guard: root must exist before scanning
   if not root.is_dir():
     return found
@@ -134,6 +139,7 @@ def harvest_root(
     for entry in os.listdir(skills_dir):
       # waiver: filesystem path/filename idiom, not a domain constant
       skill_md = skills_dir / entry / "SKILL.md"
+
       # guard: only count entries that actually own a SKILL.md
       if not skill_md.is_file():
         continue
@@ -156,6 +162,7 @@ def harvest_root(
       if not entry.endswith(".md"):
         continue
       agent_md = agents_dir / entry
+
       # guard: skip stray directories or broken symlinks
       if not agent_md.is_file():
         continue
@@ -178,6 +185,7 @@ def harvest_root(
       if not entry.endswith(".md"):
         continue
       cmd_md = commands_dir / entry
+
       # guard: skip stray directories or broken symlinks
       if not cmd_md.is_file():
         continue
@@ -238,6 +246,7 @@ def in_repo_plugin_roots(repo: Path | None) -> list[Path]:
     return []
   # waiver: filesystem path/filename idiom, not a domain constant
   candidate = repo / "claude"
+
   # guard: repository must own a `claude/` directory
   if not candidate.is_dir():
     return []
@@ -262,6 +271,7 @@ def project_local_root(repo: Path | None) -> Path | None:
     # waiver: filesystem path/filename idiom, not a domain constant
     candidate = repo / ".claude"
     return candidate if candidate.is_dir() else None
+
   # fall back to the current working directory when no git repo is available
   # waiver: filesystem path/filename idiom, not a domain constant
   candidate = Path.cwd() / ".claude"
@@ -292,6 +302,7 @@ def installed_plugin_roots() -> list[Path]:
       install_path = entry.get("installPath")
       if install_path:
         roots.append(Path(install_path))
+
   # deduplicate while preserving first-seen ordering
   seen: set[Path] = set()
   unique: list[Path] = []

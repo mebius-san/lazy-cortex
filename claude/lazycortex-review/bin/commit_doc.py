@@ -1,4 +1,5 @@
-"""`commit-doc` — the coordinator's one commit per wake.
+"""
+`commit-doc` — the coordinator's one commit per wake.
 
 Commits the working-tree state of one review document under the coordinator's registered
 git identity, with the `Doc-Review-Phase: mechanical` trailer and the document's icon
@@ -15,8 +16,6 @@ The author identity comes from the consumer's `experts["review.coordinator"]`
 `review.coordinator@bot.invalid` default so the commit is still recognisable.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error,wrong-import-position
 
 import argparse
 import json
@@ -34,14 +33,66 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import git_ops as _git_ops  # noqa: E402
+import git_ops as _git_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from keys import JobKey, Paths  # noqa: E402
+from keys import JobKey, Paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # the coordinator's expert name and fallback identity — the registered settings entry wins
 _COORDINATOR_EXPERT = "review.coordinator"
 _FALLBACK_EMAIL = "review.coordinator@bot.invalid"
+
+
+# ----------------------------------------------------------------------------------------
+class _HistoryWire:
+  """
+  The core verb that places a `# History` line, as this verb calls it (dev.plugin-boundaries § 1c).
+
+  Attributes:
+    VERB: The `lazycortex-core` subcommand.
+    LINE_FLAG: The flag carrying the line text.
+  """
+
+  VERB = "history-append"
+  LINE_FLAG = "--line"
+
+
+def _append_history(repo: Path, file_path: Path, lines: tuple[str, ...]) -> None:
+  """
+  Land the coordinator's history lines on the document through the core verb.
+
+  The section's shape — day groups under `#### <date>`, one bullet per line — is the core
+  plugin's to keep, so the coordinator hands over text only and this verb hands it on.
+
+  Args:
+    repo: Repository root the core-CLI resolver's dev fallback is tried against.
+    file_path: Absolute path to the review document.
+    lines: The lines to record, in order, each without a leading bullet.
+
+  Raises:
+    RuntimeError: When the core CLI cannot be resolved or refuses a line.
+  """
+  # guard: nothing to journal this wake
+  if not lines:
+    return
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  import collect_ops as _collect_ops  # pylint: disable=import-error
+  # waiver: the resolver is the collector's own copy of the § 1c lookup, reused rather than duplicated a fourth time
+  cli = _collect_ops._resolve_core_cli()  # pylint: disable=protected-access
+
+  # guard: no core CLI reachable — the line cannot land, and a silent skip would lose it
+  if cli is None:
+    raise RuntimeError("lazycortex-core CLI not resolvable — cannot append the history line")
+  for line in lines:
+    proc = subprocess.run(
+        [sys.executable, str(cli), _HistoryWire.VERB, str(file_path), _HistoryWire.LINE_FLAG, line],
+        cwd = str(repo), capture_output = True, text = True, check = False,
+    )
+
+    # guard: the verb refused (empty line, no section it could create) — surface its own message
+    if proc.returncode != 0:
+      raise RuntimeError(f"history-append refused: {proc.stderr.strip() or proc.stdout.strip()}")
 
 
 def _coordinator_author(repo: Path) -> dict:
@@ -63,19 +114,24 @@ def _coordinator_author(repo: Path) -> dict:
     settings = {}
   # waiver: 'experts'/'git_author' are lazy.settings.json's own wire-shape keys, not keys.py-promoted constants
   author = settings.get("experts", {}).get(_COORDINATOR_EXPERT, {}).get("git_author", {})
+
   # guard: an entry without both fields would half-apply — fall back whole
   if not isinstance(author, dict) or not author.get(JobKey.NAME) or not author.get(JobKey.EMAIL):
     return {JobKey.NAME: _COORDINATOR_EXPERT, JobKey.EMAIL: _FALLBACK_EMAIL}
   return {JobKey.NAME: author[JobKey.NAME], JobKey.EMAIL: author[JobKey.EMAIL]}
 
 
-def commit_doc(repo: Path, file_path: Path, subject: str, *, extra_paths: tuple[str, ...] = ()) -> dict:
+def commit_doc(
+    repo: Path, file_path: Path, subject: str, *,
+    extra_paths: tuple[str, ...] = (), history: tuple[str, ...] = (),
+) -> dict:
   """
   Commit the document's working-tree state as the coordinator's single wake commit.
 
   Guarantees:
-    - Commits nothing when the document is unmodified, no extra path is dirty, and the icon
-      repaint has nothing to touch; a no-op wake leaves the repository's history untouched.
+    - Commits nothing when the document is unmodified, no extra path is dirty, no history line
+      was handed over, and the icon repaint has nothing to touch; a no-op wake leaves the
+      repository's history untouched.
 
   Args:
     repo: Repository root.
@@ -83,11 +139,17 @@ def commit_doc(repo: Path, file_path: Path, subject: str, *, extra_paths: tuple[
     subject: Commit subject line, written verbatim.
     extra_paths: Repo-relative paths the wake also landed — the attachments a `collect-job`
       put beside the document — committed together with it.
+    history: The wake's `# History` lines, appended through the core verb before the commit.
 
   Returns:
     `{"committed": true, "sha": <sha>}` when a commit was made, or `{"committed": false}`
     when nothing this wake touched is dirty.
+
+  Raises:
+    RuntimeError: When a history line cannot be landed (no core CLI, or the verb refused it).
   """
+  # the journal line lands before the status read below, so it rides in this same commit
+  _append_history(repo, file_path, history)
   rel = str(file_path.relative_to(repo))
   status = subprocess.run(
       # waiver: git CLI vocabulary
@@ -119,12 +181,13 @@ def main(argv: list[str]) -> int:
     argv: Command-line arguments, excluding the program name.
 
   Returns:
-    Exit code: `0` on success (including the clean no-op), `2` when the file does not exist
+    Exit code: `0` on success (including the clean no-op), `2` when a `--history` line cannot
+    be landed, when the file does not exist
     or the subject is empty.
   """
   # the CLI surface: one document, its subject, and the extra paths the wake also landed
   # waiver: argparse CLI signature, not a domain key
-  parser = argparse.ArgumentParser(prog="lazycortex-review commit-doc")
+  parser = argparse.ArgumentParser(prog = "lazycortex-review commit-doc")
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("file")
   # waiver: argparse CLI signature, not a domain key
@@ -133,22 +196,37 @@ def main(argv: list[str]) -> int:
   parser.add_argument("--repo", default = ".")
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--also", action = "append", default = None)
+  # waiver: argparse CLI signature, not a domain key
+  parser.add_argument("--history", action = "append", default = None)
   args = parser.parse_args(argv)
 
   # `file` resolves against `--repo` unless it's already absolute, mirroring the other verbs
   repo = Path(args.repo).resolve()
   file_path = (repo / args.file).resolve()
+
+  # guard: a missing document is the caller's error — nothing to commit and nothing to create
   if not file_path.is_file():
     sys.stderr.write(f"file not found: {file_path}\n")
     return 2
+
   # guard: a commit needs a subject — an empty one would land an unreadable history line
   if not args.subject.strip():
     # waiver: one-shot CLI error string, not a domain key
     sys.stderr.write("empty --subject\n")
     return 2
 
-  # the CLI's whole contract is this one summary line
-  print(json.dumps(commit_doc(repo, file_path, args.subject, extra_paths = tuple(args.also or ()))))
+  # land the commit and print its summary — that one line is the CLI's whole contract
+  try:
+    result = commit_doc(
+        repo, file_path, args.subject,
+        extra_paths = tuple(args.also or ()), history = tuple(args.history or ()),
+    )
+  # a history line could not be landed (no core CLI, or the verb refused it) — nothing was
+  # committed, so surface the reason and exit 2
+  except RuntimeError as exc:
+    sys.stderr.write(f"{exc}\n")
+    return 2
+  print(json.dumps(result))
   return 0
 
 

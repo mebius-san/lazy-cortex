@@ -20,7 +20,7 @@ spec_source_docs: []
 <!-- What part of the codebase this touches and why an architecture step is warranted here. -->
 
 ## Terms
-<!-- "Glossary: The most important domain and technical terms that your stakeholders use when discussing the system." — arc42 §12 Glossary. One line per term the document uses, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, a term this document introduces is defined here first. -->
+<!-- Optional. "Glossary: The most important domain and technical terms that your stakeholders use when discussing the system." — arc42 §12 Glossary. One line per term the document uses, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, a term this document introduces is defined here first. -->
 
 ## Module boundaries
 <!-- Which modules/components own which responsibility; public contract versus internals; dependency direction between them. -->
@@ -29,10 +29,10 @@ spec_source_docs: []
 <!-- Data shapes, schemas, and interfaces the change introduces or alters — the seams other code will call across. -->
 
 ## Dependencies & children
-<!-- External dependencies this design pulls in; any sub-feature this decomposes into, proposed via the `[!asset-proposal]` callout rather than created directly. -->
+<!-- Optional. External dependencies this design pulls in; any sub-feature this decomposes into, proposed via the `[!asset-proposal]` callout rather than created directly. -->
 
 ## Migration & cost
-<!-- Data or schema migration this introduces; the cost to existing callers — what breaks, what must be updated alongside this change. -->
+<!-- Optional. Data or schema migration this introduces; the cost to existing callers — what breaks, what must be updated alongside this change. -->
 
 # Sources
 #protected/spec/sources

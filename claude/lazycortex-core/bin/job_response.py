@@ -38,6 +38,7 @@ def outcome_tokens(response: dict) -> list[str]:
     The non-empty outcome tokens in declaration order.
   """
   raw = response.get(JobResponseKey.OUTCOME)
+
   # guard: a missing or non-string outcome carries no tokens
   if not isinstance(raw, str):
     return []
@@ -142,6 +143,7 @@ def read_response(jdir: Path) -> dict:
     malformed, or holds a non-object JSON value.
   """
   resp_path = jdir / JobFile.RESPONSE
+
   # guard: the expert may have exited without writing a response at all
   if not resp_path.exists():
     return {}

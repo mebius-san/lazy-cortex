@@ -18,14 +18,14 @@ GitPython, per the project tech conventions.  Node hashing reuses the
 `source_hash` / `stored_src_hash` properties from `nodes.py`.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import subprocess
 from pathlib import Path
 
-import nodes as _nodes
-import scope as _scope
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import nodes as _nodes  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import scope as _scope  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -209,10 +209,12 @@ class RelinkPlanner:
     changed: list[str] = []
     for node_path in self._resolver.iter_nodes(self._cfg):
       node = _nodes.node_for(node_path)
+
       # guard: unrecognised file type — skip
       if node is None:
         continue
       stored = node.stored_src_hash
+
       # never curated (no stored hash) or content drifted — recurate
       if stored is None or stored != node.source_hash:
         changed.append(str(node_path))
@@ -251,9 +253,11 @@ class RelinkPlanner:
         if self._resolves_into_scope(rel):
           drop.append(str(abs_path))
         continue
+
       # Added / modified: must resolve into this scope AND still exist on disk.
       if self._resolves_into_scope(rel) and abs_path.is_file():
         node = _nodes.node_for(abs_path)
+
         # guard: unrecognised file type — skip
         if node is None:
           continue
@@ -298,10 +302,12 @@ class RelinkPlanner:
       The anchor value, or `None` when the index file or key is absent.
     """
     raw = self._cfg.get(self._CFG_TOPICS_INDEX, "")
+
     # guard: no topics index configured — treat as no anchor
     if not raw:
       return None
     index_path = (self._repo / raw).resolve()
+
     # guard: index file does not exist yet — no anchor
     if not index_path.is_file():
       return None
@@ -323,6 +329,7 @@ class RelinkPlanner:
       True when the anchor is a usable base for `git diff`, False otherwise.
     """
     exists = self._git_ok([ "cat-file", "-e", f"{sha}^{{commit}}" ])
+
     # guard: commit object is gone (gc / shallow / rewritten history)
     if not exists:
       return False
@@ -347,6 +354,7 @@ class RelinkPlanner:
     """
     cmd = [ "git", "-C", str(self._repo), "diff", "--name-status", f"{sha}..HEAD" ]
     proc = subprocess.run(cmd, capture_output = True, text = True, check = False)
+
     # guard: git failed — yield no delta rather than crashing the plan
     if proc.returncode != 0:
       return []
@@ -359,11 +367,13 @@ class RelinkPlanner:
         continue
       parts = line.split("\t")
       status = parts[0]
+
       # Rename / copy: `R100\told\tnew` — old path deleted, new path added.
       if status.startswith(self._STATUS_RENAME_PREFIX) and len(parts) >= self._RENAME_COLS:
         out.append((self._STATUS_DELETE, parts[1]))
         out.append((self._STATUS_ADD, parts[2]))
         continue
+
       # guard: malformed line without a path column
       if len(parts) < 2:
         continue
@@ -395,6 +405,7 @@ class RelinkPlanner:
 
     # a path belongs here only when it resolves into this very scope
     result = self._resolver.resolve_scope_by_path(rel_path)
+
     # guard: path matches no scope at all
     if result is None:
       return False

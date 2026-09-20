@@ -27,15 +27,15 @@ Reserved frontmatter keys (`review_active` / `review_round` /
 `review_approved`) are silently dropped from any agent overlay.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
-# pylint: disable=import-error,deprecated-module
 
 import re
 
-import frontmatter as _fm
-import parser as _parser
-from keys import Phase, Position, Tag
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import frontmatter as _fm  # pylint: disable=import-error
+# waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
+import parser as _parser  # pylint: disable=import-error,deprecated-module
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from keys import Phase, Position, Tag  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -115,18 +115,22 @@ def _owner_of_section(section_body: str) -> tuple[str, str] | None:
   """
   for line in section_body.split("\n"):
     stripped = line.strip()
+
     # guard: leading blank lines aren't the tag line; skip to the first non-empty content line.
     if not stripped:
       continue
+
     # guard: first content line lacking the #expert/ prefix means no ownership tag — bail.
     if not stripped.startswith(Tag.EXPERT_PREFIX):
       return None
     rest = stripped[len(Tag.EXPERT_PREFIX):].strip()
     parts = rest.split("/")
+
     # guard: a well-formed ownership tag is exactly 2 slash-parts; anything else is malformed.
     if len(parts) != 2:
       return None
     flat_name, section_id = parts[0].strip(), parts[1].strip()
+
     # guard: both parts must be non-empty for a valid owner; an empty half is malformed.
     if not flat_name or not section_id:
       return None
@@ -162,6 +166,7 @@ def _section_tag_line(section_body: str) -> str | None:
   """
   for line in section_body.split("\n"):
     stripped = line.strip()
+
     # guard: leading blank lines aren't the tag line; skip to the first non-empty content line.
     if not stripped:
       continue
@@ -201,6 +206,7 @@ def _section_is_tagged(section_body: str) -> bool:
 
   for line in section_body.split("\n"):
     stripped = line.strip()
+
     # guard: leading blank lines aren't the tag line; skip to the first non-empty content line.
     if not stripped:
       continue
@@ -233,6 +239,7 @@ def _drop_sections(
   if not spans:
     return body
   keep_ranges: list[tuple[int, int]] = []
+
   # Preamble (anything before first H1) always kept.
   if spans[0][0] > 0:
     keep_ranges.append((0, spans[0][0]))
@@ -241,12 +248,14 @@ def _drop_sections(
     section_body_only = section_text[len(_heading_line_for(start, end, body)):]
     owner = _owner_of_section(section_body_only)
     tagged = _section_is_tagged(section_body_only)
+
     # the # History section is governed solely by drop_history — never by the drop_owned
     # policy, even though the historian's tag is ownerless.
     if _parser.is_historian_section(section_body_only):
       if not drop_history:
         keep_ranges.append((start, end))
       continue
+
     # guard: under drop_owned policy, tagged sections are removed; only an explicitly kept owner is
     # exempt — ownerless tagged sections (#protected/..., owner is None) must never match a None keep_owner.
     if drop_owned and tagged and (keep_owner is None or owner != keep_owner):
@@ -379,6 +388,7 @@ def section_content_for_owner(body: str, owner: tuple[str, str]) -> str | None:
     return None
   heading_line = _heading_line_for(0, len(section_text), section_text)
   rest = section_text[len(heading_line):]
+
   # Strip the leading ownership tag line. Tag may sit on the first
   # non-empty line; preserve blank lines around it for the caller's
   # whitespace check (see `section_has_substance`).
@@ -469,9 +479,11 @@ def remove_owned_section(body: str, owner: tuple[str, str]) -> str:
     section_text = body[start:end]
     heading_line = _heading_line_for(start, end, body)
     owner_pair = _owner_of_section(section_text[len(heading_line):])
+
     # guard: only the target owner's section is dropped; skip every other section.
     if owner_pair != owner:
       continue
+
     # Drop the section span entirely. The H1 spans returned by
     # `_enumerate_h1_spans` include the trailing blank gap before
     # the next H1, so cutting [start, end) leaves no orphan blank
@@ -508,9 +520,11 @@ def replace_owned_section_body(
     section_text = body[start:end]
     heading_line = _heading_line_for(start, end, body)
     owner_pair = _owner_of_section(section_text[len(heading_line):])
+
     # guard: only the target owner's section has its tag line stripped; skip every other section.
     if owner_pair != owner:
       continue
+
     # Find the ownership-tag line: should be the first non-empty
     # line after the heading.
     lines = section_text.splitlines(keepends=True)
@@ -519,6 +533,7 @@ def replace_owned_section_body(
     if i < len(lines):
       head_lines.append(lines[i])  # heading
       i += 1
+
     # Walk blanks until we find the tag line.
     while i < len(lines) and lines[i].strip() == "":
       head_lines.append(lines[i])
@@ -526,6 +541,7 @@ def replace_owned_section_body(
     if i < len(lines):
       head_lines.append(lines[i])  # ownership tag
       i += 1
+
     # Preserve any trailing blank lines from the section's tail
     # (the trailing blank gap before the next H1 that the span
     # includes — see `_enumerate_h1_spans`).
@@ -560,6 +576,7 @@ def rewrite_section_h1(body: str, owner: tuple[str, str], canonical_title: str) 
     section_text = body[start:end]
     heading_line = _heading_line_for(start, end, body)
     owner_pair = _owner_of_section(section_text[len(heading_line):])
+
     # guard: only the target owner's section gets its heading rewritten; skip every other section.
     if owner_pair != owner:
       continue
@@ -666,6 +683,7 @@ def strip_owned_h1_sections(
       keep_ranges.append((start, end))
       continue
     owner = _owner_of_section(section_text[heading_len:])
+
     # owner is (flat_name, section_id); preserve check is on section_id
     # per spec § Stage 7 (preserve-set keyed by section-id, since
     # section-id is unique across both umbrellas — see § review-class
@@ -792,6 +810,7 @@ def _section_is_protected(section_body: str) -> bool:
   """
   for line in section_body.split("\n"):
     stripped = line.strip()
+
     # guard: skip leading blank lines before the first content line
     if not stripped:
       continue
@@ -818,6 +837,7 @@ def split_out_protected_sections(body: str) -> tuple[str, list[str]]:
     the ordered list of original section texts (list index = placeholder index).
   """
   spans = _enumerate_h1_spans(body)
+
   # guard: no H1 sections — nothing protected to lift
   if not spans:
     return body, []
@@ -827,6 +847,7 @@ def split_out_protected_sections(body: str) -> tuple[str, list[str]]:
   for start, end, _title, _heading in spans:
     section_text = body[start:end]
     heading_len = len(_heading_line_for(start, end, body))
+
     # guard: not a protected section — leave it for the normal passes
     if not _section_is_protected(section_text[heading_len:]):
       continue
@@ -1009,6 +1030,7 @@ def _restore_owned_and_history(
     if _parser.is_historian_section(section_body_only):
       history_section = section_text
       continue
+
     # Spec inv 8: preserve EVERY tagged H1 section (any tag), not
     # only 2-part #expert/<flat>/<section-id>. Downstream consumer
     # overlays may carry other prefixes. All foreign to the main writer.
@@ -1017,6 +1039,7 @@ def _restore_owned_and_history(
     if not tagged or (skip_owner is not None and owner == skip_owner):
       continue
     tag_line = _section_tag_line(section_body_only)
+
     # guard: the tag pair is the section's identity — a second operator-side instance with the same
     # tag is a duplicate; restore only the first so damaged documents self-heal to one instance.
     if tag_line is not None and tag_line in seen_tags:
@@ -1075,15 +1098,18 @@ def _carry_banner_from_operator(operator_body: str, new_body: str) -> str:
     when the operator body carries no banner.
   """
   head = ""
+
   # Find the banner block at the very top of operator_body.
   m = _BANNER_BLOCK_RE.match(operator_body)
   if m is not None:
     head = m.group(0)
   if not head:
     return new_body
+
   # Normalize: strip all trailing newlines, then re-attach exactly one
   # trailing newline + one blank-line separator.
   head = head.rstrip("\n") + "\n\n"
+
   # Strip any banner already in new_body to avoid duplication.
   new_body_no_banner = _strip_banner(new_body).lstrip("\n")
   return head + new_body_no_banner
@@ -1107,9 +1133,11 @@ def _document_title_heading(body: str) -> str | None:
     section_text = body[start:end]
     heading_line = _heading_line_for(start, end, body)
     section_body_only = section_text[len(heading_line):]
+
     # guard: the historian's # History section is not the title
     if _parser.is_historian_section(section_body_only):
       continue
+
     # guard: expert-owned sections are not the title
     if _owner_of_section(section_body_only) is not None:
       continue
@@ -1146,9 +1174,11 @@ def _carry_title_from_operator(operator_body: str, new_content: str) -> str:
   # document's other placement rules to anchor against.
 
   op_title = _document_title_heading(operator_body)
+
   # guard: operator body carries no title H1 — nothing to restore
   if op_title is None:
     return new_content
+
   # guard: writer kept a title H1 — leave its content untouched
   if _document_title_heading(new_content) is not None:
     return new_content
@@ -1172,10 +1202,13 @@ def _reassemble_main(
   """
   # 1. Agent's content body is authoritative for user content.
   new_content = _strip_owned_meta_and_history(agent_body)
+
   # 1b. Restore the document title if the writer dropped it (Bug 105).
   new_content = _carry_title_from_operator(operator_body, new_content)
+
   # 2. Restore operator's owned sections + history.
   rebuilt = _restore_owned_and_history(operator_body, new_content, section_layout=section_layout)
+
   # 3. Restore the operator's banner anchor (state machine repaints
   #    separately).
   rebuilt = _carry_banner_from_operator(operator_body, rebuilt)
@@ -1201,6 +1234,7 @@ def _reassemble_section(
   # Body comes from operator — agent's body edits are IGNORED.
   # Pull only the agent's owned section.
   agent_owned = _extract_section_by_owner(agent_body, owned_owner)
+
   # Operator body minus owned sections AND History — we re-add both
   # below in canonical order (owned first, History last). Bug 30.
   op_body_no_owned = _drop_sections(
@@ -1209,6 +1243,7 @@ def _reassemble_section(
       drop_history=True,
       keep_owner=None,
   )
+
   # Splice the agent's owned section in BEFORE History so the History
   # terminal invariant holds. Position is taken from `section_layout`
   # — `"top"` prepends the section above the operator's free body,

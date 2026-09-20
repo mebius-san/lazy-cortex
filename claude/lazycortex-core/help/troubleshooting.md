@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-09-17
+last_regen: 2026-09-20
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, generic iteration loops, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys, seed data gaps), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models, plugin-path resolution, stale source paths at claim time), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources, worker import errors), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
@@ -38,7 +38,7 @@ source_skills:
   - lazy-runtime.preflight
   - lazy-runtime.recover
   - lazy-runtime.tick
-source_sha: 4ce2acf18852efdc30c37eebe5c23618c5b98b26
+source_sha: 5ede910ce825bf2c51707a5e1ac86965ab0a4d6b
 ---
 # Troubleshooting
 
@@ -984,9 +984,9 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ## `/lazy-routine.register` fails: name format, already registered, or unknown type
 
-**Symptom**: Running `/lazy-routine.register` fails with "routine names must be `<plugin>.<verb>` format", "routine `<name>` already registered. Use `--force` to overwrite", "unknown type 'X'", "missing required field(s)", "`<inbox_dir>` is not gitignored", or "`.claude/lazy.settings.json` unwritable".
+**Symptom**: Running `/lazy-routine.register` fails with "routine names must be `<plugin>.<verb>[.<scope>]` format", "routine `<name>` already registered. Use `--force` to overwrite", "unknown type 'X'", "missing required field(s)", "`<inbox_dir>` is not gitignored", or "`.claude/lazy.settings.json` unwritable".
 
-**Likely cause (name format)**: The `name` argument does not contain exactly one dot, or one of the two parts is empty.
+**Likely cause (name format)**: The `name` argument does not split into two or three non-empty dot-separated parts — `<plugin>.<verb>` or `<plugin>.<verb>.<scope>`. The optional third segment is for a routine registered once per scope (for example `lazy-wiki.mirror-sync.<scope-id>`); a name with one, zero, or more than three dot-separated parts, or with any empty part, is rejected.
 
 **Likely cause (already registered)**: A routine with the same name is already present in the `routines` section of `.claude/lazy.settings.json`. The skill refuses to silently overwrite.
 
@@ -998,7 +998,7 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Likely cause (unwritable)**: `.claude/lazy.settings.json` does not exist (the expert runtime was never bootstrapped) or the file has permissions that prevent writing.
 
-**Fix (name format)**: Rename the routine to follow `<plugin>.<verb>` convention, for example `acme-lint.tick`.
+**Fix (name format)**: Rename the routine to follow the `<plugin>.<verb>` convention, for example `acme-lint.tick` — or add a third `<scope>` segment when registering one instance per scope, for example `lazy-wiki.mirror-sync.spec-catalog`.
 
 **Fix (already registered)**: Re-run with `--force` to overwrite, or run `/lazy-routine.unregister <name>` first.
 

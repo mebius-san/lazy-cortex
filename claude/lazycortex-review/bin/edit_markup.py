@@ -90,6 +90,7 @@ def _resolve_diff_block(block_body: str) -> str:
     if raw.startswith("  "):
       out_lines.append(raw[2:])
       continue
+
     # Anything else (e.g. unknown marker): keep verbatim.
     out_lines.append(raw)
   return "\n".join(out_lines)
@@ -123,18 +124,22 @@ def _parse_fence_body(block_body: str) -> tuple[list[tuple[bool, str]], list[str
     if raw == "-" or raw.startswith("- "):
       deletions.append(raw[2:])
       continue
+
     # an insertion-marked diff line is appended as a cancellable emission
     if raw == "+" or raw.startswith("+ "):
       output_lines.append((True, raw[2:]))
       continue
+
     # an emphasis-marked diff line is appended as a cancellable emission (same semantics as +)
     if raw == "!" or raw.startswith("! "):
       output_lines.append((True, raw[2:]))
       continue
+
     # a context line is appended as NOT cancellable (kept verbatim, never targeted by a cross-fence `-`)
     if raw.startswith("  "):
       output_lines.append((False, raw[2:]))
       continue
+
     # Anything else (e.g. unknown marker): keep verbatim, treat as cancellable.
     output_lines.append((True, raw))
   return output_lines, deletions
@@ -174,10 +179,12 @@ def _strip_diff(text: str) -> str:
   # own block, the plain reading of a deletion against unedited body text.
 
   fences = list(_DIFF_FENCE_RE.finditer(text))
+
   # guard: no fences present — return source verbatim
   if not fences:
     return text
   parsed = [_parse_fence_body(m.group(1)) for m in fences]
+
   # cancelled[(fence_idx, emit_idx)] — emissions retracted by a later fence's deletion.
   cancelled: set[tuple[int, int]] = set()
   for later_idx, (_, deletions) in enumerate(parsed):
@@ -193,6 +200,7 @@ def _strip_diff(text: str) -> str:
           cancelled.add((earlier_idx, emit_idx))
           matched = True
           break
+
         # guard: cancellation done for this deletion — stop scanning earlier fences
         if matched:
           break
@@ -277,6 +285,7 @@ def drop_whitespace_only_diff_fences(text: str) -> str:
     if _normalize_ws("\n".join(minus_lines)) == _normalize_ws("\n".join(plus_lines)):
       # Whitespace-only fence: emit resolved text directly.
       return _resolve_diff_block(body)
+
     # Real content change: keep the fence intact.
     return match.group(0)
   return _DIFF_FENCE_RE.sub(repl, text)

@@ -27,8 +27,6 @@ bookkeeping against `fetch_failure_threshold`, a live Dataview summary of its un
 current every tick, in its own atomic commit, independent of that per-unit budget.
 """
 from __future__ import annotations
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error,wrong-import-position
 
 import argparse
 import hashlib
@@ -40,12 +38,18 @@ import subprocess
 import sys
 from pathlib import Path
 
-import flip_gate
-import iconize_inline
-import note_explainers
-import resolve_language
-import spec_paths
-from spec_keys import (
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import flip_gate  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import iconize_inline  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import note_explainers  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import resolve_language  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import spec_paths  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from spec_keys import (  # pylint: disable=import-error
     DraftKey, HistoryEvent, UPSTREAM_ACTION_LABELS, UPSTREAM_FROZEN_STATUSES, UpstreamAction,
     UpstreamKey, UpstreamRole, UpstreamSourceKey, UpstreamSourceStatus, UpstreamStatus,
 )
@@ -450,9 +454,11 @@ def _load_upstream_config(repo: Path) -> dict:
     Parsed `upstream` sub-section, or `{}` when absent/malformed.
   """
   path = repo / _SETTINGS_REL
+
   # guard: no settings file at all — nothing configured
   if not path.is_file():
     return {}
+
   # a malformed settings file is treated the same as an absent one — every caller already
   # falls back to an empty section
   try:
@@ -531,6 +537,7 @@ def _call_remote_mirror(repo: Path, payload: dict) -> dict:
       [sys.executable, str(cli), _K.REMOTE_MIRROR_VERB],
       input = json.dumps(payload), capture_output = True, text = True, env = env, check = False,
   )
+
   # guard: the CLI's own contract is "0 on success, 1 on any failure — always valid JSON on
   # stdout" (remote_mirror.py `main`); a non-JSON stdout means the process itself crashed
   try:
@@ -634,6 +641,7 @@ def _match_unit_dirs(all_paths: list[str], source_path: str, units: list[str], e
   """
   matcher = GlobMatcher()
   prefix = f"{source_path}/" if source_path and source_path != "." else ""
+
   # collect every directory segment under source_path that appears in the file-path list
   dirs: set[str] = set()
   for p in all_paths:
@@ -717,6 +725,7 @@ def _invalid_char_reason(unit_path: str) -> str | None:
 
   for segment in unit_path.split("/"):
     bad = next((ch for ch in _K.UNSAFE_NAME_CHARS if ch in segment), None)
+
     # guard: first offending character found — one reason is enough, no need to scan further
     if bad is not None:
       return f"unsafe character {bad!r} in directory name {segment!r}"
@@ -783,6 +792,7 @@ def _vault_existing_units(repo: Path, repo_key: str, mount: str) -> set[str]:
     `upstream/<repo-key>/<mount>/`.
   """
   base = repo / _K.UPSTREAM_ROOT / repo_key / mount
+
   # guard: nothing landed under this mount yet
   if not base.is_dir():
     return set()
@@ -849,9 +859,11 @@ def _ordered_units(
       units_cfg = list(rec.get(_K.UNITS) or [])
       exclude_cfg = list(rec.get(_K.EXCLUDE) or [])
       matched: set[str] = set()
+
       # guard: tree unreadable this tick — only vault-existing units are still visitable
       if error is None:
         matched = _match_unit_dirs(tree_paths, source_path, units_cfg, exclude_cfg)
+
         # guard: overlapping units — refuse the whole mount, not the tick
         if _has_overlap(matched):
           refused_mounts.add((repo_key, mount))
@@ -887,10 +899,12 @@ def _plan_source_tree(
     `([], error)` when the clone/fetch step itself failed or the source has no usable `url`.
   """
   url = source_cfg.get(_K.URL)
+
   # guard: malformed source record — nothing to fetch
   if not url:
     return [], "missing 'url'"
   clone_dir = _clone_dir(repo, repo_key)
+
   # guard: an existing clone points at a different remote — never silently re-fetch the wrong repo
   if _clone_origin_mismatch(clone_dir, url):
     return [], f"clone origin mismatch for '{repo_key}': configured url is '{url}'"
@@ -900,6 +914,7 @@ def _plan_source_tree(
       _K.INCLUDE: include, _K.DEST: str(clone_dir / _PLAN_DEST_SEGMENT),
       _K.MODE: _K.MODE_PLAN,
   })
+
   # guard: `remote-mirror` reported an in-band fetch failure — isolate this source, not the tick
   if _PlanKey.ERROR in result:
     return [], str(result[_PlanKey.ERROR])
@@ -1008,6 +1023,7 @@ def _apply_ignore_filter(repo: Path, source_dir: Path, plan: list[dict]) -> tupl
     rel_in_repo = str(file_path.relative_to(repo))
     if rel_in_repo in ignored:
       entry = { _PlanKey.PATH: item[_PlanKey.PATH], _SkipKey.REASON: SKIP_REASON_IGNORED }
+
       # guard: read the file's own size/hash before deleting it — the bytes are gone after
       if file_path.is_file() and not file_path.is_symlink():
         entry[_SkipKey.SIZE] = file_path.stat().st_size
@@ -1036,6 +1052,7 @@ def _aggregate_hash(signature: dict[str, str], skipped: list[dict]) -> str:
     Hex sha256 digest over a canonical, sorted rendering of both inputs.
   """
   lines = [f"{k}:{v}" for k, v in sorted(signature.items())]
+
   # a skip entry's hash is truncated to `_HASH_DISPLAY_LEN` on every round trip through a
   # rendered note (`_render_skipped_section` displays only that many characters, and
   # `_extract_section` can only ever recover what was displayed) — truncating here too keeps a
@@ -1083,6 +1100,7 @@ def _forge_blob_url(url: str, revision: str, path: str) -> str | None:
     host, owner_repo = ssh_match.group(1), ssh_match.group(2)
   else:
     https_match = re.match(r"^https?://([^/]+)/(.+?)(?:\.git)?$", url)
+
     # guard: neither SSH nor HTTPS shape recognised
     if not https_match:
       return None
@@ -1213,6 +1231,7 @@ def _extract_section(body: str, heading: str) -> list[dict]:
         _K.SKIPPED_CURRENT_H1: _K.LEGACY_SKIPPED_CURRENT_H1,
         _K.SKIPPED_PROCESSED_H1: _K.LEGACY_SKIPPED_PROCESSED_H1,
     }.get(heading)
+
     # guard: section not present under either name (first-ever write)
     if not legacy or legacy not in body:
       return []
@@ -1250,11 +1269,13 @@ def _resolve_upstream_icon(status: str) -> tuple[str, str]:
     then simply carries no icon keys, exactly as an unregistered status always did).
   """
   registry = Path(__file__).resolve().parent.parent / _K.REFERENCES_DIR / _K.ICON_REGISTRY_FILE
+
   # guard: a checkout without the shipped registry renders unpainted rather than failing the tick
   if not registry.is_file():
     return "", ""
   status_key = f"frontmatter.{UpstreamKey.STATUS}"
   best: tuple[int, str, str] = ( -1, "", "" )
+
   # highest-priority matcher keyed solely on the unit status wins, same tie-break as the engine
   for entry in json.loads(registry.read_text()).get(_K.ICON_MATCHERS, []):
     # guard: only matchers keyed solely on the unit status are this note's own paint
@@ -1380,11 +1401,12 @@ def _is_draft_gated(source_dir: Path, unit_title: str) -> bool:
     `True` only when the canon note exists, parses, and carries `spec_draft: true`.
   """
   canon = source_dir / f"{unit_title}{_K.MD_SUFFIX}"
+
   # guard: no root note mirrored for this unit — ungated
   if not canon.is_file():
     return False
   fm, _end = flip_gate.parse_frontmatter(canon.read_text())
-  return flip_gate._is_true(fm, DraftKey.DRAFT)
+  return flip_gate.is_true(fm, DraftKey.DRAFT)
 
 
 _ACTION_SKIPPED = "skipped"
@@ -1418,6 +1440,7 @@ def _flatten_synced_tree(source_dir: Path, include_root: str) -> None:
   nested_root = source_dir
   for segment in include_root.split("/"):
     nested_root = nested_root / segment
+
   # guard: nothing matched this sync (an empty unit, or every file skipped) — nothing to move
   if not nested_root.is_dir():
     return
@@ -1475,6 +1498,7 @@ def _sync_unit_source(
     error)` on an in-band fetch failure (`source_dir` is left empty, never partially written).
   """
   include_root = f"{source_path}/{unit_path}" if source_path and source_path != "." else unit_path
+
   # guard: routine-owned directory, wiped before every sync so a removed upstream file cannot
   # survive under a stale flattened path `remote-mirror`'s own dest-state tracking never sees
   if source_dir.is_dir():
@@ -1486,6 +1510,7 @@ def _sync_unit_source(
       _K.MAX_BYTES: max_bytes, _K.DEST: str(source_dir), _K.MODE: _K.MODE_SYNC,
       _K.SKIP_FETCH: True,
   })
+
   # guard: fetch failed — isolated to this unit; source_dir stays empty, never partially written
   if _PlanKey.ERROR in result:
     return [], None, str(result[_PlanKey.ERROR])
@@ -1504,6 +1529,7 @@ def _sync_unit_source(
   for item in primitive_skips:
     clone_file = clone_dir / include_root / item[_PlanKey.PATH]
     entry = { _PlanKey.PATH: item[_PlanKey.PATH], _SkipKey.REASON: item.get(_SkipKey.REASON, "") }
+
     # guard: the clone still holds the file's bytes for a too-large/binary skip (not a symlink)
     if clone_file.is_file() and not clone_file.is_symlink():
       entry[_SkipKey.SIZE] = clone_file.stat().st_size
@@ -1550,6 +1576,7 @@ def _append_history_entry(history_body: str, entry: str) -> str:
   # default to the standard empty-section shape when the note carries no prior history
   history_body = history_body or f"{_K.HISTORY_H1}\n{_K.NONE_MARKER}\n"
   heading, _sep, rest = history_body.partition("\n")
+
   # a prior render's explainer line is presentation, not history — the next render re-adds it
   lines = [
       line for line in rest.splitlines()
@@ -1589,6 +1616,7 @@ def _read_request_frontmatter(repo: Path, wikilink: str) -> dict | None:
     dangling mutex Phase A leaves for the doctor rather than guessing at (§ 8).
   """
   path = repo / f"{wikilink}{_K.MD_SUFFIX}"
+
   # guard: the request was deleted by hand — nothing to read
   if not path.is_file():
     return None
@@ -1738,6 +1766,7 @@ def _render_request_body(
       "\n## Removed\n", _bullets(removed),
       "\n## Skipped changed\n", _bullets(skip_changed),
   ]
+
   # a drift request additionally carries a one-line, content-free essence of the change (§ 9)
   if reason == UpstreamStatus.DRIFTED:
     lines.append(
@@ -1868,6 +1897,7 @@ def _accept_unit(
 
   source_dir = unit_dir / _K.SOURCE_DIR
   processed_dir = unit_dir / _K.PROCESSED_DIR
+
   # processed/ is REPLACED, not merged — a file the source dropped must disappear from the
   # snapshot too (§ 8: replaced wholesale, never topped up)
   if processed_dir.is_dir():
@@ -1878,13 +1908,14 @@ def _accept_unit(
   # the repo language feeds both the History line and the note render; the resolver walks to
   # the settings root and reads config, so one lookup serves both
   repo_language = resolve_language.resolve_repo_language(repo)
+
   # the localized narrative tail of the processed-request History line
   processed_tail = note_explainers.history_line_for_lang(
       repo_language, HistoryEvent.REQUEST_PROCESSED, wikilink = wikilink,
   )
   history_body = _append_history_entry(
       _history_section(existing_body),
-      f"- {flip_gate._today(None)} — {_K.BOT_NAME} · {processed_tail}",
+      f"- {flip_gate.effective_today(None)} — {_K.BOT_NAME} · {processed_tail}",
   )
   new_text = _render_note(
       unit_path = unit_path, status = UpstreamStatus.PROCESSED, revision = revision,
@@ -1927,7 +1958,7 @@ def _release_unit(
   skipped_current = _extract_section(existing_body, _K.SKIPPED_CURRENT_H1)
   skipped_processed = _extract_section(existing_body, _K.SKIPPED_PROCESSED_H1)
   history_body = _append_history_entry(
-      _history_section(existing_body), f"- {flip_gate._today(None)} — {_K.BOT_NAME} · {history_note}",
+      _history_section(existing_body), f"- {flip_gate.effective_today(None)} — {_K.BOT_NAME} · {history_note}",
   )
   new_text = _render_note(
       unit_path = unit_path, status = fallback_status, revision = revision, url = source_url,
@@ -1963,11 +1994,13 @@ def _advance_frozen_unit(
   """
   revision = existing_fm.get(UpstreamKey.REVISION, "")
   request_raw = existing_fm.get(UpstreamKey.REQUEST)
+
   # guard: no request link recorded on the note — nothing to unfreeze against
   if not request_raw:
     return False, UpstreamStatus.IN_REVIEW
   wikilink = _wikilink_target(request_raw)
   request_fm = _read_request_frontmatter(repo, wikilink)
+
   # guard: the linked request no longer resolves — a dangling mutex, the doctor's own scope
   if request_fm is None:
     return False, UpstreamStatus.IN_REVIEW
@@ -1987,13 +2020,14 @@ def _advance_frozen_unit(
         repo, unit_dir, unit_path, source_url, revision, existing_body, fallback_status,
         f"routing on [[{wikilink}]] named no applicable target — released to {fallback_status}",
     )
-  review_active = flip_gate._is_true(request_fm, _K.REQUEST_REVIEW_ACTIVE_KEY)
+  review_active = flip_gate.is_true(request_fm, _K.REQUEST_REVIEW_ACTIVE_KEY)
   review_result = request_fm.get(_K.REQUEST_REVIEW_RESULT_KEY, "")
   if request_status == _K.REQUEST_STATUS_DRAFT and not review_active and not review_result:
     return _release_unit(
         repo, unit_dir, unit_path, source_url, revision, existing_body, fallback_status,
         f"review stopped on [[{wikilink}]] without a verdict — released to {fallback_status}",
     )
+
   # still under active review, or awaiting the apply pass — stay frozen
   return False, UpstreamStatus.IN_REVIEW
 
@@ -2166,12 +2200,14 @@ def _advance_unit(
   # a prior tick's own status/revision is the baseline every branch below may fall back to
   existing_fm, existing_body = _read_note(note_path)
   prior_status = existing_fm.get(UpstreamKey.STATUS)
+
   # guard: frozen — Phase A decides an in-review unit's fate from its linked request alone,
   # never touching the fetch/detect ladder below
   if prior_status in UPSTREAM_FROZEN_STATUSES:
     return _advance_frozen_unit(
         repo, unit_dir, unit_path, existing_fm, existing_body, source_cfg.get(_K.URL, ""),
     )
+
   # guard: already-materialized unit whose mirrored canon note already carries `spec_draft: true`
   # — frozen wholesale, checked against the PRIOR tick's own mirror so a steady-state gated unit
   # never gets re-synced (draft-gate: the mirror stays unrefreshed and the status stays put)
@@ -2212,6 +2248,7 @@ def _advance_unit(
     )
     if sync_error is not None:
       return False, prior_status or UpstreamStatus.NEW
+
     # the revision names the commit that delivered the current bytes — an upstream commit that
     # left this unit's subtree untouched must not move it, or every tick lands a noise commit
     if not revision or _source_content_changed(repo, source_dir):
@@ -2224,12 +2261,14 @@ def _advance_unit(
       status = UpstreamStatus.INVALID
     else:
       gated = _is_draft_gated(source_dir, title)
+
       # guard: first-ever landing of a unit whose own root note already carries `spec_draft:
       # true` — undo this tick's sync entirely, the fetch/detect phase never materializes it
       # (there is no prior state to freeze back to; it never existed before this tick)
       if gated and prior_status is None:
         shutil.rmtree(unit_dir, ignore_errors = True)
         return False, None
+
       # underlying content status first, independent of any postpone toggle — a postponed unit's
       # own resume action (§ 7) needs the status the toggle is shadowing, not `POSTPONED` itself
       cur_hash = _aggregate_hash(_tree_signature(source_dir), skipped_current)
@@ -2265,12 +2304,14 @@ def _advance_unit(
         # take-into-work action win and short-circuit past this render entirely
         content_status = UpstreamStatus.POSTPONED
         postponed_hash = cur_hash
+
       # a draft-gated unit never advances into a fresh new/drifted transition; every other
       # unit takes its freshly computed content status as-is
       if gated and content_status in (UpstreamStatus.NEW, UpstreamStatus.DRIFTED):
         status = prior_status if prior_status in _GATE_HOLD_STATUSES else UpstreamStatus.NEW
       else:
         status = content_status
+
         # a ticked take-into-work/process-update checkbox is only actionable on the two
         # statuses that ever carry one directly, or a postponed unit resuming into either
         if not gated and underlying_status in (UpstreamStatus.NEW, UpstreamStatus.DRIFTED):
@@ -2310,6 +2351,7 @@ def _load_cursor(repo: Path) -> int:
     The persisted cursor index, or `0` when absent/malformed.
   """
   path = repo / _K.CURSOR_FILE
+
   # guard: no cursor persisted yet — start from the beginning
   if not path.is_file():
     return 0
@@ -2365,6 +2407,7 @@ def _ensure_root_note(repo: Path) -> Path | None:
     exists — an existing note is operator territory and is never rewritten.
   """
   note_path = repo / _K.UPSTREAM_ROOT / f"{_K.UPSTREAM_ROOT}{_K.MD_SUFFIX}"
+
   # guard: write-once — an existing note is operator-owned, byte-identical after this call
   if note_path.is_file():
     return None
@@ -2423,6 +2466,7 @@ def _render_source_note(
   """
   invalid = invalid or []
   refused_mounts = refused_mounts or []
+
   # both extra frontmatter lines are status-scoped, same convention as _render_note's own
   # postponed/request lines: the error only survives while failing, the success date only once
   # there has been one
@@ -2589,7 +2633,7 @@ def run(repo: Path) -> dict:
 
   # every configured source gets its own repo-level note kept current — independent of
   # max_units_per_tick and of whether it has any matched units yet (§ 5)
-  today = flip_gate._today(None)
+  today = flip_gate.effective_today(None)
   for repo_key, (_paths, error) in tree_by_source.items():
     _update_source_note(
         repo, repo_key, error, failure_threshold, today,
@@ -2599,6 +2643,7 @@ def run(repo: Path) -> dict:
         ),
         extra_paths = [root_note] if root_note is not None else None,
     )
+
     # the seed rides exactly one commit — once handed to the first source note, it is spent
     root_note = None
 
@@ -2622,6 +2667,7 @@ def run(repo: Path) -> dict:
         repo, content_root, repo_key, mount, unit_path, source_cfg, mount_cfg,
         tree_paths, tree_error, mount_refused, max_bytes,
     )
+
     # a `None` status is a draft-gated unit's undone first landing — it never materialized, so
     # there is nothing to count here (contrast every other status, which always counts)
     if status is not None:
@@ -2725,6 +2771,7 @@ def _material_unit_dirs(mount_base: Path) -> dict[str, Path]:
   found: dict[str, Path] = {}
   for dirpath, _dirs, _files in os.walk(str(mount_base)):
     unit_dir = Path(dirpath)
+
     # guard: the mount base itself is never a unit
     if unit_dir == mount_base:
       continue
@@ -2782,6 +2829,7 @@ def _parse_tags(text: str) -> list[str]:
     if bullet := re.match(r"^\s*-\s*(.+?)\s*$", line):
       out.append(bullet.group(1))
       continue
+
     # guard: a blank line before the first bullet is just the header's own line break; once a
     # bullet has landed, the first non-bullet line (blank or not) ends the list
     if out or line.strip():
@@ -2982,6 +3030,7 @@ def _apply_unit_reset(
   """
   title = unit_path.rsplit("/", 1)[-1]
   note_path = unit_dir / f"{title}{_K.MD_SUFFIX}"
+
   # guard: material without a note — `doctor_scan` reports it, there is nothing here to reset
   if not note_path.is_file():
     return None
@@ -2991,6 +3040,7 @@ def _apply_unit_reset(
   if fm.get(UpstreamKey.STATUS) != UpstreamStatus.IN_REVIEW:
     return None
   request_raw = fm.get(UpstreamKey.REQUEST)
+
   # guard: the freeze still has a live request behind it — Phase A owns that unit, not the doctor
   if request_raw and _read_request_frontmatter(repo, _wikilink_target(request_raw)) is not None:
     return None
@@ -2998,6 +3048,7 @@ def _apply_unit_reset(
   # the released ladder position, read off the snapshot exactly as `_advance_frozen_unit` reads it
   processed_dir = unit_dir / _K.PROCESSED_DIR
   entry = { "repo_key": repo_key, "mount": mount, "unit_path": unit_path }
+
   # guard: a snapshot directory holding nothing answers to neither released status
   if processed_dir.is_dir() and not any(processed_dir.iterdir()):
     return _APPLY_SKIPPED, { **entry, "reason": _AMBIGUOUS_SNAPSHOT_REASON }
@@ -3069,6 +3120,7 @@ def doctor_apply(repo: Path) -> dict:
     for mount in sorted(_configured_mounts(cfg, repo_key) & on_disk_mounts):
       for unit_path, unit_dir in sorted(_material_unit_dirs(repo_base / mount).items()):
         outcome = _apply_unit_reset(repo, repo_key, mount, unit_path, unit_dir, url)
+
         # guard: the repair does not cover this unit — nothing to record
         if outcome is None:
           continue

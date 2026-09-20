@@ -7,8 +7,6 @@ lazycortex-core exclusively via its published CLI binary, never by
 importing core Python modules.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import json
 import os
@@ -16,7 +14,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-import tags as _tags
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import tags as _tags  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -63,9 +62,11 @@ def _cached_sibling_root(name: str) -> Path | None:
     version of the sibling is cached.
   """
   own = Path(__file__).resolve()
+
   # guard: not a cached install — a dev checkout has no version directory above bin/
   if not own.parents[1].name.replace(".", "").isdigit():
     return None
+
   # the cache root sits four levels above bin/: cache/<registry>/<plugin>/<version>/bin
   try:
     cache = own.parents[4]
@@ -352,6 +353,7 @@ class CoreDispatch:
     if payload.get(cls._PAYLOAD_KIND) != cls.KIND_CLASSIFY:
       return payload
     listed = _tags.dictionary_values(repo)
+
     # guard: no dictionary on disk — the collected census stands as the whole anchor
     if not listed:
       return payload
@@ -459,6 +461,7 @@ class CoreDispatch:
       env = env,
       check = False,
     )
+
     # guard: non-zero exit from core — surface stdout+stderr for diagnosis
     if proc.returncode != 0:
       raise RuntimeError(

@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-09-18
+last_regen: 2026-09-20
 no_diagram: true
 source_skills:
   - lazy-spec.add-asset-type
@@ -25,7 +25,7 @@ source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
   - lazy-spec.audit
-source_sha: f723a0557db9ea1fc346db7cac478f05d49c7eac
+source_sha: 7534fc3a65c619600558c152d92d734e4534619f
 ---
 # Troubleshooting
 
@@ -155,7 +155,7 @@ source_sha: f723a0557db9ea1fc346db7cac478f05d49c7eac
 
 **Symptom**: Agent D's `note-check` delegation reports a FAIL naming `unknown-key` on `spec_doc_type` for the product folder-note (`<spec_path>/<leaf>.md`) or the catalog root's own note — even though nothing was hand-edited.
 
-**Likely cause**: An older `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> doc-type backfill` run derived a type from the level note's own `product` / `catalog` role and wrote `spec_doc_type: <role>` onto it — a key no level-note schema has ever declared room for. Only the asset status note and the operator-zone group/category notes were excluded from typing before this was fixed; a level note slipped through and picked up a stray key that `note-check` now rejects.
+**Likely cause**: An older `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> doc-type backfill` run derived a type from the level note's own `product` / `catalog` role and wrote `spec_doc_type: <role>` onto it — a key no level-note schema has ever declared room for. Only the asset status note and the operator-zone group notes were excluded from typing before this was fixed; a level note slipped through and picked up a stray key that `note-check` now rejects.
 
 **Fix**: Two verbs clear this, and the finding names whichever fits. For the whole catalog in one pass, re-run `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> doc-type backfill` (or re-run `/lazy-spec.install`, whose Step 7c calls it) — reporting the count under a `cleaned` counter alongside `touched` / `skipped`. For a single note, run `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> note-drop-key <note_dir> spec_doc_type` directly — the same verb the coordinators reach for to clean up a stray key on their own wake, so a level note under an active coordinator usually self-heals before this audit pass ever reports it. Re-run `/lazy-spec.audit` afterward to confirm the FAIL clears.
 
@@ -183,7 +183,7 @@ source_sha: f723a0557db9ea1fc346db7cac478f05d49c7eac
 
 ## `/lazy-spec.audit` keeps warning that a container folder-note has no `# Coordinator rules` section
 
-**Symptom**: Every audit run reports a WARN naming a container folder-note (e.g. `features/features.md`) as missing its `# Coordinator rules` section, alongside the same warning for the product folder-note.
+**Symptom**: Every audit run reports a WARN naming a container folder-note (e.g. `bugs/bugs.md`) as missing its `# Coordinator rules` section, alongside the same warning for the product folder-note.
 
 **Likely cause**: The rule-chain the coordinator reads before deciding anything on any asset (playbook → vault doc → product note → container notes top-down → asset note) now spans container-level notes too, not just the product root — a container folder-note that has never needed group-wide constraints simply has nothing written yet, which is expected rather than broken.
 
@@ -248,6 +248,16 @@ source_sha: f723a0557db9ea1fc346db7cac478f05d49c7eac
 **Likely cause**: The type's declaration under `products[<key>].asset_types` is missing `start_doc` — usually an interrupted `/lazy-spec.add-asset-type` run, or a hand-edited entry.
 
 **Fix**: Re-run `/lazy-spec.add-asset-type <product> <existing-type-name>` and answer the start-document question with a `<file>.md:<doc-type>` pair, then re-invoke `/lazy-spec.create-asset`.
+
+---
+
+## `/lazy-spec.add-asset-type` refuses naming an unknown product
+
+**Symptom**: The skill refuses immediately, naming the product key you passed and pointing at `/lazy-spec.product-config`.
+
+**Likely cause**: The product compound-key has no record in `lazy.settings.json[products]` — the product was never registered, or the key was mistyped.
+
+**Fix**: Run `/lazy-spec.product-config` to register the product, then re-invoke `/lazy-spec.add-asset-type <product> <type-name>`.
 
 ---
 
@@ -367,7 +377,7 @@ source_sha: f723a0557db9ea1fc346db7cac478f05d49c7eac
 
 **Likely cause**: The path or slug you passed is ambiguous — it could map to multiple products or categories — or it does not match any asset folder.
 
-**Fix**: Pass the unambiguous asset directory path (e.g. `Server/products/api/features/csv-export`).
+**Fix**: Pass the unambiguous asset directory path (e.g. `Server/products/api/csv-export`).
 
 ---
 
@@ -721,13 +731,13 @@ source_sha: f723a0557db9ea1fc346db7cac478f05d49c7eac
 
 ---
 
-## `/lazy-spec.lookup` refuses: bare category/slug without a product
+## `/lazy-spec.lookup` refuses: a product-relative path without a product
 
-**Symptom**: A lookup call refuses, saying a `<category>/<slug>` anchor was given with no product to resolve it against.
+**Symptom**: A lookup call refuses, saying a product-relative path anchor was given with no product to resolve it against.
 
-**Likely cause**: A `<category>/<slug>` shorthand (e.g. `features/csv-export`) is ambiguous on its own — the same category/slug pair can exist under more than one product.
+**Likely cause**: A product-relative path (e.g. a bare `csv-export`, or `bugs/crash`) is ambiguous on its own — the same path can exist under more than one product.
 
-**Fix**: Pass the product key alongside the anchor, or give the full vault-relative path instead (e.g. `Server/products/api/features/csv-export`).
+**Fix**: Pass the product key alongside the anchor, or give the full vault-relative path instead (e.g. `Server/products/api/csv-export`).
 
 ---
 
@@ -797,4 +807,4 @@ source_sha: f723a0557db9ea1fc346db7cac478f05d49c7eac
 
 **Likely cause**: The description is written by the coordinator that owns the note, on a wake. A level or asset that has never been woken — a product registered but carrying no assets, for instance — has never had one written.
 
-**Fix**: Give the coordinator a reason to wake, or run `/lazy-spec.drive` to walk the notes in session mode. A category note (`features/`, `bugs/`, `changes/`) deliberately carries no description at all — only its counts.
+**Fix**: Give the coordinator a reason to wake, or run `/lazy-spec.drive` to walk the notes in session mode. A group note (`bugs/`, `changes/`) deliberately carries no description at all — only its counts.

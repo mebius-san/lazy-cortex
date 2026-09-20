@@ -23,8 +23,6 @@ naming a finished, dead, cancelled, or vanished bundle clears the marker and the
 carries on to trigger resolution.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error,wrong-import-position
 
 import argparse
 import json
@@ -44,19 +42,19 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import git_ops as _git_ops  # noqa: E402
+import git_ops as _git_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import job_markers as _job_markers  # noqa: E402
+import job_markers as _job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import note_ops as _note_ops  # type: ignore # noqa: E402
+import note_ops as _note_ops  # type: ignore # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import parser as _parser  # noqa: E402
+import parser as _parser  # noqa: E402  # pylint: disable=wrong-import-position,deprecated-module,import-error
 # waiver: `claude/lazycortex-specs/bin/note_ops.py` shares this basename; in a whole-project mypy run the bare
 # `import note_ops` above resolves to that unrelated module instead (this dir's `__init__.py` makes review's
 # own copy package-qualified as `bin.note_ops`), so mypy checks the attribute against the wrong file's shape
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from keys import (  # noqa: E402
+from keys import (  # noqa: E402  # pylint: disable=import-error,wrong-import-position
     CoreCommand, EnvVar, JobFile, JobKey, JobMarker, Paths, Plugin, ReviewKey, Tag, Trailer,
 )
 
@@ -159,6 +157,7 @@ def _load_settings(repo: Path) -> dict:
     RuntimeError: When the file exists but is not valid JSON.
   """
   path = repo / Paths.CLAUDE_DIR / Paths.SETTINGS_FILE
+
   # guard: no settings file at all — nothing registered
   if not path.exists():
     return {}
@@ -188,6 +187,7 @@ def _bot_emails(settings: dict) -> set[str]:
     Set of non-empty `git_author.email` values across every registered expert and routine.
   """
   emails: set[str] = set()
+
   # one loop over both registries — the entry shape (`git_author.email`) is identical in each
   for block in (JobKey.EXPERTS, JobKey.ROUTINES):
     for name, entry in settings.get(block, {}).items():
@@ -283,6 +283,7 @@ def _has_buried_operator_commit(repo: Path, asset_note: Path, item: dict, bot_em
   # at a later, system-authored commit.
 
   sha = item.get(_ITEM_SHA, "")
+
   # guard: no window to scan — no cursor, no sha, or the item IS the cursor
   if not sha or not last_seen or sha == last_seen:
     return False
@@ -295,16 +296,20 @@ def _has_buried_operator_commit(repo: Path, asset_note: Path, item: dict, bot_em
     if not in_window:
       in_window = record.sha == sha
       continue
+
     # guard: reached the cursor — everything older was judged by an earlier invocation
     if record.sha == last_seen:
       return False
     scanned += 1
+
     # guard: window implausibly deep — stop rather than walk unbounded history
     if scanned > _WINDOW_SCAN_CAP:
       return False
+
     # guard: a coordinator commit proves everything older in the window was already handled
     if Trailer.PHASE in record.trailers:
       return False
+
     # a trailerless non-bot author inside the window is the buried operator edit
     if not _email_is_bot(record.author_email, bot_emails):
       return True
@@ -369,6 +374,7 @@ def _coordinator_job_id(markers: dict) -> str:
     The tracked job id, or an empty string when no job is recorded.
   """
   raw = markers.get(JobMarker.COORDINATOR_JOB)
+
   # guard: a cleared (or never-written) marker records no job
   if not isinstance(raw, str):
     return ""
@@ -388,6 +394,7 @@ def _is_job_live(repo: Path, job_id: str) -> bool:
     CANCELLED, or gone from disk entirely.
   """
   jdir = repo / JobFile.EXPERTS_DIR / JobFile.JOBS_DIR / _COORDINATOR_EXPERT / job_id
+
   # guard: no bundle on disk — a job that left no trace is not one this document waits on
   if not jdir.is_dir():
     return False
@@ -531,6 +538,7 @@ def _resolve_core_cli() -> Path | None:
     cli = Path(d) / Paths.BIN_DIR / Plugin.CORE
     if cli.is_file():
       return cli
+
   # dev-vault stage — this file sits at claude/lazycortex-review/bin/, so core's own bin/ is two
   # levels up and back down the sibling tree; it must precede the cache (§ 2b) so a checkout runs
   # the sources at hand rather than whatever version happens to be installed
@@ -538,6 +546,7 @@ def _resolve_core_cli() -> Path | None:
   if sibling.is_file():
     return sibling
   cache = Path.home() / Paths.PLUGIN_CACHE
+
   # guard: no plugin cache on this machine — nothing further to try
   if not cache.is_dir():
     return None
@@ -547,6 +556,7 @@ def _resolve_core_cli() -> Path | None:
       if registry.is_dir() and (registry / Plugin.CORE).is_dir()
   ]
   all_versions = [v for pd in plugin_dirs for v in pd.iterdir() if v.is_dir()]
+
   # guard: no installed version found — nothing further to try
   if not all_versions:
     return None
@@ -573,6 +583,7 @@ def _core_dispatch_job(repo: Path, bundle: dict) -> dict:
     RuntimeError: When the CLI can't be resolved or exits non-zero.
   """
   cli = _resolve_core_cli()
+
   # guard: no lookup stage found a binary
   if cli is None:
     raise RuntimeError(
@@ -586,6 +597,7 @@ def _core_dispatch_job(repo: Path, bundle: dict) -> dict:
       [sys.executable, str(cli), CoreCommand.DISPATCH_JOB],
       input = json.dumps(bundle), capture_output = True, text = True, env = env, check = False,
   )
+
   # guard: the CLI call itself failed — surface stdout/stderr for diagnosis
   if proc.returncode != 0:
     raise RuntimeError(
@@ -676,6 +688,7 @@ def _resolve_and_dispatch(repo: Path, asset_note: Path, item: dict) -> dict:
   current_report = _note_ops.build_report(current_text, markers)  # type: ignore[attr-defined]
   settings = _load_settings(repo)
   blob_text = _read_blob(repo, item.get(_ITEM_SHA, ""), item.get(_ITEM_PATH, ""))
+
   # a fresh tick is an operator gesture whoever committed it — bots never tick, so a tick
   # transition overrides the author-based suppression exactly like a review_result transition;
   # an operator commit buried under a later bot commit in the same watch window is rescued by
@@ -692,6 +705,7 @@ def _resolve_and_dispatch(repo: Path, asset_note: Path, item: dict) -> dict:
 
   # check the four triggers in order; the first that fires wins
   trigger = _resolve_trigger(current_report, blob_report, is_operator_edit, markers)
+
   # guard: nothing wakes the coordinator this tick
   if trigger is None:
     return {"action": "noop"}
@@ -817,6 +831,7 @@ def main(argv: list[str]) -> int:
     sys.stderr.write(f"malformed git-watch item JSON: {args.item_json!r}\n")
     return 2
   raw_path = item.get(_ITEM_PATH) if isinstance(item, dict) else None
+
   # guard: not the shape a `changed_files` item takes — nothing to dispatch on
   if not isinstance(raw_path, str) or not raw_path:
     sys.stderr.write(f"git-watch item carries no {_ITEM_PATH!r}: {item!r}\n")
@@ -826,6 +841,7 @@ def main(argv: list[str]) -> int:
   # against --repo (defaulting to the current directory)
   repo = Path(args.repo).resolve()
   asset_note = (repo / raw_path).resolve()
+
   # guard: the note was deleted or moved between the git-watch scan and this dispatch
   if not asset_note.is_file():
     print(json.dumps({"action": "noop"}))

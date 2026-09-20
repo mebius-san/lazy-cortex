@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, knowledge markers, tests, and the checker stack.
-last_regen: 2026-09-11
+last_regen: 2026-09-20
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -21,7 +21,7 @@ source_skills:
   - review.py
   - lazy-python.coding-guidelines
   - lazy-python.checking-guidelines
-source_sha: 7bb7ffdd946f6774a970182afea33d221674dd58
+source_sha: f3f458fd3763b21b44ad1860d8fef3f0c2465707
 ---
 # Frequently asked questions
 
@@ -113,6 +113,14 @@ To disable the check, set `[tool.pcf] check_block_comments = false` in `pyprojec
 
 ---
 
+## `chk-py` is flagging a cached function for missing a `# opt:` clause. What is `_check_cache_markers`?
+
+`pcf` now proves presence of a cache's `opt:` marker mechanically, the same presence-vs-meaning split it applies to purpose comments. Any definition decorated with `functools.cache`, `lru_cache`, or `cached_property` — bare or qualified, called or not — is flagged unless the contiguous comment block directly above the first decorator carries an `# opt:` with a non-empty clause. A `# waiver: <reason>` covering the first decorator line exempts it, with the same reach any other waiver has. A hand-rolled memo dict or precomputed table carries no decorator for `pcf` to key on — catching those, and judging whether a clause actually names the real assumption rather than the speed win, stays with `chk-py review` and the `lazy-python.code-reviewer` agent.
+
+The clause itself changed meaning too: `# opt:` now records the assumption outside the marked lines that keeps the optimization correct — which inputs the cached value depends on, what would invalidate it — not the speed win. A clause that reads "faster lookup" instead of naming the assumption passes `pcf` (the clause is non-empty) but is a finding at review time.
+
+---
+
 ## `chk-py` is flagging a comment or docstring line for not being written in a configured language. What is this check?
 
 `pcf` proves the *language* of every comment and docstring, on top of proving content and format: `check_language` (on by default, admitting only `english`) walks each letter in a comment or docstring and reports the first one whose Unicode script belongs to no configured language — one finding per offending line, naming the character and the languages the project allows. Punctuation, digits, and symbols carry no language and never trip the check.
@@ -158,6 +166,18 @@ LaTeX markup (`$...$`, `\frac{}{}`, and similar) is forbidden in every code comm
 ## Does `lazy-python.code-reviewer` duplicate what `pcf` / `mypy` / `ruff` / `pylint` already check?
 
 No — by design it refuses to. The agent's whole job is guideline clauses no deterministic checker can prove: whether a comment explains the right thing, whether a `# guard:` marker is on an actual defensive early-exit rather than an ordinary branch, whether a docstring's `Args:`/`Returns:`/`Raises:` still match the real signature, whether a suppression comment (`# type: ignore`, `# noqa`, `# pylint: disable`) carries a real `# waiver:` reason. If a finding duplicates something `pcf` or `ruff` would already have flagged, that is a bug in the agent's output, not an expected overlap.
+
+---
+
+## Why did the reviewer flag an `# opt:` marker I didn't touch in this change?
+
+Because the file it sits in did. The agent re-reads every `opt:` in a file whenever the diff touches that file's `Contract:` blocks, `Domain(…):` blocks, or any function body — not just the lines you edited — and checks each marker's named assumption against the change. An assumption the change quietly broke while the optimized code stayed as written is a `FAIL`, and the fix belongs to the optimization or its marker, never to loosening the assumption's wording to match the new code.
+
+---
+
+## The reviewer flagged my `Contract:` / `Domain(…):` / `opt:` block for having no test. What test does it want?
+
+Per the testing canon's *Knowledge-derived tests* section, a changed or added knowledge marker is itself a testable claim: a `Contract:` block wants one test per guarantee it states (including one inherited from an interface declaration), a `Domain(…):` block wants expected values worked out by hand from the formula or rule for two or three inputs, and an `opt:` clause wants a test that violates the named assumption and asserts the result stays correct or the cache is dropped. The review only judges the touched regions of changed files — a pre-existing marker with no test is not this review's debt — and a `Domain(unfiled):` block is judged the same as any filed one: parking the group does not park its test.
 
 ---
 
@@ -253,7 +273,7 @@ Check 12 fires when your sources already carry `Domain(…):` blocks but no dict
 
 ## Should I write tests by hand, or always use the agent?
 
-Always use the `lazy-python.test-writer` agent. The agent applies the Paranoid Testing Strategy (7 mandatory test categories per class), selects the correct base test class from your project overlay, enforces 2-space indentation and the 117-character line limit, derives expected values from docstring contracts rather than implementation, and runs `chk-py` plus `tst-py` as a verification gate. Hand-writing tests from session memory reliably skips categories or picks the wrong base class.
+Always use the `lazy-python.test-writer` agent. The agent applies the Paranoid Testing Strategy (9 mandatory test categories per class), selects the correct base test class from your project overlay, enforces 2-space indentation and the 117-character line limit, derives expected values from docstring contracts rather than implementation, and runs `chk-py` plus `tst-py` as a verification gate. The last two categories come from the knowledge markers in the method bodies it reads, not the docstring: every `Contract:` block (including one inherited from an interface declaration) gets a test per guarantee, every `Domain(…):` block gets expected values worked out by hand from its formula or rule, and every `opt:` clause gets a test that violates the named assumption and checks the result stays correct or the cache is dropped. Hand-writing tests from session memory reliably skips categories or picks the wrong base class.
 
 ---
 

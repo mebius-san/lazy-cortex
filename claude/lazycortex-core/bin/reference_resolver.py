@@ -8,14 +8,13 @@ listed in `LAZYCORTEX_PLUGIN_DIRS` before falling back to the Claude Code plugin
 cache.
 """
 from __future__ import annotations
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import json
 import os
 from pathlib import Path
 
-from constants import PluginFile
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from constants import PluginFile  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -60,6 +59,7 @@ def _dev_plugin_dirs() -> list[Path]:
     list when the env var is unset or empty.
   """
   raw = os.environ.get("LAZYCORTEX_PLUGIN_DIRS", "")
+
   # guard: env var unset or empty — no dev plugin directories to consult
   if not raw:
     return []
@@ -90,6 +90,7 @@ def _resolve_in_dev_dir(plugin_dir: Path, plugin_name: str, dir_name: str, name:
     data = json.loads(manifest.read_text())
   except (FileNotFoundError, json.JSONDecodeError):
     return None
+
   # guard: manifest name does not match the requested plugin scope
   if data.get(PluginFile.NAME) != plugin_name:
     return None
@@ -178,6 +179,7 @@ def resolve(ref: str, *, category: str, repo: Path) -> Path:
           return hit
       # waiver: filesystem path idiom
       cache = Path.home() / ".claude/plugins/cache"
+
       # Real layout: cache/<registry>/<plugin>/<version>/<dir>/<name>.md.
       # Walk all <registry>/<plugin> dirs under any registry prefix.
       plugin_dirs: list[Path] = []
@@ -189,16 +191,20 @@ def resolve(ref: str, *, category: str, repo: Path) -> Path:
           candidate = registry / scope
           if candidate.is_dir():
             plugin_dirs.append(candidate)
+
       # guard: no registry contains the requested plugin scope
       if not plugin_dirs:
         raise ReferenceError(f"plugin not in cache: {scope}")
+
       # Collect all version subdirectories across matching registry/plugin dirs.
       all_versions: list[Path] = []
       for pd in plugin_dirs:
         all_versions.extend(v for v in pd.iterdir() if v.is_dir())
+
       # guard: plugin dir exists but contains no cached versions
       if not all_versions:
         raise ReferenceError(f"no versions cached for plugin: {scope}")
+
       # highest version by numeric order (consistent with runtime_daemon)
       latest = max(all_versions, key = lambda v: _version_sort_key(v.name))
       p = latest / dir_name / f"{name}.md"
@@ -206,6 +212,7 @@ def resolve(ref: str, *, category: str, repo: Path) -> Path:
     # bare reference resolves under the repo-local .claude tree
     # waiver: filesystem path idiom
     p = Path(repo) / ".claude" / dir_name / f"{ref}.md"
+
   # guard: resolved path does not exist on disk
   if not p.exists():
     raise ReferenceError(f"{category} not found: {ref} → {p}")

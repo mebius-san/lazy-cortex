@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Non-obvious answers on install, LLM providers, the runtime daemon and experts, routines, scaffolding, git staging, and MCP permissions.
-last_regen: 2026-09-17
+last_regen: 2026-09-20
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -32,7 +32,7 @@ source_skills:
   - lazy-expert.cancel-job
   - lazy-expert.list-jobs
   - lazy-memory.write
-source_sha: 4ce2acf18852efdc30c37eebe5c23618c5b98b26
+source_sha: 5ede910ce825bf2c51707a5e1ac86965ab0a4d6b
 ---
 # FAQ
 
@@ -342,6 +342,12 @@ Five types, each suited to a different scheduling pattern:
 - **md-scan** — scans markdown files matching vault-relative globs, filters by frontmatter key/value, and fires in-place (no file move) on each match. Good for processing items whose lifecycle state is tracked in their own frontmatter.
 
 All five require a dot-namespaced `name` (e.g. `acme-lint.tick`). The wizard in `/lazy-routine.register` asks for the type first, then prompts only for the fields that type needs. Registration itself never depends on `daemon.enabled` — a routine registered on a project ticking by hand (see the runtime-opt-in question above) is picked up the next time you run `/lazy-runtime.tick`, exactly as it would by a live daemon.
+
+---
+
+## When multiple `group_globs` entries could match the same changed file in a `git` routine, which one wins?
+
+For a `git` routine's `watch: changed_files` / `new_files` / `deleted_files` / `renamed_files` config, `group_globs` is a set of directory globs, not an ordered list — the order you write them in has no effect. When more than one glob in the set matches a changed file's directory, the deepest matching glob wins: the file collapses into the group for whichever glob is nested furthest down the tree, not whichever glob happens to appear first in the list. Files whose path sits strictly below the winning glob are grouped into one item per matched directory — carrying `dir` plus a sorted list of member `paths` — instead of firing one job per file. `group_globs` is not valid together with `watch: new_commits`, since that watch mode already fires once per commit rather than once per file.
 
 ---
 

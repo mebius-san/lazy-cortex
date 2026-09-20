@@ -52,6 +52,7 @@ class RepoWalk:
     if not rels:
       return set()
     cmd = [ "git" ]
+
     # wire the repo `.lazyignore` in as git's global excludes source when the file is present
     if self._excludes.is_file():
       cmd += [ "-c", f"core.excludesFile={self._excludes}" ]
@@ -61,6 +62,7 @@ class RepoWalk:
       cmd, cwd = str(self._repo),
       input = blob, capture_output = True, text = True, check = False,
     )
+
     # git check-ignore: rc 0 = some ignored, 1 = none ignored, >1 = real error
     # guard: not a git repo / git failure — exclude nothing rather than crash the tick
     if proc.returncode not in ( 0, 1 ):
@@ -79,6 +81,7 @@ class RepoWalk:
       is unavailable or the directory is not a repository.
     """
     cmd = [ "git" ]
+
     # wire the repo `.lazyignore` in as git's global excludes source when the file is present
     if self._excludes.is_file():
       cmd += [ "-c", f"core.excludesFile={self._excludes}" ]
@@ -87,9 +90,11 @@ class RepoWalk:
       cmd, cwd = str(self._repo),
       capture_output = True, text = True, check = False,
     )
+
     # guard: not a git repo / git failure — signal the caller to fall back
     if proc.returncode != 0:
       return None
+
     # dedupe while keeping order: `ls-files -c` repeats a path once per merge stage
     return list(dict.fromkeys( p for p in proc.stdout.split(self._NUL) if p ))
 
@@ -143,6 +148,7 @@ class RepoWalk:
       if rel in ignored:
         continue
       full = repo / rel
+
       # guard: index entry with no worktree file (staged delete, submodule)
       if not full.is_file():
         continue

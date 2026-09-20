@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: One agreed dictionary per scope, consulted at write-time and kept honest by a curator and an audit, so a concept never grows a second name.
-last_regen: 2026-09-17
+last_regen: 2026-09-20
 diagram_spec:
   anchor: "How the pieces fit together"
   request: "Flow diagram with three legs sharing one dictionary file. Leg 1 (write-time): a writing expert calls lazy-wiki.terms mid-document, in lookup mode or check-a-candidate-word mode; the skill reads the dictionary and returns matching definitions, never writes. Leg 2 (curate, git-watch): a document commit triggers the terms-scan routine, which dispatches lazy-wiki.terms-curator in curate mode; the curator reads the changed document plus the dictionary headings, decides add / extend / rename / split per new concept, edits the dictionary, and commits. Leg 3 (audit): the terms section of /lazy-wiki.audit checks format and scope configuration by reading, then dispatches lazy-wiki.terms-curator in report mode for meaning checks (divergence, missing, duplicate, dead); /lazy-core.doctor presents each finding to the operator one at a time via AskUserQuestion and applies only what they choose. Show all three legs converging on the one dictionary file, and that report mode writes nothing itself."
@@ -10,7 +10,7 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.terms-curator
   - lazy-wiki.audit
-source_sha: d8d333338bcd2cca2b033eeb8fd72b47fa5be8db
+source_sha: 092195a4fbb13a8c1f71552815a771ae70533efd
 ---
 # Terms
 

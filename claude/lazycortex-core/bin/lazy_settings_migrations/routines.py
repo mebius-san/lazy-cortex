@@ -179,6 +179,7 @@ def _retrofit_wiki_git_author(entry: object) -> object:
   # only the wiki CLI's committing subcommands resolve to a retrofit family
   # waiver: sibling-plugin binary name local to this retrofit step, not a reusable domain key
   family = _WIKI_COMMIT_FAMILIES.get(command[1]) if command[0] == "lazycortex-wiki" else None
+
   # guard: not one of the committing wiki subcommands
   if family is None:
     return entry

@@ -8,8 +8,6 @@ the `lazycortex-core` CLI (`dispatch-job`, `collect-job`, `lookup-expert`,
 `consume-job`) — never via direct Python import.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 from typing import TypedDict
 
@@ -21,15 +19,16 @@ from contextlib import contextmanager
 from pathlib import Path
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from job_response import classify_response, is_job_bundle, read_response
+from job_response import classify_response, is_job_bundle, read_response  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from lazy_install_phases import ensure_self_ignoring_dir
+from lazy_install_phases import ensure_self_ignoring_dir  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from provider_env import resolve_provider
+from provider_env import resolve_provider  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import runtime_state
+import runtime_state  # pylint: disable=import-error
 
-from constants import (
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from constants import (  # pylint: disable=import-error
   HookName, IncidentActor, IncidentKey, IncidentKind, IncidentPhase, JobCollectKey, JobConfigKey,
   JobFile,
   JobIODir, JobMarker, JobRequestKey, JobResponseKey, JobStatus,
@@ -106,7 +105,8 @@ def _with_routine_protocols(protocols: list[str] | None) -> list[str]:
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   import os as _os
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from routine_types import ROUTINE_PROTOCOLS_ENV, parse_routine_protocols_env
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from routine_types import ROUTINE_PROTOCOLS_ENV, parse_routine_protocols_env  # pylint: disable=import-error
 
   # env first so the routine's own protocols lead the list a plugin dispatcher extends
   merged: list[str] = []
@@ -229,19 +229,24 @@ def dispatch_job(
         # guard: only real bundles are queue entries
         if not is_job_bundle(jdir):
           continue
+
         # guard: pre-READY bundles are not yet active
         if not (jdir / JobMarker.READY).exists():
           continue
+
         # guard: DEAD bundles are not eligible for dedup
         if (jdir / JobMarker.DEAD).exists():
           continue
+
         # guard: CONSUMED bundles have been retired by the consumer
         if (jdir / JobMarker.CONSUMED).exists():
           continue
+
         # guard: CANCELLED bundles released their dedup key on cancellation
         if (jdir / JobMarker.CANCELLED).exists():
           continue
         req_file = jdir / JobFile.REQUEST
+
         # guard: bundle missing request.json is malformed and cannot match
         if not req_file.exists():
           continue
@@ -269,6 +274,7 @@ def dispatch_job(
   # the bundle slot: a caller-supplied id keeps dispatches addressable, otherwise mint one
   job_id = job_id or uuid.uuid4().hex[:12]
   d = _job_dir(repo, expert, job_id)
+
   # park any prior DEAD bundle at the same slot before reusing it — without
   # this the new job would coexist with the stale DEAD marker and the pump
   # would skip it as a zombie
@@ -276,6 +282,7 @@ def dispatch_job(
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     d.rename(d.with_name(f"{job_id}.dead-{stamp}"))
   d.mkdir(parents = True, exist_ok = True)
+
   # the job queue's own root gains a self-ignoring .gitignore on first use — no install
   # phase runs for a repo that only ever dispatches jobs
   ensure_self_ignoring_dir(Path(repo) / RepoDir.EXPERTS)
@@ -392,7 +399,8 @@ def _resolve_expert_entry(repo: Path, expert_name: str) -> dict:
     expert is absent or stored as a non-dict value.
   """
   # waiver: deferred import — avoid module-load cycle with lazy_settings
-  from lazy_settings import load_section
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from lazy_settings import load_section  # pylint: disable=import-error
   experts = load_section(Path(repo) / SettingsFile.REL, SettingsKey.EXPERTS)
   entry = experts.get(expert_name)
   return entry if isinstance(entry, dict) else {}
@@ -432,9 +440,11 @@ def resolve_agent_model(repo: Path, agent_ref: str | None) -> str | None:
   if not agent_ref:
     return None
   # waiver: deferred import — avoid module-load cycle with lazy_settings
-  from lazy_settings import load_section, resolve_agent_model_tier
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from lazy_settings import load_section, resolve_agent_model_tier  # pylint: disable=import-error
   groups = load_section(Path(repo) / SettingsFile.REL, SettingsKey.AGENT_MODELS)
   tier: str | None = None
+
   # flatten grouped agent_models; on cross-group collision the last entry wins
   for entries in groups.values():
     # guard: non-dict group value is metadata (`_version`, etc.)
@@ -443,6 +453,7 @@ def resolve_agent_model(repo: Path, agent_ref: str | None) -> str | None:
     if agent_ref in entries:
       # unwrap bare pin / seed object to its effective tier; malformed resolves to None
       tier = resolve_agent_model_tier(entries[agent_ref])
+
   # guard: sentinel / unknown / malformed tier — treat as no explicit pin
   if tier not in _MODEL_TIERS:
     return None
@@ -463,7 +474,8 @@ def _record_unpinned_model(repo: Path, expert: str, agent_ref: str | None, jdir:
     jdir: Path to the job bundle the incident references.
   """
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import error_ledger
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  import error_ledger  # pylint: disable=import-error
   error_ledger.record(Path(repo), {
     IncidentKey.INCIDENT: f"unpinned:{expert}",
     IncidentKey.PHASE: IncidentPhase.OPENED,
@@ -519,9 +531,11 @@ def collect_job(repo: Path, expert: str, job_id: str) -> dict:
     including a response that violates the envelope by omitting `outcome`.
   """
   d = _job_dir(repo, expert, job_id)
+
   # guard: caller may poll before the bundle has been queued
   if not d.exists():
     return { JobCollectKey.STATUS: JobStatus.MISSING }
+
   # guard: pump has not finished processing yet
   if not (d / JobMarker.DONE).exists():
     return { JobCollectKey.STATUS: JobStatus.PENDING }
@@ -557,12 +571,14 @@ def list_jobs(
   """
   base = Path(repo) / JOBS_BASE
   out: list[dict] = []
+
   # guard: empty repo has no queue at all
   if not base.exists():
     return out
   experts = [ expert ] if expert else [ d.name for d in base.iterdir() if d.is_dir() ]
   for e in experts:
     edir = base / e
+
     # guard: expert filter may name a queue that has never seen a dispatch
     if not edir.exists():
       continue
@@ -571,11 +587,13 @@ def list_jobs(
       if not is_job_bundle(jdir):
         continue
       entry_status = _job_status(jdir)
+
       # guard: bundle in an unrecognised shape is dropped from the listing
       if entry_status is None:
         continue
       entry = { JobCollectKey.EXPERT: e, JobCollectKey.JOB_ID: jdir.name, JobCollectKey.PATH: str(jdir),
                 JobCollectKey.STATUS: entry_status }
+
       # guard: caller-supplied status filter eliminates non-matching bundles
       if status and entry[JobCollectKey.STATUS] != status:
         continue
@@ -649,9 +667,11 @@ def cancel_job(repo: Path, expert: str, job_id: str) -> None:
   # already-cancelled bundle is a no-op, never an error.
 
   d = _job_dir(repo, expert, job_id)
+
   # guard: bundle never existed or was already removed
   if not d.exists():
     return
+
   # CANCELLED lands before the kill so a worker outcome-path racing the signal
   # finds the terminal marker already in place
   (d / JobMarker.CANCELLED).touch()
@@ -683,6 +703,7 @@ def _stop_claimant(pid: int) -> None:
   # waiver: deferred / late-bound local imports per the plugin import style (avoids import cycles / optional deps)
   import os
   import subprocess
+
   # guard: claimant already gone — nothing left to signal (children were reparented; the
   # spawned executor exits on its own once its stdout consumer disappeared)
   try:
@@ -713,6 +734,7 @@ def _kill_group(pid: int) -> None:
   # waiver: deferred / late-bound local imports per the plugin import style (avoids import cycles / optional deps)
   import os
   import signal
+
   # PermissionError ranks with ProcessLookupError throughout: a group we may not signal
   # (or a zombie-only group, which macOS reports as EPERM) is one we are done with
   try:
@@ -732,6 +754,7 @@ def _kill_group(pid: int) -> None:
     except (ProcessLookupError, PermissionError):
       return
     time.sleep(_KILL_POLL_SEC)
+
   # the grace window expired with the group still alive — SIGTERM was ignored, escalate to SIGKILL
   try:
     os.killpg(pgid, signal.SIGKILL)
@@ -795,6 +818,7 @@ def consume_job(
   # mattering for that lookup and a later dispatch under the same key is free to run again.
 
   d = _job_dir(repo, expert, job_id)
+
   # guard: caller may consume a job that no longer exists on disk
   if not d.exists():
     return
@@ -823,6 +847,7 @@ def read_unpushed_consumes(repo: Path) -> list[str]:
     empty list when nothing has been consumed since the last publish.
   """
   ledger = Path(repo) / RuntimeFile.CONSUMED_UNPUSHED
+
   # guard: no ledger — nothing has been consumed since the last publish
   if not ledger.exists():
     return []
@@ -840,6 +865,7 @@ def settle_unpushed_consumes(repo: Path, entries: list[str]) -> None:
     entries: The `<expert>/<job_id>` entries to drop, as returned by `read_unpushed_consumes`.
   """
   settled = set(entries)
+
   # the read and the rewrite share one lock so an append from another process is never dropped
   with _unpushed_consumes_lock(repo):
     _write_unpushed_consumes(repo, [ e for e in read_unpushed_consumes(repo) if e not in settled ])
@@ -865,6 +891,7 @@ def rollback_unpushed_consumes(repo: Path) -> list[str]:
   # never dropped
   with _unpushed_consumes_lock(repo):
     entries = read_unpushed_consumes(repo)
+
     # a job whose bundle the pump already cleaned up has nothing left to unmark
     for entry in entries:
       expert, _, job_id = entry.partition("/")
@@ -932,6 +959,7 @@ def retire_completed_jobs(
   """
   retired: list[str] = []
   edir = Path(repo) / JOBS_BASE / expert
+
   # guard: no bundles for this expert yet — nothing to retire
   if not edir.exists():
     return retired
@@ -939,16 +967,20 @@ def retire_completed_jobs(
     # guard: only real bundles are queue entries
     if not is_job_bundle(jdir):
       continue
+
     # guard: only finished bundles are eligible — never retire an in-flight job
     if not (jdir / JobMarker.DONE).exists():
       continue
+
     # guard: bundle already retired by a prior consumer pass
     if (jdir / JobMarker.CONSUMED).exists():
       continue
+
     # guard: dead bundles are the dead-job collector's responsibility
     if (jdir / JobMarker.DEAD).exists():
       continue
     req_file = jdir / JobFile.REQUEST
+
     # guard: bundle missing request.json is malformed and cannot match
     if not req_file.exists():
       continue
@@ -996,6 +1028,7 @@ def completed_dedup_jobs(repo: Path, expert: str) -> list[dict]:
   """
   out: list[dict] = []
   edir = Path(repo) / JOBS_BASE / expert
+
   # guard: no bundles for this expert yet
   if not edir.exists():
     return out
@@ -1003,16 +1036,20 @@ def completed_dedup_jobs(repo: Path, expert: str) -> list[dict]:
     # guard: only real bundles are queue entries
     if not is_job_bundle(jdir):
       continue
+
     # guard: only finished bundles are reconcilable
     if not (jdir / JobMarker.DONE).exists():
       continue
+
     # guard: already retired by a prior reconcile pass
     if (jdir / JobMarker.CONSUMED).exists():
       continue
+
     # guard: dead bundles are the dead-job collector's responsibility
     if (jdir / JobMarker.DEAD).exists():
       continue
     req_file = jdir / JobFile.REQUEST
+
     # guard: bundle missing request.json is malformed and carries no key
     if not req_file.exists():
       continue
@@ -1021,12 +1058,14 @@ def completed_dedup_jobs(repo: Path, expert: str) -> list[dict]:
     except (OSError, json.JSONDecodeError):
       continue
     dedup_key = req.get(JobRequestKey.DEDUP_KEY)
+
     # guard: only keyed bundles are reconcilable against an external input store
     if dedup_key is None:
       continue
     resp = read_response(jdir)
     error = resp.get(JobResponseKey.ERROR)
     category = error.get(JobResponseKey.CATEGORY) if isinstance(error, dict) else None
+
     # the DONE marker is stamped when the pump wrote the response — the bundle's finish time
     out.append({
       JobCollectKey.JOB_ID:    jdir.name,
@@ -1081,7 +1120,8 @@ def register_routine(repo: Path, name: str, cfg: dict | None = None, *,
       `command` + `interval_sec` pair is supplied.
   """
   # waiver: deferred import — avoid module-load cycle with routine_types
-  from routine_types import validate_routine_entry
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from routine_types import validate_routine_entry  # pylint: disable=import-error
   if cfg is None:
     # guard: legacy shape requires both command and interval_sec
     if command is None or interval_sec is None:
@@ -1099,10 +1139,12 @@ def register_routine(repo: Path, name: str, cfg: dict | None = None, *,
   if hooks_enabled is not None:
     cfg[RoutineKey.HOOKS_ENABLED] = list(hooks_enabled)
   validate_routine_entry(name, cfg)
+
   # load_tracked_section keeps local-overlay routine entries out of the
   # tracked file on save_section
   # waiver: deferred import — avoid module-load cycle with lazy_settings
-  from lazy_settings import load_tracked_section, save_section
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from lazy_settings import load_tracked_section, save_section  # pylint: disable=import-error
   settings = Path(repo) / SettingsFile.REL
   routines = load_tracked_section(settings, SettingsKey.ROUTINES)
   routines[name] = cfg
@@ -1140,10 +1182,12 @@ def unregister_routine(repo: Path, name: str) -> None:
       f"cannot unregister built-in routine: {name}. "
       f"It is required by the expert runtime; uninstall the plugin instead."
     )
+
   # load_tracked_section: same reasoning as register_routine — only the
   # tracked layer participates in the load → modify → save round-trip
   # waiver: deferred import — avoid module-load cycle with lazy_settings
-  from lazy_settings import load_tracked_section, save_section
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from lazy_settings import load_tracked_section, save_section  # pylint: disable=import-error
   settings = Path(repo) / SettingsFile.REL
   routines = load_tracked_section(settings, SettingsKey.ROUTINES)
   routines.pop(name, None)
@@ -1242,6 +1286,7 @@ def _backfill_defaults(repo: Path, entry: _RoutineDefaults, existing: dict) -> N
   # waiver: TypedDict iteration yields its own string-literal keys; `name` is the registry key,
   # not part of the config body
   missing = { k: v for k, v in entry.items() if k != "name" and k not in existing }
+
   # guard: the registered entry already carries every default key
   if not missing:
     return
@@ -1284,8 +1329,10 @@ def bootstrap_default_routines(repo: Path) -> None:
   # because an explicit empty answer is a decision, not a gap.
 
   # waiver: deferred import — avoid module-load cycle with lazy_settings
-  from lazy_settings import load_section, load_tracked_section
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from lazy_settings import load_section, load_tracked_section  # pylint: disable=import-error
   settings = Path(repo) / SettingsFile.REL
+
   # two views, two questions: the merged one answers "is this routine configured at all",
   # the tracked one is the only safe basis for a write-back — merging the overlay in and
   # saving would copy the operator's private values into the shared file
@@ -1294,10 +1341,12 @@ def bootstrap_default_routines(repo: Path) -> None:
   for entry in (DEFAULT_EXPERT_PUMP, DEFAULT_DOCTOR_TICK, DEFAULT_INDEX_GUARD):
     # waiver: TypedDict access requires string-literal keys; constants break mypy literal-required
     name = entry["name"]
+
     # guard: configured only in the local overlay — writing the tracked layer would leave the
     # repository carrying the routine twice, so the operator's own copy is left to them
     if name in merged and name not in tracked:
       continue
+
     # guard: already tracked — fill only what the defaults gained since, never a set value
     if name in tracked:
       _backfill_defaults(repo, entry, tracked[name])

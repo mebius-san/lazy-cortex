@@ -38,6 +38,8 @@ Outcome: `verified`.
 
 Every class entry carries a `class` identity token — a short unique slug (`design`, `request`, `meeting-notes`) tooling addresses the entry by; globs stay routing-only. Read-first: an entry the operator means to extend is found by its token. For a new class, derive the token from the document kind and confirm it in the same question as the globs; refuse a token another entry already carries.
 
+A token of the form `<type>@<product>` scopes the class to one product. When several such classes cover the same typed document, the one whose globs anchor on the most **leading literal segments** — the innermost product's — takes it, so a nested product's own class outranks the ancestor's whatever the list order is; list order only breaks an equal-depth tie, and it is the whole matcher for a document carrying no type.
+
 If `review.classes` already holds the class (matched by token), reuse its `paths` silently (read-first). Otherwise:
 
 ```

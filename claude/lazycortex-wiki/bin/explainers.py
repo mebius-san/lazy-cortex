@@ -133,6 +133,7 @@ def resolve_language(repo: Path) -> str:
     settings = json.loads(settings_path.read_text())
   except (OSError, json.JSONDecodeError):
     return LANG_EN
+
   # guard: a malformed settings document falls back the same way a missing one does
   if not isinstance(settings, dict):
     return LANG_EN
@@ -187,6 +188,7 @@ def language_code(value: str) -> str:
   # resolves to the `en` floor rather than to an empty string.
 
   cleaned = value.strip().lower()
+
   # guard: nothing configured — `en` is the shipped floor
   if not cleaned:
     return LANG_EN

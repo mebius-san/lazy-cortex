@@ -85,7 +85,13 @@ A block marker is **not a comment to the code** — it is a standalone block, se
 - `TMP:` — marks temporary code (debugging aids, workarounds, scaffolding) that must be removed before the feature is considered complete.
 - `DBG:` — marks diagnostic/debug code blocks used during development to inspect runtime state.
 - `ref:` — marks source references pointing to related code, classes, constants, or `Domain(…)` groups elsewhere in the codebase. Stripped automatically during generation; serves only as human-readable traceability links.
-- `opt:` — marks optimization annotations that explain why a non-obvious implementation choice was made for performance reasons.
+- `opt:` — marks a performance-driven implementation choice whose correctness rests on an assumption about code outside the marked lines. One line; the clause names that assumption, not the speed win.
+  - Correct:
+      # opt: cached — valid while rows stay immutable after load()
+      # opt: index built once — every caller passes the same sorted keys
+  - An optimization the surrounding code cannot silently break (a set for membership, a hoisted invariant) needs no marker. One that a change elsewhere can break always gets one — every cache, memo, precomputed table, or value reused across calls is the canonical case: what it stores goes stale the moment its assumption stops holding, and nothing in the code says so without the marker.
+  - Every `opt:` earns a test that violates the named assumption and proves the result stays correct or the cache is dropped — see *Knowledge-derived tests* in `lazy-python.testing-guidelines.md`. When a change touches a `Contract:`, a `Domain(…):` block, or the body of a function in a file, every `opt:` in that file is re-checked against the change, by the review and by that test.
+  - `pcf` proves the clause is non-empty and that a `functools` cache decorator (`cache`, `lru_cache`, `cached_property`) has an `opt:` in the comment block directly above it; whether the clause names the real assumption is the review phase's call.
 - `limit:` — marks a deliberate simplification with a known ceiling: the implementation is correct at the current scale but stops being adequate under the named condition. One line, naming the ceiling and the upgrade path.
   - Correct:
       # limit: global lock, per-account locks if throughput matters
@@ -97,7 +103,7 @@ A block marker is **not a comment to the code** — it is a standalone block, se
 - `Decision:` — marks a recorded design decision: a real fork where the author chose X over Y and the why is worth keeping next to the code. Hybrid format: the thesis is mandatory on the marker line — `# Decision: <chose X, not Y> — <why>`; rationale or rejected alternatives that do not fit the line continue on the following `#` lines. A short decision stays a single line.
   - Correct:
       # Decision: dict over dataclass — the schema drifts with the config
-      # Decision: core/features/export#D-007 — records are append-only
+      # Decision: core/export#D-007 — records are append-only
       # rejected in-place edits: anchors point at heading text,
       # rewriting the thesis breaks every inbound link
   - The multi-line form is a standalone block — separated by an empty line from the surrounding code and from any other comments. Never glue it to a statement in place of the block's purpose comment, and never glue other comments to it: every `#` line adjacent to the block is treated as decision text.
@@ -140,6 +146,7 @@ A block marker is **not a comment to the code** — it is a standalone block, se
 - Treatment rules:
   - Never remove or alter `# Contract:` comments without explicit user approval.
   - When generating or updating a method's docstring `Guarantees` section, include every `Contract:` comment from that method.
+  - Every `Contract:` block, including one the class inherits from an interface declaration, becomes at least one test of the implementation — see *Knowledge-derived tests* in `lazy-python.testing-guidelines.md`.
   - When a method carries the same `Contract:` block on both its interface declaration and its implementation, the duplicate on the implementation is a finding: keep the interface's block, drop the implementation's, and keep the implementation's `Guarantees` section pointing at the interface.
 
 ## Domain Comments
@@ -147,6 +154,7 @@ A block marker is **not a comment to the code** — it is a standalone block, se
 - The **group name** in parentheses categorizes the comment by topic. **Always use a group listed in the project's domain-groups dictionary** (`docs/guidelines/domain-groups.md` — a language-neutral project registry shared by every language's markers). Do not invent new groups without explicit user approval.
 - The group `unfiled` is **reserved**: it marks a block whose real group is not in the dictionary yet. It is never listed in the dictionary, and the checker flags every `Domain(unfiled)` block until the operator adds the real group and renames the block.
 - Domain comments explain **principles and concepts**, not method implementation details.
+- A `Domain(…):` block that states a formula or a rule is the source of expected values in tests: the test works them out by hand from the block, never from the implementation — see *Knowledge-derived tests* in `lazy-python.testing-guidelines.md`.
 - Domain comments must always be placed **inside methods or functions**, near the code that implements the described mechanic, or **at class body level** when documenting enum members, class-level constants, or weight mappings that are not tied to a single method. Never place Domain comments between class definitions, above class definitions, or at module level outside a class or function. When a constant or mapping is used by only one method, prefer placing the Domain comment inside that method.
 - Never describe what "this method does" or how the code works internally. Instead, describe the underlying domain mechanics, formulas, or rules that the code implements.
 - Focus on answering "what are the rules/principles?" rather than "what does the code do?"

@@ -97,6 +97,7 @@ def pytest_collection_modifyitems(config: Config, items: list[Item]) -> None:
   for item in items:
     func = getattr(item, "function", None)
     cls = getattr(item, "cls", None)
+
     # guard: items that are neither a class method nor a plain function (e.g. DoctestItem) — never dedup them
     if cls is None and func is None:
       kept.append(item)

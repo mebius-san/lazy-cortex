@@ -22,8 +22,6 @@ mutates settings and always exits 0 on a completed run — the verdict travels i
 the JSON, not the exit code (non-zero is reserved for invocation errors).
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import argparse
 import json
@@ -34,12 +32,20 @@ import tempfile
 import time
 from pathlib import Path
 
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+# pylint: disable-next=import-error
 from expert_pump import build_expert_argv, _normalize_mcp_config, _normalize_setting_sources, _VALID_SETTING_SOURCES
-from expert_runtime import resolve_agent_model
-from lazy_settings import load_section, resolve_agent_model_tier
-import rate_limit_flag
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from expert_runtime import resolve_agent_model  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from lazy_settings import load_section, resolve_agent_model_tier  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import rate_limit_flag  # pylint: disable=import-error
 # waiver: ReferenceError is reference_resolver's domain exception, not the builtin
-from reference_resolver import resolve, ReferenceError  # pylint: disable=redefined-builtin
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from reference_resolver import resolve, ReferenceError  # pylint: disable=import-error,redefined-builtin
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+# pylint: disable-next=import-error
 from constants import HaltReason, JobConfigKey, RateLimitGuardKey, RoutineKey, RoutineType, SettingsFile, SettingsKey
 
 from typing import TYPE_CHECKING
@@ -241,13 +247,16 @@ def collect_target_experts(repo: Path) -> list[str]:
     if not isinstance(cfg, dict):
       continue
     rtype = cfg.get(RoutineKey.TYPE, _DEFAULT_ROUTINE_TYPE)
+
     # guard: only expert-dispatching routine types name an expert to validate
     if rtype not in _EXPERT_ROUTINE_TYPES:
       continue
     expert = cfg.get(RoutineKey.EXPERT)
+
     # guard: command-shape routine — no expert to validate
     if not expert or not isinstance(expert, str):
       continue
+
     # de-dup while preserving first-seen order
     if expert not in seen:
       seen.append(expert)
@@ -276,9 +285,11 @@ def _routine_protocols_for_expert(repo: Path, expert: str) -> list[str]:
     if not isinstance(cfg, dict):
       continue
     routine_expert = cfg.get(RoutineKey.EXPERT)
+
     # guard: routine does not name a string expert
     if not isinstance(routine_expert, str):
       continue
+
     # guard: routine dispatches a different expert
     if routine_expert != expert:
       continue
@@ -309,30 +320,37 @@ def _inbox_dir_checks(repo: Path, expert: str) -> list[dict]:
     One `fail` finding per unresolvable declared inbox; empty when every one resolves.
   """
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from external_dirs import is_declared
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from external_dirs import is_declared  # pylint: disable=import-error
   findings: list[dict] = []
   routines = load_section(_settings_path(repo), SettingsKey.ROUTINES)
   for name, cfg in routines.items():
     # guard: skip the _version sentinel and any non-dict routine value
     if not isinstance(cfg, dict):
       continue
+
     # guard: only an inbox routine has a directory to resolve
     if cfg.get(RoutineKey.TYPE) != RoutineType.INBOX:
       continue
     routine_expert = cfg.get(RoutineKey.EXPERT)
+
     # guard: routine does not name a string expert
     if not isinstance(routine_expert, str):
       continue
+
     # guard: routine dispatches a different expert
     if routine_expert != expert:
       continue
     rel = cfg.get(RoutineKey.INBOX_DIR)
+
     # guard: a routine without a string inbox path is caught by schema validation, not here
     if not isinstance(rel, str) or not rel:
       continue
+
     # guard: the inbox resolves — nothing to report
     if (repo / rel).exists():
       continue
+
     # guard: an undeclared inbox may simply not be created yet
     if not is_declared(repo, rel):
       continue
@@ -363,9 +381,11 @@ def _repo_checks(repo: Path) -> list[dict]:
     scans and its sandbox scope covers everything it grants.
   """
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from inbox_guard import check_inbox_collision
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from inbox_guard import check_inbox_collision  # pylint: disable=import-error
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from constants import InboxGuardKey
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from constants import InboxGuardKey  # pylint: disable=import-error
   return [
     _finding(Level.FAIL, f"inbox ownership: {f[InboxGuardKey.DETAIL]}")
     for f in check_inbox_collision(repo)
@@ -391,17 +411,22 @@ def _sandbox_checks(repo: Path) -> list[dict]:
     scope reaches everything with the retry closed, or when no scope is recorded.
   """
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from sandbox_scope import audit
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from sandbox_scope import audit  # pylint: disable=import-error
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from constants import SandboxKey, SandboxSyncKey
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from constants import SandboxKey, SandboxSyncKey  # pylint: disable=import-error
   result = audit(repo)
+
   # guard: no sandbox file — spawns run unconfined, so no allowlist can be short
   if not result[SandboxSyncKey.PRESENT]:
     return []
+
   # guard: confinement recorded as off — the allowlist grants nothing and denies nothing
   if result[SandboxSyncKey.ENABLED] is False:
     return []
   fixes = f"run `lazycortex-core sandbox-sync --repo-root {repo}` to record it"
+
   # the retry hatch is a finding whenever it is not recorded closed — Claude Code defaults it to open
   hatch = [] if result[SandboxSyncKey.ALLOW_UNSANDBOXED] is False else [
     _finding(Level.FAIL, f"sandbox {SandboxKey.ALLOW_UNSANDBOXED} is not recorded as false — a command the "
@@ -454,6 +479,7 @@ def _static_checks(repo: Path, expert: str, entry: dict | None) -> list[dict]:
     A list of `{level, message}` finding dicts; empty when every check passed.
   """
   findings: list[dict] = []
+
   # guard: expert not registered in settings — every other check is moot
   if not isinstance(entry, dict):
     findings.append(_finding(Level.FAIL, f"expert '{expert}' not found in settings.experts"))
@@ -462,6 +488,7 @@ def _static_checks(repo: Path, expert: str, entry: dict | None) -> list[dict]:
   # the agent reference is the spawn's identity — without a resolvable one the spawn
   # silently falls back to the default assistant
   agent_ref = entry.get(JobConfigKey.AGENT)
+
   # an absent reference fails outright; a present one still has to resolve
   if not agent_ref or not isinstance(agent_ref, str):
     findings.append(_finding(Level.FAIL, _MSG_MISSING_AGENT))
@@ -544,9 +571,11 @@ def _mcp_config_checks(repo: Path, mcp_config: object) -> list[dict]:
     and valid, or when no MCP config is declared.
   """
   findings: list[dict] = []
+
   # guard: hermetic spawn — no MCP config to validate
   if not mcp_config:
     return findings
+
   # guard: mcp_config must be a path string or a list of them
   if not isinstance(mcp_config, (str, list)):
     # waiver: reporting the type name of an arbitrary settings value; type(x).__name__ is the right idiom — no class-system object
@@ -554,6 +583,7 @@ def _mcp_config_checks(repo: Path, mcp_config: object) -> list[dict]:
     return findings
   for cfg_path in _normalize_mcp_config(mcp_config, repo):
     p = Path(cfg_path)
+
     # guard: declared config path is absent on disk
     if not p.is_file():
       findings.append(_finding(Level.FAIL, f"mcp_config path does not exist: {cfg_path}"))
@@ -584,6 +614,7 @@ def _setting_sources_checks(setting_sources: object) -> list[dict]:
     is recognized or none are declared.
   """
   findings: list[dict] = []
+
   # guard: only a declared string/list can carry an unrecognized scope
   if not isinstance(setting_sources, (str, list)):
     return findings
@@ -620,6 +651,7 @@ def _model_is_known(repo: Path, model: str) -> bool:
     # guard: skip non-dict group values (the _version sentinel, etc.)
     if not isinstance(entries, dict):
       continue
+
     # unwrap each entry (bare pin or seed object) to its effective tier before comparing;
     # `seeded_from` is bookkeeping and must never make a model count as known
     if any(resolve_agent_model_tier(val) == model for val in entries.values()):
@@ -645,6 +677,7 @@ def _servers_in_config(repo: Path, mcp_config: object) -> list[str]:
   names: list[str] = []
   for cfg_path in _normalize_mcp_config(mcp_config, repo):
     p = Path(cfg_path)
+
     # guard: unreadable / missing config — static check already flagged it
     if not p.is_file():
       continue
@@ -697,9 +730,11 @@ def _derive_plugin_dirs(repo: Path) -> tuple[str, bool]:
     caller to mark plugin-dir resolution as best-effort in the finding.
   """
   dirs: list[str] = []
+
   # Dev-vault sources take precedence (matches lazy.runtime.sh --dev-mode).
   # waiver: dev-vault plugin-tree dirname, fixed by the repo layout, not a domain key
   dev_claude = Path(repo) / "claude"
+
   # in a dev vault every in-repo source dir carrying a manifest is a plugin dir
   if dev_claude.is_dir():
     for entry in sorted(dev_claude.iterdir()):
@@ -707,6 +742,7 @@ def _derive_plugin_dirs(repo: Path) -> tuple[str, bool]:
       manifest = entry / ".claude-plugin" / "plugin.json"
       if manifest.is_file():
         dirs.append(str(entry.resolve()))
+
   # Fall back to (and augment with) the plugin cache's latest version per plugin.
   # waiver: filesystem path idiom
   cache = Path.home() / ".claude/plugins/cache"
@@ -720,6 +756,7 @@ def _derive_plugin_dirs(repo: Path) -> tuple[str, bool]:
         if not plugin.is_dir():
           continue
         versions = [ v for v in plugin.iterdir() if v.is_dir() ]
+
         # guard: plugin dir exists but has no cached versions
         if not versions:
           continue
@@ -743,6 +780,7 @@ def _probe_env(repo: Path) -> tuple[dict[str, str], bool]:
     env and none could be derived).
   """
   env = os.environ.copy()
+
   # A hanging MCP server is dropped after MCP_TIMEOUT instead of eating the wall budget.
   # waiver: external Claude Code environment-variable name, not a domain key
   env["MCP_TIMEOUT"] = _MCP_TIMEOUT_MS
@@ -819,6 +857,7 @@ def _classify_server(debug_text: str, server: str) -> tuple[str, str]:
   if not debug_text:
     return Srv.UNKNOWN, "no debug output captured"
   relevant = [ ln for ln in debug_text.splitlines() if server in ln ]
+
   # guard: server never mentioned in the debug log — leave it unclassified
   if not relevant:
     return Srv.UNKNOWN, "server not mentioned in debug log"
@@ -913,6 +952,7 @@ def _run_probe(repo: Path, entry: dict) -> dict:
   # waiver: temp-file naming idiom, not a domain constant
   fd, debug_file = tempfile.mkstemp(prefix = "lazy_preflight_", suffix = ".log")
   os.close(fd)
+
   # --debug mcp + --debug-file so per-server MCP init is logged for classification.
   # waiver: external Claude Code CLI flags, not internal keys
   argv = [ *argv, "--debug", "mcp", "--debug-file", debug_file ]
@@ -1015,6 +1055,7 @@ def _fixes_for(expert: str, static: list[dict], dynamic: dict | None) -> list[di
   for srv in dynamic.get(RKey.SERVERS, []):
     status = srv.get(RKey.STATUS)
     name = srv.get(RKey.NAME)
+
     # guard: healthy or unclassifiable servers need no fix
     if status not in _SRV_BAD:
       continue
@@ -1061,18 +1102,23 @@ def _verdict_for(static: list[dict], dynamic: dict | None) -> str:
   # guard: any hard static failure fails the expert regardless of the probe
   if any(f.get(RKey.LEVEL) == Level.FAIL for f in static):
     return Verdict.FAIL
+
   # guard: static-only run (no probe) with no hard failure passes
   if not dynamic:
     return Verdict.OK
+
   # guard: a deliberately skipped probe (rate-limit flag up) is not evidence of failure
   if dynamic.get(RKey.SKIPPED):
     return Verdict.OK
+
   # guard: probe hit the wall timeout — hung spawn
   if dynamic.get(RKey.TIMED_OUT):
     return Verdict.FAIL
+
   # guard: agent never resolved — spawn would fall back to the default assistant
   if not dynamic.get(RKey.AGENT_RESOLVED):
     return Verdict.FAIL
+
   # guard: any declared server hit a bad init status
   if any(s.get(RKey.STATUS) in _SRV_BAD for s in dynamic.get(RKey.SERVERS, [])):
     return Verdict.FAIL
@@ -1105,6 +1151,7 @@ def evaluate_expert(repo: Path, expert: str, *, probe: bool) -> dict:
 
   # the probe stays unrun unless it can produce a trustworthy signal
   dynamic: dict | None = None
+
   # Only probe a registered expert whose agent statically resolves — a probe with
   # a missing agent would spuriously "pass" via the default-assistant fallback.
   agent_resolves = entry is not None and not any(
@@ -1115,6 +1162,7 @@ def evaluate_expert(repo: Path, expert: str, *, probe: bool) -> dict:
     # the same repo config gates both sides — the skip here and the frame write inside the probe —
     # so a disabled guard never lets a foreign checkout's record suppress this repo's probes
     guard = rate_limit_flag.config(load_section(repo / SettingsFile.REL, SettingsKey.DAEMON))
+
     # guard: the probe is itself a real `claude -p` spawn — under a raised rate-limit flag it is
     # skipped with an explicit outcome, never run and never counted as a failure
     if guard[RateLimitGuardKey.ENABLED] and rate_limit_flag.is_raised():
@@ -1150,6 +1198,7 @@ def preflight(repo: Path, *, expert: str | None, probe: bool) -> dict:
   """
   repo = Path(repo)
   targets = collect_target_experts(repo)
+
   # a single-expert run narrows the target list to just that name
   if expert is not None:
     targets = [ expert ]
@@ -1157,12 +1206,14 @@ def preflight(repo: Path, *, expert: str | None, probe: bool) -> dict:
   # evaluate every target, then add the checkout-level findings that belong to no expert
   results = [ evaluate_expert(repo, name, probe = probe) for name in targets ]
   repo_findings = _repo_checks(repo)
+
   # a one-line headline the operator reads before drilling into the per-expert detail
   failed = sum(1 for r in results if r[RKey.VERDICT] == Verdict.FAIL)
   mode = "static-only" if not probe else "static+probe"
   summary = f"{len(results)} expert(s) checked ({mode}); {failed} failing, {len(results) - failed} ok"
   if repo_findings:
     summary += f"; {len(repo_findings)} repo-level finding(s)"
+
   # the verdict document the preflight skill renders
   return {
     "experts": results,

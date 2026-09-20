@@ -88,6 +88,7 @@ def is_raised() -> bool:
   # and treated as absent instead of raising.
 
   base = flag_dir()
+
   # guard: no writer has ever raised the flag on this host
   if not base.is_dir():
     return False
@@ -107,12 +108,14 @@ def is_raised() -> bool:
     except (OSError, json.JSONDecodeError) as e:
       sys.stderr.write(f"lazy-claude: ignoring unreadable record {name}: {e}\n")
       continue
+
     # guard: a record that is not an object carries no window — report it like the sibling reader
     if not isinstance(entry, dict):
       sys.stderr.write(f"lazy-claude: ignoring malformed record {name}\n")
       continue
     # waiver: record field name shared with rate_limit_flag.py, duplicated by the standalone contract
     resets = entry.get("resets_at")
+
     # guard: a live window holds the flag up; anything else is expired or malformed
     if isinstance(resets, (int, float)) and now < float(resets):
       return True
@@ -132,6 +135,7 @@ def frames(text: str) -> list[dict]:
   found: list[dict] = []
   for line in text.splitlines():
     raw = line.strip()
+
     # guard: skip the parse for every line that cannot be the frame this function wants
     # waiver: external Claude Code stream-json field name, not an internal key
     if not raw or "rate_limit_event" not in raw:
@@ -140,6 +144,7 @@ def frames(text: str) -> list[dict]:
       frame = json.loads(raw)
     except json.JSONDecodeError:
       continue
+
     # guard: only rate-limit events carry a payload this wrapper reads
     # waiver: external Claude Code stream-json field name, not an internal key
     if not isinstance(frame, dict) or frame.get("type") != "rate_limit_event":
@@ -175,10 +180,12 @@ def triggered(info: dict) -> str | None:
 
   # waiver: external Claude Code stream-json field name, not an internal key
   status = info.get("status")
+
   # guard: the two provider statuses that close a window
   # waiver: provider status tokens, a fixed external contract
   if status in ("allowed_warning", "rejected"):
     return str(status)
+
   # guard: spend has crossed into paid overage — an absent field means unknown, never "no"
   # waiver: external Claude Code stream-json field name, not an internal key
   if info.get("isUsingOverage") is True:
@@ -208,6 +215,7 @@ def record(info: dict, trigger: str) -> None:
   # and never takes down the process that called it.
 
   now = time.time()
+
   # an overage trigger is bounded by the overage window, every other trigger by the plain one
   # waiver: external Claude Code stream-json field names, not internal keys
   first, second = ("overageResetsAt", "resetsAt") if trigger == "overage" else ("resetsAt", "overageResetsAt")
@@ -247,6 +255,7 @@ def record(info: dict, trigger: str) -> None:
   try:
     target = flag_dir() / f"{window}.json"
     target.parent.mkdir(parents = True, exist_ok = True)
+
     # atomic replace so a concurrent reader never sees a half-written record
     # waiver: temp-file naming idiom, not a domain constant
     fd, tmp = tempfile.mkstemp(prefix = ".flag.", suffix = ".tmp", dir = str(target.parent))
@@ -281,9 +290,11 @@ def find_real_claude() -> str | None:
     if not entry:
       continue
     candidate = Path(entry) / _CLAUDE
+
     # guard: only an executable file that is not this very wrapper qualifies
     if not candidate.is_file() or not os.access(candidate, os.X_OK):
       continue
+
     # guard: PATH may list the wrapper's own directory first — never wrap ourselves
     if candidate.resolve() == own:
       continue
@@ -379,6 +390,7 @@ def main(argv: list[str]) -> int:
     The exit code to terminate with; interactive calls never return (the process is replaced).
   """
   real = find_real_claude()
+
   # guard: no real claude anywhere on PATH — nothing to wrap
   if real is None:
     # waiver: one-off human-facing message

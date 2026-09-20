@@ -28,9 +28,6 @@ ride along here so one `parse-note` call still shows the coordinator the whole p
 `ParseError` on a malformed frontmatter block rather than reporting it in a return value.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
-# pylint: disable=import-error,wrong-import-position,deprecated-module
 
 import argparse
 import json
@@ -48,18 +45,20 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import banner as _banner  # noqa: E402
+import banner as _banner  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import body as _body  # noqa: E402
+import body as _body  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import frontmatter as _fm  # noqa: E402
+import frontmatter as _fm  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import job_markers as _job_markers  # noqa: E402
+import job_markers as _job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import parser as _parser  # noqa: E402
+# waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
+import parser as _parser  # noqa: E402  # pylint: disable=import-error,wrong-import-position,deprecated-module
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from errors import ParseError  # noqa: E402
+from errors import ParseError  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# pylint: disable-next=import-error,wrong-import-position
 from keys import LANG_EN as _LANG_EN, Bucket, Phase, ReviewKey, Tag  # noqa: E402
 
 
@@ -208,6 +207,7 @@ def _build_banner_report(text: str, body: str) -> dict:
     Dict with `present`, `state_tag`, and `gestures` — see module docstring.
   """
   state = _banner.extract(body)
+
   # guard: no banner present — nothing further to report
   if state is None:
     return _empty_banner_report()
@@ -236,6 +236,7 @@ def _build_sections_report(text: str) -> list[dict]:
   sections = []
   for section in _parser.parse(text).sections:
     owner = _body.owner_of_section(section.content)
+
     # guard: an untagged (or non-`#expert/`-tagged) section carries no ownership to report
     if owner is None:
       continue
@@ -260,6 +261,7 @@ def _build_callout_reports(text: str, body: str) -> tuple[list[dict], list[dict]
   ticked_question_options: list[dict] = []
   for m in _CALLOUT_HEAD_RE.finditer(body):
     marker, tag = m.group(1), m.group(2)
+
     # guard: a banner-state tag is reported via `banner`, never duplicated here
     if tag in _BANNER_STATE_TAGS:
       continue
@@ -478,12 +480,14 @@ def resolve_language(file_path: Path) -> str:
       except (OSError, json.JSONDecodeError):
         settings = None
       break
+
   # guard: no settings file, or an unreadable one — English is the shipped floor
   if not isinstance(settings, dict):
     return _LANG_EN
 
   # the repo-wide key is the only one consulted — review has no language of its own
   value = settings.get(_LANGUAGE_KEY)
+
   # guard: an absent or empty key leaves the floor in place
   if not isinstance(value, str) or not value:
     return _LANG_EN
@@ -524,6 +528,7 @@ def repaint_banner(text: str, *, job_in_flight: bool = False, lang: str = _LANG_
   # same `job_in_flight` value, returns identical text.
 
   meta, body = _fm.parse(text)
+
   # guard: no frontmatter — nothing to derive a banner state from
   if not meta:
     return text

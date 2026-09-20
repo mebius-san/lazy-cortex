@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-review skills — symptoms, likely causes, and fixes.
-last_regen: 2026-09-18
+last_regen: 2026-09-20
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree routing on observed symptom. Top-level branches: install/bootstrap failures (settings missing, permission error, malformed JSON), configure failures (audit FAIL after wizard, section-id loop), start/submit problems (file not opted in, no-op on re-run when unexpected), status reporting nothing useful, stop/resume confusion, finalize blocked or partial, audit FAIL findings. Each leaf names the troubleshooting entry that resolves it."
@@ -15,7 +15,7 @@ source_skills:
   - lazy-review.stop
   - lazy-review.finalize
   - lazy-review.audit
-source_sha: f723a0557db9ea1fc346db7cac478f05d49c7eac
+source_sha: ddcc3d531e1a77299395aa3c7f54eb3492434ea0
 ---
 # Troubleshooting
 
@@ -51,7 +51,7 @@ source_sha: f723a0557db9ea1fc346db7cac478f05d49c7eac
 
 ## Review callouts render as plain Obsidian callouts after install
 
-**Symptom**: The Waiting banner and the `#review/command`, `#review/question`, `#review/concern` callouts all look identical — no distinct colour or icon.
+**Symptom**: The Waiting banner and the `#review/command`, `#review/question` callouts all look identical — no distinct colour or icon.
 
 **Likely cause**: Either this repo has no `.obsidian/` vault (install reports `no-vault` and skips styling entirely — review still works, just unstyled), or the snippet was enabled in `appearance.json` while Obsidian was already running and the app has not picked up the change.
 
@@ -186,6 +186,16 @@ source_sha: f723a0557db9ea1fc346db7cac478f05d49c7eac
 **Likely cause**: A class was configured referencing an expert that was never registered in the experts registry, or the expert entry was deleted after the class was created.
 
 **Fix**: Run `/lazy-review.configure` to re-enter the wizard and supply the missing expert, or to remove the class member that references a non-existent expert. Audit will pass once every class reference has a corresponding `experts` entry.
+
+---
+
+## `/lazy-review.audit` reports `override_glob_depth WARN`
+
+**Symptom**: Audit returns a WARN finding with check `override_glob_depth`, naming a product-scoped `<type>@<key>` class.
+
+**Likely cause**: A product-scoped review class's `paths` glob was written without `**`, so it fixes the asset's depth below the product's `spec_path`. An asset sitting at the product root, or nested deeper than the glob expects, falls outside the class and loses that product's own expert chain.
+
+**Fix**: Re-run `/lazy-spec.product-config <key>` in edit mode — the wizard regenerates the class's globs with `**` so they cover an asset at any depth below the product. Then re-run `/lazy-review.audit` to confirm the WARN is gone.
 
 ---
 

@@ -39,6 +39,7 @@ def _scope_entries(data: dict) -> list[dict]:
     absent or malformed.
   """
   scopes = data.get(_SCOPES_KEY)
+
   # guard: no scopes, or a malformed section — nothing to read axes from
   if not isinstance(scopes, dict):
     return []
@@ -78,6 +79,7 @@ def _without_structure_map(data: dict) -> dict:
     left with an empty list keeps the empty list rather than losing the key.
   """
   scopes = data.get(_SCOPES_KEY)
+
   # guard: no scopes, or a malformed section — nothing to strip
   if not isinstance(scopes, dict):
     return data
@@ -88,6 +90,7 @@ def _without_structure_map(data: dict) -> dict:
       rebuilt[key] = cfg
       continue
     own = cfg.get(_SCOPE_EXCLUDE_KEY)
+
     # guard: the scope declares no excludes of its own
     if not isinstance(own, list):
       rebuilt[key] = cfg

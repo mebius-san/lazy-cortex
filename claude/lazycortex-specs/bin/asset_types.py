@@ -18,8 +18,6 @@ implies before anyone has judged the asset. A type may borrow another type's pla
 Every consumer asks here instead of matching a folder name against a closed list.
 """
 from __future__ import annotations
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error,wrong-import-position
 
 import argparse
 import json
@@ -39,11 +37,11 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import flip_gate  # noqa: E402
+import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import spec_keys  # noqa: E402
+import spec_keys  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import spec_paths  # noqa: E402
+import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # ----------------------------------------------------------------------------------------
@@ -104,13 +102,18 @@ class _K:
   SKIPPED = "skipped"
 
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 _TYPE_KEY = spec_keys.AssetTypeKey.TYPE
 _UNKNOWN = spec_keys.AssetTypeKey.UNKNOWN
 
 # The frontmatter line the new key is inserted after — every status folder-note the catalog
 # scaffolds carries `spec_role: status` above its body.
 _FM_ANCHOR_RE = re.compile(r"(?m)^spec_role\s*:.*$")
+
+# waiver: CLI verb tokens -- dispatch keys for this module's own argparse router
+_VERB_OF = "of"
+_VERB_BACKFILL = "backfill"
+_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
+_OUT_ASSET_TYPE = "asset_type"
 
 
 def _plugin_root() -> Path:
@@ -123,19 +126,29 @@ def _plugin_root() -> Path:
   return Path(__file__).resolve().parent.parent
 
 
+# opt: read once per process — the shipped file never changes at runtime and callers never mutate the mapping
 @lru_cache(maxsize = 1)
 def builtin_defaults() -> dict[str, dict]:
   """
   Read the plugin's own asset-type declarations.
 
+  Guarantees:
+    - The returned mapping is the single instance shared by every caller in the process;
+      callers MUST treat it as read-only and copy it before mutating.
+
   Returns:
     Mapping of type name to its declaration dict, exactly as shipped.
   """
+
+  # Contract:
+  # The returned mapping is the single instance shared by every caller in the process.
+  # Callers MUST treat it as read-only and copy it before making any mutation.
+
   path = _plugin_root() / _K.REFERENCES_DIR / _K.DEFAULTS_FILE
   return json.loads(path.read_text(encoding = _K.ENCODING)).get(_K.ASSET_TYPES) or {}
 
 
-def _declared(record: dict) -> dict[str, dict]:
+def declared(record: dict) -> dict[str, dict]:
   """
   Return every asset type visible in one product's scope.
 
@@ -172,11 +185,12 @@ def resolve(asset_type: str, record: dict) -> dict | None:
   # extended or overridden per product — never a value checked against a fixed catalogue baked
   # into the tooling. A kind nobody declared is simply absent from the registry, not rejected
   # as invalid; consulting the declaration is the only way any consumer learns what a kind
-  # implies — its icon, its playbook, the folder it defaults into, its starting document, or
-  # the tools it carries before anyone has judged it.
+  # implies — its icon, its playbook, the place it defaults into (a folder under the product
+  # root, or that root itself when the declaration names it), its starting document, or the
+  # tools it carries before anyone has judged it.
 
   # ask the declaration directly rather than testing membership in a closed set
-  return _declared(record).get(asset_type)
+  return declared(record).get(asset_type)
 
 
 def alias_base(asset_type: str, record: dict) -> str:
@@ -204,15 +218,14 @@ def alias_base(asset_type: str, record: dict) -> str:
   # resolving which playbook a type ultimately uses never depends on the order aliases happen
   # to be declared in.
 
-  # resolve the alias target and enforce the one-hop rule
-  base = (resolve(asset_type, record) or {}).get(AssetTypeField.ALIAS_OF, "")
   # guard: a concrete type borrows nothing — nothing further to validate
-  if not base:
+  if not (base := (resolve(asset_type, record) or {}).get(AssetTypeField.ALIAS_OF, "")):
     return ""
-  target = resolve(base, record)
+
   # guard: an alias pointing at nothing has no declaration to borrow
-  if target is None:
+  if (target := resolve(base, record)) is None:
     raise ValueError(f"{AssetTypeField.ALIAS_OF} of {asset_type!r} names an undeclared base type {base!r}")
+
   # guard: an alias chain would make resolution order-dependent — one hop only
   if target.get(AssetTypeField.ALIAS_OF):
     raise ValueError(f"{AssetTypeField.ALIAS_OF} of {asset_type!r} names {base!r}, which is itself "
@@ -235,8 +248,13 @@ def _effective(asset_type: str, record: dict) -> dict:
   Returns:
     The type's own declaration with the base type's fields underneath it, or `{}` when the
     type is undeclared.
+
+  Raises:
+    ValueError: Propagated from `alias_base` when `asset_type` aliases an undeclared base type,
+      or a base that is itself an alias.
   """
   own = resolve(asset_type, record)
+
   # guard: an undeclared type has nothing to fall back to
   if own is None:
     return {}
@@ -257,6 +275,7 @@ def icon_color(asset_type: str, record: dict) -> tuple[str, str] | None:
     when the type is undeclared.
   """
   decl = resolve(asset_type, record)
+
   # guard: an undeclared type has no paint to report
   if decl is None:
     return None
@@ -286,7 +305,8 @@ def default_path(asset_type: str, record: dict) -> str:
     record: The product's settings record, or `{}` to consult only the shipped set.
 
   Returns:
-    The declared folder name, falling back to the type's own name.
+    The declared folder name, falling back to the type's own name. `"."` names the product
+    root and is returned as it is; a missing or empty key falls back to the type's own name.
   """
   return (resolve(asset_type, record) or {}).get(AssetTypeField.DEFAULT_PATH, "") or asset_type
 
@@ -303,6 +323,7 @@ def start_doc(asset_type: str, record: dict) -> tuple[str, str]:
     A `(filename, doc_type)` pair, both empty when the type declares no starting document.
   """
   token = (resolve(asset_type, record) or {}).get(AssetTypeField.START_DOC, "")
+
   # guard: a type declaring no starting document has no pair to split
   if _K.START_DOC_SEP not in token:
     return "", ""
@@ -351,9 +372,9 @@ def type_of(note: Path) -> str:
   return fm_values.get(_TYPE_KEY, "")
 
 
-def _folder_map(repo: Path) -> dict[str, str]:
+def folder_map(repo: Path) -> dict[str, str]:
   """
-  Build the folder-name to type-name map the backfill derives a legacy note's type from.
+  Build the folder-name to type-name map a legacy note's or a legacy spawn path's type is derived from.
 
   Every declared type contributes both its `default_path` and its own name, so an operator's
   type whose folder is named after the type itself resolves the same way a shipped one does.
@@ -385,7 +406,7 @@ def _folder_map(repo: Path) -> dict[str, str]:
   # shipped set authoritative for the folder names it already owns
   mapping: dict[str, str] = {}
   for record in records:
-    for name in _declared(record):
+    for name in declared(record):
       for folder in ( default_path(name, record), name ):
         mapping.setdefault(folder, name)
   return mapping
@@ -404,17 +425,18 @@ def _insert_type(fm_text: str, asset_type: str) -> tuple[str, int]:
     line to write under.
   """
   line = f"{_TYPE_KEY}: {asset_type}"
-  return _FM_ANCHOR_RE.subn(lambda m: f"{m.group(0)}\n{line}", fm_text, count = 1)
+  return _FM_ANCHOR_RE.subn(lambda hit: f"{hit.group(0)}\n{line}", fm_text, count = 1)
 
 
 def backfill(repo: Path) -> dict:
   """
   Walk the spec content-root and add `spec_asset_type` to every status folder-note missing it.
 
-  The type is derived from the name of the folder holding the asset — `features/auth/auth.md`
-  is a `feature`. A folder no declaration claims yields the `unknown` sentinel, which the
-  coordinator resolves on its own wake. Idempotent: a note already carrying the key is left
-  alone and counted `skipped`. Never commits — the caller owns that.
+  The type is derived from the folder holding the asset when a declared `default_path` names it
+  — `bugs/crash/crash.md` is a `bug`; an asset at the product root or in an operator's folder
+  yields the `unknown` sentinel, which the coordinator resolves on its own wake. Idempotent: a
+  note already carrying the key is left alone and counted `skipped`. Never commits — the caller
+  owns that.
 
   Guarantees:
     - A note that already carries `spec_asset_type` is left unchanged and counted as skipped.
@@ -436,12 +458,13 @@ def backfill(repo: Path) -> dict:
 
   settings_root = spec_paths.find_settings_root(repo)
   content_root = spec_paths.spec_content_root(settings_root)
-  mapping = _folder_map(settings_root)
+  mapping = folder_map(settings_root)
   touched = 0
   skipped = 0
   for dirpath, _dirnames, filenames in os.walk(content_root):
     folder = Path(dirpath)
     name = f"{folder.name}{_K.MD_SUFFIX}"
+
     # guard: a status folder-note is always named after its own folder
     if name not in filenames:
       continue
@@ -449,14 +472,17 @@ def backfill(repo: Path) -> dict:
     text = note.read_text(encoding = _K.ENCODING)
     # waiver: sibling-module frontmatter parser -- the one parser every specs primitive shares
     fm_values, fm_end = flip_gate.parse_frontmatter(text)
+
     # guard: only a status folder-note carries the asset's own type
     if fm_values.get(_K.SPEC_ROLE) != _K.STATUS_ROLE:
       continue
+
     # guard: already typed — idempotent no-op
     if _TYPE_KEY in fm_values:
       skipped += 1
       continue
     new_fm, count = _insert_type(text[:fm_end], mapping.get(folder.parent.name, _UNKNOWN))
+
     # guard: no anchor line to insert after — leave the note for the doctor to report
     if count != 1:
       skipped += 1
@@ -464,13 +490,6 @@ def backfill(repo: Path) -> dict:
     note.write_text(new_fm + text[fm_end:], encoding = _K.ENCODING)
     touched += 1
   return { _K.TOUCHED: touched, _K.SKIPPED: skipped }
-
-
-# waiver: CLI verb tokens -- dispatch keys for this module's own argparse router
-_VERB_OF = "of"
-_VERB_BACKFILL = "backfill"
-_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
-_OUT_ASSET_TYPE = "asset_type"
 
 
 def _repo_from_args(cwd: str | None) -> Path:
@@ -512,6 +531,7 @@ def main(argv: list[str]) -> int:
   if args.verb == _VERB_OF:
     print(json.dumps({ _OUT_ASSET_TYPE: type_of(args.note) }))
     return 0
+
   # the only remaining verb — argparse rejected anything else before reaching here
   print(json.dumps(backfill(_repo_from_args(args.cwd))))
   return 0

@@ -19,7 +19,7 @@ spec_source_docs: []
 <!-- What is being investigated and for whom. Opens with a reference to the sibling vision when one exists; goals live here only when there is no vision. -->
 
 ## Terms
-<!-- "Glossary: The most important domain and technical terms that your stakeholders use when discussing the system." — arc42 §12 Glossary. One line per term the document uses, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, a term this document introduces is defined here first. -->
+<!-- Optional. "Glossary: The most important domain and technical terms that your stakeholders use when discussing the system." — arc42 §12 Glossary. One line per term the document uses, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, a term this document introduces is defined here first. -->
 
 ## Questions
 
@@ -34,6 +34,7 @@ spec_source_docs: []
 <!-- Boundaries of the search: what to consider, what to leave out, deadline, effort budget. -->
 
 ## Known
+<!-- Optional. What is already established before the research starts. -->
 
 <!-- What is already established and where it comes from. The researcher starts here and does not re-derive it. -->
 

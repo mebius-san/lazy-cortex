@@ -1,7 +1,7 @@
 ---
 name: lazy-spec.create-bug
-description: "Use when filing a bug against a product spec. Built-in wrapper: pins the asset type to `bug` and delegates — all clarification, scaffolding, prose, and diagrams are owned by `lazy-spec.create-asset`. Which document the asset starts from is declared by the type declaration (`asset_types.bug.start_doc`) and read by the delegate, never by this wrapper."
-execution-discipline-waiver: "Thin wrapper — pins the category to `bug` and delegates to lazy-spec.create-asset via the Skill tool; the multi-phase orchestration where step-skip can hide lives entirely in the delegate."
+description: "Use when filing a bug against a product spec. Built-in wrapper: pins `<asset-type>` to `bug` and delegates — all clarification, scaffolding, prose, and diagrams are owned by `lazy-spec.create-asset`. Which document the asset starts from is declared by the type declaration (`asset_types.bug.start_doc`) and read by the delegate, never by this wrapper."
+execution-discipline-waiver: "Thin wrapper — pins the asset type to `bug` and delegates to lazy-spec.create-asset via the Skill tool; the multi-phase orchestration where step-skip can hide lives entirely in the delegate."
 logging-waiver: "pure delegator — lazy-spec.create-asset owns the log"
 ---
 # Create Bug
@@ -12,8 +12,8 @@ The document a `bug` asset starts from is declared by the type declaration (`ass
 
 ## Input
 
-Signature: `<product> <slug> [--empty]`. The user gives the product compound-key and the bug slug (lowercase-with-hyphens); pass `--empty` straight through when present.
+Signature: `<product> <slug> [--path <dir>] [--empty]`. The user gives the product compound-key and the bug slug (lowercase-with-hyphens); pass `--path <dir>` and `--empty` straight through when present.
 
 ## Process
 
-Invoke `lazy-spec.create-asset` via the `Skill` tool (`skill: "lazycortex-specs:lazy-spec.create-asset"`) with args `<product> bug <slug>`, appending `--empty` when the caller passed it. Report the delegate's outcome verbatim.
+Invoke `lazy-spec.create-asset` via the `Skill` tool (`skill: "lazycortex-specs:lazy-spec.create-asset"`) with args `<product> bug <slug>`, appending `--path <dir>` and `--empty` when the caller passed them. Report the delegate's outcome verbatim.

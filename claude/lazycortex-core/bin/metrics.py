@@ -89,6 +89,7 @@ def _format_labels(labels: dict[str, str]) -> str:
   # guard: empty label set renders as no block at all
   if not labels:
     return ""
+
   # sort keys for deterministic output (tests + diff stability)
   pairs = []
   for key in sorted(labels):
@@ -302,6 +303,7 @@ class _Histogram:
     self.name = name
     self.help = help_text
     self.labelnames = labelnames
+
     # key = label tuple; value = [bucket_counts, sum, count]
     self.values: dict[tuple[str, ...], list] = {}
 
@@ -321,6 +323,7 @@ class _Histogram:
     for label in self.labelnames:
       _validate_label_value(label, label_values[label])
     key = tuple(label_values[name] for name in self.labelnames)
+
     # guard: lazily initialize the per-key bucket state on first observation
     if key not in self.values:
       # trailing +1 slot is the +Inf bucket
@@ -329,6 +332,7 @@ class _Histogram:
     for idx, bucket in enumerate(_BUCKETS):
       if value <= bucket:
         buckets[idx] += 1
+
     # +Inf bucket accumulates every observation regardless of magnitude
     buckets[-1] += 1
     self.values[key] = [ buckets, total_sum + value, total_count + 1 ]
@@ -531,8 +535,10 @@ def init(repo_label: str, version: str, daemon_name: str) -> None:
 
   # token_offset is populated by aggregate_tokens_from_log on each scrape
   _state[MetricStateKey.TOKEN_OFFSET] = 0
+
   # jobs_offset is populated by aggregate_jobs_from_log on each scrape
   _state[MetricStateKey.JOBS_OFFSET] = 0
+
   # incidents_offset is populated by aggregate_incidents_from_ledger on each scrape
   _state[MetricStateKey.INCIDENTS_OFFSET] = 0
 
@@ -568,6 +574,7 @@ def _resolve_status(exit_code: int, error: str | None) -> tuple[str, str | None]
   # waiver: cross-module daemon error tag, not an internal key
   if error == "timeout":
     return ("timeout", "timeout")
+
   # guard: a registry entry rejected by its own schema is its own axis, not a failed run
   if error is not None and error.startswith(HaltReason.ROUTINE_CONFIG_INVALID):
     return ("error", HaltReason.ROUTINE_CONFIG_INVALID)
@@ -721,6 +728,7 @@ def set_halt_gauge(reason: str | None, triggered_by: str | None) -> None:
     return
   with _state[MetricStateKey.LOCK]:
     _state[MetricStateKey.DAEMON_HALTED].clear()
+
     # guard: no active halt block — leave the gauge empty after clearing
     if reason is None or triggered_by is None:
       return
@@ -792,9 +800,11 @@ def get_value(metric_name: str, labels: dict[str, str]) -> float | None:
     a counter or gauge, or has no value recorded for the given label combination.
   """
   metric = _registry_for(metric_name)
+
   # guard: metric not registered
   if metric is None:
     return None
+
   # guard: histograms expose values via get_bucket_value, not this entry point
   if not isinstance(metric, (_Counter, _Gauge)):
     return None
@@ -817,11 +827,13 @@ def get_bucket_value(metric_name: str, labels: dict[str, str], le: str) -> float
     match any configured bucket boundary.
   """
   metric = _registry_for(metric_name)
+
   # guard: only histograms expose bucket values
   if not isinstance(metric, _Histogram):
     return None
   key = tuple(labels.get(name, "") for name in metric.labelnames)
   state = metric.values.get(key)
+
   # guard: series has no observations yet
   if state is None:
     return None
@@ -859,6 +871,7 @@ def render() -> bytes:
     "daemon_halted", "daemon_paused", "halt_count", "dirty_tree",
   ):
     metric = _state.get(key)
+
     # guard: metric not yet registered — skip silently
     if metric is None:
       continue
@@ -978,6 +991,7 @@ def resolve_repo_label(repo_root: Path, override: str | None) -> str:
   if override:
     return override
   candidate = repo_root.name
+
   # guard: the readable default is used only when it satisfies the closed label charset
   if _LABEL_VALUE_RE.match(candidate):
     return candidate
@@ -1020,9 +1034,11 @@ def set_queue_depth_from_filesystem(repo_root: Path) -> None:
   # guard: metrics are off — scanning the filesystem is wasted work
   if not is_enabled():
     return
+
   # `expert_pump.JOBS_BASE` is the source of truth: `.experts/.jobs`
   # waiver: filesystem path idiom, not domain constants
   base = repo_root / ".experts" / ".jobs"
+
   # guard: no jobs directory — clear the gauge and bail
   if not base.exists():
     _state[MetricStateKey.QUEUE_DEPTH].clear()
@@ -1035,6 +1051,7 @@ def set_queue_depth_from_filesystem(repo_root: Path) -> None:
     if not expert_dir.is_dir():
       continue
     expert = expert_dir.name
+
     # guard: skip names that would expand label cardinality outside the closed set
     if not _LABEL_VALUE_RE.match(expert):
       continue
@@ -1088,20 +1105,24 @@ def _classify_job_state(job_dir: Path) -> str:
   # pump will never take, and the queue depth reports a backlog that does not exist
   if (job_dir / JobMarker.CANCELLED).exists():
     return JobStatus.CANCELLED
+
   # guard: DEAD outranks every other marker — a job the runtime abandoned is nothing else
   if (job_dir / JobMarker.DEAD).exists():
     return JobStatus.DEAD
+
   # guard: a finished job is classified by its response rather than by the marker alone
   if (job_dir / JobMarker.DONE).exists():
     # only an explicit finished outcome counts as done; a missing, malformed, or
     # outcome-less response is a failure the dashboard must show, not hide, and
     # postponed work gets its own state so it cannot hide inside either bucket
     return classify_response(read_response(job_dir))
+
   # guard: READY without DEAD or DONE is still in the queue — only a PID file makes it active
   if (job_dir / JobMarker.READY).exists():
     if (job_dir / JobMarker.PID).exists():
       return JobStatus.ACTIVE
     return JobStatus.QUEUED
+
   # fallback for partial / in-flight job dirs
   return JobStatus.QUEUED
 
@@ -1130,6 +1151,7 @@ def aggregate_tokens_from_log(repo_root: Path) -> None:
     return
   # waiver: filesystem path idiom (token-log location), not domain constants
   log_path = repo_root / ".logs" / "lazy-core" / "runtime" / "tokens.jsonl"
+
   # guard: no token log yet — nothing to aggregate
   if not log_path.exists():
     return
@@ -1149,9 +1171,11 @@ def aggregate_tokens_from_log(repo_root: Path) -> None:
       routine = rec.get("routine") or "expert-pump"
       # waiver: external token-log JSON field name and default, not internal keys
       model = rec.get("model") or "unknown"
+
       # the log's `expert` field names the actual consumer; older lines predate the field
       # waiver: external token-log JSON field name and default, not internal keys
       expert = rec.get("expert") or "unknown"
+
       # guard: closed-vocabulary check rejects entries with unsafe label values
       if not _LABEL_VALUE_RE.match(routine) or not _LABEL_VALUE_RE.match(model) or not _LABEL_VALUE_RE.match(expert):
         continue
@@ -1207,6 +1231,7 @@ def aggregate_jobs_from_log(repo_root: Path) -> None:
     return
   # waiver: filesystem path idiom (job-log location), not domain constants
   log_path = repo_root / ".logs" / "lazy-core" / "runtime" / "jobs.jsonl"
+
   # guard: no job log yet — nothing to aggregate
   if not log_path.exists():
     return
@@ -1226,6 +1251,7 @@ def aggregate_jobs_from_log(repo_root: Path) -> None:
       expert = rec.get("expert") or ""
       # waiver: external job-log JSON field names, not internal keys
       outcome = rec.get("outcome") or ""
+
       # guard: closed-vocabulary checks reject entries with unsafe or unknown label values
       if outcome not in _JOB_LOG_OUTCOMES or not _LABEL_VALUE_RE.match(expert):
         continue
@@ -1284,6 +1310,7 @@ def aggregate_incidents_from_ledger(repo_root: Path) -> None:
 
   # the ledger owns the journal path; a repo that never failed has no file at all
   journal = repo_root / error_ledger.JOURNAL_REL
+
   # guard: no journal yet — nothing has failed in this repo
   if not journal.exists():
     return
@@ -1322,6 +1349,7 @@ def aggregate_incidents_from_ledger(repo_root: Path) -> None:
         continue
       kind = rec.get(IncidentKey.KIND) or ""
       cause = rec.get(IncidentKey.CAUSE) or ""
+
       # guard: closed-vocabulary checks reject unknown kinds and unsafe cause values
       if kind not in _INCIDENT_KINDS or not _LABEL_VALUE_RE.match(cause):
         continue

@@ -158,6 +158,7 @@ def compile_scope_glob(glob: str) -> re.Pattern[str]:
       # a double-wildcard segment maps to "match anything, any length"
       parts.append(".*")
       i += 2
+
       # consume a following slash so `dir/**/file` also matches `dir/file`
       if i < len(glob) and glob[i] == "/":
         parts.append("/?")
@@ -306,15 +307,19 @@ def is_waived(check_id: str, file_path: str, matched_text: str, waivers: list) -
     # check-id match
     # waiver: external-format guard config field name, not an internal key
     wcheck = w.get("check", "*")
+
     # guard: skip waivers whose check id does not match
     if wcheck not in ("*", check_id):
       continue
+
     # scope match
     # waiver: external-format guard config field name, not an internal key
     scope = w.get("scope", "*")
+
     # guard: skip waivers whose scope does not cover this path
     if scope != "*" and not fnmatch(file_path, scope):
       continue
+
     # pattern match
     try:
       # guard: skip waivers whose pattern does not match the finding
@@ -322,9 +327,11 @@ def is_waived(check_id: str, file_path: str, matched_text: str, waivers: list) -
         continue
     except re.error:
       continue
+
     # expiry check
     # waiver: external-format guard config field name, not an internal key
     expires = w.get("expires")
+
     # guard: skip expired waivers
     if expires and today >= expires:
       continue
@@ -504,6 +511,7 @@ def main(argv: list[str]) -> int:
 
   # findings decide the exit code — the publish gate branches on it
   findings = scan_lines(lines, FAIL_CHECKS, waivers)
+
   # guard: clean scan
   if not findings:
     return 0

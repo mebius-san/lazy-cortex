@@ -11,16 +11,17 @@ carry are planted, an operator's own predicate for the same key is never overwri
 into, and a routine that is not registered is reported, never created.
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import argparse
 import json
 from pathlib import Path
 
-from constants import SettingsKey
-from lazy_settings import load_tracked_section, save_section
-from settings_cli import _resolve_settings_path
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from constants import SettingsKey  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from lazy_settings import load_tracked_section, save_section  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from settings_cli import _resolve_settings_path  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -110,6 +111,7 @@ def ensure_routine_filter(repo: Path, name: str, filter_frontmatter: dict) -> di
   # the keys the routine does not judge yet, in request order; a filter block is created on demand
   frontmatter = entry.setdefault(_K.FILTER, {}).setdefault(_K.FRONTMATTER, {})
   added = [ key for key in filter_frontmatter if key not in frontmatter ]
+
   # guard: every requested key is already judged by the routine — no write at all
   if not added:
     return { _K.STATUS: _K.UNCHANGED }
@@ -151,6 +153,7 @@ def cmd_routine_ensure_filter(argv: list[str]) -> int:
   except json.JSONDecodeError as error:
     print(json.dumps({ _K.STATUS: _K.ERROR, _K.REASON: f"filter-json parse: {error}" }))
     return 1
+
   # guard: a scalar or array cannot be seeded key by key
   if not isinstance(predicates, dict):
     print(json.dumps({ _K.STATUS: _K.ERROR, _K.REASON: _K.NOT_AN_OBJECT }))

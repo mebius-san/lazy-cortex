@@ -20,8 +20,6 @@ under `request`. The write is committed under a bot identity, defaulting to the 
 coordinator's own; a vault outside a git checkout is written but not committed.
 """
 from __future__ import annotations
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import argparse
 import json
@@ -30,10 +28,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-import flip_gate
-import scaffold_asset
-import spec_paths
-from spec_keys import SpecKey, SpecValue
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import flip_gate  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import scaffold_asset  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import spec_paths  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from spec_keys import SpecKey, SpecValue  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -215,7 +217,8 @@ def _commit(repo: Path, request_path: Path, author_name: str, author_email: str)
   Raises:
     subprocess.CalledProcessError: When either git invocation exits non-zero.
   """
-  top = flip_gate._git_field(repo, [ "rev-parse", _K.GIT_TOPLEVEL ], "")
+  top = flip_gate.git_field(repo, [ "rev-parse", _K.GIT_TOPLEVEL ], "")
+
   # guard: vault is not inside a git checkout — the write above is the whole mutation
   if not top:
     return
@@ -319,16 +322,19 @@ def main(argv: list[str]) -> int:
   args = parser.parse_args(argv)
 
   # a relative --source names a repo-relative document, so the verb reads the same from any cwd
-  repo = Path(args.cwd).resolve() if args.cwd else scaffold_asset._repo_root(Path.cwd())
+  repo = Path(args.cwd).resolve() if args.cwd else scaffold_asset.repo_root(Path.cwd())
   source: Path = args.source if args.source.is_absolute() else repo / args.source
+
   # guard: a source that does not exist would be attributed as a dangling wikilink
   if not source.is_file():
     sys.stderr.write(_ERR_SOURCE.format(path = source))
     return 2
+
   # guard: an unreadable body file would emit a titled request with nothing under it
   if not args.body.is_file():
     sys.stderr.write(_ERR_BODY.format(path = args.body))
     return 2
+
   # guard: the attribution wikilink is content-root-relative, so a source outside that root has
   # no expressible link — refused here rather than raised out of `draft` as a bare ValueError
   content_root = spec_paths.spec_content_root(repo)

@@ -15,8 +15,6 @@ on a non-living-doc role, and — for an asset-level doc — on the owning asset
 `spec_cancelled` / `spec_halted` / `spec_released` flags, checked here rather than by any caller.
 """
 from __future__ import annotations
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error,wrong-import-position
 
 import argparse
 import hashlib
@@ -40,11 +38,13 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import flip_gate  # noqa: E402
+import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import spec_paths  # noqa: E402
+import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import spec_doc_types  # noqa: E402
+import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import spec_doc_types  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 # The document type this module's registry files declare themselves as.
 _DECISIONS_TYPE = "decisions"
@@ -57,11 +57,11 @@ class _K:
   than once across this module, per the plugin's per-file small-constant convention.
 
   Attributes:
-    CLAUDE_DIR: The `.claude` directory segment.
-    SETTINGS_FILE: Filename of the settings file.
-    PRODUCTS: Settings key holding the product registry.
     SPEC_PATH: Settings key naming a product's spec directory.
     SPEC_ROLE: Frontmatter key naming a doc's role, read to gate `promote` to living docs.
+    ASSET_TYPE: Frontmatter key naming an asset's kind, read for the category of an asset
+      sitting straight at the product root, where no group folder names one.
+    TYPE_UNKNOWN: The `spec_asset_type` sentinel written before anybody judged the kind.
     GIT_DIR: The `.git` entry marking a repo root / holding the exclusive lock file.
     TAG_PROTECTED: The `#protected/` H1-section owner-tag prefix (cross-plugin owned sections).
     TAG_EXPERT: The `#expert/` H1-section owner-tag prefix (review-cycle-scoped sections).
@@ -98,11 +98,11 @@ class _K:
     PROG: CLI program name shown in `--help` output.
   """
 
-  CLAUDE_DIR = ".claude"
-  SETTINGS_FILE = "lazy.settings.json"
-  PRODUCTS = "products"
   SPEC_PATH = "spec_path"
   SPEC_ROLE = "spec_role"
+  ROLE_STATUS = "status"
+  ASSET_TYPE = "spec_asset_type"
+  TYPE_UNKNOWN = "unknown"
   GIT_DIR = ".git"
   TAG_PROTECTED = "#protected/"
   TAG_EXPERT = "#expert/"
@@ -177,10 +177,12 @@ _LIVING_ROLES = frozenset({"design", "bug", "tech", "architecture"})
 # § on assets outside the automation).
 _HALT_FLAGS = ("spec_cancelled", "spec_halted", "spec_released")
 
-# Reverse of `scaffold_asset.py`'s `_Category.BUILTIN_FOLDERS` — maps an on-disk category folder
-# name back to its singular `category` axis value; an operator-defined category folder maps to
-# itself (scaffold_asset.py's own convention for non-built-in categories).
-_CATEGORY_FOLDER_TO_KEY = {"features": "feature", "changes": "change", "bugs": "bug"}
+# Reverse of the shipped half of `asset_types.folder_map` — maps an on-disk group folder name
+# back to its singular `category` axis value; an operator-defined group folder maps to itself,
+# the same convention that map follows for a folder named after its own type. `feature` (and
+# every other type whose `default_path` is the product root itself) contributes no folder at all,
+# so an asset sitting there takes its category from its own `spec_asset_type` instead.
+_CATEGORY_FOLDER_TO_KEY = {"changes": "change", "bugs": "bug"}
 
 
 # ----------------------------------------------------------------------------------------
@@ -194,8 +196,10 @@ class _Context:
       wikilinks relative to it.
     product: The product's settings-dict key (e.g. `core`) — the literal header value — or None
       at project level (the content-root itself owns no product).
-    category: The singular category axis value (`feature` / `change` / `bug` / operator-defined),
-      or None at product and project level (no category exists there).
+    category: The singular category axis value (`feature` / `change` / `bug` / operator-defined) —
+      named by the group folder the asset sits in, or by the asset's own declared type when it
+      sits straight at the product root; None at product and project level, and None for an
+      asset whose type is still unjudged.
     slug: The asset's folder slug, or None at product and project level.
     asset_dir: The asset's own folder, or None at product and project level.
   """
@@ -207,7 +211,7 @@ class _Context:
   asset_dir: Path | None
 
 
-def _resolve_context(target_path: Path) -> _Context:
+def resolve_context(target_path: Path) -> _Context:
   """
   Resolve the product/asset placement of a `decisions.md` path or a living doc's own path.
 
@@ -215,7 +219,10 @@ def _resolve_context(target_path: Path) -> _Context:
   (relative to the spec content-root) against each product's `spec_path`, picking the longest
   (most specific) match. A parent equal to the content-root itself is project-level; a parent
   equal to a product's `spec_path` is product-level; a parent one or more segments deeper is
-  asset-level.
+  asset-level, its asset being the nearest folder up to the product root whose folder-note
+  carries `spec_role: status` — any depth, nested inside another asset or straight at the
+  product root alike. The category comes from the group folder holding the asset; an asset at
+  the product root sits in none, so its own declared asset type names it instead.
 
   Args:
     target_path: The `decisions.md` path (may not yet exist) or a living doc's own path; only
@@ -237,46 +244,99 @@ def _resolve_context(target_path: Path) -> _Context:
     return _Context(content_root = content_root, product = None,
                     category = None, slug = None, asset_dir = None)
 
-  # below the root a product must claim the target — load the registered product records
-  settings_path = settings_root / _K.CLAUDE_DIR / _K.SETTINGS_FILE
-  data = json.loads(settings_path.read_text()) if settings_path.is_file() else {}
-  products = data.get(_K.PRODUCTS) or {}
-
-  # match the target dir against every registered product's spec_path; the longest (most
-  # specific) match wins when spec_path values happen to nest
+  # below the root a product must claim the target — ownership, its segment-wise matching and
+  # its longest-`spec_path` tie-break all belong to the resolver, never restated here
   rel_str = target_dir.relative_to(content_root).as_posix()
-  best_key: str | None = None
-  best_spec_path: str | None = None
-  for key, record in products.items():
-    # guard: malformed product record — skip
-    if not isinstance(record, dict):
-      continue
-    sp = record.get(_K.SPEC_PATH)
-    # guard: no spec_path on this record, or the target dir isn't under it — not a candidate
-    if not sp or not (rel_str == sp or rel_str.startswith(sp + "/")):
-      continue
-    if best_spec_path is None or len(sp) > len(best_spec_path):
-      best_key, best_spec_path = key, sp
+  best_key, record = resolve_product.effective_record_by_path(settings_root, rel_str)
+  best_spec_path = (record or {}).get(_K.SPEC_PATH)
 
   # guard: no product's spec_path covers the target — caller passed a path outside the catalog
-  if best_key is None or best_spec_path is None:
+  if best_key is None or not isinstance(best_spec_path, str) or not best_spec_path:
     raise ValueError(f"no product registered whose spec_path covers '{rel_str}'")
 
   # derive the placement fields shared by both product- and asset-level shells
   remainder = rel_str[len(best_spec_path):].strip("/")
+
   # guard: target dir IS the product root — product-level, no category/slug
   if not remainder:
     return _Context(content_root = content_root, product = best_key,
                     category = None, slug = None, asset_dir = None)
 
-  # target dir is one level under an asset category folder — resolve category + slug + asset_dir
-  parts = remainder.split("/")
-  category_folder = parts[0]
-  slug = parts[1] if len(parts) > 1 else parts[0]
-  category = _CATEGORY_FOLDER_TO_KEY.get(category_folder, category_folder)
-  asset_dir = content_root / best_spec_path / category_folder / slug
+  # target dir is inside an asset — the nearest status folder-note up to the product root marks it
+  product_root = content_root / best_spec_path
+  asset_dir = _nearest_asset_dir(target_dir, product_root)
+  if asset_dir is not None:
+    # the category is the folder the asset sits in; an asset straight at the product root has none
+    category_folder = asset_dir.parent.name if asset_dir.parent != product_root else None
+  else:
+    # no status note yet between the target and the product root — read the whole remainder as
+    # the not-yet-scaffolded asset's own placement at whatever depth it sits: the last segment
+    # is the slug, the one before it the enclosing group folder, and a lone segment is a slug
+    # sitting straight at the product root with no folder above it
+    parts = remainder.split("/")
+    category_folder = parts[-2] if len(parts) > 1 else None
+    asset_dir = product_root / remainder
+  category = _CATEGORY_FOLDER_TO_KEY.get(category_folder, category_folder) if category_folder else None
+
+  # an asset straight at the product root sits in no group folder, so the folder names no
+  # category — its own status note declares what it is, and that is the pin the registry carries
+  if category is None:
+    category = _declared_asset_type(asset_dir)
   return _Context(content_root = content_root, product = best_key,
-                  category = category, slug = slug, asset_dir = asset_dir)
+                  category = category, slug = asset_dir.name, asset_dir = asset_dir)
+
+
+def _declared_asset_type(asset_dir: Path) -> str | None:
+  """
+  Read the asset type an asset folder's own status note declares.
+
+  Args:
+    asset_dir: The asset folder; it need not exist yet.
+
+  Returns:
+    The `spec_asset_type` value, or None when the note is absent, carries no type, or carries
+    the `unknown` sentinel nobody has resolved yet.
+  """
+  note = asset_dir / f"{asset_dir.name}.md"
+
+  # guard: a not-yet-scaffolded asset has no note to declare anything
+  if not note.is_file():
+    return None
+  fm_values, _end = flip_gate.parse_frontmatter(note.read_text())
+  declared = fm_values.get(_K.ASSET_TYPE)
+
+  # guard: an absent, empty or still-unjudged type pins no category
+  if not isinstance(declared, str) or declared in ("", _K.TYPE_UNKNOWN):
+    return None
+  return declared
+
+
+def _nearest_asset_dir(start: Path, product_root: Path) -> Path | None:
+  """
+  Find the asset folder owning `start`: the nearest folder, from `start` up to (excluding)
+  `product_root`, whose folder-note `<dir>/<dir.name>.md` carries `spec_role: status`.
+
+  Args:
+    start: The directory to walk up from (inclusive).
+    product_root: The owning product's root; the walk stops before it.
+
+  Returns:
+    The asset folder, or None when no status folder-note sits between `start` and the product
+    root (or `start` is not under `product_root` at all).
+  """
+  for candidate in (start, *start.parents):
+    # guard: reached the product root, or left its tree, without meeting a status note
+    if candidate == product_root or product_root not in candidate.parents:
+      return None
+    note = candidate / f"{candidate.name}.md"
+
+    # guard: no folder-note here — not an asset boundary
+    if not note.is_file():
+      continue
+    fm_values, _ = flip_gate.parse_frontmatter(note.read_text())
+    if fm_values.get(_K.SPEC_ROLE) == _K.ROLE_STATUS:
+      return candidate
+  return None
 
 
 # ----------------------------------------------------------------------------------------
@@ -322,6 +382,7 @@ def _lock_file_path(decisions_path: Path) -> Path:
   """
   repo = _git_repo_root(decisions_path.parent)
   target = decisions_path.resolve()
+
   # a target outside the repo (no plausible caller today, but not a contract violation either)
   # falls back to its own absolute path rather than raising
   try:
@@ -350,6 +411,7 @@ def _decisions_lock(decisions_path: Path) -> Iterator[None]:
   lock_path = _lock_file_path(decisions_path)
   lock_path.parent.mkdir(parents = True, exist_ok = True)
   deadline = time.time() + _LOCK_WAIT_SECONDS
+
   # poll until the exclusive create succeeds, a stale peer is broken, or the deadline passes
   while True:
     try:
@@ -358,6 +420,7 @@ def _decisions_lock(decisions_path: Path) -> Iterator[None]:
       break
     except FileExistsError:
       pass
+
     # a lock observed as present a moment ago but gone by the time it's stat'd (raced with its
     # own holder's release) is treated the same as still-contended below, rather than retried
     # instantly — it still waits its turn through the deadline/sleep check instead of spinning
@@ -373,6 +436,7 @@ def _decisions_lock(decisions_path: Path) -> Iterator[None]:
         except FileNotFoundError:
           pass
         continue
+
     # guard: wait deadline reached without acquiring the lock
     if time.time() >= deadline:
       raise TimeoutError(f"decisions lock busy: {lock_path}")
@@ -494,6 +558,7 @@ def _parse_records(body: str) -> list[dict]:
   content_end = _protected_boundary_line(lines)
   headings = [(i, m) for i in range(content_end) if (m := _HEADING_RE.match(lines[i])) is not None]
   records = []
+
   # each record's chunk runs from its own heading to the next record's heading, or the content
   # boundary (whichever ends the registry's own content first)
   for idx, (line_no, m) in enumerate(headings):
@@ -512,6 +577,7 @@ def _parse_records(body: str) -> list[dict]:
       elif origin_m:
         origin = origin_m.group(1).strip()
         body_start = k + 1
+
     # the body starts after the blank line separating it from the Origin metadata line
     while body_start < len(meta_lines) and not meta_lines[body_start].strip():
       body_start += 1
@@ -585,10 +651,12 @@ def _set_status(body: str, number: int, new_status: str) -> tuple[str, bool]:
   # from the registry — it stays as history, just no longer read as the live word on the subject.
 
   heading_m = re.search(rf"(?m)^## D-{number:03d} — .*$", body)
+
   # guard: no such record in this body
   if heading_m is None:
     return body, False
   status_m = re.search(r"(?m)^Status:.*$", body[heading_m.end():])
+
   # guard: record found but malformed — no Status line to rewrite
   if status_m is None:
     return body, False
@@ -601,7 +669,7 @@ def _insert_record(body: str, record_text: str) -> str:
   """
   Insert a formatted record at the end of the CONTENT, before a `#protected/`-tagged H1 section.
 
-  Mirrors `flip_gate._append_under_heading`'s treatment of a `#protected/...` tag line as NOT a
+  Mirrors `flip_gate.append_under_heading`'s treatment of a `#protected/...` tag line as NOT a
   heading boundary in spirit, but this primitive has no named container heading to insert under —
   `decisions.md` records are top-level `## D-NNN` blocks, so the insertion point is simply "before
   the first H1 whose first non-blank content line is a `#protected/` tag", or end-of-body when no
@@ -647,14 +715,16 @@ def _new_file_shell(decisions_path: Path) -> tuple[str, str]:
     `(fm_text, body)` per spec-decisions-design.md §§ on the record layout and the frontmatter
     shape.
   """
-  ctx = _resolve_context(decisions_path)
+  ctx = resolve_context(decisions_path)
   fm_lines = ["---", "spec_role: decisions", "wiki_pinned_topics:",
               "  - wiki/doc-kind/decisions"]
+
   # project-level registries carry no product pin — there is no product above the content-root
   if ctx.product is not None:
     fm_lines.append(f"  - wiki/product/{ctx.product}")
   if ctx.category is not None:
     fm_lines.append(f"  - wiki/category/{ctx.category}")
+
   # the registry never carries a stage, so no matcher ever claims it — the type's own seed is
   # the only paint it will ever have, and it has to be written here rather than by the scaffold
   if (paint := spec_doc_types.icon_color(
@@ -696,6 +766,7 @@ def _parse_id(record_id: str) -> int:
     ValueError: When `record_id` does not match the `D-NNN` shape.
   """
   m = re.match(r"^D-(\d{3,})$", record_id.strip())
+
   # guard: malformed id token
   if m is None:
     raise ValueError(f"invalid decision id: {record_id!r}")
@@ -738,7 +809,7 @@ def add(decisions_path: Path, thesis: str, body: str, *,
     ValueError: `decisions_path` needs to be lazily created and its parent directory isn't
       covered by any registered product's `spec_path`.
   """
-  today_str = flip_gate._today(today)
+  today_str = flip_gate.effective_today(today)
 
   # Contract:
   # concurrent callers never allocate the same `D-NNN` number — the whole
@@ -748,6 +819,7 @@ def add(decisions_path: Path, thesis: str, body: str, *,
   with _decisions_lock(decisions_path):
     if decisions_path.is_file():
       fm_text, existing_body = _split(decisions_path.read_text())
+
       # a decisions.md with no parseable frontmatter (fm_end == 0) still needs its canonical
       # shell — prepend fresh frontmatter + header rather than writing a still-headerless file
       if not fm_text:
@@ -762,6 +834,7 @@ def add(decisions_path: Path, thesis: str, body: str, *,
     dup = next(
         (r for r in existing if _dedup_key(r[_K.THESIS], r[_K.BODY]) == key), None,
     )
+
     # guard: an existing record already carries this exact content — write nothing
     if dup is not None:
       return {_K.STATUS: _Result.DUPLICATE, _K.ID: f"D-{dup[_K.NUMBER]:03d}",
@@ -794,6 +867,7 @@ def _write_status(decisions_path: Path, number: int, new_status: str) -> bool:
     text = decisions_path.read_text()
     fm_text, body = _split(text)
     new_body, changed = _set_status(body, number, new_status)
+
     # guard: no such record — nothing written
     if not changed:
       return False
@@ -825,6 +899,7 @@ def supersede(decisions_path: Path, old_id: str, thesis: str, body: str, *,
   """
   old_number = _parse_id(old_id)
   existing = _parse_records(_split(decisions_path.read_text())[1]) if decisions_path.is_file() else []
+
   # guard: the record being superseded must already exist
   if not any(r[_K.NUMBER] == old_number for r in existing):
     return {_K.STATUS: _Result.REFUSED, _K.REASON: f"no such record: D-{old_number:03d}"}
@@ -836,7 +911,7 @@ def supersede(decisions_path: Path, old_id: str, thesis: str, body: str, *,
   result = add(decisions_path, thesis, body, origin = origin, today = today)
   new_id = result[_K.ID]
   if result[_K.STATUS] == _Result.ADDED:
-    content_root = _resolve_context(decisions_path).content_root
+    content_root = resolve_context(decisions_path).content_root
     link = _self_link(decisions_path, new_id, thesis, content_root)
     _write_status(decisions_path, old_number, f"superseded-by {link}")
   return {_K.STATUS: _Result.SUPERSEDED, _K.OLD_ID: f"D-{old_number:03d}", _K.NEW_ID: new_id}
@@ -861,6 +936,7 @@ def obsolete(decisions_path: Path, record_id: str, reason: str) -> dict:
   """
   number = _parse_id(record_id)
   ok = _write_status(decisions_path, number, f"obsolete — {reason}")
+
   # guard: no such record
   if not ok:
     return {_K.STATUS: _Result.REFUSED, _K.REASON: f"no such record: D-{number:03d}"}
@@ -910,6 +986,7 @@ def _find_decision_blocks(body: str) -> list[dict]:
   in_fence = False
   skip_section = False
   i = 0
+
   # single forward pass: toggle fence state, refresh the current section's skip flag at every
   # H1 boundary, and collect `[!decision]` blocks only while neither guard is active
   while i < n:
@@ -997,6 +1074,7 @@ def _doc_title_line(body: str) -> str:
     m = re.match(r"^#\s+(.+)$", line)
     if m:
       return m.group(1).strip()
+
     # guard: first non-blank, non-heading line — no title present
     if line.strip():
       break
@@ -1012,6 +1090,7 @@ def _resolve_supersedes_link(text: str, content_root: Path) -> tuple[Path | None
     shape.
   """
   m = _WIKILINK_RE.match(text.strip())
+
   # guard: not a recognizable `[[<path>#D-NNN ...]]` link
   if m is None:
     return None, None
@@ -1075,6 +1154,7 @@ def promote(doc_path: Path, *, today: str | None = None) -> dict:
   text = doc_path.read_text()
   fm_values, fm_end = flip_gate.parse_frontmatter(text)
   role = fm_values.get(_K.SPEC_ROLE, "")
+
   # guard: only living docs are a source for promoted decisions — plans decompose already-accepted
   # decisions and reports carry only candidates (spec-decisions-design.md § on candidates sourced
   # from reports)
@@ -1092,20 +1172,21 @@ def promote(doc_path: Path, *, today: str | None = None) -> dict:
   # a product-level doc has no owning asset and so no terminal/halt flags to check at all; an
   # asset-level doc's owning asset gates every promote call regardless of who invoked it (auto on
   # approve, or a manual /lazy-spec.record-decision promote)
-  ctx = _resolve_context(doc_path)
+  ctx = resolve_context(doc_path)
   if ctx.asset_dir is not None:
     status_note = ctx.asset_dir / f"{ctx.slug}.md"
     if status_note.is_file():
       note_fm, _ = flip_gate.parse_frontmatter(status_note.read_text())
       for flag in _HALT_FLAGS:
         # guard: the owning asset carries a terminal/halt flag — refuse the whole call
-        if flip_gate._is_true(note_fm, flag):
+        if flip_gate.is_true(note_fm, flag):
           return {_K.STATUS: _Result.REFUSED, _K.REASON: f"asset flag {flag} is true",
                   _K.TOUCHED_PATHS: [], _K.RECORDS: []}
 
   # find every transferable block before touching anything on disk
   body = text[fm_end:]
   blocks = _find_decision_blocks(body)
+
   # guard: nothing to promote — no mutation, no touched paths
   if not blocks:
     return {_K.STATUS: _Result.NOOP, _K.TOUCHED_PATHS: [], _K.RECORDS: []}
@@ -1128,6 +1209,7 @@ def promote(doc_path: Path, *, today: str | None = None) -> dict:
   for blk in sorted(blocks, key = lambda b: b[_K.START], reverse = True):
     supersedes, block_body_lines = _split_supersedes_and_body(blk[_K.RAW_LINES])
     thesis = blk[_K.THESIS]
+
     # trim only the leading/trailing blank padding a source block may carry — every content
     # line in between is preserved exactly, verbatim, minus its `> ` prefix
     while block_body_lines and not block_body_lines[0].strip():

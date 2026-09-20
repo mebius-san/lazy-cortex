@@ -155,6 +155,7 @@ def is_empty_settings(parsed: dict | None) -> bool:
     return True
   # waiver: external-format Claude Code settings field name, not an internal key
   perms = parsed.get("permissions", {})
+
   # guard: no permissions block at all
   if not perms:
     return parsed == { "permissions": {} }
@@ -165,10 +166,12 @@ def is_empty_settings(parsed: dict | None) -> bool:
   # waiver: external-format Claude Code settings field name, not an internal key
   ask = perms.get("ask", [])
   other_keys = set(parsed.keys()) - { "permissions", "$schema" }
+
   # guard: any non-permissions top-level key disqualifies emptiness
   if other_keys:
     return False
   perm_keys = set(perms.keys()) - { "allow", "deny", "ask" }
+
   # guard: any unrecognised permission key disqualifies emptiness
   if perm_keys:
     return False
@@ -225,6 +228,7 @@ def extract_permission_entries(text: str) -> set[str]:
         if isinstance(entry, str):
           entries.add(entry)
     return entries
+
   # Partial text (Edit fragments): match uppercase-starting tool names and mcp__ prefixes
   return set(re.findall(r'"([A-Z][A-Za-z]+(?:\([^"]*\))?|mcp__[^"]+)"', text))
 
@@ -303,6 +307,7 @@ def check_tracked_permissions_leak(classification: dict, old_text: str | None, n
   old_perms = extract_permission_entries(old_text) if old_text else set()
   new_perms = extract_permission_entries(new_text)
   added = new_perms - old_perms
+
   # guard: nothing new added — no leak to report
   if not added:
     return None
@@ -488,6 +493,7 @@ def main() -> None:
 
   # Fast path: not a settings file
   classification = classify_path(file_path, cwd)
+
   # guard: not a settings file — let the call through silently
   # waiver: internal classify_path result-schema field name, single-source set in classify_path
   if not classification["is_settings"]:
@@ -510,6 +516,7 @@ def main() -> None:
 
   # Check deny removal first — deletions have empty new_text but non-empty old_text
   deny_removal = check_critical_deny_removal(old_text, new_text)
+
   # guard: a critical deny rule is being dropped — veto the write
   if deny_removal:
     output_block(deny_removal)
@@ -520,6 +527,7 @@ def main() -> None:
 
   # Block checks
   blocked = check_blocked_allow_patterns(new_text)
+
   # guard: an allow entry matches a blocked pattern — veto the write
   if blocked:
     output_block(blocked)

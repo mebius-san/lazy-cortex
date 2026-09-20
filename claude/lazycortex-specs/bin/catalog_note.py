@@ -19,8 +19,6 @@ repo-relative path under `note`, and the frontmatter keys and section headings t
 under `added`. Nothing is staged or committed — the caller owns the commit.
 """
 from __future__ import annotations
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
 
 import argparse
 import json
@@ -28,12 +26,20 @@ import os
 import sys
 from pathlib import Path
 
-import asset_types
-import flip_gate
-import note_explainers
-import note_ops
-import scaffold_asset
-import spec_paths
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import asset_types  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import flip_gate  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import note_explainers  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import note_ops  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import scaffold_asset  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import spec_paths  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+# pylint: disable-next=import-error
 from spec_keys import BOOL_FALSE, LEVEL_GATE_ORDER, Section, SpecHaltKey, SpecKey, SpecValue
 
 from typing import TYPE_CHECKING
@@ -41,6 +47,7 @@ if TYPE_CHECKING:
   pass
 
 
+# ----------------------------------------------------------------------------------------
 class _Out:
   """
   Result-dict field names this verb returns and prints.
@@ -56,6 +63,7 @@ class _Out:
   ADDED = "added"
 
 
+# ----------------------------------------------------------------------------------------
 class _Outcome:
   """
   `_Out.OUTCOME` values this verb reports.
@@ -92,10 +100,6 @@ _TEMPLATE_NAME = "level-note.md"
 _TEMPLATE_CONTEXT_PRODUCT = "product"
 _TEMPLATE_CONTEXT_VAULT = "vault"
 _ROLE_TOKEN = "role"
-
-# Identity recorded in the `# History` line this verb leaves behind, mirroring the `<actor>` half
-# of every other verb's own line.
-_ACTOR = "lazy-spec.catalog-note"
 
 # CLI argparse names and help strings.
 _PROG = "lazycortex-specs catalog-note"
@@ -136,12 +140,16 @@ def _target(repo: Path, product: str | None, root: bool) -> tuple[Path, str, dic
   Raises:
     SystemExit: When the product form names a key no product registry declares.
   """
+  # One call renders exactly the one level note its argument names and walks no tree: nothing
+  # here enumerates a product's children, so a product nested inside another is never reached
+  # from its parent's run and there is no nested-product skip to make.
   content_root = spec_paths.spec_content_root(repo)
+
   # guard: the root form has no product record to read — the vault root names its own note
   if root:
     return content_root / f"{content_root.name}.md", SpecValue.ROLE_CATALOG, {}
-  record = scaffold_asset._resolve_product(repo, product or "")
-  product_dir = content_root / record[scaffold_asset._K.SPEC_PATH]
+  record = scaffold_asset.resolve_product(repo, product or "")
+  product_dir = content_root / record[scaffold_asset.Keys.SPEC_PATH]
   return product_dir / f"{product_dir.name}.md", SpecValue.ROLE_PRODUCT, record
 
 
@@ -192,9 +200,9 @@ def _managed_keys(role: str, record: dict) -> list[tuple[str, str]]:
   # the resolved paint keys put the folder's icon in the explorer
   icon, color = _paint(role, record)
   if icon:
-    pairs.append(( note_ops._ICONIZE_ICON_KEY, icon ))
+    pairs.append(( note_ops.ICONIZE_ICON_KEY, icon ))
   if color:
-    pairs.append(( note_ops._ICONIZE_COLOR_KEY, f'"{color}"' ))
+    pairs.append(( note_ops.ICONIZE_COLOR_KEY, f'"{color}"' ))
   return pairs
 
 
@@ -215,12 +223,12 @@ def _seed_text(repo: Path, role: str, product: str, record: dict) -> str:
     SystemExit: When no layer of the override chain carries the level-note template.
   """
   # the catalog root has its own context and shares the level note with the product context
-  context = _TEMPLATE_CONTEXT_PRODUCT if product else _TEMPLATE_CONTEXT_VAULT
-  alias_base = "" if product else _TEMPLATE_CONTEXT_PRODUCT
-  template = scaffold_asset._resolve_template(repo, context, product, _TEMPLATE_NAME, alias_base = alias_base)
-  text = scaffold_asset._substitute(template.read_text(), { _ROLE_TOKEN: role })
+  template = scaffold_asset.resolve_template(
+      repo, _TEMPLATE_CONTEXT_PRODUCT if product else _TEMPLATE_CONTEXT_VAULT, product, _TEMPLATE_NAME,
+      alias_base = "" if product else _TEMPLATE_CONTEXT_PRODUCT)
+  text = scaffold_asset.substitute(template.read_text(), { _ROLE_TOKEN: role })
   icon, color = _paint(role, record)
-  return scaffold_asset._inject_iconize(text, icon, color)
+  return scaffold_asset.inject_iconize(text, icon, color)
 
 
 def _section_blocks(text: str) -> dict[str, list[str]]:
@@ -311,6 +319,7 @@ def _insert_sections(body: str, blocks: dict[str, list[str]], lang: str) -> tupl
   lines = body.splitlines()
   positions = { line.strip(): idx for idx, line in enumerate(lines) if line.strip() in _SECTION_ORDER }
   missing = [ heading for heading in _SECTION_ORDER if heading not in positions ]
+
   # guard: the roster is already complete — the body is returned byte-identical
   if not missing:
     return body, []
@@ -343,37 +352,20 @@ def _apply_keys(text: str, role: str, record: dict) -> tuple[str, list[str]]:
   Returns:
     A `(text, added)` pair — `added` names the keys written, in write order.
   """
-  fm, fm_end = flip_gate.parse_frontmatter(text)
+  frontmatter, fm_end = flip_gate.parse_frontmatter(text)
   pairs = _managed_keys(role, record)
+
   # guard: no parseable frontmatter at all — the whole block is written from the managed set
   if fm_end == 0:
     block = "".join(f"{key}: {value}\n" for key, value in pairs)
     return f"---\n{block}---\n" + text, [ key for key, _value in pairs ]
 
   # an existing key is the operator's or another writer's — only the absent ones are filled in
-  missing = [ pair for pair in pairs if pair[0] not in fm ]
+  missing = [ pair for pair in pairs if pair[0] not in frontmatter ]
   fm_text = text[:fm_end]
   for key, value in missing:
-    fm_text = note_ops._set_fm_scalar(fm_text, key, value)
+    fm_text = note_ops.set_fm_scalar(fm_text, key, value)
   return fm_text + text[fm_end:], [ key for key, _value in missing ]
-
-
-def _append_history(text: str, added: list[str], today: str | None) -> str:
-  """
-  Record one dated audit line for the run under the note's `# History` section.
-
-  Args:
-    text: The full note text, its `# History` section already present.
-    added: The keys and sections the run added; empty for a freshly created note.
-    today: Optional ISO date pinned into the line.
-
-  Returns:
-    The note text carrying one more history line.
-  """
-  detail = f"added: {', '.join(added)}" if added else _Outcome.CREATED
-  line = f"- {flip_gate._today(today)} — {_ACTOR} · backfill · {detail}"
-  _fm, fm_end = flip_gate.parse_frontmatter(text)
-  return text[:fm_end] + flip_gate._append_under_heading(text[fm_end:], Section.HISTORY, line)
 
 
 def backfill(repo: Path, *, product: str | None, root: bool, today: str | None = None) -> dict:
@@ -394,7 +386,8 @@ def backfill(repo: Path, *, product: str | None, root: bool, today: str | None =
     repo: The settings root holding `.claude/lazy.settings.json`.
     product: The product compound-key whose level note is the target, or None for the root form.
     root: True to target the catalog root note instead of a product's own.
-    today: Optional ISO date pinned into the emitted history line.
+    today: Accepted for CLI compatibility and ignored — a backfill journals nothing since the
+      history redesign; the commit records the run.
 
   Returns:
     `{"outcome": "created" | "updated" | "unchanged", "note": <repo-relative path>,
@@ -413,6 +406,10 @@ def backfill(repo: Path, *, product: str | None, root: bool, today: str | None =
   # Contract:
   # A run over a note that already carries the full schema writes nothing to disk and reports
   # `unchanged`.
+
+  # the date is accepted for the callers that still pass it and discarded here, so the
+  # signature stays honest about the fact that a backfill journals nothing any more
+  del today
 
   # which note this call names, the role it carries, and whether it is there yet
   note, role, record = _target(repo, product, root)
@@ -439,7 +436,7 @@ def backfill(repo: Path, *, product: str | None, root: bool, today: str | None =
   if created:
     text = note_explainers.heal_note_text(note, text)
   note.parent.mkdir(parents = True, exist_ok = True)
-  note.write_text(_append_history(text, added, today))
+  note.write_text(text)
   return { _Out.OUTCOME: _Outcome.CREATED if created else _Outcome.UPDATED,
            _Out.NOTE: str(note.relative_to(repo)), _Out.ADDED: added }
 
@@ -472,7 +469,7 @@ def main(argv: list[str]) -> int:
   # the flag, then the daemon-exported env var, then the process cwd — like every sibling verb;
   # a headless caller standing in another checkout would otherwise seed a catalog there
   start = Path(args.cwd or os.environ.get(_ENV_REPO_ROOT) or Path.cwd())
-  result = backfill(scaffold_asset._repo_root(start), product = args.product,
+  result = backfill(scaffold_asset.repo_root(start), product = args.product,
                     root = args.root, today = args.today)
   print(json.dumps(result))
   return 0

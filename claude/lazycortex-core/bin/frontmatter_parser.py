@@ -45,6 +45,7 @@ def parse_frontmatter(text: str) -> dict:
 
   # frontmatter is only frontmatter when the very first line opens the fence
   lines = text.splitlines()
+
   # guard: missing opening fence
   if not lines or lines[0].strip() != "---":
     return {}
@@ -55,6 +56,7 @@ def parse_frontmatter(text: str) -> dict:
     if lines[i].strip() == "---":
       close_idx = i
       break
+
   # guard: no closing fence — frontmatter is malformed
   if close_idx is None:
     return {}
@@ -68,6 +70,7 @@ def parse_frontmatter(text: str) -> dict:
   for raw in block:
     stripped = raw.lstrip()
     indent = len(raw) - len(stripped)
+
     # indented `- item` line under the most recent key — append to its list
     if indent > 0 and stripped.startswith("- ") and current_key is not None:
       value = _unquote(stripped[2:].strip())
@@ -82,6 +85,7 @@ def parse_frontmatter(text: str) -> dict:
     key, _, value = raw.partition(":")
     key = key.strip()
     value = value.strip()
+
     # guard: empty key after stripping
     if not key:
       continue
@@ -137,6 +141,7 @@ def _coerce_scalar(s: str) -> bool | int | float | str | None:
     return False
   if s.lower() in ( "null", "~" ):
     return None
+
   # try numeric coercion: prefer int when there's no decimal point, fall back to float
   try:
     if "." not in s:

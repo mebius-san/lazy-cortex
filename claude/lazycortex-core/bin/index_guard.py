@@ -57,6 +57,7 @@ def _git_common_dir(repo_root: Path) -> Path | None:
     [ "git", "rev-parse", "--git-common-dir" ],
     cwd = repo_root, check = False, capture_output = True, text = True,
   )
+
   # guard: not a repository — nothing to heal
   if probe.returncode != 0:
     return None
@@ -122,12 +123,14 @@ def guard_index(repo_root: Path) -> dict:
   # rank one over the other.
 
   git_dir = _git_common_dir(repo_root)
+
   # guard: not a repository — nothing to heal
   if git_dir is None:
     return { "restored": False, "removed": 0, "skipped": "no-git" }
 
   # oldest-to-newest, so the last element is the one candidate worth restoring
   copies = sorted(git_dir.glob(_CONFLICTED_COPY_GLOB), key = lambda p: p.stat().st_mtime)
+
   # guard: no conflicted copies — the common case, exit without touching anything
   if not copies:
     return { "restored": False, "removed": 0, "skipped": None }
@@ -153,10 +156,12 @@ def guard_index(repo_root: Path) -> dict:
   restored = False
   if candidate:
     copy_matches = _matches_head(repo_root, newest)
+
     # guard: neither candidate agrees with HEAD — two staged states nothing here can rank, so the
     # copies stay in place and the operator decides
     if not copy_matches and not _matches_head(repo_root, index):
       return { "restored": False, "removed": 0, "skipped": "ambiguous" }
+
     # the copy git wrote last agrees with HEAD; a live index that does not is the resurrected
     # stale one, and a live index that also does is equivalent, so the copy wins either way
     if copy_matches:

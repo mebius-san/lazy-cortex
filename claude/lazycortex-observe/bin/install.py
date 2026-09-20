@@ -52,6 +52,7 @@ def detect_host() -> str:
   if sys.platform == "darwin":
     # waiver: OS/platform token (sys.platform), external
     return "darwin"
+
   # guard: any Linux variant
   # waiver: OS/platform token (sys.platform), external
   if sys.platform.startswith("linux"):
@@ -252,6 +253,7 @@ def write_answer_file(answers: dict) -> Path:
     # guard: never persist secret keys via the non-secret answer file
     if k in { "token", "LAZYCORTEX_OBSERVE_TOKEN" }:
       raise ValueError(f"refused to write secret key {k!r} into the answer file")
+
     # boolean values render as lowercase TOML literals
     if isinstance(v, bool):
       lines.append(f"{k} = {'true' if v else 'false'}")
@@ -294,14 +296,17 @@ def read_answer_file() -> dict:
   pat = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$')
   for raw in ANSWER_FILE.read_text().splitlines():
     line = raw.strip()
+
     # guard: skip blank lines and comments
     if not line or line.startswith("#"):
       continue
     m = pat.match(line)
+
     # guard: skip malformed entries silently
     if not m:
       continue
     k, v = m.group(1), m.group(2).strip()
+
     # decode booleans first to avoid them being eaten by the numeric branch
     if v.lower() in ("true", "false"):
       # waiver: stdlib encoding/mode/escape idiom
@@ -345,6 +350,7 @@ def find_agent_binary(agent_kind: str) -> Path | None:
   }.get(agent_kind, [])
   for name in candidates:
     path = shutil.which(name)
+
     # guard: first match on PATH wins
     if path:
       return Path(path)
@@ -417,6 +423,7 @@ def unload_service_macos(plist_path: Path) -> tuple[bool, str]:
     [ "launchctl", "bootout", f"gui/{uid}", str(plist_path) ],
     capture_output = True, text = True, check = False,
   )
+
   # bootout exits non-zero if not loaded — caller decides whether to care.
   return (proc.returncode == 0, proc.stderr)
 
@@ -559,9 +566,11 @@ def _cached_sibling_root(name: str) -> Path | None:
     version of the sibling is cached.
   """
   own = Path(__file__).resolve()
+
   # guard: not a cached install — a dev checkout has no version directory above bin/
   if not own.parents[1].name.replace(".", "").isdigit():
     return None
+
   # the cache root sits four levels above bin/: cache/<registry>/<plugin>/<version>/bin
   try:
     cache = own.parents[4]
@@ -626,14 +635,17 @@ def resolve_core_cli() -> Path:
     if candidate.is_file():
       return candidate
   on_path = shutil.which(_CORE_CLI_NAME)
+
   # guard: PATH lookup succeeds in installed environments that expose plugin bins
   if on_path:
     return Path(on_path)
   # waiver: plugin-tree layout directory name, not an internal key
   sibling = Path(__file__).resolve().parents[2] / _CORE_CLI_NAME / "bin" / _CORE_CLI_NAME
+
   # guard: dev-vault fallback — plugin sources checked out side by side under claude/
   if sibling.is_file():
     return sibling
+
   # plugin-cache fallback — a consumer install running from the cache with no daemon export
   cached_root = _cached_sibling_root(_CORE_CLI_NAME)
   # waiver: plugin-tree layout directory name, not an internal key
@@ -677,6 +689,7 @@ def local_scrape_targets() -> list[dict]:
     [sys.executable, str(cli), "daemon-list", "--json"],
     capture_output = True, text = True, check = False, timeout = _CORE_CLI_TIMEOUT_SEC,
   )
+
   # guard: a failing registry call must abort loudly, not render an empty shipper config
   if proc.returncode != 0:
     raise RuntimeError(f"lazycortex-core daemon-list failed: {proc.stderr.strip()[:300]}")
@@ -864,6 +877,7 @@ def write_scrape_file_via_core(out: Path | None = None) -> dict:
   # waiver: external core-CLI subcommand and flag, not internal keys
   argv = [sys.executable, str(cli), "metrics-scrape-file"] + (["--out", str(out)] if out else [])
   proc = subprocess.run(argv, capture_output = True, text = True, check = False, timeout = _CORE_CLI_TIMEOUT_SEC)
+
   # guard: a failing scrape-file write must surface, not pass silently
   if proc.returncode != 0:
     raise RuntimeError(f"lazycortex-core metrics-scrape-file failed: {proc.stderr.strip()[:300]}")
@@ -934,6 +948,7 @@ def _read_grafana_process_config() -> tuple[Path | None, Path | None]:
     # guard: reject every process line that is not a grafana server
     if not any(marker in line for marker in _GRAFANA_SERVER_MARKERS):
       continue
+
     # lift the two path flags off the matched command line
     config: Path | None = None
     homepath: Path | None = None
@@ -942,6 +957,7 @@ def _read_grafana_process_config() -> tuple[Path | None, Path | None]:
         config = Path(arg[len(_GRAFANA_CONFIG_FLAG):])
       elif arg.startswith(_GRAFANA_HOMEPATH_FLAG):
         homepath = Path(arg[len(_GRAFANA_HOMEPATH_FLAG):])
+
     # guard: reject a grafana line that carries neither path flag
     if not (config or homepath):
       continue
@@ -1037,6 +1053,7 @@ def detect_grafana_dashboards_dir() -> Path | None:
 
   # an operator's recorded directory is the authoritative answer for this host
   recorded = read_answer_file().get(_ANSWER_KEY_DASHBOARD_DIR)
+
   # guard: reject every probe once an override is on record
   if recorded:
     override = Path(os.path.expanduser(str(recorded)))
@@ -1059,6 +1076,7 @@ def detect_grafana_dashboards_dir() -> Path | None:
     if not candidate.is_file():
       continue
     provisioning = _resolve_provisioning_dir(candidate, homepath)
+
     # guard: reject a config that is unreadable or leaves a relative path unresolvable
     if provisioning is None:
       continue
@@ -1103,6 +1121,7 @@ def deploy_dashboards(target_dir: Path | None = None) -> dict:
   """
   # settle where the dashboards go before touching anything on disk
   target = target_dir or detect_grafana_dashboards_dir()
+
   # guard: reject the copy when this host has no Grafana provisioning tree
   if target is None:
     # waiver: outcome tokens of the dashboard-provisioning step contract
@@ -1196,8 +1215,10 @@ class _Template:
         value.
     """
     out: list[str] = []
+
     # stack of (active, true_branch_taken) — controls whether to emit text
     stack: list[ tuple[bool, bool] ] = [ (True, True) ]
+
     # loop stack: each frame collects body fragments and replays them per iteration on endfor
     loop_stack: list[dict] = []
 
@@ -1231,6 +1252,7 @@ class _Template:
     # guard: every {% if %} must be closed before the template ends
     if len(stack) != 1:
       raise SyntaxError("template ended with unclosed {% if %} block")
+
     # guard: every {% for %} must be closed before the template ends
     if loop_stack:
       raise SyntaxError("template ended with unclosed {% for %} block")
@@ -1318,11 +1340,13 @@ class _Template:
     elif directive.startswith("for "):
       # `for item in seq`
       m = re.match(r"for\s+(\w+)\s+in\s+(\S+)", directive)
+
       # guard: malformed for directive
       if not m:
         raise SyntaxError(f"bad for: {directive!r}")
       if active:
         seq = self._eval_value(m.group(2))
+
         # guard: refuse to iterate over a non-iterable value
         if not isinstance(seq, Iterable):
           raise TypeError(f"non-iterable in for: {seq!r}")
@@ -1336,10 +1360,12 @@ class _Template:
     # waiver: single-dict-literal key (template engine internal), not a cross-module key
     elif directive == "endfor":
       frame = loop_stack.pop()
+
       # guard: skip expansion when the loop sat inside an inactive branch
       # waiver: single-dict-literal key (template engine internal), not a cross-module key
       if not frame["active"]:
         return
+
       # replay buffered body for each iteration, binding the loop variable per pass
       # waiver: single-dict-literal key (template engine internal), not a cross-module key
       for item in frame["seq"]:
@@ -1361,6 +1387,7 @@ class _Template:
               loop_stack[-1]["body"].append(("text", rendered))
             else:
               out.append(rendered)
+
       # remove the loop variable so it does not leak into the surrounding scope
       # waiver: single-dict-literal key (template engine internal), not a cross-module key
       self.vars.pop(frame["var"], None)

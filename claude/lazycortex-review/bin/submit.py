@@ -24,10 +24,6 @@ file matches no configured review class (and no `--expert` given to
 seed from).
 """
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
-# deferred imports below module code; position intentional (ruff E402 noqa guards it)
-# pylint: disable=import-error,wrong-import-position,deprecated-module
 
 import argparse
 import json
@@ -45,20 +41,22 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import doc_class as _doc_class  # noqa: E402
+import doc_class as _doc_class  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import frontmatter as _fm  # noqa: E402
+import frontmatter as _fm  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import note_ops as _note_ops  # type: ignore # noqa: E402
+import note_ops as _note_ops  # type: ignore # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: `claude/lazycortex-specs/bin/note_ops.py` shares this basename; in a whole-project mypy run the bare
 # `import note_ops` above resolves to that unrelated module instead (this dir's `__init__.py` makes review's
 # own copy package-qualified as `bin.note_ops`), so mypy checks the attribute against the wrong file's shape
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import parser as _parser  # noqa: E402
+# waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
+import parser as _parser  # noqa: E402  # pylint: disable=import-error,wrong-import-position,deprecated-module
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# pylint: disable-next=import-error,wrong-import-position
 from keys import Bucket, JobKey, Paths, Phase, ReviewKey, Trailer  # noqa: E402
 # waiver: deferred sibling imports follow the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import start as _start  # noqa: E402
+import start as _start  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 def _load_settings(repo: Path) -> dict:
@@ -75,6 +73,7 @@ def _load_settings(repo: Path) -> dict:
     Parsed settings dict, or `{}` when the file is absent or unparseable.
   """
   path = repo / Paths.CLAUDE_DIR / Paths.SETTINGS_FILE
+
   # guard: no settings file at all — nothing registered
   if not path.exists():
     return {}
@@ -163,6 +162,7 @@ def open_submit(
   # Re-submitting an already-skipped document changes nothing further.
 
   text = file_path.read_text()
+
   # Reuse start's bootstrap (review_active / round / approved / banner /
   # review_result clear / optional review_expert).
   _start.open_review(file_path, expert=expert)  # bootstrap, writes in place, no commit
@@ -183,6 +183,7 @@ def open_submit(
       meta.get(ReviewKey.PHASE) == Bucket.AWAITING_OPERATOR
       and all(_parser.flatten_expert_name(n) in current_done_flat for n in main_writers)
   )
+
   # a prior run already applied the leapfrog, so the bootstrapped content stands as-is
   if already_settled:
     new_text = bootstrapped
@@ -280,6 +281,7 @@ def _atomic_commit(file_path: Path) -> None:
       ["git", "add", "--", str(file_path.name)],
       cwd=cwd, check=True, capture_output=True,
   )
+
   # the pathspec keeps a concurrently staged foreign file out of the submit commit
   subprocess.run(
       [

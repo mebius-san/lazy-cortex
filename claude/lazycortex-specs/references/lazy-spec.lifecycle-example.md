@@ -23,10 +23,10 @@ design.md approved in lazy-review (review_result: approved)
     status note and loads the playbooks they resolve to — the type playbook, plus one tool
     playbook per named tool. Those files, and no others, are the law of this wake
   → Stage promotion (playbook Ch.4): coordinator calls `lazy-spec.set-stage design.md approved`
-       (scalar + spec/approved mirror tag + folder-note # History; unchanged primitive)
+       (scalar + spec/approved mirror tag + spec_approved_at stamp on the doc; unchanged primitive)
   → the TYPE playbook's own condition for spec_design_done holds on the promoted state
   → coordinator calls `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> flip-gate <asset> spec_design_done --auto`
-       (unconditional flip; callout + history line + atomic commit — flip_gate's own work, Part 2)
+       (unconditional flip; spec_design_done_at stamp + atomic commit — flip_gate's own work, Part 2)
   → coordinator reconciles the checkbox set the playbooks declare (the protocol's Part 3 is only
     the block SHAPE): the next box the type playbook declares at this state is hung in # Gates
   → the daemon's `_git_post` pushes the coordinator's commit; the operator's own pull
@@ -35,7 +35,7 @@ design.md approved in lazy-review (review_result: approved)
   → the daemon's next pull fast-forwards the tick's commit in — spec.coordinator wakes again
   → coordinator dispatches the job the declaring playbook names (its role, source, context and
     result document), marks active_job via mark-job — which checks the record's SHAPE, not the
-    label's spelling — and records # History
+    label's spelling; nothing is journaled until the job ends
   → the job runs, writes its result document, reports DONE
   → on that DONE, spec.coordinator calls lazy-review.submit on the document the job wrote — for
     a plan and for a tool's report alike, this is the ONLY thing that opens review (playbook
