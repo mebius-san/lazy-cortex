@@ -1,6 +1,6 @@
 ---
 name: lazy-spec.create-from-code
-description: Use when generating a specification FROM an existing codebase for an already-registered, code-bound product — fans heavy source scanning out to parallel Explore agents, then writes a behavior-only product design doc and a code-grounded product tech doc with source URLs. Product mode documents the product itself and places candidates by semantic area, registering an area as a nested product when the operator says so; feature mode delegates one feature-candidate to lazy-spec.create-asset. Requires the product to be registered with a `source` binding via /lazy-spec.product-config first.
+description: Use when generating a specification FROM an existing codebase for an already-registered, code-bound product — fans heavy source scanning out to parallel Explore agents, then writes a behavior-only product design doc and a code-grounded product tech doc with source URLs. Product mode documents the product itself and places candidates by semantic area, registering an area as a nested product when the operator says so; feature mode scaffolds one feature-candidate through lazy-spec.create-asset with `--empty` and authors its documents from the same code scan, asking the operator nothing the code already answers. Requires the product to be registered with a `source` binding via /lazy-spec.product-config first.
 allowed-tools: Read, Glob, Grep, Bash, Edit, Write, Skill, AskUserQuestion, Agent
 ---
 # Create Spec from Code
@@ -10,7 +10,7 @@ Generate a specification from existing source code for a product that is **alrea
 Two modes:
 
 - **Product mode** (default): document the whole product from code — a `vision.md` (goals and value; authored first when absent), a behavior-only `design.md`, a code-grounded `tech.md`, and the empty asset-type dirs. An `AskUserQuestion` in Step P4 offers to also author the product-level `use-cases.md` (actors and cross-feature scenarios) from the same code survey — opt-in, skipped silently when declined. Diagrams are not part of this skill's mandate: the operator draws one on request via `/lazy-diagram.draw`, and the writing experts decide their own per the figures rules in `lazy-core.markdown-style`.
-- **Feature mode**: scaffold ONE feature-candidate discovered in the code by delegating to `lazy-spec.create-asset <product> feature <slug>`. This skill does NOT author the feature folder itself — create-asset owns the asset scaffold and its docs.
+- **Feature mode**: document ONE feature-candidate discovered in the code. `lazy-spec.create-asset` is invoked with `--empty`, so it contributes the scaffold alone — the status folder-note and the type's start doc; the `vision.md` a type carrying `vision: mandatory` requires is seeded here through the `seed-doc` primitive. This skill then authors every seeded document from the code scan. The wizard's clarifying questions never run: a feature read out of code has its answers in the code.
 
 Heavy source reading runs through parallel Explore agents so the main session stays on synthesis. Filenames, folder structure, header section, frontmatter keys, and wikilink format are owned by `${CLAUDE_PLUGIN_ROOT}/references/` — this skill never inlines those patterns.
 
@@ -38,6 +38,7 @@ This skill has two modes (`product` + `feature`) with mode-specific step lists. 
    **Feature mode**:
    - `Step F1 — Determine the feature slug`
    - `Step F2 — Delegate to lazy-spec.create-asset`
+   - `Step F2b — Author the docs from code`
    - `Step F3 — Verify`
    - `Step F4 — Log the run`
 
@@ -49,7 +50,7 @@ This skill has two modes (`product` + `feature`) with mode-specific step lists. 
 
 Signature: `<product> [feature <slug>] [--path <dir>] [--empty]`
 
-`--path <dir>` names the product-relative folder the asset lands in, overriding the type's `default_path`; `--empty` scaffolds the shell without authoring the design body. Both are forwarded verbatim to `lazy-spec.create-asset` in Step F2 and are meaningful in feature mode only.
+`--path <dir>` names the product-relative folder the asset lands in, overriding the type's `default_path`; it is forwarded verbatim to `lazy-spec.create-asset` in Step F2 and is meaningful in feature mode only. `--empty` is redundant here and changes nothing — Step F2 always delegates with it, and Step F2b authors the prose this skill owns.
 
 The user provides a product compound-key (e.g. `dashboards`, `server-tester-chapter`) or a source path under a registered product. For feature mode, the user names a feature-candidate slug (or picks one from the product-mode candidate preview). If ambiguous, ask which product or candidate they mean — context first: where (`/lazy-spec.create-from-code · Input`), found (the code-bound keys under `lazy.settings.json[products]`, or the candidate slugs the preview listed), why asking (the input maps to none or several), answers (one option per key or slug — the run continues on it; nothing persisted); then `AskUserQuestion` header "Product" or "Candidate", question naming what is being picked, one option per key or slug with a description.
 
@@ -80,7 +81,7 @@ All narrative prose this skill authors (design body, tech architecture narrative
 1. If the user explicitly says "feature spec" / "feature for <product>" / names a single feature-candidate slug → **feature mode**.
 2. Otherwise → **product mode**.
 
-In product mode the per-candidate scaffold decisions (Step P6) re-enter feature mode by delegating to `lazy-spec.create-asset` — they do NOT re-invoke this skill.
+In product mode the per-candidate scaffold decisions (Step P6) re-enter feature mode by delegating to `lazy-spec.create-asset` with `--empty` and authoring the candidate's documents per Step F2b — they do NOT re-invoke this skill.
 
 ## Branch handling (applies to both modes)
 
@@ -350,17 +351,21 @@ AskUserQuestion: header "Candidate <n>/<N>", question "How should the code unit 
 - `treat as architectural area` — append a subsection under the product tech doc's `## Architectural Areas` with the candidate's source link and short description. No feature folder.
 - `skip` — omit entirely, no trace.
 
-After every candidate is decided, run the scaffolds serially. For each `scaffold feature` candidate, invoke via the `Skill` tool one of, per the candidate's area placement recorded in Step P3b:
+After every candidate is decided, run the scaffolds serially. For each `scaffold feature` candidate, invoke via the `Skill` tool one of, per the candidate's area placement recorded in Step P3b — always with `--empty`:
 
 ```
-Skill(skill: "lazycortex-specs:lazy-spec.create-asset", args: "<nested-key> feature <candidate-slug>")
-Skill(skill: "lazycortex-specs:lazy-spec.create-asset", args: "<product> feature <candidate-slug> --path <area>")
-Skill(skill: "lazycortex-specs:lazy-spec.create-asset", args: "<product> feature <candidate-slug>")
+Skill(skill: "lazycortex-specs:lazy-spec.create-asset", args: "<nested-key> feature <candidate-slug> --empty")
+Skill(skill: "lazycortex-specs:lazy-spec.create-asset", args: "<product> feature <candidate-slug> --path <area> --empty")
+Skill(skill: "lazycortex-specs:lazy-spec.create-asset", args: "<product> feature <candidate-slug> --empty")
 ```
 
 The first is for an area registered as a nested product (`<nested-key>` is the key P3b recorded); the second is for an area kept as a group folder; the third is for a `root` candidate or an area decided `flat`.
 
-Pass the candidate's source files / one-line purpose / behavior summary in the dispatch prompt so create-asset's clarifying step has grounding. Optionally append `--empty` to the args string when you want to scaffold the shell only and populate the design body yourself afterward — but the default is the full create-asset run, which authors the design doc. For a candidate, this skill does NOT author the feature folder, does NOT scaffold a per-asset `tech.md` (removed — only the product carries `tech.md`), and does NOT seed any workflow. create-asset owns the asset scaffold.
+`--empty` is not optional here. A candidate read out of the code has its scope, its users and its edge cases in the code this step has already scanned; re-entering create-asset's wizard would ask the operator to restate the scan. Pass the candidate's source files / one-line purpose / behavior summary in the dispatch prompt all the same, so the scaffold's own report names what it stands for.
+
+Then, per scaffolded candidate: seed the mandatory `vision.md` through the `seed-doc` primitive exactly as Step F2 does, and author that candidate's documents by the procedure `Step F2b — Author the docs from code` defines — same per-`spec_doc_type` passes, same template-comment discipline, same decision callouts, same source-attribution and stage handling, same folder-note précis. The evidence is the scan this mode already holds: agents A/B/C/D ran in Step P2, and each candidate is authored from its own `evidence` file list within that material. No second scan runs, and F2b's one-question allowance does not carry over — the per-candidate question above is the only question this step asks.
+
+For a candidate, this skill scaffolds NO per-asset `tech.md` (removed — only the product carries `tech.md`) and seeds NO workflow; create-asset owns the folder scaffold and this skill owns the prose inside it.
 
 Scaffolded candidates leave NO trace in `design.md` — the decomposition catalog is owned by the folder-notes — the product's, each group folder's, each nested product's.
 
@@ -374,6 +379,8 @@ This step emits `no-candidates` if Agent D returned an empty `findings` list.
 - Both product docs carry the migrated `spec_role` + `spec_stage` frontmatter and the mandatory header (frontmatter + H1) per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md`.
 - Both product docs carry `wiki_pinned_topics` — `wiki/doc-kind/design` + `wiki/product/<product>` on `design.md`, `wiki/doc-kind/tech` + `wiki/product/<product>` on `tech.md` — no `wiki/category/...` line on either (product-level docs have no category).
 - No operator-zone folder-note, no `human-tasks.md`, no `spec_role: layout` doc, no `layout.excalidraw` file, and no `backlog/` were created (those are removed roles / product-config's territory).
+- Every `scaffold feature` candidate's folder holds its status folder-note, the type's start doc and the mandatory `vision.md`, each document carrying prose authored from the scan rather than a surviving template placeholder comment, with no section added beyond the template's own.
+- No candidate's scaffold asked a clarifying or opt-in-document question — the per-candidate question of Step P6 is the only question the candidate pass raises, and every candidate design carries no source URLs, repo file paths or class/function names.
 - Every nested product the operator chose carries its level note and a seeded `vision.md`, and is registered under `products` with a `spec_path` under this product's; no candidate landed under a dedicated `features` folder — candidates sit at the product root, under the group folder the operator chose, or at a nested product's root.
 - Wikilinks use path-qualified form per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md` and target existing pages.
 
@@ -383,7 +390,7 @@ Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/lazy
 
 ## Feature Mode Process
 
-Feature mode scaffolds ONE feature-candidate from code by delegating to `lazy-spec.create-asset`. This skill no longer authors the feature folder itself.
+Feature mode documents ONE feature-candidate from code. `lazy-spec.create-asset` owns the scaffold, invoked with `--empty` so none of its wizard questions fire; this skill owns every word inside the documents that scaffold seeds.
 
 ### F1 — Determine the feature slug
 
@@ -391,29 +398,75 @@ If the slug is obvious from the user's input or the source path, use it (lowerca
 
 ### F2 — Delegate to lazy-spec.create-asset
 
-Invoke via the `Skill` tool:
+Invoke via the `Skill` tool, always with `--empty`:
 
 ```
-Skill(skill: "lazycortex-specs:lazy-spec.create-asset", args: "<product> feature <slug>")
+Skill(skill: "lazycortex-specs:lazy-spec.create-asset", args: "<product> feature <slug> --empty")
 ```
 
-Append `--path <dir>` to the args string when the caller passed one (Step F1's target folder) — absent it, create-asset places the asset at the type's `default_path`. Pass the candidate's behavior summary / source files in the dispatch prompt so create-asset's clarifying step (Step 3) and prose step (Step 6) have code grounding. Optionally append `--empty` to scaffold the shell only, then populate the design body afterward; the default full run authors `design.md`.
+Append `--path <dir>` to the args string when the caller passed one (Step F1's target folder) — absent it, create-asset places the asset at the type's `default_path`. Pass the candidate's behavior summary / source files in the dispatch prompt as grounding for this skill's own scan in Step F2b.
 
-create-asset owns: the asset folder + status folder-note, the one authored doc it seeds (`design.md` — NO per-asset `tech.md`, NO `layout` doc, and NO `code-plan.md` / `test-plan.md` / `code-report.md` / `test-report.md`, all of which are opt-in and out of scope for the scaffold), per-file start stages, and the prose. This skill seeds NO workflow and scaffolds NO `tech.md`. Capture create-asset's report for this skill's report.
+`--empty` is what keeps the wizard out of a code-derived asset: create-asset's clarifying questions (its Step 3) and its opt-in-document question (its Step 4) never fire, and it authors neither précis nor prose. Asking an operator to describe a feature's scope, its users, or its edge cases is asking them to restate what the scan already reads off the code.
+
+create-asset owns: the asset folder, its status folder-note, the type's start doc (`design.md` for the shipped `feature`) and the per-file start stages. NO per-asset `tech.md`, NO `layout` doc, and NO `code-plan.md` / `test-plan.md` / `code-report.md` / `test-report.md`: every one of those is opt-in and out of scope for a scaffold. This skill seeds NO workflow and scaffolds NO `tech.md`.
+
+**Seed the mandatory vision.** `--empty` never widens the document set beyond the type's `start_doc`, so a type carrying `vision: mandatory` (the shipped `feature` does — `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.asset-types.json`) still needs its `vision.md`, and the coordinator's own first-wake seeding would leave nothing for the scan to fill. Seed it here through the primitive, against the folder-note the scaffold just reported:
+
+```bash
+"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" seed-doc <product> <folder-note-path> --doc vision.md:vision
+```
+
+The `<folder-note-path>` is the repo-relative `folder_note` field of create-asset's scaffold JSON. The primitive fills every template token and starts the document at stage `empty`. A type whose `vision` contract is `opt-in` or `none` gets no such call — an absent vision is that type's normal state, and nothing here turns an opt-in document into a mandatory one.
+
+Capture create-asset's report and the resulting document list for Step F2b and for this skill's report.
+
+### F2b — Author the docs from code
+
+Run the code scan per "Parallel code scanning" — agents A, B and C launched in a single message, scoped to the candidate's evidence files (the file list Agent D's finding carried, or the source files the caller's dispatch prompt named) and, when the caller gave none, to the product's `source.paths`. Agent D does not run in this mode: the candidate is already named.
+
+Then fill every document Step F2 left on disk, in the product's `language` (Step 0), one pass per document driven by that document's own `spec_doc_type` — replacing each section's placeholder comment in place:
+
+- **`vision`** — `## Overview`, `## Goals`, `## Requirements` and `## Value Proposition` from what the code evidently does: the outcome the feature produces for whoever triggers it, the obligations it already meets stated as requirement sentences, the value that outcome carries.
+- **`design`** — `## Design`, `## Behavior`, `## Constraints`, `## Risks`, `## Known Limitations` and `## Boundaries` from the scan, with `## Overview` opening on a reference to the sibling vision (goals and value live there, never here). Behavior terms only: no source URLs, no repo file paths, no class or function names — the scan's evidence is read, never quoted.
+
+Follow each section's own template comment — that comment is the section's contract. Drop a section whose comment marks it `Optional.` when the code gives it nothing to say, never add a section the template does not carry, and never write behavior the scan did not evidence. Where the code shows a real fork was taken (the weight test in `${CLAUDE_PLUGIN_ROOT}/rules/spec.decisions.md`), record it as a `[!decision] <thesis> #spec/decision` callout whose body is the justification in plain prose per `lazy-core.markdown-style`; never force a fork that is not there.
+
+**Source attribution.** Leave both documents' `spec_source_docs` as the scaffold wrote them — empty — and leave the body's `# Sources` sub-sections exactly as it rendered them. A freshly scaffolded asset-level document cites nothing: the documents of an asset's own level are read by rule rather than by link, so naming the sibling vision here would only duplicate what the folder layout already shows and invite drift. The key records what the layout cannot — the requests a document came from, and links across separate assets — and earns entries only when something actually adds them. Neither document carries `spec_source_branches` either: a feature's documents emit no source URLs. Emit outcome `unchanged`.
+
+**Stages.** The scaffold seeds each document at its own doc type's default — `vision.md` at `empty`, `design.md` at `draft`. Once the vision carries prose, set its stage through the `Skill` tool (`skill: "lazycortex-specs:lazy-spec.set-stage"`) → `draft`, so the `spec/<stage>` tag mirror stays in sync; `design.md` is already `draft` and needs no call.
+
+**Précis.** Author the asset's `# Summary` précis in the status folder-note — the shape `lazy-spec.create-asset` Step 6 describes: one plain line of 1–2 phrases capturing the feature's essence, written directly below the section's engine-owned explainer line under the `#protected/spec/summary` tag, replacing a previous line when one is there and touching nothing else in the section. `--empty` skipped create-asset's own précis step; this skill owns the prose, so it owns the précis. The folder-note, the documents this step authored, and any `group_note` the scaffold's JSON reported all belong in the commit pathspec — a seeded note left untracked halts the runtime daemon's clean-tree check.
+
+**At most ONE `AskUserQuestion` in this step**, and only when the code leaves a real fork the spec must settle — a boundary the bundle blurs (two units the code never separates, and the spec must say whether this feature holds both), a platform gap that may be a ceiling to record under `## Known Limitations` or a requirement to state in the vision. Otherwise ask nothing: a question whose answer sits in the scan is the defect this mode exists to prevent.
+
+```
+Context (print before asking):
+- Where: /lazy-spec.create-from-code · Step F2b — Author the docs from code; target <spec_path>/<folder>/<slug>/<doc>
+- Found: the scan evidences <file — symbol or route group> and <the second reading's evidence>; nothing in the code separates them
+- Why asking: both readings are consistent with the code and the document must state one — this is a fork the code left open, not a fact the scan can settle
+- Answers: `<outcome A>` — <the sentence that lands, and the section that carries it>; `<outcome B>` — <the same for the other reading>. Written into the doc now, never re-asked
+AskUserQuestion: header "<the fork's topic>", question "<self-contained question naming the feature, the product and the fork>", options `<outcome A>` / `<outcome B>` with the descriptions above.
+```
+
+Outcome: `authored:<N>` where `<N>` is the document count, suffixed `+decided` when the fork question was raised.
 
 ### F3 — Verify
 
-- `lazy-spec.create-asset` returned a complete report (one line per its canonical task). Surface that report.
-- The feature folder exists at `<spec_path>/<slug>/`, or under the folder passed with `--path`, with the docs create-asset scaffolds (folder-note + `design.md`); confirm NO `tech.md`, NO `layout` doc, and no opt-in `code-plan.md` / `test-plan.md` / `code-report.md` / `test-report.md` were created.
-- This skill authored no folder-note and invoked no drawer — confirm `.logs/claude/lazy-diagram.draw/` gained no entries from this run.
+- `lazy-spec.create-asset` returned a complete report (one line per its canonical task), with its clarification, précis and prose steps reading `skipped-empty-mode`. Surface that report.
+- The feature folder exists at `<spec_path>/<slug>/`, or under the folder passed with `--path`, holding the folder-note, the type's start doc and — for a type carrying `vision: mandatory` — the `vision.md` Step F2 seeded; confirm NO `tech.md`, NO `layout` doc, and no opt-in `code-plan.md` / `test-plan.md` / `code-report.md` / `test-report.md` were created.
+- Every seeded document carries authored prose: no section survives with its template placeholder comment as its only content, and no section the template does not carry was added.
+- `design.md` contains zero source URLs (no `/blob/`, `/-/blob/`, `/src/`, `/tree/` for any forge), no repo file paths, no class or function names, and no `spec_source_branches` frontmatter.
+- Both documents keep the empty `spec_source_docs` the scaffold wrote, and their `# Sources` sub-sections are untouched under the `#protected/spec/sources` tag — an asset-level document cites no sibling of its own level.
+- Both documents read `spec_stage: draft`, the vision's set through `lazy-spec.set-stage`; the folder-note's `# Summary` carries the asset précis.
+- This skill wrote nothing in the folder-note beyond the précis line and invoked no drawer — confirm `.logs/claude/lazy-diagram.draw/` gained no entries from this run.
 
 ### F4 — Log the run
 
-Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/lazy-spec.create-from-code/YYYY-MM-DD_HH-MM-SS.md` exactly as in Step P8, with one `## Actions` line per feature-mode task and its outcome word.
+Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/lazy-spec.create-from-code/YYYY-MM-DD_HH-MM-SS.md` exactly as in Step P8, with one `## Actions` line per feature-mode task and its outcome word — the ledger's five lines, `Step F2b — Author the docs from code` among them. A missing line is a bug.
 
 ## Report
 
-One line per task in the active mode's canonical list, with its outcome word. A missing line is a bug. In feature mode, include the `lazy-spec.create-asset` report captured in Step F2.
+One line per task in the active mode's canonical list, with its outcome word. A missing line is a bug. In feature mode, include the `lazy-spec.create-asset` report captured in Step F2 alongside this skill's own Step F2b line, so the reader sees which documents the scaffold seeded and which of them this skill authored.
 
 ## Key Rules
 
@@ -422,7 +475,7 @@ One line per task in the active mode's canonical list, with its outcome word. A 
 - **Strict file roles** — the product design doc NEVER contains source URLs; the product tech doc DOES (per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md`).
 - **Nested products are a per-area operator choice** — Step P3b asks per semantic area whether it becomes a nested product, a group folder, or flat placement; any candidate may still land as an `## Architectural Areas` subsection of the product tech doc instead of a feature folder, per its own P6 answer.
 - **Delegate heavy reads** — parallel Explore agents scan source; the main session synthesizes and decides.
-- **Feature mode delegates to create-asset** — it owns the asset scaffold and docs. No per-asset `tech.md` and no seeded workflow originate from this skill.
+- **An asset derived from code is scaffolded empty and written from the scan** — in both modes create-asset is invoked with `--empty`, so it owns the folder, the seeded documents and their start stages while this skill owns every word inside them. Its clarifying and opt-in-document questions never fire: the answers are in the code. Feature mode may raise one question, and only for a real fork the code left open; product mode's candidate pass raises none beyond its own scaffold / architectural-area / skip question. No per-asset `tech.md` and no seeded workflow originate from this skill.
 - **This skill draws no diagrams.** A product picture is drawn on the operator's own `/lazy-diagram.draw` call against an existing heading, and the writing experts carry their own figures discipline (`lazy-core.markdown-style` § Figures). The removed `spec_role: layout` doc / `layout.excalidraw` file stay removed.
 - **Source attribution** — both product docs carry default `spec_source_docs` frontmatter and a body `# Sources` section (`## Docs` projected from that list; `## Requests` empty), mirroring `lazy-spec.create-asset`, per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.sources-protocol.md`.
 - **Migrated frontmatter keys** — authored docs use `spec_role` / `spec_stage`; per-file stages flow through `lazy-spec.set-stage`. Pins use `spec_source_branches`.

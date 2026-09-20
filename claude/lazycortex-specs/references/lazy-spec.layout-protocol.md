@@ -79,7 +79,7 @@ Product and group folder-note **bodies are operator-zone**: the plugin does not 
 
 ### Template storage (per-file + per-product)
 
-Doc templates come from a **linear base keyed on filename** plus **per-context specialisations**. `spec.docs/` holds one template per document filename and serves every context; a `spec.<context>/` folder — an asset type, `product`, or `vault` — carries the structural notes that context owns (`asset-note.md`, `group-note.md`, `level-note.md`) plus the documents that genuinely differ from the base under the same filename. A document's type is what its template declares in `spec_doc_type`; no declaration names a template file. An asset type needs no template of its own to scaffold a document — the bases cover it — and an edit to a specialisation never affects another context:
+Doc templates come from a **linear base keyed on filename** plus **per-context specialisations**. `spec.docs/` holds one template per document filename and serves every context; a `spec.<context>/` folder — an asset type, `product`, or `vault` — carries the structural notes that context owns (`group-note.md`, `level-note.md`; the asset-note is shared by every type from `spec.asset/`) plus the documents that genuinely differ from the base under the same filename. A document's type is what its template declares in `spec_doc_type`; no declaration names a template file. An asset type needs no template of its own to scaffold a document — the bases cover it — and an edit to a specialisation never affects another context:
 
 ```
 .claude/templates/
@@ -97,22 +97,19 @@ Doc templates come from a **linear base keyed on filename** plus **per-context s
 │   ├── tech.md                                  ← <product>/tech.md typed system-tech
 │   ├── level-note.md                            ← <product>.md level folder-note; `catalog-note backfill` renders it, at a product root and at the catalog root alike
 │   └── group-note.md                            ← group folder-note skeleton (product is the "group" of its asset types)
-├── spec.vault/                                  ← catalog-root docs; falls through to spec.product/ for the level note
-│   ├── vision.md                                ← content-root vision.md typed system-vision
-│   ├── design.md                                ← content-root design.md typed system-design
-│   └── tech.md                                  ← content-root tech.md typed system-tech
-├── spec.feature/                                ← shipped feature type — no doc specialisations, rides the base
-│   ├── asset-note.md                            ← <slug>/<slug>.md asset status folder-note (gates + # History)
-│   └── group-note.md                            ← seeded only when a feature is nested under an operator-named folder — default_path is the product root itself, which gets no group-note (operator-zone)
+├── spec.vault/                                  ← catalog-root docs; falls through to spec.product/ for everything it does not carry (vision, tech, the level note)
+│   └── design.md                                ← content-root design.md typed system-design — the one root document with sections of its own (## Products)
+├── spec.feature/                                ← shipped feature type
+│   └── design.md                                ← specialisation: the feature design (arc42); the base design.md is the abstract default
+├── spec.content/                                ← shipped content type — one record of data written against the project's schema
+│   └── design.md                                ← specialisation: the record's definition, field by field
 ├── spec.change/                                 ← shipped change type
 │   ├── design.md                                ← specialisation
 │   ├── architecture.md                          ← specialisation
 │   ├── code-plan.md                             ← specialisation
-│   ├── asset-note.md
 │   └── group-note.md                            ← changes/changes.md group folder-note
 ├── spec.bug/                                    ← shipped bug type (its `start_doc` seeds `bug.md`, not `design.md`)
 │   ├── code-plan.md                             ← specialisation
-│   ├── asset-note.md
 │   └── group-note.md                            ← bugs/bugs.md group folder-note
 ├── spec.request/                                ← content-root intake inbox (the request file itself has no template — `lazy-spec.create-request` writes its body inline)
 │   └── group-note.md                            ← <content-root>/requests/requests.md inbox folder-note
@@ -137,10 +134,10 @@ Diagram exemplars are owned by the `lazycortex-diagram:lazy-diagram.draw` engine
 1. **Per-product override** — `.claude/templates/spec.<context>/<compound-key>/<file>.md` (operator-authored variant for one specific product; compound-key matches the product's settings key; the `vault` context has no product layer).
 1b. **Ancestor-product override** — the same `.claude/templates/spec.<context>/<compound-key>/<file>.md` path for each ancestor product of the owning one, innermost ancestor first, outermost last. A nested product with no template of its own inherits its parent's, exactly as it inherits the parent's record (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md` § Effective record). A top-level product has no ancestors and this layer is empty.
 2. **Consumer context baseline** — `.claude/templates/spec.<context>/<file>.md` (the context-level baseline in the consumer vault — where an operator's own specialisations live, for a shipped type and an operator-defined one alike).
-3. **Plugin context baseline** — `${CLAUDE_PLUGIN_ROOT}/templates/spec.<context>/<file>.md` (the plugin-shipped specialisation; exists only where a context genuinely diverges from the base — `spec.research/design.md`, the three `spec.product/` and `spec.vault/` documents, the `spec.change/` and `spec.bug/` files).
+3. **Plugin context baseline** — `${CLAUDE_PLUGIN_ROOT}/templates/spec.<context>/<file>.md` (the plugin-shipped specialisation; exists only where a context genuinely diverges from the base — `spec.feature/design.md`, `spec.content/design.md`, `spec.research/design.md`, the three `spec.product/` and `spec.vault/` documents, the `spec.change/` and `spec.bug/` files).
 4. **Consumer linear base** — `.claude/templates/spec.docs/<file>.md` (one consumer file for every context that has no specialisation of that filename above it).
 5. **Plugin linear base** — `${CLAUDE_PLUGIN_ROOT}/templates/spec.docs/<file>.md`, one template per document filename. Any context or per-product override of the same filename still wins over it; it exists so a context needs no doc template of its own.
-6. **Plugin type-agnostic base** — `${CLAUDE_PLUGIN_ROOT}/templates/spec.asset/<file>.md`, the structural notes (`asset-note.md`) that are byte-identical across types. The LAST layer.
+6. **Plugin type-agnostic base** — `${CLAUDE_PLUGIN_ROOT}/templates/spec.asset/<file>.md`, the structural notes (`asset-note.md`) every type shares — no type ships a copy of its own. The LAST layer.
 
 **Type check.** After the first hit, the resolver reads the file's own `spec_doc_type` and compares it with the type the caller expects (the type half of `start_doc` / `--doc <name>:<type>`). A file declaring another type is a `logical` refusal naming the file, its type and the expected one — a base `design.md` never stands in for a product's or a research asset's design silently. A file declaring no type (a consumer override written before typing landed) is accepted, and the caller stamps the expected type into the seeded document.
 

@@ -48,6 +48,8 @@ When invoked with `--empty`:
 - Skip Step 7 (no prose) — emit outcome `skipped-empty-mode`.
 
 
+A caller that owns the prose itself scaffolds with `--empty` and authors afterwards — `lazy-spec.create-from-code`'s feature mode does exactly that, so the clarifying questions of Step 3 and the opt-in-document question of Step 4 are never asked for an asset derived from code, whose answers are in the code already.
+
 `--empty` mode is silent on stdout (no `AskUserQuestion`). The audit trail for empty-mode scaffolds lives in the originating request file's body until the asset's docs are filled and reviewed; no separate changelog entry is needed.
 
 ## Step 1 — Resolve the product

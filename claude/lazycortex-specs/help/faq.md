@@ -31,7 +31,7 @@ source_skills:
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
   - lazy-spec.resolve-dependency
-source_sha: 7534fc3a65c619600558c152d92d734e4534619f
+source_sha: 363d44e24bc3b51a232b4ca6f637dba8c931b2f7
 ---
 # Frequently asked questions
 
@@ -67,7 +67,7 @@ The parent stays aware of a nested product too: re-approving a nested product's 
 
 ## Can I generate a product's spec from an existing codebase instead of writing it by hand?
 
-Yes, for a product that is already registered with a source binding. Run `/lazy-spec.create-from-code <product>` — it scans the source in parallel, then authors the product's `vision.md` (goals and value, from the code's evidenced outcomes) when one doesn't already exist, followed by a behaviour-only product design doc and a code-grounded product tech doc, complete with the primary behavioural and architecture diagrams. It also surfaces feature-candidates it found in the code and, per candidate, asks whether to scaffold a full feature (delegating to `/lazy-spec.create-asset`, which seeds its own `vision.md` + `design.md`), record it only as an architectural area inside the tech doc, or skip it.
+Yes, for a product that is already registered with a source binding. Run `/lazy-spec.create-from-code <product>` — it scans the source in parallel, then authors the product's `vision.md` (goals and value, from the code's evidenced outcomes) when one doesn't already exist, followed by a behaviour-only product design doc and a code-grounded product tech doc, complete with the primary behavioural and architecture diagrams. It also surfaces feature-candidates it found in the code and, per candidate, asks whether to scaffold a full feature (`/lazy-spec.create-asset` with `--empty` for the folder and the start doc, the mandatory `vision.md` seeded beside it, and both documents then written from the same scan — no further questions), record it only as an architectural area inside the tech doc, or skip it.
 
 The skill requires the product to already carry a `source` binding — register that first with `/lazy-spec.product-config`. On a design-only product (no source attached) it no-ops rather than guessing at code that isn't wired in.
 

@@ -8,12 +8,13 @@ diagram_spec:
 source_skills:
   - lazy-spec.product-config
   - lazy-spec.create-from-code
+  - lazy-spec.create-feature
   - lazy-spec.coverage
-source_sha: aeb62595836d479bf7b79836f08871bb3794c5b9
+source_sha: 363d44e24bc3b51a232b4ca6f637dba8c931b2f7
 ---
 # How do I get specs for a codebase that already exists?
 
-You have a working codebase — a service, a library, an application — and no spec to go with it. This walkthrough starts from the vault spec that has to exist before any product can be registered, then takes you through registering the product in the spec system, generating a behavior-and-source-grounded specification directly from the code, and running a gap-scan to catch anything the auto-generated docs and candidate features missed. Three skills carry the bulk of the work; your job is to answer their wizard questions and review what lands.
+You have a working codebase — a service, a library, an application — and no spec to go with it. This walkthrough starts from the vault spec that has to exist before any product can be registered, then takes you through registering the product in the spec system, generating a behavior-and-source-grounded specification directly from the code, and running a gap-scan to catch anything the auto-generated docs and candidate features missed. Three skills carry the bulk of the work; your job is to answer their wizard questions and review what lands. A fourth, `lazy-spec.create-feature`, comes in if you want to scaffold a feature the code scan didn't already surface.
 
 ## Outcome
 
@@ -112,11 +113,13 @@ Once `design.md` is written, the skill asks one question: also author the produc
 
 Once every doc is written, the skill re-presents Agent D's candidate list — your area decisions are already recorded, so it does not ask those again — and asks what to do with each candidate:
 
-- **scaffold feature** — delegates immediately to `lazy-spec.create-asset`, landing the feature wherever its area was placed: the nested product's root, the group folder, or the product root. Pick this for features you want to document now. Scaffolded features leave no trace in `design.md` — the folder-notes aggregate the decomposition catalog.
+- **scaffold feature** — scaffolds the feature wherever its area was placed: the nested product's root, the group folder, or the product root. `lazy-spec.create-asset` is called with `--empty` for the folder and the start doc, the mandatory `vision.md` is seeded beside it, and the skill then writes both documents from the scan it already ran — you are asked nothing further about a candidate that is already in the code. Pick this for features you want to document now. Scaffolded features leave no trace in `design.md` — the folder-notes aggregate the decomposition catalog.
 - **treat as architectural area** — adds a subsection to the tech doc's `## Architectural Areas`; no feature folder is created. Only offered for a candidate whose area you kept flat or as a group folder — a candidate under a promoted nested product scaffolds into that product instead.
 - **skip** — leaves no trace.
 
 Work through each candidate. You do not need to scaffold all of them now — re-run this skill later to see the current candidate list again, or let Step 4's gap-scan catch anything you skipped that still has no spec asset.
+
+Agent D only flags candidates it can already see as coherent units in the code — sub-folders and route groups that already exist there. For a feature you want documented that isn't in the code yet, or that Agent D's scan didn't pick up as its own unit, scaffold it directly instead of waiting on a future run: `/lazy-spec.create-feature <compound-key> <new-slug>` pins the asset type to `feature` and hands off to `lazy-spec.create-asset` for its full wizard — 2 to 5 clarifying questions about the feature's scope, an opt-in prompt for `use-cases.md` / `ui-design.md`, and hand-authored prose — since there is no code scan behind it to answer those questions automatically.
 
 **Verification gate.** `vision.md`, `design.md`, and `tech.md` should exist and carry `spec_stage: draft` (`use-cases.md` too, if you opted in). The design doc must contain no source URLs and no `spec_source_branches` frontmatter. All the docs should carry the default `spec_source_docs` frontmatter and a body `# Sources` section pointing at each other. Any area you promoted to a nested product should now show up as its own entry under `lazy.settings.json[products]`, with its own level note and a seeded `vision.md`.
 
@@ -136,7 +139,7 @@ The report prints one line per phase — resolve, structure-map query, domain-gr
 
 For each remaining gap, one `AskUserQuestion` at a time offers:
 
-- **materialize via lazy-spec.create-from-code** — offered only for code-bound `feature` gaps; runs `/lazy-spec.create-from-code <compound-key> feature <slug>` in feature mode right away — landing in the group folder you named for the gap when you named one, the product root otherwise — which delegates to `lazy-spec.create-asset` the same way Step 3's candidate scaffolding did, including its own flow diagram.
+- **materialize via lazy-spec.create-from-code** — offered only for code-bound `feature` gaps; runs `/lazy-spec.create-from-code <compound-key> feature <slug>` in feature mode right away — landing in the group folder you named for the gap when you named one, the product root otherwise. Feature mode calls `lazy-spec.create-asset` with `--empty` for the scaffold and then writes the feature's `vision.md` and `design.md` from its own scan of that candidate's files, so no clarifying questions are asked about a feature that already exists in the code.
 - **print asset-proposal markup** — any category; prints a pasteable proposal block for you to drop into a living doc (`design.md`, `tech.md`, `architecture.md`) yourself, where the coordinator materializes it once that document is next approved. The skill does not write it into any document itself.
 - **skip** — no trace; the gap is re-reported the next time you run `/lazy-spec.coverage`.
 

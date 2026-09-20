@@ -15,28 +15,25 @@ spec_source_docs: []
 # {{product}} — design
 
 ## Overview
-<!-- Opens with a reference to the sibling vision (goals and value live there, never here). What the system is and why it exists. -->
+<!-- Opens with a reference to the sibling vision (goals and value live there, never here). What the product is and why it exists. -->
 
 ## Terms
 <!-- Optional. "Glossary: The most important domain and technical terms that your stakeholders use when discussing the system." — arc42 §12 Glossary. One line per term the document uses, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, a term this document introduces is defined here first. -->
 
 ## Design
-<!-- "Important, expensive, large scale or risky architecture decisions including rationales. With 'decisions' we mean selecting one alternative based on given criteria." — arc42 §9 Architecture Decisions -->
-
-## Behavior
-<!-- "The runtime view describes concrete behavior and interactions of the system's building blocks in form of scenarios." — arc42 §6 Runtime View -->
+<!-- What the product is made of and why it is shaped this way, at the product's own altitude — in words. Never an asset's behaviour, never how it is built: that is the assets' documents and the sibling tech. -->
 
 ## Constraints
-<!-- Optional. "Constraint: externally imposed limitation on the system, its design, or implementation or on the process used to develop or modify a system." — ISO/IEC/IEEE 29148 § 3.1.7. "Anything that limits the architect's freedom of design decisions." — arc42 §2 Architecture Constraints. Facts of the environment and decisions taken elsewhere that this design works within; the requirements it satisfies live in the sibling vision. -->
+<!-- Optional. The frame the product lives within: decisions taken above or outside it that this design cannot revisit. Technical constraints — stack, platforms, infrastructure — live in the sibling tech, not here. -->
 
 ## Risks
-<!-- Optional. "A list of identified technical risks or technical debts, ordered by priority." — arc42 §11 Risks and Technical Debt -->
+<!-- Optional. What could sink the product as a whole, and what the design does about each. -->
 
 ## Known Limitations
 <!-- Optional. "Identify any product features or characteristics that a stakeholder might anticipate, but which are not planned to be included in the new product." — Wiegers, Vision & Scope, Limitations and Exclusions -->
 
 ## Boundaries
-<!-- "System scope and context — as the name suggests — delimits your system (i.e. your scope) from all its communication partners (neighboring systems and users)." — arc42 §3 Context and Scope -->
+<!-- Optional. Where the product ends: what it deliberately does not do, and which neighbouring product owns what lies beyond. -->
 
 # Sources
 #protected/spec/sources

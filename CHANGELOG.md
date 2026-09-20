@@ -681,6 +681,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 9.4.0 — 2026-09-20 UTC
+
+- `lazy-spec.create-from-code` no longer re-runs the interactive scaffold wizard when deriving feature or product candidates from code — each candidate is now scaffolded empty and its documents authored straight from the code scan, with at most one question left for a genuine fork the code didn't resolve.
+- Design templates are now tailored by asset type: content assets get a data-record design (overview, intent, field definitions, relations) instead of the feature's arc42 shape, the generic default for untemplated types is trimmed to overview/glossary/intent with optional bounds, product design drops the unused Behavior section, and duplicate asset-note/vision/tech template copies were removed.
+
 ### 9.3.0 — 2026-09-20 UTC
 
 - Spec products can now nest inside each other: features, content, and research default to the product root (bugs and changes still get their own folders), nested products inherit their ancestors' settings, and the catalog, coordinator, and audit tooling track the hierarchy end to end — rollup statistics, spawn and resolve at any depth, cycle protection, and reapproving a nested product's vision or design wakes its parent.

@@ -93,7 +93,7 @@ Project root is `git rev-parse --show-toplevel` (or current working directory if
 The plugin install path (`<installPath>`) is the `installPath` field from `installed_plugins.json` for `lazycortex-specs@lazycortex`. The plugin ships:
 
 - Protocol-contract docs at `${CLAUDE_PLUGIN_ROOT}/references/*.md`
-- Default authored-doc templates at `${CLAUDE_PLUGIN_ROOT}/templates/spec.<context>/` (one folder per shipped type: `spec.feature/`, `spec.change/`, `spec.bug/`, `spec.product/`, `spec.request/`; operator-defined types add their own under `spec.<name>/` via `/lazy-spec.add-asset-type`)
+- Default authored-doc templates at `${CLAUDE_PLUGIN_ROOT}/templates/spec.<context>/` (one folder per shipped type: `spec.feature/`, `spec.change/`, `spec.bug/`, `spec.content/`, `spec.research/`, `spec.product/`, `spec.request/`; operator-defined types add their own under `spec.<name>/` via `/lazy-spec.add-asset-type`)
 
 These are read directly from the plugin cache at runtime — this skill does NOT copy them into the consumer tree.
 
