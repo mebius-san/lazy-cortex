@@ -290,11 +290,19 @@ _REQUIRED_SECTIONS = (
     Section.HISTORY,
 )
 
-# The same roster on a level note (`spec_role` in `LEVEL_ROLES`), where `# Attachments` closes
-# the body as the registry of the level documents' own attachments. It is required there rather
-# than optional because every level note is brought to this shape by `catalog-note backfill`,
-# so an absent section means the backfill was never run — exactly what the check should say.
-_LEVEL_REQUIRED_SECTIONS = ( *_REQUIRED_SECTIONS, Section.ATTACHMENTS )
+# The same roster on a level note (`spec_role` in `LEVEL_ROLES`), where `# Attachments` follows
+# `# Gates` exactly as on the asset note, as the registry of the level documents' own attachments,
+# and `# History` closes the body. It is required there rather than optional because every level
+# note is brought to this shape by `catalog-note backfill`, so an absent section means the
+# backfill was never run — exactly what the check should say.
+_LEVEL_REQUIRED_SECTIONS = (
+    Section.GATES,
+    Section.ATTACHMENTS,
+    Section.STATUS_BRIEF,
+    Section.COORD_RULES,
+    Section.COORD_COMMANDS,
+    Section.HISTORY,
+)
 
 # Sections that must carry their `#protected/<owner>/<region>` tag as the very next line
 # — a scaffolded placeholder is never a legitimate substitute.
@@ -789,7 +797,7 @@ def note_check(asset_note: Path) -> dict:
   one "section-order" violation. The roster follows the note's own `spec_role`: on an asset's
   status note `# Attachments` stays optional — never "missing-section" when absent, still
   "missing-marker" when present and untagged, and outside the order check — while on a product
-  or catalog level note it closes the required roster like any other section. No asset-only key
+  or catalog level note it is required and ordered right after `# Gates` like any other section. No asset-only key
   is ever required of a level note.
 
   Guarantees:

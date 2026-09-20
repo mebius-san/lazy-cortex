@@ -153,7 +153,7 @@ iconize_color: <from the level's registry entry, or the product's own colour>
 
 ### Level body format
 
-Seven plugin-owned H1 sections, each with its `#protected/spec/<region>` tag as its first content line, in this order: `# Summary`, `# Gates`, `# Status brief`, `# Coordinator rules`, `# Coordinator commands`, `# History`, `# Attachments`. `# Summary` carries both marker pairs: `spec.catalog-coordinator` writes the level's one-line description between `<!-- spec:precis:* -->`, and the `render-container-stats` verb writes the counts between `<!-- spec:stats:* -->`. A group container note carries the stats pair alone — a group folder holds no précis of its own.
+Seven plugin-owned H1 sections, each with its `#protected/spec/<region>` tag as its first content line, in this order: `# Summary`, `# Gates`, `# Attachments`, `# Status brief`, `# Coordinator rules`, `# Coordinator commands`, `# History`. `# Summary` carries both marker pairs: `spec.catalog-coordinator` writes the level's one-line description between `<!-- spec:precis:* -->`, and the `render-container-stats` verb writes the counts between `<!-- spec:stats:* -->`. A group container note carries the stats pair alone — a group folder holds no précis of its own.
 
 **A group folder is transparent to the counts.** The stats a note carries cover every asset below it, read straight through any group folder in the way: an asset filed under `bugs/` counts on the product root's line exactly as one sitting loose there does, and the group folder's own note is never itself one of the counted children. A nested product ends the reading instead — it is counted whole in the line's separate `N products` segment, excluded from the asset total, and its own assets belong to its own line.
 

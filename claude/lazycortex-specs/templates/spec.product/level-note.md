@@ -18,6 +18,9 @@ spec_halted: false
 # Gates
 #protected/spec/gates
 
+# Attachments
+#protected/spec/attachments
+
 # Status brief
 #protected/spec/status-brief
 _Not yet assessed by the coordinator._
@@ -30,6 +33,3 @@ _Not yet assessed by the coordinator._
 
 # History
 #protected/spec/history
-
-# Attachments
-#protected/spec/attachments

@@ -18,7 +18,7 @@ Any `#` followed by letters, digits, `_`, `-`, or `/` is indexed as a tag and sh
 
 ## 2. Unquoted frontmatter values destroy the whole block
 
-A value containing `:` or starting with `#`, `@`, `{`, or `[` makes the YAML unparseable. Obsidian drops the entire frontmatter silently — the note loses `tags`, `spec_role`, `review_active`, and vanishes from dataview queries, gate scans, and the review loop.
+A value containing `:` or starting with `#`, `@`, `{`, or `[` makes the YAML unparseable. Obsidian drops the entire frontmatter silently — the note loses `tags`, `spec_role`, `review_active`, and vanishes from dataview queries, gate scans, and the review loop. An ISO 8601 timestamp such as `2026-09-07T00:00:00Z` is the one bare value with colons that is safe: YAML reads it as a timestamp, and only a colon followed by a space breaks the block.
 
 Quote any value that is not a plain word or number. When in doubt, quote.
 

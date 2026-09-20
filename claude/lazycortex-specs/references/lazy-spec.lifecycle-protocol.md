@@ -85,7 +85,7 @@ The tag enables Obsidian queries (`#spec` for all stage-bearing docs, `#spec/app
 1. Validates the document by its declared type, never by its path or basename: it refuses a document carrying no `spec_doc_type`, refuses a type no declaration covers in the product's scope, and refuses a type declared `stages: false` (which is what excludes the status folder-note, every `report_doc` type a tool declares, and the `decisions` registry — none of them carries an independently-settable stage). It then validates the requested stage against the closed set; anything outside it — including the removed `review` / `done` / `wtr` — is refused with a clear error.
 2. Rewrites `spec_stage` in frontmatter, preserving all other keys and their order.
 3. Updates the `spec/<stage>` tag in `tags:` in the same edit (strips the old `spec/*` entry, appends `spec/<new>`).
-4. When the new stage is `approved`, writes `spec_approved_at` — a quoted ISO 8601 UTC datetime, e.g. `"2026-09-19T08:11:19Z"` — onto the document's own frontmatter and leaves it in place afterwards as the last approval moment. No history line is written on any stage move; a passed author is accepted and ignored.
+4. When the new stage is `approved`, writes `spec_approved_at` — an unquoted ISO 8601 UTC datetime, e.g. `2026-09-19T08:11:19Z` — onto the document's own frontmatter and leaves it in place afterwards as the last approval moment. No history line is written on any stage move; a passed author is accepted and ignored.
 
 It does NOT advance the folder-note's gates — deciding whether a gate is ready to move, and calling `lazy-spec.flip-gate` to move it, is `spec.coordinator`'s call (§ Part 2 below). The full skill contract lives at `${CLAUDE_PLUGIN_ROOT}/skills/lazy-spec.set-stage/SKILL.md`.
 
@@ -162,7 +162,7 @@ Each gate is still one of two kinds, a distinction the coordinator's own reasoni
 1. Reads the folder-note frontmatter.
 2. Refuses only when the asset is cancelled (`spec_cancelled: true`) — no other precondition check.
 3. Rewrites the gate boolean in frontmatter.
-4. Writes `spec_<gate>_at` (a quoted ISO 8601 UTC datetime) beside a gate turning true and removes it when the gate turns false. Nothing is written to `# Gates` or `# History`; the reason (`--reason`, prefixed `auto:` under `--auto`) is recorded in the run log only.
+4. Writes `spec_<gate>_at` (an unquoted ISO 8601 UTC datetime) beside a gate turning true and removes it when the gate turns false. Nothing is written to `# Gates` or `# History`; the reason (`--reason`, prefixed `auto:` under `--auto`) is recorded in the run log only.
 5. **Atomic git commit of the folder-note edit** under `lazy-spec.flip-gate@bot.invalid` (subject `lazy-spec.flip-gate: <gate> → <true|false> on <asset>`). Without this commit the daemon's next iteration trips its dirty-tree-skip guard and silently halts every routine on the asset. Defensive skip when the asset is not inside a git repository (test-fixture path) — the file write remains but the commit step is no-op.
 6. Writes a run log under `.logs/claude/lazy-spec.flip-gate/`.
 

@@ -79,17 +79,18 @@ class _Outcome:
   UNCHANGED = "unchanged"
 
 
-# The level note's body in canonical order. `# Summary` opens it (the plugin's own précis and
-# stats region) and `# Attachments` closes it (the coordinator's registry of the level
-# documents' attachments); the five between are the coordinator's own working sections.
+# The level note's body in canonical order — the asset note's order with `# Summary` in front.
+# `# Summary` opens it (the plugin's own précis and stats region), `# Attachments` follows
+# `# Gates` (the coordinator's registry of the level documents' attachments), and `# History`
+# closes it; the rest are the coordinator's own working sections.
 _SECTION_ORDER = (
     Section.SUMMARY,
     Section.GATES,
+    Section.ATTACHMENTS,
     Section.STATUS_BRIEF,
     Section.COORD_RULES,
     Section.COORD_COMMANDS,
     Section.HISTORY,
-    Section.ATTACHMENTS,
 )
 
 # Template filename and the category whose override chain resolves it. One template serves both

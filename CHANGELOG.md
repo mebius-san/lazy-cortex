@@ -681,6 +681,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 9.4.1 — 2026-09-20 UTC
+
+- Fixed gate timestamps (e.g. `spec_approved_at`) being written unquoted by code but demanded quoted by the skill, lifecycle protocol, coordination playbook, and walkthroughs — prose now matches the code's unquoted ISO 8601 form.
+- Fixed the level-note template placing `# Attachments` last, after `# History`, instead of right after `# Gates` like asset notes — template, backfill order, and note check now aligned.
+
 ### 9.4.0 — 2026-09-20 UTC
 
 - `lazy-spec.create-from-code` no longer re-runs the interactive scaffold wizard when deriving feature or product candidates from code — each candidate is now scaffolded empty and its documents authored straight from the code scan, with at most one question left for a genuine fork the code didn't resolve.
@@ -988,6 +993,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial release.
 
 ## lazycortex-obsidian
+
+### 5.3.1 — 2026-09-20 UTC
+
+- The vault-safe markdown rule now calls out ISO 8601 timestamps (e.g. `2026-09-07T00:00:00Z`) as the one frontmatter value with a colon that's safe to leave unquoted — everything else with a colon still needs quoting to avoid Obsidian silently dropping the frontmatter block.
 
 ### 5.3.0 — 2026-09-14 UTC
 
