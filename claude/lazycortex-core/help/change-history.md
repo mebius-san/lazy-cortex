@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Run-log housekeeping and change-history access — clean up orphaned log directories, distill commits into themed prose, and ask "why was X changed?" across every source at once.
-last_regen: 2026-09-17
+last_regen: 2026-09-21
 diagram_spec:
   anchor: "How the members fit together"
   request: "Architecture diagram showing the two groups of members in the change-history block: (1) lazy-log.clean prunes the .logs/claude/ tree; (2) lazy-log.distill converts .logs/commits.jsonl into .logs/changelog.md; (3) lazy-log.recall, lazy-log.timeline, and lazy-log.summary read from changelog + run logs + git log + memory to answer history queries; (4) lazy-log.bullets reads git commits to produce a user-facing release block. Show the shared inputs (commits.jsonl, changelog.md, run logs) feeding the query agents."
@@ -13,6 +13,7 @@ source_skills:
   - lazy-log.summary
   - lazy-log.bullets
 source_sha: 4ce2acf18852efdc30c37eebe5c23618c5b98b26
+surface_sha: 05db4f913879dd476a3e8c03112e2ba2edbfc3a93a69e36cb87b1b759e2028f3
 ---
 # Change history and run-log housekeeping
 

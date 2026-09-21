@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-wiki skills — symptoms, likely causes, and fixes.
-last_regen: 2026-09-17
+last_regen: 2026-09-21
 no_diagram: true
 source_skills:
   - lazy-wiki.install
@@ -13,7 +13,8 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: d8d333338bcd2cca2b033eeb8fd72b47fa5be8db
+source_sha: ece443fde681d08757d84c2adc770268af1c254a
+surface_sha: 08486043e0ee4b6d8a3ea70f5f40291f592991d77fe919591712a724b729e9ce
 ---
 # Troubleshooting
 

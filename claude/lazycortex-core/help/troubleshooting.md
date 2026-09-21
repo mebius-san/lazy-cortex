@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-09-20
+last_regen: 2026-09-21
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, generic iteration loops, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys, seed data gaps), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models, plugin-path resolution, stale source paths at claim time), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources, worker import errors), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
@@ -38,7 +38,8 @@ source_skills:
   - lazy-runtime.preflight
   - lazy-runtime.recover
   - lazy-runtime.tick
-source_sha: 5ede910ce825bf2c51707a5e1ac86965ab0a4d6b
+source_sha: ece443fde681d08757d84c2adc770268af1c254a
+surface_sha: 5ad77b4755ec7c8d326775b07fc550d40d3fdbdcb7c7fba07d2ada305ca4dd9d
 ---
 # Troubleshooting
 
@@ -440,13 +441,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ---
 
-## `/lazy-core.audit` flags a routine command as failing even though the plugin is installed
+## `/lazy-core.audit` flags a routine's `command` or `expert` shape as invalid
 
-**Symptom**: `/lazy-core.audit` reports a routine's `command:` entry as failing, but you can confirm the named plugin is installed and working.
+**Symptom**: `/lazy-core.audit` reports one of "routine `<name>` names neither a command nor an expert + request", "... names both a command and an expert", "routine `<name>` command path does not exist: `<path>`", or "routine `<name>` dispatches unregistered expert `<expert>`" against a routine you registered — even when the plugin or expert it should be reaching looks fine.
 
-**Likely cause**: The routine's recorded command path points at an older plugin-cache layout. Plugin binaries live under a versioned path; if the routine was registered against an earlier install, the path in `lazy.settings.json` can go stale after a plugin update.
+**Likely cause**: Every routine names its worker in exactly one of two shapes — a `command` list (a plain subprocess), or an `expert` name paired with a `request` template (an expert-dispatching routine, the shape every curator and coordinator routine ships in). The audit's routine check validates both shapes, not just `command`:
+- Carrying **neither** shape, or carrying **both** at once, is always a FAIL — the registry validator only accepts exactly one.
+- A `command`-shape routine's path must resolve under the plugin cache's versioned layout (`$HOME/.claude/plugins/cache/<registry>/<plugin>/<version>/bin/<plugin>`); a routine registered against an older cache layout, or before the owning plugin was last reinstalled, points at a bin path that no longer exists.
+- An `expert`-shape routine's `expert` field must name a key already present in `lazy.settings.json[experts]`; a typo, a removed expert, or a routine registered before the expert was added dispatches to nothing the runtime recognises.
 
-**Fix**: Re-install the plugin that owns the routine (`/plugin update <plugin>@lazycortex`), then re-run `/lazy-core.install` for that plugin so the routine's command path is refreshed. Re-run `/lazy-core.audit` to confirm.
+**Fix**: For a routine carrying neither or both shapes, re-register it with the correct one via `/lazy-routine.register --force` — a `command` list, or an `expert` name plus `request` template, never both. For a stale `command` path, reinstall the plugin that owns the routine (`/plugin update <plugin>@lazycortex`), then re-run `/lazy-core.install` for that plugin so the routine's command path is refreshed. For an unregistered `expert`, either register the missing expert through the `/lazy-core.install` expert wizard, or re-register the routine against an existing expert key with `/lazy-routine.register --force`. Re-run `/lazy-core.audit` to confirm.
 
 ---
 

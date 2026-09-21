@@ -1,13 +1,14 @@
 ---
 chapter_type: block
 summary: Assign model tiers to every agent, prune dead entries, and register non-Anthropic provider endpoints for expert jobs to spawn against.
-last_regen: 2026-09-17
+last_regen: 2026-09-21
 no_diagram: true
 source_skills:
   - lazy-core.agent-models
   - lazy-core.agent-models-seed
   - lazy-core.providers
 source_sha: c02247a7934dc795134e714f217ab0c7082bcdd3
+surface_sha: a87f90f3dbb9c369cf3c7669b61063593e76834c82b55ae3f23368501409ab16
 ---
 # Per-agent model routing
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Register, unregister, tick, preflight, and recover routines in the per-repo serial daemon — six skills keep the async team running in order, decide when a new periodic job needs the daemon at all, and validate broken expert configs before they run live.
-last_regen: 2026-09-20
+last_regen: 2026-09-21
 diagram_spec:
   anchor: "Runtime lifecycle"
   request: "State diagram showing the daemon lifecycle: routines registered in lazy.settings.json feed the serial daemon loop; the daemon runs each routine in order per interval_sec or cron schedule; a dirty working tree triggers an uncommitted_changes halt; a failed remote sync retries with backoff and only escalates to a git_pull_diverged / git_push_failed / git_remote_unavailable halt once retries are exhausted; /lazy-runtime.recover (commit/stash/discard/abort for tree halts; manual-fix + resume for remote-sync halts) cleans the precondition and resumes; unregister removes a routine from the loop."
@@ -17,7 +17,8 @@ source_skills:
   - lazy-core.state-schema
   - lazy-core.expert-runtime-schema
   - lazy-core.metrics-schema
-source_sha: be6b0e00d45c8962c246f7471080c884ac6318d2
+source_sha: ece443fde681d08757d84c2adc770268af1c254a
+surface_sha: b39fd489128d8e7198e6144d9af152849682808905cc1115634a45a68cd0bedf
 ---
 # Runtime daemon — routine management and recovery
 
@@ -36,7 +37,7 @@ Three routines exist before you register any of your own — the daemon's instal
 - `subprocess` — run any shell command on a fixed interval. Use it for scripts, CLI tools, or any periodic task that does not need expert routing.
 - `inbox` — watch a directory and dispatch one job per file. With an `expert + request` dispatch, the daemon references each file by its path — the file is never copied into the job bundle — and deletes it only once the job's response proves a finished outcome; with a `command` dispatch the file stays in the inbox until the consumer removes it.
 - `schedule` — fire once per cron boundary using a standard five-field cron expression. Use it for calendar-driven tasks like nightly backups or weekly audits.
-- `git` — poll local HEAD for `new_commits`, `new_files`, `changed_files`, `deleted_files`, or `renamed_files` and fire once per match. Use it for CI-like reactions to changes in the working repo. An optional `group_globs` set of directory globs collapses file-level matches sitting below a matched directory glob into one item per directory (carrying `dir` plus the sorted member paths) instead of one item per file — the deepest matching glob wins, with the first listed breaking a depth tie, so list order otherwise carries no meaning — useful when a routine cares about "something changed under this folder" rather than every individual file; it does not apply to `new_commits` watches.
+- `git` — poll local HEAD for `new_commits`, `new_files`, `changed_files`, `deleted_files`, or `renamed_files` and fire once per match. Use it for CI-like reactions to changes in the working repo. For an `expert`-shape git routine, grouping is on by default: matched files collapse into one job per parent directory instead of one job per file, so a directory-wide change dispatches a single job carrying every touched path. Set `group: false` on that routine to get one job per file instead — a `command`-shape routine never groups unless it opts a `group_globs` set into the mix. An optional `group_globs` set of directory globs widens the grouping unit past the immediate parent directory, collapsing every file-level match sitting below a matched glob into one item per directory (carrying `dir` plus the sorted member paths) — the deepest matching glob wins; two globs matching at the same depth name the same directory, so list order carries no meaning. Neither `group` nor `group_globs` applies to `new_commits` watches.
 - `md-scan` — scan vault-relative glob patterns, filter matching markdown files by frontmatter key-value pairs, and fire in-place once per match. Use it for processing request-queue notes tracked in git, such as design-request or review-request documents.
 
 Every type accepts the same two dispatch shapes: either a `command` list (spawn a subprocess) or an `expert + request` pair (queue a job to a named expert). For cross-repo dispatch, the `expert` field accepts an `<expert>@<repo>` suffix — the daemon resolves the target repo from `lazy.settings.json` and routes the job there. The skill refuses to overwrite an existing routine unless you pass `--force`.
@@ -130,7 +131,8 @@ Before any of the above matters, `/lazy-core.daemon-authoring` is the fork in th
 - **Recover from a `config_violation` halt** — read the rejection text from the routine's own error record, fix whatever setting it names (usually in the plugin section that routine drives), and re-run the routine's command by hand to confirm before resuming.
 - **Unregister the index healer or hourly doctor** — run `/lazy-routine.unregister lazy-core.index-guard` or `/lazy-routine.unregister lazy-runtime.doctor`. Neither is protected the way `lazy-expert.pump` is, but removing one turns off its safety net (index self-heal, or dead-job/stale-halt detection) until you re-register it or re-run `/lazy-core.install`.
 - **Recover from a `rate_limit` halt** — usually no action needed; the daemon lifts it itself once the window reopens. Pick `resume` in `/lazy-runtime.recover` only if you want the queue moving again immediately — safe, since the pump still refuses to spawn while the window is closed.
-- **Two `group_globs` entries could both match a changed file's directory** — the deepest matching glob wins; when two entries match at the same depth, the one listed first in `group_globs` wins the tie. List order otherwise carries no meaning, so treat `group_globs` as a set when composing it.
+- **Get a job per changed file instead of a job per directory** — a `git` routine dispatching to an expert groups by default (`group: true`): every changed file collapses into a job with the rest of its own parent directory. Set `group: false` when registering (`/lazy-routine.register <name> --force`) to get one job per file instead. A `command`-shape `git` routine never groups unless `group_globs` is declared, so this only matters for `expert`-shape routines.
+- **Two `group_globs` entries could both match a changed file's directory** — the deepest matching glob wins; two entries that match at the same depth name the same directory, so there is no real tie left to break. List order otherwise carries no meaning, so treat `group_globs` as a set when composing it.
 
 ## Runtime lifecycle
 

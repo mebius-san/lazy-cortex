@@ -366,12 +366,13 @@ Validate the returned sections (`daemon_version` / `routines_version` are the cu
 - **`routines` section.** The section IS the routines map (each key is a routine name; `_version` is the lone reserved key). `routines._version` must equal `routines_version` (current `CURRENT_VERSIONS['routines']`, presently 2). Wrong value or absent → `[FAIL] routines section _version mismatch (expected <routines_version>) | .claude/lazy.settings.json`. The section must be a dict — a non-dict value → `[FAIL] routines section is not a dict | .claude/lazy.settings.json`.
 - When D1 found at least one expert AND `routines` does not contain a `lazy-expert.pump` entry → `[WARN] experts configured but lazy-expert.pump routine absent from routines | .claude/lazy.settings.json`.
 
-**D4 — Routine command resolvability**
+**D4 — Routine worker resolvability**
 
 For each key/value in `routines` (skip if D3 found the section absent):
 
-- Read the routine object's `command` field. If absent → `[FAIL] routine <name> has no command field | .claude/lazy.settings.json`.
-- The `command` value must be a plugin bin path under the 4-level plugin cache layout: `$HOME/.claude/plugins/cache/<registry>/<plugin>/<version>/bin/<plugin>`. Resolve `$HOME` via `Bash(echo $HOME)`. Check path existence via `Bash(test -f '<path>' && echo ok || echo missing)`. Missing → `[FAIL] routine <name> command path does not exist: <path> | .claude/lazy.settings.json`.
+- A routine names its worker in one of two shapes, and the registry validator accepts exactly one of them per routine: a `command` list, or an `expert` name together with a `request` template. Carrying neither, or carrying both, → `[FAIL] routine <name> names neither a command nor an expert + request | .claude/lazy.settings.json` (respectively `... names both a command and an expert`). Do not report a missing `command` on a routine that correctly carries `expert` + `request` — that is the shape every curator and coordinator routine ships in.
+- **`command` shape only.** The `command` value must be a plugin bin path under the 4-level plugin cache layout: `$HOME/.claude/plugins/cache/<registry>/<plugin>/<version>/bin/<plugin>`. Resolve `$HOME` via `Bash(echo $HOME)`. Check path existence via `Bash(test -f '<path>' && echo ok || echo missing)`. Missing → `[FAIL] routine <name> command path does not exist: <path> | .claude/lazy.settings.json`.
+- **`expert` shape only.** The named expert must be a key in `lazy.settings.json[experts]` (from D1). Absent → `[FAIL] routine <name> dispatches unregistered expert <expert> | .claude/lazy.settings.json`.
 
 **D5 — Orphan jobs**
 

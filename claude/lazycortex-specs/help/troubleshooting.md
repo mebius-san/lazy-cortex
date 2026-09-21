@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-09-20
+last_regen: 2026-09-21
 no_diagram: true
 source_skills:
   - lazy-spec.add-asset-type
@@ -25,7 +25,8 @@ source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
   - lazy-spec.audit
-source_sha: 363d44e24bc3b51a232b4ca6f637dba8c931b2f7
+source_sha: b9cc732063fd5d0d05c3e9e7be1bb76cd38af2a6
+surface_sha: bb8f6e9b8940000d86c1bb4868e5f424774437f5a74cb899a0d04ff60b5d21db
 ---
 # Troubleshooting
 
@@ -39,13 +40,23 @@ source_sha: 363d44e24bc3b51a232b4ca6f637dba8c931b2f7
 
 ---
 
-## `/lazy-spec.install` reports a routine already registered
+## `/lazy-spec.install` reports `refreshed` for a routine you already registered
 
-**Symptom**: The install run reports `routine lazy-spec.gate-tick already registered`, `routine lazy-spec.coordinator-watch already registered`, `routine lazy-spec.collect already registered`, or `routine lazy-spec.upstream-tick already registered` and moves on without rewiring it.
+**Symptom**: A repeat install run reports `refreshed` (rather than `unchanged`) for `lazy-spec.gate-tick`, `lazy-spec.coordinator-watch`, `lazy-spec.collect`, or `lazy-spec.upstream-tick`, even though you already ran install before.
 
-**Likely cause**: A prior install already wired that routine. Re-running `/lazy-spec.install` never overwrites an existing routine registration — this is the expected `routine-already-present` outcome, not a failure. `lazy-spec.collect` is the postman routine that delivers a finished expert job's terminal marker back into the asset's status folder-note. `lazy-spec.upstream-tick` runs the unattended `upstream/` fetch/detect pass on a schedule — install only registers it once at least one source is configured under `spec.upstream`, skipping silently otherwise. All four register alongside each other during install.
+**Likely cause**: Re-running `/lazy-spec.install` no longer leaves an existing routine alone — every registration step calls the routine registrar in reconcile mode. Install-managed keys (the routine type, its path mask or `path_filter`, its frontmatter filter, its `command:` worker) are rewritten to the current shipped shape on every run; the keys that are genuinely yours — `interval_sec`, `timeout_sec`, `priority`, `cron`, `branch`, `hooks_enabled`, `ignore_halt`, and `group_globs` — are left exactly as they stand. `refreshed` means one of the managed keys had drifted from what the plugin currently ships (an older filter shape, a narrower glob, a stale worker) and reconcile corrected it; `unchanged` means nothing needed correcting. `lazy-spec.collect` is the postman routine that delivers a finished expert job's terminal marker back into the asset's status folder-note. `lazy-spec.upstream-tick` runs the unattended `upstream/` fetch/detect pass on a schedule — install only registers it once at least one source is configured under `spec.upstream`, skipping silently otherwise.
 
-**Fix**: Nothing to do if the routine's shape is still correct. To change its shape (schedule, paths, filters), run `/lazy-routine.unregister lazy-spec.gate-tick` (or `lazy-spec.coordinator-watch`, `lazy-spec.collect`, or `lazy-spec.upstream-tick`) first, then re-run `/lazy-spec.install` so it re-registers fresh.
+**Fix**: Nothing to do — a `refreshed` outcome on a managed key is install catching the routine up, not discarding your customization. If you deliberately changed one of the install-managed keys itself (not the operator ones above), that override does not survive reconcile; it is rewritten back to the shipped shape on every run.
+
+---
+
+## `/lazy-spec.install` refuses to reconcile a routine, asking `merge-shipped` or `keep-local`
+
+**Symptom**: An install run stops on one routine (most often `lazy-spec.coordinator-watch` or `lazy-spec.request-apply`) with a `RoutineConfigError`-driven question naming a shape conflict, offering `merge-shipped` or `keep-local`.
+
+**Likely cause**: Reconcile can rewrite individual managed keys, but it cannot merge across a genuine shape change — the recorded entry's `type` differs from what's shipped now, or it still carries an older shape (e.g. the `expert:` + `request:` pair where the shipped routine now uses `command:`). That only happens on a checkout whose routine was registered before a later plugin release changed the routine's shape.
+
+**Fix**: Pick `merge-shipped` to unregister the old entry and re-register the shipped shape, carrying your operator keys (schedule, branch, etc.) over from the removed entry — this is the normal choice. Pick `keep-local` only if you deliberately want to keep running the old shape; the conflict question resurfaces on every install run until you resolve it one way or the other.
 
 ---
 

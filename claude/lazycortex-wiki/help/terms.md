@@ -1,16 +1,17 @@
 ---
 chapter_type: block
 summary: One agreed dictionary per scope, consulted at write-time and kept honest by a curator and an audit, so a concept never grows a second name.
-last_regen: 2026-09-20
+last_regen: 2026-09-21
 diagram_spec:
   anchor: "How the pieces fit together"
-  request: "Flow diagram with three legs sharing one dictionary file. Leg 1 (write-time): a writing expert calls lazy-wiki.terms mid-document, in lookup mode or check-a-candidate-word mode; the skill reads the dictionary and returns matching definitions, never writes. Leg 2 (curate, git-watch): a document commit triggers the terms-scan routine, which dispatches lazy-wiki.terms-curator in curate mode; the curator reads the changed document plus the dictionary headings, decides add / extend / rename / split per new concept, edits the dictionary, and commits. Leg 3 (audit): the terms section of /lazy-wiki.audit checks format and scope configuration by reading, then dispatches lazy-wiki.terms-curator in report mode for meaning checks (divergence, missing, duplicate, dead); /lazy-core.doctor presents each finding to the operator one at a time via AskUserQuestion and applies only what they choose. Show all three legs converging on the one dictionary file, and that report mode writes nothing itself."
+  request: "Flow diagram with three legs sharing one dictionary file. Leg 1 (write-time): a writing expert calls lazy-wiki.terms mid-document, in lookup mode or check-a-candidate-word mode; the skill reads the dictionary and returns matching definitions, never writes. Leg 2 (curate, git-watch): a document commit triggers the terms-scan routine, which dispatches lazy-wiki.terms-curator in curate mode with every document of one directory that changed in the same wave as its batch; the curator reads the batch as one body of text plus the dictionary headings, decides add / extend / rename / split per candidate concept (a concept spanning several of the batch's documents becomes one candidate, not one per file), edits the dictionary, and commits once for the whole batch. Leg 3 (audit): the terms section of /lazy-wiki.audit checks format and scope configuration by reading, then dispatches lazy-wiki.terms-curator in report mode for meaning checks (divergence, missing, duplicate, dead); /lazy-core.doctor presents each finding to the operator one at a time via AskUserQuestion and applies only what they choose. Show all three legs converging on the one dictionary file, and that report mode writes nothing itself."
   kind_hint: flow
 source_skills:
   - lazy-wiki.terms
   - lazy-wiki.terms-curator
   - lazy-wiki.audit
-source_sha: 092195a4fbb13a8c1f71552815a771ae70533efd
+source_sha: b9cc732063fd5d0d05c3e9e7be1bb76cd38af2a6
+surface_sha: da6218d646403628d1464c4c6adb495abdf69eb8062f5cd64d087931ce108d13
 ---
 # Terms
 
@@ -29,7 +30,7 @@ The three pieces never touch the same file at the same time. `lazy-wiki.terms` o
 
 **Lookup, at write time.** `lazy-wiki.terms` is what a writing expert (or you, mid-session) calls before naming something. It resolves which scope's dictionary covers the document being written from `.claude/lazy.settings.json[terms.scopes]`, then runs in one of two modes: look up one term's existing definition, or check a name you're about to use against the headings already taken. In the second mode it greps just the headings first, picks the candidates that plausibly name the same thing, and only then reads those candidates' definitions — the whole dictionary never enters the caller's context. If a candidate really does name your concept, you take the existing word, even when yours reads better; a second name for one thing is exactly what the dictionary exists to prevent. If none do, your word is new and the curator will pick it up later. Two of those candidate matches carry their own rule: when the candidate is the qualified name of the very concept you were about to call by its bare everyday word — `input field` where you meant `field` — you take the qualified term, since the bare word is exactly the ambiguity the qualifier exists to escape; and when the candidate is itself still a bare common word standing for a project entity, you write the qualified form in your document instead and list it in your own `## Terms` section with the dictionary's definition verbatim — the bare heading itself is never named anywhere in your document; the curator matches that verbatim definition and performs the rename from that section, since renaming the dictionary's heading is the curator's call, not something you do mid-sentence. This skill never edits the dictionary — deciding a term deserves an entry, or that its definition needs widening, is the curator's call once the document is finished, not a mid-sentence decision by whoever is writing.
 
-**Curation, after the fact.** `lazy-wiki.terms-curator` owns the dictionary file and nothing else. When a document under a terms scope changes and the `lazy-wiki.terms-scan-<scope-id>` routine fires, the curator runs in `curate` mode: it reads the changed document — starting with its own `## Terms` section when it carries one, where each `**term** — definition` line names a candidate outright with the definition the document itself gives, and a line whose definition disagrees with the dictionary's is a divergence to record rather than a silent overwrite — then reads the rest of the body for any concepts that section left out. It reads the dictionary's headings, and for each concept the document introduces decides whether it's genuinely new (**add**), already named but under-defined for this shade of meaning (**extend** — the existing heading stays, the body widens), still carrying a bare everyday heading for a concept the document has now named in its qualified form (**rename** — the heading becomes the qualifying noun the definition already implies, the body stays otherwise the same, and a document still writing the bare word becomes a divergence for the audit to catch — a term is a name, never just an ordinary word, so a heading like "field" that really means one project's particular input field is renamed to say so), or colliding with a name that actually belongs to a neighbouring concept (**split** — a second entry lands under a different name, and both definitions are reworded to name each other, so a future audit can tell a fresh split from an unused term). It writes the dictionary directly — sections sorted by heading, three physical lines per definition at most — and commits. It never edits the document that triggered it.
+**Curation, after the fact.** `lazy-wiki.terms-curator` owns the dictionary file and nothing else. When a document under a terms scope changes and the `lazy-wiki.terms-scan-<scope-id>` routine fires, the curator runs in `curate` mode. A run carries a **batch**, not one document — every document of one directory that changed in the same wave, because a directory's documents describe one subject and their terms are decided against each other rather than one at a time; a single changed document still arrives as a batch of one, and behaves identically. It reads the surviving documents of the batch as one body of text rather than one at a time — starting with each document's own `## Terms` section when it carries one, where each `**term** — definition` line names a candidate outright with the definition the document itself gives, and a line whose definition disagrees with the dictionary's is a divergence to record rather than a silent overwrite — then reading the rest of each body for any concepts those sections left out. Because the batch is judged together, a concept that two or more documents in the directory name is one candidate, not one per file. It reads the dictionary's headings, and for each concept the batch introduces decides whether it's genuinely new (**add**), already named but under-defined for this shade of meaning (**extend** — the existing heading stays, the body widens), still carrying a bare everyday heading for a concept the batch has now named in its qualified form (**rename** — the heading becomes the qualifying noun the definition already implies, the body stays otherwise the same, and a document still writing the bare word becomes a divergence for the audit to catch — a term is a name, never just an ordinary word, so a heading like "field" that really means one project's particular input field is renamed to say so), or colliding with a name that actually belongs to a neighbouring concept (**split** — a second entry lands under a different name, and both definitions are reworded to name each other, so a future audit can tell a fresh split from an unused term). It applies every decision, writes the dictionary, and commits **once for the whole batch** — sections sorted by heading, three physical lines per definition at most — forty documents in one directory produce one commit, not forty. It never edits the documents that triggered it.
 
 **Audit, on demand.** The terms section of `/lazy-wiki.audit` is where drift that slipped past both of the above gets caught. It checks format and scope configuration itself, by reading — a dictionary file that doesn't exist, two scopes' `paths` overlapping, a missing `source_exclude` entry, definitions run past three lines, headings out of sort order. Then, for the judgment calls a program can't make, it dispatches `lazy-wiki.terms-curator` in `report` mode — no job dir this time, just the scope id, the dictionary path, the scope's `paths`, and its `source_exclude` in the prompt — and gets back `divergence` (a document and the dictionary disagree on the word for one concept — including two language forms of the same concept, and a document still writing the bare everyday word for a term the dictionary now carries under its qualified name), `missing` (a document names a project entity the dictionary doesn't carry), `duplicate` (two entries describe one concept), and `dead` (a term no document in the scope actually uses, excluding a term whose definition names a sibling — that's a fresh split, not a corpse). Report mode writes nothing. `/lazy-core.doctor` then walks you through each finding individually via `AskUserQuestion`, since which side of a divergence is "right" is your call, not a default — showing both words, the document, and the dictionary side by side before asking — and leaves alone anything under a document with `review_active: true` or inside a mirrored tree, since editing either would fight the process that owns them.
 
@@ -51,56 +52,52 @@ The three pieces never touch the same file at the same time. `lazy-wiki.terms` o
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  writingExpert["Writing expert mid-document"]
-  termsLookup{"lazy-wiki.terms - lookup or check candidate?"}
-  termsReturns["Returns matching definitions, never writes"]
-  documentCommit["Document commit"]
-  curatorCurate["terms-curator curate mode - reads changed document and dictionary headings"]
-  curatorDecision{"Add, extend, or split concept?"}
-  curatorCommits["Edits dictionary and commits"]
-  auditTerms["lazy-wiki.audit terms section - reads dictionary, checks format and scope"]
-  curatorReport["terms-curator report mode - checks divergence, missing, duplicate, dead"]
-  doctorReview["lazy-core.doctor presents each finding via AskUserQuestion"]
-  operatorApplies["Operator applies only chosen fixes"]
-  dictionaryFile[("Dictionary file")]
+  writingExpertCallsTerms["Writing expert calls lazy-wiki.terms mid-document"]
+  readsAndReturnsDefinitions["Reads dictionary, returns matching definitions, never writes"]
+  documentCommitTriggersScan["Document commit triggers terms-scan routine"]
+  dispatchCuratorCurate["Dispatches lazy-wiki.terms-curator, curate mode, with directory's batch"]
+  decideConceptAction{"Add, extend, rename, or split candidate concept?"}
+  editsDictionaryCommitsBatch["Edits dictionary, commits once for whole batch"]
+  auditChecksFormatScope["lazy-wiki.audit terms section checks format and scope config"]
+  dispatchCuratorReport["Dispatches lazy-wiki.terms-curator, report mode"]
+  curatorReportsFindings["Reports divergence, missing, duplicate, dead findings"]
+  doctorPresentsFindings{"lazy-core.doctor presents each finding to operator"}
+  operatorAppliesChosen["Operator applies only what they choose"]
+  termsDictionaryFile["Shared terms dictionary file"]
 
-  writingExpert -->|calls mid-document| termsLookup
-  termsLookup -->|lookup| dictionaryFile
-  termsLookup -->|check candidate| dictionaryFile
-  dictionaryFile -->|read| termsReturns
-
-  documentCommit -->|triggers terms-scan routine| curatorCurate
-  curatorCurate -->|reads| dictionaryFile
-  curatorCurate -->|decides| curatorDecision
-  curatorDecision -->|add| curatorCommits
-  curatorDecision -->|extend| curatorCommits
-  curatorDecision -->|split| curatorCommits
-  curatorCommits -->|writes| dictionaryFile
-
-  auditTerms -->|reads for format and scope| dictionaryFile
-  auditTerms -->|dispatches report mode| curatorReport
-  curatorReport -->|reads for meaning checks| dictionaryFile
-  curatorReport -->|findings, writes nothing| doctorReview
-  doctorReview -->|one at a time| operatorApplies
-  operatorApplies -->|applies chosen only| dictionaryFile
+  writingExpertCallsTerms -->|queries, lookup or check mode| readsAndReturnsDefinitions
+  readsAndReturnsDefinitions -->|reads| termsDictionaryFile
+  documentCommitTriggersScan -->|triggers| dispatchCuratorCurate
+  dispatchCuratorCurate -->|reads batch as one body plus dictionary headings, one candidate per concept| decideConceptAction
+  decideConceptAction -->|add| editsDictionaryCommitsBatch
+  decideConceptAction -->|extend| editsDictionaryCommitsBatch
+  decideConceptAction -->|rename| editsDictionaryCommitsBatch
+  decideConceptAction -->|split| editsDictionaryCommitsBatch
+  editsDictionaryCommitsBatch -->|writes and commits batch| termsDictionaryFile
+  auditChecksFormatScope -->|reads| termsDictionaryFile
+  auditChecksFormatScope -->|dispatches| dispatchCuratorReport
+  dispatchCuratorReport -->|reads for meaning checks, writes nothing| curatorReportsFindings
+  curatorReportsFindings -->|surfaces| doctorPresentsFindings
+  doctorPresentsFindings -->|operator accepts| operatorAppliesChosen
+  doctorPresentsFindings -->|operator declines| curatorReportsFindings
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
 
-  class writingExpert entry
-  class documentCommit entry
-  class auditTerms entry
-  class termsLookup guard
-  class curatorDecision guard
-  class dictionaryFile action
-  class curatorCurate action
-  class curatorReport action
-  class doctorReview action
-  class termsReturns success
-  class curatorCommits success
-  class operatorApplies success
+  class writingExpertCallsTerms entry
+  class readsAndReturnsDefinitions success
+  class documentCommitTriggersScan entry
+  class dispatchCuratorCurate action
+  class decideConceptAction guard
+  class editsDictionaryCommitsBatch success
+  class auditChecksFormatScope entry
+  class dispatchCuratorReport action
+  class curatorReportsFindings action
+  class doctorPresentsFindings guard
+  class operatorAppliesChosen success
+  class termsDictionaryFile action
 ```
 <!-- /lazy-diagram.draw lands the fence here; do not author a code block manually. -->
 

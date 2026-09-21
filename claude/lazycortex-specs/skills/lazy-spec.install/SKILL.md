@@ -27,6 +27,24 @@ Every file this skill creates or updates — settings sections, routine entries,
 
 Steps 5, 5b, and 6 register routines (`lazy-spec.gate-tick`, `lazy-spec.coordinator-watch`, `lazy-spec.request-open`, `lazy-spec.request-apply`). None of them is gated on `daemon.enabled`: `/lazy-runtime.tick` runs the registered set in the daemon's own priority order on a checkout that never starts one, so an unregistered routine is not a saved dead entry, it is a routine the operator cannot tick. The flag governs only what a live daemon process must own — the supervisor unit and the metrics endpoint — and both belong to `lazy-core.install`. Never read it here, and never ask about it.
 
+## Routine registrations are reconciled, never skipped
+
+Every step that registers a routine (5, 5b, 5c, 6a, 6b, 6.7) calls `lazycortex-core:lazy-routine.register` in **reconcile mode**, passing the shipped `cfg` and the list of keys this plugin owns:
+
+```
+Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=<name> cfg=<cfg-json> --managed <key>,<key>")
+```
+
+The plain register call is never used here: it aborts on a name it already knows, so a consumer registered under an older shape keeps that shape forever, and nothing this skill writes afterwards ever revisits the entry.
+
+**What `--managed` names is the plugin's own knowledge** — the routine type, the path mask, the filter predicates, the watch mode, the `command:` worker, the request template. Those keys are corrected to the shipped value on every run. Every other key the recorded entry carries is the operator's answer and is left exactly as it stands: `interval_sec`, `timeout_sec`, `priority`, `cron`, `branch`, `hooks_enabled`, `ignore_halt`, and `group_globs` (owned by `lazy-spec.product-config` Step 12 and extendable by hand). A shipped key the entry never carried is filled in. Each step names its own `--managed` list beside its `cfg`; the registrar returns `registered`, `refreshed`, or `unchanged`, and the step reports whichever came back.
+
+A stale install-managed value is therefore never a drift question and never an unregister/re-register dance — it is simply rewritten on the next run.
+
+**The one case reconcile cannot merge is a shape change.** The registrar validates the merged entry against the routine type's closed vocabulary, so an entry whose recorded `type` differs from the shipped one, or which still carries the older `expert:` + `request:` pair where the shipped shape has `command:`, raises `RoutineConfigError` instead of being written. That is the genuine conflict the File-sync policy means — surface it through the policy's conflict question: **Where** — this step, `routines.<name>` in `<settings-dir>/lazy.settings.json`; **Found** — the recorded entry against the shipped `cfg`; **Why asking** — the two shapes cannot be merged mechanically and the operator keys of the old entry would be discarded with it; **Answers** — `merge-shipped` (`/lazy-routine.unregister <name>`, then re-register the shipped `cfg`, carrying over the operator keys read back from the removed entry) / `keep-local` (the entry stays and the routine keeps running its old shape, raised again on the next run). Outcome: `shape-migrated` or `shape-kept-local`.
+
+**No routine of another plugin is reconciled from here.** Step 7b seeds a `spec_stage` exclusion into the wiki plugin's own routines through the core CLI's absent-key-only `routine-ensure-filter`, never through `--managed`: reasserting a sibling's `filter` block from this side would delete whatever that plugin, or the operator, put there.
+
 ## Execution discipline (MANDATORY — read before any action)
 
 This skill has 18 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
@@ -213,13 +231,13 @@ Invoke `lazycortex-core:lazy-routine.register` via the `Skill` tool, passing a `
 
 The mask spans the whole vault because the filter, not the glob, is what selects: every non-product subtree under the content root (`requests/`, the project-level system documents, an operator's own folders) carries a `spec_role` other than `status`, or no frontmatter at all, so the frontmatter predicate rejects all of it. The one tree that made width expensive rather than wrong was the mirrored `upstream/` content, which no longer lives under the vault at all — it sits at `<repo>/upstream/`, outside every glob this routine writes.
 
-**Compare the recorded `paths` before accepting `already-present`.** `/lazy-routine.register` refuses a name it already knows, so a repo registered under an older shape keeps that shape forever — either an over-wide `["**/*.md"]` that re-parses every markdown file in the repository each tick, or a narrowed products-subtree glob that matches nothing under a layout with no literal `products/` segment. Read the entry back with `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get routines)` and, when `routines["lazy-spec.gate-tick"].paths` differs from the shipped value above, refresh it the way Step 5b refreshes its filter: unregister, then re-register with the `cfg` above. A stale mask is an install-managed value that rotted, never a genuine conflict. Outcome: `paths-current` or `paths-migrated`.
+**Managed keys — `type,paths,filter,command`.** Pass them as `--managed type,paths,filter,command` per § Routine registrations are reconciled, never skipped: the mask, the frontmatter predicate and the worker are this plugin's own knowledge, while `interval_sec` / `timeout_sec` are the operator's cadence and stay outside the list. Absent that reconciliation a repo registered under an older shape keeps it forever — either an over-wide `["**/*.md"]` that re-parses every markdown file in the repository each tick, or a narrowed products-subtree glob that matches nothing under a layout with no literal `products/` segment.
 
 The composite `{in: [...], not_in: []}` predicate is the shape the md-scan filter expects (same form as the `review_active` / `review_result` clauses on Step 6a's own routine): `null` in `in` matches a missing key or explicit null, so an asset whose status note has not yet stamped `spec_cancelled` / `spec_released` still matches. The filter selects every live (un-cancelled, un-released) asset status folder-note across the vault content root.
 
 The daemon resolves `command[0]` (`lazycortex-specs`) to the plugin's bin script and runs it as `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" gate-tick <matched-file-path>` — it **appends the matched file's absolute path as the last argv** (the md-scan convention every command-based routine of this type relies on). `gate-tick <asset_note>` reads the appended status folder-note path, clears the runtime sidecar's `active_job` marker when its bundle has landed a terminal marker (raising a `job-done` wake and opening report review on `DONE`), and runs `note_check` — it dispatches no jobs of its own and carries no protocol (pure script, nothing here ever produces LLM markdown output).
 
-Outcome: `routine-registered`, or the `paths-current` / `paths-migrated` outcome from the comparison above when the routine was already registered.
+Outcome: `registered`, `refreshed`, or `unchanged`, whichever the registrar returned.
 
 ## Step 5b: Register the coordinator-watch routine
 
@@ -273,21 +291,7 @@ The second member selects on the presence of `spec_doc_type` rather than on a cl
 
 The daemon resolves `command[0]` (`lazycortex-specs`) to the plugin's bin script and runs it once per changed file OR once per matched asset group (per `group_globs` above) as `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" coordinator-dispatch '<item-json>'` — a single JSON argv carrying either `{"path", "status", "sha", "author_name", "author_email"}` for an ungrouped file or `{"dir", "paths", "sha", "author_name", "author_email"}` for a grouped asset directory (`routine_types.dispatch_git`'s `command:` sub-shape), **not** a bare file path the way `lazy-spec.gate-tick` / `lazy-review.scan` pass one. For an ungrouped item, `coordinator-dispatch` resolves `item["path"]` against its `cwd` (the repo root, set by the daemon); when it names a status folder-note directly it detects whether the note carries a wake trigger, and when it names a sibling doc instead (the `any_of` filter's other member) it resolves the OWNING asset's status folder-note and detects a `review_result` transition against that note's own marker. For a grouped item, `coordinator-dispatch` resolves `item["dir"]` to the same owning asset's status folder-note directly and scans every member in `item["paths"]` for a wake trigger in one pass, dispatching at most one `spec.coordinator` job per tick regardless of how many members changed. Either shape dispatches one `spec.coordinator` job when a trigger fires; a no-op tick touches nothing.
 
-If `/lazy-routine.register` reports the routine is already registered, accept its outcome (`unchanged` / `present`) — do not force-overwrite. A pre-existing `md-scan`-shaped entry from an install that predates the git-watch resew is a genuine shape conflict, not an `unchanged` match — surface it through the skill's normal conflict path rather than silently upgrading it. Outcome: `routine-registered` or `routine-already-present`.
-
-**Stale-filter migration — read the registered filter before accepting `already-present`.** `/lazy-routine.register` aborts on a name it already knows, so accepting its outcome on an install that predates the level coordinator leaves the OLD filter in place forever: the routine keeps matching `spec_role: status` only, no level note ever reaches `coordinator-dispatch`, and every product's and the catalog root's system documents sit unstaged with nobody to promote them. Read the entry before accepting anything:
-
-```
-Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get routines)
-```
-
-Inspect `routines["lazy-spec.coordinator-watch"].filter`. It is **stale** whenever it differs from the shipped `filter` block in the `cfg` above in any way — a missing key, an extra key, a changed `in` / `not_in` list. Compare the whole block, not a checklist of known drifts: an enumerated test only catches the migrations someone remembered to write down, so the next key added to the shipped filter goes missing in every repo that already has the routine. Today's known drifts are all instances of that one rule — a `spec_role.in` without both `product` and `catalog`, a leftover `spec_released` key, an absent `spec_cancelled` key. A stale entry is the same class of finding Step 6d's terminal-writer swap is — an install-managed value that rotted against the shipped shape, not an `unchanged` match and not a genuine conflict — so it is refreshed silently and resolved the same way, by replacing the entry rather than editing settings by hand:
-
-1. Hold the entry's `group_globs` list from the `settings-get` read above — `/lazy-routine.unregister` prints only `unregistered`, so the read just made is the only copy. Never re-derive the list from `products` alone: an operator-added glob is not in `products` and would be lost.
-2. `Skill(skill: "lazycortex-core:lazy-routine.unregister", args: "lazy-spec.coordinator-watch")`.
-3. Re-run this step's `/lazy-routine.register` call with the `cfg` above, carrying the held `group_globs` list verbatim (omit the key entirely when the removed entry had none).
-
-The two calls are one migration, never left half-done: an unregister without the re-register leaves the daemon with no coordinator routine at all. A filter that matches the shipped block exactly is current — accept `already-present` and skip the migration entirely. Outcome: `filter-current` or `filter-migrated`.
+**Managed keys — `type,watch,path_filter,filter,command`.** Pass them as `--managed type,watch,path_filter,filter,command` per § Routine registrations are reconciled, never skipped. The whole `filter` block is this plugin's — an install that predates the level coordinator recorded a filter matching `spec_role: status` only, so no level note ever reached `coordinator-dispatch` and every product's and the catalog root's system documents sat unstaged with nobody to promote them; reconcile rewrites the block whole, which is what keeps the next key added to the shipped filter from going missing in every repo that already has the routine. `group_globs` stays outside the list: `lazy-spec.product-config` Step 12 owns it and an operator may have added a glob of their own, neither of which is derivable from `products` — the registrar fills the key in only when the recorded entry never carried it, which is the backfill this step used to perform by hand. `branch`, `interval_sec` and `timeout_sec` are the operator's. A pre-existing `md-scan`-shaped entry from an install that predates the git-watch resew cannot be merged into the git shape at all: the registrar raises `RoutineConfigError`, handled as the shape conflict that section describes. Outcome: `registered`, `refreshed`, or `unchanged`, whichever the registrar returned.
 
 ### 5b-a. Seed the mandatory protocols
 
@@ -299,7 +303,7 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> add-protocols --routine lazy-spe
 
 No question is asked here: a mandatory protocol is not an operator choice, and the step must also land under `lazy-core.autosetup`, where every question-gated step is skipped.
 
-This sub-step carries no outcome of its own — it rolls into Step 5b's, which reads `routine-registered+protocol-seeded` or `routine-already-present+protocol-seeded`.
+This sub-step carries no outcome of its own — it rolls into Step 5b's, which reads `<registrar-outcome>+protocol-seeded` (`registered` / `refreshed` / `unchanged`).
 
 ### 5b-b. Verify the coordinator's output can actually leave this checkout
 
@@ -333,7 +337,7 @@ Invoke `lazycortex-core:lazy-routine.register` via the `Skill` tool with:
 
 The shape mirrors `lazy-review.collect` (same interval, timeout, priority — the two postmen are peers on the schedule). The worker takes no per-file argv: `collect-tick` sweeps the whole sidecar itself and exits immediately when it records nothing.
 
-If `/lazy-routine.register` reports the routine is already registered, accept its outcome. Outcome: `routine-registered` or `routine-already-present`.
+**Managed keys — `type,command`.** Pass them as `--managed type,command` per § Routine registrations are reconciled, never skipped; `interval_sec`, `timeout_sec` and `priority` are the operator's schedule. Outcome: `registered`, `refreshed`, or `unchanged`, whichever the registrar returned.
 
 ## Step 6: Wire the request-handler runtime
 
@@ -347,11 +351,11 @@ Without all three wired, the request inbox is dead from the daemon's perspective
 
 **Project-scope only.** Request files live in `<vault-root>/requests/` per-vault; wiring at user scope would point the daemon at the wrong path. If Step 1 detected user scope, skip this step silently — outcome `skipped-user-scope`.
 
-Read `lazy.settings.json` (create the file if missing) and merge the blocks per the File-sync policy: absent → write silently; present and cleanly mergeable → merge silently; genuine conflict (an existing entry whose shape contradicts the shipped one) → the only case that asks. Report `wiring-applied:<count-added>` (count of blocks newly added/merged; 0 means everything was already in place).
+Read `lazy.settings.json` (create the file if missing) and merge the `experts` and `review.classes` blocks per the File-sync policy: absent → write silently; present and cleanly mergeable → merge silently; genuine conflict (an existing entry whose shape contradicts the shipped one) → the only case that asks. The two routine blocks (6a, 6b) are not hand-merged at all — they go through the registrar in reconcile mode, per § Routine registrations are reconciled, never skipped. Report `wiring-applied:<count-added>` (count of blocks newly added/merged; 0 means everything was already in place).
 
 ### 6a. md-scan open routine (mechanical, command-based)
 
-Under `routines` add the key `lazy-spec.request-open` if missing:
+Register `lazy-spec.request-open` through `lazycortex-core:lazy-routine.register` in reconcile mode — never by hand-editing the `routines` section. The shipped `cfg`:
 
 ```yaml
 lazy-spec.request-open:
@@ -372,11 +376,11 @@ The joint filter `review_active: [null] + review_result: [null]` catches files t
 
 Once the script commits with `review_active: true`, the file falls out of this routine's filter and into the review loop — `lazycortex-review`'s own `lazy-review.coordinator-watch` routine picks the commit up. After finalize stamps `review_result`, the apply routine (6b) takes over.
 
-If the routine already exists, apply the File-sync policy: byte-identical → `unchanged`; a stale shape that the shipped delta upgrades cleanly → merge silently (`merged`). Upgrades that count as clean: adding the missing `review_result: [null]` clause; adding the missing `filter.folder_note: false` clause; setting `interval_sec` to `60` when it still carries the legacy `5` (an operator-chosen value other than 5 stays untouched) — all provided no local edit contradicts them. Only a genuine contradiction (a local edit that the shipped shape would overwrite incompatibly — older `expert:` form replaced by `command:`, a deliberately narrowed `request_status: [null]` filter, an operator-set `folder_note: true`) triggers the File-sync conflict question, filled as: Where — Step 6a, `routines.lazy-spec.request-open` in `<settings-dir>/lazy.settings.json`; Found — the local entry against the shipped shape as a unified diff; Why asking — that local edit contradicts the shipped shape; Answers — `merge-shipped` / `keep-local` per the policy.
+**Managed keys — `type,paths,filter,command`.** Pass them as `--managed type,paths,filter,command` per § Routine registrations are reconciled, never skipped, so the joint `review_active` / `review_result` predicate and the `folder_note: false` clause reach an entry registered before either existed. `interval_sec`, `timeout_sec` and `priority` are the operator's — an entry still carrying the legacy `interval_sec: 5` keeps it, since nothing can tell that value apart from a cadence the operator chose. A deliberately narrowed `request_status: [null]` filter or an operator-set `folder_note: true` is inside the managed block and is rewritten with it; an operator who needs a different predicate here owns the whole routine and re-registers it.
 
 ### 6b. md-scan apply routine (mechanical, command-based)
 
-Under `routines` add the key `lazy-spec.request-apply` if missing:
+Register `lazy-spec.request-apply` through `lazycortex-core:lazy-routine.register` in reconcile mode — never by hand-editing the `routines` section. The shipped `cfg`:
 
 ```yaml
 lazy-spec.request-apply:
@@ -399,7 +403,7 @@ The daemon resolves `command[0]` (`lazycortex-specs`) to the plugin's bin script
 
 The joint filter `request_status: ["draft"] + review_result: ["approved", "approved-with-concerns"]` matches only the post-finalize state: finalize stamped `review_result` (clean approve OR approve-with-concerns) as its last step, and the terminal `request_status` has not been written yet (still `draft`). Stop-aborted reviews (no `review_result` ever written) and mid-review files (transient `review_*` keys present but `review_result` not yet stamped) do not match — apply only fires on a clean finalize. The worker reads the resolved routing prose that `spec.coordinator` folded into `# Routing` during review (its routing mode, per `lazy-spec.coordination-playbook.md` Chapter 7) and enacts it.
 
-If the routine already exists, apply the File-sync policy: the older `expert: lazy-spec.request-apply` form (LLM-dispatched apply) is superseded by the shipped `command:` shape; the missing `filter.folder_note: false` clause is added; and `interval_sec` is set to `60` when it still carries the legacy `5` (an operator-chosen value other than 5 stays untouched) — when no local edit contradicts these, merge silently (`merged`); only when a local edit on that entry would be lost does it become a genuine conflict and raise the File-sync conflict question, filled as: Where — Step 6b, `routines.lazy-spec.request-apply` in `<settings-dir>/lazy.settings.json`; Found — the local entry against the shipped shape as a unified diff; Why asking — that local edit would be lost; Answers — `merge-shipped` / `keep-local` per the policy.
+**Managed keys — `type,paths,filter,command`.** Pass them as `--managed type,paths,filter,command` per § Routine registrations are reconciled, never skipped: the glob, the post-finalize predicate and the worker are this plugin's, while `interval_sec`, `timeout_sec` and `priority` are the operator's — an entry still carrying the legacy `interval_sec: 5` keeps it, since nothing can tell that value apart from a cadence the operator chose. The older `expert: lazy-spec.request-apply` form (LLM-dispatched apply) is a shape change, not a merge: the shipped `command:` alongside the recorded `expert:` + `request:` pair violates the registrar's EITHER/OR rule and raises `RoutineConfigError`, handled as the shape conflict that section describes.
 
 ### 6c. Expert entry
 
@@ -788,7 +792,7 @@ Invoke `lazycortex-core:lazy-routine.register` via the `Skill` tool, passing a `
 
 The daemon resolves `command[0]` (`lazycortex-specs`) to the plugin's bin script and runs `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" upstream-tick` on the configured cadence — the same primitive `/lazy-spec.upstream-run` invokes manually; both share one implementation, so a scheduled pass and a manual run behave identically. No `hooks_enabled` entry is set — the routine schema's empty default already silences every lazycortex hook inside its own subprocesses, which is what this routine's atomic per-unit commits need.
 
-If `/lazy-routine.register` reports the routine is already registered, accept its outcome (`unchanged` / `present`) — do not force-overwrite. Outcome: `routine-registered`, `routine-already-present`, or `skipped-no-upstream-configured`.
+**Managed keys — `type,command`.** Pass them as `--managed type,command` per § Routine registrations are reconciled, never skipped; `cron` is the operator's cadence and stays outside the list. Outcome: `registered`, `refreshed`, `unchanged`, or `skipped-no-upstream-configured`.
 
 ## Step 6.9: Seed the vault spec and the catalog root's level note
 
@@ -968,12 +972,12 @@ Outcome: `cli-allow-added` or `cli-allow-already-present`.
   - Consumer dir state from Step 3
   - Step 3b outcome (`rules-mirrored:<N>`)
   - Step 4 outcome (`language-on-record:<code>`, `language-default-en`, or `language-set:<code>`)
-  - Step 5 outcome (`routine-registered` or `routine-already-present`)
-  - Step 5b outcome (`routine-registered+protocol-seeded` or `routine-already-present+protocol-seeded`), plus 5b-b's `remote-sync-ok` or `remote-sync-not-pull-push:<value>`
-  - Step 5c outcome (`routine-registered` or `routine-already-present`)
+  - Step 5 outcome (`registered`, `refreshed`, or `unchanged`)
+  - Step 5b outcome (`<registrar-outcome>+protocol-seeded`), plus 5b-b's `remote-sync-ok` or `remote-sync-not-pull-push:<value>`
+  - Step 5c outcome (`registered`, `refreshed`, or `unchanged`)
   - Step 6 outcome (`wiring-applied:<N>` or `skipped-user-scope`)
   - Step 6.5 outcome (`seeded` or `unchanged`), with the primitive's report block folded in verbatim; surface `sot-missing` / `no-entries` if returned
-  - Step 6.7 outcome (`routine-registered`, `routine-already-present`, or `skipped-no-upstream-configured`)
+  - Step 6.7 outcome (`registered`, `refreshed`, `unchanged`, or `skipped-no-upstream-configured`)
   - Step 6.9 outcome (`seeded`, `already-present`, or `skipped-user-scope`)
   - Step 7 outcome (`registered: <compound-key>` or `skipped-per-user-choice`)
   - Step 7b outcome (`skipped-no-wiki` or `ensured: <N-scopes> (no-scope: <M-products>, cli-failed: <K>)`)
@@ -989,8 +993,8 @@ Use two separate steps: `Bash(mkdir -p ...)` then `Write` tool. Never chain with
 ## Failure modes
 
 - **`/lazy-spec.install` aborts: plugin not installed** — `lazycortex-specs@lazycortex` has no entry in `~/.claude/plugins/installed_plugins.json` → add `"lazycortex-specs@lazycortex": true` to `enabledPlugins` in your `settings.json` and restart Claude Code, then re-run.
-- **`/lazy-spec.install` reports `routine lazy-spec.gate-tick already registered`** — a prior install already wired the routine → accept the `routine-already-present` outcome; re-running never overwrites it. To change its shape, run `/lazy-routine.unregister lazy-spec.gate-tick` first, then re-run install.
-- **`/lazy-spec.install` reports `routine lazy-spec.coordinator-watch already registered`** — same case as above, for the coordinator's own watch routine → accept `routine-already-present`; `/lazy-routine.unregister lazy-spec.coordinator-watch` first to change its shape.
+- **`/lazy-spec.install` reports `routine <name> already registered`** — the step called the registrar without its `--managed` list → re-invoke it in reconcile mode per § Routine registrations are reconciled, never skipped; an already-registered routine is refreshed, never skipped.
+- **`/lazy-spec.install` reports `RoutineConfigError` on `lazy-spec.coordinator-watch`** — the recorded entry is still the `md-scan` shape an install predating the git-watch resew wrote, and reconcile cannot merge a type change → answer the shape-conflict question with `merge-shipped`, or run `/lazy-routine.unregister lazy-spec.coordinator-watch` and re-run install.
 
 ## Notes
 

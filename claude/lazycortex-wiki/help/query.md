@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Associative Q&A over the wiki graph — /lazy-wiki.query runs in dispatcher mode (seeker + gatherer subagents) when the Agent tool is available, and agentless mode otherwise.
-last_regen: 2026-09-20
+last_regen: 2026-09-21
 diagram_spec:
   anchor: "How the query pipeline works"
   request: "Sequence diagram showing /lazy-wiki.query dispatching one seeker per scope in parallel to read topics.md and return entry points, then dispatching a single gatherer to traverse See-also links depth-first and return a synthesised answer block back to the skill, which presents the answer and entry-point seed to the user."
@@ -10,6 +10,7 @@ source_skills:
   - lazy-wiki.seeker
   - lazy-wiki.gatherer
 source_sha: 9457a31b7cd3a3ac0a276a53a9efecb6495a8588
+surface_sha: b5133c418e36e035fd9cb49e9d1e4181fb52a051233230134b12089f10802661
 ---
 # Wiki query
 

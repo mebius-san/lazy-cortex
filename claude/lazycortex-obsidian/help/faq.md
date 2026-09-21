@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about vault setup, Iconize, diagram render glue, the vault manifest, plugin updates, and tag pages for lazycortex-obsidian.
-last_regen: 2026-09-14
+last_regen: 2026-09-21
 no_diagram: true
 source_skills:
   - lazy-obsidian.install
@@ -14,7 +14,8 @@ source_skills:
   - lazy-obsidian.audit
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: 1268ddde908fd66ba20f4106a5d934925e8e61fb
+source_sha: b9cc732063fd5d0d05c3e9e7be1bb76cd38af2a6
+surface_sha: 4a0cbfe98c998f2620878a83fc88924b7ef5fe527f607cae23c5f3e0f673ff72
 ---
 # Frequently asked questions
 
@@ -50,7 +51,7 @@ Nothing repaints inside your commit: no hook stages into your index behind your 
 
 ## I upgraded the plugin and my repaint routine still behaves the old way. Do I need to re-register it by hand?
 
-No — re-running `/lazy-obsidian.iconize-install` fixes it for you. The `lazy-obsidian.repaint` routine's `command`, `watch`, `ignore_halt`, and `git_author` fields are entirely composed by the plugin, so the skill now reads the registered routine back and compares it against what the current version would write; a mismatch (left over from an older plugin version) is refreshed silently — unregistered and re-registered — while your own `interval_sec` tuning is carried over untouched. The report line reads **refreshed** instead of the older **already-present** when this happens. No prompt, no manual `lazy-routine.unregister` / `lazy-routine.register` needed.
+No — re-running `/lazy-obsidian.iconize-install` fixes it for you. It re-registers `lazy-obsidian.repaint` through `lazy-routine.register` in reconcile mode, naming `type`, `watch`, `command`, and `git_author` as the managed keys — the ones only the plugin can know, since they carry the watch mode, the worker the daemon resolves, and the bot identity every authorship check keys on. Those four are corrected back to the shipped shape on every run, which is what brings a vault registered by an older version of this step current; `interval_sec`, `branch`, and `ignore_halt` stay outside the managed set, since you could reasonably have tuned any of them, and the registrar only fills one in when the recorded entry never carried it at all. The report line reads **refreshed** when a managed key needed correcting, or **unchanged** when the entry already matched. No prompt, no manual `lazy-routine.unregister` / `lazy-routine.register` needed.
 
 ---
 

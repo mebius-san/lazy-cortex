@@ -14,7 +14,7 @@ Each entry under `routines` may carry an optional `type` field. Default is `subp
 | `subprocess` (default) | `interval_sec` | `timeout_sec` |
 | `inbox` | `inbox_dir`, `interval_sec` | `filter`, `deferred_retry_sec`, `timeout_sec` |
 | `schedule` | `cron` | `timeout_sec` |
-| `git` | `branch`, `watch`, `interval_sec` | `repo_dir`, `remote`, `path_filter`, `filter`, `group_globs`, `timeout_sec` |
+| `git` | `branch`, `watch`, `interval_sec` | `repo_dir`, `remote`, `path_filter`, `filter`, `group`, `group_globs`, `watch_runtime_trees`, `timeout_sec` |
 | `md-scan` | `paths`, `interval_sec` | `filter`, `timeout_sec`, `can_commit_in_repo` |
 
 `command`, `expert`, and `request` are absent from both columns on purpose: they sit in every type's optional set, and the dispatch shape across them is enforced separately by `_validate_command_or_expert`. So **every** row above additionally requires EITHER `command` OR `expert` + `request`, never both, never neither — the § 3 contract, uniform across all five types.
@@ -63,10 +63,35 @@ Watches local `HEAD` and dispatches one job per item per `watch`. Closed enum + 
 | `watch` | Variables exposed in `request` template |
 |---|---|
 | `new_commits` | `{sha}`, `{short_sha}`, `{subject}`, `{author_name}`, `{author_email}`, `{commit_ts}` |
-| `new_files` | `{path}`, `{status}`=A, `{sha}`, `{author_name}`, `{author_email}` |
-| `changed_files` | `{path}`, `{status}` (A or M), `{sha}`, `{author_name}`, `{author_email}` |
-| `deleted_files` | `{path}`, `{status}`=D, `{sha}`, `{author_name}`, `{author_email}` |
-| `renamed_files` | `{old_path}`, `{new_path}`, `{sha}`, `{author_name}`, `{author_email}` |
+| `new_files` | `{path}`, `{paths}`, `{status}`=A, `{sha}`, `{author_name}`, `{author_email}` |
+| `changed_files` | `{path}`, `{paths}`, `{status}` (A or M), `{sha}`, `{author_name}`, `{author_email}` |
+| `deleted_files` | `{path}`, `{paths}`, `{status}`=D, `{sha}`, `{author_name}`, `{author_email}` |
+| `renamed_files` | `{old_path}`, `{new_path}`, `{paths}`, `{old_paths}`, `{sha}`, `{author_name}`, `{author_email}` |
+
+Every file-level watch exposes `{paths}` — the same list a grouped item carries, holding the
+one path when nothing was grouped. A rename exposes `{old_paths}` beside it, each old path at
+its new path's index. Writing a request against `{paths}` therefore serves a grouped and an
+ungrouped item alike, and turning `group_globs` on later changes how many jobs are dispatched
+without changing the request's shape.
+
+**Whole-leaf placeholders keep their type.** A `request` string leaf that is exactly one
+placeholder and nothing else (`"paths": "{paths}"`) substitutes the value itself, so a list
+reaches the job as a JSON array. A placeholder with surrounding text formats as text as
+before, and a doubled-brace literal (`"{{paths}}"`) stays literal.
+
+**`path_filter`** (optional) — a git pathspec narrowing the watch before any item exists,
+given as one pattern or a list of them. Exclude magic works, so
+`[":(exclude).memory/**", ":(exclude)vendor/**"]` subtracts both trees from the whole
+enumeration. This is the only filter that costs nothing per skipped path: the composite
+`filter` block reads each candidate file, and an `expert`-shape routine pays for a whole job
+before the worker can decide the path was irrelevant.
+
+**Grouping is on by default for a routine that dispatches an expert.** With no `group_globs`
+declared, each changed file collapses into its own parent directory, so one directory-wide change
+is one job carrying every path instead of one job per file. A `command` routine keeps the
+file-level shape its consumer was written against unless it declares globs. `group: false` turns
+grouping off for a routine that genuinely wants a job per file; the key is a boolean, and the
+directory globs that widen the unit past one directory go in `group_globs`.
 
 **`group_globs`** (optional, file-level watches only — rejected with `new_commits`) — a list of directory globs; after the composite filter runs, file items whose path sits strictly below a matching glob collapse into ONE item per matched directory. The deepest matching glob wins — the list is a set, not an ordering; a glob matches segment-by-segment (`*` never crosses `/`); a file lying AT the glob's depth (a folder-note beside the group dirs) and any path outside every glob stay ordinary file-level items. A group item exposes `{dir}` (the matched directory), `{paths}` (sorted member paths), and `{sha}` / `{author_name}` / `{author_email}` of the last commit touching the dir in the scanned range. The group is also the retry unit: a failing group re-dispatches whole.
 

@@ -686,6 +686,11 @@ def _resolve_and_dispatch(repo: Path, asset_note: Path, item: dict) -> dict:
   current_text = asset_note.read_text()
   # waiver: type: ignore — note_ops is a deferred/late-bound sibling import; mypy cannot resolve it
   current_report = _note_ops.build_report(current_text, markers)  # type: ignore[attr-defined]
+
+  # guard: the document is not under review and nothing is waiting to land on it — no trigger
+  # can legitimately fire, so the wake ends here before any settings read or blob fetch
+  if not _is_under_review(current_report, markers):
+    return {"action": "noop"}
   settings = _load_settings(repo)
   blob_text = _read_blob(repo, item.get(_ITEM_SHA, ""), item.get(_ITEM_PATH, ""))
 
@@ -713,6 +718,36 @@ def _resolve_and_dispatch(repo: Path, asset_note: Path, item: dict) -> dict:
   # dispatch through the shared tail so the direct job-done path and this git path stay one shape
   dedup_key = f"{item.get(_ITEM_PATH, asset_note.name)}:{item.get(_ITEM_SHA, '')}"
   return _dispatch(repo, asset_note, trigger, dedup_key)
+
+
+def _is_under_review(current_report: dict, markers: dict) -> bool:
+  """
+  Decide whether a document is the coordinator's business at all this wake.
+
+  Args:
+    current_report: The document's structural report, as `note_ops.build_report` returns it.
+    markers: The document's runtime marker entry, from `job_markers.read`.
+
+  Returns:
+    True when the document carries an active review, or when a landed expert payload is
+    waiting to be picked up; False otherwise.
+  """
+
+  # Domain(review.coordinator):
+  # # A wake belongs to a document that is actually in review
+  # The coordinator watches a whole tree of documents and is woken by commits touching any of
+  # them, so the first question of every wake is whether this document is in review at all. A
+  # document that is not, and has no expert result waiting to land on it, has no move the
+  # coordinator could make — every one of its wake triggers presupposes an open review. Asking
+  # the question here rather than trusting the watch to have asked it is what keeps the cost of
+  # a mistake in the watch's configuration bounded: the wake ends in one cheap read instead of
+  # becoming a full coordinator turn for every document an operator happens to edit.
+
+  # waiver: 'frontmatter' is note_ops.build_report's own wire-shape key (module docstring), not a keys.py-promoted constant
+  frontmatter = current_report.get("frontmatter") or {}
+
+  # an expert payload landed by the postman is picked up even as the review closes around it
+  return frontmatter.get(ReviewKey.ACTIVE) is True or bool(markers.get(JobMarker.PENDING_WAKE))
 
 
 def _dispatch(repo: Path, asset_note: Path, trigger: str, dedup_key: str) -> dict:
@@ -807,8 +842,9 @@ def main(argv: list[str]) -> int:
 
   Invoked by the `lazy-review.coordinator-watch` git-watch routine as `coordinator-dispatch
   <item-json>` — one JSON item per changed file, spawned with `cwd = repo`. The routine's own
-  `filter.frontmatter` clause has already restricted matches to documents with `review_active:
-  true`.
+  `filter.frontmatter` clause restricts matches to documents with `review_active: true`, and the
+  tick re-checks that for itself rather than trusting it, so a watch registered without the
+  clause costs one cheap read per document instead of a coordinator turn.
 
   Args:
     argv: Command-line arguments, excluding the program name.

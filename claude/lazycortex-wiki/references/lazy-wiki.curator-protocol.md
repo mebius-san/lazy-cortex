@@ -201,7 +201,7 @@ The curator is a C-hybrid expert: it has Bash access and is expected to apply it
 
 The expert MUST NOT hand-edit the node file directly — the `apply-node` call (per-node kinds) and `retag` (normalize-tags) are the only permitted write paths for node content outside the job dir.
 
-- The expert MUST NOT touch any file outside its job dir except via `apply-node` as described above, and via `.memory/<self>/` (granted by the persona aspect).
+- The expert MUST NOT touch any file outside its job dir except via `apply-node` as described above.
 - The expert MUST NOT write back to the file in `source/` directly — it is a read-only staged copy.
 
 ## Attachments

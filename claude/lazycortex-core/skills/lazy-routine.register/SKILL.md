@@ -54,7 +54,7 @@ Every type ends with the same EITHER/OR question — `command` (list) OR `expert
 - **subprocess** — `interval_sec` (int), `timeout_sec?` (int). Then EITHER `command` OR `expert` + `request`.
 - **inbox** — `inbox_dir` (path relative to repo), `interval_sec`, `timeout_sec?`. Then EITHER `command` OR `expert` + `request`. With `expert + request`: files are moved into job staging; with `command`: files stay in the inbox until the consumer removes them.
 - **schedule** — `cron` (5-field expression). Then EITHER `command` OR `expert` + `request`.
-- **git** — `repo_dir?` (default `.`), `remote?` (vestigial/ignored — remote sync is the daemon's job; accepted for schema compatibility but has no effect on the watch), `branch` (vestigial — the watch target is always local HEAD; the field is retained in the schema for legacy round-trip compatibility), `watch` (one of `new_commits` / `new_files` / `changed_files` / `deleted_files` / `renamed_files`), `path_filter?`, `filter?` (same composite frontmatter block md-scan takes), `group_globs?` (a set of directory globs; the deepest matching glob wins, list order carries nothing; file items whose path sits strictly below a matching glob collapse into one item per matched dir — carrying `dir` + sorted member `paths` — instead of one item per file; not valid with `new_commits`), `interval_sec`. Then EITHER `command` OR `expert` + `request`.
+- **git** — `repo_dir?` (default `.`), `remote?` (vestigial/ignored — remote sync is the daemon's job; accepted for schema compatibility but has no effect on the watch), `branch` (vestigial — the watch target is always local HEAD; the field is retained in the schema for legacy round-trip compatibility), `watch` (one of `new_commits` / `new_files` / `changed_files` / `deleted_files` / `renamed_files`), `path_filter?` (a git pathspec narrowing the watch before any item exists — one pattern or a list of them, exclude magic such as `:(exclude)<glob>` included), `filter?` (same composite frontmatter block md-scan takes), `watch_runtime_trees?` (boolean, default false — true lets the watch see the runtime's own tracked trees, which are subtracted from every watch otherwise), `group?` (boolean, default true — a routine dispatching an expert groups each changed file into its own parent directory unless this is false; a `command` routine never groups by default), `group_globs?` (a set of directory globs; the deepest matching glob wins, list order carries nothing; file items whose path sits strictly below a matching glob collapse into one item per matched dir — carrying `dir` + sorted member `paths` — instead of one item per file; not valid with `new_commits`), `interval_sec`. Then EITHER `command` OR `expert` + `request`.
 - **md-scan** — `paths` (list of vault-relative globs, e.g. `["requests/*.md"]`), `filter` (optional composite filter block; e.g. `{"frontmatter": {"request_status": {"in": [null, "draft"], "not_in": []}}}`; `null` in `in` matches a missing key or explicit null), `interval_sec`, `timeout_sec?`. Then EITHER `command` OR `expert` + `request`. No file move — the consumer gets the absolute path of each match and edits in place.
 
 Three common fields are asked for every type, after the type-specific ones:
@@ -98,15 +98,17 @@ print('present' if sys.argv[1] in routines else 'absent')
 " '<name>')
 ```
 
-If `present` and `--force` not set → abort: "routine `<name>` already registered. Use `--force` to overwrite, or call `/lazy-routine.unregister` first."
+If `present` and `--force` not set and no `--managed` list was passed → abort: "routine `<name>` already registered. Use `--force` to overwrite, `--managed <key>,<key>` to reconcile the caller's own keys, or call `/lazy-routine.unregister` first."
 
 If `present` and `--force` is set → proceed (will overwrite).
 
-Outcome: `absent`, `overwrite-forced`, or `aborted`.
+If `--managed <key>,<key>` was passed → proceed in reconcile mode whether the entry is present or absent. **This is the shape a plugin install skill uses**, and it is the only one that keeps an old registration current. The caller names the keys its plugin owns — the request template, the path mask, the filter block, the protocol list. Every other key the entry already carries is the operator's answer and is left exactly as it stands; a shipped key the entry never carried is filled in.
+
+Outcome: `absent`, `overwrite-forced`, `reconciling`, or `aborted`.
 
 ## Step 3 — Register routine
 
-Pass the typed cfg dict to `expert_runtime.register_routine`:
+Without `--managed`, pass the typed cfg dict to `expert_runtime.register_routine`:
 
 ```
 Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
@@ -120,15 +122,29 @@ print('registered')
 " '<name>' '<cfg-json>')
 ```
 
-`register_routine` validates again before write; if anything slipped past Step 1, it raises `RoutineConfigError` here.
+With `--managed`, pass the same cfg plus the owned-key list to `expert_runtime.reconcile_routine`:
 
-Outcome: `registered` or `error`.
+```
+Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+import sys, json
+from pathlib import Path
+from expert_runtime import reconcile_routine
+name    = sys.argv[1]
+cfg     = json.loads(sys.argv[2])
+managed = sys.argv[3].split(',')
+print(reconcile_routine(Path('.'), name, cfg, managed))
+" '<name>' '<cfg-json>' '<managed-keys>')
+```
+
+Both validate again before write; if anything slipped past Step 1, they raise `RoutineConfigError` here.
+
+Outcome: `registered`, `refreshed`, `unchanged`, or `error`.
 
 ## Step 4 — Report
 
 One line per task in the canonical list, with its outcome word. A missing line is a bug.
 
-Print: "registered routine `<name>` (type=<type>, <key params>)".
+Print: "registered routine `<name>` (type=<type>, <key params>)", or in reconcile mode "`<outcome>` routine `<name>` (managed: <keys>)".
 
 ## Step 5 — Log the run
 

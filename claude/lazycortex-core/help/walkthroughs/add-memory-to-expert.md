@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Opt an existing expert into the memory subsystem, dispatch jobs to accumulate runs, run the first reflect pass, and verify the expert's first durable notes land in .memory/.
-last_regen: 2026-09-17
+last_regen: 2026-09-21
 diagram_spec:
   anchor: "How memory grows over time"
   request: "Sequence diagram showing user invoking mark-persona, then dispatching jobs (accumulating run logs), then invoking reflect which reads run logs + existing memory notes and calls lazy-memory.write to produce .memory/<expert>/<slug>.md, committing atomically under the memory-bot identity."
@@ -11,6 +11,7 @@ source_skills:
   - lazy-memory.reflect
   - lazy-memory.write
 source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
+surface_sha: 11aa3e8dfb9d20e4c37b1e02a78b131d108751a859d310ce0b08ff2e62c520d5
 ---
 # Add long-term memory to an existing expert
 

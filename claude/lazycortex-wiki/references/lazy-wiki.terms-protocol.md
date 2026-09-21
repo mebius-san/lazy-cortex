@@ -15,7 +15,7 @@ Canonical contract for jobs dispatched to `wiki.terms-curator` (or any consumer 
 {
   "kind":    "curate",
   "role":    "terms-curator",
-  "file":    "<repo-relative path of the document that changed>",
+  "files":   ["<repo-relative path of a document that changed>", "..."],
   "result":  [{"path": "result/terms.json", "description": "curator output: the dictionary operations it applied"}]
 }
 ```
@@ -23,7 +23,9 @@ Canonical contract for jobs dispatched to `wiki.terms-curator` (or any consumer 
 Field notes:
 
 - `kind` — see `## Kind enum` below.
-- `file` — the repo-relative path of the document whose change triggered this job. The curator reads the document at this path in the working tree; the same path decides which scope the document belongs to, matched against the scope's globs.
+- `files` — the repo-relative paths of the documents whose change triggered this job. The curator reads each document at its path in the working tree; the same paths decide which scope the documents belong to, matched against the scope's globs.
+- **A request carries a batch, and one document is a batch of one.** A watch groups the documents of one directory into a single job, because a directory's documents describe one subject and their terms are decided against each other rather than one at a time. The singular key `file` remains legal for a consumer dispatching its own terms-curator-shaped jobs; a request carrying it is read as a batch of one, and a request carrying both forms uses the list.
+- **The batch is answered as a whole**: every operation the documents produce lands in one `result/terms.json`, followed by one commit of the dictionary. A batch whose documents introduce nothing is a `noop` for the whole batch.
 - No extra fields.
 
 ### `report` dispatch
@@ -43,7 +45,7 @@ A `report` dispatch writes no `response.json` at all; its findings travel in the
 
 ## Kind enum
 
-- `curate` — read one changed document, decide whether it introduced a project entity the dictionary does not name, and apply the resulting dictionary operations. Per-document.
+- `curate` — read the changed documents, decide whether they introduced project entities the dictionary does not name, and apply the resulting dictionary operations. Per-batch, one commit.
 - `report` — read a whole scope and return the divergences between its documents and its dictionary. Scope-level, read-only, no job dir.
 
 ## Outcome by kind
@@ -56,7 +58,7 @@ A `report` dispatch writes no `response.json` at all; its findings travel in the
 Outcome semantics:
 
 - `curated` — the dictionary changed and the change is committed. `result` MUST list `result/terms.json`.
-- `noop` — nothing to do: the document introduced no entity the dictionary lacks, or it is excluded as a term source. Nothing written, nothing committed, `result` omitted.
+- `noop` — nothing to do: no document in the batch introduced an entity the dictionary lacks, or every one of them is excluded as a term source. Nothing written, nothing committed, `result` omitted.
 - `error` — the expert failed. `error.category` routes the consumer's response.
 
 ## Per-kind contents
@@ -122,7 +124,7 @@ Never translated, in any language: frontmatter keys and values, `wiki/<axis>/<va
 
 - The expert MAY edit the scope's dictionary file in place, and commit it under the git identity its environment carries.
 - The expert MUST NOT edit the document that triggered the job, or any other document of the scope. A document naming a concept differently from the dictionary is a `report` finding, never a silent rewrite of someone else's text.
-- The expert MUST NOT touch any tracked file except the dictionary, and `.memory/<self>/` where the persona aspect grants it.
+- The expert MUST NOT touch any tracked file except the dictionary.
 - On `report` the expert writes nothing at all.
 
 ## Attachments

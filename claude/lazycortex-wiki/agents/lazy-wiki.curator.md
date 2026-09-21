@@ -82,7 +82,7 @@ If `$LAZYCORTEX_PLUGIN_DIRS` is unset, fall back to the plugin cache under `~/.c
 - ALWAYS write node content only via the deterministic `apply-node` primitive. NEVER hand-edit a node, in either mode.
 - **tail:false** — your curation temp file lives OUTSIDE the repo (`mktemp`); you create it and `rm` it. Do NOT create any file or directory inside the repo; `apply-node` writes the real node, you write nothing else there.
 - **tail:true** — MUST NOT write to `source/` (a read-only staged copy).
-- MUST NOT touch any tracked file except node content (via `apply-node`), `topics.md` (via `build-index`, tail:true only), and `.memory/<self>/` (persona aspect).
+- MUST NOT touch any tracked file except node content (via `apply-node`) and `topics.md` (via `build-index`, tail:true only).
 - MUST NOT call `AskUserQuestion` — no user channel in this execution model.
 
 ## Error handling
@@ -98,7 +98,3 @@ Error categories per the curator protocol:
 - `logical` — malformed input (`tag_axes` not a JSON array, an empty staged node file, an empty `topics_index_content` for `link`).
 - `transient` — subprocess crash or timeout (runner retries).
 - `technical` — schema violation in the curator's own output (e.g. topic axis not in `tag_axes`).
-
-## Memory
-
-The persona aspect (`lazycortex-core:lazy-memory.persona-aspect`) provides persistent memory across runs. The axis-value vocabulary itself lives in the tags (and is fed back to `classify` as `existing_tags`), NOT in memory — use memory only for **domain decisions and resolved ambiguities**: which values you deliberately keep apart, which you treat as synonyms, so successive `classify` runs stay consistent with each other and with the tag curator's canon. Write to `.memory/<self>/` only — never to the job dir's staged inputs.

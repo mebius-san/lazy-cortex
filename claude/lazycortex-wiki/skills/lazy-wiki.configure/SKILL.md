@@ -487,14 +487,16 @@ One routine per scope: `path_filter` is a single pathspec string and cannot span
 Resolve the watched branch with `Bash(git rev-parse --abbrev-ref HEAD)`. Register through the registrar rather than hand-writing JSON — it validates the record's shape:
 
 ```
-Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=lazy-wiki.terms-scan-<id> type=git watch=changed_files branch=<branch> interval_sec=60 path_filter=<first paths glob> filter.frontmatter.review_active.not_in=[true] filter.folder_note=false expert=wiki.terms-curator protocols=lazycortex-wiki:lazy-wiki.terms-protocol request.kind=curate request.file={path} timeout_sec=900")
+Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=lazy-wiki.terms-scan-<id> type=git watch=changed_files branch=<branch> interval_sec=60 path_filter=<first paths glob> filter.frontmatter.review_active.not_in=[true] filter.folder_note=false expert=wiki.terms-curator protocols=lazycortex-wiki:lazy-wiki.terms-protocol request.kind=curate request.files={paths} timeout_sec=900 --managed type,watch,expert,protocols,request,path_filter,group_globs")
 ```
 
 `protocols` is declared on the routine, not on the expert — that is the only channel by which the curator receives its own field contract in the job prompt. The `review_active` filter keeps documents under an open review out of the dictionary: a review can still rewrite or reject them, and a term lifted from a draft would surface as a divergence the moment the review closed.
 
-**Edit mode rewrites rather than patches.** The registrar refuses to overwrite an existing record, so when `paths` changed, first `Skill(skill: "lazycortex-core:lazy-routine.unregister", args: "name=lazy-wiki.terms-scan-<id>")`, then register again with the new `path_filter`. **Remove mode** unregisters and stops.
+**One job per directory, not per document.** The routine declares no grouping globs, so a change spread over a directory reaches the curator as one job carrying every path — that is what a routine dispatching an expert does by default. A directory's documents describe one subject, so their terms are decided against each other rather than one at a time, and the request above is written against the list shape for exactly that reason.
 
-Outcome: `registered` / `re-registered` / `unregistered`.
+**Edit mode needs no unregister.** The registration above runs in reconcile mode, so a changed `paths` reaches the routine's `path_filter` on the next run of this branch — the key is one of the plugin's own. **Remove mode** unregisters and stops.
+
+Outcome: `registered` / `refreshed` / `unchanged` / `unregistered`.
 
 ### Terms 7 — Log + pointers
 
@@ -570,19 +572,38 @@ Three git routines, one per event class, because one `watch` covers one status s
 
 The scan routine deliberately does NOT watch modifications (`changed_files` = `A`+`M`): the map describes the tree's shape — what exists where — and a content edit never changes that, so every `M` dispatch cost one expert job with nothing to apply, and a busy commit wave queued them by the dozen. The price is that a per-file description at `file` depth goes stale when its file is rewritten in place; that drift is `report`'s to find (`/lazy-wiki.audit`, the `divergence` finding) and `/lazy-wiki.structure rebuild`'s to repair.
 
-Resolve the watched branch with `Bash(git rev-parse --abbrev-ref HEAD)`. Register each through the registrar:
+**Two derived keys decide how much this costs, and both are mandatory.** A dispatch is the expensive unit: the runtime creates a job, the pump spawns a model, and the curator loads the settings and the map before it can decide the path was irrelevant. Every path the routines let through is paid for whether or not the map changes. So the cut is made in the routine, before a job exists, not in the curator afterwards.
+
+- **`path_filter`** — one `:(exclude)<glob>` entry per glob the map does not describe. An excluded tree then produces no item at all, instead of one job per file the curator answers with `noop`.
+- **`group_globs`** — the directory globs a change collapses along. A directory move of forty files becomes one dispatch carrying forty paths rather than forty dispatches carrying one each, which is the honest unit of work: a `dir` or `brief` class describes the directory and never its files, and a `file` class still wants every member of a move judged together.
+
+**Do not compose either value by hand.** Both are derived from the section Structure 4 just wrote, and the derivation is code, not judgement — it forces the map's own path into the exclusions whatever the settings say. Read them once:
 
 ```
-Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=lazy-wiki.structure-scan type=git watch=new_files branch=<branch> interval_sec=60 filter.frontmatter.review_active.not_in=[true] expert=wiki.structure-curator protocols=lazycortex-wiki:lazy-wiki.structure-protocol request.kind=curate request.path={path} request.status={status} timeout_sec=900")
-Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=lazy-wiki.structure-scan-deletes type=git watch=deleted_files branch=<branch> interval_sec=60 filter.frontmatter.review_active.not_in=[true] expert=wiki.structure-curator protocols=lazycortex-wiki:lazy-wiki.structure-protocol request.kind=curate request.path={path} request.status={status} timeout_sec=900")
-Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=lazy-wiki.structure-scan-renames type=git watch=renamed_files branch=<branch> interval_sec=60 filter.frontmatter.review_active.not_in=[true] expert=wiki.structure-curator protocols=lazycortex-wiki:lazy-wiki.structure-protocol request.kind=rename request.old_path={old_path} request.new_path={new_path} timeout_sec=900")
+Bash("${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> structure-watch-config --repo "<repo-root>")
 ```
 
-The rename routine carries a **different** `request` because `renamed_files` exposes different placeholders — `{old_path}` / `{new_path}`, not `{path}` / `{status}`; a shared template would `KeyError` on substitution and fail the tick on every rename. `path_filter` is omitted deliberately — the routines watch the whole tracked tree; the fine-grained cut is `exclude`, applied by the curator. The `review_active` filter keeps documents under an open review out of the map until the review closes and the file changes one last time; files without frontmatter pass it (`not_in [true]` holds for an absent key).
+where `<wiki-cli>` stands for the wiki plugin's `bin/lazycortex-wiki` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-wiki/<version>/`, or `claude/lazycortex-wiki/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> <verb>`: the file carries no exec bit and is not on `PATH`. It prints one JSON object carrying `path_filter`, and `group_globs` only when at least one depth class declares a glob; pass each key it printed through verbatim as `<exclude-pathspecs>` and `<profile-globs>` below, and omit the grouping argument entirely when the key is absent. A section with no depth classes derives no grouping set on purpose: the routine config rejects an empty one, and a routine that declares none already groups each change by its own directory.
 
-Edit mode: a routine already registered is left as is (`already-present`); when the section was reconfigured in a way the routines do not carry (they have no `path_filter`), nothing needs re-registering.
+Resolve the watched branch with `Bash(git rev-parse --abbrev-ref HEAD)`. Register each through the registrar, substituting the two derived values:
 
-Outcome: `registered` / `already-present`.
+```
+Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=lazy-wiki.structure-scan type=git watch=new_files branch=<branch> interval_sec=60 path_filter=<exclude-pathspecs> group_globs=<profile-globs> filter.frontmatter.review_active.not_in=[true] expert=wiki.structure-curator protocols=lazycortex-wiki:lazy-wiki.structure-protocol request.kind=curate request.paths={paths} request.status={status} timeout_sec=900 --managed type,watch,expert,protocols,request,path_filter,group_globs")
+Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=lazy-wiki.structure-scan-deletes type=git watch=deleted_files branch=<branch> interval_sec=60 path_filter=<exclude-pathspecs> group_globs=<profile-globs> filter.frontmatter.review_active.not_in=[true] expert=wiki.structure-curator protocols=lazycortex-wiki:lazy-wiki.structure-protocol request.kind=curate request.paths={paths} request.status={status} timeout_sec=900 --managed type,watch,expert,protocols,request,path_filter,group_globs")
+Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=lazy-wiki.structure-scan-renames type=git watch=renamed_files branch=<branch> interval_sec=60 path_filter=<exclude-pathspecs> group_globs=<profile-globs> filter.frontmatter.review_active.not_in=[true] expert=wiki.structure-curator protocols=lazycortex-wiki:lazy-wiki.structure-protocol request.kind=rename request.old_paths={old_paths} request.new_paths={paths} timeout_sec=900 --managed type,watch,expert,protocols,request,path_filter,group_globs")
+```
+
+The rename routine carries a **different** `request` because `renamed_files` exposes different placeholders — the two aligned lists `{old_paths}` / `{paths}`, not `{paths}` / `{status}`; a shared template would `KeyError` on substitution and fail the tick on every rename. The `review_active` filter keeps documents under an open review out of the map until the review closes and the file changes one last time; files without frontmatter pass it (`not_in [true]` holds for an absent key).
+
+Every request is written against the list placeholders, never `{path}` / `{old_path}`. A file-level watch carries the one-path list whether or not anything grouped, so one template serves both shapes and editing `group_globs` later never invalidates a registration.
+
+**`--managed` is what keeps an old registration current.** The listed keys are this plugin's own knowledge — what it watches, what it dispatches, and the shape of the request it sends. On a routine already registered they are set to the values above whatever the record says, so a repository configured before any of them changed is corrected by this branch rather than left on the old shape. Everything outside the list is the operator's: how often the routine ticks, how long it may run, which hooks it may wake.
+
+`filter` is deliberately absent from that list. The spec plugin's own install patches a stage exclusion into these routines' filter block, and a wiki run that reasserted the block would delete a sibling plugin's work on every pass. `protocols` is absent for the same shape of reason — an operator attaches one deliberately and reassertion would delete it. `git_author` is absent because these four routines carry none: they dispatch an expert, and the identity their commits wear comes from that expert's own registration.
+
+Edit mode needs no special case: re-running this branch re-registers each routine in reconcile mode, which reports `registered`, `refreshed`, or `unchanged` per routine. Verify afterwards with the same command that derived the values, passing `--check`; it compares every registered structure-scan routine against the derivation and exits non-zero naming each difference.
+
+Outcome: `registered` / `refreshed` / `already-present`.
 
 ### Structure 6 — Initial map + log
 

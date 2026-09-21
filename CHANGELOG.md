@@ -4,6 +4,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 9.7.0 — 2026-09-21 UTC
+
+- Fixed a quota-burning bug in expert-waking routines — a routine no longer re-triggers on its own commit, directory exclusions are honored, and same-directory file changes are grouped into one task instead of firing one task per file.
+- Routines now group a directory's changed files into one task by default (`group: false` opts a routine out); a new reconciliation step keeps already-registered routines in sync with a plugin's declared shape on every update, without touching protocols the operator added by hand.
+
 ### 9.6.0 — 2026-09-20 UTC
 
 - Git-watch routine grouping (`group_globs`) now picks the deepest matching directory glob, regardless of list order — previously the first-listed glob won a depth tie.
@@ -681,6 +686,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 9.5.0 — 2026-09-21 UTC
+
+- Routine registrations `lazy-spec.install` writes (`lazy-spec.gate-tick`, `lazy-spec.coordinator-watch`, `lazy-spec.request-open`, `lazy-spec.request-apply`, `lazy-spec.collect-tick`, `lazy-spec.upstream-tick`) are now reconciled on every run instead of being left alone once present — the path mask, filter predicates, dispatch shape, and worker are corrected to the shipped shape, while operator-tuned cadence keys are left untouched. A registration made before any of those changed used to keep its old shape forever.
+- A registration whose recorded routine type no longer matches what's shipped (e.g. an install predating the coordinator-watch git-watch conversion) now fails loudly at install with a question for the operator, instead of being silently merged into an unrunnable mixture.
+- Fixed a product spawned from a request never joining the coordinator's watch — the step adding its directory globs was reading the routine registry from a settings section nothing writes, so it silently found nothing to update.
+
 ### 9.4.1 — 2026-09-20 UTC
 
 - Fixed gate timestamps (e.g. `spec_approved_at`) being written unquoted by code but demanded quoted by the skill, lifecycle protocol, coordination playbook, and walkthroughs — prose now matches the code's unquoted ISO 8601 form.
@@ -994,6 +1005,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 5.4.0 — 2026-09-21 UTC
+
+- Re-running the Obsidian install (or `lazy-obsidian.iconize-install` on its own) now repairs an existing repaint-routine registration instead of leaving it frozen at whatever shape it was created with — the watch mode, worker command, and commit identity are brought up to the current shipped values automatically, while your own interval, branch, and halt-behavior tuning is left untouched.
+
 ### 5.3.1 — 2026-09-20 UTC
 
 - The vault-safe markdown rule now calls out ISO 8601 timestamps (e.g. `2026-09-07T00:00:00Z`) as the one frontmatter value with a colon that's safe to leave unquoted — everything else with a colon still needs quoting to avoid Obsidian silently dropping the frontmatter block.
@@ -1294,6 +1309,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
 
 ## lazycortex-review
+
+### 6.7.0 — 2026-09-21 UTC
+
+- Fixed: a coordinator wake now checks for itself whether the document is actually under review, instead of trusting the watch's own filter. A document with no active review and no expert result waiting to land ends the wake on one cheap read — previously, a `lazy-review.coordinator-watch` registration missing its `review_active` filter clause turned every operator commit into a full coordinator turn for every markdown file in the watched tree.
+- `/lazy-review.install` now reconciles its three routine registrations (`lazy-review.collect`, `lazy-review.coordinator-watch`, `lazy-review.sanitize`) on every run instead of leaving an existing registration untouched forever. The dispatch shape, worker command, and the watch's path filter (re-derived from `review.watch_root`) are corrected to the shipped value; operator-tuned fields — interval, timeout, priority, cron, branch, attached protocols, and the watch's frontmatter filter — are always left exactly as recorded.
+- `/lazy-review.configure`'s watch-root widening step now notes that the watch's path filter is install-owned and re-derived automatically on the next install, so a hand-written widening only needs to survive until then.
 
 ### 6.6.1 — 2026-09-20 UTC
 
@@ -1755,6 +1776,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+### 4.7.0 — 2026-09-21 UTC
+
+- The `python.code-reviewer` expert is now registered with no aspects. It is a mechanical worker — a file list in, findings out, nothing carried between dispatches — so the memory aspect it used to carry was paid for on every review and repaid on none. Aspects are install-managed, so re-running `/lazy-python.install` removes it from an existing setup with no manual settings edit.
+
 ### 4.6.0 — 2026-09-20 UTC
 
 - `chk-py` now flags cached functions (`@cache`, `@lru_cache`, `@cached_property`) that lack an `opt:` comment naming the assumption the optimization relies on.
@@ -1947,6 +1972,18 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 3.2.0 — 2026-09-21 UTC
+
+- Fixed the structure-map's grouping-filter command emitting an empty glob set when no depth classes are configured — that used to make routine registration fail outright in a repo without depth classes, with the auditor then reporting the same drift forever.
+- The protocol list a routine carries is no longer treated as wiki's own to overwrite on reconciliation — protocols the operator attached by hand now survive every install run instead of being silently wiped.
+- `/lazy-wiki.install`'s routine registration now reconciles all five installer routines and the four `/lazy-wiki.configure structure` wizard routines against their current shape on every run, so a routine that changed shape after an earlier install no longer stays stuck on the old one forever.
+- Change grouping by directory is now on by default for the routines that wake wiki's curators — edits under one directory collapse into a single curator job instead of one per file. `group: false` restores the old per-file behavior, and `group_globs` still widens a job beyond a single directory.
+- The terms curator now processes a whole batch of changed documents together instead of one file at a time — since a shared directory usually names one subject, terms are checked against each other within the batch and the dictionary commits once per batch rather than once per document.
+- Fixed a bug where a curator's own commit could re-wake the same routine — routines that dispatch an expert now skip changes authored by that expert's own registered mail, and the structure-map's runtime-managed folders are excluded from every git watch unconditionally.
+- The structure-map's own exclusion filters (memory directories, the map file itself, runtime folders) are now emitted by a dedicated command instead of parsed out of skill text, and the structure curator applies a whole batch of changed paths in one pass and one commit instead of one commit per path.
+- `/lazy-wiki.audit` now hard-fails when a routine's actual path filtering has drifted from what it's declared to cover, instead of silently reporting nothing — this catches a scope that ends up excluding everything it was meant to include.
+- The wiki's curator agents (`wiki.curator`, `wiki.terms-curator`, `wiki.structure-curator`, `wiki.tag-curator`) no longer carry a memory aspect — they're mechanical executors with nothing to accumulate between runs, so their persona notes are gone too.
 
 ### 3.1.1 — 2026-09-20 UTC
 

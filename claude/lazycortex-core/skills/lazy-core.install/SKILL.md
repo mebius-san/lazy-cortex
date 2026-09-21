@@ -626,7 +626,7 @@ If Step 9 was skipped (outcome `skipped-not-in-git-repo`), inherit the same outc
 
 Otherwise, check one condition: the `experts` section of `<repo-root>/.claude/lazy.settings.json` contains at least one expert entry (a key that is not `_version` and whose value is a dict).
 
-Run the bootstrap whenever it holds — including on a repository that already has the routines. Registration still skips an existing entry, but a default key the entry predates is filled in: a repository installed before `hooks_enabled` existed would otherwise keep an expert-spawn allow-list nobody ever set, and the secret scan would stay off there forever. A value the operator has set, empty list included, is never touched.
+Run the bootstrap whenever it holds — including on a repository that already has the routines. An existing entry is reconciled rather than skipped: a default key the entry predates is filled in (a repository installed before `hooks_enabled` existed would otherwise keep an expert-spawn allow-list nobody ever set, and the secret scan would stay off there forever), and the one key the built-ins claim as their own — the autocheckup's `type`, without which the daemon cannot tell how to run the entry at all — is corrected to the shipped value. Every other value the operator has set, empty list included, is never touched.
 
 ```bash
 PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
@@ -636,7 +636,7 @@ bootstrap_default_routines(Path('<repo-root>'))
 "
 ```
 
-State **registered** if a routine was added; **backfilled** if an existing routine gained a default key it predated; **already-present** if nothing changed; **skipped-no-experts** if the condition was false.
+State **registered** if a routine was added; **refreshed** if an existing routine gained a default key it predated or had an owned key corrected; **unchanged** if nothing moved; **skipped-no-experts** if the condition was false.
 
 ## Step 12.5: Restore externally-sourced working directories
 

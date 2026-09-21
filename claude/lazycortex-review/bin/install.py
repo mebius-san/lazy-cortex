@@ -2,11 +2,14 @@
 
 Writes (or leaves alone if present) the following pieces of state:
 
-- `<repo>/.claude/lazy.settings.json` — adds the `review` section, the
-  `experts` entries for the plugin's own system experts, and the
+- `<repo>/.claude/lazy.settings.json` — adds the `review` section and the
+  `experts` entries for the plugin's own system experts if absent (existing
+  values are never overwritten), and reconciles the
   `routines["lazy-review.collect"]` / `routines["lazy-review.coordinator-watch"]` /
-  `routines["lazy-review.sanitize"]` trio if absent. Existing values are never
-  overwritten.
+  `routines["lazy-review.sanitize"]` trio through the core CLI's
+  `reconcile-routine` verb: the keys this plugin owns are corrected to the shipped
+  value on every run, every other key the registration carries is the operator's
+  and is left as it stands.
 - `<repo>/.experts/.jobs/` and `<repo>/.logs/lazy-review/runs/`
   directories.
 
@@ -61,6 +64,26 @@ class _SettingsKey:
   BASE_BRANCH = "base_branch"
 
 
+# ----------------------------------------------------------------------------------------
+class _CoreCommand:
+  """
+  Wire tokens of the `lazycortex-core reconcile-routine` verb this install drives.
+
+  Attributes:
+    RECONCILE_ROUTINE: The subcommand name.
+    CFG_FLAG: Flag carrying the shipped config body as JSON.
+    MANAGED_FLAG: Flag carrying the comma-separated owned-key list.
+    CWD_FLAG: Flag carrying the repository root to write into.
+    STATUS: Result key holding the verb's outcome word.
+  """
+
+  RECONCILE_ROUTINE = "reconcile-routine"
+  CFG_FLAG = "--cfg-json"
+  MANAGED_FLAG = "--managed"
+  CWD_FLAG = "--cwd"
+  STATUS = "status"
+
+
 _REQUIRED_DIRS = (
     ".experts/.jobs",
     ".logs/lazy-review/runs",
@@ -83,6 +106,26 @@ _RETIRED_SCAN_ROUTINE = "lazy-review.scan"
 _COLLECT_ROUTINE = "lazy-review.collect"
 _WATCH_ROUTINE = "lazy-review.coordinator-watch"
 _SANITIZE_ROUTINE = "lazy-review.sanitize"
+
+# Per-routine list of the config keys this plugin owns — corrected to the shipped value on
+# every install, where every other key the registration carries stays the operator's answer.
+# Owned: the dispatch shape (`type` / `watch`), the CLI verb the routine runs (`command`), and the
+# path mask the watch derives from `review.watch_root` — none of them is a value the operator
+# could have decided, and all of them are values this plugin has changed before. Deliberately NOT
+# owned: `protocols` (an operator attaches an extra protocol deliberately through the offer verb,
+# and reasserting the shipped list would delete that attachment on the next install — the shipped
+# refs reach a registration that lacks them through the same additive union), `interval_sec`,
+# `timeout_sec`, `priority`, `cron` and `branch` (cadence and scope the operator retunes), and
+# the watch's `filter` block — `review_active` is load-bearing there, but the block is also the
+# seam the core CLI's `routine-ensure-filter` verb plants sibling-plugin predicates into (the
+# specs plugin parks `deferred` documents that way), and owning the whole block would silently
+# undo such a seed on the next install. A registration that carries no `filter` at all still
+# gains the shipped one, which is the case a stale install actually presents.
+_MANAGED_FIELDS = {
+    _COLLECT_ROUTINE: ("command",),
+    _WATCH_ROUTINE: ("type", "watch", "path_filter", "command"),
+    _SANITIZE_ROUTINE: ("type", "command"),
+}
 
 # Whole-repo watch scope, used when nothing narrower can be derived. Collapses the
 # pathspec to `:(glob)**/*.md`, mirroring how `spec.vault_root: "."` is resolved.
@@ -286,6 +329,61 @@ def _default_settings(repo: Path, existing: dict) -> dict:
   }
 
 
+def _reconcile_routines(repo: Path, cfgs: dict) -> dict:
+  """
+  Bring each of this plugin's routine registrations in `repo` back to its shipped shape.
+
+  Goes through the core CLI's `reconcile-routine` verb rather than importing
+  `lazycortex-core` Python — the § 1c contract of `dev.plugin-boundaries.md`. Each call
+  writes the keys named in `_MANAGED_FIELDS`, fills in any shipped key the registration
+  never carried, and leaves every other key exactly as recorded.
+
+  Args:
+    repo: Repository root whose settings file carries the registrations.
+    cfgs: The shipped config body per routine name.
+
+  Returns:
+    The verb's outcome word (`registered` / `refreshed` / `unchanged`) per routine name.
+
+  Raises:
+    RuntimeError: When the core CLI cannot be resolved, or a call exits non-zero.
+  """
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  import collect_ops as _collect_ops  # pylint: disable=import-error
+  # waiver: the resolver is the collector's own copy of the § 1c lookup, reused rather than duplicated a fourth time
+  cli = _collect_ops._resolve_core_cli()  # pylint: disable=protected-access
+
+  # guard: no lookup stage found a binary — the routines this plugin ships would stay on
+  # whatever shape the consumer installed years ago, silently
+  if cli is None:
+    raise RuntimeError(
+        "lazycortex-core CLI not resolvable: $LAZYCORTEX_PLUGIN_DIRS yields no match, no "
+        "dev-vault sibling tree carries bin/lazycortex-core, and the plugin cache has no "
+        "lazycortex-core version with a bin/lazycortex-core entry."
+    )
+  outcomes: dict[str, str] = {}
+  for name, cfg in cfgs.items():
+    proc = subprocess.run(
+        [
+            sys.executable, str(cli), _CoreCommand.RECONCILE_ROUTINE, name,
+            _CoreCommand.CFG_FLAG, json.dumps(cfg),
+            _CoreCommand.MANAGED_FLAG, ",".join(_MANAGED_FIELDS[name]),
+            _CoreCommand.CWD_FLAG, str(repo),
+        ],
+        capture_output = True, text = True, check = False,
+    )
+
+    # guard: the verb refused — a rejected config must not pass for a reconciled routine
+    if proc.returncode != 0:
+      raise RuntimeError(
+          f"{_CoreCommand.RECONCILE_ROUTINE} {name} exit={proc.returncode} "
+          f"stdout={proc.stdout.strip()!r} stderr={proc.stderr.strip()!r}"
+      )
+    outcomes[name] = json.loads(proc.stdout)[_CoreCommand.STATUS]
+  return outcomes
+
+
 def _migrate(existing: dict) -> list[str]:
   """
   Bring a pre-coordinator settings object to the current `review` schema in place.
@@ -361,13 +459,15 @@ def _ensure_settings(repo: Path) -> dict:
   """
   Merge the default lazy-review settings into `repo`'s `.claude` settings file.
 
-  Existing keys are left untouched at every depth; only missing keys are added, including
-  sub-fields of an entry that already exists but was only partially written by an earlier
-  install. Retired registrations from an earlier schema are then removed.
+  Existing `review` and `experts` keys are left untouched at every depth; only missing keys
+  are added, including sub-fields of an entry that already exists but was only partially
+  written by an earlier install. Retired registrations from an earlier schema are then
+  removed, and this plugin's three routines are reconciled through the core CLI, which owns
+  the write for those entries.
 
   Returns:
-    A dict with the settings file path, the list of keys that were added, and the
-    list of migrations applied.
+    A dict with the settings file path, the list of keys that were added, the list of
+    migrations applied, and the reconcile outcome per routine name.
   """
   settings_dir = repo / Paths.CLAUDE_DIR
   settings_dir.mkdir(parents=True, exist_ok=True)
@@ -381,11 +481,24 @@ def _ensure_settings(repo: Path) -> dict:
   # declares are derived from the consumer's own state, so it must be built before
   # the merge and before the migration strips what it derives from.
   defaults = _default_settings(repo, existing)
+
+  # The routine bodies leave the absent-only merge: a registration already on record would
+  # keep whatever shape it was installed with, and the owned keys are exactly what a plugin
+  # update needs to correct. Everything else in the `routines` section — the `_version` meta
+  # key — still rides the merge.
+  cfgs = { name: defaults[_SettingsKey.ROUTINES].pop(name) for name in _MANAGED_FIELDS }
   added: list[str] = []
   _merge_defaults(existing, defaults, added)
   migrated = _migrate(existing)
   settings_path.write_text(json.dumps(existing, indent=2) + "\n")
-  return {"settings_path": str(settings_path), "added_keys": added, "migrated": migrated}
+
+  # after the write, so the core CLI reconciles against the section this install just left
+  # on disk rather than racing it
+  reconciled = _reconcile_routines(repo, cfgs)
+  return {
+      "settings_path": str(settings_path), "added_keys": added,
+      "migrated": migrated, "reconciled": reconciled,
+  }
 
 
 def install(repo: Path) -> dict:
@@ -394,18 +507,26 @@ def install(repo: Path) -> dict:
 
   Guarantees:
     - Never overwrites a settings key the repository's settings file already has, at any
-      nesting depth; only a missing key is added.
+      nesting depth; only a missing key is added. The one exception is a key this plugin
+      declares as its own in `_MANAGED_FIELDS`, on one of the three routines it registers.
 
   Args:
     repo: Path to the repository root to install into.
 
   Returns:
-    Dict with keys `repo`, `created_dirs`, `settings_path`, `added_keys`, and `migrated`.
+    Dict with keys `repo`, `created_dirs`, `settings_path`, `added_keys`, `migrated`, and
+    `reconciled`.
+
+  Raises:
+    RuntimeError: When the `lazycortex-core` CLI cannot be resolved, or its
+      `reconcile-routine` verb refuses one of this plugin's routine configs.
   """
 
   # Contract:
   # Any settings key already present in the repository's settings file, at any nesting
-  # depth, is left exactly as recorded; only a missing key is added.
+  # depth, is left exactly as recorded; only a missing key is added. The sole exception is
+  # a key named in `_MANAGED_FIELDS` on one of this plugin's own three routines, which is
+  # ALWAYS set to the shipped value.
 
   repo = repo.resolve()
   dirs = _ensure_dirs(repo)

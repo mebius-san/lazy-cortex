@@ -1,13 +1,14 @@
 ---
 chapter_type: block
 summary: The PostToolUse hook that runs `pcf.py` on every `.py` edit and surfaces style violations inline in the next turn — zero install steps, zero config writes.
-last_regen: 2026-09-20
+last_regen: 2026-09-21
 no_diagram: true
 source_skills:
   - lazy-python.check-style.sh
   - hooks.json
   - pcf.py
 source_sha: f3f458fd3763b21b44ad1860d8fef3f0c2465707
+surface_sha: 30ccbcdbfd74af4f7a9a28ac597203d1d778ea23a65a7c9a865e97423f4f6dfb
 ---
 # Inline style feedback on every Python edit
 

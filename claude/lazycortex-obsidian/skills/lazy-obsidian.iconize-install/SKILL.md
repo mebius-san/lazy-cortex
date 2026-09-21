@@ -228,27 +228,45 @@ the whole runtime.
 Skip the whole step when this repo runs no daemon (`daemon` absent from `lazy.settings.json`).
 Outcome: **no-daemon**.
 
-Register through `lazy-routine.register` (never by hand-editing the registry):
+Register through `lazy-routine.register` in **reconcile mode** — never by hand-editing the
+registry, and never the plain register call, which aborts on a name it already knows and would
+leave a vault registered by an older version of this step on that shape forever:
 
 ```
-Skill(skill: "lazycortex-core:lazy-routine.register", args: "lazy-obsidian.repaint --type git")
+Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=lazy-obsidian.repaint cfg=<cfg-json> --managed type,watch,command,git_author")
 ```
 
-Answer its wizard with: `watch` = `new_commits`, `branch` = the repo's own default branch,
-`interval_sec` = `60`, `command` = `["lazycortex-obsidian", "reconcile-commit"]`, no `path_filter`
-and no `filter` — a matcher callback can key on a non-markdown file, so narrowing the trigger
-would silently drop repaints. Set `ignore_halt: true`: the routine must run precisely when a
-dirty tree has stopped everything else, since that dirt is what it clears. Set `git_author` to
-`{"name": "lazy-obsidian.repaint", "email": "lazy-obsidian.repaint@bot.invalid"}` — the identity
+The shipped `cfg`:
+
+```json
+{
+  "type": "git",
+  "watch": "new_commits",
+  "branch": "<default-branch>",
+  "interval_sec": 60,
+  "ignore_halt": true,
+  "command": ["lazycortex-obsidian", "reconcile-commit"],
+  "git_author": {
+    "name": "lazy-obsidian.repaint",
+    "email": "lazy-obsidian.repaint@bot.invalid"
+  }
+}
+```
+
+`<default-branch>` is the repo's own default branch. There is deliberately no `path_filter` and no
+`filter` — a matcher callback can key on a non-markdown file, so narrowing the trigger would
+silently drop repaints. `ignore_halt: true` because the routine must run precisely when a dirty
+tree has stopped everything else, since that dirt is what it clears. `git_author` is the identity
 the worker stamps on its own commits, and the one every consumer of system-vs-operator authorship
 reads, so a repaint never wakes a sibling coordinator as an operator edit.
 
-A registered routine is read back and compared against the answers above, per the File-sync
-policy's install-managed-value rule: this plugin composed every one of them, so a `command`,
-`watch`, `ignore_halt`, or `git_author` that differs is a value an older version of this step
-wrote, not a choice to preserve. Refresh it the way `lazy-spec.install` Step 5b refreshes its
-filter — unregister, then re-register — holding `interval_sec` from the recorded entry, which the
-operator does tune. Outcome: **registered** / **refreshed** / **already-present** / **no-daemon**.
+`--managed type,watch,command,git_author` names the keys only this plugin can know: the watch mode,
+the worker the daemon resolves, the bot identity every authorship check keys on. Those are corrected
+to the shipped value on every run, which is what brings a vault registered by an older version of
+this step current. `interval_sec`, `branch` and `ignore_halt` stay outside the list — the operator
+could reasonably have tuned any of them, and the registrar fills each in only when the recorded
+entry never carried it. Outcome: **registered** / **refreshed** / **unchanged** (the registrar's own
+word) / **no-daemon**.
 
 Then prune the legacy duplicate of that identity. Earlier releases of this step also wrote the
 same `git_author` block into `experts["lazy-obsidian.repaint"]` in `lazy.settings.json`, because
@@ -324,7 +342,7 @@ One bullet per step, in order — missing bullet = skipped step, back up and run
 - **Step 2.55** legacy pre-commit shim: **legacy-shim-removed** (+ **hooksPath-unset**) / **kept-foreign** / **not-present**.
 - **Step 2.6** Iconize frontmatter settings: **asserted** / **merged** / **kept-local** / **iconize-absent**.
 - **Step 2.7** icon-map: **installed** / **unchanged** / **merged** (with `additions=N conflicts-kept-authored=N conflicts-took-shipped=N`; append `paint-roots-seeded=<vault_root>` when the key was introduced this run) / **migrated-v`N`-to-v`SCHEMA_VERSION`** / **migration-path-missing** / **blocker-plugin-too-old**. Prepend **path-migrated** when the v1.0.0 legacy-path pre-flight moved the file; **kept-orphan** for the legacy path when both old and new paths exist.
-- **Step 3.5** repaint routine: **registered** / **refreshed** / **already-present** / **no-daemon**, plus the legacy-identity prune (**identity-pruned** / **identity-absent**) and backfill outcomes.
+- **Step 3.5** repaint routine: **registered** / **refreshed** / **unchanged** / **no-daemon**, plus the legacy-identity prune (**identity-pruned** / **identity-absent**) and backfill outcomes.
 - **Step 4** callbacks dir: **created** / **already-present** / **.gitkeep-added**.
 - **Step 4.5** `.gitignore` (iconize data.json): **added** / **already-ignored** / **gitignore-created**; WARN if `git ls-files --error-unmatch` exits 0 (user runs `git rm --cached`, never auto).
 - **Step 4.6** plugin registries: **registries-visible-<count>** (one line per registry) / **no-registries**.

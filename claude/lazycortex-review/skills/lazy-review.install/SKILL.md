@@ -47,11 +47,14 @@ Every file this skill creates or updates follows three cases — no per-file "in
 
 Run `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/install.py" --cwd .`. The script applies the File-sync policy at the section level:
 
-- Creates `.claude/lazy.settings.json` if missing, or merges the defaults in for absent top-level keys and absent nested keys only — existing values are never overwritten (cases 1–2; the bin contains no contradicting-region path, so case 3 never arises here).
+- Creates `.claude/lazy.settings.json` if missing, or merges the `review` / `experts` defaults in for absent top-level keys and absent nested keys only — existing values are never overwritten (cases 1–2; the bin contains no contradicting-region path, so case 3 never arises here).
+- Reconciles the three routines below through the core CLI's `reconcile-routine` verb instead of the absent-only merge, so a registration made by an older version of this plugin does not stay on its old shape forever.
 - Creates `.experts/.jobs/` and `.logs/lazy-review/runs/` if missing.
-- Prints a JSON report of what changed, including a `migrated` list.
+- Prints a JSON report of what changed, including a `migrated` list and a `reconciled` outcome word per routine.
 
 The script's default seed includes the routine trio the loop runs on — `routines["lazy-review.collect"]` (the interval postman that lands finished expert payloads), `routines["lazy-review.coordinator-watch"]` (the git-watch that turns a commit into a coordinator wake), and `routines["lazy-review.sanitize"]` (the daily deterministic sanitizer that repairs lost writer wakes, orphaned reviews, and markers on vanished documents) — plus `review.watch_root`, `review.coordination_rules`, and the `experts["review.coordinator"]` identity. All three routines stay registered whatever the project's daemon posture is.
+
+**What a re-run corrects on an existing registration.** Each routine declares its own list of owned keys, drawn from the dispatch shape (`type`, `watch`), the CLI verb (`command`), the watch's `path_filter` (re-derived from the current `review.watch_root`), and its `protocols` list. Only the watch carries all four; the postman owns its verb alone and the sanitizer its shape and verb, because those are the only keys their shipped configs carry. Those are set to the shipped value on every run; a shipped key the registration never carried is filled in; everything else it carries is left exactly as recorded. `interval_sec`, `timeout_sec`, `priority`, `cron`, `branch`, and the watch's `filter` block are the operator's (the `filter` block deliberately so — it is where another plugin's `routine-ensure-filter` seed lands).
 
 **Migration on a repo installed before the coordinator.** The bin applies it in the same run, unconditionally — none of the three steps below reads a version number — and the `migrated` list names each change:
 
@@ -60,7 +63,7 @@ The script's default seed includes the routine trio the loop runs on — `routin
 - **Drops the `history` group** from every `review.classes[*].experts`. The historian is retired; the coordinator writes `# History` inline, so the link points at an expert nothing dispatches.
 - **Leaves `review._version` alone.** The `review` section's version ladder belongs to `lazycortex-core`, which skips any section already standing at or beyond its own target — a number written from this side makes core skip its next step forever. The two cleanups above are version-independent and apply whatever the section's number is.
 
-Outcome: `installed` (anything was created or merged) or `already-installed` (no-op).
+Outcome: `installed` (anything was created, merged, or reconciled — a routine reported `registered` or `refreshed`) or `already-installed` (every routine reported `unchanged` and nothing else moved).
 
 ## Step 3 — Attach routine protocols
 

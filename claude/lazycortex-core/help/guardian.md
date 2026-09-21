@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Catch secrets, PII, and internal paths before they reach a public repo; stop per-tool allow prompts for new MCP servers in one step.
-last_regen: 2026-09-20
+last_regen: 2026-09-21
 diagram_spec:
   anchor: "How the three skills fit together"
   request: "Flow diagram showing how lazy-guard.check-public feeds findings into lazy-repo.mark-public (which creates .guard-public.json and activates the pre-commit hook), and how lazy-guard.allow-mcp independently classifies MCP server tools into allow/ask/skip buckets and writes them to settings.local.json"
@@ -10,6 +10,7 @@ source_skills:
   - lazy-guard.check-public
   - lazy-guard.allow-mcp
 source_sha: 49c3acca48d76212bd8165bbd0df7bc23243faa9
+surface_sha: c66d1299b980d4546be66e401639ca64308e9e5464a919aa48c58c369eab7602
 ---
 # Public-repo guardrails and MCP permission management
 

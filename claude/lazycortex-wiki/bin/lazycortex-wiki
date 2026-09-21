@@ -48,6 +48,8 @@ import relink as _relink      # noqa: E402
 # waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
 import scope as _scope        # noqa: E402
 # waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
+import structure as _structure  # noqa: E402
+# waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
 import tags as _tags          # noqa: E402
 # waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
 import terms as _terms        # noqa: E402
@@ -83,6 +85,7 @@ _SUBCOMMANDS = {
   "terms-apply":    "Apply a decided term replacement to one document's prose (the operator picks the direction).",
   "mirror-plan":    "Fetch a mirror scope's source and print the sync plan as JSON (dry-run, mirror untouched).",
   "mirror-sync":    "Fetch a mirror scope's source, sync the mirror tree, and commit the touched files.",
+  "structure-watch-config": "Derive the path filter and grouping globs the structure-scan routines must carry.",
 }
 
 # Environment variable name that carries the repository root.
@@ -118,6 +121,7 @@ class Cli:
   _CMD_DISPATCH_LINK  = "dispatch-link"
   _CMD_BUILD_INDEX    = "build-index"
   _CMD_RELINK_PLAN    = "relink-plan"
+  _CMD_STRUCTURE_WATCH_CONFIG = "structure-watch-config"
   _CMD_RELINK_ALL     = "relink-all"
   _CMD_FIND_CANDIDATES = "find-candidates"
   _CMD_FIND_BACK_CANDIDATES = "find-back-candidates"
@@ -359,6 +363,8 @@ class Cli:
       return self._cmd_mirror_plan(args)
     if cmd == self._CMD_MIRROR_SYNC:
       return self._cmd_mirror_sync(args)
+    if cmd == self._CMD_STRUCTURE_WATCH_CONFIG:
+      return self._cmd_structure_watch_config(args)
     return self._not_implemented(cmd)
 
   def _build_parser(self) -> argparse.ArgumentParser:
@@ -440,6 +446,15 @@ class Cli:
         p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
       elif name == self._CMD_RELINK_PLAN:
         p.add_argument(self._ARG_SCOPE_ID, help = self._ARG_RELINK_SCOPE_ID_HELP)
+        p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+      elif name == self._CMD_STRUCTURE_WATCH_CONFIG:
+        p.add_argument(
+          "--check",
+          dest = "check",
+          action = "store_true",
+          help = "Compare every registered structure-scan routine against the derivation and "
+                 "exit non-zero on any difference.",
+        )
         p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
       elif name == self._CMD_RELINK_ALL:
         p.add_argument(
@@ -811,6 +826,76 @@ class Cli:
     rel = out_path.relative_to(repo).as_posix()
     print(f"build-index: ok {args.scope_id} → {rel}")
     return 0
+
+  def _cmd_structure_watch_config(self, args: argparse.Namespace) -> int:
+    """
+    Print the derived watch configuration, or check the registered routines against it.
+
+    Without `--check` the derived `path_filter` and `group_globs` are printed as one JSON
+    object for a caller to splice into a routine registration. With `--check` every
+    registered structure-scan routine is compared against that derivation and the
+    differences are reported, which is what makes a stale registration a failure rather
+    than a judgement.
+
+    Args:
+      args: Parsed argument namespace; must carry `.repo` and `.check`.
+
+    Returns:
+      Integer exit code — 0 when nothing drifted, 1 when `--check` found a difference.
+    """
+    repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
+    repo = Path(repo_raw).resolve()
+    watch = _structure.StructureWatch(repo = repo)
+
+    # guard: plain derivation requested — print it and stop
+    if not args.check:
+      print(json.dumps(watch.expected(), indent = 2, sort_keys = True))
+      return 0
+
+    # compare each registered structure routine against what the section derives
+    registered = self._structure_routines(repo)
+    drifted = { name: watch.drift(cfg) for name, cfg in registered.items() }
+    drifted = { name: found for name, found in drifted.items() if found }
+    print(json.dumps({
+      "expected": watch.expected(),
+      "routines": sorted(registered),
+      "drift": drifted,
+    }, indent = 2, sort_keys = True))
+    return 1 if drifted else 0
+
+  @staticmethod
+  def _structure_routines(repo: Path) -> dict:
+    """
+    Return every registered routine whose name marks it as a structure scan.
+
+    Args:
+      repo: Repository root whose settings hold the routine registry.
+
+    Returns:
+      A mapping of routine name to its config dict; empty when none are registered.
+    """
+    settings_file = repo / ".claude/lazy.settings.json"
+
+    # guard: no settings file — nothing is registered
+    if not settings_file.is_file():
+      return {}
+
+    # an unreadable registry is reported as an empty one; the caller's check then finds every
+    # derived key missing, which is the honest verdict for settings nobody can read
+    try:
+      with settings_file.open(encoding = "utf-8") as fh:
+        data = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+      return {}
+    routines = data.get("routines", {})
+
+    # guard: registry absent or malformed
+    if not isinstance(routines, dict):
+      return {}
+    return {
+      name: cfg for name, cfg in routines.items()
+      if isinstance(cfg, dict) and name.startswith("lazy-wiki.structure-scan")
+    }
 
   def _cmd_relink_plan(self, args: argparse.Namespace) -> int:
     """

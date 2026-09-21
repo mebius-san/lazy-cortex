@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Protect your repo's git index from Claude Code — pathspec-only commits by default, an optional staging lock for concurrent sessions, and the two skills to inspect and break it.
-last_regen: 2026-09-17
+last_regen: 2026-09-21
 diagram_spec:
   anchor: "Lock lifecycle"
   request: "State diagram of the lazy-core.git staging-window lock, scoped to the mutex row only (git.pathspec_enabled=false, git.mutex_enabled=true — the lock never exists on the default pathspec row). NO_LOCK → HELD (a hook or skill acquires .git/lazy-git.lock before touching the git index) → auto-released when the staging window closes (commit/reset empties the index) OR auto-broken by heuristics (dead PID / stale-and-idle / different host) → NO_LOCK. Show the manual break path via /lazy-core.git-unlock as an alternative exit from HELD, guarded by /lazy-core.git-status inspection first."
@@ -10,6 +10,7 @@ source_skills:
   - lazy-core.git-status
   - lazy-core.git-unlock
 source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
+surface_sha: eaf1310ccdb589ea719c38ba898bf71a1b2c6c6882d993e83de9471ce0969dc2
 ---
 # git staging coordination
 

@@ -66,7 +66,7 @@ Surface-level — there is no node. You judge a canonical axis-value set and emi
 - The **dictionary file is yours to write directly** — it is your own output, not node content, and no primitive owns it.
 - **tail:false** — your alias-map temp file lives OUTSIDE the repo (`mktemp`); you create it and `rm` it. The dictionary is the only file inside the repo you write yourself.
 - **tail:true** — MUST NOT write to `context/` (read-only staged copies).
-- MUST NOT touch any tracked file except node tags (via `retag`), the dictionary file, `topics.md` (via `build-index`, tail:true only), and `.memory/<self>/` (persona aspect).
+- MUST NOT touch any tracked file except node tags (via `retag`), the dictionary file, and `topics.md` (via `build-index`, tail:true only).
 - MUST NOT call `AskUserQuestion` — no user channel in this execution model.
 
 ## Error handling
@@ -82,7 +82,3 @@ Error categories per the tag-curator protocol:
 - `logical` — malformed input (`collected_tags.json` not a JSON object, no surface id in the request).
 - `transient` — subprocess crash or timeout (runner retries).
 - `technical` — schema violation in your own output (an alias map that is not `{axis: {old: new}}`, a `retag` call refused because the surface id is unknown).
-
-## Memory
-
-The persona aspect (`lazycortex-core:lazy-memory.persona-aspect`) provides persistent memory across runs. The canonical vocabulary itself lives in the tags and in the dictionary file, NOT in memory — use memory only for **decisions and resolved ambiguities**: which values you deliberately keep apart and why, which merges an operator reverted, so a later pass does not re-propose them. Write to `.memory/<self>/` only — never to job-dir context files.

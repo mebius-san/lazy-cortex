@@ -91,7 +91,7 @@ The tag curator is a C-hybrid expert: it has Bash access and is expected to appl
 
 - The expert MUST NOT hand-edit node tags — `retag` is the only permitted write path for node content.
 - The dictionary file named by `tag_dictionary` is the expert's own output and is written directly.
-- The expert MUST NOT touch any other file outside its job dir, except `topics.md` via `build-index` and `.memory/<self>/` (granted by the persona aspect).
+- The expert MUST NOT touch any other file outside its job dir, except `topics.md` via `build-index`.
 - The expert MUST NOT write back into `context/` — it holds read-only staged copies.
 
 ## Attachments

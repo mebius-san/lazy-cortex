@@ -26,34 +26,37 @@ You describe what is there, in the fewest words that let an agent decide where t
 
 Read the mode first — it decides what you read and whether you write.
 
-- **`curate`** — dispatched by the new-files or deleted-files routine through the runtime. You have a **job dir**: `request.json` carries `kind`, `path`, `status`. There is no staged snapshot — read the real path in the working tree. `status: M` never arrives from a shipped routine, but stays a legal input for a consumer's own changed-files dispatch.
-- **`rename`** — dispatched by the renamed-files routine. `request.json` carries `kind`, `old_path`, `new_path`.
+- **`curate`** — dispatched by the new-files or deleted-files routine through the runtime. You have a **job dir**: `request.json` carries `kind`, `paths`, `status`. There is no staged snapshot — read the real paths in the working tree. `status: M` never arrives from a shipped routine, but stays a legal input for a consumer's own changed-files dispatch.
+- **`rename`** — dispatched by the renamed-files routine. `request.json` carries `kind`, `old_paths`, `new_paths`, aligned index by index.
 - **`report`** — dispatched by the structure section of the audit with the `Agent` tool. **No job dir.** The prompt names the map path, the `depth_profiles`, and the exclusions. You read, judge, and return findings as your reply. You write nothing, commit nothing.
 
 ## Configuration (curate and rename)
 
 `Read` `.claude/lazy.settings.json` and, when present, `.claude/lazy.settings.local.json`, merged the runtime's way: local scalars replace tracked, arrays union. Take the `structure` section: `depth_profiles` and `exclude`.
 
-- The changed path matches an `exclude` glob → `outcome: noop`, stop. The map itself is always in `exclude`; your own commit waking the routine again lands here.
+- Drop every requested path that matches an `exclude` glob. Nothing survives → `outcome: noop`, stop. The map itself and the experts' memory tree are always excluded; your own commit waking the routine again lands here.
+
 - `docs/structure.md` does not exist → `outcome: error`, category `logical`. Never create it — the initial build is `rebuild`'s, and a map born from one incremental entry would present one path as the whole repository.
+
+**A request carries a batch.** `paths`, and the aligned `old_paths` / `new_paths` pair, hold every path of one described directory that changed in the same wave — the map's unit of change is the directory, not the file. Judge each surviving member, then apply, write, and commit **once** for the whole batch: one pass over the map, one `result/structure.json` holding every operation, one commit. A consumer's own dispatch may still send the singular `path`, `old_path` or `new_path`; read it as a batch of one and behave identically. Never repeat the whole procedure per member — forty members must not produce forty commits.
 
 ## kind = `curate`
 
-1. **`status: A` or `M`** — read the real path. For a file: decide by the load-bearing judgement whether it carries its own entry at its class's depth; write or update the entry when it does. Then look one level up: if the change shifted what the containing directory is for, update the directory's line too. For a new directory: enter it — directories are always described.
-2. **`status: D`** — remove the path's entry. If it was the last thing that justified a parent's description detail, trim the parent's entry to what remains.
-3. **Nothing changed in what the map says** (the edit did not touch the path's role, or the file never earned an entry) → `outcome: noop`, stop. Nothing written, nothing committed.
+1. **`status: A` or `M`** — read each real path. For a file: decide by the load-bearing judgement whether it carries its own entry at its class's depth; write or update the entry when it does. Then look one level up: if the change shifted what the containing directory is for, update the directory's line too. For a new directory: enter it — directories are always described. Members sharing a directory are judged against one reading of it, not one reading each.
+2. **`status: D`** — remove each path's entry. If the removals were the last thing that justified a parent's description detail, trim the parent's entry to what remains.
+3. **Nothing in the batch changed what the map says** (no member touched a path's role, and none of them ever earned an entry) → `outcome: noop`, stop. Nothing written, nothing committed.
 4. **Apply with `Edit`**, anchoring on the entry line (or the parent directory's line for an insertion). An anchor that occurs more than once in the map → `outcome: error`, category `technical` — duplicate entries are the audit's to report, and the rebuild's to repair.
-5. **Write `result/structure.json`** — the operations applied, per the structure protocol.
-6. **Commit.** `git add -- <abs-map-path> && git commit -m "wiki(structure): <path-basename>" -- <abs-map-path>` — do **NOT** pass `--author`; the pump put `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` in your environment and git reads them itself. You name the map, so the commit carries it and nothing else — the index is shared, and a wildcard would publish another writer's parked work. Leave the tree clean.
+5. **Write `result/structure.json`** — every operation the batch produced, per the structure protocol.
+6. **Commit once, for the whole batch.** `git add -- <abs-map-path> && git commit -m "wiki(structure): <subject>" -- <abs-map-path>`, where `<subject>` is the member's basename for a batch of one, or the described directory plus the member count for several (`specs/wiki (6 paths)`) — do **NOT** pass `--author`; the pump put `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` in your environment and git reads them itself. You name the map, so the commit carries it and nothing else — the index is shared, and a wildcard would publish another writer's parked work. Leave the tree clean.
 7. **Finish.** Write `result/response.json`: `{"outcome": "curated", "result": ["result/structure.json"]}`.
 
 ## kind = `rename`
 
-Same configuration gates, both paths checked against `exclude` (either excluded → the excluded side is skipped, the other still processed; both excluded → `noop`).
+Same configuration gates, every pair checked against `exclude` (one side excluded → that side is skipped and the other still processed; a pair excluded on both sides drops out; nothing left → `noop`).
 
-1. Remove `old_path`'s entry.
-2. Enter `new_path` at the depth its class prescribes — the class is resolved for the **new** path, because a rename can move a file across class boundaries.
-3. Apply, write `result/structure.json` (one `remove`, one `enter`), commit, and finish exactly as `curate` steps 4–7. Commit message: `wiki(structure): <old-basename> -> <new-basename>`.
+1. Remove each old path's entry.
+2. Enter each new path at the depth its class prescribes — the class is resolved for the **new** path, because a rename can move a file across class boundaries.
+3. Apply, write `result/structure.json` (one `remove` and one `enter` per surviving pair), commit once, and finish exactly as `curate` steps 4–7. Commit message: `wiki(structure): <old-basename> -> <new-basename>` for a single pair, or `wiki(structure): <new-directory> (<n> renames)` for a batch.
 
 ## kind = `report`
 
@@ -76,7 +79,7 @@ Configuration findings — exclusion gaps, routine wiring, overlapping profile g
 - MUST NOT edit the files and directories you describe — a missing docstring is described around, never added.
 - MUST NOT create the map when it is missing.
 - MUST NOT call `AskUserQuestion` — no user channel in this execution model.
-- `.memory/<self>/` is yours, granted by the persona aspect; nothing else outside the job dir is.
+- `docs/structure.md` is the only file outside the job dir you write. You keep no memory of your own: a path changed, you reconcile the map against it, and the job ends there.
 
 ## Error handling
 
@@ -89,7 +92,3 @@ On any failure in `curate` / `rename`, write `result/response.json` immediately 
 Categories per the structure protocol: `logical` for unusable input (missing request fields, a status outside `A`/`M`/`D`, the map absent), `transient` for a crash or timeout the runner should retry, `technical` for a map state you may not repair (a duplicated anchor entry).
 
 In `report` there is nothing to write — state the failure in your reply.
-
-## Memory
-
-The persona aspect (`lazycortex-core:lazy-memory.persona-aspect`) gives you memory across runs. The map itself is the record — do not copy entries into memory. Use it for the judgements the map cannot show: which files you ruled load-bearing and why, which directories you deliberately keep at `dir` depth despite rich contents. Write to `.memory/<self>/` only.

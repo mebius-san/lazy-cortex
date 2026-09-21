@@ -17,8 +17,8 @@ import sys
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from constants import (  # pylint: disable=import-error
-  EnvVar, JobCollectKey, JobConfigKey, JobErrorCategory, JobStatus, RoutineKey, StateKey,
-  TickResultKey,
+  BOT_EMAIL_DOMAIN, EnvVar, JobCollectKey, JobConfigKey, JobErrorCategory, JobStatus, RoutineKey,
+  StateKey, TickResultKey,
 )
 
 from typing import TYPE_CHECKING
@@ -47,6 +47,17 @@ DEFERRED_RETRY_AGE_SEC = 86400.0
 VALID_GIT_WATCH = {
   "new_commits", "new_files", "changed_files", "deleted_files", "renamed_files",
 }
+
+# the repository-relative trees the runtime writes and commits on its own behalf
+RUNTIME_WRITTEN_TREES = ( ".memory", ".state" )
+
+# the per-routine opt-out from the subtraction above
+# waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
+WATCH_RUNTIME_TREES_KEY = "watch_runtime_trees"
+
+# the per-routine opt-out from directory-level grouping
+# waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
+GROUP_KEY = "group"
 
 # maps a file-level diff status to the `git log --diff-filter=` flag that finds its
 # last-changing commit; "R" (renames) widens to the union of add/modify/delete/rename
@@ -77,6 +88,7 @@ SCHEMAS = {
     "optional": {
       "command", "expert", "request", "timeout_sec",
       "repo_dir", "remote", "path_filter", "filter", "group_globs",
+      WATCH_RUNTIME_TREES_KEY, GROUP_KEY,
     },
   },
   "md-scan": {
@@ -512,6 +524,25 @@ def validate_routine_entry(name: str, cfg: dict) -> None:
       f"routine '{name}': 'git_author' must be a dict with string 'name' and 'email'"
     )
 
+  # Domain(runtime.bot-identity):
+  # # A system identity is recognisable by its address
+  # Several parts of the runtime decide whether a commit was made by a person or by the system,
+  # and they decide it from the committer's address. The system therefore commits under addresses
+  # in one reserved domain that no person can receive mail at, and membership of that domain is
+  # what the question actually asks. An address outside it, given to a part of the system, makes
+  # that part indistinguishable from an operator: everything it commits reads as a human gesture,
+  # including the commits it makes in answer to the previous one, and the exchange never ends.
+  # The address is typed by hand into configuration, so the check belongs where the configuration
+  # is accepted rather than where the mistake would eventually show.
+
+  # guard: a system identity outside the reserved domain would read as an operator everywhere
+  # waiver: the git_author sub-key, owned by the lazy.settings contract, not a reusable domain key
+  if isinstance(author, dict) and not str(author.get("email", "")).endswith(BOT_EMAIL_DOMAIN):
+    raise RoutineConfigError(
+      f"routine '{name}': 'git_author.email' must end with '{BOT_EMAIL_DOMAIN}' — an address "
+      f"outside that domain reads as an operator edit to every bot-vs-operator check"
+    )
+
   # the optional filter sub-mapping is validated key by key
   # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
   flt = cfg.get("filter")
@@ -557,6 +588,31 @@ def validate_routine_entry(name: str, cfg: dict) -> None:
       raise RoutineConfigError(
         f"routine '{name}' (type=git): invalid watch value '{watch}'. "
         f"Valid: {sorted(VALID_GIT_WATCH)}."
+      )
+
+    # the watch may be narrowed to a pathspec — one pattern or a list of them
+    # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
+    path_filter = cfg.get("path_filter")
+    if path_filter is not None:
+      # guard: the key must be a pathspec string or a non-empty list of pathspec strings
+      if not (
+        (isinstance(path_filter, str) and path_filter.strip())
+        or (isinstance(path_filter, list) and path_filter
+            and all(isinstance(pat, str) and pat.strip() for pat in path_filter))
+      ):
+        raise RoutineConfigError(
+          f"routine '{name}' (type=git): 'path_filter' must be a pathspec string or a "
+          f"non-empty list of pathspec strings"
+        )
+
+    # grouping is on by default for an expert-dispatching routine; the key turns it off
+    group = cfg.get(GROUP_KEY)
+
+    # guard: the opt-out is a boolean, never a glob list mistyped into the wrong key
+    if group is not None and not isinstance(group, bool):
+      raise RoutineConfigError(
+        f"routine '{name}' (type=git): '{GROUP_KEY}' must be a boolean — declare the "
+        f"directory globs in 'group_globs' to widen the unit instead"
       )
 
     # dir-level grouping rides on file-level items, so it needs a path to group by
@@ -812,6 +868,11 @@ def _render_template(template: object, values: dict) -> object:
   isn't provided raises `KeyError` — caller treats this as a routine failure
   rather than silently emitting a malformed request.
 
+  A leaf that is exactly one placeholder and nothing else substitutes the raw value
+  instead of its text, so a list-valued item field (a grouped watch item's member
+  paths) reaches the request as a JSON array rather than a Python list repr. A
+  placeholder embedded in surrounding text still formats as text.
+
   Args:
     template: A dict, list, str, or other JSON-shaped value to render.
     values: Mapping of placeholder names to their substitution values.
@@ -827,6 +888,12 @@ def _render_template(template: object, values: dict) -> object:
   if isinstance(template, list):
     return [ _render_template(v, values) for v in template ]
   if isinstance(template, str):
+    # a lone placeholder carries the value itself — `"{paths}"` must reach the request as a
+    # list, not as the string `"['a', 'b']"`; `"{{paths}}"` is an escaped literal and is
+    # excluded because its inner text is not an identifier
+    if (template.startswith("{") and template.endswith("}")
+        and template[1:-1].isidentifier()):
+      return values[template[1:-1]]
     return template.format(**values)
   return template
 
@@ -1513,7 +1580,10 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
   # head_sha regardless of this branch, so a separate reset write here was dead code (M11)
   if not force_pushed and last_seen != head_sha:
     # the watch mode decides what a single item is (a commit, a path, a rename pair)
-    fresh_items = _compute_git_items(work_dir, last_seen, head_sha, watch, path_filter)
+    fresh_items = _compute_git_items(
+      work_dir, last_seen, head_sha, watch, path_filter,
+      bool(cfg.get(WATCH_RUNTIME_TREES_KEY, False)),
+    )
 
     # Optional composite filter — same matcher md-scan / inbox use. Items carrying a
     # file `path` are evaluated against their parsed frontmatter; an unreadable or
@@ -1550,13 +1620,25 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
         kept.append(item)
       fresh_items = kept
 
-    # optional dir-level grouping — N same-dir file items collapse into one item per group
-    # dir AFTER the filter, so a worker whose real unit is the directory is invoked once
-    # per dir over the surviving members; paths outside every glob stay file-level items
+    # an expert never wakes on the commit it authored itself — dropped before grouping, so a
+    # batch is never assembled out of the expert's own paths
     # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
+    if fresh_items and RoutineKey.EXPERT in cfg:
+      fresh_items = _drop_self_authored(repo, cfg[RoutineKey.EXPERT], fresh_items)
+
+    # dir-level grouping — N same-dir file items collapse into one item per group dir AFTER
+    # the filter, so a worker whose real unit is the directory is invoked once per dir over the
+    # surviving members. A declared glob set widens the unit past one directory and leaves
+    # paths outside every glob as file-level items; with nothing declared, a routine that
+    # dispatches an expert still groups by each file's own directory, because the cost of an
+    # expert job is not something an omitted config key should decide. A `command` routine
+    # keeps the file-level shape its consumer was written against unless it opts in.
+    # waiver: routine-config schema field names, single-source set in SCHEMAS, not reusable cross-module keys
     group_globs = cfg.get("group_globs")
-    if group_globs and fresh_items:
-      fresh_items = _group_git_items(work_dir, fresh_items, group_globs, f"{last_seen}..{head_sha}")
+    grouping = cfg.get(GROUP_KEY, True) and RoutineKey.EXPERT in cfg
+    if fresh_items and (group_globs or grouping):
+      fresh_items = _group_git_items(
+        work_dir, fresh_items, group_globs or None, f"{last_seen}..{head_sha}")
 
   # a command routine receives the items as a subprocess payload, not as jobs; retries go
   # first, so a broken item gets its next attempt before any fresh item is even tried
@@ -1619,15 +1701,27 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
     request_template = cfg["request"]
     # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
     # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-    from expert_runtime import dispatch_job  # pylint: disable=import-error
+    from expert_runtime import completed_dedup_jobs, consume_job, dispatch_job  # pylint: disable=import-error
     protocols = _routine_protocols(cfg)
 
+    # a dedup key stays held until the asker says it is done with the answer, and a git watch
+    # has no result to collect — so release this routine's own finished bundles first, or the
+    # first change to a place would be the last one that ever dispatched for it
     # the dispatch surface takes a real path; symlinks are resolved so a daemon started through a
     # symlinked checkout writes the same bundle paths as one started through the canonical one
     target_repo = Path(repo).resolve()
+    for done_job in completed_dedup_jobs(target_repo, expert):
+      done_key = done_job.get(JobCollectKey.DEDUP_KEY)
+      if isinstance(done_key, str) and done_key.startswith(f"{name}:"):
+        consume_job(target_repo, expert, done_job[JobCollectKey.JOB_ID])
+
+    # every surviving item becomes one dispatched job, folded into any live job for its place
     for item in fresh_items:
       rendered = _render_template(request_template, item)
-      dispatch_job(target_repo, expert, rendered, protocols = protocols)
+      dispatch_job(
+        target_repo, expert, rendered, protocols = protocols,
+        dedup_key = _git_dedup_key(name, item),
+      )
 
   # the scanned range is closed by advancing the last-seen sha to HEAD; failed items persist
   # (or clear) alongside it so the next tick knows what to retry
@@ -1743,8 +1837,9 @@ def _is_ancestor(work_dir: Path, ancestor: str, descendant: str) -> bool:
   return rc.returncode == 0
 
 
-def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str,
-                       watch: str, path_filter: str | None) -> list[dict]:
+def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str, watch: str,
+                       path_filter: str | list[str] | None,
+                       watch_runtime_trees: bool = False) -> list[dict]:
   """
   Enumerate per-watch items between two SHAs.
 
@@ -1757,8 +1852,12 @@ def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str,
     last_seen: Baseline SHA (exclusive lower bound of the range).
     head_sha: Current SHA (inclusive upper bound of the range).
     watch: Watch mode — one of the values in `VALID_GIT_WATCH`.
-    path_filter: Optional pathspec pattern restricting the enumeration; None
-      means no filter.
+    path_filter: Optional pathspec restricting the enumeration — one pattern or a
+      list of them, passed to git verbatim so exclude magic (`:(exclude)<glob>`)
+      works; None means no filter.
+    watch_runtime_trees: True lets the watch see the runtime's own tracked trees,
+      which are subtracted by default; only a routine whose work really is that
+      bookkeeping passes it.
 
   Returns:
     A list of item dicts; empty when no items match the watch mode in the range.
@@ -1769,7 +1868,32 @@ def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str,
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   import subprocess
   rng = f"{last_seen}..{head_sha}"
-  pathspec = [ "--", path_filter ] if path_filter else []
+  # a list narrows the watch by several patterns at once; git reads them as one pathspec, so
+  # a set of `:(exclude)<glob>` entries subtracts every one of them from the whole tree
+  if not path_filter:
+    patterns = []
+  elif isinstance(path_filter, str):
+    patterns = [ path_filter ]
+  else:
+    patterns = list(path_filter)
+
+  # Domain(runtime.routines):
+  # # The runtime's own tracked output is never watched
+  # Parts of the runtime keep tracked, committed state inside the repository they operate on: the
+  # experts' memory notes and the skills' cross-machine checkpoints. Those files are written by the
+  # system, committed by the system, and describe the system's own bookkeeping rather than the
+  # project. A watch that sees them turns the runtime into its own workload — an expert writes a
+  # note, the note is committed, the commit wakes the watch, and the watch dispatches the expert
+  # again. The subtraction therefore belongs to the watch itself rather than to any consumer's
+  # configuration: a repository whose exclusion list was written carelessly, or written before these
+  # trees existed, still cannot feed the runtime with its own output. A routine that genuinely needs
+  # to observe them says so once, in its own config, and takes the loop it asked for.
+
+  # the runtime's own tracked trees are subtracted unless the routine asked for them; a lone
+  # exclude pathspec still means "everything else", so this works with no configured filter too
+  if not watch_runtime_trees:
+    patterns += [ f":(exclude){tree}/**" for tree in RUNTIME_WRITTEN_TREES ]
+  pathspec = [ "--", *patterns ] if patterns else []
 
   # commit-level watches read the range straight from the log
   # waiver: git CLI/output vocabulary, not a domain constant
@@ -1780,7 +1904,7 @@ def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str,
         rng, *pathspec ],
       cwd = str(work_dir), text = True,
     ).strip()
-    items = []
+    items: list[dict[str, object]] = []
     if out:
       for line in out.splitlines():
         parts = line.split("\t")
@@ -1827,10 +1951,14 @@ def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str,
         path = parts[1]
         sha = _last_change_sha(work_dir, path, rng, status)
         author_name, author_email = _last_change_author(work_dir, path, rng, status)
-        items.append({
+        file_item: dict[str, object] = {
           "path": path, "status": status, "sha": sha,
+          # the one-member list shape a grouped watch also emits, so a request template
+          # written against `paths` serves a grouped and an ungrouped item alike
+          "paths": [ path ],
           "author_name": author_name, "author_email": author_email,
-        })
+        }
+        items.append(file_item)
     return items
 
   # renames need the rename-detection pass to pair the old and new path
@@ -1850,35 +1978,129 @@ def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str,
           # waiver: git CLI/output vocabulary, not a domain constant
           sha = _last_change_sha(work_dir, new_path, rng, "R")
           author_name, author_email = _last_change_author(work_dir, new_path, rng, "R")
-          items.append({
+          rename_item: dict[str, object] = {
             "old_path": old_path,
             "new_path": new_path,
+            # the one-member list shape a grouped watch also emits, both sides aligned
+            "paths": [ new_path ],
+            "old_paths": [ old_path ],
             "sha": sha,
             "author_name": author_name,
             "author_email": author_email,
-          })
+          }
+          items.append(rename_item)
     return items
 
   # every watch value is handled above, so reaching here means the config is invalid
   raise RoutineConfigError(f"unknown git watch value: {watch!r}")
 
 
-def _group_dir_for(path: str, group_globs: list) -> str | None:
+def _git_dedup_key(routine: str, item: dict) -> str | None:
+  """
+  Return the key that identifies one git-watch item's unit of work, for dispatch dedup.
+
+  Args:
+    routine: Name of the dispatching routine, so two routines watching the same path
+      never collapse into each other's queued job.
+    item: One watch item, grouped or file-level.
+
+  Returns:
+    A stable key naming the group directory or the changed path, or None for a watch whose
+    items carry no path at all.
+  """
+
+  # Domain(runtime.routines):
+  # # One queued job per unit of work
+  # A watch can see the same place change several times before the expert it dispatches has
+  # finished answering the first change. Queueing a job per observation spends the whole series
+  # to produce one answer, because the expert reads the current state of the repository when it
+  # finally runs and the earlier observations have been overtaken by then. Naming the unit of
+  # work each observation belongs to lets a second observation of the same place fold into the
+  # job already waiting for it. The name has to carry the watching routine as well as the place,
+  # so two routines watching the same place keep their own queues.
+
+  # waiver: `_compute_git_items`'s per-watch item-shape keys, not reusable domain keys
+  unit = item.get("dir") or item.get("path") or item.get("new_path")
+
+  # guard: a path-less item (a commit watch) names no place to fold into
+  if not isinstance(unit, str) or not unit:
+    return None
+  return f"{routine}:{unit}"
+
+
+def _drop_self_authored(repo: Path, expert: str, items: list[dict]) -> list[dict]:
+  """
+  Return the watch items an expert did not commit itself.
+
+  Args:
+    repo: Repository root whose settings carry the expert registry.
+    expert: Name of the expert this routine dispatches.
+    items: Watch items already filtered, each carrying the committing `author_email`.
+
+  Returns:
+    Every item whose author is not the expert's registered identity; the list unchanged when
+    the expert has no registered email or the settings cannot be read.
+  """
+
+  # Domain(runtime.routines):
+  # # An expert is never woken by its own commit
+  # Several experts keep a generated file current by watching the repository for changes and
+  # reconciling the file against what they find. The reconciliation itself is a commit, so the
+  # watch that woke the expert sees that commit too and wakes it again — the expert becomes its
+  # own source of work, and the cycle ends only when a quota runs out. Whether the watch should
+  # have been looking at the changed path at all is a separate, configurable question; that an
+  # expert must not answer for its own output is not configurable, because no configuration can
+  # make it useful. Each expert commits under an identity of its own, which is what lets its own
+  # work be told apart from everyone else's and left alone.
+
+  # guard: nothing to judge
+  if not items:
+    return items
+
+  # the registry is read fresh each tick, so an identity corrected mid-run takes effect at once
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from settings_cli import settings_get  # pylint: disable=import-error
+  try:
+    # waiver: the settings section name, owned by the lazy.settings contract, not a reusable domain key
+    experts = settings_get("experts", cwd = repo)
+  except Exception:
+    return items
+  entry = experts.get(expert) if isinstance(experts, dict) else None
+
+  # guard: expert not registered, or registered without an identity of its own
+  if not isinstance(entry, dict):
+    return items
+  # waiver: the expert-entry identity keys, owned by the lazy.settings contract, not reusable domain keys
+  author = entry.get("git_author")
+  email = author.get("email") if isinstance(author, dict) else None
+
+  # guard: no registered email — nothing can be attributed, so nothing is skipped
+  if not isinstance(email, str) or not email.strip():
+    return items
+  # waiver: `_compute_git_items`'s per-watch item-shape key, not a reusable domain key
+  return [ item for item in items if item.get("author_email") != email ]
+
+
+def _group_dir_for(path: str, group_globs: list | None) -> str | None:
   """
   Resolve the group directory a file path collapses into, if any.
 
-  The deepest matching glob wins; two globs of equal depth name the same directory prefix, so
-  list order carries nothing. A glob matches segment-by-segment
+  With a glob list, the deepest matching glob wins; two globs of equal depth name the same
+  directory prefix, so list order carries nothing. A glob matches segment-by-segment
   (`*` never crosses `/`), and the file must sit strictly below the glob's depth, so a
   note lying AT that depth (a folder-note beside the group dirs) never becomes its own
-  group.
+  group. With no glob list, the file's own parent directory is the group, which is the
+  shape a consumer gets without declaring anything.
 
   Args:
     path: Repo-relative file path from a git-watch item.
-    group_globs: Glob list from the routine's `group_globs` config key.
+    group_globs: Glob list from the routine's `group_globs` config key, or None to group
+      every file by its own parent directory.
 
   Returns:
-    The matched directory prefix as a repo-relative path, or None when no glob matches.
+    The matched directory prefix as a repo-relative path, or None when no glob matches and
+    for a file sitting at the repository root.
   """
 
   # Domain(runtime.routines):
@@ -1894,7 +2116,18 @@ def _group_dir_for(path: str, group_globs: list) -> str | None:
   # depth, such as a note describing the group itself, never becomes a group of one. Grouping cannot
   # be combined with a watch whose items carry no path at all, since there is nothing to group by in
   # that case.
+  #
+  # Declaring the set is how a consumer widens the unit beyond one directory. Declaring nothing
+  # does not mean one unit per file: the containing directory is the unit, because that is the
+  # smallest grouping that is always right and costs the least. What a consumer omitted from its
+  # configuration must not decide how much the work costs.
 
+  # with nothing declared, the file's own directory is the unit; a root-level file has none
+  if not group_globs:
+    # waiver: filesystem path idiom, not a domain constant
+    return path.rsplit("/", 1)[0] if "/" in path else None
+
+  # with a glob set declared, the deepest one that matches claims the file
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   import fnmatch
   parts = path.split("/")
@@ -1917,7 +2150,7 @@ def _group_dir_for(path: str, group_globs: list) -> str | None:
   return best
 
 
-def _group_git_items(work_dir: Path, items: list[dict], group_globs: list, rng: str) -> list[dict]:
+def _group_git_items(work_dir: Path, items: list[dict], group_globs: list | None, rng: str) -> list[dict]:
   """
   Collapse file-level items into one item per matched group directory.
 
@@ -1926,10 +2159,16 @@ def _group_git_items(work_dir: Path, items: list[dict], group_globs: list, rng: 
   no glob pass through unchanged, so grouping is an overlay on the file-level watch, not a
   replacement.
 
+  A group item carries the same `paths` list every file-level item already carries, so one
+  request template serves a grouped and an ungrouped item alike; a rename group also carries
+  `old_paths` aligned index by index with `paths`, and a status-bearing watch carries the
+  members' shared `status`.
+
   Args:
     work_dir: Path-like reference to the git working tree.
     items: File-level items from `_compute_git_items`, already filtered.
-    group_globs: Glob set from the routine's `group_globs` config key.
+    group_globs: Glob set from the routine's `group_globs` config key, or None to group
+      every file by its own parent directory.
     rng: The `<last_seen>..<head>` range this tick scans, for the group's attribution.
 
   Returns:
@@ -1975,14 +2214,27 @@ def _group_git_items(work_dir: Path, items: list[dict], group_globs: list, rng: 
     )
 
     # the group item — dir identity plus sorted member paths
-    singles.append({
+    # waiver: `_compute_git_items`'s per-watch item-shape keys, not reusable domain keys
+    ordered = sorted(members, key = lambda m: str(m.get("path") or m.get("new_path")))
+    group_item = {
       "dir": gdir,
       # waiver: `_compute_git_items`'s per-watch item-shape keys, not reusable domain keys
-      "paths": sorted(str(member.get("path") or member.get("new_path")) for member in members),
+      "paths": [ str(member.get("path") or member.get("new_path")) for member in ordered ],
       "sha": sha,
       "author_name": author_name,
       "author_email": author_email,
-    })
+    }
+
+    # a rename group carries both sides, aligned index by index with `paths`
+    # waiver: `_compute_git_items`'s per-watch item-shape keys, not reusable domain keys
+    if any(member.get("old_path") for member in ordered):
+      group_item["old_paths"] = [ str(member.get("old_path", "")) for member in ordered ]
+
+    # one routine watches one status set, so every member shares the group's status
+    # waiver: `_compute_git_items`'s per-watch item-shape keys, not reusable domain keys
+    if ordered[0].get("status"):
+      group_item["status"] = ordered[0]["status"]
+    singles.append(group_item)
   return singles
 
 

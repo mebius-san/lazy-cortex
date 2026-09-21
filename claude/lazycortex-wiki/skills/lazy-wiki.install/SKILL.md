@@ -147,13 +147,15 @@ Ensure the `structure` key exists. If absent, add:
 {
   "_version": 1,
   "depth_profiles": {},
-  "exclude": ["docs/structure.md"]
+  "exclude": ["docs/structure.md", ".memory/**"]
 }
 ```
 
-`exclude` seeds with `docs/structure.md` itself and nothing else — the one mandatory entry (`lazy-wiki.structure`'s `rebuild` mode would otherwise describe the map inside the map). `depth_profiles` seeds empty; classes are per-repo, and `/lazy-wiki.configure structure` is the wizard that collects and writes them.
+`exclude` seeds with two mandatory entries and nothing else. `docs/structure.md` is the map itself, which `lazy-wiki.structure`'s `rebuild` mode would otherwise describe inside the map. `.memory/**` is the experts' own memory tree: every note is a tracked file landed by its own commit, so without the entry a note wakes the scan, the scan dispatches the curator, and a curator that writes a note wakes the scan again. Both entries exist for the same reason — a writer's own output must not be what triggers it.
 
-`exclude` is mandatory and is completed on a present section exactly as the `wiki` keys above are: a `structure` section holding only `_version` is the stub `settings-get` returns for an unwritten section, and accepting it leaves the map describing itself.
+`exclude` is mandatory and is completed on a present section exactly as the `wiki` keys above are: a `structure` section holding only `_version` is the stub `settings-get` returns for an unwritten section, and accepting it leaves the map describing itself. Completion is per entry, so a section written before `.memory/**` was mandatory gains it on the next run without any other value moving.
+
+**`depth_profiles` seeds empty**; classes are per-repo, and `/lazy-wiki.configure structure` is the wizard that collects and writes them.
 
 Ensure the `terms` key exists. If absent, add:
 
@@ -208,7 +210,9 @@ Outcome: `agent-models: <seeded-N|unchanged|no-entries>`.
 
 ## Step 8: Register curator experts + routines
 
-The `wiki.curator` and `wiki.terms-curator` **experts** are dispatch-routing config — the entries that resolve which agent + aspects run when each curator is dispatched. Both are registered **unconditionally**, exactly like any other expert (not daemon-gated). The five wiki **routines** (`lazy-wiki.scan`, `lazy-wiki.scan-deletes`, `lazy-wiki.relink-weekly`, `lazy-wiki.doctor-apply`, `lazy-wiki.tag-normalize`) are registered unconditionally too: `/lazy-runtime.tick` fires them on a checkout with no daemon, so `daemon.enabled` gates nothing here. The non-daemon parts of this install (rule, settings section, doc-kind axis, `agent_models`, template dir, CLI allow-pattern) are done by Steps 3–7 and Step 9.
+The `wiki.curator` and `wiki.terms-curator` **experts** are dispatch-routing config — the entries that resolve which agent + aspects run when each curator is dispatched.
+
+**A curator is seeded with no aspects, and this skill never adds one.** These four experts are mechanical: a path changed, they reconcile one generated file against it and stop. An aspect is prompt text prepended to every job, so on a curator it is paid for on every dispatch and repaid on none — the memory aspect in particular obliges the expert to read its notes before each job and to attempt a note whenever a trigger fires, which on a curator fires on the routine churn itself. An operator who wants one on a curator adds it deliberately; `aspects: []` is the shipped value and a re-run never replaces it. Both are registered **unconditionally**, exactly like any other expert (not daemon-gated). The five wiki **routines** (`lazy-wiki.scan`, `lazy-wiki.scan-deletes`, `lazy-wiki.relink-weekly`, `lazy-wiki.doctor-apply`, `lazy-wiki.tag-normalize`) are registered unconditionally too: `/lazy-runtime.tick` fires them on a checkout with no daemon, so `daemon.enabled` gates nothing here. The non-daemon parts of this install (rule, settings section, doc-kind axis, `agent_models`, template dir, CLI allow-pattern) are done by Steps 3–7 and Step 9.
 
 ### Expert (always registered)
 
@@ -217,7 +221,7 @@ Ensure `experts` exists as an object with `_version: 1` (create if absent — ne
 ```json
 "wiki.curator": {
   "agent": "lazycortex-wiki:lazy-wiki.curator",
-  "aspects": ["lazycortex-core:lazy-memory.persona-aspect"],
+  "aspects": [],
   "git_author": {
     "name": "Wiki Curator",
     "email": "wiki.curator@bot.invalid"
@@ -233,7 +237,7 @@ The `wiki.terms-curator` **expert** is registered on the same terms — dispatch
 ```json
 "wiki.terms-curator": {
   "agent": "lazycortex-wiki:lazy-wiki.terms-curator",
-  "aspects": ["lazycortex-core:lazy-memory.persona-aspect"],
+  "aspects": [],
   "git_author": {
     "name": "Wiki Terms Curator",
     "email": "wiki.terms-curator@bot.invalid"
@@ -253,7 +257,7 @@ The `wiki.structure-curator` **expert** is registered on the same terms — disp
 ```json
 "wiki.structure-curator": {
   "agent": "lazycortex-wiki:lazy-wiki.structure-curator",
-  "aspects": ["lazycortex-core:lazy-memory.persona-aspect"],
+  "aspects": [],
   "git_author": {
     "name": "Wiki Structure Curator",
     "email": "wiki.structure-curator@bot.invalid"
@@ -271,7 +275,7 @@ The `wiki.tag-curator` **expert** is registered on the same terms — dispatch-r
 ```json
 "wiki.tag-curator": {
   "agent": "lazycortex-wiki:lazy-wiki.tag-curator",
-  "aspects": ["lazycortex-core:lazy-memory.persona-aspect"],
+  "aspects": [],
   "git_author": {
     "name": "Tag Curator",
     "email": "wiki.tag-curator@bot.invalid"
@@ -286,7 +290,19 @@ State `experts.wiki.tag-curator: <seeded|kept-local>`.
 
 ### Routines
 
-Ensure `routines` exists as an object (create `{"_version": 1}` if absent — never overwrite existing content). For each of the five routines below, apply absent-only semantics (present → **kept-local**, absent → **seeded**):
+Ensure `routines` exists as an object (create `{"_version": 1}` if absent — never overwrite existing content). Register each of the five routines below through the registrar in reconcile mode rather than writing the JSON into the file by hand:
+
+```
+Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=<name> <cfg keys> --managed type,watch,command,expert,request,path_filter,group_globs,git_author")
+```
+
+**Absent-only seeding is what leaves a consumer on an old shape forever.** A routine registered before this plugin changed what it watches or how it dispatches keeps the old record, because nothing ever revisits an entry that already exists. The keys named in `--managed` are this plugin's own knowledge and are corrected on every install run. `git_author` is among them for the same reason it is on every other routine this plugin registers: every check across the runtime reads that identity to tell a system commit from a person's, so a registration predating the block would keep the wrong answer indefinitely. The cadence keys `interval_sec`, `timeout_sec`, `priority` and `hooks_enabled` stay outside the list because an operator may have tuned them.
+
+`filter` is deliberately outside the list too. The spec plugin's install patches a stage exclusion into `lazy-wiki.scan` and the scan routines, and a wiki run that reasserted the block would delete a sibling plugin's work on every pass.
+
+`protocols` is outside it for the same shape of reason. An operator attaches an extra protocol to a routine deliberately, and reasserting the shipped list would delete that attachment on every install. The shipped refs still reach a registration that lacks them, through the additive union the protocol sub-step below performs.
+
+Report each routine as `registered`, `refreshed`, or `unchanged`, whichever the registrar returned.
 
 **`lazy-wiki.scan`** — event-driven git-watch routine, processes changed files:
 
@@ -306,7 +322,7 @@ Ensure `routines` exists as an object (create `{"_version": 1}` if absent — ne
 
 Substitute `<current-branch>` with the output of `Bash(git rev-parse --abbrev-ref HEAD)` (the branch the daemon watches). The core `dispatch_git` routine type reads `branch` as a branch-name string for `git rev-parse <remote>/<branch>` — a boolean breaks it.
 
-The `filter` block is the earliest cut, on two criteria. `frontmatter` drops a changed file whose frontmatter matches before `process-file` runs, so a document under review (`review_active: true`) never reaches the curator. `folder_note: false` drops a note named after its own folder (`sync/sync.md`) — under the folder-notes convention that file renders as the folder itself, a structural navigation node rather than a document, so curating it produces summary + tags + See-also on a container. The predicate is tri-state: omitting the key means "do not restrict", and `true` selects folder notes exclusively. Both mirror the per-scope `filter` (the source of truth honored on every path); seeding them here keeps the daemon quiet during review and off the folder tree. Absent-only semantics apply to the whole routine — a user who removed the filter is not re-seeded.
+The `filter` block is the earliest cut, on two criteria. `frontmatter` drops a changed file whose frontmatter matches before `process-file` runs, so a document under review (`review_active: true`) never reaches the curator. `folder_note: false` drops a note named after its own folder (`sync/sync.md`) — under the folder-notes convention that file renders as the folder itself, a structural navigation node rather than a document, so curating it produces summary + tags + See-also on a container. The predicate is tri-state: omitting the key means "do not restrict", and `true` selects folder notes exclusively. Both mirror the per-scope `filter` (the source of truth honored on every path); seeding them here keeps the daemon quiet during review and off the folder tree. Reconciliation fills in a shipped key the registration never carried, so a routine registered before this filter existed gains it. A `filter` block the operator deliberately emptied is a different case the plugin cannot tell apart from the first, and it is re-seeded on the next install; removing the whole routine is what stops it for good.
 
 **`lazy-wiki.scan-deletes`** — event-driven git-watch routine, prunes links to deleted nodes:
 
@@ -361,7 +377,13 @@ The curator dispatch carries the plugin's own `lazy-wiki.tag-curator-protocol` s
 
 ### Domain-spec expert + routines (only when `wiki.domains` is configured)
 
-Read `wiki.domains` from the target `lazy.settings.json`. Absent → skip this whole sub-step silently with outcome `skipped-no-domains` (the section is created by `/lazy-wiki.configure domains`; re-running this install afterwards registers everything below). Present → apply absent-only semantics to each entry:
+Read `wiki.domains` from the target `lazy.settings.json`. Absent → skip this whole sub-step silently with outcome `skipped-no-domains` (the section is created by `/lazy-wiki.configure domains`; re-running this install afterwards registers everything below). Present → seed the expert with absent-only semantics, and register both routines through the registrar in reconcile mode exactly as the five above:
+
+```
+Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=<name> <cfg keys> --managed type,watch,command,cron,git_author")
+```
+
+`cron` is this plugin's own here and not the operator's: the weekly full pass is insurance against a missed wake, not a cadence anyone tunes, and the pair only works when the two schedules stay apart. `git_author` is owned because every check across the runtime reads it to tell a system commit from a person's. `interval_sec`, `timeout_sec` and `priority` stay outside the list. Report each of the two as `registered`, `refreshed`, or `unchanged`.
 
 **Expert `wiki.domain-writer`** (registered whenever `wiki.domains` is present — dispatch-routing config, not daemon-gated):
 
@@ -412,7 +434,13 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> add-protocols --routine lazy-wik
 
 ### Mirror-sync routines (only for scopes with a `mirror` block)
 
-Read `wiki.scopes` from the target `lazy.settings.json`. For every scope whose entry carries a `mirror` block, register one schedule routine named `lazy-wiki.mirror-sync.<scope-id>` (absent-only semantics):
+Read `wiki.scopes` from the target `lazy.settings.json`. For every scope whose entry carries a `mirror` block, register one schedule routine named `lazy-wiki.mirror-sync.<scope-id>` through the registrar in reconcile mode:
+
+```
+Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=lazy-wiki.mirror-sync.<scope-id> <cfg keys> --managed type,command,git_author")
+```
+
+`cron` is deliberately outside the list here, unlike the domain pair: how often a mirror re-fetches its source is a judgement about that source, and an operator who slowed a noisy one down must keep the answer. `command` is owned because the scope id it carries is the routine's whole identity, and `git_author` because the mirror family commits under one identity that authorship checks key on. Report each scope's routine as `registered`, `refreshed`, or `unchanged`.
 
 ```json
 "lazy-wiki.mirror-sync.<scope-id>": {
@@ -425,11 +453,11 @@ Read `wiki.scopes` from the target `lazy.settings.json`. For every scope whose e
 
 The consumer is deterministic (fetch → sync → commit; no expert dispatch), so no protocol is attached. `git_author` is one family identity across every mirror scope — the routine key already names the scope, the commit subject names the synced paths, and `git blame` on mirrored content must point at the sync bot, never at the operator who has not seen it. The commit it lands is picked up by the git-watch `lazy-wiki.scan` routine, which re-curates the changed mirror nodes — no second curation channel. Scopes without a `mirror` block get nothing; when no scope carries one, state the outcome `skipped-no-mirrors`. The block is created by `/lazy-wiki.configure mirror`; re-running this install afterwards registers the routine.
 
-Write the file if any mutation happened (preserve `_version: 1` for both `routines` and `experts`).
+Write the file if any expert entry changed (preserve `_version: 1` for both `routines` and `experts`); the routine registrations are written by the registrar, not by this step.
 
 ### Seed the mandatory protocol
 
-`lazy-wiki.scan` and `lazy-wiki.relink-weekly` dispatch curator jobs that write into vault notes (`wiki_summary`, tag values, the glossed `# See also` block), so both carry one mandatory protocol. Attach it after the routine write, whether the entry was just seeded or kept local — the union is idempotent and never removes what the operator added:
+`lazy-wiki.scan` and `lazy-wiki.relink-weekly` dispatch curator jobs that write into vault notes (`wiki_summary`, tag values, the glossed `# See also` block), so both carry one mandatory protocol. Attach it after the routine registration, whatever the registrar reported — the union is idempotent and never removes what the operator added:
 
 ```
 Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> add-protocols --routine lazy-wiki.scan --ids lazycortex-core:lazy-core.markdown-style)
@@ -442,7 +470,7 @@ No question is asked: a mandatory protocol is not an operator choice, and the st
 
 This sub-step carries no outcome of its own — each seeded routine's line below gains a `+protocol` suffix.
 
-Outcome (one line per seeded entry): `experts.wiki.curator: <seeded|kept-local>` (always), `experts.wiki.domain-writer: <seeded|kept-local|skipped-no-domains>`, `routines.<key>: <seeded|kept-local|skipped-no-domains|skipped-no-mirrors>`, with `+protocol` appended on `lazy-wiki.scan`, `lazy-wiki.relink-weekly`, `lazy-wiki.domain-scan`, and `lazy-wiki.domain-full` whenever the seeding above ran.
+Outcome (one line per seeded entry): `experts.wiki.curator: <seeded|kept-local>` (always), `experts.wiki.domain-writer: <seeded|kept-local|skipped-no-domains>`, `routines.<key>: <registered|refreshed|unchanged|skipped-no-domains|skipped-no-mirrors>`, with `+protocol` appended on `lazy-wiki.scan`, `lazy-wiki.relink-weekly`, `lazy-wiki.domain-scan`, and `lazy-wiki.domain-full` whenever the seeding above ran.
 
 ### First scope pointer
 

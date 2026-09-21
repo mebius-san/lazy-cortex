@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about setting up scopes, running relinks, mirroring foreign repos, querying the wiki, the terms dictionary, the structure map, the domain-spec tree, the tag-values canon, and the wiki's own writing language.
-last_regen: 2026-09-20
+last_regen: 2026-09-21
 no_diagram: true
 source_skills:
   - lazy-wiki.install
@@ -13,7 +13,8 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: 092195a4fbb13a8c1f71552815a771ae70533efd
+source_sha: ece443fde681d08757d84c2adc770268af1c254a
+surface_sha: 08486043e0ee4b6d8a3ea70f5f40291f592991d77fe919591712a724b729e9ce
 ---
 # Frequently asked questions
 
@@ -117,7 +118,7 @@ There are two common causes. First, the topics index for the relevant scope may 
 
 `see-also-path-base` catches a See-also link written against the wrong path form for the target node (for example, a relative link that no longer matches how the node's canonical path is tracked in the index) — the fix rewrites the link's target to the canonical path without touching its gloss.
 
-Report-only findings (`dangling-at-prefix`, `missing-summary`, `unknown-axis`, `dup-branch`, `broken-wiki-block`, `scope-overlap`, `domain-output-in-scope`, and — for any scope carrying a `mirror` block — `mirror-clone-orphaned`, `mirror-dir-missing`, `mirror-paths-uncovered`, `mirror-stale-fetch`, `mirror-local-edit`) identify structural issues that require a curator relink, a scope reconfiguration, or a mirror sync to resolve — the audit surfaces them but modifies nothing. `dangling-at-prefix` catches a See-also link still written in the old `@<repo-key>/<path>` cross-repo notation whose target now belongs to a mirrored scope and should point at the mirrored node's local path instead.
+Report-only findings (`dangling-at-prefix`, `missing-summary`, `unknown-axis`, `dup-branch`, `broken-wiki-block`, `scope-overlap`, `scope-self-nullified`, `domain-output-in-scope`, and — for any scope carrying a `mirror` block — `mirror-clone-orphaned`, `mirror-dir-missing`, `mirror-paths-uncovered`, `mirror-stale-fetch`, `mirror-local-edit`) identify structural issues that require a curator relink, a scope reconfiguration, or a mirror sync to resolve — the audit surfaces them but modifies nothing. `dangling-at-prefix` catches a See-also link still written in the old `@<repo-key>/<path>` cross-repo notation whose target now belongs to a mirrored scope and should point at the mirrored node's local path instead. `scope-self-nullified` catches a scope whose `exclude_paths` glob covers everything its `paths` glob admits — every path the scope claims to curate is also excluded, so it indexes nothing and the navigation rule sends every session to an index that stays empty; the finding names the file count that removing the offending exclude glob would wake into one curator job per file, so the fix is made on purpose rather than as a typo cleanup.
 
 The same run also audits the terms dictionary (when any terms scope is configured) and the project-structure map (when it is configured or already built), and — when `wiki.domains` is configured — a repo-level `domains` section covering the generated doc tree; see the dedicated questions below for what each of those sections reports.
 
@@ -197,7 +198,7 @@ Mirror bodies are overwritten on every sync, so a hand-edit to a mirrored node's
 
 ## Is it safe to re-run `/lazy-wiki.install` on a project that is already set up?
 
-Yes. `/lazy-wiki.install` is fully idempotent. It will not overwrite existing scope configurations, agent model overrides, routine entries, or expert definitions that you have customised. It reports each item's outcome (`already-present`, `kept-local`, `unchanged`) so you can see what it skipped. The one interactive prompt you may still see is around a genuine conflict — an existing `lazy.settings.json` value that contradicts a value the install requires; when nothing in your settings contradicts what's shipped, install proceeds without asking.
+Yes. `/lazy-wiki.install` is idempotent, but "idempotent" means different things for different pieces of what it writes. Settings sections (`wiki`, `structure`, `terms`) and agent model overrides are seeded only when absent, reporting `seeded` or `already-present`; expert definitions are the same shape, reporting `seeded` or `kept-local` — none of these four is ever touched once it exists. Routine entries are not absent-only: registration is a reconcile, so a routine already on record still has its plugin-managed keys (things like `git_author`, `command`, and the request/filter shape) corrected on every run, while cadence knobs you've tuned by hand (`interval_sec`, `timeout_sec`, `priority`, `hooks_enabled`) are left alone. Each routine reports `registered` (newly created), `refreshed` (managed keys corrected), or `unchanged`. Routines that only apply when you've configured the matching feature — the domain pair, and a scope's mirror-sync routine — report `skipped-no-domains` or `skipped-no-mirrors` instead when that feature isn't set up. The one interactive prompt you may still see is around a genuine conflict — an existing `lazy.settings.json` value that contradicts a value the install requires; when nothing in your settings contradicts what's shipped, install proceeds without asking.
 
 ---
 
@@ -250,6 +251,8 @@ Any agent that needs to know where something lives (an architect deciding where 
 `/lazy-wiki.configure structure` registers three git-watch routines — one for new files, one for deletions, and one for renames — that dispatch the structure curator to update just the affected entries as commits land, when your project runs the background daemon. The scan routine deliberately does not watch content edits to existing files: the map describes the shape of the tree, not what's inside each file, so rewriting a file in place never removes it from the map — the file's own line just goes stale, which is what the `divergence` finding below exists to catch (dispatching an expert job on every content edit used to queue dozens of no-op jobs per commit wave).
 
 Without the daemon, the map only updates when you run `/lazy-wiki.structure rebuild` yourself; the structure section of `/lazy-wiki.audit` also flags drift (`missing-dir`, `missing-file`, `dead-entry`, `divergence`, `depth`) you can act on by hand or by rebuilding. A `config` finding there that says the map is reachable by the wiki is fixed once for the whole vault via `/lazy-wiki.configure vault` (putting `docs/structure.md` back into `wiki.exclude`), not by editing any one scope; the same section also flags a `config` finding when the three routines are registered but `docs/structure.md` itself is missing — every incremental dispatch would fail until you run `/lazy-wiki.structure rebuild` once, though `/lazy-wiki.configure structure`'s own last step already prevents this from happening on a fresh setup.
+
+One structure finding is a FAIL rather than a drift report: `structure-watch-filter` compares the three routines' `path_filter` and `group_globs` against what the current `structure` section derives, and fails when either has drifted — a routine with no filtering dispatches one expert job per changed path instead of one per directory, which on a large refactor commit turns into hundreds of dispatches costing an evening's budget on jobs that answer "nothing to do". The fix is `/lazy-wiki.configure structure` again, which re-registers the drifted routines with the correct derived values; you never compose `path_filter` or `group_globs` by hand.
 
 ---
 

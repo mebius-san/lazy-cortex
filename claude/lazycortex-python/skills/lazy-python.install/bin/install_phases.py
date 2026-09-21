@@ -739,9 +739,13 @@ class Phase7Expert:
   """
 
   EXPERT_KEY = "python.code-reviewer"
-  EXPERT_ENTRY = {
+  # The reviewer is a mechanical expert: a file list in, findings out, no state carried between
+  # dispatches. An aspect is prompt text prepended to every job, so one here is paid for on every
+  # review and repaid on none. `aspects` stays install-managed, so a consumer carrying the memory
+  # aspect from an earlier release has it removed on the next install run.
+  EXPERT_ENTRY: dict[str, object] = {
     "agent": "lazycortex-python:lazy-python.code-reviewer",
-    "aspects": ["lazycortex-core:lazy-memory.persona-aspect"],
+    "aspects": [],
     "git_author": {
       "name": "Python Code Reviewer",
       "email": "python.code-reviewer@bot.invalid",

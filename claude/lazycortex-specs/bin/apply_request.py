@@ -255,8 +255,7 @@ class _K:
     SETTINGS_SPEC: Settings section holding the vault-wide spec configuration.
     SETTINGS_REVIEW: Settings section holding the review configuration.
     SETTINGS_EXPERTS: Settings section holding the registered experts, keyed by expert name.
-    SETTINGS_RUNTIME: Settings section holding the runtime configuration.
-    ROUTINES: Runtime-section key holding the registered routines, keyed by routine name.
+    ROUTINES: Settings section holding the registered routines, keyed by routine name.
     COORDINATOR_WATCH: Name of the routine watching every product's asset directories.
     GROUP_GLOBS: Routine key holding the directory globs the watch collapses items under.
     GLOB_NESTED: Glob tail matching an asset filed under a group folder.
@@ -399,7 +398,6 @@ class _K:
   SETTINGS_SPEC = "spec"
   SETTINGS_REVIEW = "review"
   SETTINGS_EXPERTS = "experts"
-  SETTINGS_RUNTIME = "runtime"
   ROUTINES = "routines"
   COORDINATOR_WATCH = "lazy-spec.coordinator-watch"
   GROUP_GLOBS = "group_globs"
@@ -2346,8 +2344,9 @@ class _Apply:
     # No glob already on record is ever removed: the routine's list is read, extended with
     # whatever of this product's two globs it lacks, and written back whole.
 
-    runtime = self._settings_section(_K.SETTINGS_RUNTIME)
-    routines = runtime.get(_K.ROUTINES)
+    # the registry is a flat top-level section; nothing reads a nested one, so a lookup there
+    # finds nothing whatever is registered and the product silently never joins the watch
+    routines = self._settings_section(_K.ROUTINES)
     entry = routines.get(_K.COORDINATOR_WATCH) if isinstance(routines, dict) else None
 
     # guard: the watch routine is not registered in this consumer, so there is no set to extend
@@ -2368,7 +2367,7 @@ class _Apply:
     if not missing:
       return
     entry[_K.GROUP_GLOBS] = globs + missing
-    self._write_settings_section(_K.SETTINGS_RUNTIME, runtime)
+    self._write_settings_section(_K.ROUTINES, routines)
 
   def _seed_level_vision(self, key: str, note: Path) -> Path:
     """

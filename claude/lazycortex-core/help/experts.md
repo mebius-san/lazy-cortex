@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Dispatch jobs to named expert workers, keep the main session free, and collect results — including deferred and fail-closed outcomes.
-last_regen: 2026-09-20
+last_regen: 2026-09-21
 diagram_spec:
   anchor: "How the pieces fit together"
   request: "Flow diagram showing a user dispatching a job via dispatch-job, the runtime daemon draining the queue, and the user collecting results via collect-job. Include list-jobs and cancel-job as optional side paths. Use boxes for the four skills and a distinct shape for the daemon process."
@@ -11,6 +11,7 @@ source_skills:
   - lazy-expert.cancel-job
   - lazy-expert.list-jobs
 source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
+surface_sha: 108031c9627f1d30f14a13ee011fd95a636fa6746eb5d5e11090d95c8f7d3d1f
 ---
 # Expert workers — dispatch, keep working, collect later
 

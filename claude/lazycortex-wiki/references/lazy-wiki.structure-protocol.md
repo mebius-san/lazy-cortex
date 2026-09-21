@@ -15,7 +15,7 @@ Canonical contract for jobs dispatched to `wiki.structure-curator` (or any consu
 {
   "kind":    "curate",
   "role":    "structure-curator",
-  "path":    "<repo-relative path that changed>",
+  "paths":   ["<repo-relative path that changed>", "..."],
   "status":  "<A|M|D>",
   "result":  [{"path": "result/structure.json", "description": "curator output: the map operations it applied"}]
 }
@@ -25,19 +25,21 @@ Canonical contract for jobs dispatched to `wiki.structure-curator` (or any consu
 
 ```json
 {
-  "kind":     "rename",
-  "role":     "structure-curator",
-  "old_path": "<repo-relative path before the rename>",
-  "new_path": "<repo-relative path after the rename>",
-  "result":   [{"path": "result/structure.json", "description": "curator output: the map operations it applied"}]
+  "kind":       "rename",
+  "role":       "structure-curator",
+  "old_paths":  ["<repo-relative path before the rename>", "..."],
+  "new_paths":  ["<repo-relative path after the rename>", "..."],
+  "result":     [{"path": "result/structure.json", "description": "curator output: the map operations it applied"}]
 }
 ```
 
 Field notes:
 
 - `kind` — see `## Kind enum` below.
-- `path` / `status` — (`curate` only) the changed path and its git status letter. `A` arrives from a new-files watch, `D` from a deleted-files watch; the watches feed one kind because the curator's response differs only in direction (enter or update versus remove). `M` stays a legal value for a consumer that dispatches curator-shaped jobs from its own changed-files watch, but no shipped routine sends it — the map describes the tree's shape, and a content edit never changes that.
-- `old_path` / `new_path` — (`rename` only) both sides of the rename. Both are required: removing the old entry needs the old name, and the two names travel in one request because a rename split into a delete and an add would touch the map twice for one event.
+- `paths` / `status` — (`curate` only) the changed paths and the git status letter they share. `A` arrives from a new-files watch, `D` from a deleted-files watch; the watches feed one kind because the curator's response differs only in direction (enter or update versus remove). `M` stays a legal value for a consumer that dispatches curator-shaped jobs from its own changed-files watch, but no shipped routine sends it — the map describes the tree's shape, and a content edit never changes that.
+- `old_paths` / `new_paths` — (`rename` only) both sides of every rename in the batch, the same length and aligned index by index. Both lists are required: removing the old entry needs the old name, and the two names travel in one request because a rename split into a delete and an add would touch the map twice for one event.
+- **A request carries a batch, and one path is a batch of one.** A watch groups the paths of one directory into a single job, so the curator is dispatched once per described directory rather than once per file — the map's unit of change is the directory, and forty files moved together are one change to it. The singular keys `path`, `old_path` and `new_path` remain legal for a consumer dispatching its own curator-shaped jobs; a request carrying one is read as a batch of one, and a request carrying both forms uses the list.
+- **Every path in one request shares one status and one commit.** The batch is applied as a whole: the curator judges each member, folds every resulting operation into one `result/structure.json`, and lands one commit for the map. A member that changes nothing contributes no operation; a request whose members all change nothing is a `noop` for the whole batch.
 - There is no `source/` — the curator reads the real file (or notices its absence) in the working tree, because the description is derived from live content and a snapshot of one file cannot show the directory around it.
 - No extra fields.
 
@@ -58,8 +60,8 @@ A `report` dispatch writes no `response.json` at all; its findings travel in the
 
 ## Kind enum
 
-- `curate` — apply one path change to the map: enter or update the path's entry (and its directory's entry when the directory's role shifted) on `A`/`M`, remove it on `D`. Per-path.
-- `rename` — move one path's entry: remove `old_path`'s entry, enter `new_path` at the depth its class prescribes. Per-rename.
+- `curate` — apply a batch of path changes to the map: enter or update each path's entry (and its directory's entry when the directory's role shifted) on `A`/`M`, remove it on `D`. Per-batch, one commit.
+- `rename` — move a batch of entries: remove each old path's entry, enter each new path at the depth its class prescribes. Per-batch, one commit.
 - `report` — read the whole map against the tree and return the divergences. Repo-level, read-only, no job dir.
 
 ## Outcome by kind
@@ -100,7 +102,7 @@ Outcome semantics:
 }
 ```
 
-- `op` — `enter` (a path the map did not carry), `update` (an existing entry's description no longer matched), `remove` (the path left the tree, or its entry moved under a rename — a `rename` job produces one `remove` and one `enter`).
+- `op` — `enter` (a path the map did not carry), `update` (an existing entry's description no longer matched), `remove` (the path left the tree, or its entry moved under a rename — a `rename` job produces one `remove` and one `enter` per renamed path that earned an entry).
 - `path` — repo-relative, as it appears in the map.
 - `description` — the entry's one-line description; absent on `remove`.
 
@@ -133,7 +135,7 @@ Never translated, in any language: frontmatter keys and values, `wiki/<axis>/<va
 - The expert MAY edit the repository's structure map in place, and commit it under the git identity its environment carries.
 - The expert MUST NOT edit any other tracked file — the paths it describes are read-only material, and a missing docstring or README is never "fixed" to improve a description.
 - The expert MUST NOT create the map when it is missing: the full build belongs to the rebuild mode of the structure skill, and an incremental job against a missing map is an `error`, not an invitation.
-- The expert MUST NOT touch anything outside the job dir except the map, and `.memory/<self>/` where the persona aspect grants it.
+- The expert MUST NOT touch anything outside the job dir except the map.
 - On `report` the expert writes nothing at all.
 
 ## Attachments

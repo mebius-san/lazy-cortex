@@ -29,6 +29,7 @@ import runtime_state  # pylint: disable=import-error
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from constants import (  # pylint: disable=import-error
+  BOT_EMAIL_DOMAIN,
   HookName, IncidentActor, IncidentKey, IncidentKind, IncidentPhase, JobCollectKey, JobConfigKey,
   JobFile,
   JobIODir, JobMarker, JobRequestKey, JobResponseKey, JobStatus,
@@ -39,7 +40,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   from typing import NotRequired
 
-  from collections.abc import Iterator
+  from collections.abc import Iterator, Sequence
 
 
 JOBS_BASE = ".experts/.jobs"
@@ -260,6 +261,28 @@ def dispatch_job(
   # resolve expert settings before any filesystem mutation so a misconfigured
   # expert surfaces at dispatch time rather than after partial setup
   expert_entry = _resolve_expert_entry(repo, expert)
+
+  # Domain(runtime.bot-identity):
+  # # A system identity is recognisable by its address
+  # Whether a commit came from a person or from the system is decided across the runtime by
+  # looking at the committer's address, and the system commits under addresses in one reserved
+  # domain that no person can receive mail at. An expert given an address outside that domain
+  # is read as an operator by every one of those checks: the work it commits looks like a human
+  # gesture, which wakes whatever watches for human gestures, which dispatches the expert again.
+  # The address is typed into configuration by hand, so a dispatch refuses it rather than
+  # queueing work that would answer its own answer.
+
+  # guard: an identity outside the reserved domain would read as an operator everywhere
+  # waiver: the expert-entry identity sub-key, owned by the lazy.settings contract, not a reusable domain key
+  entry_author = expert_entry.get(JobConfigKey.GIT_AUTHOR)
+  # waiver: the expert-entry identity sub-key, owned by the lazy.settings contract, not a reusable domain key
+  author_email = str(entry_author.get("email", "")) if isinstance(entry_author, dict) else ""
+  if author_email and not author_email.endswith(BOT_EMAIL_DOMAIN):
+    raise ValueError(
+      f"expert '{expert}': git_author.email {author_email!r} must end with "
+      f"'{BOT_EMAIL_DOMAIN}' — an address outside that domain reads as an operator edit to "
+      f"every bot-vs-operator check, so the expert would wake itself"
+    )
 
   # Contract:
   # The expert's configured `provider` entry MUST be resolved and validated before any job
@@ -1154,6 +1177,68 @@ def register_routine(repo: Path, name: str, cfg: dict | None = None, *,
 PROTECTED_ROUTINES = { "lazy-expert.pump", "lazy-runtime.doctor" }
 
 
+def reconcile_routine(repo: Path, name: str, cfg: dict, managed_fields: Sequence[str]) -> str:
+  """
+  Register a routine, or bring an already registered one back to the shipped shape.
+
+  Args:
+    repo: Absolute path to the repository whose settings file is updated.
+    name: Routine name, as it appears in the `routines` section.
+    cfg: The shipped reference config the plugin would register today.
+    managed_fields: The config keys this plugin owns, corrected on every call.
+
+  Returns:
+    `registered` when the entry was absent, `refreshed` when an owned key or a missing key
+    was written, or `unchanged` when the entry already matched.
+
+  Raises:
+    RoutineConfigError: When the resulting entry fails schema validation.
+  """
+
+  # Contract:
+  # A key outside `managed_fields` that the registered entry already carries is NEVER
+  # rewritten, whatever its value. A key inside `managed_fields` is ALWAYS set to the
+  # shipped value, whatever the registered entry says.
+
+  # Domain(runtime.routines):
+  # # Who owns which value inside a registered routine
+  # A routine's registration lives in the consumer's own configuration file, but not every value
+  # in it is the consumer's. Some describe a choice only the operator can make — how often the
+  # routine runs, which hooks it may wake. Others are the plugin's own knowledge, written there
+  # because that is where the runtime reads them: the shape of the request it sends its expert,
+  # the mask of paths it watches, the predicates it filters by. When a plugin changes its own
+  # knowledge, a registration made before that change keeps describing the old shape forever,
+  # because registration only ever skipped an entry that already existed. Declaring which keys
+  # are the plugin's is what lets an update correct exactly those and leave the operator's
+  # answers alone; anything the operator could reasonably have decided stays outside the list.
+
+  # waiver: deferred import — avoid module-load cycle with lazy_settings
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  from lazy_settings import load_tracked_section  # pylint: disable=import-error
+  existing = load_tracked_section(Path(repo) / SettingsFile.REL, SettingsKey.ROUTINES).get(name)
+
+  # guard: nothing on record — the shipped entry is written whole
+  if not isinstance(existing, dict):
+    register_routine(repo, name, dict(cfg))
+    # waiver: this function's own documented return vocabulary, not a reusable cross-module key
+    return "registered"
+
+  # an owned key is corrected to the shipped value; every other shipped key is only filled in
+  # when the entry never carried it, so an operator's own answer survives the update
+  merged = dict(existing)
+  for key, value in cfg.items():
+    if key in managed_fields or key not in merged:
+      merged[key] = value
+
+  # guard: the registration already matches — no write, no churn in the settings file
+  if merged == existing:
+    # waiver: this function's own documented return vocabulary, not a reusable cross-module key
+    return "unchanged"
+  register_routine(repo, name, merged)
+  # waiver: this function's own documented return vocabulary, not a reusable cross-module key
+  return "refreshed"
+
+
 def unregister_routine(repo: Path, name: str) -> None:
   """
   Remove a routine entry from the `routines` section.
@@ -1262,39 +1347,18 @@ DEFAULT_AUTOCHECKUP_CFG: dict = {
 }
 
 
-def _backfill_defaults(repo: Path, entry: _RoutineDefaults, existing: dict) -> None:
-  """
-  Add default keys a registered built-in routine predates, leaving every set value intact.
-
-  A repository installed before a default gained a key keeps the old shape forever
-  otherwise: the routine exists, so registration skips it, and nothing else ever revisits
-  the entry.
-
-  Args:
-    repo: Absolute path to the repository whose settings file is updated.
-    entry: The built-in routine's default config block.
-    existing: The routine config as it stands in the tracked settings layer.
-
-  Raises:
-    RoutineConfigError: When the merged entry fails schema validation — a pre-existing
-      malformed built-in entry surfaces here instead of at the routine's next tick.
-  """
-  # Contract: a key the entry already carries is never rewritten, whatever its value —
-  # `hooks_enabled: []` is an operator's answer, not a gap to fill.
-
-  # only keys absent from the registered entry are candidates
-  # waiver: TypedDict iteration yields its own string-literal keys; `name` is the registry key,
-  # not part of the config body
-  missing = { k: v for k, v in entry.items() if k != "name" and k not in existing }
-
-  # guard: the registered entry already carries every default key
-  if not missing:
-    return
-
-  # the merged entry is re-validated on write, so a default that no longer fits the schema
-  # surfaces here rather than at the routine's next tick
-  # waiver: TypedDict access requires string-literal keys; constants break mypy literal-required
-  register_routine(repo, str(entry["name"]), { **existing, **missing })
+# Which keys of a built-in routine this plugin corrects on every bootstrap, and which it only
+# ever fills in when absent (`reconcile_routine`'s ownership split).
+#
+# The three interval routines below declare nothing owned. Every key their defaults carry —
+# `interval_sec`, `timeout_sec`, `priority`, `hooks_enabled`, `ignore_halt` — is a cadence or a
+# posture the operator is expected to retune, and `command` is one the operator may repoint at a
+# wrapper of their own; correcting any of them would overwrite an answer rather than a stale
+# shape. The autocheckup owns only `type`: the typed dispatch shape is what the daemon reads to
+# decide how to run the entry at all, and an entry that predates the typed shape is unrunnable
+# without it. Its `cron` is the operator's cadence, and its `expert` / `request` stay theirs too.
+_BUILTIN_MANAGED: tuple[str, ...] = ()
+_AUTOCHECKUP_MANAGED = ( "type", )
 
 
 def bootstrap_default_routines(repo: Path) -> None:
@@ -1308,16 +1372,17 @@ def bootstrap_default_routines(repo: Path) -> None:
 
   Guarantees:
     - Idempotent: never overwrites a value an existing routine already carries, including a
-      value the operator explicitly set to empty or falsy.
+      value the operator explicitly set to empty or falsy, unless the key is one the built-in
+      declares as its own (`_BUILTIN_MANAGED` / `_AUTOCHECKUP_MANAGED`).
 
   Args:
     repo: Absolute path to the repository whose settings file is updated.
   """
 
   # Contract:
-  # A key already present on a registered built-in routine MUST NEVER be overwritten by this
-  # call, whatever its value — an explicit empty or falsy value is the operator's decision,
-  # not a gap to backfill.
+  # A key already present on a registered built-in routine and NOT named in that routine's
+  # managed-field list MUST NEVER be overwritten by this call, whatever its value — an explicit
+  # empty or falsy value is the operator's decision, not a gap to backfill.
 
   # Domain(runtime.daemon-loop):
   # # Built-in routine default backfill guarantee
@@ -1326,7 +1391,9 @@ def bootstrap_default_routines(repo: Path) -> None:
   # must still receive it — otherwise that repository is stuck on the shape it had at first
   # install forever. The backfill only ever adds a field the registered routine does not carry
   # at all; a field the operator already set, even to an empty or falsy value, is never touched,
-  # because an explicit empty answer is a decision, not a gap.
+  # because an explicit empty answer is a decision, not a gap. The one exception is a field the
+  # built-in declares as its own knowledge rather than the operator's, which is corrected to the
+  # shipped value on every call.
 
   # waiver: deferred import — avoid module-load cycle with lazy_settings
   # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -1334,56 +1401,28 @@ def bootstrap_default_routines(repo: Path) -> None:
   settings = Path(repo) / SettingsFile.REL
 
   # two views, two questions: the merged one answers "is this routine configured at all",
-  # the tracked one is the only safe basis for a write-back — merging the overlay in and
-  # saving would copy the operator's private values into the shared file
+  # the tracked one is the only safe basis for a write-back — reconciling an overlay-only
+  # entry would copy the operator's private values into the shared file
   merged = load_section(settings, SettingsKey.ROUTINES)
   tracked = load_tracked_section(settings, SettingsKey.ROUTINES)
   for entry in (DEFAULT_EXPERT_PUMP, DEFAULT_DOCTOR_TICK, DEFAULT_INDEX_GUARD):
     # waiver: TypedDict access requires string-literal keys; constants break mypy literal-required
-    name = entry["name"]
+    name = str(entry["name"])
 
     # guard: configured only in the local overlay — writing the tracked layer would leave the
     # repository carrying the routine twice, so the operator's own copy is left to them
     if name in merged and name not in tracked:
       continue
 
-    # guard: already tracked — fill only what the defaults gained since, never a set value
-    if name in tracked:
-      _backfill_defaults(repo, entry, tracked[name])
-      continue
-    register_routine(
-      # waiver: TypedDict access requires string-literal keys; constants break mypy literal-required
-      repo, entry["name"],
-      # waiver: TypedDict access requires string-literal keys; constants break mypy literal-required
-      command = entry["command"],
-      # waiver: TypedDict access requires string-literal keys; constants break mypy literal-required
-      interval_sec = entry["interval_sec"],
-      # waiver: TypedDict access requires string-literal keys; constants break mypy literal-required
-      timeout_sec = entry["timeout_sec"],
-      # waiver: TypedDict access requires string-literal keys; constants break mypy literal-required
-      priority = entry.get("priority"),
-      # waiver: TypedDict access requires string-literal keys; constants break mypy literal-required
-      hooks_enabled = entry.get("hooks_enabled"),
-      # waiver: TypedDict access requires string-literal keys; constants break mypy literal-required
-      ignore_halt = entry.get("ignore_halt"),
-    )
+    # the registry key lives outside the config body it keys, so it never reaches the entry
+    # waiver: TypedDict iteration yields its own string-literal keys
+    cfg = { key: value for key, value in entry.items() if key != "name" }
+    reconcile_routine(repo, name, cfg, _BUILTIN_MANAGED)
 
-  # the weekly autocheckup rides the same absent-only / backfill discipline as the loop above,
-  # in the typed (`schedule` + `expert`) shape the legacy loop cannot carry
+  # the weekly autocheckup rides the same reconcile discipline as the loop above, in the typed
+  # (`schedule` + `expert`) shape the legacy `_RoutineDefaults` block cannot carry
   # guard: configured only in the local overlay — writing the tracked layer would leave the
   # repository carrying the routine twice, so the operator's own copy is left to them
   if DEFAULT_AUTOCHECKUP_NAME in merged and DEFAULT_AUTOCHECKUP_NAME not in tracked:
     return
-
-  # guard: already tracked — fill only the default keys the entry predates, never a set value
-  if DEFAULT_AUTOCHECKUP_NAME in tracked:
-    missing = {
-        key: value for key, value in DEFAULT_AUTOCHECKUP_CFG.items()
-        if key not in tracked[DEFAULT_AUTOCHECKUP_NAME]
-    }
-    if missing:
-      register_routine(repo, DEFAULT_AUTOCHECKUP_NAME, { **tracked[DEFAULT_AUTOCHECKUP_NAME], **missing })
-    return
-
-  # fresh registration — the defaults land whole
-  register_routine(repo, DEFAULT_AUTOCHECKUP_NAME, dict(DEFAULT_AUTOCHECKUP_CFG))
+  reconcile_routine(repo, DEFAULT_AUTOCHECKUP_NAME, dict(DEFAULT_AUTOCHECKUP_CFG), _AUTOCHECKUP_MANAGED)
