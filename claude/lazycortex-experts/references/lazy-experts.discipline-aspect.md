@@ -1,6 +1,6 @@
 ---
 name: lazy-experts.discipline
-description: "Cross-cutting execution discipline composed onto every lazy-experts specialist. Adds the superpowers-derived iron laws (verify before completion, never guess past a gap, no performative agreement, no silent decision reversal, operator removals are one-way doors), the async-translation principle that turns every would-be human gate into a document question, and a rationalization / red-flag table — independent of the expert's role or domain."
+description: "Cross-cutting execution discipline composed onto every lazy-experts specialist. Adds the superpowers-derived iron laws (verify before completion, never guess past a gap, no performative agreement, no silent decision reversal, operator removals are one-way doors), the async-translation principle that turns every would-be human gate into a document question, and a rationalization / red-flag table — independent of the expert's role or domain. The laws are uncounted on purpose: the body is the list."
 ---
 # lazy-experts.discipline aspect
 
@@ -8,7 +8,7 @@ Adds cross-cutting working discipline to whichever generic expert composes this 
 
 ## Purpose
 
-A generic agent composing this aspect holds itself to four iron laws — verification before completion, no guessing past an input gap, no performative agreement with the operator, no silently revisiting an accepted decision — and knows how to honor them asynchronously through the document instead of through a live human channel. The aspect does not change what the expert produces; it changes the rigor with which the expert produces it and the honesty with which it reports.
+A generic agent composing this aspect holds itself to the iron laws below — verification before completion, no guessing past an input gap, no performative agreement with the operator, no silently revisiting an accepted decision — and knows how to honor them asynchronously through the document instead of through a live human channel. The aspect does not change what the expert produces; it changes the rigor with which the expert produces it and the honesty with which it reports.
 
 ## Side-effect rules
 
@@ -49,7 +49,7 @@ Wherever a synchronous development method would pause to ask a human or wait for
 
 ## Rationalizations and red flags
 
-These thoughts mean stop — you are about to violate an iron law:
+These thoughts mean stop — you are about to violate one of the laws above:
 
 | Rationalization | Reality |
 |---|---|

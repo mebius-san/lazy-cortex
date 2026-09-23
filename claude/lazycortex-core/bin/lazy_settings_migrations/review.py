@@ -88,8 +88,13 @@ expert-signals and doc-height protocols and no validation block (a vision is
 closed by its writer and the operator). A vision class whose source class is
 absent is not seeded — there is nobody to derive the writer from, and a
 re-run of `/lazy-spec.install` covers such vaults. Guarded add-if-absent
-throughout; nothing is ever removed or rewritten. Add `11: lambda data:
-<transformed>` here when a v11 → v12 migration is needed.
+throughout; nothing is ever removed or rewritten.
+
+v11 → v12 (`MIGRATIONS[11]`) adds the document-height protocol to every
+`system-tech` class (product-qualified variants included): the tech document
+joined the protocol's scope so a product-level tech never repeats the
+content-root one. Same guarded add-if-absent union as v9 → v10. Add `12:
+lambda data: <transformed>` here when a v12 → v13 migration is needed.
 """
 from __future__ import annotations
 
@@ -115,6 +120,9 @@ _SPEC_PROTOCOL_NEW_PREFIX = "lazycortex-specs:lazy-spec."
 # it before this step (waiver: one-off literal for this single union step)
 _DOC_HEIGHT_PROTOCOL = "lazycortex-specs:lazy-spec.doc-height-protocol"
 _HEIGHT_CLASS_NAMES = { ReviewClassName.DESIGN, "system-design" }
+# the v11 -> v12 union: the tech document joined the height protocol's scope (waiver: one-off
+# literal — "system-tech" carries no ReviewClassName constant either)
+_TECH_HEIGHT_CLASS_NAMES = { "system-tech" }
 
 # the v10 -> v11 vision seeding: class tokens, path globs, and the content-root use-cases path
 # (waiver: one-off literals for this single seeding step; "vision" / "system-vision" carry no
@@ -266,6 +274,8 @@ def _migrate_plan_classes(data: dict) -> dict:
   Returns:
     The section content with `classes` migrated; all other keys preserved.
   """
+  # waiver: single local mirrors the sibling _migrate_* functions' shape in this file
+  # (_migrate_planner_and_reports, _migrate_context_from_frontmatter, which reassign it more than once)
   classes = _add_test_plan_class(_rename_plan_to_dev_plan(data.get(ReviewClassKey.CLASSES, [])))
   return { **data, ReviewClassKey.CLASSES: classes }
 
@@ -338,6 +348,8 @@ def _migrate_test_plan_main_to_tester(data: dict) -> dict:
   Returns:
     The section content with `classes` migrated; all other keys preserved.
   """
+  # waiver: single local mirrors the sibling _migrate_* functions' shape in this file
+  # (_migrate_planner_and_reports, _migrate_context_from_frontmatter, which reassign it more than once)
   classes = _rewrite_test_plan_main(data.get(ReviewClassKey.CLASSES, []))
   return { **data, ReviewClassKey.CLASSES: classes }
 
@@ -525,7 +537,7 @@ def _migrate_routing_to_coordinator(data: dict) -> dict:
     The section content with `classes` migrated; all other keys preserved.
   """
   # waiver: single local mirrors the sibling _migrate_* functions' shape in this file
-  # (_migrate_test_plan_main_to_tester, _migrate_planner_and_reports, _migrate_context_from_frontmatter)
+  # (_migrate_planner_and_reports, _migrate_context_from_frontmatter, which reassign it more than once)
   classes = _rewrite_terminal_routing(data.get(ReviewClassKey.CLASSES, []))
   return { **data, ReviewClassKey.CLASSES: classes }
 
@@ -720,6 +732,32 @@ def _migrate_code_classes(data: dict) -> dict:
   return { **data, ReviewClassKey.CLASSES: classes }
 
 
+def _union_doc_height_protocol(data: dict, class_names: set[str]) -> dict:
+  """
+  Append the document-height protocol to every class whose bare token is in `class_names`.
+
+  Args:
+    data: The `review` section content.
+    class_names: The bare class tokens (product qualifier stripped) that receive the protocol.
+
+  Returns:
+    The section content with `lazycortex-specs:lazy-spec.doc-height-protocol` appended to the
+    `protocols` list of every matching class that does not already carry it; every other key
+    and class is preserved.
+  """
+  # an entry already carrying the reference (operator customization or a previous run) is
+  # left untouched; nothing is ever removed
+  classes = [
+    { **c, _PROTOCOLS_KEY: [*c.get(_PROTOCOLS_KEY, []), _DOC_HEIGHT_PROTOCOL] }
+    if isinstance(c, dict)
+    and str(c.get(ReviewClassKey.CLASS, "")).split(_CLASS_PRODUCT_SEP, maxsplit = 1)[0] in class_names
+    and _DOC_HEIGHT_PROTOCOL not in c.get(_PROTOCOLS_KEY, [])
+    else c
+    for c in data.get(ReviewClassKey.CLASSES, [])
+  ]
+  return { **data, ReviewClassKey.CLASSES: classes }
+
+
 def _migrate_doc_height_protocol(data: dict) -> dict:
   """
   Apply the v9 → v10 addition of the document-height protocol to design-family classes.
@@ -728,21 +766,24 @@ def _migrate_doc_height_protocol(data: dict) -> dict:
     data: The `review` section content.
 
   Returns:
-    The section content with `lazycortex-specs:lazy-spec.doc-height-protocol` appended to the
-    `protocols` list of every `design` / `system-design` class (product-qualified variants
-    included) that does not already carry it; every other key and class is preserved.
+    The section content with the height protocol on every `design` / `system-design` class
+    (product-qualified variants included); see `_union_doc_height_protocol`.
   """
-  # an entry already carrying the reference (operator customization or a previous run) is
-  # left untouched; nothing is ever removed
-  classes = [
-    { **c, _PROTOCOLS_KEY: [*c.get(_PROTOCOLS_KEY, []), _DOC_HEIGHT_PROTOCOL] }
-    if isinstance(c, dict)
-    and str(c.get(ReviewClassKey.CLASS, "")).split(_CLASS_PRODUCT_SEP, maxsplit = 1)[0] in _HEIGHT_CLASS_NAMES
-    and _DOC_HEIGHT_PROTOCOL not in c.get(_PROTOCOLS_KEY, [])
-    else c
-    for c in data.get(ReviewClassKey.CLASSES, [])
-  ]
-  return { **data, ReviewClassKey.CLASSES: classes }
+  return _union_doc_height_protocol(data, _HEIGHT_CLASS_NAMES)
+
+
+def _migrate_tech_height_protocol(data: dict) -> dict:
+  """
+  Apply the v11 → v12 addition of the document-height protocol to the `system-tech` class.
+
+  Args:
+    data: The `review` section content.
+
+  Returns:
+    The section content with the height protocol on every `system-tech` class
+    (product-qualified variants included); see `_union_doc_height_protocol`.
+  """
+  return _union_doc_height_protocol(data, _TECH_HEIGHT_CLASS_NAMES)
 
 
 def _migrate_vision_and_use_cases(data: dict) -> dict:
@@ -778,6 +819,8 @@ def _migrate_vision_and_use_cases(data: dict) -> dict:
     # guard: the class already exists, or the source class to copy the main writers from is gone
     if token in present or seed[_SEED_SOURCE_KEY] not in present:
       continue
+    # the class whose main writers the new vision class copies; named because the deep copy below
+    # reads two keys off it and an inlined generator would not survive a reader
     source = next(c for c in classes
                   if isinstance(c, dict) and c.get(ReviewClassKey.CLASS) == seed[_SEED_SOURCE_KEY])
     classes.append({
@@ -801,4 +844,5 @@ MIGRATIONS = {
   8: _migrate_code_classes,
   9: _migrate_doc_height_protocol,
   10: _migrate_vision_and_use_cases,
+  11: _migrate_tech_height_protocol,
 }

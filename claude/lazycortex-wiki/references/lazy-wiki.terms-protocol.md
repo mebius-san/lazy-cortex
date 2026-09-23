@@ -136,6 +136,6 @@ deterministic apply call that writes it; there is nothing to place beside anythi
 
 | Category | Used when |
 |---|---|
-| `logical` | Input is malformed or unusable: the document at `file` is missing or empty, `file` is absent from the request, the document's path matches no scope, or the dictionary path in the scope's configuration names a file that does not exist. |
+| `logical` | Input is malformed or unusable: the document at a path in `files` is missing or empty, `files` is absent from the request — the legacy singular `file` remains legal and fails the same way when nothing names a document — the document's path matches no scope, or the dictionary path in the scope's configuration names a file that does not exist. |
 | `transient` | Claude subprocess crashed or timed out — the runner should retry. |
 | `technical` | The dictionary is in a state the curator may not repair: the heading it would anchor an insertion to appears more than once. Log and skip; repairing duplicate headings belongs to the report side. |

@@ -1,11 +1,21 @@
 {
   "name": "lazycortex-obsidian",
-  "version": "5.4.0",
+  "version": "6.0.0",
   "description": "Obsidian vault bootstrap and configuration management for Claude Code",
   "author": {
     "name": "Mebius-san"
   },
   "dependencies": [
     "lazycortex-core"
+  ],
+  "provides_fix_flows": [
+    {
+      "skill": "lazycortex-obsidian:lazy-obsidian.capture",
+      "label": "Obsidian: record the live `.obsidian/` config into the tracked manifest (the vault is right)"
+    },
+    {
+      "skill": "lazycortex-obsidian:lazy-obsidian.deploy",
+      "label": "Obsidian: rebuild `.obsidian/` from the tracked manifest (the manifest is right)"
+    }
   ]
 }

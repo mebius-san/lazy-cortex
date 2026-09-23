@@ -34,7 +34,9 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
+from importlib import import_module
 from pathlib import Path
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -54,7 +56,7 @@ CURRENT_VERSIONS = {
   "git": 1,
   "products": 2,
   "repos": 1,
-  "review": 11,
+  "review": 12,
   "spec": 2,
   "structure": 1,
   "terms": 1,
@@ -114,10 +116,7 @@ def _migrations(section_key: str) -> dict[int, Callable[[dict], dict]]:
   """
   mod_name = section_key.replace(".", "_").replace("-", "_")
   try:
-    # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-    from importlib import import_module
-    ladder = import_module(f"lazy_settings_migrations.{mod_name}")
-    return ladder.MIGRATIONS
+    return import_module(f"lazy_settings_migrations.{mod_name}").MIGRATIONS
   except ModuleNotFoundError:
     return {}
 
@@ -528,9 +527,6 @@ def _cli() -> None:
   Reads the optional `migrate [path]` arguments, runs every section's
   migration ladder, and prints a one-line summary of upgraded sections.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import sys
-
   # guard: only the "migrate" subcommand is supported
   # waiver: argparse CLI signature, not a domain key
   if len(sys.argv) < 2 or sys.argv[1] != "migrate":
@@ -541,8 +537,7 @@ def _cli() -> None:
   # run every ladder against the requested file, defaulting to the repo-local settings path
   target = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(".claude/lazy.settings.json")
   upgraded = migrate_all(target)
-  total = len(CURRENT_VERSIONS)
-  up_to_date = total - len(upgraded)
+  up_to_date = len(CURRENT_VERSIONS) - len(upgraded)
 
   # one-line summary for the operator, with a per-section breakdown only when something moved
   if not upgraded:

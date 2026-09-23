@@ -65,7 +65,7 @@ then run `/plugin install lazycortex/lazycortex-obsidian`.
 
 ## Step 2: Determine paths
 
-Enumerate every rule file shipped by the plugin via `Bash(ls <installPath>/rules/*.md)` — never hardcode filenames. `<installPath>` is the `installPath` field from `installed_plugins.json` for `lazycortex-obsidian@lazycortex`.
+Enumerate every rule file shipped by the plugin via `Bash(ls <installPath>/rules/*.md)` — never hardcode filenames. `<installPath>` is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-obsidian` prints: the authoring repo's own `claude/lazycortex-obsidian/` when this checkout ships the plugin, else the daemon's exported plugin dir, else the newest cached install. Never read `installed_plugins.json` for it by hand — in a repo that authors the plugin that hands back the previous publish instead of the sources at hand, and every role, rule, template, or tier row added since is silently missed.
 
 For each source file `<installPath>/rules/<name>.md`, the rule destination by scope is:
 

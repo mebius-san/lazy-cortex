@@ -1,6 +1,6 @@
 ---
 name: lazy-wiki.audit
-description: "Run when the operator asks to check the wiki's health, or when the wiki misbehaves — `/lazy-wiki.query` misses material it should cover or returns entries that no longer exist, See-also links point at moved or deleted nodes, the topic index disagrees with the files on disk, or documents and the terms dictionary have drifted onto different words for one concept. Read-only audit of one scope or all: it reports findings as `FAIL` / `WARN` / `INFO` with a repair route per finding and writes nothing itself, so the repairs are the operator's to run."
+description: "Run when the operator asks to check the wiki's health, or when the wiki misbehaves — `/lazy-wiki.query` misses material it should cover or returns entries that no longer exist, See-also links point at moved or deleted nodes, the topic index disagrees with the files on disk, or documents and the terms dictionary have drifted onto different words for one concept. Read-only audit of one scope or all: it reports findings as `PASS` / `INFO` / `WARN` / `FAIL` with a repair route per finding and writes nothing itself, so the repairs are the operator's to run."
 allowed-tools: Read, Write, Grep, Glob, Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" doctor *), Bash(date -u *), Bash(git rev-parse *), Bash(mkdir -p *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
 ---
 # lazy-wiki.audit
@@ -10,6 +10,8 @@ Run the integrity audit over one wiki scope (or every configured scope) and pres
 Invocation: `/lazy-wiki.audit [<scope-id>]`
 
 Prerequisites: `/lazy-wiki.install` has run and at least one scope is configured in `.claude/lazy.settings.json[wiki.scopes]`.
+
+This skill follows the shared audit contract at `claude/lazycortex-core/references/lazy-core.audit-contract.md`: the audit only reads, the severity vocabulary is `PASS` / `INFO` / `WARN` / `FAIL` and nothing else, every finding carries its own repair route in the same line, and no finding estimates what running that route would change.
 
 Fix/waive orchestration over these findings belongs to `/lazy-core.doctor`, which delegates to this audit and drives whatever loop the operator wants; this skill only measures.
 
@@ -32,7 +34,7 @@ Run the read-only audit — never pass `--apply`, in this phase or any other. Th
 
 `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" doctor <scope-id>)` when the operator named a scope, or `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" doctor)` to audit every configured scope.
 
-The command prints findings grouped per scope and severity (`FAIL` / `WARN` / `INFO`), tags each fixable finding `(fixable)`, and ends with a grand-total count. It exits 0 when the audit ran; a non-zero exit means the named scope id is unknown or no scopes are configured — surface that message to the operator and stop (do not proceed to later phases).
+The command prints findings grouped per scope and severity (`FAIL` / `WARN` / `INFO`; a check that ran with nothing wrong is a `PASS`), tags each fixable finding `(fixable)`, and ends with a grand-total count. It exits 0 when the audit ran; a non-zero exit means the named scope id is unknown or no scopes are configured — surface that message to the operator and stop (do not proceed to later phases).
 
 Outcome: `audited`.
 
@@ -61,7 +63,7 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> structure-watch-config --check -
 
 This one is a FAIL and not a WARN because the cost is unbounded. A routine with no filtering dispatches one expert job per changed path, each job loading the settings and the map before it can answer that there was nothing to do; a single large refactor commit turns into hundreds of dispatches, which is how an account's whole budget goes in one evening. Every other finding in this section describes a map that is wrong. This one describes a map that is expensive to keep right, which is worse.
 
-**A scope that excludes everything it covers — WARN.** For each entry of `wiki.scopes`, test whether every path its `paths` globs admit is also matched by one of its `exclude_paths` globs. A scope in that state is switched off: it indexes nothing, its declared `topics_index` is never built, and every session the navigation rule sends to that index finds nothing there. Report it as `WARN scope-self-nullified: <id> — every path <paths> admits is excluded by <glob>`. Say in the finding that removing the offending glob wakes one curator job per file the scope then covers, and give that file count, so the repair is made deliberately rather than as a typo cleanup.
+**A scope that excludes everything it covers — WARN.** For each entry of `wiki.scopes`, test whether every path its `paths` globs admit is also matched by one of its `exclude_paths` globs. A scope in that state is switched off: it indexes nothing, its declared `topics_index` is never built, and every session the navigation rule sends to that index finds nothing there. Report it as `WARN scope-self-nullified: <id> — every path <paths> admits is excluded by <glob>`. Say in the finding that removing the offending glob wakes a curator job for every file the scope then covers, so the repair is made deliberately rather than as a typo cleanup. Give no count: a finding states what is, not what a repair nobody has run would cost.
 
 The rest of the section judges configuration and content, and writes nothing. From the merged settings take the `structure` section; `depth_profiles` empty AND `docs/structure.md` absent → state `no-structure` and move on. Otherwise, two halves, nothing written:
 
@@ -72,7 +74,7 @@ Outcome: `terms-audited` / `no-terms-scopes` plus `structure-audited` / `no-stru
 
 ## Phase 3 — Present findings
 
-Summarise the captured output for the operator: the per-scope counts by severity, and a short list of the concrete findings (check name, node path, message). Every finding carries a repair route the operator runs; this skill runs none of them.
+Summarise the captured output for the operator: the per-scope counts by severity — `PASS`, `INFO`, `WARN`, `FAIL`, and no other word — and a short list of the concrete findings (check name, node path, message). Every finding is one line carrying its own repair route, and a route shared by a whole class of findings is repeated on each of that class's lines rather than collected into a section of its own; the report ends with the findings and has no recommendations block. This skill runs none of the routes it names.
 
 Call out which findings the CLI repairs for you (`orphan-topic`, `index-desync`, `index-stale`, `see-also-path-base`, `broken-see-also`, `stale-gloss` — route: `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" doctor <scope-id> --apply)`, which rebuilds the index, rewrites the path-base See-also targets, drops the broken lines and refreshes the glosses, leaving the rewritten files uncommitted in the worktree; the scheduled `lazy-wiki.doctor-apply` routine runs the same command with `--commit`) versus which need a hand repair (`dangling-at-prefix`, `missing-summary`, `unknown-axis`, `dup-branch`, `broken-wiki-block`, `scope-overlap`, the mirror checks `mirror-clone-orphaned`, `mirror-dir-missing`, `mirror-paths-uncovered`, `mirror-stale-fetch`, `mirror-local-edit`, and every check in the `domains` section: `domain-dictionary-missing`, `domain-doc-unknown`, `domain-gloss-missing`, `domain-group-unknown`, `domain-hash-stale`, `domain-output-in-scope`, `domain-routine-mismatch`, `domain-tag-axis-unknown`). For a `dangling-at-prefix` finding, name the repair route: rewrite the link to the mirrored node's local path (when a mirror scope covers the target) or drop the line. For the mirror findings: register or remove the scope's `mirror` block via `/lazy-wiki.configure mirror` (`mirror-clone-orphaned`), run `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" mirror-sync <scope-id>)` by hand or wait for the `lazy-wiki.mirror-sync` routine (`mirror-dir-missing`, `mirror-stale-fetch`, `mirror-local-edit` — local edits are overwritten by that sync, so salvage them first), add `<mirror_path>/**` to the scope's `paths` (`mirror-paths-uncovered`). For the domain findings, name the repair route — two of them carry a second route the operator is more likely to want:
 

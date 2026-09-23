@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-observe install, uninstall, and audit — symptoms, likely causes, and fixes.
-last_regen: 2026-09-11
+last_regen: 2026-09-22
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree rooted at the operator's situation: top-level branch on whether the shipper is installed at all (answer file present?); if not-installed, branch further on whether the Step 0 pre-flight found an already-covered host (routes to --integrate-only or --force-standalone guidance) versus a genuinely clear host (routes to plain install); if installed, branch on whether the host runs in integrate mode (scrape-targets file present and current vs missing/stale) or standalone mode — standalone then branches on whether the service is active, whether local /metrics is reachable, whether agent self-metrics show successful remote_write (token vs observer-reachability vs WAL-recovery sub-branches), and whether WAL is oversized. Separate top-level branch for uninstall failures (launchctl error 5 vs systemctl unit-not-found). Each leaf cites the troubleshooting entry that resolves it."
@@ -10,7 +10,8 @@ source_skills:
   - lazy-observe.install
   - lazy-observe.uninstall
   - lazy-observe.audit
-source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
+source_sha: 1d3be1fe4f60ed602d7da87f6ed5cb2eccec283f
+surface_sha: 53f81f67e5321bb09d48a037623b5ef6718de0a0f87be23dd14de11f0ec794ce
 ---
 # Troubleshooting
 

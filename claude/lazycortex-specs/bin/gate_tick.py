@@ -108,6 +108,16 @@ _JOB_MARKER_DONE = "DONE"
 JOB_MARKER_DEAD = "DEAD"
 _JOB_MARKER_CANCELLED = "CANCELLED"
 
+# Mirrored job-bundle lifecycle markers from the same runtime: `READY` is touched last by a
+# dispatch (the bundle is complete and queued), `PID` is written by the pump the moment it
+# claims the job and copies its `source/` / `context/` from the tree as it stands then.
+_JOB_MARKER_READY = "READY"
+_JOB_MARKER_PID = "PID"
+
+# Mirrored claim-time artifact from the same runtime: the commit the work tree stood at when the
+# pump claimed the job, i.e. the tree its `source/` / `context/` were copied from.
+_JOB_ARTIFACT_CLAIM_HEAD = "claim_head"
+
 # Mirrored job-bundle directory layout: `<repo>/.experts/.jobs/<expert>/<job_id>/`.
 _JOBS_BASE = ".experts/.jobs"
 
@@ -217,6 +227,43 @@ def find_active_job_marker(repo_root: Path, expert: str, job_id: str) -> str | N
     if (job_dir / marker).is_file():
       return marker
   return None
+
+
+def is_job_queued(repo_root: Path, expert: str, job_id: str) -> bool:
+  """
+  Check whether an active job is still waiting in the queue — dispatched, never claimed.
+
+  Args:
+    repo_root: The repository root holding `.experts/.jobs/`.
+    expert: The dispatched expert name from the job marker.
+    job_id: The dispatched job id from the job marker.
+
+  Returns:
+    True when the bundle carries `READY` and no `PID`; False for a claimed job, and for a
+    bundle that is missing altogether, whose state cannot be told and so reads as running.
+  """
+  job_dir = repo_root / _JOBS_BASE / expert / job_id
+  return (job_dir / _JOB_MARKER_READY).is_file() and not (job_dir / _JOB_MARKER_PID).exists()
+
+
+def read_job_claim_head(repo_root: Path, expert: str, job_id: str) -> str | None:
+  """
+  Read the commit a claimed job's inputs were copied from.
+
+  Args:
+    repo_root: The repository root holding `.experts/.jobs/`.
+    expert: The dispatched expert name from the job marker.
+    job_id: The dispatched job id from the job marker.
+
+  Returns:
+    The recorded commit hash, or None when the bundle carries no claim-head marker — a job
+    not yet claimed, a bundle that is gone, or a pump older than the marker.
+  """
+  try:
+    value = (repo_root / _JOBS_BASE / expert / job_id / _JOB_ARTIFACT_CLAIM_HEAD).read_text().strip()
+  except OSError:
+    return None
+  return value or None
 
 
 def _land_job_result(repo_root: Path, asset_dir: Path, expert: str, job_id: str) -> list[str]:

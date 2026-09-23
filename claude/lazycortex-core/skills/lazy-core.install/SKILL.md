@@ -134,7 +134,7 @@ then run `/plugin install lazycortex/lazycortex-core`.
 
 ## Step 2: Determine paths
 
-Enumerate every rule file shipped by the plugin via `Bash(ls <installPath>/rules/*.md)` — never hardcode filenames. `<installPath>` is the `installPath` field from `installed_plugins.json`.
+Enumerate every rule file shipped by the plugin via `Bash(ls <installPath>/rules/*.md)` — never hardcode filenames. `<installPath>` is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-core` prints: the authoring repo's own `claude/lazycortex-core/` when this checkout ships the plugin, else the daemon's exported plugin dir, else the newest cached install. Never read `installed_plugins.json` for it by hand — in a repo that authors the plugin that hands back the previous publish instead of the sources at hand, and every role, rule, template, or tier row added since is silently missed.
 
 For each source file `<installPath>/rules/<name>.md`, the target is:
 
@@ -185,7 +185,7 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold sync-rule --src <instal
 
 Authoring-template copy **and** scaffold-registry population are both done by `lazy-core.scaffold-sync`, invoked for `lazycortex-core` itself — core registers through the same path as any other plugin (dogfood).
 
-Resolve this plugin's own `<installPath>` (the `installPath` field of `lazycortex-core@lazycortex` in `installed_plugins.json`) and the detected `<scope>` (`project` / `user`), then dispatch:
+Resolve this plugin's own `<installPath>` (via `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-core`, the same resolution the rules mirror used above) and the detected `<scope>` (`project` / `user`), then dispatch:
 
 ```
 Skill(skill: "lazycortex-core:lazy-core.scaffold-sync", args: "plugin=lazycortex-core installPath=<installPath> scope=<scope>")

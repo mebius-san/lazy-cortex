@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-review skills — symptoms, likely causes, and fixes.
-last_regen: 2026-09-21
+last_regen: 2026-09-23
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree routing on observed symptom. Top-level branches: install/bootstrap failures (settings missing, permission error, malformed JSON), configure failures (audit FAIL after wizard, section-id loop), start/submit problems (file not opted in, no-op on re-run when unexpected), status reporting nothing useful, stop/resume confusion, finalize blocked or partial, audit FAIL findings. Each leaf names the troubleshooting entry that resolves it."
@@ -15,8 +15,8 @@ source_skills:
   - lazy-review.stop
   - lazy-review.finalize
   - lazy-review.audit
-source_sha: ece443fde681d08757d84c2adc770268af1c254a
-surface_sha: 0673851e3d2b6ad16767f78c67bdc21891628308a26f99c0371e00a90c163347
+source_sha: 1d3be1fe4f60ed602d7da87f6ed5cb2eccec283f
+surface_sha: 68434c86b94ff8116bcda3045cdd308c32c7844b9db0660b6c8cca29ddcfbefd
 ---
 # Troubleshooting
 

@@ -351,7 +351,7 @@ Outcome: `guidelines-set`, `no-guidelines`, or (edit mode) `unchanged`.
 
 **Nested product:** when an ancestor's `@<key>` classes already cover this product's documents by path, outcome `inherited`, no question; edit mode still lets the operator declare an own value, which wins — declaring experts here generates this product's own `@<key>` set, which wins by depth.
 
-The built-in review classes generated in Step 12 are driven by ten roles — `use-case-writer`, `designer`, `system-designer`, `architect`, `ui-designer`, `planner`, `developer`, `tester`, `data-writer`, `researcher`. These experts are **shared vault-wide**: one common set of review classes serves every product whose role-experts are identical, so a second product normally reuses the first product's experts rather than adding its own classes (see Step 12). Read the available expert names and the current review classes first:
+The built-in review classes generated in Step 12 are driven by the roles `use-case-writer`, `designer`, `system-designer`, `architect`, `ui-designer`, `planner`, `developer`, `tester`, `data-writer`, `researcher`, and `editor`. These experts are **shared vault-wide**: one common set of review classes serves every product whose role-experts are identical, so a second product normally reuses the first product's experts rather than adding its own classes (see Step 12). Read the available expert names and the current review classes first:
 
 ```bash
 "${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get experts
@@ -366,16 +366,16 @@ The keys of the first printed object are the registered expert names. In the sec
   ```
   Context (print before asking):
   - Where: Step 8 — Review experts; target `review.classes` (shared set vs `<kind>@<key>` override)
-  - Found: shared set present — experts read from its bare-label classes: use-case-writer `<…>`, designer `<…>`, system-designer `<…>`, architect `<…>`, ui-designer `<…>`, planner `<…>`, developer `<…>`, tester `<…>`, data-writer `<…>`
+  - Found: shared set present — experts read from its bare-label classes: use-case-writer `<…>`, designer `<…>`, system-designer `<…>`, architect `<…>`, ui-designer `<…>`, planner `<…>`, developer `<…>`, tester `<…>`, data-writer `<…>`, editor `<…>`
   - Why asking: whether this product's design / code-plan / test-plan / bug docs need a different persona than the rest of the vault is a judgement about the product, not derivable
   - Answers: `use shared experts` — NO new review classes for this product; Step 12 reuses the shared set and collapses this product's stale `@<key>` classes (outcome `shared-set`); `define product-specific override` — the nine role questions below, then Step 12 generates product-scoped `<kind>@<key>` classes that shadow the shared set for this product only (outcome `override`). A typed document takes the scoped class whose globs anchor on the most leading literal segments — the innermost product's — so a nested product's override outranks its ancestor's; list order only breaks an equal-depth tie and drives the untyped-document fallback (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md` § Effective record); every other product keeps riding the shared set either way
   AskUserQuestion: header "Review experts", question "Product `<key>`: ride the vault's shared review experts (<experts>), or define a product-specific override? See: ${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md", options `use shared experts` / `define product-specific override` with the descriptions above.
   ```
 
-  - **use shared experts** → read the experts from the shared classes (`use-case-writer` = the `use-cases` class main writer, `designer` = the `design` class `experts.main[0].name`, `system-designer` = the `system-design` class main writer, `architect` = the `system-tech` class main writer, `ui-designer` = the `ui-design` class main writer, `planner` = the `code-plan` class main writer, `developer` = the `code-report` class main writer, `tester` = the `bug` class main writer, `data-writer` = the `data-report` class main writer, `researcher` = the `research-report` class main writer) and do NOT ask the role questions. Outcome `shared-set`. **Fallback for a class the shared set lacks:** a vault seeded before the `use-cases`, `ui-design`, `system-ui-design`, `research-design`, or `research-report` classes existed lacks them, so those reads come back empty — for each missing one, take the same path the `docs-report` class takes below: ask that single role question offering only the "other — define a new persona" option, pointing the operator at `lazycortex-experts` to compose one, and omit the class when they have none. Every other role still rides the shared set and the outcome stays `shared-set`.
+  - **use shared experts** → read the experts from the shared classes (`use-case-writer` = the `use-cases` class main writer, `designer` = the `design` class `experts.main[0].name`, `system-designer` = the `system-design` class main writer, `architect` = the `system-tech` class main writer, `ui-designer` = the `ui-design` class main writer, `planner` = the `code-plan` class main writer, `developer` = the `code-report` class main writer, `tester` = the `bug` class main writer, `data-writer` = the `data-report` class main writer, `researcher` = the `research-report` class main writer, `editor` = the `design` class `experts.main[1].name` when that entry exists, else none) and do NOT ask the role questions. Outcome `shared-set`. **Fallback for a class the shared set lacks:** a vault seeded before the `use-cases`, `ui-design`, `system-ui-design`, `research-design`, or `research-report` classes existed lacks them, so those reads come back empty — for each missing one, take the same path the `docs-report` class takes below: ask that single role question offering only the "other — define a new persona" option, pointing the operator at `lazycortex-experts` to compose one, and omit the class when they have none. Every other role still rides the shared set and the outcome stays `shared-set`.
   - **define product-specific override** → ask the role questions below; the answers drive this product's override classes in Step 12. Outcome `override`.
 
-Role questions (asked only on the `assigned` and `override` paths — skipped on `shared-set`): for EACH of the ten roles in order (`use-case-writer`, then `designer`, then `system-designer`, then `architect`, then `ui-designer`, then `planner`, then `developer`, then `tester`, then `data-writer`, then `researcher`), issue a SEPARATE `AskUserQuestion` (one per role) offering the registered expert names as options. Where each role lands in the built-in classes (Step 12), for the question's `<landing>`:
+Role questions (asked only on the `assigned` and `override` paths — skipped on `shared-set`): for EACH role in order (`use-case-writer`, then `designer`, then `system-designer`, then `architect`, then `ui-designer`, then `planner`, then `developer`, then `tester`, then `data-writer`, then `researcher`, then `editor`), issue a SEPARATE `AskUserQuestion` (one per role) offering the registered expert names as options. Where each role lands in the built-in classes (Step 12), for the question's `<landing>`:
 
 - `use-case-writer` — main writer of the `use-cases` class, defaulting to `<domain>.use-case-writer` when `lazycortex-experts` seeded one.
 - `designer` — main writer of the asset-level `design`, `vision` and `research-design` classes and a section validator on `use-cases`.
@@ -387,6 +387,7 @@ Role questions (asked only on the `assigned` and `override` paths — skipped on
 - `tester` — main writer of `bug`, `test-plan`, and `test-report`, and a section validator on the `code-plan` class.
 - `data-writer` — main writer of the `data-report` class, defaulting to `<domain>.data-writer` when `lazycortex-experts` seeded one.
 - `researcher` — main writer of the `research-report` class (a research asset's `research.md`) and a section validator on `research-design`, defaulting to `<domain>.researcher` when `lazycortex-experts` seeded one.
+- `editor` — second main writer, after the author, of the seven prose classes `vision`, `system-vision`, `use-cases`, `design`, `system-design`, `research-design`, `research-report`: it brings the author's prose to the writing canon in every main round before the operator reads, defaulting to `<domain>.editor` when `lazycortex-experts` seeded one. It is the one role that may be answered `none`: the classes are then generated with their author alone, never omitted.
 
 The `docs-report` class has no default writer — offer only the "other" path for it, pointing the operator at `lazycortex-experts` to compose one, and omit the class when they have none. Do NOT invent an expert name — only names present in `settings-get experts` are valid.
 
@@ -553,11 +554,11 @@ AskUserQuestion: header "<type> class", question "Validation shape for product `
 
 | `class` label | `paths` | `experts.main` | `experts.validation` | extra |
 |---|---|---|---|---|
-| `use-cases` | `["*/use-cases.md"]` | `[{ "name": "<use-case-writer>" }]` | D | `context_from_frontmatter: [spec_source_requests]` |
-| `design` | `["*/*/design.md"]` | `[{ "name": "<designer>" }]` | A | `context_from_frontmatter: [spec_source_requests]` |
-| `vision` | `["*/*/vision.md"]` | `[{ "name": "<designer>" }]` | NONE | `context_from_frontmatter: [spec_source_requests]` |
-| `system-vision` | `["*/vision.md", "vision.md"]` | `[{ "name": "<system-designer>" }]` | NONE | `context_from_frontmatter: [spec_source_requests]` |
-| `system-design` | `["*/design.md", "design.md"]` | `[{ "name": "<system-designer>" }]` | A | `context_from_frontmatter: [spec_source_requests]` |
+| `use-cases` | `["*/use-cases.md"]` | `[{ "name": "<use-case-writer>" }, { "name": "<editor>" }]` | D | `context_from_frontmatter: [spec_source_requests]` |
+| `design` | `["*/*/design.md"]` | `[{ "name": "<designer>" }, { "name": "<editor>" }]` | A | `context_from_frontmatter: [spec_source_requests]` |
+| `vision` | `["*/*/vision.md"]` | `[{ "name": "<designer>" }, { "name": "<editor>" }]` | NONE | `context_from_frontmatter: [spec_source_requests]` |
+| `system-vision` | `["*/vision.md", "vision.md"]` | `[{ "name": "<system-designer>" }, { "name": "<editor>" }]` | NONE | `context_from_frontmatter: [spec_source_requests]` |
+| `system-design` | `["*/design.md", "design.md"]` | `[{ "name": "<system-designer>" }, { "name": "<editor>" }]` | A | `context_from_frontmatter: [spec_source_requests]` |
 | `system-tech` | `["*/tech.md", "tech.md"]` | `[{ "name": "<architect>" }]` | NONE | — |
 | `system-ui-design` | `["*/ui-design.md"]` | `[{ "name": "<ui-designer>" }]` | A | — |
 | `architecture` | `["*/architecture.md"]` | `[{ "name": "<architect>" }]` | P | — |
@@ -569,8 +570,8 @@ AskUserQuestion: header "<type> class", question "Validation shape for product `
 | `test-report` | `["*/test-report.md"]` | `[{ "name": "<tester>" }]` | NONE | — |
 | `data-report` | `["*/data-report.md"]` | `[{ "name": "<data-writer>" }]` | NONE | — |
 | `docs-report` | `["*/docs-report.md"]` | `[{ "name": "<docs-writer>" }]` | NONE | — |
-| `research-design` | `["*/*/design.md"]` | `[{ "name": "<designer>" }]` | R | `context_from_frontmatter: [spec_source_requests]` |
-| `research-report` | `["*/research.md"]` | `[{ "name": "<researcher>" }]` | NONE | — |
+| `research-design` | `["*/*/design.md"]` | `[{ "name": "<designer>" }, { "name": "<editor>" }]` | R | `context_from_frontmatter: [spec_source_requests]` |
+| `research-report` | `["*/research.md"]` | `[{ "name": "<researcher>" }, { "name": "<editor>" }]` | NONE | — |
 
 The `system-vision` / `system-design` / `system-tech` classes serve the **level docs** — the product-root `vision.md` / `design.md` / `tech.md` set AND the same set at the spec content-root (the project-wide spec; no config key declares it — the files' existence is the declaration, except `vision.md`, which is seeded). One expert set serves both scales. The `system-ui-design` class serves the product-root `ui-design.md` alone — the product's shared look (design system, recurring screen patterns, navigation skeleton) that the assets' own `ui-design.md` refine; the content root never carries one. It shares the asset `ui-design` class's glob and is told apart by type, exactly like the design pair. The vision classes carry NO validators — the writer and the operator close the loop. A typed document routes by its `spec_doc_type`, so the overlapping design globs are untyped-fallback tie-breakers only: the asset `design` class sits earlier in the list and wins the fallback. The `research-design` class shares the `*/*/design.md` glob for the same reason: a research asset's `design.md` carries `spec_doc_type: research-design` and routes by type.
 
@@ -578,11 +579,11 @@ The `system-vision` / `system-design` / `system-tech` classes serve the **level 
 
 | `class` label | `paths` | `experts.main` | `experts.validation` |
 |---|---|---|---|
-| `use-cases@<key>` | `["<spec_path>/*/**/use-cases.md"]` | `[{ "name": "<use-case-writer>" }]` | D |
-| `design@<key>` | `["<spec_path>/*/**/design.md"]` | `[{ "name": "<designer>" }]` | A |
-| `vision@<key>` | `["<spec_path>/*/**/vision.md"]` | `[{ "name": "<designer>" }]` | NONE |
-| `system-vision@<key>` | `["<spec_path>/vision.md"]` | `[{ "name": "<system-designer>" }]` | NONE |
-| `system-design@<key>` | `["<spec_path>/design.md"]` | `[{ "name": "<system-designer>" }]` | A |
+| `use-cases@<key>` | `["<spec_path>/*/**/use-cases.md"]` | `[{ "name": "<use-case-writer>" }, { "name": "<editor>" }]` | D |
+| `design@<key>` | `["<spec_path>/*/**/design.md"]` | `[{ "name": "<designer>" }, { "name": "<editor>" }]` | A |
+| `vision@<key>` | `["<spec_path>/*/**/vision.md"]` | `[{ "name": "<designer>" }, { "name": "<editor>" }]` | NONE |
+| `system-vision@<key>` | `["<spec_path>/vision.md"]` | `[{ "name": "<system-designer>" }, { "name": "<editor>" }]` | NONE |
+| `system-design@<key>` | `["<spec_path>/design.md"]` | `[{ "name": "<system-designer>" }, { "name": "<editor>" }]` | A |
 | `system-tech@<key>` | `["<spec_path>/tech.md"]` | `[{ "name": "<architect>" }]` | NONE |
 | `system-ui-design@<key>` | `["<spec_path>/ui-design.md"]` | `[{ "name": "<ui-designer>" }]` | A |
 | `architecture@<key>` | `["<spec_path>/*/**/architecture.md"]` | `[{ "name": "<architect>" }]` | P |
@@ -594,8 +595,8 @@ The `system-vision` / `system-design` / `system-tech` classes serve the **level 
 | `test-report@<key>` | `["<spec_path>/*/**/test-report.md"]` | `[{ "name": "<tester>" }]` | NONE |
 | `data-report@<key>` | `["<spec_path>/*/**/data-report.md"]` | `[{ "name": "<data-writer>" }]` | NONE |
 | `docs-report@<key>` | `["<spec_path>/*/**/docs-report.md"]` | `[{ "name": "<docs-writer>" }]` | NONE |
-| `research-design@<key>` | `["<spec_path>/*/**/design.md"]` | `[{ "name": "<designer>" }]` | R |
-| `research-report@<key>` | `["<spec_path>/*/**/research.md"]` | `[{ "name": "<researcher>" }]` | NONE |
+| `research-design@<key>` | `["<spec_path>/*/**/design.md"]` | `[{ "name": "<designer>" }, { "name": "<editor>" }]` | R |
+| `research-report@<key>` | `["<spec_path>/*/**/research.md"]` | `[{ "name": "<researcher>" }, { "name": "<editor>" }]` | NONE |
 
 The content-root (project-wide) `design.md` / `tech.md` pair is never product-scoped — it belongs to no product, so only the shared `system-design` / `system-tech` classes ever cover it; a content-root `ui-design.md` does not exist at all.
 

@@ -284,7 +284,7 @@ Parse each returned block by splitting on `## scan:` headings. Deduplicate findi
 
 ### 2a. Coordinator-assigned fields (enable waiver matching)
 
-For every finding after merge, the coordinator attaches three internal fields. Agents don't emit them — the coordinator derives them from the finding's title + path. These fields never appear in the printed report; they're used only by Phase 2.7 and the logs.
+For every finding after merge, the coordinator attaches three internal fields plus the `resolution` field described below. Agents don't emit them — the coordinator derives them from the finding's title + path. The three internal fields never appear in the printed report; they're used only by Phase 2.7 and the logs. `resolution` is the exception: it travels with the finding into `/lazy-core.checkup`'s merged table and is rendered there.
 
 - **`check_id`** — a stable slug of the form `<area>.<rule>` that identifies the check the finding came from (e.g. `rules.broken-artifact-reference`, `rules.oversize`, `rules.unscoped-no-waiver`, `agents.filename-no-dot`, `agents.frontmatter-malformed`, `skills.name-dir-mismatch`, `commands.filename-no-dot`, `settings.tracked-owns-permissions`, `memory.not-indexed`, `memory.oversize`, `claude-md.path-missing`, `budget.always-loaded-warn`, `budget.always-loaded-fail`, `hooks.import-undeclared`, `mcp.entry-wildcard`, `mcp.destructive-in-allow`, `paths.user-home-abs`, `paths.user-home-subdir`, `paths.project-prefix`, `paths.claude-home-for-local`, `runtime.external-dir-broken`, `runtime.inbox-collision`). The coordinator maintains an explicit title→slug table; new titles must be added to the table with their slug before shipping.
 - **`scope`** — one of `project` / `personal` / `ambiguous`. Derived from the finding's primary path:
@@ -296,6 +296,16 @@ For every finding after merge, the coordinator attaches three internal fields. A
 - **`fingerprint`** — the tuple `(check_id, normalized_path, detail_hash)` used by Phase 2.7 to match findings against stored waivers:
   - `normalized_path` — project-relative (`./.claude/rules/foo.md`), `~`-prefixed (`$HOME/.claude/CLAUDE.md`), or `*` for findings with no path.
   - `detail_hash` — first 8 hex chars of sha256 of a normalized detail string (drop whitespace, drop byte counts, keep the referenced symbol / path / tool name). Specific enough that "missing agent X" is waived independently of "missing agent Y"; stable enough that whitespace edits don't re-surface the same finding.
+
+### 2b. Resolution class (the third field beside severity and path)
+
+Every finding carries a `resolution` alongside its severity and its path, and `/lazy-core.checkup` reads it to decide whether to offer a fix-flow at all. Three values:
+
+- **`mechanical`** — the change follows unambiguously from what the check already read. These are exactly the fixes Phase 4 marks **(auto)**: install-managed rule drift restored from source, a derived `description:` line, the inline-array `paths:` migration, the authoring-rule template scaffold, a missing routine protocol appended, the memory index rebuilt, settings and permissions leakage moved to the file the hygiene split assigns, an undeclared marketplace block copied in verbatim, gitignore coverage appended, path hygiene rewritten to its `$HOME`-anchored equivalent, a stale `enabledMcpjsonServers` entry removed, a naming-canon rename, and the Phase 2.5 plugin update. Doctor applies these during the run; they reach checkup already under `### Applied`, and a finding that remains after the apply keeps its class.
+- **`selective`** — the operator must choose between defensible answers, or the repair deletes something. These are exactly the fixes Phase 4 marks **(ask)**, plus every fix a finding hands to Phase 4 as *offered* rather than auto-applied and every conditional Loop-runtime offer (Fix L1–L7): an oversized rule's slimming, a rule's scope key, an orphan rule's deletion, MCP enablement and whitelisting, plugin-dependency warnings, a dead runtime key's deletion, a bot identity's domain rewrite, an unregistered sanitizer routine, a language value rewritten to the code it maps to, a daemon restart, orphan-job deletion, routine unregistration, a broken external directory, a shared inbox, an unconfigured `daemon.git`, and a sandbox scope that misses a resolved location.
+- **`report-only`** — no change is expected of this run. Every `[INFO]` line (marketplace cache fallback, agent-model gaps, env-var status, suppression counters, the `review.language` inert-key note), every finding Phase 4 lists as report-only (agents, skills, `CLAUDE.md`, hook-script bodies, a marketplace source that did not resolve, a language value with no known mapping, an external dir holding real content), and every finding already suppressed by a waiver in Phase 2.7.
+
+A finding from a delegated audit in Phase 3 carries the resolution that audit assigned it; one that arrives without the field is folded in as `report-only`, never as a reason to ask. A check added to this skill is assigned a resolution in the same edit as its Phase 4 fix bullet — the class and the bullet's `(auto)` / `(ask)` / report-only mark are one decision, written twice, and they must not disagree.
 
 ## Phase 2.5 — Plugin version currency
 
@@ -554,14 +564,15 @@ Render in the existing format, with a new "Waived" tail section covering finding
 ### Summary
 - Checks run: N
 - PASS: N | WARN: N | FAIL: N | Waived: N
+- Resolution: mechanical N | selective N | report-only N
 
 ### Issues
 
-#### [FAIL] Rules: openclaw.md is 25 KB (limit: 3 KB)
+#### [FAIL] (selective) Rules: openclaw.md is 25 KB (limit: 3 KB)
 Reference material should be in .claude/agents/openclaw-config.md.
 **Fix**: Run `/lazy-core.slim-context` to slim rules files.
 
-#### [WARN] Memory: feedback_old_thing.md not in MEMORY.md index
+#### [WARN] (mechanical) Memory: feedback_old_thing.md not in MEMORY.md index
 File exists but has no index entry.
 **Fix**: Add `- [old-thing](feedback_old_thing.md) — <description>` to MEMORY.md
 
@@ -826,6 +837,7 @@ Log to `./.logs/claude/lazy-core.doctor/YYYY-MM-DD_HH-MM-SS.md`. Use `Bash(mkdir
 
 The `## Actions` section must include, in addition to the usual run details:
 
+- **Resolution counts** — one line with the finding count per resolution class: `resolution: mechanical=<N>, selective=<N>, report-only=<N>`.
 - **Backend discovery** — one line per scope recording which backends were reachable (e.g. `backend discovery (project): file=ok, mcp=<discovered server name or 'none'>`).
 - **Waiver recall counts** — per backend / per scope (`recall: file=<N>, mcp=<N>`), plus an `INFO` line for any fingerprint held by both backends (`both-backends: <fingerprint> (file wins)`).
 - **Suppressed findings** — one line per finding dropped by Phase 2.7: `waived finding suppressed: <check_id> | <normalized_path>`.

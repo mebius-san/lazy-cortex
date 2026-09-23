@@ -26,7 +26,7 @@ Parse two inputs from `args` (or the invoking skill's context):
 
 ### Locate `default-tiers.json` (the SOT)
 
-`lazycortex-core` is a declared dependency of every consuming plugin, so it is installed (cache) or co-resident (dev vault). Locate the canonical defaults file per the inter-plugin boundary contract — walk `$LAZYCORTEX_PLUGIN_DIRS` first, fall back to the cache glob when the env is unset (install-time invocation outside the daemon):
+`lazycortex-core` is a declared dependency of every consuming plugin, so it is installed (cache) or co-resident (dev vault). `<core-cli>` is the core plugin's own `bin/lazycortex-core` file, `${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core` — this skill ships with that plugin, so no lookup is needed; every verb runs through the interpreter because the file carries no exec bit. The file is `<core-root>/skills/lazy-core.agent-models/default-tiers.json`, where `<core-root>` is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-core` prints — the authoring repo's own `claude/lazycortex-core/` when this checkout ships the plugin, else the daemon's exported plugin dir, else the newest cached install. Reading the cache first in an authoring repo leaves every tier row added since the last publish unseeded. The env walk and the cache glob below are what the primitive does; run them by hand only when `<core-cli>` itself cannot be resolved:
 
 ```bash
 FILE=""

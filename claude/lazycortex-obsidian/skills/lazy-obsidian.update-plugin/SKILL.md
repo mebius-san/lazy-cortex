@@ -34,7 +34,7 @@ Optional flag: `--bundled` — skip the GitHub resolution and copy binaries from
 
 ## Step 1 — Locate plugin install path and vault
 
-Resolve `<installPath>` from `~/.claude/plugins/installed_plugins.json` entry `lazycortex-obsidian@lazycortex`. Abort with a clear message if the plugin isn't enabled.
+Resolve `<installPath>` as what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-obsidian` prints — the authoring repo's `claude/lazycortex-obsidian/` when this checkout ships the plugin, else the exported or newest cached copy; a bundle copied from the cache in an authoring repo is the previous publish. `<core-cli>` is the core plugin's `bin/lazycortex-core`: `<repo-root>/claude/lazycortex-core/bin/lazycortex-core` when this repo authors it, else `<installPath>/bin/lazycortex-core` from the last `lazycortex-core@lazycortex` record in `~/.claude/plugins/installed_plugins.json`. Abort with a clear message if the primitive exits non-zero.
 
 Determine vault:
 

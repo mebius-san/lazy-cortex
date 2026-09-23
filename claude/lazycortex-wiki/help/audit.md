@@ -1,12 +1,12 @@
 ---
 chapter_type: block
 summary: Run integrity checks across a wiki scope, its terms dictionary, structure map, mirrors, and domain tree — with optional auto-repair.
-last_regen: 2026-09-21
+last_regen: 2026-09-23
 no_diagram: true
 source_skills:
   - lazy-wiki.audit
-source_sha: 5d905fb7bf2d0a7a7080688312e3428513f3bcc4
-surface_sha: 7d829113de7dcdb10455d32ca8ad0e188a70b17b57c80c374875b5b1b7070c5e
+source_sha: 1d3be1fe4f60ed602d7da87f6ed5cb2eccec283f
+surface_sha: b635729b3fbcd6d30afd2560130b8982203d9d8f943593a8af9e852132604097
 ---
 # Wiki integrity audit
 
@@ -14,7 +14,7 @@ Over time a curated wiki drifts: See-also links point to renamed or deleted node
 
 `<wiki-cli>` stands for the wiki plugin's `bin/lazycortex-wiki` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-wiki/<version>/`, or `claude/lazycortex-wiki/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
-`/lazy-wiki.audit` is the only member. It reads your scope configuration from `lazy.settings.json`, runs the built-in `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> doctor` command against the target scope (or all scopes), audits any configured terms scopes and the project-structure map — including a hard check that the structure-scan routines' watch filtering still matches the map — and groups every finding into `FAIL`, `WARN`, and `INFO` buckets before presenting them to you.
+`/lazy-wiki.audit` is the only member. It reads your scope configuration from `lazy.settings.json`, runs the built-in `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> doctor` command against the target scope (or all scopes), audits any configured terms scopes and the project-structure map — including a hard check that the structure-scan routines' watch filtering still matches the map — and groups every finding into `PASS`, `INFO`, `WARN`, and `FAIL` buckets before presenting them to you. A check that ran and found nothing wrong reports `PASS`.
 
 ## When you'd use this
 
@@ -40,9 +40,9 @@ You invoke `/lazy-wiki.audit` with an optional scope id. Omit the id and the ski
 
 Structure configuration checks now also confirm that `.memory/**` and `docs/structure.md` itself are excluded from the section's own `exclude` — without them, an expert's own memory-note commit, or the map's own commit, would wake a scan of the very output it produced — on top of the existing checks: the three scan routines (`lazy-wiki.structure-scan`, `-deletes`, `-renames`) existing with the right `watch` setting, none of them registered before `docs/structure.md` exists, and no two `depth_profiles` classes overlapping.
 
-Separately, every configured wiki scope is checked for a state where its own `exclude_paths` covers everything its `paths` admits — a scope like that indexes nothing, and its declared `topics_index` never gets built. The audit reports the file count you'd wake by removing the offending exclude glob, so fixing it is a deliberate call rather than an accidental typo cleanup.
+Separately, every configured wiki scope is checked for a state where its own `exclude_paths` covers everything its `paths` admits — a scope like that indexes nothing, and its declared `topics_index` never gets built. The audit says removing the offending exclude glob would wake a curator job for every file the scope then covers, without naming a count, so fixing it is a deliberate call rather than an accidental typo cleanup.
 
-**Phase 3 — presentation.** Every finding from both phases is summarised: per-scope counts by severity, plus check name, affected node or entry, and message — with the findings `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> doctor --apply` repairs called out separately from the ones needing a hand repair, and a named repair route for every class.
+**Phase 3 — presentation.** Every finding from both phases is summarised: per-scope counts by severity — `PASS`, `INFO`, `WARN`, `FAIL`, and no other word — plus check name, affected node or entry, and message — with the findings `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> doctor --apply` repairs called out separately from the ones needing a hand repair, and a named repair route for every class.
 
 **Applying the repairs.** The audit stops at its report. To repair the index/link findings, run `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> doctor <scope-id> --apply` yourself — index rebuild, See-also path rewrite, broken-line drop, gloss refresh, left uncommitted in the worktree for you to inspect. The daily `lazy-wiki.doctor-apply` routine already runs the same command with `--commit` across every scope, so on a checkout with a running daemon these usually clear on their own. Terms findings are never decided for you — which side is "right", the document's wording or the dictionary's, is a judgment call, and the audit reports both sides for you to settle. Once you have settled a `divergence` in the dictionary's favour, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> terms-apply <document> --from "<the document's word>" --to "<the dictionary's term>"` carries out that substitution: whole-word, prose only, with the frontmatter, code fences, inline code spans, link targets and the `# See also` block left exactly as they are, the rewrite left uncommitted in your worktree, and a flat refusal (exit 1, reason on stderr) on a document carrying `review_active: true` or living inside a scope's mirror tree. Re-running it after it has applied reports `noop` and rewrites nothing. Every other terms finding — and the other side of a divergence, where the dictionary's term is the one that changes — stays a hand edit.
 
@@ -61,7 +61,7 @@ Applying a fix only touches the lines that need it — the rest of a node's See-
 - `divergence`, `missing`, `duplicate`, `dead`, plus terms `format` / `config` findings — the terms dictionary versus the documents it serves. See [terms](terms.md) for how the dictionary is normally kept current.
 - `missing-dir`, `missing-file`, `dead-entry`, `divergence`, `depth`, plus structure `config` findings — the project-structure map versus the tracked tree. The `config` bucket now also covers `.memory/**` and `docs/structure.md` missing from the structure section's own `exclude`, on top of the scan routines' `watch` setting and overlapping `depth_profiles` globs. See [structure](structure.md) for how the map is normally kept current.
 - `structure-watch-filter` — a **FAIL**, not a WARN: a structure-scan routine's registered watch filtering (`path_filter`, `group_globs`) no longer matches what the map requires, so it dispatches more broadly than it should — per changed file instead of per changed directory, in the worst case. Left alone, one large commit can spend a whole evening's expert-job budget on dispatches that answer "nothing to do". Fix by re-running `/lazy-wiki.configure structure`, which re-registers the drifted routine.
-- `scope-self-nullified` — a **WARN**: a wiki scope whose `exclude_paths` matches every path its `paths` admits, so it indexes nothing and its `topics_index` never gets built. The finding names the file count you'd wake by removing the offending glob. Fix by narrowing or dropping that glob via `/lazy-wiki.configure`.
+- `scope-self-nullified` — a **WARN**: a wiki scope whose `exclude_paths` matches every path its `paths` admits, so it indexes nothing and its `topics_index` never gets built. The finding says removing the offending glob would wake a curator job for every file the scope then covers, without naming a count. Fix by narrowing or dropping that glob via `/lazy-wiki.configure`.
 
 ## Common adjustments
 
@@ -75,7 +75,7 @@ Applying a fix only touches the lines that need it — the rest of a node's See-
 - **Structure or domain drift after a rename sweep** — `missing-dir` / `missing-file` / `dead-entry` / `divergence` findings usually clear with a wholesale `/lazy-wiki.structure rebuild` rather than fixing entries one at a time; `domain-hash-stale` clears with `/lazy-wiki.domain-sync`.
 - **A structure-scan routine reports `config` right after registration** — if `docs/structure.md` doesn't exist yet, every one of the three scan routines fails its precondition until you run `/lazy-wiki.structure rebuild` once to create the map.
 - **A structure-scan routine reports `structure-watch-filter`** — its registered watch filtering has drifted from what the map now requires. Run `/lazy-wiki.configure structure` to re-register it; don't leave this one for the next `/lazy-wiki.structure rebuild`, since it's the routine's registration that's wrong, not the map's content.
-- **A scope reports `scope-self-nullified`** — an `exclude_paths` glob you added is covering everything the scope's `paths` admit. Check the finding's file count, then narrow or drop that glob via `/lazy-wiki.configure` once you're sure that's what you want.
+- **A scope reports `scope-self-nullified`** — an `exclude_paths` glob you added is covering everything the scope's `paths` admit. The finding won't tell you how many files that wakes — narrow or drop that glob via `/lazy-wiki.configure` once you're sure that's what you want.
 - **`docs/structure.md` shows up as a finding in its own scope** — the map has no frontmatter to defend itself against being curated as an ordinary node. The exclusion belongs to the whole vault, not one scope: add `docs/structure.md` to `wiki.exclude` via `/lazy-wiki.configure vault` rather than excluding it scope by scope.
 - **If the scope id you pass is not in `lazy.settings.json`** — the command exits non-zero and the skill surfaces the error without proceeding to the presentation or apply phases.
 

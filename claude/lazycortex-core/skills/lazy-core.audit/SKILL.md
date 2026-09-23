@@ -7,6 +7,8 @@ allowed-tools: Read, Write, Glob, Grep, Bash(wc *), Bash(command -v python3), Ba
 
 Coordinator skill. Runs inline logging compliance checks, then dispatches four **Explore** subagents in parallel to measure context weight and hygiene. Read-only — no changes made.
 
+This skill follows the shared audit form in `claude/lazycortex-core/references/lazy-core.audit-contract.md` — `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.audit-contract.md` in an install: read-only, the four severity words, the repair route standing in the finding line itself, no estimate of what a repair would save. Read it before adding or rewording a check here. The one file this skill writes is its own run log under `./.logs/claude/lazy-core.audit/`, which `lazy-log.logging` mandates for every run.
+
 Read `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md` before dispatching for the coordinator pattern.
 
 **CRITICAL PATH RULE** (applies to every dispatched agent): `$HOME/.claude/` is protected from Bash access. Agents must use ONLY Glob and Read under `$HOME/.claude/`. `wc -c` via Bash is allowed ONLY for paths under the project root.
@@ -14,6 +16,20 @@ Read `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md` before dispat
 **Path expansion** (mandatory): Glob and Read do **not** shell-expand `~` or `$HOME`. Before any Glob/Read targeting a home-relative path, run `Bash(echo $HOME)` once and substitute the result (or read the absolute home path from the session env block). A literal `~/.claude/rules/*.md` or `$HOME/.claude/rules/*.md` passed to Glob will match nothing and silently report "empty".
 
 **Size estimation**: for Read-measured files use `size ~ lines × 45 bytes`; for `wc -c` use exact bytes.
+
+## Finding shape
+
+Every finding this skill emits carries three fields: **severity**, **path** (the artifact the finding is about), and **resolution**.
+
+Severity is the shared vocabulary of `lazy-core.audit-contract.md` and nothing else: `PASS` (the check ran and found nothing wrong), `INFO` (a measurement or observation needing no action), `WARN` (a divergence), `FAIL` (a violation). Each finding line also names its own repair route — the route is never lifted into a separate section at the end of the report.
+
+Resolution says what kind of change the finding implies, and `/lazy-core.checkup` reads it to decide whether to offer a fix-flow at all:
+
+- **`mechanical`** — the repair follows unambiguously from what the check already read; there is no second defensible answer. Checks: L1 consumer-scope copy absent, L2, L3; Agent B scaffold-registry `plugin_root_var`, path hygiene, Python runtime FAIL, rule-writing 3 (inline-array `paths:`) and 9 (missing template pointer), model routing 4 (orphans) and 5 (gaps), audit-shape S4 (contract not named); Agent D D3, D4, D10 index desync, D11 rows other than `not_a_symlink` / `source_missing`, D13.
+- **`selective`** — a repair exists, but which one is right is the operator's call. Checks: L1 missing plugin-source `description:`, L4; Agent A oversize rule and oversize `MEMORY.md`; Agent B MCP enablement, scaffold-registry `parse_error` / `bad_shape` / `glob_overlap` / `missing_template` / `orphan_key`, naming hygiene, every skill-writing, agent-writing and rule-writing check not listed as mechanical above, dirty-tree write-without-commit, reference-writing 11 and 12, audit-shape S1–S3; Agent D D1, D2, D5, D7, D8, D9, D11 `not_a_symlink` / `source_missing`, D12, D14, D15, D16.
+- **`report-only`** — a measurement or an observation with no change expected. Checks: every sizing row and `total_kb` line from Agents A and B, the Python-runtime `[INFO]` line, model routing 1 (`_version` provenance), 3 (merged entries) and 7 (env var), every visible-waiver `[INFO]` (execution-discipline, `size-waiver:`, dirty-tree), Agent C H1 and H2 (both clear at the next publish bump — there is no manual route), D1's experts-count line, D3's absent-section lines, and D10's persona-but-empty line.
+
+A check added here is assigned a resolution in the same edit; an unassigned finding counts as `report-only` downstream, which silently drops a real repair out of `/lazy-core.checkup`'s question.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -32,7 +48,7 @@ This skill has 4 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 Absorbed from the retired `lazy-log.audit` skill. These four checks run inline (no subagent dispatch) before Phase 2's parallel scan. Record findings in a local list for inclusion in the Phase 3 render.
 
-Severity vocabulary (same as Phase 2): `INFO` / `WARN` / `FAIL`.
+Severity vocabulary: the four words from **Finding shape** above — `PASS` / `INFO` / `WARN` / `FAIL`. A check that ran clean emits `PASS`; the Phase 3 render folds the `PASS` lines into the section's summary line.
 
 ### L1 — Logging rule presence
 
@@ -66,7 +82,7 @@ Valid concrete strings → no finding.
 
 Dispatch these four Explore agents **in a single message with four Agent tool calls** (`subagent_type: "Explore"`, `mode: "dontAsk"`). Each returns the structured report from `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md`. Budget: "Report under 350 words".
 
-Severity vocabulary for this skill: `INFO` (measurement row or visible waiver, including dirty-tree waiver acknowledgements) / `WARN` (recommendation or heuristic flag, including dirty-tree write-without-commit findings) / `FAIL` (structural violation — Agent B compliance checks across skill-writing, agent-writing, hook-writing, and rule-writing: missing preamble, invalid waiver, "Optional" heading, missing rule frontmatter or scope, oversize rule, code block > 10 lines, `AskUserQuestion` inside agent body, hook script missing shebang, hook script crashing on malformed stdin).
+Severity vocabulary for every dispatched agent: the four words from **Finding shape** above and no others. `PASS` (the check ran clean — carried as a count, not a printed line) / `INFO` (measurement row or visible waiver, including dirty-tree waiver acknowledgements) / `WARN` (divergence or heuristic flag, including dirty-tree write-without-commit findings) / `FAIL` (structural violation — Agent B compliance checks across skill-writing, agent-writing, hook-writing, and rule-writing: missing preamble, invalid waiver, "Optional" heading, missing rule frontmatter or scope, oversize rule, code block > 10 lines, `AskUserQuestion` inside agent body, hook script missing shebang, hook script crashing on malformed stdin). Every finding names its repair route in its own line; no agent returns a recommendations block.
 
 ### Agent A — always-loaded context
 
@@ -115,14 +131,14 @@ Emit one `[INFO]` per enabled server. Emit `[WARN]`:
 
 **Python runtime** — every `lazycortex-*` plugin ships hooks that shebang `python3`, and project hooks invoked as `python3 ...` from `settings.json` rely on the same interpreter. If `python3` is missing or too old, hooks silently fail and the user loses distill-after-commit, settings/public guards, agent-model routing, and autobump. Run two short Bash probes:
 
-- `command -v python3` — empty output → `[FAIL] python3 not in PATH — every hook in .claude/settings.json and every plugin-shipped hooks/*.py will fail to execute.`
+- `command -v python3` — empty output → `[FAIL] python3 not in PATH — every hook in .claude/settings.json and every plugin-shipped hooks/*.py will fail to execute; fix: install Python ≥ 3.12 and re-run /lazy-core.install.`
 - `python3 --version 2>&1` — parse `Python X.Y.Z`. Floor is **3.12** (shipped Python uses `pathlib` semantics that shifted in 3.12; per-plugin `<ns>.install` skills inherit the floor and must NOT re-probe). Emit:
   - `[INFO] python3 path=<path> version=<X.Y.Z>` when found and ≥ 3.12.
   - `[FAIL] python3 version <X.Y.Z> below floor 3.12 — every shipped hook fails on startup. Run /lazy-core.install to walk the install path.` when found and < 3.12.
 
 Skip both probes silently if neither runs (sandbox restriction); the renderer treats the section as absent.
 
-**Scaffold registry validation** — for each in-scope `lazy-core.scaffold.md` (`.claude/rules/`, `$HOME/.claude/rules/`), run `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" scaffold validate --registry <path>` (resolve the core CLI from `installed_plugins.json[lazycortex-core@lazycortex].installPath`/`bin/lazycortex-core`; skip silently if unresolvable). Map each returned finding: `parse_error` / `bad_shape` / `plugin_root_var` → `[FAIL]`; `glob_overlap` → `[WARN]`. The primitive's deterministic parse is the single source of structural truth — do not also eyeball the YAML.
+**Scaffold registry validation** — for each in-scope `lazy-core.scaffold.md` (`.claude/rules/`, `$HOME/.claude/rules/`), run `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" scaffold validate --registry <path>` (`${CLAUDE_PLUGIN_ROOT}` is this plugin's own root, so in a checkout that authors the plugin that is `claude/lazycortex-core/` and in a consumer the installed copy; skip silently if the file is missing). Map each returned finding: `parse_error` / `bad_shape` / `plugin_root_var` → `[FAIL]`; `glob_overlap` / `missing_template` / `orphan_key` → `[WARN]`. The primitive's deterministic parse is the single source of structural truth — do not also eyeball the YAML.
 
 **Path hygiene** — grep every project-level config file (`.claude/agents/*.md`, `.claude/rules/*.md`, `.claude/skills/*/SKILL.md`, `.claude/commands/*.md`, `CLAUDE.md`) and emit `[WARN]` for:
 
@@ -161,6 +177,22 @@ Emit WARN only when the match survives all three gates.
 5. **No "Optional" in phase/step headings** — same as skill-writing §2 → `[FAIL]`.
 7. **Narrative padding (heuristic)** — same denylist as skill-writing §3 → `[WARN]`.
 
+**Audit-shape conformance** — see `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.audit-contract.md`. File set: `claude/*/skills/*.audit/SKILL.md` (every audit this repo ships, this skill included) plus `.claude/skills/*.audit/SKILL.md` when the consumer authors one. Four checks:
+
+**S1 — severity words inside the shared vocabulary.** Collect every token standing in a severity slot: a bracketed token (`[WARN]`), and an uppercase word opening a finding or outcome (directly after `→`, or at the head of a finding line, as in `FAIL agent-missing: …` / `PASS <N> roles resolve`). Any such token outside `PASS` / `INFO` / `WARN` / `FAIL` → `[FAIL] audit <name> uses severity word <token> outside the shared vocabulary | <path>:<line>`; `fix: reword the finding to one of PASS / INFO / WARN / FAIL per lazy-core.audit-contract.md`. Uppercase words that are not in a severity slot (`MANDATORY`, `TODO`, a shouted clause in prose) are not severities and are never flagged.
+
+**S2 — read-only.** Three grounds, each on its own finding:
+
+- A body site instructing a `Write`, `Edit`, or `NotebookEdit` whose target is anything other than the skill's own run log under `./.logs/claude/<name>/` → `[FAIL] audit <name> writes <target> — an audit reports, it does not repair | <path>:<line>`; `fix: move the write into the repair skill the finding names, and leave the audit naming the route`.
+- An apply-style flag or mode on the audit's **own** invocation (`--apply`, `--fix`, a `fix` argument the skill itself executes) → `[FAIL] audit <name> declares the apply-style flag <flag> | <path>:<line>`; `fix: drop the flag; the repair is a separate run the operator starts`. A flag named in a repair route the operator runs elsewhere (`… doctor <scope> --apply`) is the route, not the audit's own flag, and is never flagged.
+- `AskUserQuestion` in `allowed-tools:`, or a body site instructing this skill to raise one → `[FAIL] audit <name> asks the operator a question | <path>:<line>`; `fix: delete the question and its step; an audit ends at its report`. Skip the exclusions `lazy-core.skill-writing § 11` already names — negations, mentions of another artifact — and skip a line whose subject is the token itself (a check that greps for `AskUserQuestion` names it without raising one).
+
+**S3 — no separate recommendations section in the report.** Any heading whose text names recommendations, saving opportunities, or repair routes (grep `^#{2,}\s.*\b([Rr]ecommend|[Ss]aving|[Oo]pportunit|[Rr]epair route)`) → `[WARN] audit <name> lifts repair routes into the section "<heading>" | <path>:<line>`; `fix: move each line into the finding it belongs to, and delete the section`.
+
+The check is about what the operator reads. A section the skill states is an internal lookup, used while composing finding lines and never rendered into the report, is not a finding — the section body must say so in its own first sentence for the carve-out to apply.
+
+**S4 — the shared form is named.** The body must reference `lazy-core.audit-contract.md`. Absent → `[WARN] audit <name> does not name the shared audit contract | <path>`; `fix: add one line to the skill body stating it follows ${CLAUDE_PLUGIN_ROOT}/references/lazy-core.audit-contract.md`.
+
 **Model routing** — load both settings files via `bin/lazy_settings.py`:
 
 ```
@@ -188,7 +220,7 @@ Missing files are a silent no-op — `load_section` returns a stub with `_versio
 1. **Built-ins** — hardcoded list: `Explore`, `Plan`, `general-purpose`, `statusline-setup`. Group: `_builtin`. Dispatch string: bare name.
 2. **User-authored, global** — `$HOME/.claude/agents/*.md`. Group: `_user`. Dispatch string: bare filename stem.
 3. **User-authored, project** — `./.claude/agents/*.md`. Group: `_project`. Dispatch string: bare filename stem. (Project entries shadow global entries of the same stem — both still listed separately with provenance.)
-4. **Plugin-shipped** — `$HOME/.claude/plugins/cache/**/agents/*.md`. Extract plugin name from path (`$HOME/.claude/plugins/cache/<marketplace>/<plugin-name>/<version>/agents/<agent>.md` → plugin = `<plugin-name>`). Group: **domain** derived from plugin name via the domain-extraction rule (first `-`-delimited segment, or full name if no `-`). Dispatch string: `<plugin-name>:<stem>`. **Install-scope filter:** the cache is machine-global — keep a plugin's agents only when `~/.claude/plugins/installed_plugins.json` shows it installed at `user` scope, or at `project` scope with a `projectPath` equal to the current repo root; a plugin installed only into another project's scope is not part of this repo's surface and its agents are never flagged missing here.
+4. **Plugin-shipped** — for every plugin name `installed_plugins.json` records (plus, in a repo that authors plugins, every `claude/<name>/` carrying a manifest), glob `<root>/agents/*.md` where `<root>` is what `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" plugin-root <name>` prints — the authoring repo's tree first, then the exported dir, then the newest cached version; a walk of `$HOME/.claude/plugins/cache/**` alone never sees an agent added since the last publish. Group: **domain** derived from plugin name via the domain-extraction rule (first `-`-delimited segment, or full name if no `-`). Dispatch string: `<plugin-name>:<stem>`. **Install-scope filter:** the cache is machine-global — keep a plugin's agents only when `~/.claude/plugins/installed_plugins.json` shows it installed at `user` scope, or at `project` scope with a `projectPath` equal to the current repo root; a plugin installed only into another project's scope is not part of this repo's surface and its agents are never flagged missing here.
 
 **Rule-writing compliance** — see `lazy-core.rule-writing`. File set: `.claude/rules/*.md`, `$HOME/.claude/rules/*.md`, `claude/*/rules/*.md`. **Exclude** `**/templates/**/*-template.md` from every check below — templates are skeletons, not rules; their placeholder frontmatter and example clauses would otherwise misfire. Checks:
 
@@ -602,7 +634,7 @@ The `external_dirs` and `inbox_ownership` groups are omitted entirely when they 
 
 ## Phase 3 — Render
 
-Parse all four returned blocks plus the Phase 1 inline findings. Produce:
+Parse all four returned blocks plus the Phase 1 inline findings. Every rendered finding line carries all four of: severity, the path it is about, its repair route, and its `resolution` value from **Finding shape** above — the resolution travels with the finding when `/lazy-core.checkup` merges this report, and a finding that arrives without it counts as `report-only` there. The report ends with the last finding section: there is no recommendations block, and no line states what a repair would save. Produce:
 
 ### Always loaded (startup cost)
 
@@ -611,6 +643,8 @@ Parse all four returned blocks plus the Phase 1 inline findings. Produce:
 | (one row per Agent A `[INFO]` finding, sorted by size descending) |
 
 **Total always-loaded**: ~X KB
+
+`[INFO]` the system prompt, the skill registry, the MCP instructions and the deferred-tool list are injected by Claude Code, are not measured here, and no repair reduces them.
 
 ### On-demand (no startup cost)
 
@@ -622,47 +656,58 @@ Parse all four returned blocks plus the Phase 1 inline findings. Produce:
 
 ### MCP servers
 
-List enabled servers and the mode in effect. Flag any WARN findings from Agent B's MCP section.
+List enabled servers and the mode in effect. One line per WARN finding from Agent B's MCP section, each naming its route: enable the server for this project (`enabledMcpjsonServers`, or global `enableAllProjectMcpServers`), or drop the stale name — which servers this project trusts is the operator's call.
 
 ### Python runtime
 
-One line for the `[INFO]` finding (path + version), or the `[FAIL]` / `[WARN]` if the probe found a problem. Omit the section if Agent B reported neither.
+One line for the `[INFO]` finding (path + version), or the `[FAIL]` / `[WARN]` if the probe found a problem — a problem line carries its route: install or upgrade to Python ≥ 3.12, then run `/lazy-core.install`, so the shipped hooks execute again. Omit the section if Agent B reported neither.
 
 ### Path hygiene
 
-One line per Agent B path-hygiene `[WARN]`.
+One line per Agent B path-hygiene `[WARN]`, each naming its route: replace the hardcoded path with its relative or `$HOME`-anchored equivalent — `/lazy-core.doctor` applies that rewrite per finding.
 
 ### Naming hygiene
 
-One line per Agent B naming `[WARN]`.
+One line per Agent B naming `[WARN]`, each naming its route: rename the file to `<namespace>.<name>` per `lazy-core.hygiene` § Naming and update every reference to it.
 
 ### Skill-writing compliance
 
-- **Missing Execution-Discipline preamble** (FAIL) — one line per finding (skills only).
-- **"Optional" in phase/step heading** (FAIL) — one line per match.
-- **Waivered files** (INFO) — one line per file with `execution-discipline-waiver: "<reason>"`.
-- **Narrative-padding heuristic** (WARN) — one line per match with the offending line.
-- **Invalid `lazy_setup_phase` value** (WARN) — one line per match with the offending value.
-- **`description:` absent** (FAIL) — one line per skill or command missing the frontmatter key.
-- **`allowed-tools` missing `Agent`** (WARN) — one line per file that declares `allowed-tools:` without `Agent` in the list.
-- **Research-marker semantics** (WARN) — one line per skill with a research-shaped contract missing the marker, or the marker present without a documented query contract.
+Every line carries its own route; there is no routes section after the report.
+
+- **Missing Execution-Discipline preamble** (FAIL) — one line per finding (skills only); route: add the preamble per `lazy-core.skill-writing § 1`, or declare `execution-discipline-waiver: "<concrete reason>"` in frontmatter.
+- **"Optional" in phase/step heading** (FAIL) — one line per match; route: rename the heading — the accept/decline choice belongs inside an `AskUserQuestion`, not at heading level.
+- **Waivered files** (INFO) — one line per file with `execution-discipline-waiver: "<reason>"`; no route, the waiver is the decision.
+- **Narrative-padding heuristic** (WARN) — one line per match with the offending line; route: drop the passage when its removal leaves executable behaviour unchanged — author's call.
+- **Invalid `lazy_setup_phase` value** (WARN) — one line per match with the offending value; route: set it to one of `pre-install` / `per-plugin` / `post-install` per `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.setup-phases-contract.md`.
+- **`description:` absent** (FAIL) — one line per skill or command missing the frontmatter key; route: write one opening with the invocation condition per `lazy-core.skill-writing § 8` and the shapes in `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.description-triggers.md`.
+- **`allowed-tools` missing `Agent`** (WARN) — one line per file that declares `allowed-tools:` without `Agent` in the list; route: add `Agent` to the list per `lazy-core.skill-writing § 9`.
+- **Research-marker semantics** (WARN) — one line per skill with a research-shaped contract missing the marker, or the marker present without a documented query contract; route: add `research: true` (or the word in the description), or document the query mode, per `lazy-core.skill-writing § 10`.
+
+### Audit-shape conformance
+
+One line per Agent B S1–S4 finding, each naming its route as the check defines it.
+
+- **Severity word outside the vocabulary** (FAIL) — one line per token.
+- **Audit writes, carries an apply-style flag, or asks a question** (FAIL) — one line per site.
+- **Repair routes lifted into their own section** (WARN) — one line per heading.
+- **Shared contract not named** (WARN) — one line per audit.
+
+Omit the whole subsection when S1–S4 produced no findings.
 
 ### Agent-writing compliance
 
-- **Frontmatter incomplete** (FAIL) — one line per agent missing `name`/`description`/`tools`.
-- **Missing preamble** (FAIL) — multi-phase agents without preamble and without valid waiver.
-- **`AskUserQuestion` in agent body** (FAIL) — one line per match.
-- **`tools: ["*"]` without justification** (WARN) — one line per match.
-- **`tools:` missing `Agent`** (WARN) — one line per agent whose `tools:` list omits it.
-- **"Optional" in heading** (FAIL) — one line per match.
-- **Narrative-padding heuristic** (WARN) — one line per match.
+- **Frontmatter incomplete** (FAIL) — one line per agent missing `name`/`description`/`tools`; route: fill the missing key per `lazy-core.agent-writing`.
+- **Missing preamble** (FAIL) — multi-phase agents without preamble and without valid waiver; route: add the preamble per `lazy-core.agent-writing § 4`, or declare a concrete `execution-discipline-waiver:` string.
+- **`AskUserQuestion` in agent body** (FAIL) — one line per match; route: delete the question — an agent has no user channel; return the choice to its caller instead.
+- **`tools: ["*"]` without justification** (WARN) — one line per match; route: enumerate the tools the agent actually uses, or justify the wildcard on the same line.
+- **`tools:` missing `Agent`** (WARN) — one line per agent whose `tools:` list omits it; route: add `Agent` per `lazy-core.agent-writing § 5`.
+- **"Optional" in heading** (FAIL) — one line per match; route: rename the heading, as in the skill-writing case above.
+- **Narrative-padding heuristic** (WARN) — one line per match; route: drop the passage when its removal leaves executable behaviour unchanged.
 
 ### Help-doc compliance
 
-- **Missing walkthrough chapter** (WARN) — one line per Agent C H1 finding (scenario without a chapter).
-- **Stale chapter** (WARN) — one line per Agent C H2 finding (source_skills mtime newer than chapter `last_regen`).
-
-Both clear automatically at the next publish bump for the affected plugin — no manual fix path.
+- **Missing walkthrough chapter** (WARN) — one line per Agent C H1 finding (scenario without a chapter); no manual route — it clears at the next publish bump for the plugin.
+- **Stale chapter** (WARN) — one line per Agent C H2 finding (source_skills mtime newer than chapter `last_regen`); no manual route — same bump clears it.
 
 ### Model routing
 
@@ -691,40 +736,40 @@ Then render the merged-with-provenance view grouped by top-level group name:
 
 One line per entry. Below the table:
 
-- **Orphans** (WARN) — one line per `orphan agent_models entry` finding.
-- **Gaps** (INFO) — one line per `no agent_models entry for ...` finding.
-- **Invalid values** (WARN) — one line per invalid-value finding.
-- **Env-var** (INFO) — `LAZY_AGENT_MODEL_FLOOR=<value>` with tier-order note, or `(unset)`.
+- **Orphans** (WARN) — one line per `orphan agent_models entry` finding; route: run `/lazy-core.agent-models`, which prunes entries whose agent is gone.
+- **Gaps** (INFO) — one line per `no agent_models entry for ...` finding; route: run `/lazy-core.agent-models` to fill the tier, or set the agent to `"default"` deliberately.
+- **Invalid values** (WARN) — one line per invalid-value finding; route: rewrite the value to one of `haiku` / `sonnet` / `opus` / `default`.
+- **Env-var** (INFO) — `LAZY_AGENT_MODEL_FLOOR=<value>` with tier-order note, or `(unset)`; no route.
 
 ### Rule-writing compliance
 
-- **Missing frontmatter** (FAIL) — one line per rule without YAML frontmatter.
-- **Missing scope or waiver** (FAIL) — neither `paths:` nor `always_loaded:`, or invalid `always_loaded` (true/empty).
-- **Non-canonical `paths:` shape** (FAIL) — one line per rule using inline-array form (`paths: [...]`) instead of the canonical YAML block-list.
-- **Size over budget** (FAIL / WARN) — `always_loaded:` > 3 KB; `paths:` > 10 KB (WARN) or > 25 KB (FAIL).
-- **Code block > 10 lines** (FAIL) — one line per match.
-- **Filename lacks dot separator** (WARN) — one line per match.
-- **Broken artifact reference** (WARN) — one line per unresolved reference.
-- **Narrative-padding heuristic** (WARN) — one line per match.
-- **Authoring rule without template reference** (WARN) — one line per authoring rule with no `templates/**/*-template.md` mention in the body.
+- **Missing frontmatter** (FAIL) — one line per rule without YAML frontmatter; route: add at minimum a `description:` key per `lazy-core.rule-writing § 1`.
+- **Missing scope or waiver** (FAIL) — neither `paths:` nor `always_loaded:`, or invalid `always_loaded` (true/empty); route: add a `paths:` block-list (preferred) or a concrete `always_loaded: "<reason>"` per `lazy-core.rule-writing § 1` — `/lazy-core.doctor` asks per rule which of the two the rule's audience calls for.
+- **Non-canonical `paths:` shape** (FAIL) — one line per rule using inline-array form (`paths: [...]`) instead of the canonical YAML block-list; route: migrate to the block-list shape — `/lazy-core.doctor` applies that migration in place, preserving every glob.
+- **Size over budget** (FAIL / WARN) — `always_loaded:` > 3 KB; `paths:` > 10 KB (WARN) or > 25 KB (FAIL); route: move the long guidance into `<plugin>/skills/<skill>/references/*.md` per `lazy-core.rule-writing § 2`, or run `/lazy-core.slim-context`.
+- **Code block > 10 lines** (FAIL) — one line per match; route: shorten the block, or move it to a reference the rule points at, per `lazy-core.rule-writing § 3`.
+- **Filename lacks dot separator** (WARN) — one line per match; route: rename to `<namespace>.<name>.md` and update every reference.
+- **Broken artifact reference** (WARN) — one line per unresolved reference; route: correct the reference, or delete it when the artifact is retired.
+- **Narrative-padding heuristic** (WARN) — one line per match; route: drop the passage when its removal leaves executable behaviour unchanged.
+- **Authoring rule without template reference** (WARN) — one line per authoring rule with no `templates/**/*-template.md` mention in the body; route: create `<plugin>/templates/<group>/<artifact>-template.md` and add a `**Template:** <path>` pointer at the top of the rule body per `lazy-core.scaffold` — `/lazy-core.doctor` scaffolds both.
 
 ### Reference-writing compliance
 
-- **Size over budget** (FAIL / WARN) — reference > 50 KB (FAIL); > 25 KB (WARN). One line per file.
-- **Size waived** (INFO) — one line per reference carrying a valid `size-waiver:`, showing its size and the declared reason. Omit the whole subsection when there are no findings of either kind.
-- **Invalid `size-waiver:` value** (FAIL) — one line per reference whose waiver is boolean or empty.
+- **Size over budget** (FAIL / WARN) — reference > 50 KB (FAIL); > 25 KB (WARN). One line per file; route: split the subjects no reader needs together into siblings, leaving a numbered stub per extracted section, per `lazy-core.reference-writing § 4.1` — or declare `size-waiver: "<reason naming the reader>"` when the file is genuinely read whole (§ 4.2).
+- **Size waived** (INFO) — one line per reference carrying a valid `size-waiver:`, showing its size and the declared reason; no route. Omit the whole subsection when there are no findings of either kind.
+- **Invalid `size-waiver:` value** (FAIL) — one line per reference whose waiver is boolean or empty; route: replace it with a concrete string reason, or remove the key and act on the size finding.
 
 ### Expert runtime
 
 Render Agent D findings, grouped by sub-check. Omit any sub-check whose findings are all `[INFO]` and print only the summary line instead.
 
-**Expert configuration** — one line per `[FAIL]` from D1 (schema) and D2 (agent reference resolution). Show the `[INFO]` experts count line when all schema checks pass.
+**Expert configuration** — one line per `[FAIL]` from D1 (schema) and D2 (agent reference resolution); route on D1: add the missing fields per the expert schema, or re-run `/lazy-core.install` to re-scaffold the entry. Route on D2: correct the `agent` ref to a resolvable format (`<plugin>:<name>`, `user:<name>`, bare `<name>`), or delete the entry. Show the `[INFO]` experts count line when all schema checks pass.
 
-**Loop settings** — one line per `[FAIL]` or `[WARN]` from D3 (runtime schema) and D4 (routine command resolvability). Omit the section if all pass.
+**Loop settings** — one line per `[FAIL]` or `[WARN]` from D3 (runtime schema) and D4 (routine command resolvability); route on D3: re-run `/lazy-core.install` to scaffold or repair the flat `daemon` and `routines` sections. Route on D4: install the missing plugin, or unregister the routine via `/lazy-routine.unregister`. Omit the section if all pass.
 
-**Job hygiene** — one line per `[WARN]` from D5 (orphan jobs) and D6 (stale DONE/DEAD jobs). Omit the section if no warnings.
+**Job hygiene** — one line per `[WARN]` from D5 (orphan jobs) and D6 (stale DONE/DEAD jobs); route on D5: delete the orphan directory once its output is no longer wanted, or re-register the expert. Route on D6: start the pump so cleanup runs. Omit the section if no warnings.
 
-**Daemon liveness** — one line per `[WARN]` from D7. Omit the section if no warnings.
+**Daemon liveness** — one line per `[WARN]` from D7; route: restart the daemon through its supervisor — `/lazy-core.doctor` offers that restart. Omit the section if no warnings.
 
 **Aspect resolution** — one line per `[FAIL]` from D8. Omit the section if all pass.
 
@@ -746,37 +791,16 @@ Render Agent D findings, grouped by sub-check. Omit any sub-check whose findings
 
 Render Phase 1 inline findings.
 
-- **Logging rule presence** (FAIL / WARN) — one line per L1 finding. Omit the sub-section if all pass.
-- **`.logs/` and `.runtime/` directories** (WARN) — one line per L2 finding (each directory is checked independently). Omit if both present.
-- **`.gitignore` coverage** (WARN) — one line per L3 finding (`.logs/` and `.runtime/` are checked independently). Omit if both covered.
-- **`logging-waiver:` value** (FAIL) — one line per L4 finding. Omit if all valid.
+- **Logging rule presence** (FAIL / WARN) — one line per L1 finding; route: run `/lazy-core.setup` to copy `lazy-log.logging.md` into the consumer scope, or write the missing frontmatter `description:` in the plugin source. Omit the sub-section if all pass.
+- **`.logs/` and `.runtime/` directories** (WARN) — one line per L2 finding (each directory is checked independently); route: run `/lazy-core.setup` to bootstrap the directory. Omit if both present.
+- **`.gitignore` coverage** (WARN) — one line per L3 finding (`.logs/` and `.runtime/` are checked independently); route: add the missing line to `.gitignore`, by hand or via `/lazy-core.setup`. Omit if both covered.
+- **`logging-waiver:` value** (FAIL) — one line per L4 finding; route: replace the empty or boolean value with a concrete string reason per `lazy-log.logging` § Waiver. Omit if all valid.
 
 If all L1–L4 checks pass: emit a single `PASS: logging rule installed, .logs/ + .runtime/ present, .gitignore covers both, all waiver values valid` summary line.
 
-### Recommendations
+### Verdict
 
-- Memory index > 5 KB → suggest consolidation.
-- `python3` missing or below 3.8 → install/upgrade Python so plugin hooks (distill-trigger, lazy-guard.*, model-router, pub.*) can run.
-- Hardcoded paths found → run `/lazy-core.doctor` for details.
-- Missing Execution-Discipline preamble → add per `lazy-core.skill-writing § 1` (or `lazy-core.agent-writing § 4`), or declare `execution-discipline-waiver: "<reason>"` in frontmatter with a concrete justification.
-- Rule missing scope or waiver → add a `paths:` block-list (preferred) or `always_loaded: "<reason>"` per `lazy-core.rule-writing § 1`.
-- Rule using inline-array `paths:` form → migrate to canonical block-list shape per `lazy-core.rule-writing § 1`. `lazy-core.doctor` Phase 4 offers an in-place migration that preserves all globs.
-- Authoring rule without template reference → create `<plugin>/templates/<group>/<artifact>-template.md` (e.g. `templates/core/rule-template.md`) and add a `**Template:** <path>` pointer at the top of the rule body, per `lazy-core.scaffold`. `lazy-core.doctor` Phase 4 offers a templated fix.
-- Rule over size budget → move long guidance to `<plugin>/skills/<skill>/references/*.md` per `lazy-core.rule-writing § 2`.
-- Reference over size budget → split the subjects no reader needs together into siblings, leaving a numbered stub per extracted section, per `lazy-core.reference-writing § 4.1`. When the file is genuinely read whole, declare `size-waiver: "<reason naming the reader>"` in its frontmatter instead (§ 4.2).
-- "Optional" in phase/step heading → rename the heading; the user's accept/decline choice belongs inside an `AskUserQuestion`, not at the heading level.
-- Narrative-padding match → review and drop the passage if its removal leaves executable behavior unchanged.
-- Missing `description:` → write one, opening with the invocation condition per `lazy-core.skill-writing § 8` and the shapes in `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.description-triggers.md`.
-- `lazy.settings.json[experts]` FAIL → add missing fields per the expert schema; run `/lazy-core.install` wizard step to re-scaffold.
-- Reference resolution FAIL → verify the agent reference uses a valid format (`<plugin>:<name>`, `user:<name>`, or bare `<name>`) and that the referenced artifact exists.
-- Loop settings FAIL → re-run `/lazy-core.install` to scaffold or repair the flat `daemon` and `routines` sections in `lazy.settings.json`.
-- Routine command FAIL → install the missing plugin or remove the unresolvable routine entry.
-- Daemon stalled → run `/lazy-core.doctor` for the restart fix-offer.
-- Logging rule not installed in consumer scope → run `/lazy-core.setup` to copy `lazy-log.logging.md` to `.claude/rules/`.
-- `.logs/` or `.runtime/` missing → run `/lazy-core.setup` to bootstrap the directory.
-- `.gitignore` missing `.logs/` or `.runtime/` entry → add the missing line to `.gitignore` manually or via `/lazy-core.setup`.
-- `logging-waiver:` FAIL → replace empty/boolean waiver value with a concrete string reason per `lazy-core.skill-writing § 1`.
-- Note: system prompt, skill registry, MCP instructions, deferred tool list are injected by Claude Code and cannot be reduced by the user.
+Close the report with the contract's summary line — `audit: <LEVEL> (<N> findings)`, where `<LEVEL>` is the highest severity present with `INFO` counted as `PASS`, and `<N>` counts every finding rendered above. Nothing follows it.
 
 ## Logging
 
@@ -785,7 +809,7 @@ Log the run to `./.logs/claude/lazy-core.audit/YYYY-MM-DD_HH-MM-SS.md` per `lazy
 1. `Bash(mkdir -p ./.logs/claude/lazy-core.audit)` — a separate step from the `Write`, never chained.
 2. `Bash(date -u +%Y-%m-%d_%H-%M-%S)` for the filename; `Bash(git rev-parse HEAD)` and `Bash(git rev-parse --abbrev-ref HEAD)` for `git_sha` / `git_branch` (`no-git` when either fails).
 3. `Write` the file. Frontmatter: `git_sha`, `git_branch`, `date` (UTC), `input` (the arguments passed, or `none`).
-4. Body: `# lazy-core.audit` heading, then `## Actions` — one line per Phase with its outcome word, plus the per-severity finding counts — and `## Result` with the outcome word and a one-sentence summary.
+4. Body: `# lazy-core.audit` heading, then `## Actions` — one line per Phase with its outcome word, plus the per-severity and per-resolution finding counts — and `## Result` with the outcome word and a one-sentence summary.
 
 ## Failure modes
 

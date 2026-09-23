@@ -707,6 +707,41 @@ def _worktree_head(wt: Path) -> str | None:
   return head.stdout.strip()
 
 
+def _record_claim_head(jdir: Path, work_root: Path) -> str | None:
+  """
+  Write the commit the work tree stands at into the job bundle as its claim head.
+
+  Notes:
+    - Writes one file into the bundle directory and nothing else; the work tree is only read.
+
+  Args:
+    jdir: Job bundle directory the marker is written into.
+    work_root: Tree the job's buckets were copied from — its linked worktree when it has
+      one, otherwise the repository checkout.
+
+  Returns:
+    The recorded commit hash, or None when the tree has no resolvable `HEAD` — then no marker
+    is written, and a consumer reads the absence as "unknown", the conservative side.
+  """
+
+  # Domain(runtime.jobs):
+  # # A job's claim head
+  # A queued job reads nothing until the pump claims it; at that moment its inputs are copied
+  # from the tree as it stands, so the commit the tree points at then is the exact boundary of
+  # what the job saw. Anything reachable from that commit was in the job's inputs, anything
+  # landing later was not. Recording that commit beside the claim lets whoever dispatched the
+  # job answer "did it already see this change?" precisely, instead of guessing from clocks —
+  # a commit's timestamp says when it was authored elsewhere, not when it reached this tree.
+
+  # guard: no resolvable HEAD — leave no marker rather than a misleading one
+  if (head := _worktree_head(work_root)) is None:
+    return None
+
+  # the marker beside PID: one hash, read back by whoever dispatched the job
+  (jdir / JobArtifact.CLAIM_HEAD).write_text(f"{head}\n")
+  return head
+
+
 def _isolated_job_failure(wt: Path, pre_spawn_tip: str | None) -> str | None:
   """
   Check an isolated job's worktree after a clean spawn: dirty tree or an unmoved branch fails it.
@@ -1591,6 +1626,10 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     # The dead-job detector reads this to distinguish queued (no PID)
     # from active (PID file present, alive) from stuck (PID dead).
     (jdir / JobMarker.PID).write_text(f"{os.getpid()}\n")
+
+    # the commit the buckets above were copied from — the one fact that lets a consumer tell
+    # a change this job already read from one that landed after it started
+    _record_claim_head(jdir, worktree_dir or repo)
 
     # Bump attempts counter — persists across pump kills + recovery cycles.
     # Recovery routine reads this to decide retry vs. permanent-fail.

@@ -4,6 +4,8 @@ version: 2
 description: Vault-local Iconize protocol — how the Python worker, the bundled `iconize-reloader` Obsidian plugin, and Iconize itself cooperate to compute file/folder icons from frontmatter and apply them at the live `data.json`.
 protocol_version: 2.3.1
 hook_version: 4.0.0
+# `version` mirrors the icon-map schema generation (iconize_sync.py SCHEMA_VERSION), not this
+# document's own revision — protocol_version / hook_version above track the protocol itself.
 owner_skill: lazy-obsidian.iconize-sync
 ---
 # Obsidian Iconize Protocol (vault-local)

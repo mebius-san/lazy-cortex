@@ -4,6 +4,16 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 9.8.0 — 2026-09-23 UTC
+
+- Two new expert roles ship with `lazycortex-experts` and are seeded here: an editor for technical documents and a fiction editor for literary text, both on the opus tier.
+- A new `plugin-root` command answers where a plugin's sources live, preferring the authoring checkout over the install cache. Every install, audit, tier seed and stale-agent prune now uses it, so a role, rule, template or tier row added in a checkout is seen before it is published.
+- The two headless maintenance agents no longer refuse a repo just because its tree is dirty. Only a conflict with what the install chain writes stops a run; an operator-declared prefix is left alone, and each agent commits strictly its own writes.
+- A paused daemon keeps its dashboard honest: queue-depth, token, job and incident gauges are republished from disk on every paused iteration.
+- The job pump records the work tree's commit when it claims a job, so the guard defers only an edit the job never saw.
+- The commit journal is safe against concurrent writes — two runs on one commit leave one entry, and a journalling failure opens an incident instead of vanishing.
+- The review settings ladder attaches the document-height protocol to every existing tech class, so a vault installed earlier receives it on its next setup run.
+
 ### 9.7.0 — 2026-09-21 UTC
 
 - Fixed a quota-burning bug in expert-waking routines — a routine no longer re-triggers on its own commit, directory exclusions are honored, and same-directory file changes are grouped into one task instead of firing one task per file.
@@ -686,6 +696,14 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 9.6.0 — 2026-09-23 UTC
+
+- The level tech document is now a narrow statement of the technologies a level is built with. Its template keeps Terms, Stack and Platforms and drops the constraints, infrastructure-decision and boundary sections that pulled architecture into it.
+- The editing pass joins the review chain. The install seed and the product configurator put the domain's editor second in the main-writer list of seven prose classes, so a main round ends with the prose brought to the writing canon before the operator reads it.
+- Every expert writing a spec document is now forbidden to restate or quote another spec document — material another document owns is linked, never copied.
+- Four documentation contracts rejoined the code: a parked document may be abandoned where it sits, a research report travels through the job's result directory like every other catalog document, the content-root use-cases document is declared an opt-in level document, and the enumerations of stage-bearing documents name the research pair.
+- A queued job now covers its own wake, so the coordinator does not stamp a status note again after its own commit.
+
 ### 9.5.0 — 2026-09-21 UTC
 
 - Routine registrations `lazy-spec.install` writes (`lazy-spec.gate-tick`, `lazy-spec.coordinator-watch`, `lazy-spec.request-open`, `lazy-spec.request-apply`, `lazy-spec.collect-tick`, `lazy-spec.upstream-tick`) are now reconciled on every run instead of being left alone once present — the path mask, filter predicates, dispatch shape, and worker are corrected to the shipped shape, while operator-tuned cadence keys are left untouched. A registration made before any of those changed used to keep its old shape forever.
@@ -1005,6 +1023,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 6.0.0 — 2026-09-23 UTC
+
+- The audit no longer offers to repair the vault. It used to ask the operator to pick between two routes and then run the chosen one; now it names both routes in the finding and runs neither.
+- The plugin publishes both repair routes through its manifest, so the checkup command offers them alongside the core ones.
+- The audit writes a run log again, having previously opted out of logging.
+- The install and the vault-plugin updater resolve this plugin's own sources from the authoring checkout before the install cache.
+
 ### 5.4.0 — 2026-09-21 UTC
 
 - Re-running the Obsidian install (or `lazy-obsidian.iconize-install` on its own) now repairs an existing repaint-routine registration instead of leaving it frozen at whatever shape it was created with — the watch mode, worker command, and commit identity are brought up to the current shipped values automatically, while your own interval, branch, and halt-behavior tuning is left untouched.
@@ -1226,6 +1251,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-diagram
 
+### 2.0.0 — 2026-09-23 UTC
+
+- The audit no longer fixes anything. It used to ask which findings to repair and then edit the shipped templates; now it reports and stops, and each finding names the route that repairs it.
+- The plugin publishes its own repair flow through its manifest, so the checkup command offers it alongside the core ones.
+- The audit resolves this plugin's own templates and colour schemes from the authoring checkout before the install cache.
+
 ### 1.2.5 — 2026-09-13 UTC
 
 - Fixed a plugin-install failure: the install skill's core-CLI call could exit 126 on a checkout without the exec bit and could resolve to a stale cached copy of the core CLI; it now runs through the interpreter and always picks the highest-version registry record.
@@ -1309,6 +1340,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
 
 ## lazycortex-review
+
+### 6.8.0 — 2026-09-23 UTC
+
+- The audit writes a run log again, carries its repair route in the line that reports each finding, and matches the severity vocabulary every other audit uses.
+- The document-review wire protocol now documents the `history` dispatch the code has always accepted, including its outcomes and the summary field it requires, and its error categories are back to the three the runtime contract defines.
 
 ### 6.7.0 — 2026-09-21 UTC
 
@@ -1492,6 +1528,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-observe
 
+### 2.1.0 — 2026-09-23 UTC
+
+- The audit gained an `INFO` severity level and a run-log step, and every finding now carries its own repair route instead of one route stated for the whole skill.
+
 ### 2.0.1 — 2026-09-12 UTC
 
 - Fixed the shipped Prometheus alert annotations and FAQ, which pointed at the bare `lazycortex-core error-list` command — that form exits 126 (no exec bit, not on `PATH`); triage commands now run through the interpreter and actually work when copied.
@@ -1616,6 +1656,14 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.
 
 ## lazycortex-experts
+
+### 1.9.0 — 2026-09-23 UTC
+
+- Two editing roles join the class map: an editor for technical documents and a fiction editor for literary text. Each corrects prose in place under the edit markers, against its own canon, and neither changes what a document says or what happens in a scene.
+- A technical class now seeds fifteen roles including the editor; a fiction class seeds a fiction writer and a fiction editor. Neither editor crosses to the other row.
+- The install reads its own agents and aspects from the authoring checkout when the repo ships the plugin, so a role added there is seeded before it is published.
+- The audit follows the shared audit shape: the full severity vocabulary, and a repair route in every finding line.
+- Two documentation slips closed: the discipline aspect no longer counts its own laws in the preamble, and the architect names the real six-section shape of the architecture template.
 
 ### 1.8.0 — 2026-09-20 UTC
 
@@ -1775,6 +1823,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 4.7.1 — 2026-09-23 UTC
+
+- Each audit finding now carries its own repair route. The route used to be stated once for the whole skill, which left an individual finding without it.
+- The install resolves this plugin's own sources from the authoring checkout before the install cache.
 
 ### 4.7.0 — 2026-09-21 UTC
 
@@ -1972,6 +2025,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 3.2.1 — 2026-09-23 UTC
+
+- The audit follows the shared audit shape: the full severity vocabulary, and a repair route in every finding line.
+- Three wire-protocol slips closed. The curator protocol no longer restates the response envelope the runtime contract owns, an empty topic index is legal dispatcher input again, and the structure and terms protocols name the batched request keys in their error rows.
+- The install resolves this plugin's own sources from the authoring checkout before the install cache.
 
 ### 3.2.0 — 2026-09-21 UTC
 

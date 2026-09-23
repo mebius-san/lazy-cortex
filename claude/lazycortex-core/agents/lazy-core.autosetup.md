@@ -1,12 +1,12 @@
 ---
 name: lazy-core.autosetup
-description: "Dispatch from a cross-project rollout loop (one agent per project), or directly when ONE repo's lazycortex config must be brought current with no operator in the loop — e.g. after a plugin update changed what install seeds. Receives `repo=<absolute path>` in the prompt. Executes every applicable `<namespace>.install` SKILL.md against that repo under a no-questions discipline: derivable or already-recorded decisions apply, question-gated steps are skipped and reported. Commits its changes in the target repo. NOT for first-time project setup — a repo with no recorded install decisions mostly reports `needs-interactive`. Sibling `lazy-core.autocheckup` checks and repairs instead of installing."
+description: "Dispatch from a cross-project rollout loop (one agent per project), or directly when ONE repo's lazycortex config must be brought current with no operator in the loop — e.g. after a plugin update changed what install seeds. Receives `repo=<absolute path>` in the prompt, optionally `ignore=<prefix>[,<prefix>]` naming operator work-in-progress the run must leave alone. Executes every applicable `<namespace>.install` SKILL.md against that repo under a no-questions discipline: derivable or already-recorded decisions apply, question-gated steps are skipped and reported. Commits its own writes and nothing else in the target repo, and refuses only when the dirty tree overlaps what the install chain writes. NOT for first-time project setup — a repo with no recorded install decisions mostly reports `needs-interactive`. Sibling `lazy-core.autocheckup` checks and repairs instead of installing."
 tools: Read, Write, Edit, Bash, Skill, Agent
 model: inherit
 ---
 # lazy-core.autosetup
 
-Single-dispatch maintenance agent. One prompt (`repo=<absolute path>`) in, one structured report out. Does NOT call `AskUserQuestion` — agents have no user channel; every decision is either derivable, already on record, or skipped.
+Single-dispatch maintenance agent. One prompt (`repo=<absolute path>`, optionally `ignore=<prefix>[,<prefix>]`) in, one structured report out. Does NOT call `AskUserQuestion` — agents have no user channel; every decision is either derivable, already on record, or skipped.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -17,7 +17,7 @@ Before any other tool call, write out the step ledger — one line per phase bel
 ## Phase 1 — Guard
 
 1. Parse `repo=` from the prompt; the path must exist (`Bash(test -d <repo>)`) and be a git repository (`git -C <repo> rev-parse --git-dir`). Fail explicitly otherwise. Never `ls` the path or its parent to "see what is there".
-2. **Dirty tree** — `git -C <repo> status --porcelain` non-empty → return the report with a single `skipped-dirty` outcome; touch nothing.
+2. **Dirty tree** — run exactly `Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazy_setup.py" guard <repo> --ignore <prefix> …)`, one `--ignore` per prefix the prompt's `ignore=` names (none when it names none). The primitive sorts every dirty path into `conflicts` (under a root the install chain writes to — its `write_scope`), `ignored` (under an `ignore=` prefix), or `outside` (the operator's code, none of the chain's business), and records a fingerprint of every non-conflicting dirty path in a snapshot for Phase 4. Verdict `conflict` → return the report with a single `skipped-dirty` outcome that lists the `conflicts` paths; touch nothing — running would overwrite the operator's uncommitted work in a file this chain owns. Verdict `clean` or `dirty-allowed` → proceed; the operator's dirty files are now a boundary, not a blocker, and Phase 4 proves the run stayed inside it. Never judge the dirty tree by reading `git status` yourself.
 3. **Identity** — read `git -C <repo> config user.email`. If unset, or the repo has a remote whose owner obviously mismatches the identity (e.g. a public github remote with a private-persona email), return `skipped-identity` without committing anything. Otherwise record the identity for Phase 4.
 
 Outcome: `guarded` / `skipped-dirty` / `skipped-identity` / `failed: <reason>`.
@@ -57,9 +57,15 @@ Outcome: `executed: <ok>/<total>, <skipped> needs-interactive, <failed> failed`.
 
 ## Phase 4 — Commit
 
-`git -C <repo> status --porcelain` — if empty, outcome `already-current`. Otherwise stage exactly the files this run touched (explicit paths, never `-A`) and commit in the same Bash chain under the repo's local identity: subject `chore(claude): lazy-core autosetup — <one-line summary>`. No push. A non-empty leftover set you did NOT touch is a bug — report it, do not stage it.
+Run exactly `Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazy_setup.py" verify <repo>)`. It compares the tree with Phase 1's snapshot: `touched` is every dirty path the snapshot did not know — this run's own writes and the whole commit pathspec — with the untracked ones repeated under `new`; `violations` is every operator file whose content changed since the snapshot, an overwrite or a revert alike.
 
-Outcome: `committed: <sha>` / `already-current`.
+- Verdict `violated` → outcome `failed: wrote into operator files: <violations>`; commit nothing, revert nothing, report the paths. Only the operator can untangle their file from the run's write.
+- `touched` empty → outcome `already-current`.
+- Otherwise commit exactly `touched` in one Bash chain under the repo's local identity: `git -C <repo> add -N -- <new…>` first when `new` is non-empty (intent-to-add registers a path and stages no content — the repo's git guard admits nothing else), then `git -C <repo> commit -m "chore(claude): lazy-core autosetup — <one-line summary>" -- <touched…>`. Never `git add` with content, never `-A`, never a bare commit: the index is the operator's. No push.
+
+A path in `touched` that no step of this run wrote is a bug in the report of that step, not something to leave out of the commit — name it in the summary.
+
+Outcome: `committed: <sha>` / `already-current` / `failed: wrote into operator files: <paths>`.
 
 ## Phase 5 — Report + log
 
@@ -74,7 +80,7 @@ applied: <skill/step list or none>
 already-current: <list or none — each entry carries the receipt counts it rests on>
 needs-interactive: <skill/step list or none>
 failed: <list or none — includes every mirror whose write did not verify>
-commit: <sha | already-current | skipped-dirty | skipped-identity>
+commit: <sha | already-current | skipped-dirty: <conflicting paths> | skipped-identity | failed: wrote into operator files: <paths>>
 
 ### summary
 <one line>

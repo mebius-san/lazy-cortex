@@ -1,12 +1,14 @@
 ---
 name: lazy-obsidian.audit
-description: "Run when the operator asks whether this vault's live Obsidian config still matches its captured manifest — icons or plugin settings changed by hand, a plugin updated past its captured version, or after pulling a checkout onto a new machine. Compares `.obsidian.manifest.json` against the live config directory and reports drift; the fix is the operator's pick between `/lazy-obsidian.capture` and `/lazy-obsidian.deploy`. Read-first; presents findings, then asks which to fix."
-allowed-tools: Read, Glob, Grep, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(test *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), AskUserQuestion, Write, Agent
+description: "Run when the operator asks whether this vault's live Obsidian config still matches its captured manifest — icons or plugin settings changed by hand, a plugin updated past its captured version, or after pulling a checkout onto a new machine. Delegated from `lazy-core.doctor` Phase 3. Read-only comparison of `.obsidian.manifest.json` against the live config directory: every finding names both repair routes — `/lazy-obsidian.capture` when the vault is right, `/lazy-obsidian.deploy` when the manifest is — and the audit runs neither."
+allowed-tools: Read, Write, Glob, Grep, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(test *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Agent
 argument-hint: "(no arguments — runs the vault-manifest drift check)"
 ---
 # lazycortex-obsidian audit
 
 Vault-manifest drift check: does the live `.obsidian/` config still match the manifest `/lazy-obsidian.capture` recorded. Consumer-facing only — the plugin's own shipped artifacts are audited by the maintainer's tooling, not here.
+
+The run follows the shared audit shape in `claude/lazycortex-core/references/lazy-core.audit-contract.md` — severity vocabulary, finding shape, and the read-only boundary come from there. This skill asks nothing and resolves no drift: it names the repair route on the finding line and stops. The one file it writes is its own run log, which `lazy-log.logging` makes mandatory for every run.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -14,10 +16,10 @@ This skill has 3 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 1 — Vault manifest drift`
-   - `Phase 2 — Report + fix loop`
+   - `Phase 2 — Report`
    - `Phase 3 — Log the run`
-2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `no-manifest`, `skipped-per-user-choice`).
-3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `clean`, `no-manifest`, `logged`).
+3. **Do not reach the Report step until the ledger shows Phase 1 `completed`.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
 ## Phase 1 — Vault manifest drift
@@ -30,25 +32,35 @@ Only when the repo carries a vault manifest — `test -f <repo_root>/.obsidian.m
 
 The worker writes nothing; it compares the live config directory against the manifest and returns two lists.
 
-- **WARN** per entry in `drift` — the live vault and its manifest disagree. Never auto-resolve: only the operator knows which side is right. Offer the two moves in the fix loop and let them choose — `/lazy-obsidian.capture` (the vault is right, record it) or `/lazy-obsidian.deploy` (the manifest is right, restore it).
-- **WARN** per entry in `warnings` — not drift. A plugin whose installed version moved past the one its settings were captured under, and credentials the manifest can never carry.
-- **PASS** when both lists are empty.
+Outcomes — each finding line carries both repair routes, and the audit runs neither:
 
-Outcome: `clean`, `drift: <N>`, or `no-manifest`.
+- `PASS` — both lists are empty; the live vault and its manifest agree.
+- `INFO no-manifest` — `<repo_root>/.obsidian.manifest.json` is absent, so there is nothing to compare; nothing to act on unless the operator wants a manifest, which `/lazy-obsidian.capture` records.
+- `INFO` per entry in `warnings` — not drift: a plugin whose installed version moved past the one its settings were captured under, or a credential value the manifest can never carry. Nothing to act on; neither `/lazy-obsidian.capture` nor `/lazy-obsidian.deploy` changes it.
+- `WARN` per entry in `drift` — `<repo_root>/.obsidian/` and `<repo_root>/.obsidian.manifest.json` disagree on that entry, and only the operator knows which side is right → `/lazy-obsidian.capture` when the vault is right (record it), `/lazy-obsidian.deploy` when the manifest is (restore it). Never resolved here, and never by hand.
+- `FAIL worker-refused` — the worker raised: the manifest at `<repo_root>` does not parse, or the vault has no `.obsidian/` config directory to compare it against → `/lazy-obsidian.capture` rewrites an unparseable manifest from the live vault; a checkout with no config directory at all needs `/lazy-obsidian.install` first.
 
-## Phase 2 — Report + fix loop
+Outcome: `clean`, `drift: <N>`, `no-manifest`, or `worker-refused`.
 
-Collect all findings. Present a grouped report with `PASS` / `WARN` / `FAIL` prefixes. For each `WARN`, one `AskUserQuestion`, its context filled per finding:
+## Phase 2 — Report
+
+Render the findings as one line each, in the contract's finding shape, grouped by severity:
 
 ```
-Context (print before asking):
-- Where: /lazy-obsidian.audit · Phase 2 — Report + fix loop; target <repo_root>/.obsidian/ vs <repo_root>/.obsidian.manifest.json
-- Found: <the WARN line verbatim — the drifted entry with its live and manifest values, or the warning>
-- Why asking: only the operator knows which side is right — the live vault or the manifest
-- Answers: `fix` — drift routes through `/lazy-obsidian.capture` (the vault is right, record it) or `/lazy-obsidian.deploy` (the manifest is right, restore it) per the operator's pick, never resolved by hand here; `skip` — left as is, nothing written, shown again on the next audit
-AskUserQuestion: header "Drift", question "<entry> differs between the live vault and the manifest at <repo_root> — fix or skip?", options `fix`, `skip` with those descriptions.
+[<SEVERITY>] <entry> — <live value vs manifest value>; <repair route>
 ```
+
+The route on each line is the one Phase 1's outcome list names for that severity, repeated per line; there is no trailing recommendations section, and nothing is dispatched. Close with the contract's summary line — `audit: <PASS|WARN|FAIL> (<n> findings)`, the verdict being the highest severity present and `INFO` counting as `PASS`.
+
+Outcome: `reported`.
 
 ## Phase 3 — Log the run
 
-`./.logs/claude/lazy-obsidian.audit/YYYY-MM-DD_HH-MM-SS.md` per the logging rule.
+Log the run to `./.logs/claude/lazy-obsidian.audit/YYYY-MM-DD_HH-MM-SS.md` per `lazy-log.logging`. Read-only is not an exemption: the finding set this skill produces is variable-shaped, so it is `should-log`, never a waiver candidate. The log is the one file this skill writes.
+
+1. `Bash(mkdir -p ./.logs/claude/lazy-obsidian.audit)` — a separate step from the `Write`, never chained.
+2. `Bash(date -u +%Y-%m-%d_%H-%M-%S)` for the filename; `Bash(git rev-parse HEAD)` and `Bash(git rev-parse --abbrev-ref HEAD)` for `git_sha` / `git_branch` (`no-git` when either fails).
+3. `Write` the file. Frontmatter: `git_sha`, `git_branch`, `date` (UTC), `input` (the arguments passed, or `none`).
+4. Body: `# lazy-obsidian.audit` heading, then `## Actions` — one line per step with its outcome word, plus the per-severity finding counts — and `## Result` with the outcome word and a one-sentence summary.
+
+Outcome: `logged`.

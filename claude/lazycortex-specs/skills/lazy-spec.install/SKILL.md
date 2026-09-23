@@ -108,7 +108,7 @@ Project root is `git rev-parse --show-toplevel` (or current working directory if
 | `user` | `~/.claude/` |
 | `project` | `<repo-root>/.claude/` |
 
-The plugin install path (`<installPath>`) is the `installPath` field from `installed_plugins.json` for `lazycortex-specs@lazycortex`. The plugin ships:
+The plugin install path (`<installPath>`) is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-specs` prints: the authoring repo's `claude/lazycortex-specs/` when this checkout ships the plugin, else the exported or newest cached copy — never `installed_plugins.json` read by hand. The plugin ships:
 
 - Protocol-contract docs at `${CLAUDE_PLUGIN_ROOT}/references/*.md`
 - Default authored-doc templates at `${CLAUDE_PLUGIN_ROOT}/templates/spec.<context>/` (one folder per shipped type: `spec.feature/`, `spec.change/`, `spec.bug/`, `spec.content/`, `spec.research/`, `spec.product/`, `spec.request/`; operator-defined types add their own under `spec.<name>/` via `/lazy-spec.add-asset-type`)
@@ -309,7 +309,7 @@ This sub-step carries no outcome of its own — it rolls into Step 5b's, which r
 
 The coordinator's every write — `# Status brief`, `[!question]` callouts, gate flips, `# Coordinator commands` locking — is a local commit in the daemon's own checkout. It reaches the operator only through the daemon's post-iteration `_git_post` push, which itself only runs when `daemon.git.remote_sync == "pull_push"` (`runtime_daemon.py`'s `_git_post`). A checkout with `remote_sync` unset or set to anything else piles up every coordinator commit locally, forever invisible to the operator.
 
-Read the tracked `daemon.git` block. `<core-bin>` is `<installPath-of-lazycortex-core>/bin` — resolve `lazycortex-core@lazycortex`'s `installPath` from `installed_plugins.json`:
+Read the tracked `daemon.git` block. `<core-bin>` is `<core-root>/bin`, where `<core-root>` is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-core` prints — the authoring repo's `claude/lazycortex-core/` when this checkout ships the plugin, else the exported or newest cached copy. Outside an authoring repo that is the `installPath` of `lazycortex-core@lazycortex` from `installed_plugins.json`:
 
 ```
 Bash(PYTHONPATH=<core-bin> python3 -c "from lazy_settings import load_tracked_section; from pathlib import Path; print(load_tracked_section(Path('<repo-root>/.claude/lazy.settings.json'),'daemon').get('git',{}).get('remote_sync','unset'))")
@@ -485,6 +485,7 @@ Under `review.classes` append each entry below whose `class:` token no existing 
   experts:
     main:
       - name: <designer-expert>
+      - name: <editor-expert>
 # use-cases.md class (all levels) — use-case-writer writes; one designer_review validation slot
 # (asset-level: opt-in sibling created by a ticked launch checkbox; seed-doc copies the status
 # folder-note's spec_source_requests onto the seeded doc, so context_from_frontmatter folds the
@@ -500,6 +501,7 @@ Under `review.classes` append each entry below whose `class:` token no existing 
   experts:
     main:
       - name: <use-case-writer-expert>
+      - name: <editor-expert>
     validation:
       designer_review:
         name: <designer-expert>
@@ -515,6 +517,7 @@ Under `review.classes` append each entry below whose `class:` token no existing 
   experts:
     main:
       - name: <designer-expert>
+      - name: <editor-expert>
     validation:
       architect_review:
         name: <architect-expert>
@@ -534,6 +537,7 @@ Under `review.classes` append each entry below whose `class:` token no existing 
   experts:
     main:
       - name: <system-designer-expert>
+      - name: <editor-expert>
 - class: system-design
   protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol", "lazycortex-specs:lazy-spec.doc-height-protocol"]
   paths:
@@ -543,15 +547,18 @@ Under `review.classes` append each entry below whose `class:` token no existing 
   experts:
     main:
       - name: <system-designer-expert>
+      - name: <editor-expert>
     validation:
       architect_review:
         name: <architect-expert>
         section: Architect review
         position: bottom
 # system-tech class — the product-root tech.md AND the content-root (project-wide) tech.md;
-# the architect writes (a tech spec is code structure, not code), no validators
+# the architect writes the technologies the level is built with — stack and platforms, never
+# code structure — and the height protocol keeps the product document from repeating the
+# content-root one; no validators
 - class: system-tech
-  protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol"]
+  protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol", "lazycortex-specs:lazy-spec.doc-height-protocol"]
   paths:
     - "*/tech.md"
     - "tech.md"
@@ -686,6 +693,7 @@ Under `review.classes` append each entry below whose `class:` token no existing 
   experts:
     main:
       - name: <designer-expert>
+      - name: <editor-expert>
     validation:
       researcher_review:
         name: <researcher-expert>
@@ -701,6 +709,7 @@ Under `review.classes` append each entry below whose `class:` token no existing 
   experts:
     main:
       - name: <researcher-expert>
+      - name: <editor-expert>
 # bug.md class — tester writes the report; developer validates (the same DV shape product-config
 # Step 12 generates); context_from_frontmatter folds the originating request(s) in
 - class: bug
@@ -718,7 +727,7 @@ Under `review.classes` append each entry below whose `class:` token no existing 
         position: bottom
 ```
 
-`<use-case-writer-expert>` / `<designer-expert>` / `<system-designer-expert>` / `<architect-expert>` / `<ui-designer-expert>` / `<planner-expert>` / `<developer-expert>` / `<tester-expert>` / `<data-writer-expert>` / `<docs-writer-expert>` / `<researcher-expert>` are placeholders for the consumer-supplied COMPOSED expert key (typically `<domain>.<role>` from `lazycortex-experts`, e.g. `claude-plugin.designer` — never a bare role word like `designer`; a project-local override expert key works the same way). The bare `vision.md` / `design.md` / `tech.md` entries of the system classes catch the project-wide set that lives loose at the spec content-root (`spec.vault_root`, default `specs`), beside `requests/`. When the consumer has not registered one of them yet, omit that class until the expert exists — without a registered `main`, the dispatcher logs a no-writer warning per-tick. The `bug` class above is that layout's own class (bug-kind layout substitutes `bug.md` for `design.md`); it carries the same `context_from_frontmatter: [spec_source_requests]` key as `design`.
+`<use-case-writer-expert>` / `<designer-expert>` / `<system-designer-expert>` / `<architect-expert>` / `<ui-designer-expert>` / `<planner-expert>` / `<developer-expert>` / `<tester-expert>` / `<data-writer-expert>` / `<docs-writer-expert>` / `<researcher-expert>` / `<editor-expert>` are placeholders for the consumer-supplied COMPOSED expert key (typically `<domain>.<role>` from `lazycortex-experts`, e.g. `claude-plugin.designer` — never a bare role word like `designer`; a project-local override expert key works the same way). The bare `vision.md` / `design.md` / `tech.md` entries of the system classes catch the project-wide set that lives loose at the spec content-root (`spec.vault_root`, default `specs`), beside `requests/`. When the consumer has not registered one of them yet, omit that class until the expert exists — without a registered `main`, the dispatcher logs a no-writer warning per-tick. `<editor-expert>` is the one exception: it is never the reason to omit a class. It stands second in `main` on the seven prose classes — `vision`, `system-vision`, `use-cases`, `design`, `system-design`, `research-design`, `research-report` — so the editing pass runs after the author in every main round, before the document reaches the operator; when no `<domain>.editor` is registered, drop that one entry and seed the class with its author alone. **The editor joins on re-run.** A class of those seven that already exists with its author as the only main writer gains the editor entry the moment a `<domain>.editor` of the same domain as `main[0]` appears in the experts registry — an append at position two, never a rewrite of the author's entry, stated as `editor-joined: <class>…`; a class the operator narrowed to a `review_expert` override or wired to a different chain is left alone. Journals, plans, `request`, `bug`, `system-tech`, `architecture`, and the two ui-design classes carry no editor: journals are only appended to, the rest are lists and structure where the prose canon buys little per dispatch. The `bug` class above is that layout's own class (bug-kind layout substitutes `bug.md` for `design.md`); it carries the same `context_from_frontmatter: [spec_source_requests]` key as `design`.
 
 The `design` and `test-plan` classes' `main` experts carry one dispatch beyond ordinary review-writing: `spec.coordinator`'s change-cascade dispatch (`lazy-spec.coordination-playbook.md` Chapter 4, wire shape in `lazy-spec.lifecycle-protocol.md` Part 4) sends them to fold a change's design delta into a *different* asset's own `design.md` / `test-plan.md`. That folded document is a catalog document like every other: the writer returns it through its job's `result/`, and the coordinator — which owns cascade sequencing and therefore knows which asset the delta was folded into — lands it on the job-done wake with the `land-result` verb the specs CLI carries, naming the job dir and the target document, committed under the collector's bot identity with explicit paths. The writer never edits the other asset's document where it sits and never commits it.
 

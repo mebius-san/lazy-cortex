@@ -63,15 +63,31 @@ Otherwise state outcome `discovered-N` where N is the number of manifests found.
 
 ## Step 3 — Copy templates per group
 
+**3a. Collect the operator's own template paths.**
+
+Read the registry's `_local` key before anything is written — its entries are templates the operator authored, and this plugin owns none of them however its own shipped files happen to be named:
+
+```bash
+"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" scaffold list --registry <regPath>
+```
+
+Parse the JSON output and take `registry._local`; an absent key means an empty map. Resolve every entry key to an absolute path — a key starting with `~/` expands against `$HOME`, any other key is relative to `<repo-root>` for `project` scope and to `$HOME` for `user` scope. `<protectArgs>` is one `--protect <absolute path>` per resolved key; with no `_local` entries it is the empty string.
+
+State outcome `protecting-N` where N is the number of resolved paths.
+
+**3b. Sync the shipped templates.**
+
 For each `<group>` discovered in Step 2, sync the template files from `<installPath>/templates/<group>/` into the consumer's `.claude/templates/<group>/` directory (where "consumer" scope = `~/.claude/` for `user`, `<repo-root>/.claude/` for `project`) with the deterministic sync script — the current/not-current verdict comes from the receipt, never from impression:
 
 ```bash
-"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/file_sync.py" --src <installPath>/templates/<group> --dst <consumerScope>/.claude/templates/<group> --copy-diverged --exclude scaffold.entries.json
+"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/file_sync.py" --src <installPath>/templates/<group> --dst <consumerScope>/.claude/templates/<group> --copy-diverged --exclude scaffold.entries.json <protectArgs>
 ```
 
 `scaffold.entries.json` is plugin-internal and must not land in the consumer tree. The script creates the target directory, copies absent targets (state **installed**), byte-compares the rest (**unchanged**), overwrites every stale target from the shipped source (**refreshed**), and re-compares each write before reporting it. Subdirectories are ignored — template groups are flat.
 
 **The script is the whole step — there is nothing here to judge.** An authoring template is plugin-owned: a consumer who wants a different template authors their own file and registers it under the registry's `_local` key, where it wins over the plugin entry at equal glob specificity. So a target that differs from the shipped source is a stale copy, not a customisation, and it is overwritten without a diff preview, a merge, or a question.
+
+**A path the registry lists under `_local` is the one exception, and the script enforces it.** Such a path is the operator's own file: `--protect` makes the script leave it byte-for-byte as it is on disk — never compared, never overwritten — and report it as **protected**. A shipped template that carries the same filename confers no claim on it. What this catches is a `_local` template sitting in a group a plugin supplies — `/lazy-core.scaffold-local` Step 3a refuses to create one, but a hand-edited registry bypasses that refusal. Protection is a safety net, not the fix: surface every skip and name the `_local` entry behind it.
 
 Exit code 3 with a non-empty `failed` array means a write did not verify — report it as **failed** and never restate it as applied.
 
@@ -91,7 +107,7 @@ State outcome `merged-N` where N is the total number of entries across all group
 
 ## Step 5 — Resolve core CLI
 
-Read `~/.claude/plugins/installed_plugins.json`. Find the `lazycortex-core@lazycortex` key. If absent or its array is empty → FAIL with:
+When this repo authors the plugin itself (`<repo-root>/claude/lazycortex-core/.claude-plugin/plugin.json` exists), `<core-cli>` is `<repo-root>/claude/lazycortex-core/bin/lazycortex-core` — the sources in the tree, never the cached copy, which lags them until the next publish. Otherwise read `~/.claude/plugins/installed_plugins.json`. Find the `lazycortex-core@lazycortex` key. If absent or its array is empty → FAIL with:
 
 > `scaffold-sync: cannot resolve core CLI — lazycortex-core not installed; run /lazy-core.install first`
 
@@ -103,7 +119,7 @@ Verify the file exists with `Bash(test -f <core-cli>)`. If not → FAIL with:
 
 State outcome `resolved`.
 
-Note: `$LAZYCORTEX_PLUGIN_DIRS` may be unset at install time — always resolve via `installed_plugins.json`.
+Note: `$LAZYCORTEX_PLUGIN_DIRS` may be unset at install time — outside an authoring repo, always resolve via `installed_plugins.json`.
 
 ## Step 6 — Upsert registry
 
@@ -139,7 +155,7 @@ Templates synced:
 Registry upsert: <status>
 ```
 
-One line per template file. State one of: `installed`, `unchanged`, `refreshed`, `failed`. Then the upsert status line.
+One line per template file. State one of: `installed`, `unchanged`, `refreshed`, `protected`, `failed`. A `protected` line carries the reason and the entry behind it — `<group>/<filename>: protected — registered under `_local`, left as authored`. Then the upsert status line.
 
 ## Failure modes
 
@@ -148,6 +164,7 @@ One line per template file. State one of: `installed`, `unchanged`, `refreshed`,
 - **`scaffold-sync: cannot resolve core CLI — lazycortex-core not installed`** — `installed_plugins.json` has no `lazycortex-core@lazycortex` entry → install the plugin first (`/lazy-core.install`), then re-run.
 - **`scaffold-sync: core CLI not found at <path>`** — the `installPath` in `installed_plugins.json` points to a path that no longer exists → run `/plugin update lazycortex-core@lazycortex` to refresh the cache, then re-run.
 - **`scaffold upsert` returns `error`** — the core CLI rejected the entries (malformed JSON, schema mismatch, or registry write failure) → inspect the full error output, fix the manifest, then re-run.
+- **A template reports `protected`** — the consumer path is registered under `_local`, so the operator's own file was kept and the shipped template did not land → not an error; the `_local` entry sits in a group this plugin supplies, which `/lazy-core.scaffold-local` refuses to create. Re-file that entry under a group of its own with `/lazy-core.scaffold-local mode=remove` followed by `mode=add`, then re-run this skill.
 
 ## Logging
 

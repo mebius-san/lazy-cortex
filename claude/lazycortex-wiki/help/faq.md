@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about setting up scopes, running relinks, mirroring foreign repos, querying the wiki, the terms dictionary, the structure map, the domain-spec tree, the tag-values canon, and the wiki's own writing language.
-last_regen: 2026-09-21
+last_regen: 2026-09-23
 no_diagram: true
 source_skills:
   - lazy-wiki.install
@@ -13,8 +13,8 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: ece443fde681d08757d84c2adc770268af1c254a
-surface_sha: 08486043e0ee4b6d8a3ea70f5f40291f592991d77fe919591712a724b729e9ce
+source_sha: d646145dc19da6bfbae3e0c00253f21e2d5c4ad2
+surface_sha: 564d0025ea441c04cb7ea267855ad9324c1e71ed8b7e30cad6122c1c6dbabdc8
 ---
 # Frequently asked questions
 
@@ -114,7 +114,7 @@ There are two common causes. First, the topics index for the relevant scope may 
 
 `<wiki-cli>` stands for the wiki plugin's `bin/lazycortex-wiki` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-wiki/<version>/`, or `claude/lazycortex-wiki/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
-`/lazy-wiki.audit [<scope-id>]` runs a read-only audit first and groups findings by severity (`FAIL`, `WARN`, `INFO`). Fixable findings — `orphan-topic`, `index-desync`, `index-stale`, `see-also-path-base`, `broken-see-also`, and `stale-gloss` — are repaired by rebuilding the topic index (an `index-stale` finding covers a `topics.md` link whose file no longer exists there, and the reverse — a tagged node the index never links, typically after a rename or move), rewriting See-also links onto the canonical path base, dropping broken See-also lines, or refreshing stale glosses. The skill applies none of them — run `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> doctor <scope-id> --apply` for that repair set, or let the daily `lazy-wiki.doctor-apply` routine do it.
+`/lazy-wiki.audit [<scope-id>]` runs a read-only audit first and groups findings by severity (`PASS`, `INFO`, `WARN`, `FAIL` — a check that ran with nothing wrong is a `PASS`). Fixable findings — `orphan-topic`, `index-desync`, `index-stale`, `see-also-path-base`, `broken-see-also`, and `stale-gloss` — are repaired by rebuilding the topic index (an `index-stale` finding covers a `topics.md` link whose file no longer exists there, and the reverse — a tagged node the index never links, typically after a rename or move), rewriting See-also links onto the canonical path base, dropping broken See-also lines, or refreshing stale glosses. The skill applies none of them — run `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> doctor <scope-id> --apply` for that repair set, or let the daily `lazy-wiki.doctor-apply` routine do it.
 
 `see-also-path-base` catches a See-also link written against the wrong path form for the target node (for example, a relative link that no longer matches how the node's canonical path is tracked in the index) — the fix rewrites the link's target to the canonical path without touching its gloss.
 

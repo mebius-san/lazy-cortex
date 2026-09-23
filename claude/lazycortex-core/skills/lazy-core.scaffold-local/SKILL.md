@@ -47,7 +47,7 @@ State outcome `resolved`.
 
 ## Step 2 — Resolve core CLI
 
-Read `~/.claude/plugins/installed_plugins.json`. Find the `lazycortex-core@lazycortex` key. If absent or its array is empty → FAIL with:
+When this repo authors the plugin itself (`<repo-root>/claude/lazycortex-core/.claude-plugin/plugin.json` exists), `<core-cli>` is `<repo-root>/claude/lazycortex-core/bin/lazycortex-core` — the sources in the tree, never the cached copy, which lags them until the next publish. Otherwise read `~/.claude/plugins/installed_plugins.json`. Find the `lazycortex-core@lazycortex` key. If absent or its array is empty → FAIL with:
 
 > `scaffold-local: cannot resolve core CLI — lazycortex-core not installed; run /lazy-core.install first`
 
@@ -57,13 +57,33 @@ Verify the file exists with `Bash(test -f <core-cli>)`. If not → FAIL with:
 
 > `scaffold-local: core CLI not found at <core-cli>; run /plugin update lazycortex-core@lazycortex to restore`
 
-Note: `$LAZYCORTEX_PLUGIN_DIRS` may be unset at install time — always resolve via `installed_plugins.json`.
+Note: `$LAZYCORTEX_PLUGIN_DIRS` may be unset at install time — outside an authoring repo, always resolve via `installed_plugins.json`.
 
 State outcome `resolved`.
 
 ## Step 3 — Gather user inputs
 
 Ask one `AskUserQuestion` at a time. Wait for each answer before the next. Print each question's context block first.
+
+**3a. Collect the groups the installed plugins supply (`add` only).**
+
+A `_local` template must not share a group with a plugin. The plugin re-syncs that whole directory on every install, so a file filed there is a namesake collision waiting to happen — `/lazy-core.scaffold-sync` protects it once it is registered, but the operator should never be put in that position to begin with. Read the registry before asking for anything:
+
+```bash
+"${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold list --registry <regPath>
+```
+
+Parse the JSON output and take `registry`. For every top-level key other than `_local`, each of its template paths contributes one group — the name of that path's parent directory. The union of those names is the occupied set.
+
+Check `group` against that set: if it arrived as an argument, check it now; otherwise check the answer to question 1 the moment it arrives. On a match → FAIL with:
+
+> `scaffold-local: group \`<group>\` is supplied by installed plugin \`<plugin>\` — a _local template cannot share a plugin's group, because the plugin re-syncs that directory on every install; choose another group name`
+
+Do not offer to proceed anyway, and do not pick a substitute name — the group is the operator's to choose, so the refusal ends the run and the operator re-invokes with one of their own.
+
+`remove` skips this check entirely: an entry already filed in an occupied group must stay removable.
+
+State outcome `occupied-N` where N is the number of groups in the set (`occupied-0` when no plugin key holds a template path).
 
 **For both `add` and `remove`:**
 
@@ -72,10 +92,10 @@ Ask one `AskUserQuestion` at a time. Wait for each answer before the next. Print
 ```
 Context (print before asking):
 - Where: /lazy-core.scaffold-local · Step 3 — Gather user inputs; target <regPath> [_local]
-- Found: mode `<add|remove>`; groups present under .claude/templates/: <list, or none>; `_local` entries on record: <list, or none>
+- Found: mode `<add|remove>`; groups present under .claude/templates/: <list, or none>; `_local` entries on record: <list, or none>; groups supplied by installed plugins and therefore refused: <list from 3a, or none>
 - Why asking: the group is a repo-specific naming decision nothing on disk derives
 - Answers: free-form text — the subdirectory under `.claude/templates/` this entry lives in; builds the template path in Step 4 and is recorded in the registry, never re-asked once the entry exists
-AskUserQuestion: header "Template group", question "Which template group under .claude/templates/ does this `_local` entry belong to (e.g. `core`, `help`, `review`)?", free-form text.
+AskUserQuestion: header "Template group", question "Which template group under .claude/templates/ does this `_local` entry belong to? It may not be one of the groups an installed plugin supplies (listed above).", free-form text.
 ```
 
 2. If `kind` was not provided in args:
@@ -160,7 +180,7 @@ Run:
 "${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold list --registry <regPath>
 ```
 
-Parse the JSON output. Extract `data._local` — if the key is absent, start with `{}`.
+Parse the JSON output. Extract `registry._local` — if the key is absent, start with `{}`.
 
 **4c. Merge and upsert.**
 
@@ -198,7 +218,7 @@ Run:
 "${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold list --registry <regPath>
 ```
 
-Parse `data._local`. If the key is absent or the target entry is missing → FAIL with:
+Parse `registry._local`. If the key is absent or the target entry is missing → FAIL with:
 
 > `scaffold-local: entry \`.claude/templates/<group>/<kind>-template.md\` not found; nothing to remove`
 
@@ -274,6 +294,7 @@ Template file state is one of: `created`, `kept`, `overwritten`, `deleted`, `abs
 - **`scaffold-local: registry not found at <path>`** — `.claude/rules/lazy-core.scaffold.md` does not exist → run `/lazy-core.install` to initialise the scaffold registry, then re-run.
 - **`scaffold-local: cannot resolve core CLI — lazycortex-core not installed`** — `installed_plugins.json` has no `lazycortex-core@lazycortex` entry → install the plugin first (`/lazy-core.install`), then re-run.
 - **`scaffold-local: core CLI not found at <path>`** — the `installPath` in `installed_plugins.json` points to a missing path → run `/plugin update lazycortex-core@lazycortex` to refresh, then re-run.
+- **`scaffold-local: group \`<group>\` is supplied by installed plugin \`<plugin>\``** — the named group is one an installed plugin re-syncs on every install, so a `_local` template there would collide with a shipped namesake → re-invoke `add` with a group name of your own. Removing an entry already filed in such a group is not blocked.
 - **`scaffold-local: entry … not found in the _local registry map`** — attempting to remove an entry that is not registered → check the entry name with `scaffold list --registry <regPath>`.
 - **`scaffold upsert` / `scaffold remove` returns `error`** — the core CLI rejected the operation → inspect the full error output, fix the input, then re-run.
 - **`scaffold validate` returns FAIL-level findings** — the registry has structural errors after the upsert → inspect the validation output and edit `.claude/rules/lazy-core.scaffold.md` directly to resolve, then validate again.

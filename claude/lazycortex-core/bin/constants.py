@@ -827,6 +827,10 @@ class JobArtifact:
     TRANSIENT_ERRORS: The transient-error counter file the retry budget is judged against.
     TRANSCRIPT: The captured stream-json transcript of the expert spawn.
     ERROR_JSON: The per-attempt rejection payload fed back into the next attempt's prompt.
+    CLAIM_HEAD:
+      The commit the work tree stood at when the pump claimed the job — the tree its
+      `source/` / `context/` were copied from. A consumer deciding whether the job already
+      saw a given commit compares against this, never against the claim's wall-clock time.
   """
 
   DEAD_JSON = "dead.json"
@@ -835,6 +839,7 @@ class JobArtifact:
   TRANSIENT_ERRORS = "transient_errors"
   TRANSCRIPT = "transcript.jsonl"
   ERROR_JSON = "error.json"
+  CLAIM_HEAD = "claim_head"
 
 
 # ----------------------------------------------------------------------------------------

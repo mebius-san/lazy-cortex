@@ -41,9 +41,9 @@ See [`claude/lazycortex-diagram/`](claude/lazycortex-diagram/) for details.
 
 ### lazycortex-experts
 
-Generic lifecycle experts (interpreter, use-case-writer, designer, architect, ui-designer, planner, implementer, data-implementer, docs-writer, debugger, reviewer, tester) plus a fiction-writer agent, a starter set of domain aspects (claude-plugin, game-dev, dotfiles, obsidian-plugin, data-pipeline, sci-fi, fantasy), and five cross-cutting aspects (discipline, research, tech-writing, terms, structure). Building blocks — compose specialists in lazy.settings.json[experts] with one agent + one or more aspects.
+Generic lifecycle experts (interpreter, use-case-writer, designer, architect, ui-designer, planner, implementer, data-implementer, docs-writer, debugger, reviewer, tester, editor) plus fiction-writer and fiction-editor agents, a starter set of domain aspects (claude-plugin, game-dev, dotfiles, obsidian-plugin, data-pipeline, sci-fi, fantasy), and five cross-cutting aspects (discipline, research, tech-writing, terms, structure). Building blocks — compose specialists in lazy.settings.json[experts] with one agent + one or more aspects.
 
-2 skills, 14 agents.
+2 skills, 16 agents.
 
 Requires: lazycortex-core
 

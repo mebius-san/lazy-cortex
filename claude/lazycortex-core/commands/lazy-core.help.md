@@ -51,8 +51,8 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 
 **Agents** (dispatched via `Agent(subagent_type: "lazycortex-core:<name>")`):
 
-- `lazy-core.autosetup` — non-interactive install-chain executor for one repo (`repo=<path>`): applies derivable/recorded install steps, skips question-gated ones with a `needs-interactive` report, commits its changes. Built for cross-project rollout loops.
-- `lazy-core.autocheckup` — non-interactive checkup for one repo (`repo=<path>`): runs the checkup passes read-only, applies only mechanically derivable fixes, reports everything operator-owned, commits its fixes.
+- `lazy-core.autosetup` — non-interactive install-chain executor for one repo (`repo=<path>`, optional `ignore=<prefix>`): applies derivable/recorded install steps, skips question-gated ones with a `needs-interactive` report, refuses only when uncommitted work sits in a file the chain writes, and commits its own writes by explicit path. Built for cross-project rollout loops.
+- `lazy-core.autocheckup` — non-interactive checkup for one repo (`repo=<path>`, optional `ignore=<prefix>`): runs the checkup passes read-only, applies only mechanically derivable fixes, reports everything operator-owned, and commits its own fixes by explicit path under the same dirty-tree guard as autosetup.
 - `lazy-log.bullets` — drafts user-facing changelog bullet blocks from recent distilled entries.
 - `lazy-log.distill` — rolls commits in `.logs/commits.jsonl` into themed changelog entries in `.logs/changelog.md`.
 - `lazy-log.recall` — searches change history across `.logs/changelog.md`, per-run log files, `.logs/commits.jsonl`, and git log; returns ranked results with git SHAs.

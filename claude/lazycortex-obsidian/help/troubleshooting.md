@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, likely causes, and fixes for lazycortex-obsidian — install, iconize, diagram render, plugin updates, tag pages, and vault manifest capture/deploy.
-last_regen: 2026-09-21
+last_regen: 2026-09-23
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree branching first on which skill aborted or misbehaved (install / iconize-install / iconize-config / iconize-sync / diagram-install / update-plugin / gen-tag-pages); each branch then splits on the specific symptom; each leaf names the troubleshooting entry that resolves it"
@@ -16,8 +16,8 @@ source_skills:
   - lazy-obsidian.audit
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: b9cc732063fd5d0d05c3e9e7be1bb76cd38af2a6
-surface_sha: 4a0cbfe98c998f2620878a83fc88924b7ef5fe527f607cae23c5f3e0f673ff72
+source_sha: d646145dc19da6bfbae3e0c00253f21e2d5c4ad2
+surface_sha: 6beeba2cb74a3d684439a23b99b0cff537ee86030853a3b4e0f0be02842384e2
 ---
 # Troubleshooting
 
@@ -88,6 +88,16 @@ surface_sha: 4a0cbfe98c998f2620878a83fc88924b7ef5fe527f607cae23c5f3e0f673ff72
 **Likely cause**: The plugin was updated via `/plugin update lazycortex-obsidian@lazycortex` and the vault's icon-map declares a `schema_version` this worker no longer supports (or a `min_hook_version` the worker does not satisfy).
 
 **Fix**: Run `/lazy-obsidian.iconize-sync check-versions` to confirm the drift report, then re-run `/lazy-obsidian.iconize-install` — it migrates the icon-map schema where a migration path exists.
+
+---
+
+## The vault's repaint routine stops committing icon fixes (`reconcile-commit` exits 6)
+
+**Symptom**: New commits land in the vault, but notes whose icons should have changed as a result never get their `iconize_icon` / `iconize_color` frontmatter committed by the automatic repaint. Running `/lazy-obsidian.iconize-sync reconcile-commit` by hand exits with code 6.
+
+**Likely cause**: `reconcile-commit` (invoked automatically by the `lazy-obsidian.repaint` routine after every new commit, once `/lazy-obsidian.iconize-install` has registered it) repaints the directories one commit touched, then tries to commit only the notes whose entire diff is confined to their own `iconize_icon` / `iconize_color` lines. Exit code 6 means that commit did not land — most commonly because there was nothing eligible to commit (every touched note also carries unrelated uncommitted changes, so none qualifies), or because git itself refused the commit (a dirty index the operator is mid-work on, or a lock held by another process).
+
+**Fix**: Run `/lazy-obsidian.iconize-sync reconcile` by hand to see which files it would repaint and why none committed cleanly. If a note's diff mixes icon frontmatter with other edits, commit or stash the other edits first, then re-run `reconcile-commit`. If git itself is the blocker (dirty index, lock), resolve that before the next automatic tick.
 
 ---
 
@@ -198,6 +208,16 @@ surface_sha: 4a0cbfe98c998f2620878a83fc88924b7ef5fe527f607cae23c5f3e0f673ff72
 **Likely cause**: Something changed on one side since the manifest was last captured — you installed or updated a plugin, tweaked a setting, or added a snippet locally without recapturing, or you pulled a manifest change from another checkout without deploying it here yet.
 
 **Fix**: The audit never auto-resolves drift — only you know which side is right. If the live vault is correct, run `/lazy-obsidian.capture` to record it. If the manifest is correct (for example, you just pulled a teammate's change), run `/lazy-obsidian.deploy` to restore it here.
+
+---
+
+## `/lazy-obsidian.audit` reports `worker-refused`
+
+**Symptom**: `/lazy-obsidian.audit` reports `worker-refused` as its outcome instead of `clean` or `drift: <N>`.
+
+**Likely cause**: The drift check itself could not run — either `.obsidian.manifest.json` at the repo root does not parse, or the repo has no `.obsidian/` config directory at all to compare against.
+
+**Fix**: An unparseable manifest is rewritten from the live vault by `/lazy-obsidian.capture` — run it if the vault itself is in the state you want recorded. A checkout with no `.obsidian/` directory at all needs `/lazy-obsidian.install` first (or opening the repo as a vault in Obsidian), before any drift check makes sense.
 
 ---
 

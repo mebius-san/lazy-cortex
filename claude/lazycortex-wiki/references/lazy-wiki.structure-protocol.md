@@ -147,6 +147,6 @@ deterministic apply call that writes it; there is nothing to place beside anythi
 
 | Category | Used when |
 |---|---|
-| `logical` | Input is malformed or unusable: `path` (or `old_path` / `new_path`) absent from the request, `status` outside `A`/`M`/`D`, or the map file does not exist. |
+| `logical` | Input is malformed or unusable: `paths` (or `old_paths` / `new_paths`) absent from the request — the legacy singular forms `path` / `old_path` / `new_path` remain legal and fail the same way when nothing names a path — `status` outside `A`/`M`/`D`, or the map file does not exist. |
 | `transient` | Claude subprocess crashed or timed out — the runner should retry. |
 | `technical` | The map is in a state the curator may not repair: the entry it would anchor an edit to appears more than once. Log and skip; structural repair belongs to the rebuild mode. |

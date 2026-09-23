@@ -22,6 +22,9 @@ if TYPE_CHECKING:
 
 
 REGISTRY_HEADING = "## Registry"
+LOCAL_KEY = "_local"
+# The consumer-side record of which plugins are installed; relative to the operator's home.
+_INSTALLED_PLUGINS = "~/.claude/plugins/installed_plugins.json"
 _FENCE_OPEN = "```yaml"
 _FENCE_CLOSE = "```"
 # YAML-reserved leading characters: a plain scalar starting with one of these must be quoted.
@@ -364,23 +367,87 @@ def graft_registry(shipped_md: str, target_md: str) -> str:
   return _rewrite_block(shipped_md, body or ["{}"])
 
 
-def validate(md: str) -> list[dict]:
+def scope_root(registry: str) -> str:
+  """
+  Return the consumer-scope root that a registry file's relative template paths are written against.
+
+  Args:
+    registry: Path of the registry markdown file, `<root>/.claude/rules/<name>.md`.
+
+  Returns:
+    The absolute path of the directory three levels above the registry file.
+  """
+  return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(registry))))
+
+
+def installed_plugins() -> frozenset[str] | None:
+  """
+  Return the names of the plugins installed for the operator, or None when that record is unreadable.
+
+  Returns:
+    The plugin names, each taken from the part of a record key before `@`; None when
+    the record is absent, unreadable, or not shaped as expected.
+  """
+  try:
+    with open(os.path.expanduser(_INSTALLED_PLUGINS), encoding = "utf-8") as fle:
+      data = json.load(fle)
+  except (OSError, ValueError):
+    return None
+  # waiver: external-result schema field name, not an internal key
+  plugins = data.get("plugins")
+
+  # guard: an unexpected shape says nothing about what is installed
+  if not isinstance(plugins, dict):
+    return None
+  return frozenset(key.split("@")[0] for key in plugins)
+
+
+def _is_template_readable(path: str, base_dir: str) -> bool:
+  """
+  Report whether a registered template path resolves to a readable file in the consumer's tree.
+
+  Args:
+    path: Template path exactly as the registry records it.
+    base_dir: Consumer-scope root that a relative path is resolved against.
+
+  Returns:
+    True when the resolved path names an existing, readable file.
+  """
+  resolved = os.path.expanduser(path) if path.startswith("~") else os.path.join(base_dir, path)
+  return os.path.isfile(resolved) and os.access(resolved, os.R_OK)
+
+
+def validate(md: str, *, base_dir: str | None = None, installed: frozenset[str] | None = None) -> list[dict]:
   """
   Return a list of findings for the Registry block; an empty list means the block is clean.
 
   Checks structural invariants (every plugin entry is a proper mapping, every
   template path maps to a list of glob strings, no template path uses the
   `${CLAUDE_PLUGIN_ROOT}` variable) and cross-key overlap (two keys that share
-  at least one identical glob string).
+  at least one identical glob string). When `base_dir` is given, every template
+  path is also resolved on disk; when `installed` is given, every key other than
+  the reserved local one is matched against that set.
+
+  Guarantees:
+    - Every finding this function adds for a template that is missing on disk or for a
+      key that matches no installed plugin carries severity `WARN`, never `FAIL`.
 
   Args:
     md: Full markdown source containing a `## Registry` ```yaml block.
+    base_dir: Consumer-scope root for resolving template paths; None skips the
+      on-disk existence check entirely.
+    installed: Names of the installed plugins; None skips the orphan-key check entirely.
 
   Returns:
     A list of finding dicts, each with keys `code`, `severity` (`"FAIL"` or `"WARN"`),
     and `msg`. Returns an empty list when the block is structurally valid and no
-    overlaps are detected.
+    overlaps, missing templates, or orphan keys are detected.
   """
+
+  # Contract:
+  # A missing-template finding and an orphan-key finding MUST both carry severity `WARN`:
+  # neither is a precondition for authoring a file, so neither may block a caller that
+  # refuses only on `FAIL`.
 
   # Domain(install.reconciliation):
   # # A scaffold template path always lives in the consumer's own tree
@@ -393,13 +460,34 @@ def validate(md: str) -> list[dict]:
   # the choice between them for one shared path becomes ambiguous, so it is surfaced for a
   # human to judge instead of treated as a structural defect.
 
+  # Domain(install.reconciliation):
+  # # A registry defect is reported, never a precondition
+  # A registry may name a template that is missing or unreadable on disk, and it may carry a key
+  # for a plugin that is no longer installed. Neither stops an author from writing the file whose
+  # path the entry matches, and neither licenses substituting a neighbouring template in the
+  # missing one's place — the registry exists to point at a starting draft, not to gate authoring.
+  # Both conditions are therefore surfaced to the operator as warnings through the same reporting
+  # channel that carries glob shadowing, and a caller that refuses only on structural defects goes
+  # on working unimpeded.
+
+  # a block that does not parse has no entries to judge, so that one defect is the whole report
   findings: list[dict] = []
   try:
     data = parse_registry_block(md)
   except ValueError as err:
     return [ {"code": "parse_error", "severity": "FAIL", "msg": str(err)} ]
+
+  # every key is scanned on its own, and the globs it claims are kept for the cross-key pass below
   globs_by_key: dict[str, set] = {}
   for plugin, entries in data.items():
+    # a key naming a plugin nobody installed is leftover registration, not a structural defect
+    if installed is not None and plugin != LOCAL_KEY and plugin not in installed:
+      findings.append({
+        "code": "orphan_key",
+        "severity": "WARN",
+        "msg": f"{plugin}: registry key matches no installed plugin",
+      })
+
     # guard: top-level value must be a dict (mapping of template paths)
     if not isinstance(entries, dict):
       findings.append({"code": "bad_shape", "severity": "FAIL", "msg": f"{plugin} not a mapping"})
@@ -411,6 +499,13 @@ def validate(md: str) -> list[dict]:
           "code": "plugin_root_var",
           "severity": "FAIL",
           "msg": f"{plugin}: template path uses ${{CLAUDE_PLUGIN_ROOT}}: {path}",
+        })
+      # a plugin-root path resolves nowhere by design, so only a plain path is looked for on disk
+      elif base_dir is not None and not _is_template_readable(path, base_dir):
+        findings.append({
+          "code": "missing_template",
+          "severity": "WARN",
+          "msg": f"{plugin}: template missing or unreadable: {path}",
         })
 
       # guard: glob list must be a list
@@ -480,8 +575,10 @@ _MINIMAL = (
   "# Scaffold\n\n"
   "Before composing any **new** file whose path matches a glob below, `Read` the matching "
   "template first. Contract: `claude/lazycortex-core/references/lazy-core.scaffold-registry-contract.md`.\n\n"
-  "When several globs match the same path, the most-specific wins (within a key and across "
-  "keys); on an equal-specificity tie, `_local` overrides plugin keys.\n\n"
+  "When several globs match the same path, the most specific wins — within a key and across "
+  "keys. Specificity is a total order of three steps: (1) the number of path segments that "
+  "carry no wildcard character; (2) on a tie, the number of literal characters outside the "
+  "wildcards; (3) on a tie, the `_local` key over a plugin key.\n\n"
   "## Registry\n\n```yaml\n{}\n```\n"
 )
 
@@ -698,7 +795,9 @@ def main(argv: list[str]) -> int:  # pylint: disable=too-many-return-statements,
         md = fle.read()
     else:
       md = _MINIMAL
-    return _emit({"status": "ok", "findings": validate(md)})
+    # the registry's own location names the consumer scope its relative template paths live in
+    found = validate(md, base_dir = scope_root(args.registry), installed = installed_plugins())
+    return _emit({"status": "ok", "findings": found})
 
   # argparse rejects unknown subcommands, so reaching here is a programming error
   return 1

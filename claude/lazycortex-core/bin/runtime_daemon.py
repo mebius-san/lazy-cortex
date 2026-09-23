@@ -1266,6 +1266,11 @@ def _run_iteration(repo_root: Path, *, push: bool = True, only: str | None = Non
   import metrics  # pylint: disable=import-error
   if (repo_root / RuntimeFile.PAUSE).exists():
     metrics.set_paused_gauge(True)
+
+    # a pause stops the work, not the watching — the queue and the journals keep changing on
+    # disk (a cancelled job, a hand-edited sidecar, another session's dispatch), so the gauges
+    # derived from them are republished even though nothing is dispatched
+    _refresh_disk_gauges(repo_root)
     return
   metrics.set_paused_gauge(False)
 
@@ -3204,6 +3209,34 @@ def _emit_tick_metrics_if_available(repo_root: Path, result: dict) -> None:
     error = result.get(TickResultKey.ERROR),
     dispatched = dispatched,
   )
+
+  # the disk-derived gauges follow every tick, paused or not
+  _refresh_disk_gauges(repo_root)
+
+
+def _refresh_disk_gauges(repo_root: Path) -> None:
+  """
+  Republish the gauges derived from disk: queue depth, token, job, and incident aggregates.
+
+  Notes:
+    - Read-only over the job queue, the runtime logs, and the error ledger, so a paused daemon
+      calls it as freely as a working one.
+    - The metrics module is opt-in; when it is not installed or not enabled, the call returns
+      without observable cost.
+
+  Args:
+    repo_root: Absolute path to the repository the daemon is driving.
+  """
+  try:
+    # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+    # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+    import metrics  # pylint: disable=import-error
+  except ImportError:
+    return
+
+  # guard: metrics disabled
+  if not metrics.is_enabled():
+    return
   metrics.set_queue_depth_from_filesystem(repo_root)
   metrics.aggregate_tokens_from_log(repo_root)
   metrics.aggregate_jobs_from_log(repo_root)

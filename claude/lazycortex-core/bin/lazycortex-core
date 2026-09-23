@@ -58,7 +58,7 @@ def _forward_if_stale() -> None:
     os.execv(sys.executable, [sys.executable, str(newer), *sys.argv[1:]])
 
 USAGE = ("usage: lazycortex-core <subcommand> [args...]\n"
-         "Subcommands: expert-pump-once, doctor-tick, runtime-tick, runtime, resume, memory-reflect-all, dispatch-job, collect-job, consume-job, cancel-job, lookup-expert, scaffold, file-sync, remote-mirror, safe-pull, error-record, error-list, settings-get, settings-set, resolve-language, routine-ensure-filter, permission-allow, add-protocols, detect-scope, daemon-pause, daemon-resume, daemon-list, metrics-alloc-port, metrics-scrape-file, sandbox-sync, sandbox-audit, index-guard, history-append, reconcile-routine")
+         "Subcommands: expert-pump-once, doctor-tick, runtime-tick, runtime, resume, memory-reflect-all, dispatch-job, collect-job, consume-job, cancel-job, lookup-expert, scaffold, file-sync, remote-mirror, safe-pull, error-record, error-list, settings-get, settings-set, resolve-language, routine-ensure-filter, permission-allow, add-protocols, detect-scope, daemon-pause, daemon-resume, daemon-list, metrics-alloc-port, metrics-scrape-file, sandbox-sync, sandbox-audit, index-guard, history-append, reconcile-routine, plugin-root")
 
 
 def _cmd_consume_job(argv: list[str]) -> int:
@@ -637,6 +637,32 @@ def _cmd_detect_scope(argv: list[str]) -> int:
     return 0
 
 
+def _cmd_plugin_root(argv: list[str]) -> int:
+    """Print the directory a plugin's sources are read from: the authoring
+    repo's ``claude/<plugin>/`` when this checkout ships the plugin, else the
+    daemon's ``LAZYCORTEX_PLUGIN_DIRS`` entry, else the newest cached install.
+    One path on stdout; exit 1 with an ``error:`` line when nothing resolves.
+
+    The single implementation every install / audit / seed skill points at
+    instead of reading ``installed_plugins.json`` itself — reading the cache
+    first in a repo that authors the plugin silently runs the previous
+    publish instead of the sources at hand.
+    """
+    import argparse, subprocess
+    from lazy_setup import plugin_root
+    p = argparse.ArgumentParser(prog="lazycortex-core plugin-root")
+    p.add_argument("plugin", help="e.g. lazycortex-experts or lazycortex-experts@lazycortex")
+    a = p.parse_args(argv)
+    toplevel = subprocess.run(["git", "rev-parse", "--show-toplevel"],
+                              capture_output=True, text=True).stdout.strip()
+    report = plugin_root(a.plugin, Path(toplevel or os.getcwd()), Path.home())
+    if report is None:
+        print(f"error: {a.plugin} not installed: no authored, exported, or cached sources", file=sys.stderr)
+        return 1
+    print(report["root"])
+    return 0
+
+
 def _cmd_daemon_pause(argv: list[str]) -> int:
     """Create the local pause semaphore so the daemon skips work until resumed.
 
@@ -883,6 +909,8 @@ def main() -> int:
         return cmd_add_protocols(sys.argv[2:])
     elif sub == "detect-scope":
         return _cmd_detect_scope(sys.argv[2:])
+    elif sub == "plugin-root":
+        return _cmd_plugin_root(sys.argv[2:])
     elif sub == "daemon-pause":
         return _cmd_daemon_pause(sys.argv[2:])
     elif sub == "daemon-resume":

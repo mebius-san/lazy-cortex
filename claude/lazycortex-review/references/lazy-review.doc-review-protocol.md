@@ -12,7 +12,7 @@ Canonical contract for jobs dispatched to experts by the ``lazycortex-review`` d
 
 ```json
 {
-  "mode":                  "main | validation | terminal | repair",
+  "mode":                  "main | validation | terminal | history | repair",
   "role":                  "<free-form string from expert config>",
   "round":                 1,
   "source":                [{"path": "source/<file>"}],
@@ -44,8 +44,8 @@ Field notes:
 
 The response envelope — ``outcome`` / ``result`` / ``error`` — is owned by ``lazy-core.expert-runtime-contract``; read it alongside this protocol. This protocol adds ``history_entry`` on top of it (see § ``history_entry`` shape) and declares its own values:
 
-- ``outcome`` — ``edited | empty | error`` for a review-kind dispatch (``mode`` one of ``main`` / ``validation`` / ``terminal``); ``edited | error`` for a repair-kind dispatch (``mode == "repair"`` — a repair produces a parseable file or fails, there is no partial-progress ``empty``).
-- ``error.category`` — ``logical`` (the input was invalid), ``transient`` (a queue or Claude-process crash), ``technical`` (a schema violation), or ``broken`` (repair-specific — see `mode == "repair"`). ``broken`` is reserved for ``mode == "repair"``; the other three apply to every mode.
+- ``outcome`` — ``edited | empty | error`` for a review-kind dispatch (``mode`` one of ``main`` / ``validation`` / ``terminal``); ``edited | error`` for a repair-kind dispatch (``mode == "repair"`` — a repair produces a parseable file or fails, there is no partial-progress ``empty``); ``summarized | noop | error`` for a history-kind dispatch (``mode == "history"`` — see `mode == "history"`).
+- ``error.category`` — one of the three standard categories the runtime contract defines: ``logical`` (the input was invalid), ``transient`` (a queue or Claude-process crash), ``technical`` (a schema violation). This protocol introduces no categories of its own.
 
 For ``outcome: "edited"`` the ``result`` array's FIRST entry is the job's own body content; on ``mode=main`` every further entry is an attachment (§ Attachments). Every writer mode (``main`` / ``validation`` / ``terminal`` / ``repair``) returns body content via ``result/<file>`` per its own footprint (see § Mode rules); ``mode=validation`` and ``mode=terminal`` write only the markdown body of the owned section — **no H1 heading, no leading tag line** — the dispatcher emits those itself. A result file MAY open with an optional YAML frontmatter fence (``---\\n<keys>\\n---``); the dispatcher applies the fence's keys as an overlay onto the document's frontmatter (reserved keys — see § Frontmatter reserved keys — and ``tags`` are filtered out) and treats the remainder as the body. A result file without a fence is body-only — back-compat for sections that have no frontmatter updates this round.
 
@@ -85,6 +85,10 @@ The writer addresses the operator directly. Each open decision should be express
 
 Ready text is the medium: terminal writers emit the section content as the **settled final form** of the decision, with **no edit-marker fences** (`diff`, `criticmarkup`, `html`) wrapping in-section mutations. Each round either replaces the section's authoritative content with a new settled version, leaves it unchanged, or empties it — the terminal writer is stating a decision, not iterating on prior prose. The dispatch's `edit_marker_style` field governs `mode=main` body-prose refinement and does not apply to this mode (see § Edit-marker persistence across rounds). Downstream consumers parse the section's ready text directly; diff fences here would force every consumer (apply gates, audits) to disambiguate proposed-vs-settled lines — exactly what the ready-text rule eliminates.
 
+### mode == "history"
+
+Dispatcher reads ``history_entry`` from the response; no ``result/`` file is written. A history-kind dispatch composes the round's ``# History`` entry rather than document prose, so its outcome vocabulary is its own: ``summarized`` (the response carries a ``history_entry`` — required on this outcome), ``noop`` (the round changed no document content, only dispatcher metadata), and ``error``.
+
 ### mode == "repair"
 
 Dispatcher reads the full file body from `result/<file>` and writes it back byte-for-byte (no reapply, no graft; this is a structural-fix mode).
@@ -108,7 +112,7 @@ The operator REJECTS or REVISES a prior-round marker by editing the document dir
 
 ## ``history_entry`` shape
 
-For ``kind=review`` with ``outcome=edited``, the response MUST carry ``history_entry``: one declarative past-tense sentence, 80–200 characters, **naming WHAT is now in the document** (sections added/removed, prose rewritten, callouts appeared/disappeared) — strictly substantive content describing the document as an artefact, never the process that changed it. **Name the change, not the conclusion** — "A rollback paragraph appeared under Failure-path", NOT "Made the failure-path handling clearer".
+For ``kind=review`` with ``outcome=edited``, and for ``kind=history`` with ``outcome=summarized``, the response MUST carry ``history_entry``: one declarative past-tense sentence, 80–200 characters, **naming WHAT is now in the document** (sections added/removed, prose rewritten, callouts appeared/disappeared) — strictly substantive content describing the document as an artefact, never the process that changed it. **Name the change, not the conclusion** — "A rollback paragraph appeared under Failure-path", NOT "Made the failure-path handling clearer".
 
 Exhaustive forbidden-vocabulary list (shared by every expert that emits a ``history_entry``):
 

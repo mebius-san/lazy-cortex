@@ -1,7 +1,7 @@
 ---
 chapter_type: block
-summary: Insert new diagrams and refresh existing ones — dispatcher picks kind and format from your prose, writer agents render against shipped templates and style schemes.
-last_regen: 2026-09-11
+summary: Insert new diagrams and re-conform existing ones — dispatcher picks kind/format, writer agents render against shipped templates and schemes.
+last_regen: 2026-09-22
 diagram_spec:
   anchor: "How draw and fix route a request"
   request: "Flow showing the dispatch path: user invokes draw or fix → dispatcher validates inputs and resolves kind/format → format-compatibility check → writer agent selected (mermaid or ASCII) → byte-compare → fence written or skipped. Include the split-into-N and skipped-below-threshold outcomes as exit branches."
@@ -11,6 +11,7 @@ source_skills:
   - lazy-diagram.draw-mermaid
   - lazy-diagram.draw-ascii
 source_sha: 0957646fe88bb43168922cfd85bd6a9b6c298d1d
+surface_sha: 2180f110c2501e615011af92ac4562306f82b6a2779bf0f3f932f22e7d8c5564
 ---
 # Insert and refresh diagrams in your documentation
 
@@ -59,6 +60,8 @@ Both agents enforce density bounds. A request that maps to more nodes, participa
 The dispatcher is the only entry point; the writer agents have no user channel and write no files themselves. Their return value is text — the fence body — which the dispatcher inspects, compares, and writes. This separation means the rendering logic (templates, scheme binding, density checks) can evolve inside the agents without touching the I/O or idempotence logic in the skills.
 
 Kind and format detection from prose context means you can describe what you want in plain language — "show how the three services talk to each other when a request comes in" — and get an appropriate diagram without declaring a kind. The `scheme` parameter lets you switch from the default palette to any named scheme in `${CLAUDE_PLUGIN_ROOT}/templates/diagram.mermaid/styles-*.json`; non-default palettes are useful when a plugin ships a branded colour set or when a document targets a dark-mode host. ASCII format is chosen automatically for kinds where character-art is structurally clearer (directory trees, terminal layout sketches), and explicitly when the request names terminal or plain-text output.
+
+If you are authoring your own skill and want it to draw a diagram at a fixed point in its own process, `/lazy-diagram.draw` is meant to be called from inside that skill rather than only from a chat prompt. The calling skill declares the invocation as its own numbered substep (never a trailing mention), carries one step-ledger entry per declared invocation whose outcome word is this skill's return value (`created` / `replaced` / `unchanged` / `skipped-below-threshold` / `failed:<reason>` / `split-into-N`), and includes a `## Verify` section diffing its declared seams against what actually got logged. A section with a declared draw seam must not also carry an ASCII sketch or any other hand-authored visual placeholder — the seam invocation is the artifact.
 
 The shipped template and scheme files are the contract: every fence drawn by this block is traceable back to a template (structure reference) and a scheme (colour source). No hex is invented by the agent; no style is hand-composed. When the contract changes — a new scheme ships, an init directive format updates — running `/lazy-diagram.fix` across affected files brings them current without you editing any fence by hand.
 

@@ -475,6 +475,25 @@ def _cursor_store_path(repo_root: Path) -> Path:
   return spec_job_markers.sidecar_path(repo_root).parent / _CURSOR_SIDECAR
 
 
+def _is_ancestor(repo_root: Path, ancestor: str, descendant: str) -> bool:
+  """
+  Check whether one commit is reachable from another.
+
+  Args:
+    repo_root: The repository root to run `git` in.
+    ancestor: The commit that must be reachable.
+    descendant: The commit reachability is checked from.
+
+  Returns:
+    True when `ancestor` is `descendant` itself or one of its ancestors; False otherwise,
+    including when either hash is unknown to the repository.
+  """
+  return subprocess.run(
+      [ "git", "merge-base", "--is-ancestor", ancestor, descendant ],
+      cwd = str(repo_root), capture_output = True, text = True, check = False,
+  ).returncode == 0
+
+
 def _read_dispatch_cursor(repo_root: Path, asset_note: Path) -> str | None:
   """
   Read the note's dispatch cursor — the last item sha this worker dispatched on.
@@ -2039,6 +2058,12 @@ def coordinator_dispatch(  # pylint: disable=too-many-branches
   # cleared the moment any wake at all is acted on for the asset, because whatever runs next
   # already accounts for it. Pausing the asset holds either flag untouched until the pause is
   # lifted, rather than resolving it into a generic catch-up the operator never asked for.
+  # An action that is still waiting its turn has not looked at anything yet: it reads the asset
+  # only when it actually starts, so a reason arriving before that is already covered by it and
+  # is neither flagged nor replayed — flagging it would make the coordinator act twice on the
+  # same change, once in the queued action and once more on the record that action leaves. The
+  # same holds for a running action and every change that was already part of what it read
+  # when it started: only a change that arrived after that moment is genuinely unseen.
 
   # Contract:
   # At most one coordinator job runs against a given note at a time; a wake that arrives while
@@ -2055,6 +2080,36 @@ def coordinator_dispatch(  # pylint: disable=too-many-branches
 
     # guard: bundle carries no terminal marker yet — still running
     if marker is None:
+      # a job still in the queue reads the tree only when the pump claims it, so this item —
+      # and every commit before the claim — is already covered by the queued job itself. The
+      # dispatch cursor moves past the item so the job's own later commit cannot replay it as a
+      # bot-buried operator edit, and no `declined` flag is stamped, since there is nothing left
+      # to redeem once the job runs. A `job-done` flag already raised is left as it is.
+      # guard: queued, never claimed — covered, nothing to defer
+      if gate_tick.is_job_queued(
+          repo_root, coordinator_job[JobMarker.EXPERT], coordinator_job[JobMarker.JOB_ID],
+      ):
+        _stamp_dispatch_cursor(repo_root, asset_note, item.get(_ITEM_SHA))
+        return { TickAction.ACTION: TickAction.NOOP }
+
+      # a claimed job copied its inputs from the tree at one exact commit; an item already
+      # reachable from that commit was inside what it read, so it is covered the same way —
+      # only a change that reached the tree after the claim is genuinely unseen and deferred.
+      # A bundle without the marker (an older pump, a synthetic wake with no commit) reads as
+      # unseen, the conservative side.
+      # limit: a grouped item is judged by its newest commit alone; a member commit older than
+      # it but reachable only through a merge the claim missed would be misread as seen — the
+      # daemon checkout only ever fast-forwards, so no such history is expected here; upgrade
+      # path is checking every member commit of the group against the claim head, not the newest
+      claim_head = gate_tick.read_job_claim_head(
+          repo_root, coordinator_job[JobMarker.EXPERT], coordinator_job[JobMarker.JOB_ID],
+      )
+      item_sha = item.get(_ITEM_SHA)
+      # guard: the running job already read this commit — covered, nothing to defer
+      if claim_head and item_sha and _is_ancestor(repo_root, item_sha, claim_head):
+        _stamp_dispatch_cursor(repo_root, asset_note, item_sha)
+        return { TickAction.ACTION: TickAction.NOOP }
+
       # the git-watch cursor advances past this item regardless of the noop below, so a
       # wake-worthy tick seen here would otherwise be lost the moment the job finishes with
       # nothing further changing the note (N2) — one sidecar flag, no note write, no commit;

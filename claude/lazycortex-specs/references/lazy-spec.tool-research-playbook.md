@@ -22,7 +22,7 @@ The label is `Start implementation (research)`. The bare label `Start implementa
 
 **When it appears.** The checkbox hangs as soon as `spec_plan_done` is closed — this tool waits on no plan of its own. The shared dependency rule still applies: every dependency named in `spec_depends_on` must have closed its own `spec_develop_done`. A halted asset never gets the checkbox at all. The tool's contribution must not be counted toward the gate — an accepted report hangs no checkbox until the source-staleness rule turns the gate back off.
 
-**What a tick dispatches.** The role is the researcher; the expert is resolved mechanically as the main writer of the review class named after the tool's `report_doc` — the `research-report` class. The job's source is the **asset's approved research design** (`design.md` typed `research-design`). Context is the product's guidelines for the role and its wildcard guidelines; a declared path that does not resolve to a file becomes a warning line in the asset's history, never a silent drop. Result is `research.md`, a document of type `research-report`, seeded from its template if absent and written in place; the job commits it on its job-scoped branch.
+**What a tick dispatches.** The role is the researcher; the expert is resolved mechanically as the main writer of the review class named after the tool's `report_doc` — the `research-report` class. The job's source is the **asset's approved research design** (`design.md` typed `research-design`). Context is the product's guidelines for the role and its wildcard guidelines; a declared path that does not resolve to a file becomes a warning line in the asset's history, never a silent drop. Result is `research.md`, a document of type `research-report`, seeded from its template if absent and edited in place on every redo; the expert returns it through its job's `result/`, and the `land-result` collector puts it in place and commits it — a research job has no branch of its own.
 
 One active job per asset at a time.
 
@@ -42,6 +42,6 @@ Review of `research.md` is acceptance of **the answer**: is every question answe
 
 - A reviewer's comment means "research further and rewrite": the researcher walks the missing route, fixes the finding, rewrites the section. The report is a stage-bearing document, not a journal — it is edited in place, never appended to.
 - A finding that contradicts the research design (the question was two questions, the scope excluded the decisive route) is not fixed in the report: it is raised as a `[!question]` on the design, and the design goes back through its own review.
-- A redo runs as a **continuation to the same expert** — same job expert, same `branch`.
+- A redo runs as a **continuation to the same expert** — same job expert, same job lineage; there is no branch to continue, the report travels through `result/` every time.
 - Until the report is accepted the tool's contribution is not counted, however many findings are already written.
 - Once approved the report is immutable: a wrong conclusion is answered by a new research asset citing this one.

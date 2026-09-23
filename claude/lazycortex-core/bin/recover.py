@@ -444,7 +444,7 @@ def clear_dead_job(jdir: Path) -> None:
   # permanent-fail judgment can still act on its true attempt count.
 
   # iterate the fixed set of retry-resettable artifacts; missing files are expected
-  for name in ( JobMarker.DEAD, JobArtifact.DEAD_JSON, JobMarker.PID,
+  for name in ( JobMarker.DEAD, JobArtifact.DEAD_JSON, JobMarker.PID, JobArtifact.CLAIM_HEAD,
                 JobArtifact.TRANSCRIPT, JobArtifact.ERROR_JSON, JobFile.RESPONSE ):
     try:
       (jdir / name).unlink()

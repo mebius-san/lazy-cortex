@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: From a clean checkout to your first dashboard panel — install the runtime daemon with metrics enabled, produce traffic, install the shipper, verify the pipeline.
-last_regen: 2026-09-11
+last_regen: 2026-09-22
 diagram_spec:
   anchor: "How it flows"
   request: "Sequence diagram: operator → lazy-core.install installs the runtime daemon and auto-registers any expert candidates found; near the end of the same run the install wizard asks whether to enable the Prometheus metrics endpoint for this checkout, operator says yes, the skill allocates a free port sequentially from 9464, writes enabled+repo_label into the tracked lazy.settings.json and the allocated port into this checkout's gitignored local overlay, then the operator restarts the daemon supervisor so the one-shot metrics.init() picks up the new setting and the daemon now exposes /metrics on the allocated loopback port; operator dispatches an expert job via /lazy-expert.dispatch-job; daemon picks up the job, runs the expert, records a tick → metrics counter increments; operator runs /lazy-observe.install which pre-flight-checks for an already-covered host, finds none, walks the agent-kind/URL/auth wizard, renders agent config + service unit covering every metrics-enabled daemon on the host, loads the supervised service; agent scrapes /metrics and remote_writes to operator's Prometheus; operator runs /lazy-observe.audit; the audit verifies service active + local /metrics reachable for every daemon + agent self-metrics show successful remote_write + observer URL reachable + WAL bounded; final state: charts populated in operator's Grafana."
@@ -11,7 +11,8 @@ source_skills:
   - lazy-expert.dispatch-job
   - lazy-observe.install
   - lazy-observe.audit
-source_sha: 5a28d4bdd32d8e9cead0b771ea95d2cee4c8c212
+source_sha: d646145dc19da6bfbae3e0c00253f21e2d5c4ad2
+surface_sha: f60010e84e44f1681193aa2d3dac4990a845ff06ac982c6f1745d1dae7687b60
 ---
 # Ship your first runtime metric to a self-hosted Prometheus stack
 
@@ -70,9 +71,9 @@ Right after the smoke test, install also looks for a Grafana provisioning direct
 
 ### Step 4 — Verify end to end
 
-Run `/lazy-observe.audit`. The skill walks 7 checks read-only — service unit loaded, agent process up, local `/metrics` reachable for every daemon on this host, agent's self-metrics show successful `remote_write`, observer URL reachable, WAL bounded — and reports each as `PASS` / `WARN` / `FAIL` with a one-line fix on failure.
+Run `/lazy-observe.audit`. The skill runs through 9 ordered steps — reading its answer file, then six read-only checks (service unit loaded, agent process up, local `/metrics` reachable for every daemon on this host, agent's self-metrics show successful `remote_write`, observer URL reachable, WAL directory bounds), then logging the run and rendering the report — and reports each check as `PASS` / `INFO` / `WARN` / `FAIL` with a one-line fix on any non-`PASS` result.
 
-Expected output: all `PASS`, with `Step 5 — Agent self-metrics show successful remote_write` at `rate=N/min` (N > 0). If `Step 5` is `WARN zero-rate` your agent is up but not delivering — the audit will name the likely cause (token expired / observer unreachable / WAL recovering).
+Expected output: all `PASS`, with `Step 5 — Agent self-metrics show successful remote_write` at `rate=N/min` (N > 0). If `Step 5` is `WARN zero-rate` your agent is up but not delivering — the audit will name the likely cause (token expired / observer unreachable / WAL recovering). `Step 7 — WAL directory bounds` may report `INFO empty` instead of `PASS` on a fresh install — nothing has accumulated in the WAL yet, and there's nothing to act on.
 
 ## After you're done
 

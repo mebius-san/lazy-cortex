@@ -1,3 +1,6 @@
+---
+description: _TBD — operator-edited description of this collection._
+---
 # Summary
 #protected/spec/summary
 <!-- spec:stats:start -->

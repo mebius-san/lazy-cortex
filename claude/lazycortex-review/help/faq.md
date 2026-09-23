@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, configuring, and running the lazycortex-review document-review loop.
-last_regen: 2026-09-21
+last_regen: 2026-09-23
 no_diagram: true
 source_skills:
   - lazy-review.install
@@ -12,8 +12,8 @@ source_skills:
   - lazy-review.stop
   - lazy-review.finalize
   - lazy-review.audit
-source_sha: ece443fde681d08757d84c2adc770268af1c254a
-surface_sha: 0673851e3d2b6ad16767f78c67bdc21891628308a26f99c0371e00a90c163347
+source_sha: 1d3be1fe4f60ed602d7da87f6ed5cb2eccec283f
+surface_sha: 68434c86b94ff8116bcda3045cdd308c32c7844b9db0660b6c8cca29ddcfbefd
 ---
 # Frequently asked questions
 
@@ -142,4 +142,4 @@ A product-scoped `<type>@<product>` class carries a glob that fixes the asset's 
 
 ## Where do run logs land?
 
-Each skill writes a timestamped log under `.logs/claude/<skill-name>/` in the current repo. For example, a `start` run lands at `.logs/claude/lazy-review.start/<UTC-timestamp>.md`. The `status` and `audit` skills are read-only and do not write a log.
+Each skill writes a timestamped log under `.logs/claude/<skill-name>/` in the current repo. For example, a `start` run lands at `.logs/claude/lazy-review.start/<UTC-timestamp>.md`, and an `audit` run lands at `.logs/claude/lazy-review.audit/<UTC-timestamp>.md`. The `status` skill is the one read-only call that writes no log — it only prints its JSON summary.

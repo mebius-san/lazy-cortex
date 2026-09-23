@@ -1,10 +1,16 @@
 {
   "name": "lazycortex-diagram",
-  "version": "1.2.5",
+  "version": "2.0.0",
   "description": "Format-agnostic diagram engine: /lazy-diagram.draw dispatcher + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.",
   "author": {
     "name": "Mebius-san"
   },
+  "provides_fix_flows": [
+    {
+      "skill": "lazy-diagram.fix",
+      "label": "Re-render a drifted diagram fence in place against the current contract"
+    }
+  ],
   "dependencies": [
     "lazycortex-core"
   ]

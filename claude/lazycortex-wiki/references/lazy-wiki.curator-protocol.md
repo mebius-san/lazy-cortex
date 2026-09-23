@@ -77,13 +77,7 @@ Field notes:
 
 ## Response shape (`response.json`)
 
-```json
-{
-  "outcome": "curated | empty | error",
-  "result":  ["result/curation.json"],
-  "error":   {"category": "logical | transient | technical", "message": "..."}
-}
-```
+The response envelope — `outcome`, `result`, `error` — belongs to the expert-runtime contract and already reaches the expert through its system prompt; this protocol declares only the values `outcome` takes (see `## Outcome by kind`) and the one file `result` carries (`result/curation.json`). It does not restate the envelope here.
 
 `outcome=error` is reserved across all protocols — never define a `kind` or non-error `outcome` value named `error`.
 
@@ -213,6 +207,6 @@ deterministic apply call that writes it; there is nothing to place beside anythi
 
 | Category | Used when |
 |---|---|
-| `logical` | Input is malformed: `tag_axes` is not a JSON array, `pins` is not a JSON object, the staged node file is empty, or the node content is not recognizable as markdown. For `link`: `topics_index_content` is absent or empty, or `candidates` is present but not a JSON array of strings. An absent `candidates` is never malformed input. |
+| `logical` | Input is malformed: `tag_axes` is not a JSON array, `pins` is not a JSON object, the staged node file is empty, or the node content is not recognizable as markdown. For `link`: `topics_index_content` is absent, or `candidates` is present but not a JSON array of strings. An absent `candidates` is never malformed input, and an empty-string `topics_index_content` is legal dispatcher input (the index is not on disk yet) — the curator works with an empty catalog, it never fails the job over it. |
 | `transient` | Claude subprocess crashed or timed out — the runner should retry. |
 | `technical` | Schema violation in the curator's own output (e.g. `topics` contains an entry whose axis is not in `tag_axes`, or a `link` result contains `wiki_summary`). Log and skip; do not retry. |

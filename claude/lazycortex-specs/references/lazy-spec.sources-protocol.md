@@ -15,14 +15,14 @@ Every external reference a spec doc carries goes through one of three channels. 
 
 How an asset (and each of its authored docs) records which external inputs contributed to it AND which reference documents accompany it. Two `spec_source_*` frontmatter keys are sources of truth; the body's `# Sources` H1 section is a human-readable projection of both.
 
-The pattern is cross-spec — every stage-bearing authored doc (asset-level `design.md`, `architecture.md`, `code-plan.md`, `test-plan.md`, `bug.md`, plus product-level `design.md`, `tech.md`) and the asset's status folder-note carry the same attribution shape. The opt-in `code-report.md` / `test-report.md` journals carry neither key — they are execution logs, not sourced deliverables. Today two source kinds contribute — requests (via `lazy-spec.request-apply`) and source-docs (via `lazy-spec.create-asset` at scaffold time + `lazy-spec.refresh-sources` later); the body shape is designed so additional source kinds (external links, RFCs, tickets) can land alongside them without restructuring.
+The pattern is cross-spec — every stage-bearing authored doc at every level (asset-level `design.md`, `use-cases.md`, `architecture.md`, `ui-design.md`, `code-plan.md`, `test-plan.md`, `bug.md`, `research.md` and its `research-design` sibling, plus product-level and content-root `vision.md`, `use-cases.md`, `design.md`, `ui-design.md`, `tech.md`) and the asset's status folder-note carry the same attribution shape. The opt-in `code-report.md` / `test-report.md` journals carry neither key — they are execution logs, not sourced deliverables. Today two source kinds contribute — requests (via `lazy-spec.request-apply`) and source-docs (via `lazy-spec.create-asset` at scaffold time + `lazy-spec.refresh-sources` later); the body shape is designed so additional source kinds (external links, RFCs, tickets) can land alongside them without restructuring.
 
 ### Frontmatter — `spec_source_requests`
 
 A list of path-qualified wikilinks pointing at request files in the vault-root `requests/` inbox. Forward-only — the reverse link (request → asset) lives in the request's terminal status callout body, not as a separate field.
 
 Lives on:
-- every stage-bearing authored spec doc (`design.md`, `architecture.md`, `code-plan.md`, `test-plan.md`, `bug.md`, asset-level `tech.md`) — the per-doc subset of requests that contributed to THIS doc;
+- every stage-bearing authored spec doc (the full stage-bearing set of [file-roles](./lazy-spec.file-roles-protocol.md) § Frontmatter fields — `vision`, `system-vision`, `use-cases`, `design`, `system-design`, `architecture`, `ui-design`, `system-ui-design`, `code-plan`, `test-plan`, `bug`, `system-tech`, `research-design`, `research-report`) — the per-doc subset of requests that contributed to THIS doc;
 - the asset's status folder-note — the union of every request that has ever attached to the asset.
 
 `[]` when the doc / asset was created directly (no request origin).
@@ -33,7 +33,7 @@ Lives on:
 
 A list of path-qualified wikilinks pointing at reference documents that any agent processing this document should see as context. Distinct from `spec_source_requests`: requests record *provenance* (where the doc's content came from); source-docs record *companion references* (what the doc relies on or relates to).
 
-Lives on every stage-bearing authored spec doc (`design.md`, `architecture.md`, `code-plan.md`, `test-plan.md`, `bug.md`, asset-level `tech.md`, and product-level `design.md` + `tech.md`). Folder-note (status file) does NOT carry `spec_source_docs` — it's a managed status artifact with gates and `# History`, not content with companion references. `code-report.md` / `test-report.md` carry neither `spec_source_docs` nor `spec_source_requests`.
+Lives on every stage-bearing authored spec doc (the same full stage-bearing set as `spec_source_requests` above). Folder-note (status file) does NOT carry `spec_source_docs` — it's a managed status artifact with gates and `# History`, not content with companion references. `code-report.md` / `test-report.md` carry neither `spec_source_docs` nor `spec_source_requests`.
 
 Defaults are written by `lazy-spec.create-asset` at scaffold time. The operator may extend or trim the list manually.
 

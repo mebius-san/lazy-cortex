@@ -1,11 +1,13 @@
 ---
 name: lazy-diagram.audit
-description: "Run when the operator asks to audit the lazycortex-diagram plugin itself — after authoring or editing a template under `templates/diagram.*/` or a `styles-*.json` scheme, or when drawn diagrams come out with unbound roles, a missing init block, or an exemplar that no longer matches the authoring rule. Delegated from `lazy-core.doctor` Phase 3. Audits the plugin's own shipped templates and schemes, never a diagram in your docs — a stale fence in a document is `/lazy-diagram.fix`."
-allowed-tools: Read, Glob, Grep, Bash, Agent, AskUserQuestion, Edit, Write
+description: "Run when the operator asks to audit the lazycortex-diagram plugin itself — after authoring or editing a template under `templates/diagram.*/` or a `styles-*.json` scheme, or when drawn diagrams come out with unbound roles, a missing init block, or an exemplar that no longer matches the authoring rule. Delegated from `lazy-core.doctor` Phase 3. Audits the plugin's own shipped templates and schemes, never a diagram in your docs — a stale fence in a document is `/lazy-diagram.fix`. Read-only: it reports `PASS` / `INFO` / `WARN` / `FAIL` with the repair route named per finding and writes nothing."
+allowed-tools: Read, Glob, Grep, Bash, Agent, Write
 ---
 # lazy-diagram.audit
 
-Audit the `lazycortex-diagram` plugin for template well-formedness and contract conformance on exemplars. Read-first; nothing is mutated until the user approves.
+Audit the `lazycortex-diagram` plugin for template well-formedness and contract conformance on exemplars. Read-only: it reports and names the repair route per finding, and repairs nothing — the routes are separate runs the operator starts.
+
+This skill follows the shared audit form in `claude/lazycortex-core/references/lazy-core.audit-contract.md` — `references/lazy-core.audit-contract.md` inside the installed `lazycortex-core`: read-only, the four severity words `PASS` / `INFO` / `WARN` / `FAIL` and no others, the repair route standing in the finding line itself, and no estimate of what a repair would save. The one file it writes is its own run log under `./.logs/claude/lazy-diagram.audit/`, which `lazy-log.logging` mandates for every run.
 
 This skill is a **parallel-scan coordinator** per `lazy-core.skill-writing § 5`. Phase 1 dispatches Explore agents in a single message; Phase 2+ merges their structured reports.
 
@@ -13,23 +15,21 @@ This skill is a **parallel-scan coordinator** per `lazy-core.skill-writing § 5`
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 7 ordered steps. The executor MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 5 ordered steps. The executor MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Pre-flight`
    - `Step 2 — Dispatch A2–A3 + A5 in parallel`
    - `Step 3 — Merge structured reports`
    - `Step 4 — Present unified report`
-   - `Step 5 — Ask which to fix`
-   - `Step 6 — Apply confirmed fixes`
-   - `Step 7 — Log the run`
+   - `Step 5 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it".
 3. **Do not reach Step 4 (Present unified report) until the ledger shows steps 1–3 `completed`.** Reports without merge are a bug.
 4. **The Step 4 report is a structural verifier.** Its output MUST contain one section per A2 / A3 / A5 finding plus a summary line.
 
 ## Step 1: Pre-flight
 
-- Confirm the plugin's installPath via `~/.claude/plugins/installed_plugins.json`. If absent → `[FAIL] plugin not installed`. Stop.
+- Resolve the plugin root as what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-diagram` prints — the authoring repo's `claude/lazycortex-diagram/` when this checkout ships the plugin, else the exported or newest cached copy. `<core-cli>` is the core plugin's `bin/lazycortex-core` file: when this repo authors the plugin itself (`claude/lazycortex-core/.claude-plugin/plugin.json` exists) that is `<repo-root>/claude/lazycortex-core/bin/lazycortex-core`; otherwise `Read` `$HOME/.claude/plugins/installed_plugins.json` and take `<installPath>/bin/lazycortex-core` from the last `lazycortex-core@lazycortex` record. Every verb runs through the interpreter because the file carries no exec bit. If the primitive exits non-zero → `[FAIL] plugin not installed — fix: /plugin install lazycortex/lazycortex-diagram, then restart Claude Code and re-run`. Stop.
 - Capture `${CLAUDE_PLUGIN_ROOT}` for the dispatch prompts in Step 2.
 
 Outcome: `asserted (root=<path>)` or `[FAIL]`.
@@ -100,13 +100,23 @@ Outcome: `merged (<n> findings)`.
 
 ## Step 4: Present unified report
 
+Every finding line carries its own repair route — the run ends here, and nothing is applied. Routes by finding class:
+
+- **A2 missing section** → author the missing section in the named template, per `lazy-diagram.authoring`.
+- **A2 / A3 frontmatter or fence-count finding** → correct the named template's frontmatter or `## Exemplar` fence so exactly one fence of the folder's format remains.
+- **A3 clause violation** (single-letter ID, unlabelled edge, init literal, style literal, `classDef` / `class` / `style` line in the exemplar) → `/lazy-diagram.fix` against the offending file.
+- **A5 missing role** → add the hex entry for the named role under `roles{}` (or `textConstants{}` for a text token) in the named `styles-*.json`.
+- **A5 missing init block** → author the `blocks.init.<kind>` entry for the named kind in the named `styles-*.json`.
+- **A5 init-block sanity violation** → correct the named `blocks.init.<kind>` entry so it wraps in `%%{init: … }%%`, carries `'useMaxWidth':true`, and carries neither `'theme':'base'` nor `'darkMode':true`.
+- **A5 declared-but-unused role** → delete the unused `## Roles` line, or extend the template's `## Color binding` to reference it.
+
 Render to the user:
 
 ```
 # lazy-diagram.audit report
 
 ## A2 — Template well-formedness
-[<sev>] <title> | <path>
+[<sev>] <title> | <path> — fix: <route>
 ...
 
 ## A3 — Contract conformance on exemplars
@@ -117,48 +127,24 @@ Render to the user:
 
 ## Summary
 pass: <n>  warn: <n>  fail: <n>  info: <n>
+audit: <LEVEL> (<n> findings)
 ```
+
+`<LEVEL>` is the highest severity present, with `INFO` counted as `PASS`, per the contract's summary line.
+
+There is no recommendations section after the summary, and no line states what a repair would save.
 
 Outcome: `presented`.
-
-## Step 5: Ask which to fix
-
-- If `fail + warn == 0` → `nothing-to-fix`. Skip to Step 7.
-- Else print the context, then ask (single multi-select) and capture the selection:
-
-```
-Context (print before asking):
-- Where: /lazy-diagram.audit · Step 5 — Ask which to fix; target <root>/templates/diagram.*/ (the plugin's own templates and schemes)
-- Found: <n> WARN / <m> FAIL findings from Step 4, each as `[<sev>] <title> | <path>`
-- Why asking: fixes edit shipped templates and schemes; nothing is mutated until the user picks
-- Answers: a selected finding — its Step 6 fix vocabulary is applied now (or the un-auto-fixable part is surfaced); an unselected finding — untouched, reported `skipped-per-user-choice`, listed again on the next audit
-AskUserQuestion: header "Fixes", question "Which of the <n+m> WARN/FAIL findings in <root>/templates/ should be fixed now?", multiSelect, one option per finding with its `[<sev>] <title> | <path>` line as the description.
-```
-
-Outcome: `confirmed (<n> selected)` or `nothing-to-fix`.
-
-## Step 6: Apply confirmed fixes
-
-For each selected finding, the coordinator (this session, not the agents) applies the fix. Fix vocabulary:
-
-- A2 missing section → cannot auto-fix; surface the file path and ask the user to author the missing section.
-- A3 clause violation → offer to invoke `lazy-diagram.fix` against the offending file.
-- A5 missing-role-in-scheme → surface the scheme file path and missing role; ask the user to add the hex entry under `roles{}` or `textConstants{}`.
-- A5 missing-init-block → surface the scheme file path and missing kind; ask the user to author the `blocks.init.<kind>` entry under `templates/diagram.mermaid/styles-*.json`.
-- A5 init-block sanity violation → surface the scheme file, kind, and which sanity check failed (`useMaxWidth` missing, `theme:base` present, `darkMode:true` present, malformed wrapper); ask the user to fix the scheme entry.
-- A5 declared-but-unused role → surface the template path and unused role; offer to delete the unused `## Roles` line or extend `## Color binding` to reference it.
-
-Outcome: per-finding fix-outcome word (`fixed` / `deferred` / `skipped-per-user-choice`).
 
 ## Failure modes
 
 - **`/lazy-diagram.audit` aborts: "[FAIL] plugin not installed"** — `lazycortex-diagram` is not found in `~/.claude/plugins/installed_plugins.json` → install the plugin via `/lazy-core.install`, restart Claude Code, then re-run.
 
-## Step 7: Log the run
+## Step 5: Log the run
 
 Two separate calls:
 
 1. `Bash: mkdir -p ./.logs/claude/lazy-diagram.audit`
-2. `Write: ./.logs/claude/lazy-diagram.audit/<UTC-timestamp>.md` with frontmatter (`git_sha`, `git_branch`, `date`, `input`) and the unified report from Step 4 plus the fix outcomes from Step 6.
+2. `Write: ./.logs/claude/lazy-diagram.audit/<UTC-timestamp>.md` with frontmatter (`git_sha`, `git_branch`, `date`, `input`) and the unified report from Step 4. This is the only file the skill writes.
 
 Outcome: `logged`.

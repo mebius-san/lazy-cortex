@@ -7,6 +7,8 @@ allowed-tools: Read, Glob, Grep, Write, Bash(python3 *), Bash("${LAZYCORTEX_PYTH
 
 Verify that what `/lazy-experts.install` promised is still true: the class map's roles all resolve to shipped agent files, the aspect references the map assigns all exist, and every seeded `experts` entry still points at an agent and a set of aspects this plugin actually ships. Read-only — it collects findings and names the fix per finding; it never edits `lazy.settings.json`, never seeds an entry, and never asks a question.
 
+This skill follows the shared audit form in `claude/lazycortex-core/references/lazy-core.audit-contract.md` — `references/lazy-core.audit-contract.md` inside the installed `lazycortex-core`: read-only, the four severity words `PASS` / `INFO` / `WARN` / `FAIL` and no others, the repair route standing in the finding line itself, and no estimate of what a repair would save. The one file it writes is its own run log under `./.logs/claude/lazy-experts.audit/`, which `lazy-log.logging` mandates for every run.
+
 ## Execution discipline (MANDATORY — read before any action)
 
 This skill has 6 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
@@ -28,8 +30,8 @@ Two paths to resolve before anything is checked.
 
 **Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file: when this repo authors the plugin itself (`claude/lazycortex-core/.claude-plugin/plugin.json` exists) that is `<repo-root>/claude/lazycortex-core/bin/lazycortex-core`; otherwise `Read` `$HOME/.claude/plugins/installed_plugins.json` and take `<installPath>/bin/lazycortex-core` from the last `lazycortex-core@lazycortex` record. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
 
-- **Plugin root** — the `installPath` field for `lazycortex-experts@lazycortex` in `~/.claude/plugins/installed_plugins.json`. When the repo at hand authors this plugin, `claude/lazycortex-experts/` is the root instead and wins, so the audit judges the sources being edited rather than a stale cached copy. Neither present → `FAIL plugin-root-unresolved`; stop, no further phase runs.
-- **Settings** — `<repo-root>/.claude/lazy.settings.json` (root from `git rev-parse --show-toplevel`, cwd when not in a git repo), falling back to `~/.claude/lazy.settings.json` when the plugin is enabled only at user scope. Resolve the scope with `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> detect-scope lazycortex-experts@lazycortex)`. File absent, or its `experts` section absent or holding nothing besides `_version` → report `INFO no-experts-configured` and run Phase 2 alone; Phase 3 states `skipped (no entries)`.
+- **Plugin root** — the `installPath` field for `lazycortex-experts@lazycortex` in `~/.claude/plugins/installed_plugins.json`. When the repo at hand authors this plugin, `claude/lazycortex-experts/` is the root instead and wins, so the audit judges the sources being edited rather than a stale cached copy. Neither present → `FAIL plugin-root-unresolved — fix: /plugin install lazycortex/lazycortex-experts`; stop, no further phase runs.
+- **Settings** — `<repo-root>/.claude/lazy.settings.json` (root from `git rev-parse --show-toplevel`, cwd when not in a git repo), falling back to `~/.claude/lazy.settings.json` when the plugin is enabled only at user scope. Resolve the scope with `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> detect-scope lazycortex-experts@lazycortex)`. File absent, or its `experts` section absent or holding nothing besides `_version` → report `INFO no-experts-configured — fix: /lazy-experts.install seeds the class set when this project should have experts` and run Phase 2 alone; Phase 3 states `skipped (no entries)`.
 
 Read the `experts` section through `lazy_settings.load_tracked_section` so a local overlay is never mistaken for tracked config.
 
@@ -41,12 +43,12 @@ The class map lives in `/lazy-experts.install` Step 5 and is this phase's refere
 
 **S1 — every class-map role resolves to an agent file.** For each role the map assigns to either class kind, resolve it through the map's role→agent table (three roles do not share their agent's basename) and confirm `<root>/agents/lazy-experts.<agent>.md` exists.
 
-- Missing file → `FAIL agent-missing: <role> → lazy-experts.<agent>.md`. Every expert the map would seed for that role dispatches to nothing.
+- Missing file → `FAIL agent-missing: <role> → lazy-experts.<agent>.md — fix: /plugin update lazycortex-experts@lazycortex`. Every expert the map would seed for that role dispatches to nothing, and the shipped tree, not the settings, is what is incomplete.
 - All present → `PASS <N> roles resolve`.
 
 **S2 — every aspect the class map assigns resolves to a reference file.** Confirm `<root>/references/lazy-experts.<class>-aspect.md` exists for each class the map names, and `<root>/references/lazy-experts.<aspect>-aspect.md` for each cross-cutting aspect either row assigns. The persona aspect the map also assigns belongs to `lazycortex-core` — confirm it under that plugin's own cached `references/`, and state `INFO persona-aspect-unresolved` rather than `FAIL` when `lazycortex-core` is not installed at this scope.
 
-- Missing file → `FAIL aspect-missing: lazy-experts.<name>-aspect.md`.
+- Missing file → `FAIL aspect-missing: lazy-experts.<name>-aspect.md — fix: /plugin update lazycortex-experts@lazycortex`.
 - All present → `PASS <N> aspects resolve`.
 
 Outcome: `scanned (<N> checks)`.
@@ -57,26 +59,26 @@ Partition the `experts` section exactly as `/lazy-experts.install` Step 3 does: 
 
 For each domain entry, derive its class kind (technical or fiction) from the domain aspect it carries, then:
 
-**C1 — the `agent` ref resolves.** A ref of the form `lazycortex-experts:lazy-experts.<name>` must have `<root>/agents/lazy-experts.<name>.md` on disk. Missing → `FAIL agent-ref-unresolved: <expert-key> → <ref>`. A ref naming another plugin is out of scope — state `INFO foreign-agent: <expert-key> → <ref>`.
+**C1 — the `agent` ref resolves.** A ref of the form `lazycortex-experts:lazy-experts.<name>` must have `<root>/agents/lazy-experts.<name>.md` on disk. Missing → `FAIL agent-ref-unresolved: <expert-key> → <ref> — fix: correct the ref in lazy.settings.json, or delete the entry and re-run /lazy-experts.install to reseed it from the class map`. A ref naming another plugin is out of scope — state `INFO foreign-agent: <expert-key> → <ref>`, no route.
 
-**C2 — every `lazycortex-experts:` aspect ref resolves.** Each such ref must have its file under `<root>/references/`. Missing → `FAIL aspect-ref-unresolved: <expert-key> → <ref>`. Refs naming another plugin are that plugin's to verify; skip them silently.
+**C2 — every `lazycortex-experts:` aspect ref resolves.** Each such ref must have its file under `<root>/references/`. Missing → `FAIL aspect-ref-unresolved: <expert-key> → <ref> — fix: /lazy-experts.install`. Refs naming another plugin are that plugin's to verify; skip them silently.
 
 **C3 — the mandatory cross-cutting aspects are present for the entry's class kind.** Technical entries carry `discipline`, `research`, `tech-writing`, `terms`, and `structure`; fiction entries carry `discipline` and `research` only, and carrying any of the other three is itself the finding — the class map states plainly why those three never compose onto fiction.
 
-- Technical entry missing one or more → `WARN aspects-incomplete: <expert-key> (missing: <names>)`.
-- Fiction entry carrying `tech-writing`, `terms`, or `structure` → `WARN aspect-not-for-fiction: <expert-key> (<names>)`.
+- Technical entry missing one or more → `WARN aspects-incomplete: <expert-key> (missing: <names>) — fix: /lazy-experts.install, which appends the missing mandatory aspect`.
+- Fiction entry carrying `tech-writing`, `terms`, or `structure` → `WARN aspect-not-for-fiction: <expert-key> (<names>) — fix: drop the named aspects from the entry; the class map states why those three never compose onto fiction`.
 - Both satisfied → `PASS`.
 
 **C4 — the install-managed keys are present on the roles that need them.** A writing-role entry with no `can_commit_in_repo` key at all, or one of the four isolated roles with no `workspace` key at all, is an entry from before those keys shipped — the role lists are in `/lazy-experts.install` Step 5. An explicit `false` or an explicit `"main"` is the operator's choice and is never a finding; only total absence is.
 
-- Absent → `WARN key-absent: <expert-key> (<key>)`.
+- Absent → `WARN key-absent: <expert-key> (<key>) — fix: /lazy-experts.install, which backfills the absent install-managed key`.
 - Present in either direction → `PASS`.
 
 Outcome: `audited (<N> domain entries)` / `skipped (no entries)`.
 
 ## Phase 4 — Render report
 
-Print one bullet per finding grouped by severity, `FAIL` first, then `WARN`, then `INFO`; drop the `PASS` bullets and carry them as counts. Every `FAIL` and `WARN` bullet names its fix — for every finding this skill raises the fix is `/lazy-experts.install` (it seeds a missing entry, appends a missing mandatory aspect, and backfills an absent install-managed key), except `agent-missing` and `aspect-missing`, whose fix is `/plugin update lazycortex-experts@lazycortex` because the shipped tree itself is incomplete. Close with the summary line `audit: <LEVEL> (<N> findings)`, where `<LEVEL>` is the worst severity seen.
+Print one bullet per finding grouped by severity, `FAIL` first, then `WARN`, then `INFO`; drop the `PASS` bullets and carry them as counts. Each bullet reproduces the finding as its check phrased it — severity, key, and the `fix:` route in the same line, never a route lifted into a section of its own or left implied by the phase it came from. Close with the summary line `audit: <LEVEL> (<N> findings)`, where `<LEVEL>` is the worst severity seen. No line states what a repair would save.
 
 Nothing is written to `lazy.settings.json` in this phase or any other.
 

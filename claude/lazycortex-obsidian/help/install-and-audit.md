@@ -1,17 +1,17 @@
 ---
 chapter_type: block
 summary: Install, keep current, and audit the lazycortex-obsidian plugin — vault bootstrap, Obsidian plugin management, and vault-manifest drift checks in one pass.
-last_regen: 2026-09-21
+last_regen: 2026-09-23
 diagram_spec:
   anchor: "How the three skills compose"
-  request: "Flow diagram showing how lazy-obsidian.install orchestrates lazy-obsidian.update-plugin (for Dataview, and indirectly for Obsidian community plugins via iconize-install), syncs and enables its own CSS snippets (diagram-fit + callouts), and how lazy-obsidian.audit feeds findings back to the user for fix or skip; show the idempotent re-run loop"
+  request: "Flow diagram showing how lazy-obsidian.install orchestrates lazy-obsidian.update-plugin (for Dataview, and indirectly for Obsidian community plugins via iconize-install), syncs and enables its own CSS snippets (diagram-fit + callouts), and how lazy-obsidian.audit runs independently as a read-only drift report — every finding line already names its own repair route (lazy-obsidian.capture / lazy-obsidian.deploy), the audit itself never asks a question or writes anything but its run log; show the idempotent re-run loop"
   kind_hint: flow
 source_skills:
   - lazy-obsidian.install
   - lazy-obsidian.audit
   - lazy-obsidian.update-plugin
-source_sha: f1a56b7fe545eee38ce6ac86f103b38934d0fe11
-surface_sha: 32d86dfe58aabed2ce9f49391db48a6295696c29c448daaa7fb2017d87f0fe0f
+source_sha: d646145dc19da6bfbae3e0c00253f21e2d5c4ad2
+surface_sha: 65873b90cbf6e237c2e1524f2c936b8f1f2cad8bafd8567f4de2d1538ca71e85
 ---
 # Install and audit
 
@@ -32,7 +32,7 @@ You start with `/lazy-obsidian.install`. It detects whether you are installing a
 
 `/lazy-obsidian.update-plugin` is intentionally narrow: one plugin id per call, no side effects on sibling dirs, backup-safe (`manifest.json.bak` / `main.js.bak` are created before any download, restored on failure). When you pass `--bundled`, the skill copies binaries from the plugin's own templates instead of hitting GitHub — useful for `iconize-reloader`, which ships inside this plugin, and safe in offline environments. The state tuple it prints (`binary=... overrides=... community=...`) is machine-readable so the calling skill can log it verbatim.
 
-`/lazy-obsidian.audit` runs independently of install — invoke it any time you want a drift check. When the repo carries a tracked `.obsidian.manifest.json`, it compares the live vault config against that manifest; without one it skips silently with outcome `no-manifest`. Drift findings are never auto-resolved — the audit only reports which side disagrees and lets you pick `/lazy-obsidian.capture` (the vault is right, record it) or `/lazy-obsidian.deploy` (the manifest is right, restore it) yourself. For every WARN it offers fix / skip — one question at a time. It is also the target of `lazy-core.doctor` Phase 3, so running the core doctor in any project that has this plugin enabled will delegate to this skill automatically.
+`/lazy-obsidian.audit` runs independently of install — invoke it any time you want a drift check. When the repo carries a tracked `.obsidian.manifest.json`, it compares the live vault config against that manifest; without one it reports `INFO no-manifest` and stops — nothing to compare yet. The audit is read-only end to end: every finding line already names its own repair route right there, so there is no in-audit question to answer. `PASS` means the vault and its manifest agree; `INFO` covers a plugin whose installed version moved past what its settings were captured under (or a credential the manifest can never carry) — nothing to act on either way; `WARN` is a genuine disagreement between `<repo>/.obsidian/` and the manifest, and only you know which side is right — `/lazy-obsidian.capture` when the vault is right (record it), `/lazy-obsidian.deploy` when the manifest is (restore it); `FAIL worker-refused` means the manifest itself doesn't parse (fixed by re-running `/lazy-obsidian.capture` to rewrite it from the live vault) or the vault has no `.obsidian/` config directory at all yet (run `/lazy-obsidian.install` first). Findings are grouped by severity with a closing summary line, `audit: <PASS|WARN|FAIL> (<n> findings)`. It is also the target of `lazy-core.doctor` Phase 3, so running the core doctor in any project that has this plugin enabled will delegate to this skill automatically.
 
 ## Common adjustments
 
@@ -41,39 +41,36 @@ You start with `/lazy-obsidian.install`. It detects whether you are installing a
 - **A CSS snippet you customized conflicts with an upstream change**: `/lazy-obsidian.install` only prompts when your local edit and the shipped update touch the exact same region of a snippet — it asks you to pick **merge-shipped** (take the shipped version for that region) or **keep-local** (keep yours, still apply any non-conflicting shipped changes). Non-conflicting drift merges silently every time; you'll never be asked about it. When install runs unattended — no operator to ask, e.g. under `/lazy-core.autosetup` — it keeps your local region for that conflicting snippet automatically and still applies the rest of the shipped delta, rather than stalling on a question nobody can answer.
 - **Agent model routing**: `/lazy-obsidian.install` seeds the `lazy-obsidian.gen-tag-pages` subagent's tier automatically on every run, without overwriting a tier you've already customized. If you want to adjust which tier handles `lazy-obsidian` subagents yourself, run `/lazy-core.agent-models --scope=project` — it reads the canonical defaults from `lazycortex-core` and lets you override per-agent without hand-editing `lazy.settings.json`.
 - **After a plugin update**: re-run `/lazy-obsidian.install` after every `/plugin update lazycortex-obsidian@lazycortex`. The cache refresh does not propagate rule, template, or CSS snippet changes into your repo; the install skill does.
-- **Vault manifest drift reported by `/lazy-obsidian.audit`**: this only appears once you've captured a baseline. If you haven't, drift checking is silently skipped (reported as `no-manifest`) — nothing to fix. Once a manifest exists, resolve drift by choosing whichever side reflects intent: `/lazy-obsidian.capture` to record the vault's current state, or `/lazy-obsidian.deploy` to restore the vault from the manifest.
+- **Vault manifest drift reported by `/lazy-obsidian.audit`**: this only appears once you've captured a baseline. If you haven't, the audit reports `INFO no-manifest` and stops — nothing to fix. Once a manifest exists, every disagreement is reported with its repair route already on the finding line — the audit itself never asks you to pick; you choose whichever side reflects intent: `/lazy-obsidian.capture` to record the vault's current state, or `/lazy-obsidian.deploy` to restore the vault from the manifest.
 
 ## How the three skills compose
 
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  operatorRunsInstall["Operator runs lazy-obsidian.install"]
-  checkPluginsCurrent{"Plugins current?"}
-  updateDataview["lazy-obsidian.update-plugin (Dataview)"]
-  dispatchIconizeInstall["lazy-obsidian.iconize-install (indirect update-plugin)"]
-  syncCssSnippets["Sync CSS snippets (diagram-fit + callouts)"]
-  enableCssSnippets["Enable CSS snippets"]
-  runAudit["lazy-obsidian.audit scans vault"]
-  auditFindings{"Findings found?"}
-  userDecision{"Fix or skip?"}
-  applyFix["User applies fix"]
-  installComplete["Install complete"]
+  operatorRunsInstall["Operator runs /lazy-obsidian.install"]
+  installSyncsRulesAndTemplate["Sync plugin rules and tag-page template"]
+  installCallsUpdatePluginDataview["Call /lazy-obsidian.update-plugin for Dataview"]
+  installChainsIconizeInstall["Chain into /lazy-obsidian.iconize-install (unconditional)"]
+  iconizeCallsUpdatePlugin["Call /lazy-obsidian.update-plugin for obsidian-icon-folder, folder-notes, iconize-reloader --bundled"]
+  installSyncsCssSnippets["Sync and enable CSS snippets diagram-fit and callouts in appearance.json"]
+  installChainsDiagramInstall["Chain into /lazy-obsidian.diagram-install (mermaid-popup)"]
+  installFinishesIdempotent["Install complete - idempotent, safe to re-run"]
+  operatorRunsAudit["Operator runs /lazy-obsidian.audit"]
+  auditComparesManifest{"Compare .obsidian.manifest.json against live .obsidian/ - drift found?"}
+  auditWritesRunLog["Write run log only - no prompts, no other writes"]
 
-  operatorRunsInstall -->|start install| checkPluginsCurrent
-  checkPluginsCurrent -->|Dataview outdated| updateDataview
-  checkPluginsCurrent -->|already current| syncCssSnippets
-  updateDataview -->|installed| dispatchIconizeInstall
-  dispatchIconizeInstall -->|updates community plugins| syncCssSnippets
-  syncCssSnippets -->|snippets copied| enableCssSnippets
-  enableCssSnippets -->|snippets active| runAudit
-  runAudit -->|scan complete| auditFindings
-  auditFindings -->|no findings| installComplete
-  auditFindings -->|findings found| userDecision
-  userDecision -->|fix| applyFix
-  userDecision -->|skip| installComplete
-  applyFix -->|fixed| installComplete
-  installComplete -->|re-run install| operatorRunsInstall
+  operatorRunsInstall -->|bootstrap| installSyncsRulesAndTemplate
+  installSyncsRulesAndTemplate -->|sync| installCallsUpdatePluginDataview
+  installCallsUpdatePluginDataview -->|install Dataview| installChainsIconizeInstall
+  installChainsIconizeInstall -->|chain, no opt-in prompt| iconizeCallsUpdatePlugin
+  iconizeCallsUpdatePlugin -->|install community plugins| installSyncsCssSnippets
+  installSyncsCssSnippets -->|enable snippets| installChainsDiagramInstall
+  installChainsDiagramInstall -->|install mermaid-popup| installFinishesIdempotent
+  installFinishesIdempotent -->|re-run| operatorRunsInstall
+  operatorRunsAudit -->|read-only scan| auditComparesManifest
+  auditComparesManifest -->|yes, finding names capture or deploy route| auditWritesRunLog
+  auditComparesManifest -->|no drift| auditWritesRunLog
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
@@ -81,16 +78,16 @@ flowchart LR
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
 
   class operatorRunsInstall entry
-  class checkPluginsCurrent guard
-  class updateDataview action
-  class dispatchIconizeInstall action
-  class syncCssSnippets action
-  class enableCssSnippets action
-  class runAudit action
-  class auditFindings guard
-  class userDecision guard
-  class applyFix action
-  class installComplete success
+  class installSyncsRulesAndTemplate action
+  class installCallsUpdatePluginDataview action
+  class installChainsIconizeInstall action
+  class iconizeCallsUpdatePlugin action
+  class installSyncsCssSnippets action
+  class installChainsDiagramInstall action
+  class installFinishesIdempotent success
+  class operatorRunsAudit entry
+  class auditComparesManifest guard
+  class auditWritesRunLog success
 ```
 
 <!-- /lazy-diagram.draw lands the fence here; do not author a code block manually. -->

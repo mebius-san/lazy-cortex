@@ -1,5 +1,5 @@
 ---
-description: "Run when the operator asks what lazycortex-experts ships, which generic expert fits a piece of work, or how to assemble a named specialist — lists the fourteen persona agents (interpreter, designer, architect, planner, researcher, use-case-writer, ui-designer, implementer, data-implementer, docs-writer, debugger, reviewer, tester, fiction-writer), the domain and cross-cutting aspects that layer onto them, and the `lazy.settings.json[experts]` composition shape."
+description: "Run when the operator asks what lazycortex-experts ships, which generic expert fits a piece of work, or how to assemble a named specialist — lists the sixteen persona agents (interpreter, designer, architect, planner, researcher, use-case-writer, ui-designer, implementer, data-implementer, docs-writer, debugger, reviewer, tester, editor, fiction-writer, fiction-editor), the domain and cross-cutting aspects that layer onto them, and the `lazy.settings.json[experts]` composition shape."
 execution-discipline-waiver: "static help text — no executable steps"
 logging-waiver: "static text — no executable steps"
 ---
@@ -7,7 +7,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 
 ---
 
-**lazycortex-experts** — generic lifecycle experts plus a starter set of domain aspects. Fourteen persona-only agents (interpreter / designer / architect / planner / researcher / use-case-writer / ui-designer / implementer / data-implementer / docs-writer / debugger / reviewer / tester / fiction-writer) combine with composable aspect files (claude-plugin / game-dev / dotfiles / obsidian-plugin / data-pipeline / software-product / sci-fi / fantasy) and five cross-cutting aspects (discipline, research, tech-writing, terms, structure) to form specialists you assemble in `lazy.settings.json[experts]`. No protocols, routines, or dispatcher ship from this plugin — the dispatching routine supplies the protocol and the agent follows it.
+**lazycortex-experts** — generic lifecycle experts plus a starter set of domain aspects. Sixteen persona-only agents (interpreter / designer / architect / planner / researcher / use-case-writer / ui-designer / implementer / data-implementer / docs-writer / debugger / reviewer / tester / editor / fiction-writer / fiction-editor) combine with composable aspect files (claude-plugin / game-dev / dotfiles / obsidian-plugin / data-pipeline / software-product / sci-fi / fantasy) and five cross-cutting aspects (discipline, research, tech-writing, terms, structure) to form specialists you assemble in `lazy.settings.json[experts]`. No protocols, routines, or dispatcher ship from this plugin — the dispatching routine supplies the protocol and the agent follows it.
 
 **Agents** (invoke via Agent tool, normally only via a routine that dispatches expert jobs):
 
@@ -24,7 +24,9 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 - `lazy-experts.debugger` — investigates a bug to its root cause before any fix, one hypothesis at a time, four phases (investigate / pattern / hypothesis / fix). After repeated failed fixes, surfaces the architecture itself as the open question. Models its discipline on `superpowers:systematic-debugging`.
 - `lazy-experts.reviewer` — reviews a change for correctness and quality, returns ranked findings (location + cause + severity) with evidence, verifying each against the codebase before asserting it. Stays out of the implementer's lane. Models its discipline on `superpowers:requesting-code-review` + `receiving-code-review`.
 - `lazy-experts.tester` — discovers the testing mechanisms the repository actually ships (runners, fixtures, harnesses, Makefile / CI targets) and works only through them: writes risk-to-coverage test plans, executes plans step by step recording actual vs expected, writes evidence-grade bug reports, minimizes failures to the shortest deterministic steps-to-reproduce. Finds and documents defects; never fixes them.
+- `lazy-experts.editor` — takes a document another expert already wrote and corrects its prose against the writing canon: shop talk, coined terminology, synonym rotation, filler, broken language. Corrects in place under the edit markers and never touches what the document says; a defect that cannot be fixed without changing meaning goes into the report. Stays out of the reviewer's lane — it repairs the text rather than ranking findings.
 - `lazy-experts.fiction-writer` — takes a brief or story outline, produces literary text: narrative prose, dialogue, lyrical fragments. Owns POV/psychic distance, show-don't-tell, dialogue subtext, rhythm; story architecture comes from upstream documents. Never dispatched for technical documents.
+- `lazy-experts.fiction-editor` — takes drafted literary text and edits its prose: filter words, named emotion where behaviour belongs, monotone rhythm, dead metaphor, point-of-view leaks, the tics machine prose falls into. Cuts more than it adds, keeps the author's voice, and never changes what happens in the scene.
 
 **Aspects** (compose into any agent via `lazy.settings.json[experts][<expert>].aspects[]`):
 
@@ -44,7 +46,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 
 **Skills** (invoke as `/<name>` or via Skill tool):
 
-- `lazy-experts.install` — bootstrap the plugin for the current project (or globally). Seeds agent-model tiers from `lazycortex-core`'s defaults into `lazy.settings.json[agent_models].lazycortex` and composes expert entries per the class map (technical classes: fourteen roles, discipline + research + tech-writing + terms + structure; sci-fi/fantasy: fiction-writer, discipline + research only). Also checks system-expert completeness against sibling plugins' registrations and reports gaps. Idempotent.
+- `lazy-experts.install` — bootstrap the plugin for the current project (or globally). Seeds agent-model tiers from `lazycortex-core`'s defaults into `lazy.settings.json[agent_models].lazycortex` and composes expert entries per the class map (technical classes: fifteen roles, discipline + research + tech-writing + terms + structure; sci-fi/fantasy: fiction-writer and fiction-editor, discipline + research only). Also checks system-expert completeness against sibling plugins' registrations and reports gaps. Idempotent.
 - `lazy-experts.audit` — read-only check of the expert composition in this project. Verifies that every role the class map prescribes resolves to a shipped agent file, that every class and cross-cutting aspect reference exists, and that each seeded `experts` entry still points at an agent and an aspect set this plugin ships and carries the mandatory cross-cutting aspects for its class kind. Reports PASS / WARN / FAIL / INFO with the fix per finding; never writes to `lazy.settings.json`. Delegated from `/lazy-core.doctor`.
 
 **Commands**:

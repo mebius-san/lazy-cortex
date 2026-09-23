@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Bootstrap lazycortex-review in a repo, define document review classes, and validate configuration with a read-only audit.
-last_regen: 2026-09-21
+last_regen: 2026-09-23
 diagram_spec:
   anchor: "How install, configure, and audit fit together"
   request: "Show the three-step setup flow: /lazy-review.install seeds settings, dirs, and the routine trio (registered unconditionally, independent of daemon.enabled); /lazy-review.configure adds review classes via wizard; /lazy-review.audit validates the result."
@@ -9,8 +9,8 @@ source_skills:
   - lazy-review.install
   - lazy-review.configure
   - lazy-review.audit
-source_sha: ece443fde681d08757d84c2adc770268af1c254a
-surface_sha: f36741fd20e1b6dc9a101978aadcce10b64b5d089ec452fcd6c41ecabed0765a
+source_sha: 1d3be1fe4f60ed602d7da87f6ed5cb2eccec283f
+surface_sha: cdd5a34c1d12952336f2c85a09cc6d85a9d114dd3462402b9a144360f624d3a3
 ---
 # Install and configure lazycortex-review
 
@@ -26,7 +26,7 @@ Running install on a repo that was set up before the coordinator loop existed al
 
 **`/lazy-review.configure`** turns an empty `review.classes` block into a live class definition. The wizard collects the glob pattern that identifies which documents belong to the class, a short unique identity token for the class (used to find and extend the entry on a later run), the main-writer assignments, any `validation` or `terminal` section definitions, and the edit-marker style. A token of the form `<type>@<product>` scopes the class to one product; when several such classes cover the same typed document, the class whose globs anchor on the most leading literal path segments — the innermost product's — takes priority, so a nested product's own class always outranks an ancestor's whatever order the classes were configured in. Every question is read-first: if a value is already recorded in the settings file the wizard skips the prompt and reuses the persisted value silently, and every prompt it does ask now opens with a short context block — where in the wizard you are, what's already on record, and why the question can't be derived — before the question itself, so a fully-configured class still reruns silently while a genuinely new one explains itself as it goes. Once all values are collected, the skill writes them back, then — only when the watch routine is already registered, which is always true once `/lazy-review.install` has run, since install no longer gates the trio on the daemon flag — widens `review.watch_root` to cover the new class's paths (the watch carries one pathspec, so this widening is monotonic: it only grows the scanned tree, never narrows it away from a class configured earlier) and calls `/lazy-review.audit` so you see any configuration inconsistencies before the first review round starts. A class can also carry a `protocols` list of extra plugin-namespaced references the coordinator folds into every writer dispatch for that class's documents; the wizard never asks for this — it is seeded by whichever plugin owns the document kind and simply preserved on every configure run.
 
-**`/lazy-review.audit`** is the read-only health check for the review configuration. It runs the `audit.py` script against `.claude/lazy.settings.json`, checks schema correctness, verifies that every expert name referenced by a class exists in the top-level `experts` dictionary, confirms `git_author` completeness, and validates `edit_marker_style`. For classes using the section-writer schema it also checks each `validation` / `terminal` entry's section-id alphabet and uniqueness, its position enum (`top` / `bottom`), and that its expert name resolves and flattens to a tag-safe string. It additionally scans every document matched by a configured class's `paths` for `#review/<tag>` callouts and flags any tag outside the closed vocabulary of operator/coordinator markers and banner states. It also warns when a product-scoped `<type>@<key>` class carries a glob that fixes the asset depth: an asset sitting at the product root, or nested inside another asset, falls out of such a glob and loses the product's own experts — re-run `/lazy-spec.product-config <key>` in edit mode to regenerate it. It returns `PASS`, `WARN`, or `FAIL` with per-finding detail grouped by severity. You can run it at any time — it never writes anything.
+**`/lazy-review.audit`** is the read-only health check for the review configuration. It runs the `audit.py` script against `.claude/lazy.settings.json`, checks schema correctness, verifies that every expert name referenced by a class exists in the top-level `experts` dictionary, confirms `git_author` completeness, and validates `edit_marker_style`. For classes using the section-writer schema it also checks each `validation` / `terminal` entry's section-id alphabet and uniqueness, its position enum (`top` / `bottom`), and that its expert name resolves and flattens to a tag-safe string. It additionally scans every document matched by a configured class's `paths` for `#review/<tag>` callouts and flags any tag outside the closed vocabulary of operator/coordinator markers and banner states. It also warns when a product-scoped `<type>@<key>` class carries a glob that fixes the asset depth: an asset sitting at the product root, or nested inside another asset, falls out of such a glob and loses the product's own experts — re-run `/lazy-spec.product-config <key>` in edit mode to regenerate it. It returns `PASS`, `INFO`, `WARN`, or `FAIL` with per-finding detail grouped by severity. You can run it at any time; it never touches your configuration — the one file it writes is its own run log under `./.logs/claude/lazy-review.audit/`.
 
 ## How they work together
 

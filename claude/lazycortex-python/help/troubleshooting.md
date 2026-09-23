@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, causes, and fixes for lazycortex-python install, audit, style checks, the guideline-review gate, and writer agents.
-last_regen: 2026-09-21
+last_regen: 2026-09-23
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision-tree routing install/audit/check-style/review/writer failures: top-level branch on skill invoked (install vs audit vs check-style vs review vs docstring-writer vs test-writer); install branch splits on phase (source-not-found, rule-read-only, wrapper-template-missing, pyproject-absent, pch-no-inspect-sh, scaffold-sync-fails, env-source-multiple-candidates, wrapper-cannot-resolve-active-install); audit branch splits on check number (check-crash, check1 drift, check2 broken-pointer, check3 artifact-missing, check4 placeholder, check10 invalid-json, check11 venv-degraded, check12 domain-groups-dictionary-missing); check-style branch splits on step (step3-manual-vs-chk, step5-test-gate, step6-violations-persist); pcf branch splits on new-violations-after-upgrade: (a) D2/D5/D7/D9 firing on previously-passing docstrings because project-neutral defaults dropped a project's implicit Generation Rules / Value Ranges / _field_filters conventions, needing [tool.pcf] extra_docstring_sections / d2_exempt_marker_attrs / private_name_allowlist declared; (b) check_language flagging comments/docstrings written outside [tool.pcf] allowed_languages (default english-only), needing translation, allowed_languages, or a # waiver:; (c) project_package autodetection resolving to nothing on an ambiguous src/ + root layout, misclassifying first-party imports, needing [tool.pcf] project_package declared explicitly; review branch splits on: chk-py-all-no-longer-runs-review (review left chk-py all as of 4.0.0 and needs its own chk-py review dispatch, mandatory at the end of a planned-work cycle) vs chk-py-review-base-ref-unresolvable (typo'd or unfetched --base ref, fetch or use git merge-base) vs chk-py-review-render-still-fails-with-FAIL-finding (fix the code, re-run — new scope key re-manifests); docstring-writer branch (step6-chk-violations); test-writer branch (step6-fails-flag, step7-tst-py-fails); each leaf names the fix action"
@@ -19,8 +19,8 @@ source_skills:
   - lazy-python.knowledge-sweep
   - lazy-python.domain-writer
   - lazy-python.contract-writer
-source_sha: 672d1b9bda5f90edef93fde43a07d7981f74be83
-surface_sha: cd1d3dd0be53ff51c4c2067f0482e1a926fed26860132db93b9f038767ccea1c
+source_sha: d646145dc19da6bfbae3e0c00253f21e2d5c4ad2
+surface_sha: 92c38280400f31ea039e97d1fe3194a1aa7fed4e2489dc948257bd76e11fa323
 ---
 # Troubleshooting
 

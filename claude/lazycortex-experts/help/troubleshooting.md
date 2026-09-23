@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes during lazycortex-experts setup — symptoms, likely causes, and fixes.
-last_regen: 2026-09-20
+last_regen: 2026-09-23
 no_diagram: true
 source_skills:
   - lazy-experts.install
@@ -19,7 +19,11 @@ source_skills:
   - lazy-experts.researcher
   - lazy-experts.reviewer
   - lazy-experts.tester
-source_sha: b08ea18842928cbe682cee4ca8046f1f7a25ffe6
+  - lazy-experts.editor
+  - lazy-experts.fiction-writer
+  - lazy-experts.fiction-editor
+source_sha: d646145dc19da6bfbae3e0c00253f21e2d5c4ad2
+surface_sha: 1d71cd9fbff6c51f6d147714f1c480f4941a2cf27a4ea20832f0a1ad076f9357
 ---
 # Troubleshooting
 
@@ -55,11 +59,41 @@ source_sha: b08ea18842928cbe682cee4ca8046f1f7a25ffe6
 
 ## Only `fiction-writer` got seeded for my sci-fi or fantasy class
 
-**Symptom**: You picked `sci-fi` (or `fantasy`) when `/lazy-experts.install` asked which classes to register, but only one expert entry appeared — `sci-fi.fiction-writer` (or `fantasy.fiction-writer`) — with no interpreter, designer, system-designer, architect, planner, use-case-writer, ui-designer, developer, data-writer, docs-writer, debugger, researcher, reviewer, or tester for that class.
+**Symptom**: You picked `sci-fi` (or `fantasy`) when `/lazy-experts.install` asked which classes to register, and only `sci-fi.fiction-writer` (or `fantasy.fiction-writer`) appeared — with no `fiction-editor`, and no interpreter, designer, system-designer, architect, planner, use-case-writer, ui-designer, developer, data-writer, docs-writer, debugger, researcher, reviewer, or tester for that class.
 
-**Likely cause**: This is the intended behaviour, not a bug. The class map seeds roles differently by class kind: technical classes (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, and any future non-fiction class) get all fourteen engineering roles — `interpreter`, `designer`, `system-designer`, `architect`, `planner`, `use-case-writer`, `ui-designer`, `developer`, `data-writer`, `docs-writer`, `debugger`, `researcher`, `reviewer`, `tester`; fiction classes (`sci-fi`, `fantasy`) get only `fiction-writer`, because the other roles assume an engineering lifecycle (design specs, code architecture, implementation plans, code review, user-facing docs) that doesn't apply to literary work. `data-writer` is seeded with every technical class, not only `game-dev` — writing data files against an approved design is a general genre, not a game-dev particularity. Fiction classes also never receive `lazy-experts.tech-writing-aspect`, `lazy-experts.terms-aspect`, or `lazy-experts.structure-aspect` — those three assume a technical repository, which a scene has nothing to do with.
+**Likely cause**: A fiction class seeds exactly two roles — `fiction-writer` and `fiction-editor`. An entry set holding only `fiction-writer` predates the release that added the second one, so it is an incomplete seed rather than the finished set. The absent engineering roles are a different matter and are intended: the class map seeds roles by class kind, and technical classes (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, and any future non-fiction class) get all fifteen of them — `interpreter`, `designer`, `system-designer`, `architect`, `planner`, `use-case-writer`, `ui-designer`, `developer`, `data-writer`, `docs-writer`, `debugger`, `researcher`, `reviewer`, `tester`, `editor`. Fiction classes get neither those roles nor `lazy-experts.tech-writing-aspect`, `lazy-experts.terms-aspect`, or `lazy-experts.structure-aspect`, because all of them assume an engineering lifecycle and a technical repository that a scene has nothing to do with.
 
-**Fix**: Nothing to fix if you're working purely in a fiction domain — `fiction-writer` is the complete role set for `sci-fi`/`fantasy`. If your project also spans a technical domain (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`), register at least one expert of that class by hand in `lazy.settings.json[experts]`, or clear the `experts` section and re-run `/lazy-experts.install` so it asks again and seeds both class kinds together.
+**Fix**: Re-run `/lazy-experts.install` to complete the missing `fiction-editor` entry; the class set is sticky, so the skill derives your existing fiction class and adds the role without asking again. The engineering roles need nothing fixed if you work purely in a fiction domain. If your project also spans a technical domain, register at least one expert of that class by hand in `lazy.settings.json[experts]`, or clear the `experts` section and re-run the install so it asks again and seeds both class kinds together.
+
+---
+
+## A class registered before this release gains no `editor` or `fiction-editor` entry
+
+**Symptom**: Your technical class carries all fourteen older roles but no `<domain>.editor`, or your fiction class carries `fiction-writer` alone. Documents come back from a review round without an editing pass, and `/lazy-experts.audit` reports nothing wrong.
+
+**Likely cause**: The two editing roles joined the class map in this release. `/lazy-experts.install` seeds a class's full role set at registration time, and it does not revisit an already-registered class on its own — so a class seeded before the release keeps the role set that existed then. The audit does not flag it either, because an entry set missing a role is not malformed, only out of date.
+
+**Fix**: Re-run `/lazy-experts.install`. It derives your existing class set from the entries already present and seeds every role that class currently lacks, reporting the new entry as `added`. Nothing you customized on the existing entries is touched.
+
+---
+
+## An editor was dispatched against the wrong kind of document
+
+**Symptom**: The editor returns a pass that reads as over-correction — technical wording imposed on a scene, or literary rhythm advice on a plan — or it refuses the job outright.
+
+**Likely cause**: The two editing roles do not cross rows. `editor` reads the technical writing canon and edits technical documents; `fiction-editor` reads the class's genre aspect and edits literary text. Each class seeds the editor of its own kind on purpose, because the technical canon's bans contradict literary craft, and a genre aspect has nothing to say about a plan.
+
+**Fix**: Dispatch `<domain>.editor` for technical documents and `<domain>.fiction-editor` for scenes and other literary text. If your project needs both, register both class kinds so each row seeds its own editor; a single editor entry cannot serve both.
+
+---
+
+## An editor's pass comes back as findings instead of a corrected document
+
+**Symptom**: The editing pass returns notes — a missing paragraph, an unanswered question, a section in the wrong order — rather than a document with those things fixed.
+
+**Likely cause**: This is the role working correctly. An editor changes how a document reads and never what it says: it does not add a claim, drop one, reorder sections, or fill a gap. A missing paragraph or an unsettled number is named in the report precisely so that an editing pass cannot put a promise into a document that nobody made. Structural defects go the same way, as findings for the author rather than as a reorganization.
+
+**Fix**: Route the finding to the expert who owns the content — the designer, planner, or fiction-writer whose document it is — and dispatch the editor again once the gap is closed. Neither editor carries `can_commit_in_repo`, so both deliver through the review payload channel and never land anything in the tree themselves.
 
 ---
 
@@ -89,7 +123,7 @@ source_sha: b08ea18842928cbe682cee4ca8046f1f7a25ffe6
 
 **Likely cause**: `/lazy-experts.install` never touches a field an operator owns on an existing entry — `agent`, `git_author`, `workspace`, or the domain aspect stay exactly as they are. But two kinds of thing are treated as mandatory rather than as an operator choice: five cross-cutting aspects (`lazy-experts.discipline-aspect` and `lazy-experts.research-aspect` on every domain-class entry, plus `lazy-experts.tech-writing-aspect`, `lazy-experts.terms-aspect`, and `lazy-experts.structure-aspect` on technical-class entries specifically), and the `can_commit_in_repo` flag on every writing-role entry (`designer`, `system-designer`, `architect`, `planner`, `use-case-writer`, `ui-designer`, `developer`, `data-writer`, `docs-writer`, `debugger`, `researcher`, `tester`). An entry seeded before one of these shipped (or hand-authored without it) isn't customized with respect to it — it's incomplete. Every re-run appends whatever's still missing from the mandatory aspect list, and seeds `can_commit_in_repo: true` on any writing-role entry that carries no such key at all, without touching anything else on the entry.
 
-**Fix**: Nothing to fix — this is `/lazy-experts.install` keeping an older or hand-authored entry current with the mandatory list, not an error. If you deliberately want an expert without one of the five aspects (e.g. a technical expert that should never load `lazy-experts.terms-aspect`), there's no opt-out marker for it: the aspect gets re-appended on every future run — remove it by hand after each run if you need to keep it off. `can_commit_in_repo` is different: an explicit `false` you set yourself is an operator choice the skill leaves untouched, exactly like a customized `workspace` — only a *missing* key gets completed to `true`.
+**Fix**: Nothing to fix — this is `/lazy-experts.install` keeping an older or hand-authored entry current with the mandatory list, not an error. If you deliberately want an expert without one of the five aspects (e.g. a technical expert that should never load `lazy-experts.terms-aspect`), there's no opt-out marker for it: the aspect gets re-appended on every future run — remove it by hand after each run if you need to keep it off. `can_commit_in_repo` is different: an explicit `false` you set yourself is an operator choice the skill leaves untouched, exactly like a customized `workspace` — only a *missing* key gets completed to `true`. The two editing roles, the interpreter, and the reviewer never carry the flag at all, so its absence on them is correct rather than incomplete.
 
 ---
 
@@ -107,7 +141,7 @@ source_sha: b08ea18842928cbe682cee4ca8046f1f7a25ffe6
 
 **Symptom**: A seeded entry's role suffix doesn't match its `agent` field — e.g. `claude-plugin.system-designer` carries `"agent": "lazycortex-experts:lazy-experts.designer"`, `game.developer` carries `"agent": "lazycortex-experts:lazy-experts.implementer"`, or `game.data-writer` carries `"agent": "lazycortex-experts:lazy-experts.data-implementer"`.
 
-**Likely cause**: This is intended, not a mismatch to fix. Three roles in the class map name the job an expert does rather than reusing its agent's file name: `system-designer` and `developer` are two distinct jobs the `designer` and `implementer` agents perform depending on which stage of the class map dispatches them, and `data-writer` is the job name for the `data-implementer` agent's role across every technical class. Every other role's `agent` field matches its own name verbatim (`interpreter` → `lazy-experts.interpreter`, `architect` → `lazy-experts.architect`, `use-case-writer` → `lazy-experts.use-case-writer`, `ui-designer` → `lazy-experts.ui-designer`, `researcher` → `lazy-experts.researcher`, and so on).
+**Likely cause**: This is intended, not a mismatch to fix. Three roles in the class map name the job an expert does rather than reusing its agent's file name: `system-designer` and `developer` are two distinct jobs the `designer` and `implementer` agents perform depending on which stage of the class map dispatches them, and `data-writer` is the job name for the `data-implementer` agent's role across every technical class. Every other role's `agent` field matches its own name verbatim (`interpreter` → `lazy-experts.interpreter`, `architect` → `lazy-experts.architect`, `use-case-writer` → `lazy-experts.use-case-writer`, `ui-designer` → `lazy-experts.ui-designer`, `researcher` → `lazy-experts.researcher`, `editor` → `lazy-experts.editor`, `fiction-editor` → `lazy-experts.fiction-editor`, and so on).
 
 **Fix**: Nothing to fix. Before assuming a seeded entry is broken, check whether its role is one of the three that intentionally maps to a differently-named agent (`system-designer` → designer, `developer` → implementer, `data-writer` → data-implementer).
 

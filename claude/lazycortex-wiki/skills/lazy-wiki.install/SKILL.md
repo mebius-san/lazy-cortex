@@ -67,7 +67,7 @@ Outcome: `scope-detected: <user|project>`.
 
 ## Step 2: Determine paths
 
-Run `Bash(git rev-parse --show-toplevel)` to get `<repo-root>` (or use cwd if not in a git repo — warn the user). `<installPath>` is the `installPath` field from `installed_plugins.json` for `lazycortex-wiki@lazycortex`.
+Run `Bash(git rev-parse --show-toplevel)` to get `<repo-root>` (or use cwd if not in a git repo — warn the user). `<installPath>` is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-wiki` prints: the authoring repo's own `claude/lazycortex-wiki/` when this checkout ships the plugin, else the daemon's exported plugin dir, else the newest cached install. Never read `installed_plugins.json` for it by hand — in a repo that authors the plugin that hands back the previous publish instead of the sources at hand, and every role, rule, template, or tier row added since is silently missed.
 
 Resolve paths:
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Seven agents that turn a raw request into a scoped design, formal use cases, an optional UI, a code-structure design, a sourced research report, and an ordered implementation plan.
-last_regen: 2026-09-20
+last_regen: 2026-09-22
 diagram_spec:
   anchor: "The design-time pipeline"
   request: "Flow diagram, five nodes in a line: Interpreter -> Use-Case Writer -> Designer -> Architect -> Planner, edges labeled 'brief', 'use cases', 'design spec', 'architecture doc (optional)'. UI Designer hangs off Designer with a single edge labeled 'approved design' (UI Designer has no edge to Architect or Planner). No other nodes."
@@ -13,7 +13,8 @@ source_skills:
   - lazy-experts.architect
   - lazy-experts.planner
   - lazy-experts.researcher
-source_sha: b08ea18842928cbe682cee4ca8046f1f7a25ffe6
+source_sha: 
+surface_sha: e23360cb37b9b0b4235002d558073b650200e4631a21bf0d5d7dd5dc13be814b
 ---
 # Design-time agents
 
@@ -29,7 +30,7 @@ Before any code, data, or documentation gets written, seven agents turn a raw re
 
 **lazy-experts.ui-designer** — Takes an approved design and settles its user interface: screens, states, navigation, and interaction decisions, written into a ui-design document with self-contained HTML mockups laid down beside it as attachments — no external stylesheets, scripts, fonts, or CDN references, so a reviewer can open one straight in a browser. Every screen states its empty, loading, error, and populated states and what moves it between them. A mockup only ever illustrates a decision the document already states — never the reverse — and it is never production frontend code; it approves a look and a flow, it ships nothing.
 
-**lazy-experts.architect** — Takes an approved design — behavior already settled, never an open brief — and writes an architecture document: which modules exist, which way the dependencies point, what is public contract versus internal, what data has to migrate, and what it costs to callers that already exist. It grounds every boundary in the project's actual structure map before naming one, and classifies every touched unit as a subsystem (its own contract, state, and lifecycle) or plain service code. The last two of its five sections, Dependencies & children and Migration & cost, drop out whole when the change pulls in no dependency, proposes no child, and migrates nothing — the first three stay mandatory. A document that names modules without naming the dependency direction between them, or changes stored data without naming the migration, is incomplete.
+**lazy-experts.architect** — Takes an approved design — behavior already settled, never an open brief — and writes an architecture document: which modules exist, which way the dependencies point, what is public contract versus internal, what data has to migrate, and what it costs to callers that already exist. It grounds every boundary in the project's actual structure map before naming one, and classifies every touched unit as a subsystem (its own contract, state, and lifecycle) or plain service code. The last two of its six sections, Dependencies & children and Migration & cost, drop out whole when the change pulls in no dependency, proposes no child, and migrates nothing — the first four stay mandatory. A document that names modules without naming the dependency direction between them, or changes stored data without naming the migration, is incomplete.
 
 **lazy-experts.researcher** — Takes an approved research design — a `design.md` typed `research-design` that states the questions — and writes the research report beside it: every route it walked (the spec tree, the code, the structure map, and the wiki before it turns to the open web), a finding for every claim with the exact source it came from, the options compared when a question is one of choice, and a conclusion that answers each question in turn and states outright whether its hypothesis held. Fact and interpretation never share a sentence, and a finding without a named source doesn't make it into the report. It also validates a research design during review, judging only whether each question is answerable as posed — none hiding a second one with its own scope, a bounded scope, a sourced known part — never doing the research itself at that stage.
 

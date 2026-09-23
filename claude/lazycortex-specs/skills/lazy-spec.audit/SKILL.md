@@ -8,6 +8,8 @@ Audit a product specification for validity, consistency, and staleness. Reports 
 
 `lazy-spec.audit` validates STATE only — frontmatter, body structure, cross-links, and source references. It never writes a spec file, never changes product config, and never runs migrations: there are no existing customers and no legacy model to migrate from. It validates the current flat-gate model and ignores any artifact from an older model (legacy product `spec.cfg-<product>.md` files, `## Workflow` sections, `gates:` dicts) rather than detecting or migrating them.
 
+This skill follows the shared audit contract at `claude/lazycortex-core/references/lazy-core.audit-contract.md`: the audit only reads, the severity vocabulary is `PASS` / `INFO` / `WARN` / `FAIL` and nothing else, every finding carries its own repair route in the same line, and no finding estimates what running that route would change.
+
 Fix/waive orchestration over these findings belongs to `/lazy-core.doctor`, which delegates to this audit and drives whatever loop the operator wants; this skill only measures.
 
 ## Execution discipline (MANDATORY — read before any action)
@@ -55,7 +57,7 @@ Outcome: `code-bound` / `design-only` / `unregistered` / `all-products(<N>)`.
 
 For each product checked, dispatch 4 Explore subagents **in a single assistant message with 4 Agent tool calls** (`subagent_type: "Explore"`, `mode: "dontAsk"`). The coordinator pattern, dispatch rules, and structured-report contract (`## scan: …` + `### findings` with `[SEVERITY] title | path:line` + `### summary`) are owned by `lazy-core.parallel-scan.md` (in the `lazycortex-core` plugin) — read it before authoring or modifying agent prompts.
 
-Severity vocabulary: `PASS` / `WARN` / `FAIL`. Budget per agent: "Report under 600 words". Each agent prompt MUST include:
+Severity vocabulary: `PASS` / `INFO` / `WARN` / `FAIL` — the contract's set, and nothing outside it. Budget per agent: "Report under 600 words". Each agent prompt MUST include:
 
 1. The exact scope globs / paths to scan (no broad searches) — scoped to this product's `spec_path`.
 2. The relevant per-check rules from the agent slice below — the coordinator copies the right slice into each prompt rather than asking the agent to discover them.
@@ -288,6 +290,8 @@ Runs once, vault-wide, like Checks 8–10. The content-root `vision.md` (the vau
 
 Merge the four agents' findings plus Check 0, Check 8, Check 9, Check 10, and Check 11, then print a report grouped by severity. The report MUST contain one line per Agent (A/B/C/D) plus Check 0, Check 8, Check 9, Check 10, and Check 11 — a missing line is a bug. Checks 9–11 run exactly once per invocation (not once per product, even under "all products") — render each scan line once, at the end.
 
+Every bullet in the groups below is one finding line carrying, in that single line, the severity group it sits under, the file or artifact, what is wrong, and the route that repairs it (§ Repair routes for which route each class takes). The examples show the finding half; a rendered line appends its route even when several findings share one. The report ends with the `### Info` group — it has no routes block and no recommendations block of its own.
+
 ```
 ## <Product Name> — Spec Audit Report
 
@@ -397,6 +401,8 @@ scan: Check 11 vault-spec — <clean|INFO|WARN> (<0|1> findings)
 ```
 
 ## Repair routes
+
+This section is the coordinator's lookup while it composes the finding lines above — it is never rendered as a section of the report. A route that covers a whole class of findings is repeated on each finding line of that class rather than lifted out into a block of its own.
 
 The report is the deliverable and the run ends with it. State clearly that no file was changed. Every finding carries its route so the operator can act on it without re-deriving the fix; naming the route is this skill's whole contribution to repair, and running it is never this skill's move.
 

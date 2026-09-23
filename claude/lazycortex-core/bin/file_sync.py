@@ -30,6 +30,7 @@ STATE_UNCHANGED = "unchanged"
 STATE_DIVERGED = "diverged"
 STATE_REFRESHED = "refreshed"
 STATE_KEPT_ORPHAN = "kept-orphan"
+STATE_PROTECTED = "protected"
 STATE_FAILED = "failed"
 
 EXIT_SRC_MISSING = 2
@@ -39,6 +40,19 @@ KEY_FILE = "file"
 KEY_SRC = "src"
 KEY_DST = "dst"
 KEY_STATE = "state"
+
+
+def norm_path(path: str) -> str:
+  """
+  Reduce a path to the absolute, user-expanded, normalised form that identifies a target.
+
+  Args:
+    path: Path to reduce; a leading `~` is expanded.
+
+  Returns:
+    The absolute, normalised path.
+  """
+  return os.path.normpath(os.path.abspath(os.path.expanduser(path)))
 
 
 def _ensure_exec(path: str) -> None:
@@ -68,7 +82,14 @@ def _equal(src: str, dst: str) -> bool:
   return filecmp.cmp(src, dst, shallow = False)
 
 
-def sync_one(src: str, dst: str, *, copy_diverged: bool = False, chmod_x: bool = False) -> str:
+def sync_one(
+  src: str,
+  dst: str,
+  *,
+  copy_diverged: bool = False,
+  chmod_x: bool = False,
+  protected: frozenset[str] = frozenset(),
+) -> str:
   """
   Triage a single source/target pair and copy when mechanically safe.
 
@@ -77,6 +98,8 @@ def sync_one(src: str, dst: str, *, copy_diverged: bool = False, chmod_x: bool =
       to match the source by a second byte comparison after the write; a target whose bytes
       still differ is reported as `failed` rather than as a successful write.
     - `chmod_x` is never applied to a target left in the `diverged` state.
+    - A target the caller declared protected is neither read, written, nor re-permissioned;
+      its only outcome is the `protected` state.
 
   Args:
     src: Path of the shipped source file.
@@ -84,9 +107,11 @@ def sync_one(src: str, dst: str, *, copy_diverged: bool = False, chmod_x: bool =
     copy_diverged: When True, a diverged target is overwritten with the source
       (state `refreshed`) instead of being reported for merge judgment.
     chmod_x: When True, ensure the target carries executable bits after sync.
+    protected: Normalised target paths (see `norm_path`) the caller declared foreign;
+      a matching target is reported as `protected` and left as it is on disk.
 
   Returns:
-    One of `installed`, `unchanged`, `refreshed`, `diverged`, `failed`.
+    One of `installed`, `unchanged`, `refreshed`, `diverged`, `protected`, `failed`.
   """
 
   # Contract:
@@ -98,6 +123,24 @@ def sync_one(src: str, dst: str, *, copy_diverged: bool = False, chmod_x: bool =
   # `chmod_x` MUST NEVER be applied to a target left in the `diverged` state — permission
   # bits are only touched once the target's content is settled to match the source.
 
+  # Contract:
+  # A target whose normalised path appears in `protected` MUST NEVER be read, written, or
+  # re-permissioned by this call, and MUST be reported as `protected` — the caller has
+  # declared it foreign content, and a same-named source confers no claim on it.
+
+  # Domain(install.reconciliation):
+  # # A name collision never transfers ownership
+  # A target the caller has declared foreign belongs to whoever authored it, and a shipped source
+  # that happens to carry the same file name gives the installer no claim over it. Such a target is
+  # neither compared, nor overwritten, nor re-permissioned — matching by name is not evidence of
+  # ownership. The outcome is reported as left alone, so an operator reading the receipt can see
+  # that their own file survived an install that shipped a namesake.
+
+  # guard: a target the caller declared foreign is left exactly as it is on disk
+  if protected and norm_path(dst) in protected:
+    return STATE_PROTECTED
+
+  # an absent, an identical, and a drifted target each get their own verdict before any write
   os.makedirs(os.path.dirname(dst) or ".", exist_ok = True)
   if not os.path.exists(dst):
     shutil.copyfile(src, dst)
@@ -138,6 +181,7 @@ def sync_dir(
   owned_globs: tuple[str, ...] = (),
   copy_diverged: bool = False,
   chmod_x: bool = False,
+  protected: frozenset[str] = frozenset(),
 ) -> list[dict[str, str]]:
   """
   Triage every file of a flat source directory against the target directory.
@@ -145,6 +189,8 @@ def sync_dir(
   Guarantees:
     - A target-side file reported as `kept-orphan` is never deleted or modified by this
       call; it is only ever surfaced for a human to judge.
+    - A target the caller declared protected never appears in the results as `kept-orphan`,
+      whether or not the shipped set still carries a file of that name.
 
   Args:
     src_dir: Directory holding the shipped source files (flat — subdirectories are ignored).
@@ -154,6 +200,8 @@ def sync_dir(
       matching one of them with no same-name source are reported as `kept-orphan`.
     copy_diverged: Forwarded to the per-file triage.
     chmod_x: Forwarded to the per-file triage.
+    protected: Normalised target paths (see `norm_path`) the caller declared foreign;
+      each is left untouched, and none is ever reported as an owned-namespace orphan.
 
   Returns:
     One result dict per file: `{"file", "src", "dst", "state"}`.
@@ -163,6 +211,11 @@ def sync_dir(
   # A target-side file reported as `kept-orphan` MUST NEVER be deleted or modified by this
   # call — removing installed content without operator consent is out of scope for an
   # automated reconciliation; the orphan is surfaced for a human to judge, nothing more.
+
+  # Contract:
+  # A target whose normalised path appears in `protected` MUST NEVER be reported as
+  # `kept-orphan`, regardless of the owned-namespace patterns its name matches and
+  # regardless of whether the shipped set still carries a file of that name.
 
   # the shipped set is flat and sorted, so the receipt order is stable across runs
   results = []
@@ -175,7 +228,7 @@ def sync_dir(
   for name in names:
     src = os.path.join(src_dir, name)
     dst = os.path.join(dst_dir, name)
-    state = sync_one(src, dst, copy_diverged = copy_diverged, chmod_x = chmod_x)
+    state = sync_one(src, dst, copy_diverged = copy_diverged, chmod_x = chmod_x, protected = protected)
     results.append({ KEY_FILE: name, KEY_SRC: src, KEY_DST: dst, KEY_STATE: state })
 
   # a name that was just synced can never be an orphan
@@ -192,12 +245,18 @@ def sync_dir(
   # without comment. A file that does match one of those patterns but has no same-named source
   # anymore is a leftover of a namespace the caller owns; it is surfaced as an orphan for a human
   # to judge, and is never deleted automatically, because removing installed content without
-  # consent is a stronger action than this reconciliation is trusted to take on its own.
+  # consent is a stronger action than this reconciliation is trusted to take on its own. A target
+  # the caller declared foreign is outside the owned namespace by that declaration alone, so a
+  # pattern its name happens to match says nothing about it and it is never called an orphan.
 
   # target-side leftovers inside an owned namespace are reported, never removed
   for name in sorted(os.listdir(dst_dir)):
     # guard: only owned, not-just-synced plain files count as orphans
     if name in synced or name in excludes or not os.path.isfile(os.path.join(dst_dir, name)):
+      continue
+
+    # guard: a declared-foreign target is outside the owned namespace whatever its name matches
+    if protected and norm_path(os.path.join(dst_dir, name)) in protected:
       continue
     if any(fnmatch.fnmatch(name, pattern) for pattern in owned_globs):
       orphan = os.path.join(dst_dir, name)
@@ -218,7 +277,7 @@ def main(argv: list[str]) -> int:
     Process exit code — 0 on success, 2 on a missing source path, 3 when at
     least one written target failed its post-write byte comparison.
   """
-  # the CLI surface: the source/target pair plus the dir-mode filters and the copy switches
+  # the CLI surface: the source/target pair plus the dir-mode filters, the guard list, and the copy switches
   # waiver: argparse CLI signature and help strings, not domain keys (whole block below)
   parser = argparse.ArgumentParser(description = "Deterministic file-sync triage for install-managed mirrors.")
   # waiver: argparse CLI signature, not a domain key
@@ -233,6 +292,9 @@ def main(argv: list[str]) -> int:
   parser.add_argument("--owned-glob", action = "append", default = [], metavar = "PATTERN",
                       help = "fnmatch pattern of an owned namespace for orphan reporting (repeatable; dir mode)")
   # waiver: argparse CLI signature, not a domain key
+  parser.add_argument("--protect", action = "append", default = [], metavar = "PATH",
+                      help = "target path this run must leave untouched (repeatable)")
+  # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--copy-diverged", action = "store_true",
                       help = "overwrite diverged targets with the source (state 'refreshed')")
   # waiver: argparse CLI signature, not a domain key
@@ -244,6 +306,9 @@ def main(argv: list[str]) -> int:
     print(json.dumps({ "error": f"source not found: {args.src}" }))
     return EXIT_SRC_MISSING
 
+  # a declared-foreign target is recognised by its normalised path, never by its bare name
+  protected = frozenset(norm_path(path) for path in args.protect)
+
   # a directory source triages its whole flat content; a file source is a single pair
   if os.path.isdir(args.src):
     results = sync_dir(
@@ -252,9 +317,11 @@ def main(argv: list[str]) -> int:
       owned_globs = tuple(args.owned_glob),
       copy_diverged = args.copy_diverged,
       chmod_x = args.chmod_x,
+      protected = protected,
     )
   else:
-    state = sync_one(args.src, args.dst, copy_diverged = args.copy_diverged, chmod_x = args.chmod_x)
+    state = sync_one(args.src, args.dst, copy_diverged = args.copy_diverged,
+                     chmod_x = args.chmod_x, protected = protected)
     results = [ { KEY_FILE: os.path.basename(args.dst), KEY_SRC: args.src, KEY_DST: args.dst, KEY_STATE: state } ]
 
   # per-state tallies so the caller can read the outcome without walking the results

@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-09-21
+last_regen: 2026-09-23
 no_diagram: true
 source_skills:
   - lazy-spec.add-asset-type
@@ -25,8 +25,8 @@ source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
   - lazy-spec.audit
-source_sha: b9cc732063fd5d0d05c3e9e7be1bb76cd38af2a6
-surface_sha: bb8f6e9b8940000d86c1bb4868e5f424774437f5a74cb899a0d04ff60b5d21db
+source_sha: d646145dc19da6bfbae3e0c00253f21e2d5c4ad2
+surface_sha: 82e499b62838d4062be873b892525931148874f49f37446e7c22c009c4a623b9
 ---
 # Troubleshooting
 
@@ -74,7 +74,7 @@ surface_sha: bb8f6e9b8940000d86c1bb4868e5f424774437f5a74cb899a0d04ff60b5d21db
 
 **Symptom**: The wizard reaches the expert-assignment step and aborts with a message saying a chosen expert name is not registered.
 
-**Likely cause**: The use-case-writer, designer, system-designer, architect, ui-designer, planner, developer, tester, data-writer, or researcher persona you selected for one of the built-in review roles is not a key in the `experts` settings section. This happens when the persona has not been composed yet or the name was mistyped.
+**Likely cause**: The use-case-writer, designer, system-designer, architect, ui-designer, planner, developer, tester, data-writer, researcher, or editor persona you selected for one of the built-in review roles is not a key in the `experts` settings section. This happens when the persona has not been composed yet or the name was mistyped.
 
 **Fix**: Compose the missing persona via `lazycortex-experts` first, then re-run `/lazy-spec.product-config`. Do not type a free-form name that does not exist in the registry — the skill validates every name against `settings-get experts`.
 

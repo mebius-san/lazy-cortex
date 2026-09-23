@@ -12,7 +12,11 @@ file is the raw commit feed that `lazy-log.distill` later converts into function
 
 Notes:
   - No LLM call, no network, fast (~50ms).
-  - Silent on failure — the hook never blocks the commit outcome.
+  - Never blocks the commit outcome. A journalling failure — an unwritable journal directory or
+    lock file, a lock still held past the wait budget, or a failed append — is recorded as an
+    incident in the repository's error ledger at `.runtime/errors.jsonl` instead.
+  - The read-then-append window is serialised on a sibling lock file, so concurrent runs on one
+    commit leave exactly one entry.
   - Creates the `.logs/` directory if missing.
   - Works whether the commit was invoked via `Bash` or via the `mcp__git__git_commit` tool.
 """
@@ -21,6 +25,8 @@ from __future__ import annotations
 # waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
 # pylint: disable=import-error,wrong-import-position
 
+import contextlib
+import fcntl
 import json
 import os
 import re
@@ -31,21 +37,38 @@ from pathlib import Path
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  pass
+  from typing import TextIO
+
+  from collections.abc import Iterator
 
 
 # Resolve the sibling bin/ dir so the enablement gate is importable.
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import error_ledger  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import hook_gate  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from constants import HookName  # noqa: E402
+from constants import HookName, IncidentKey, IncidentKind, IncidentPhase  # noqa: E402
 
 
 # Freshness window for the failure-path HEAD check: a HEAD younger than this is treated as
 # produced by the just-finished chain (the commit succeeded, a later segment failed).
 HEAD_FRESHNESS_SECONDS = 60
+
+# Wait budget for the commit-journal lock. A holder does one read-then-append pass, so genuine
+# contention clears in milliseconds; a stall past the budget means the holder is wedged, and the
+# entry is recorded as lost rather than waited on while the observed tool call hangs.
+JOURNAL_LOCK_TIMEOUT_SECONDS = 5.0
+JOURNAL_LOCK_POLL_SECONDS = 0.05
+
+# Incident coordinates for a journalling failure. The key folds repeats of one cause into a single
+# incident, and the three causes stay separate so an unwritable directory never merges with a stall.
+JOURNAL_INCIDENT_PREFIX = "commit-journal"
+CAUSE_DIR_UNWRITABLE = "journal_dir_unwritable"
+CAUSE_LOCK_TIMEOUT = "journal_lock_timeout"
+CAUSE_WRITE_FAILED = "journal_write_failed"
 
 
 def get_commit_info() -> dict | None:
@@ -160,6 +183,71 @@ def head_is_fresh() -> bool:
   return abs(time.time() - committed_at) <= HEAD_FRESHNESS_SECONDS
 
 
+def record_failure(root: str, cause: str, detail: str) -> None:
+  """
+  Record one commit-journalling failure as an incident in the repository's error ledger.
+
+  Args:
+    root: Absolute path to the repository root whose ledger receives the incident.
+    cause: The cause token naming which part of the journalling step failed.
+    detail: One-line human-readable description of the failure, including the underlying error.
+  """
+  # the ledger swallows its own failures, so an unrecordable incident still cannot fail the commit
+  error_ledger.record(Path(root), {
+    IncidentKey.INCIDENT: f"{JOURNAL_INCIDENT_PREFIX}:{cause}",
+    IncidentKey.PHASE: IncidentPhase.OPENED,
+    IncidentKey.KIND: IncidentKind.PLUGIN_ERROR,
+    IncidentKey.CAUSE: cause,
+    IncidentKey.DETAIL: detail,
+    # waiver: the hook's own canonical name doubles as the actor label; IncidentActor names daemon subsystems only
+    IncidentKey.ACTOR: HookName.COMMIT_RECORDER,
+  })
+
+
+def wait_for_lock(lock: TextIO) -> bool:
+  """
+  Take an exclusive lock on an open lock file, waiting up to the journal lock budget.
+
+  Args:
+    lock: An open, writable file object to lock.
+
+  Returns:
+    True once the lock is held by this process. False when the wait budget elapsed with the lock
+    still held elsewhere, in which case nothing is locked.
+  """
+  # poll rather than block: a wedged holder must not keep the observed tool call waiting forever
+  deadline = time.time() + JOURNAL_LOCK_TIMEOUT_SECONDS
+  while True:
+    try:
+      fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+      return True
+    except OSError:
+      # guard: budget spent — leave the lock unheld so the caller records a dropped entry
+      if time.time() >= deadline:
+        return False
+      time.sleep(JOURNAL_LOCK_POLL_SECONDS)
+
+
+@contextlib.contextmanager
+def journal_lock(path: str) -> Iterator[bool]:
+  """
+  Hold the commit journal's lock for the duration of the `with` block.
+
+  Args:
+    path: Absolute path of the lock file to take the lock on; created when missing.
+
+  Yields:
+    True when the lock is held for the body of the block, False when the wait budget elapsed
+    without it. The lock is released when the block exits, however it exits.
+
+  Raises:
+    OSError: The lock file could not be opened for writing.
+  """
+  # waiver: stdlib file-mode / encoding literals, not domain constants
+  with open(path, "w", encoding = "utf-8") as lock:
+    yield wait_for_lock(lock)
+
+
 def should_run(payload: dict) -> bool:
   """
   Decide whether the current hook invocation corresponds to a successful git commit.
@@ -215,11 +303,18 @@ def should_run(payload: dict) -> bool:
 
 def main() -> None:
   """
-  Entry point invoked once per hook trigger.
+  Handle one hook invocation.
 
   Reads the hook payload from stdin, decides whether the call is a recordable git commit, gathers
-  the commit metadata, and appends a single JSON line to `<repo-root>/.logs/commits.jsonl`. Every
-  failure path returns silently so the hook never blocks the originating tool call.
+  the commit metadata, and appends a single JSON line to `<repo-root>/.logs/commits.jsonl`. Never
+  fails the originating tool call: a journalling failure is recorded in the repository's error
+  ledger instead of raised.
+
+  Guarantees:
+    - The commit-journal read-then-append window is serialised across concurrent hook invocations.
+    - Concurrent hook invocations for the same commit never leave a duplicate entry in the journal.
+    - An entry the hook could not journal is recorded as an incident in the error ledger, never
+      silently dropped.
   """
   # Enablement gate — first action. An expert spawn short-circuits here via a pure env check.
   # guard: hook disabled in the current context
@@ -250,35 +345,58 @@ def main() -> None:
   logs_dir = os.path.join(root, ".logs")
   try:
     os.makedirs(logs_dir, exist_ok = True)
-  except OSError:
+  except OSError as e:
+    record_failure(root, CAUSE_DIR_UNWRITABLE, f"cannot create the journal directory: {e}")
     return
 
   # the ledger downstream distill and recall read from
   # waiver: filesystem filename idiom (commit-ledger file), not a domain constant
   path = os.path.join(logs_dir, "commits.jsonl")
 
-  # idempotency: don't append the same SHA twice (useful if the hook fires multiple times somehow
-  # — e.g., for both Bash and MCP on the same commit)
-  try:
-    with open(path, encoding = "utf-8") as f:
-      for line in f:
-        try:
-          entry = json.loads(line)
-        except ValueError:
-          continue
+  # Contract:
+  # Concurrent hook invocations observing the same commit never leave a duplicate entry
+  # for that commit SHA in the journal file. An entry the hook could not journal is
+  # recorded as an incident in the error ledger rather than silently dropped.
 
-        # guard: SHA already recorded — skip duplicate append
+  # the read-then-append window below is serialised on this lock: two hooks firing on one commit
+  # would otherwise each miss the other's line and append a duplicate, and the journal directory is
+  # synced, so an unguarded append is not atomic on its own
+  try:
+    # waiver: lock-file suffix idiom (companion to the commit-ledger file), not a domain constant
+    with journal_lock(path + ".lock") as locked:
+      # guard: the holder outlived the wait budget — drop the entry, but leave it observable
+      if not locked:
         # waiver: one-off commit-record schema field name, not a reusable domain key
-        if entry.get("sha") == info["sha"]:
-          return
-  except FileNotFoundError:
-    pass
+        record_failure(root, CAUSE_LOCK_TIMEOUT, f"journal lock held elsewhere; dropped {info['sha']}")
+        return
 
-  # append one JSON line; a write failure degrades to a missing entry, never a failed commit
-  try:
-    with open(path, "a", encoding = "utf-8") as f:
-      f.write(json.dumps(info) + "\n")
-  except OSError:
+      # idempotency: don't append the same SHA twice (useful if the hook fires multiple times
+      # somehow — e.g., for both Bash and MCP on the same commit)
+      try:
+        with open(path, encoding = "utf-8") as f:
+          for line in f:
+            try:
+              entry = json.loads(line)
+            except ValueError:
+              continue
+
+            # guard: SHA already recorded — skip duplicate append
+            # waiver: one-off commit-record schema field name, not a reusable domain key
+            if entry.get("sha") == info["sha"]:
+              return
+      except OSError:
+        # an unreadable journal leaves nothing to dedup against; the append below reports the rest
+        pass
+
+      # append one JSON line; a write failure degrades to a missing entry, never a failed commit
+      try:
+        with open(path, "a", encoding = "utf-8") as f:
+          f.write(json.dumps(info) + "\n")
+      except OSError as e:
+        record_failure(root, CAUSE_WRITE_FAILED, f"cannot append to the journal: {e}")
+        return
+  except OSError as e:
+    record_failure(root, CAUSE_DIR_UNWRITABLE, f"cannot open the journal lock: {e}")
     return
 
 

@@ -72,9 +72,9 @@ The expert "classes" are the domain aspects this plugin ships. Enumerate the ava
 
 ### Enumerate available classes and roles
 
-- `<installPath>` is the `installPath` field from `~/.claude/plugins/installed_plugins.json` for `lazycortex-experts@lazycortex`.
+- `<installPath>` is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-experts` prints: the authoring repo's own `claude/lazycortex-experts/` when this checkout ships the plugin, else the daemon's exported plugin dir, else the newest cached install. Never read `installed_plugins.json` for it by hand — in a repo that authors the plugin that hands back the previous publish instead of the sources at hand, and every role, rule, template, or tier row added since is silently missed.
 - **Classes (domain aspects)**: `Glob <installPath>/references/lazy-experts.*-aspect.md`, minus the cross-cutting aspects `discipline`, `research`, `tech-writing`, `terms`, and `structure` (they compose onto experts, they are not classes). The class key is the basename minus the `lazy-experts.` prefix and the `-aspect.md` suffix — currently `claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, `sci-fi`, `fantasy`.
-- **Roles (agents)**: `Glob <installPath>/agents/lazy-experts.*.md`. The agent basenames minus the `lazy-experts.` prefix and `.md` suffix are the agent set — currently `interpreter`, `designer`, `architect`, `planner`, `use-case-writer`, `ui-designer`, `implementer`, `data-implementer`, `docs-writer`, `debugger`, `researcher`, `reviewer`, `tester`, `fiction-writer`. Which roles a class seeds — and which agent each role resolves to (three roles map onto an agent of a different basename, see Step 5's mapping table) — is decided by the class map in Step 5.
+- **Roles (agents)**: `Glob <installPath>/agents/lazy-experts.*.md`. The agent basenames minus the `lazy-experts.` prefix and `.md` suffix are the agent set — currently `interpreter`, `designer`, `architect`, `planner`, `use-case-writer`, `ui-designer`, `implementer`, `data-implementer`, `docs-writer`, `debugger`, `researcher`, `reviewer`, `tester`, `editor`, `fiction-writer`, `fiction-editor`. Which roles a class seeds — and which agent each role resolves to (three roles map onto an agent of a different basename, see Step 5's mapping table) — is decided by the class map in Step 5.
 
 If either glob is empty, abort with `plugin-cache-incomplete: <missing-dir>`.
 
@@ -94,7 +94,7 @@ Context (print before asking):
 - Where: /lazy-experts.install · Step 3 — Determine expert classes; target <lazy.settings.json path from Step 2>
 - Found: experts section <absent | holds only system entries: <keys>>; no domain-class entry on record; available classes <list from the references glob>
 - Why asking: which domains this project works in is project config nothing on disk derives
-- Answers: each selected class — Step 5 seeds one expert per role the class map assigns (technical classes: all fourteen engineering roles; sci-fi / fantasy: fiction-writer) into experts now; the set is sticky — later runs derive it from the entries and never re-ask; a class added later is registered by hand (see Notes)
+- Answers: each selected class — Step 5 seeds one expert per role the class map assigns (technical classes: every engineering role the class map's technical row lists; sci-fi / fantasy: fiction-writer and fiction-editor) into experts now; the set is sticky — later runs derive it from the entries and never re-ask; a class added later is registered by hand (see Notes)
 AskUserQuestion: header "Expert classes", question "Which expert classes should <lazy.settings.json path> register for this project?", multiSelect, one option per available class (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, `sci-fi`, `fantasy`), each described as the domain aspect the generic experts load for it.
 ```
 
@@ -124,12 +124,14 @@ Seed one composed expert entry per (class × role) pair from the **class map** b
 
 | Class kind | Classes | Roles seeded | Cross-cutting aspects (appended after the domain aspect) |
 |---|---|---|---|
-| technical | `claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, and any future class not listed as fiction | `interpreter`, `designer`, `system-designer`, `architect`, `planner`, `use-case-writer`, `ui-designer`, `developer`, `data-writer`, `docs-writer`, `debugger`, `researcher`, `reviewer`, `tester` | `lazy-experts.discipline-aspect`, `lazy-experts.research-aspect`, `lazy-experts.tech-writing-aspect`, `lazy-experts.terms-aspect`, `lazy-experts.structure-aspect`, `lazy-memory.persona-aspect` |
-| fiction | `sci-fi`, `fantasy` | `fiction-writer` | `lazy-experts.discipline-aspect`, `lazy-experts.research-aspect`, `lazy-memory.persona-aspect` |
+| technical | `claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, and any future class not listed as fiction | `interpreter`, `designer`, `system-designer`, `architect`, `planner`, `use-case-writer`, `ui-designer`, `developer`, `data-writer`, `docs-writer`, `debugger`, `researcher`, `reviewer`, `tester`, `editor` | `lazy-experts.discipline-aspect`, `lazy-experts.research-aspect`, `lazy-experts.tech-writing-aspect`, `lazy-experts.terms-aspect`, `lazy-experts.structure-aspect`, `lazy-memory.persona-aspect` |
+| fiction | `sci-fi`, `fantasy` | `fiction-writer`, `fiction-editor` | `lazy-experts.discipline-aspect`, `lazy-experts.research-aspect`, `lazy-memory.persona-aspect` |
 
 `data-writer` seeds with every technical class — writing data files against an approved design is a general genre, not a game-dev particularity.
 
-Technical classes never seed `fiction-writer`; fiction classes never receive `lazy-experts.tech-writing-aspect` (its bans contradict literary craft) or `lazy-experts.terms-aspect` (an obligation to call a thing by its registered term, read literally inside a scene, replaces pronouns and descriptive phrases with the entity name) or `lazy-experts.structure-aspect` (a repository map has nothing to say inside a scene). The fiction row is the closed list above; a future genre aspect extends it in the same edit that ships the aspect.
+Each row seeds the editor of its own kind, because an editing pass over what another expert wrote is a general need rather than a property of one domain. `editor` reads the technical row's prose canon and corrects technical documents; `fiction-editor` reads the class's genre aspect and edits literary text. Neither crosses to the other row: the technical canon's bans contradict literary craft, and a genre aspect has nothing to say about a plan.
+
+Technical classes never seed a fiction role (`fiction-writer`, `fiction-editor`); fiction classes never receive `lazy-experts.tech-writing-aspect` (its bans contradict literary craft) or `lazy-experts.terms-aspect` (an obligation to call a thing by its registered term, read literally inside a scene, replaces pronouns and descriptive phrases with the entity name) or `lazy-experts.structure-aspect` (a repository map has nothing to say inside a scene). The fiction row is the closed list above; a future genre aspect extends it in the same edit that ships the aspect.
 
 ### Compose
 
@@ -178,7 +180,7 @@ The composed entry's shape:
     "email": "<expert-key>@bot.invalid"
   },
   "workspace": "branch",   // developer/data-writer/docs-writer/debugger/tester roles only — omit for every other role
-  "can_commit_in_repo": true   // writing roles only (see below) — omit for interpreter/reviewer/fiction-writer
+  "can_commit_in_repo": true   // writing roles only (see below) — omit for interpreter/reviewer/editor/fiction-writer/fiction-editor
 }
 ```
 
@@ -192,7 +194,7 @@ The `researcher` is deliberately NOT one of them: its only product is a catalog 
 
 `merge` (`auto` / `ask`) is deliberately not seeded. It defaults to `ask`, it is read only by the spec coordinator's own prompt logic, and `ask` is the right pairing for an isolated workspace; writing it would only restate the default.
 
-`can_commit_in_repo: true` is seeded for every **writing role** — `designer`, `system-designer`, `architect`, `planner`, `use-case-writer`, `ui-designer`, `developer`, `data-writer`, `docs-writer`, `researcher`, `debugger`, `tester` — and omitted for `interpreter`, `reviewer`, and `fiction-writer`. What each role may land in the tree is decided by the destination rule (`lazy-core.expert-runtime-contract.md` § Working tree), not by this flag: a document or attachment bound for the spec catalog goes back through `result/` for the collector to place, whatever the flag says. The flag exists for what lands OUTSIDE the catalog — the acceptance-cycle roles committing code, data and product documentation on their job-scoped branch, debugger fixing code in the tree. Without it, `expert_pump` extends the spawn prompt with a no-commit clause and that branch work never lands. The change-cascade dispatch is not one of those cases: the designer folds a change's delta into another asset's document and returns the folded document through `result/`, for the coordinator to land on the job-done wake (`lazy-spec.install` § 6e). The non-writing roles deliver through the review payload channel (interpreter, fiction-writer) or deliver findings without editing at all (reviewer), so they stay without commit rights.
+`can_commit_in_repo: true` is seeded for every **writing role** — `designer`, `system-designer`, `architect`, `planner`, `use-case-writer`, `ui-designer`, `developer`, `data-writer`, `docs-writer`, `researcher`, `debugger`, `tester` — and omitted for `interpreter`, `reviewer`, `editor`, `fiction-writer`, and `fiction-editor`. What each role may land in the tree is decided by the destination rule (`lazy-core.expert-runtime-contract.md` § Working tree), not by this flag: a document or attachment bound for the spec catalog goes back through `result/` for the collector to place, whatever the flag says. The flag exists for what lands OUTSIDE the catalog — the acceptance-cycle roles committing code, data and product documentation on their job-scoped branch, debugger fixing code in the tree. Without it, `expert_pump` extends the spawn prompt with a no-commit clause and that branch work never lands. The change-cascade dispatch is not one of those cases: the designer folds a change's delta into another asset's document and returns the folded document through `result/`, for the coordinator to land on the job-done wake (`lazy-spec.install` § 6e). The non-writing roles deliver through the review payload channel (interpreter, fiction-writer, and both editors, whose product is the document they were handed) or deliver findings without editing at all (reviewer), so they stay without commit rights.
 
 ### Apply
 
@@ -251,14 +253,14 @@ Outcome: `system-experts: complete` or `system-experts: <N> missing`.
 ## Step 7: Verify / Report
 
 - Read back the written `lazy.settings.json` and confirm it parses + contains the `lazycortex-experts:*` keys under `agent_models.lazycortex` (one per shipped generic agent) AND the expert keys the Step 5 class map prescribes for the class set under `experts`.
-- For each seeded expert, confirm every aspect ref the class map assigns resolves: the class aspect (already proved by the Step 3 glob), `lazy-experts.discipline-aspect`, `lazy-experts.research-aspect`, and — for technical-class experts — `lazy-experts.tech-writing-aspect`, `lazy-experts.terms-aspect`, and `lazy-experts.structure-aspect` (all under `<installPath>/references/`), and `lazy-memory.persona-aspect` (under `~/.claude/plugins/cache/lazycortex/lazycortex-core/*/references/`).
+- For each seeded expert, confirm every aspect ref the class map assigns resolves: the class aspect (already proved by the Step 3 glob), `lazy-experts.discipline-aspect`, `lazy-experts.research-aspect`, and — for technical-class experts — `lazy-experts.tech-writing-aspect`, `lazy-experts.terms-aspect`, and `lazy-experts.structure-aspect` (all under `<installPath>/references/`), and `lazy-memory.persona-aspect` (under `<core-root>/references/`, where `<core-root>` is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-core` prints).
 - For each seeded expert, confirm its `agent` ref resolves to an existing file under `<installPath>/agents/` (i.e. `lazy-experts.<role>.md` exists). A missing agent file is a `verify-failed: agent-ref-unresolved <expert-key>` outcome.
 - Report to the user:
   - Scope detected.
   - Plugin version + commit synced from (from `installed_plugins.json`).
   - Class set + whether it was `asked` or `derived` (Step 3).
   - The `agent_models` seed result: fold in the Step 4 primitive's report block (its `sot:` defaults path + per-key states). If the primitive returned `sot-missing` or `no-entries`, surface that line prominently.
-  - Per-key outcome for `experts`. Every technical class set includes `<domain>.data-writer`, `<domain>.use-case-writer`, `<domain>.ui-designer`, and `<domain>.researcher`, seeded by the class map's technical row.
+  - Per-key outcome for `experts`. Every technical class set includes `<domain>.data-writer`, `<domain>.use-case-writer`, `<domain>.ui-designer`, `<domain>.researcher`, and `<domain>.editor`, seeded by the class map's technical row; every fiction class set includes `<domain>.fiction-editor` beside `<domain>.fiction-writer`.
   - System-expert check result (Step 6): the `system-experts:` outcome plus one line per missing/unknown key.
   - One line per entry the Step 5 completion pass touched, naming the aspects appended: `experts.<expert-key> (completed: <aspect>[, <aspect>…])`.
 

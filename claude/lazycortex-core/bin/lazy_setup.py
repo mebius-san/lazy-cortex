@@ -3,8 +3,11 @@
 Discovery primitive for the `lazy-core.setup` install chain and its headless twin `lazy-core.autosetup`.
 
     lazy_setup.py discover <repo-root> [--home <dir>]
+    lazy_setup.py guard <repo-root> [--ignore <prefix>]... [--snapshot <file>]
+    lazy_setup.py verify <repo-root> [--snapshot <file>]
+    lazy_setup.py plugin-root <plugin> [--repo <root>] [--home <dir>]
 
-Prints one JSON object describing the chain a repo needs, resolved against that repo alone:
+`discover` prints one JSON object describing the chain a repo needs, resolved against that repo alone:
 
 - `dev_mode` — whether the repo authors plugins itself (`claude/*/.claude-plugin/plugin.json`);
   in dev-mode an enabled plugin's in-repo sources outrank its cached copy.
@@ -18,13 +21,38 @@ Prints one JSON object describing the chain a repo needs, resolved against that 
 Enablement is the union of `enabledPlugins` in `.claude/settings.json` and
 `.claude/settings.local.json` under the repo; `installed_plugins.json` under the home directory
 resolves an install path only, never enablement.
+
+`guard` judges a dirty working tree before a headless run writes anything. Every dirty path is
+sorted into one of three buckets: `conflicts` — under a prefix the install chain writes to
+(`WRITE_SCOPE`), so running would overwrite the operator's work; `ignored` — under a prefix the
+caller declared with `--ignore`, the operator's own work-in-progress the run must leave alone;
+`outside` — anywhere else, none of the chain's business. The verdict is `conflict` when the
+first bucket is non-empty, `clean` when nothing is dirty, and `dirty-allowed` otherwise — the
+run may proceed, but only its own writes may reach the commit.
+The guard also records a content fingerprint of every non-conflicting dirty path in a snapshot
+file (default `<repo>/.runtime/lazy-setup-guard.json`) for `verify`.
+
+`verify` runs after the writes: it re-reads the tree, reports as `touched` every dirty path the
+snapshot did not know (the run's own writes, `new` marking the untracked ones — the commit
+pathspec), and as `violations` every snapshot path whose fingerprint changed (the run wrote
+into the operator's work). The verdict is `ok` only when there are no violations; a caller
+commits nothing otherwise.
+
+`plugin-root` prints the one directory a plugin's sources are read from, resolved in the
+order every skill must follow and none may reorder: the repo's own `claude/<plugin>/` when the
+repo authors the plugin (the sources in the tree outrank the cached copy, which lags them until
+the next publish), then the daemon-exported `$LAZYCORTEX_PLUGIN_DIRS` entry for the plugin,
+then the newest cached install. The plugin name may carry its `@<marketplace>` suffix. Exit
+status 1 and an `error:` line when no stage resolves.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -68,6 +96,30 @@ _FIRST_INSTALL = "lazy-core.install"
 _NOT_INSTALLED = "plugin not installed on this machine"
 # waiver: JSON report keys read by the skill and the agent
 _K_DISPATCH, _K_PHASE = "dispatch", "phase"
+
+# Decision: the prefixes the install chain and the checkup repairs write to are fixed here, not
+# derived per run — a headless agent needs the verdict BEFORE any installer runs, and every
+# installer documents its writes under these roots (`.claude/` mirrors and settings, the
+# plugin-authoring tree, Obsidian and git-hook bootstraps, run logs, daemon state, `.gitignore`).
+
+# waiver: repo-relative roots the install chain owns, not reusable domain keys
+WRITE_SCOPE = (".claude/", "claude/", ".obsidian/", ".githooks/", ".experts/", ".logs/", ".runtime/", ".gitignore")
+# waiver: machine-local daemon state dir, gitignored by lazy-core.install
+_SNAPSHOT_REL = ".runtime/lazy-setup-guard.json"
+# waiver: guard verdict vocabulary shared with the two headless agents
+_V_CLEAN, _V_ALLOWED, _V_CONFLICT, _V_OK, _V_VIOLATED = "clean", "dirty-allowed", "conflict", "ok", "violated"
+# waiver: fingerprint markers for a dirty path that is not a regular file
+_FP_ABSENT, _FP_DIR = "absent", "dir"
+# waiver: JSON keys of the snapshot file, private to guard/verify
+_K_DIRTY, _K_FINGERPRINTS = "dirty", "fingerprints"
+# waiver: git porcelain status letters whose entry carries a second (source) path
+_RENAME_STATUSES = "RC"
+# waiver: argparse sub-command names, surface strings rather than domain keys
+_VERB_DISCOVER, _VERB_GUARD, _VERB_VERIFY, _VERB_ROOT = "discover", "guard", "verify", "plugin-root"
+# waiver: the daemon's plugin-dir export (dev.plugin-boundaries § 1c), an environment name
+_PLUGIN_DIRS_ENV = "LAZYCORTEX_PLUGIN_DIRS"
+# waiver: provenance words of a resolved plugin root, read by the skills' reports
+_SRC_REPO, _SRC_ENV, _SRC_CACHE = "repo", "env", "cache"
 
 
 def _read_json(path: Path) -> dict:
@@ -223,8 +275,11 @@ def _order_key(entry: dict) -> tuple:
   Returns:
     The sort tuple.
   """
-  # Contract: the chain order is phase band, then `lazy-core.install` ahead of every other
-  # installer, then dispatch string; callers and the setup skill rely on it verbatim.
+
+  # Contract:
+  # The chain order is phase band, then `lazy-core.install` ahead of every other installer, then
+  # dispatch string; callers and the setup skill rely on it verbatim.
+
   return (
       _PHASES.index(entry[_K_PHASE]),
       not (entry[_K_PHASE] == _PHASES[1] and entry[_K_DISPATCH].endswith(":" + _FIRST_INSTALL)),
@@ -279,37 +334,275 @@ def discover(repo: Path, home: Path) -> dict:
   }
 
 
+def dirty_paths(repo: Path) -> list[str]:
+  """
+  List the repo-relative paths git reports as modified, added, deleted, renamed, or untracked.
+
+  Args:
+    repo: Repo root.
+
+  Returns:
+    Sorted repo-relative paths; a rename contributes its new name only. Untracked files are
+    listed one by one, never collapsed into their directory.
+  """
+  # NUL-separated porcelain: `XY path` per entry, a rename carrying the old name as a second field
+  out = subprocess.run(
+      [ "git", "-C", str(repo), "status", "--porcelain", "-z", "--untracked-files=all" ],
+      check = True, capture_output = True, text = True,
+  ).stdout
+  fields = out.split("\0")
+  paths: list[str] = []
+  i = 0
+  while i < len(fields) and fields[i]:
+    entry = fields[i]
+    paths.append(entry[3:])
+    # a rename or copy status is followed by the source path, which is not a dirty path of its own
+    i += 2 if entry[0] in _RENAME_STATUSES else 1
+  return sorted(set(paths))
+
+
+def _under(path: str, prefixes: tuple[str, ...] | list[str]) -> bool:
+  """
+  Tell whether a repo-relative path falls under any of the prefixes.
+
+  Args:
+    path: Repo-relative path.
+    prefixes: Directory prefixes ending in `/`, or exact file paths.
+
+  Returns:
+    True when the path equals a file prefix or starts with a directory prefix.
+  """
+  return any(path == p or path.startswith(p if p.endswith("/") else p + "/") for p in prefixes)
+
+
+def _fingerprint(repo: Path, rel: str) -> str:
+  """
+  Fingerprint the current content of one repo-relative path.
+
+  Args:
+    repo: Repo root.
+    rel: Repo-relative path.
+
+  Returns:
+    The SHA-256 of a regular file's bytes, `dir` for a directory, `absent` when nothing is there.
+  """
+  target = repo / rel
+  if target.is_dir():
+    return _FP_DIR
+  if not target.is_file():
+    return _FP_ABSENT
+  return hashlib.sha256(target.read_bytes()).hexdigest()
+
+
+def guard(repo: Path, ignore: list[str], snapshot: Path) -> dict:
+  """
+  Judge the dirty tree against the chain's write scope and record the snapshot `verify` needs.
+
+  Guarantees:
+    - A dirty path under an `--ignore` prefix is never a conflict, whatever else covers it.
+    - The snapshot fingerprints exactly the `ignored` and `outside` paths; conflicts are not
+      recorded because a `conflict` verdict means nothing runs.
+
+  Args:
+    repo: Repo root.
+    ignore: Repo-relative prefixes the operator declared as their own work-in-progress.
+    snapshot: File the snapshot is written to.
+
+  Returns:
+    The report described in the module docstring.
+  """
+  dirty = dirty_paths(repo)
+  ignored = [ p for p in dirty if _under(p, ignore) ]
+  conflicts = [ p for p in dirty if p not in ignored and _under(p, WRITE_SCOPE) ]
+  outside = [ p for p in dirty if p not in ignored and p not in conflicts ]
+  verdict = _V_CONFLICT if conflicts else (_V_CLEAN if not dirty else _V_ALLOWED)
+
+  # the snapshot is what lets `verify` prove the run stayed out of the operator's files
+  recorded = ignored + outside
+  snapshot.parent.mkdir(parents = True, exist_ok = True)
+  payload = json.dumps({ _K_DIRTY: recorded, _K_FINGERPRINTS: { p: _fingerprint(repo, p) for p in recorded } },
+                       indent = 2)
+  # waiver: stdlib encoding idiom
+  snapshot.write_text(payload, encoding = "utf-8")
+
+  # the report the agents read; the verdict alone decides whether the chain runs
+  return {
+      # waiver: JSON report keys read by the two headless agents
+      "verdict": verdict, "dirty": dirty, "conflicts": conflicts, "ignored": ignored, "outside": outside,
+      "write_scope": list(WRITE_SCOPE), "snapshot": str(snapshot),
+  }
+
+
+def verify(repo: Path, snapshot: Path) -> dict:
+  """
+  Compare the tree after a run with the guard's snapshot.
+
+  Guarantees:
+    - `touched` holds only paths the snapshot did not list, so an operator's dirty file never
+      enters the commit pathspec, and the snapshot file itself never does either.
+    - `violations` holds every recorded path whose fingerprint changed, including one that a
+      revert made clean again.
+
+  Args:
+    repo: Repo root.
+    snapshot: File `guard` wrote.
+
+  Returns:
+    The report described in the module docstring.
+  """
+  before = _read_json(snapshot)
+  recorded: list[str] = list(before.get(_K_DIRTY) or [])
+  fingerprints: dict = before.get(_K_FINGERPRINTS) or {}
+
+  # a snapshot kept inside the repo shows up as dirty itself and must never count as a write
+  try:
+    snapshot_rel = str(snapshot.resolve().relative_to(repo.resolve()))
+  except ValueError:
+    snapshot_rel = ""
+
+  # the run's own writes are the dirty paths the snapshot did not know; untracked ones need `add -N`
+  after = dirty_paths(repo)
+  touched = [ p for p in after if p not in recorded and p != snapshot_rel ]
+  tracked = set(subprocess.run(
+      [ "git", "-C", str(repo), "ls-files", "-z", "--", *touched ],
+      check = True, capture_output = True, text = True,
+  ).stdout.split("\0")) if touched else set()
+  new = [ p for p in touched if p not in tracked ]
+  violations = [ p for p in recorded if _fingerprint(repo, p) != fingerprints.get(p) ]
+
+  # the report the agents read; any violation blocks the commit
+  return {
+      # waiver: JSON report keys read by the two headless agents
+      "verdict": _V_VIOLATED if violations else _V_OK, "touched": touched, "new": new, "violations": violations,
+  }
+
+
+def plugin_root(plugin: str, repo: Path, home: Path) -> dict | None:
+  """
+  Resolve the directory a plugin's sources are read from.
+
+  Guarantees:
+    - The repo's own `claude/<plugin>/` wins whenever the repo authors the plugin.
+    - Otherwise a `$LAZYCORTEX_PLUGIN_DIRS` entry named after the plugin wins over the cache.
+
+  Args:
+    plugin: Plugin name, with or without its `@<marketplace>` suffix.
+    repo: Repo root whose authored plugins are checked first.
+    home: Home directory whose plugin registry resolves the cached copy.
+
+  Returns:
+    `{"plugin", "root", "source"}` with `source` one of `repo` / `env` / `cache`, or None when no
+    stage resolves.
+  """
+  name = plugin.split("@", 1)[0]
+
+  # Contract:
+  # The stages run repo, then export, then cache, and the first hit wins; every skill that reads
+  # a plugin's sources relies on this order, so no caller may reorder or skip a stage.
+
+  # stage one: the authoring repo's own tree
+  dev = find_dev_plugins(repo).get(name)
+  if dev is not None:
+    return _root_report(name, dev, _SRC_REPO)
+
+  # stage two: the daemon's export, matched on the directory name
+  raw = os.environ.get(_PLUGIN_DIRS_ENV, "")
+  for entry in filter(None, raw.split(os.pathsep)):
+    candidate = Path(entry)
+    if candidate.name == name and (candidate / _DEV_MANIFEST).is_file():
+      return _root_report(name, candidate, _SRC_ENV)
+
+  # stage three: the newest cached install
+  cached = read_install_paths(home).get(name)
+  return _root_report(name, cached, _SRC_CACHE) if cached is not None else None
+
+
+def _root_report(name: str, root: Path, source: str) -> dict:
+  """
+  Shape one plugin-root resolution as the report the CLI prints.
+
+  Args:
+    name: Bare plugin name.
+    root: Resolved source directory.
+    source: Which stage resolved it.
+
+  Returns:
+    The report object.
+  """
+  # waiver: JSON report keys read by the skills
+  return { "plugin": name, "root": str(root.resolve()), "source": source }
+
+
 def main(argv: list[str] | None = None) -> int:
   """
-  Parse the arguments and print the chain for the named repo.
+  Parse the arguments and print the requested report: the chain, a guard verdict, a verify
+  verdict, or a plugin root.
 
   Args:
     argv: Arguments without the program name; defaults to `sys.argv[1:]`.
 
   Returns:
-    Process exit code: 0 on success, 2 on a usage error.
+    Process exit code: 0 on success, 1 when `plugin-root` resolves nothing, 2 on a usage error.
   """
   # waiver: argparse surface strings, not reusable domain keys
   parser = argparse.ArgumentParser(prog = "lazy_setup.py")
   # waiver: argparse surface strings, not reusable domain keys
   sub = parser.add_subparsers(dest = "verb", required = True)
   # waiver: argparse surface strings, not reusable domain keys
-  disc = sub.add_parser("discover", help = "print the install chain for a repo as JSON")
+  disc = sub.add_parser(_VERB_DISCOVER, help = "print the install chain for a repo as JSON")
   # waiver: argparse surface strings, not reusable domain keys
   disc.add_argument("repo", help = "repo root the chain targets")
   # waiver: argparse surface strings, not reusable domain keys
   disc.add_argument("--home", default = None, help = "home directory (default: the current user's)")
+  # waiver: argparse surface strings, not reusable domain keys
+  grd = sub.add_parser(_VERB_GUARD, help = "judge a dirty tree against the chain's write scope, record a snapshot")
+  # waiver: argparse surface strings, not reusable domain keys
+  grd.add_argument("repo", help = "repo root the chain targets")
+  # waiver: argparse surface strings, not reusable domain keys
+  grd.add_argument("--ignore", action = "append", default = [],
+                   help = "repo-relative prefix of operator work-in-progress the run leaves alone (repeatable)")
+  # waiver: argparse surface strings, not reusable domain keys
+  grd.add_argument("--snapshot", default = None, help = f"snapshot file (default: <repo>/{_SNAPSHOT_REL})")
+  # waiver: argparse surface strings, not reusable domain keys
+  ver = sub.add_parser(_VERB_VERIFY, help = "compare the tree after a run with the guard's snapshot")
+  # waiver: argparse surface strings, not reusable domain keys
+  ver.add_argument("repo", help = "repo root the chain targets")
+  # waiver: argparse surface strings, not reusable domain keys
+  ver.add_argument("--snapshot", default = None, help = f"snapshot file (default: <repo>/{_SNAPSHOT_REL})")
+  # waiver: argparse surface strings, not reusable domain keys
+  root = sub.add_parser(_VERB_ROOT, help = "print the directory a plugin's sources are read from")
+  # waiver: argparse surface strings, not reusable domain keys
+  root.add_argument("plugin", help = "plugin name, with or without its @<marketplace> suffix")
+  # waiver: argparse surface strings, not reusable domain keys
+  root.add_argument("--repo", default = None, help = "repo root checked for authored sources (default: the cwd)")
+  # waiver: argparse surface strings, not reusable domain keys
+  root.add_argument("--home", default = None, help = "home directory (default: the current user's)")
   args = parser.parse_args(argv)
 
+  # the repo comes from the argument every verb but `plugin-root` requires; that verb falls back to the cwd
+  repo = Path(args.repo).resolve() if getattr(args, "repo", None) else Path.cwd().resolve()
+
   # guard: a repo path that is not a directory is a usage error, not an empty chain
-  repo = Path(args.repo).resolve()
   if not repo.is_dir():
     print(f"error: not a directory: {repo}", file = sys.stderr)
     return 2
 
-  # emit the report against the named home, defaulting to the current user's
-  print(json.dumps(discover(repo, Path(args.home).resolve() if args.home else Path.home()), indent = 2,
-                   ensure_ascii = False))
+  # the home resolves the cached copies; only `discover` and `plugin-root` take it explicitly
+  home = Path(args.home).resolve() if getattr(args, "home", None) else Path.home()
+
+  # emit the requested report; `discover` and `plugin-root` resolve against the named home
+  if args.verb == _VERB_DISCOVER:
+    report: dict | None = discover(repo, home)
+  elif args.verb == _VERB_ROOT:
+    report = plugin_root(args.plugin, repo, home)
+    # guard: an unresolved plugin is a failure the caller must see, not an empty report
+    if report is None:
+      print(f"error: {args.plugin} not installed: no authored, exported, or cached sources", file = sys.stderr)
+      return 1
+  else:
+    snapshot = Path(args.snapshot).resolve() if args.snapshot else repo / _SNAPSHOT_REL
+    report = guard(repo, list(args.ignore), snapshot) if args.verb == _VERB_GUARD else verify(repo, snapshot)
+  print(json.dumps(report, indent = 2, ensure_ascii = False))
   return 0
 
 

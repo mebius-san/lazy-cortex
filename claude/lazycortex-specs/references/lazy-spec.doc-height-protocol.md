@@ -1,11 +1,11 @@
 ---
 name: lazy-spec.doc-height-protocol
-version: 2
+version: 3
 description: The abstraction height a spec document holds — every document kind forms one vertical, each level writes at the height of its direct children and no deeper, and references run upward only — binding both the class's main writer and its validators.
 ---
-# Document height protocol v2
+# Document height protocol v3
 
-Contract for every expert dispatched against a document of the `vision`, `system-vision`, `system-design`, `system-ui-design`, or `design` review class — the main writer and every validator alike. It governs one thing: at what level of abstraction this document speaks, and what to do with material that belongs a level below.
+Contract for every expert dispatched against a document of the `vision`, `system-vision`, `system-design`, `system-tech`, `system-ui-design`, or `design` review class — the main writer and every validator alike. It governs one thing: at what level of abstraction this document speaks, and what to do with material that belongs a level below.
 
 ## The height ladder
 

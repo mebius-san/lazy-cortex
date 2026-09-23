@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Non-obvious answers on install, LLM providers, the runtime daemon and experts, routines, scaffolding, git staging, and MCP permissions.
-last_regen: 2026-09-21
+last_regen: 2026-09-22
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -32,8 +32,8 @@ source_skills:
   - lazy-expert.cancel-job
   - lazy-expert.list-jobs
   - lazy-memory.write
-source_sha: ece443fde681d08757d84c2adc770268af1c254a
-surface_sha: 2f0ad00ceb97efb3f256d1bed399a41494c47b5912fa9b24526dd0451e547745
+source_sha: d646145dc19da6bfbae3e0c00253f21e2d5c4ad2
+surface_sha: dedfd5a64f56a39770791bfe59fd6e52ab77dc28b104768579ac9b52322c7a17
 ---
 # FAQ
 
@@ -197,7 +197,9 @@ Edit the map by hand — add or remove a `"<hostname>": "<path>"` entry — then
 
 ## How do I run a plugin CLI verb by hand, and what does `<core-cli>` stand for?
 
-Every plugin CLI is a Python file — `bin/lazycortex-core`, `bin/lazycortex-specs`, `bin/lazycortex-wiki`, `bin/lazycortex-review`, `bin/lazycortex-obsidian` — with no exec bit and no place on your `PATH`, so a bare `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> error-list` prints "command not found" and a direct `"${LAZYCORTEX_PYTHON:-python3}" <dir>/lazycortex-core error-list` exits 126. Hand the file to the interpreter instead: `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> error-list --repo <repo>`. In the help pages `<core-cli>` stands for that file: the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-core/<version>/bin/lazycortex-core`, or `claude/lazycortex-core/bin/lazycortex-core` in a checkout that authors the plugin. The other placeholders (`<specs-cli>`, `<wiki-cli>`, `<review-cli>`, `<obsidian-cli>`) resolve the same way under their own plugin directory. Skills and the daemon's agents resolve the path themselves before their first call; the form is the same one they use. `/lazy-core.doctor` now scans your own `.claude/` sources for exactly this mistake — a skill, agent, rule, or hook that calls a plugin CLI as a bare command, a path-only command, or through a shell variable holding the path — and flags each occurrence with the file and line to fix.
+Every plugin CLI is a Python file — `bin/lazycortex-core`, `bin/lazycortex-specs`, `bin/lazycortex-wiki`, `bin/lazycortex-review`, `bin/lazycortex-obsidian` — with no exec bit and no place on your `PATH`, so a bare `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> error-list` prints "command not found" and a direct `"${LAZYCORTEX_PYTHON:-python3}" <dir>/lazycortex-core error-list` exits 126. Hand the file to the interpreter instead: `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> error-list --repo <repo>`.
+
+Don't guess at where that file lives — the `plugin-root` verb resolves it for you: `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root <plugin-name>` prints the one directory a named plugin's sources are actually read from, plus which stage resolved it. Resolution runs three stages in a fixed order, and the first hit wins — it is never cache-first: first this checkout's own `claude/<plugin>/` when the checkout authors that plugin (in-tree sources outrank the cached copy, which lags behind until the next publish); only when the checkout doesn't author it, the runtime daemon's exported `$LAZYCORTEX_PLUGIN_DIRS` entry naming that plugin; and only after both of those miss, the newest cached install under `~/.claude/plugins/cache/`. In the help pages `<core-cli>` stands for wherever that same resolution lands for `lazycortex-core` itself — the authoring repo's `claude/lazycortex-core/bin/lazycortex-core` in a checkout that ships the plugin, the daemon's exported copy inside a spawned expert or routine, or the newest cache copy otherwise. The other placeholders resolve the same three-stage way under their own plugin name: `<specs-cli>` stands for that plugin's `bin/lazycortex-specs`, `<wiki-cli>` for `bin/lazycortex-wiki`, `<review-cli>` for `bin/lazycortex-review`, and `<obsidian-cli>` for `bin/lazycortex-obsidian`. Skills and the daemon's agents resolve the path themselves through this same `plugin-root` order before their first call; you never need to hardcode a guess. `/lazy-core.doctor` now scans your own `.claude/` sources for exactly this mistake — a skill, agent, rule, or hook that calls a plugin CLI as a bare command, a path-only command, or through a shell variable holding the path — and flags each occurrence with the file and line to fix.
 
 ---
 
