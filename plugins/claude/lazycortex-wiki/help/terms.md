@@ -10,8 +10,8 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.terms-curator
   - lazy-wiki.audit
-source_sha: 0d62a86bf599c9ea915e15430033befea65bfc75
-surface_sha: 54353527b68c3f48a64f37011a516e1f576468d6af06b19047919720cd629f3c
+source_sha: 8d8ca9de4b8a6cd1d65a25b2edf8008c9d36f965
+surface_sha: 3fc695e4bff20bd341b246953232f3c48d69b24d7b886785fc42351b08bbccb2
 ---
 # Terms
 

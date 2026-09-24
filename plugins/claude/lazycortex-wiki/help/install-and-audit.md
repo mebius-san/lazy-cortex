@@ -14,8 +14,8 @@ source_skills:
   - lazy-wiki.configure
   - lazy-wiki.audit
   - lazy-wiki.help
-source_sha: 0d62a86bf599c9ea915e15430033befea65bfc75
-surface_sha: 95264d61cb30027a798ff14911f243cc7caf3590212d796cee9551aa6dcdf71f
+source_sha: 8d8ca9de4b8a6cd1d65a25b2edf8008c9d36f965
+surface_sha: 366cd5a21f4f37e868cec33aeb1e2b94f78fbe6f49bba68787396dece6162303
 ---
 # Bootstrap and maintain lazycortex-wiki
 

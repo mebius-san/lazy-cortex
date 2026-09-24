@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 10.1.1 — 2026-09-24 UTC
+
+- The unattended checkup agent (`lazy-core.autocheckup`) now automatically repairs a structure-scan routine whose path filter has drifted from what the wiki install derives, instead of leaving it as a manual finding; a routine that's missing entirely still surfaces for the operator to register.
+
 ### 10.1.0 — 2026-09-24 UTC
 
 - New `Lazy-Watch: skip` commit trailer drops a commit out of every git watch entirely — no item, and any path it last touched re-keys to the next ordinary commit — so a comment sweep, formatting pass, or mechanical rename no longer wakes a watcher.
@@ -2051,6 +2055,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 3.3.1 — 2026-09-24 UTC
+
+- `lazy-wiki.install` now repairs the structure watchers' `path_filter` key on repos registered before that setting existed, fixing a stale audit failure that previously had no automatic repair path; `lazy-wiki.audit` now points at the install route when it finds the drift.
 
 ### 3.3.0 — 2026-09-24 UTC
 

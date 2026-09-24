@@ -13,8 +13,8 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: 0d62a86bf599c9ea915e15430033befea65bfc75
-surface_sha: a6c52ef6f9071c2f793bcd98fac5d783bfdffe06de1fef574025d58e52b27956
+source_sha: 8d8ca9de4b8a6cd1d65a25b2edf8008c9d36f965
+surface_sha: f773125b11f84da932fed33e0d7dc180f3c612b35bc01e8471667ba27862b3c3
 ---
 # Frequently asked questions
 
@@ -252,7 +252,7 @@ Any agent that needs to know where something lives (an architect deciding where 
 
 Without the daemon, the map only updates when you run `/lazy-wiki.structure rebuild` yourself; the structure section of `/lazy-wiki.audit` also flags drift (`missing-dir`, `missing-file`, `dead-entry`, `divergence`, `depth`) you can act on by hand or by rebuilding. A `config` finding there that says the map is reachable by the wiki is fixed once for the whole vault via `/lazy-wiki.configure vault` (putting `docs/structure.md` back into `wiki.exclude`), not by editing any one scope; the same section also flags a `config` finding when the three routines are registered but `docs/structure.md` itself is missing — every incremental dispatch would fail until you run `/lazy-wiki.structure rebuild` once, though `/lazy-wiki.configure structure`'s own last step already prevents this from happening on a fresh setup.
 
-One structure finding is a FAIL rather than a drift report: `structure-watch-filter` compares the three routines' `path_filter` against what the current `structure` section derives, and fails when it has drifted or when a routine still carries a `group_globs` or `group` key — a routine with no filtering, or one grouped per file, dispatches one expert job per changed path instead of one per tick, which on a large refactor commit turns into hundreds of dispatches costing an evening's budget on jobs that answer "nothing to do". The fix is `/lazy-wiki.configure structure` again, which re-registers the drifted routines with the correct derived value; you never compose `path_filter` by hand.
+One structure finding is a FAIL rather than a drift report: `structure-watch-filter` compares the three routines' `path_filter` against what the current `structure` section derives, and fails when it has drifted or when a routine still carries a `group_globs` or `group` key — a routine with no filtering, or one grouped per file, dispatches one expert job per changed path instead of one per tick, which on a large refactor commit turns into hundreds of dispatches costing an evening's budget on jobs that answer "nothing to do". When the routine is already registered and only its `path_filter` drifted, re-running `/lazy-wiki.install` is the lighter fix — its Step 8 reconciles that one key on each of the three structure-scan routines straight from the `structure` section it just wrote, no question asked, and `lazy-core.autocheckup` applies the same repair unattended when it finds this finding in the wiki audit. `/lazy-wiki.configure structure` still works and covers more ground — it is the one that re-registers a routine that is missing outright, not merely drifted. A lingering `group_globs` or boolean `group` key is neither skill's business — that one is fixed by the core `routine-migrate --apply` verb. Either way you never compose `path_filter` by hand.
 
 ---
 

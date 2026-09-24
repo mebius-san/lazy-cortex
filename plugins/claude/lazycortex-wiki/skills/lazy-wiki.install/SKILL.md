@@ -5,7 +5,7 @@ allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, Skill, Bash(mkdir -p *)
 ---
 # Install lazycortex-wiki
 
-Bootstrap the plugin in the right scope: create the wiki template directory, sync the rules shipped by the plugin (`lazy-wiki.navigation`, `lazy-wiki.structure`) into the consumer's rules directory, seed the `wiki`, `structure`, and `terms` settings sections, seed agent model tiers for the curators and the domain-spec writer, compose the `wiki.curator`, `wiki.terms-curator`, `wiki.structure-curator`, and `wiki.tag-curator` experts (unconditionally — they are dispatch-routing config, not daemon-only), and register the five wiki routines (`lazy-wiki.scan`, `lazy-wiki.scan-deletes`, `lazy-wiki.relink-weekly`, `lazy-wiki.doctor-apply`, `lazy-wiki.tag-normalize`). When `wiki.domains` is configured, additionally compose the `wiki.domain-writer` expert and register the two domain routines (`lazy-wiki.domain-scan`, `lazy-wiki.domain-full`). For every scope carrying a `mirror` block, additionally register its `lazy-wiki.mirror-sync.<scope-id>` schedule routine. The structure map's three scan routines are per-repo wiring owned by `/lazy-wiki.configure structure`, alongside the terms scopes' scan routines owned by `/lazy-wiki.configure terms` — neither family is registered here. Idempotent and quiet on re-run.
+Bootstrap the plugin in the right scope: create the wiki template directory, sync the rules shipped by the plugin (`lazy-wiki.navigation`, `lazy-wiki.structure`) into the consumer's rules directory, seed the `wiki`, `structure`, and `terms` settings sections, seed agent model tiers for the curators and the domain-spec writer, compose the `wiki.curator`, `wiki.terms-curator`, `wiki.structure-curator`, and `wiki.tag-curator` experts (unconditionally — they are dispatch-routing config, not daemon-only), and register the five wiki routines (`lazy-wiki.scan`, `lazy-wiki.scan-deletes`, `lazy-wiki.relink-weekly`, `lazy-wiki.doctor-apply`, `lazy-wiki.tag-normalize`). When `wiki.domains` is configured, additionally compose the `wiki.domain-writer` expert and register the two domain routines (`lazy-wiki.domain-scan`, `lazy-wiki.domain-full`). For every scope carrying a `mirror` block, additionally register its `lazy-wiki.mirror-sync.<scope-id>` schedule routine. The structure map's three scan routines are per-repo wiring owned by `/lazy-wiki.configure structure`, alongside the terms scopes' scan routines owned by `/lazy-wiki.configure terms` — neither family is registered here; the structure routines' derived `path_filter` is refreshed here whenever they exist. Idempotent and quiet on re-run.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -453,6 +453,30 @@ Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=lazy-wiki.mirr
 
 The consumer is deterministic (fetch → sync → commit; no expert dispatch), so no protocol is attached. `git_author` is one family identity across every mirror scope — the routine key already names the scope, the commit subject names the synced paths, and `git blame` on mirrored content must point at the sync bot, never at the operator who has not seen it. The commit it lands is picked up by the git-watch `lazy-wiki.scan` routine, which re-curates the changed mirror nodes — no second curation channel. Scopes without a `mirror` block get nothing; when no scope carries one, state the outcome `skipped-no-mirrors`. The block is created by `/lazy-wiki.configure mirror`; re-running this install afterwards registers the routine.
 
+### Structure-scan routines (refresh only)
+
+The three structure-scan routines (`lazy-wiki.structure-scan`, `lazy-wiki.structure-scan-deletes`, `lazy-wiki.structure-scan-renames`) are registered by `/lazy-wiki.configure structure`, never here — which depth classes the map describes is a per-repo answer. Their `path_filter` is not: it is derived from the `structure` section Step 5 just completed, so a registration that predates the derivation, or one made before the section's `exclude` grew, is brought current on every install run without a question. Skipping this leaves a routine watching trees the map does not describe, and `lazy-wiki.audit` fails on it in every repo until someone re-runs the configure wizard by hand.
+
+For each of the three names, read whether it is registered:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> routine-show <name> --cwd <target-root>)
+```
+
+`absent` → outcome `skipped-not-registered`; nothing is written — a missing routine is `/lazy-wiki.configure structure`'s to create. `present` → derive the filter once for the run:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" structure-watch-config --repo <target-root>)
+```
+
+The command prints one JSON object carrying `path_filter` and nothing else. Pass it through verbatim as the shipped config, owning that one key:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> reconcile-routine <name> --cfg-json '<printed object>' --managed path_filter --cwd <target-root>)
+```
+
+Every other key stays as the configure wizard or the operator wrote it — `watch`, `expert`, `request`, `protocols`, the cadence keys. A retired grouping key (`group_globs`, a boolean `group`) is not this step's business: `lazy-wiki.audit` reports it and the core `routine-migrate` verb rewrites it. Report each present routine as `refreshed` or `unchanged`, whichever the registrar returned.
+
 Write the file if any expert entry changed (preserve `_version: 1` for both `routines` and `experts`); the routine registrations are written by the registrar, not by this step.
 
 ### Seed the mandatory protocol
@@ -470,7 +494,7 @@ No question is asked: a mandatory protocol is not an operator choice, and the st
 
 This sub-step carries no outcome of its own — each seeded routine's line below gains a `+protocol` suffix.
 
-Outcome (one line per seeded entry): `experts.wiki.curator: <seeded|kept-local>` (always), `experts.wiki.domain-writer: <seeded|kept-local|skipped-no-domains>`, `routines.<key>: <registered|refreshed|unchanged|skipped-no-domains|skipped-no-mirrors>`, with `+protocol` appended on `lazy-wiki.scan`, `lazy-wiki.relink-weekly`, `lazy-wiki.domain-scan`, and `lazy-wiki.domain-full` whenever the seeding above ran.
+Outcome (one line per seeded entry): `experts.wiki.curator: <seeded|kept-local>` (always), `experts.wiki.domain-writer: <seeded|kept-local|skipped-no-domains>`, `routines.<key>: <registered|refreshed|unchanged|skipped-no-domains|skipped-no-mirrors>`, `routines.lazy-wiki.structure-scan*: <refreshed|unchanged|skipped-not-registered>` (one line per name), with `+protocol` appended on `lazy-wiki.scan`, `lazy-wiki.relink-weekly`, `lazy-wiki.domain-scan`, and `lazy-wiki.domain-full` whenever the seeding above ran.
 
 ### First scope pointer
 
@@ -497,7 +521,7 @@ Outcome: `cli-allow-added` or `cli-allow-already-present`.
 
 - Read back the written `lazy.settings.json` and confirm it parses.
 - Confirm `wiki`, `structure`, `terms`, and `agent_models.lazycortex` are present, that `wiki.exclude` carries `docs/structure.md`, and that `wiki.tag_axes` includes `doc-kind` — the last one holds on a fresh install too, since the vocabulary is the repository's and does not wait for a scope. Do NOT expect `doc-kind` in any scope's own `tag_axes`: a scope list is a narrowing, and an absent or empty one means the scope uses the whole vocabulary.
-- Confirm `experts.wiki.curator`, `experts.wiki.terms-curator`, `experts.wiki.structure-curator`, and `experts.wiki.tag-curator` are present (all always registered; the terms, structure, and tag curators carry `can_commit_in_repo: true`). Do NOT expect any `routines.lazy-wiki.terms-scan-*` or `routines.lazy-wiki.structure-scan*` key — those families belong to `/lazy-wiki.configure terms` / `/lazy-wiki.configure structure`. Confirm `routines.lazy-wiki.scan`, `routines.lazy-wiki.scan-deletes`, `routines.lazy-wiki.relink-weekly`, `routines.lazy-wiki.doctor-apply`, and `routines.lazy-wiki.tag-normalize` are present, that `lazy-wiki.scan` / `lazy-wiki.relink-weekly` carry `lazycortex-core:lazy-core.markdown-style` in their `protocols`, and that `lazy-wiki.tag-normalize` carries `lazycortex-wiki:lazy-wiki.tag-curator-protocol` in its `protocols`.
+- Confirm `experts.wiki.curator`, `experts.wiki.terms-curator`, `experts.wiki.structure-curator`, and `experts.wiki.tag-curator` are present (all always registered; the terms, structure, and tag curators carry `can_commit_in_repo: true`). Do NOT expect any `routines.lazy-wiki.terms-scan-*` or `routines.lazy-wiki.structure-scan*` key — those families belong to `/lazy-wiki.configure terms` / `/lazy-wiki.configure structure`; a structure-scan routine that IS present carries the `path_filter` Step 8 derived. Confirm `routines.lazy-wiki.scan`, `routines.lazy-wiki.scan-deletes`, `routines.lazy-wiki.relink-weekly`, `routines.lazy-wiki.doctor-apply`, and `routines.lazy-wiki.tag-normalize` are present, that `lazy-wiki.scan` / `lazy-wiki.relink-weekly` carry `lazycortex-core:lazy-core.markdown-style` in their `protocols`, and that `lazy-wiki.tag-normalize` carries `lazycortex-wiki:lazy-wiki.tag-curator-protocol` in its `protocols`.
 - When `wiki.domains` is configured: confirm `experts.wiki.domain-writer` is present, along with `routines.lazy-wiki.domain-scan` / `routines.lazy-wiki.domain-full` with the markdown-style protocol. When `wiki.domains` is absent, do NOT expect any of them.
 - For every scope with a `mirror` block, confirm `routines.lazy-wiki.mirror-sync.<scope-id>` is present. When no scope carries one, do NOT expect any.
 

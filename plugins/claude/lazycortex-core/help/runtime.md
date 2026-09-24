@@ -18,7 +18,7 @@ source_skills:
   - lazy-core.expert-runtime-schema
   - lazy-core.metrics-schema
 source_sha: d8ce7b256f62dbc95a0e3f5a7aeccf166afd57a6
-surface_sha: 3940fee928ee69c03c1084f17f0daac19a20f30c291da02fd8b43fc3c2388eb0
+surface_sha: a1c91849c666a60c7a512be5f7e2b4095b1c42457e2df2f72841b584fe757b02
 ---
 # Runtime daemon — routine management and recovery
 
