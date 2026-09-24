@@ -1751,7 +1751,18 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
 
     # every surviving item becomes one dispatched job, folded into any live job for its place
     for item in fresh_items:
-      rendered = _render_template(request_template, item)
+      try:
+        rendered = _render_template(request_template, item)
+      except KeyError as e:
+        # a template naming a field the item does not carry (a `{path}` kept from before the
+        # routine moved to a grouped `group` mode, whose items carry `paths`) is a config defect
+        # of this routine — reported as its failed tick, with the cursor left where it was so
+        # the tick retries once the template is fixed
+        # waiver: one-off routine-outcome note/reason token, not an internal key
+        return _err(
+          name, started, "request_template_invalid",
+          f"placeholder {{{e.args[0]}}} not among item keys {sorted(item)}",
+        )
       dispatch_job(
         target_repo, expert, rendered, protocols = protocols,
         dedup_key = _git_dedup_key(name, item),

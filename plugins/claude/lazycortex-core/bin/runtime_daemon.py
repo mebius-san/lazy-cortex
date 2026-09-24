@@ -1430,7 +1430,19 @@ def _run_iteration(repo_root: Path, *, push: bool = True, only: str | None = Non
   open_incidents = _open_incident_keys(repo_root) if due else set()
   for name, routine_cfg in due:
     head_before = _head_sha(repo_root)
-    result = dispatch_routine(repo_root, name, routine_cfg)
+    try:
+      result = dispatch_routine(repo_root, name, routine_cfg)
+    # waiver: any exception a routine lets escape is that routine's failure — the loop must
+    # outlive every kind of it, so the catch is deliberately broad
+    except Exception as e:  # pylint: disable=broad-exception-caught
+      # an exception escaping one routine's dispatch is that routine's failed tick, not the
+      # iteration's: letting it propagate would end the iteration here, starving every routine
+      # scheduled after it (the expert pump included) with nothing in their own journal to say so
+      result = {
+        TickResultKey.NAME: name, TickResultKey.EXIT: -1, TickResultKey.DURATION_SEC: 0.0,
+        # waiver: daemon error/trigger token, not an internal key
+        TickResultKey.ERROR: f"dispatch_exception: {type(e).__name__}: {e}",
+      }
     _log_routine_result(repo_root, result)
 
     # a failed routine tick (any type) lands in the error ledger

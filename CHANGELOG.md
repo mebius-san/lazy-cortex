@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 10.2.1 — 2026-09-24 UTC
+
+- Fixed a bug where a routine raising an exception during dispatch (a stale template, a bad config) silently stalled every routine scheduled after it for the rest of that tick — including `lazy-expert.pump` — with no record of what happened. The failing routine now gets its own failed-tick result and its own error entry, and the daemon moves on to the rest of the queue; a config-related failure (e.g. a template referencing a missing field) now names the problem clearly and retries automatically once fixed.
+
 ### 10.2.0 — 2026-09-24 UTC
 
 - **Breaking:** Run logging is now opt-in — skills, agents, and commands only write a run log under `.logs/claude/<name>/` when their frontmatter declares `logging: true`; the `logging-waiver:` key is retired (and flagged by `lazy-core.audit` if still used), and the `lazy-log.distill` changelog agent is removed. Only `lazy-diagram.draw` ships with logging enabled by default.
