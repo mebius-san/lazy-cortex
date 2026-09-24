@@ -1,0 +1,1876 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "description": "",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "__requires": [
+    {
+      "type": "panel",
+      "id": "timeseries",
+      "name": "Time series",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "stat",
+      "name": "Stat",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "table",
+      "name": "Table",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "piechart",
+      "name": "Pie chart",
+      "version": ""
+    },
+    {
+      "type": "datasource",
+      "id": "prometheus",
+      "name": "Prometheus",
+      "version": "1.0.0"
+    }
+  ],
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "title": "Runtime",
+  "uid": "lazycortex-runtime",
+  "tags": [
+    "lazycortex",
+    "runtime",
+    "observability"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 3,
+  "refresh": "30s",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timepicker": {
+    "hidden": true
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {
+          "selected": false,
+          "text": "Prometheus",
+          "value": "${DS_PROMETHEUS}"
+        },
+        "hide": 2
+      },
+      {
+        "name": "period",
+        "type": "custom",
+        "label": "period",
+        "query": "1h, 6h, 12h, 24h, 7d, 30d",
+        "options": [
+          {
+            "selected": false,
+            "text": "1h",
+            "value": "1h"
+          },
+          {
+            "selected": false,
+            "text": "6h",
+            "value": "6h"
+          },
+          {
+            "selected": false,
+            "text": "12h",
+            "value": "12h"
+          },
+          {
+            "selected": true,
+            "text": "24h",
+            "value": "24h"
+          },
+          {
+            "selected": false,
+            "text": "7d",
+            "value": "7d"
+          },
+          {
+            "selected": false,
+            "text": "30d",
+            "value": "30d"
+          }
+        ],
+        "current": {
+          "selected": true,
+          "text": "24h",
+          "value": "24h"
+        }
+      },
+      {
+        "name": "repo",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": "label_values(lazycortex_runtime_routine_ticks_total, repo)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "table",
+      "title": "Daemons ($period)",
+      "description": "One row per runtime daemon: liveness, halt state, the expert queue standing on disk right now (queued + active jobs across every expert of that repo), problem jobs now, errors and tokens over the selected period. Cost is an estimate: tokens priced at Anthropic list rates per model family (fable/mythos $10, opus $5, sonnet-5 $2, sonnet-4 $3, haiku $1 per 1M input; output 5x, cache read 0.1x, cache write 1.25x). Models outside those families count as $0.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "(max by (repo) (lazycortex_runtime_dirty_tree{repo=~\"$repo\"}) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"})) + 2 * (max by (repo) (lazycortex_runtime_daemon_halted{repo=~\"$repo\",reason!~\"rate_limit|git_remote_unavailable|git_local_failed\"}) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"})) + 4 * (max by (repo) (lazycortex_runtime_daemon_paused{repo=~\"$repo\"}) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"})) + 8 * (max by (repo) (lazycortex_runtime_daemon_halted{repo=~\"$repo\",reason=\"rate_limit\"}) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"})) + 16 * (max by (repo) (lazycortex_runtime_daemon_halted{repo=~\"$repo\",reason=~\"git_remote_unavailable|git_local_failed\"}) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"}))",
+          "legendFormat": "",
+          "refId": "B",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (repo) (lazycortex_runtime_queue_depth{repo=~\"$repo\",state=~\"queued|active\"}) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"})",
+          "legendFormat": "",
+          "refId": "Q",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (repo) (increase(lazycortex_runtime_expert_jobs_total{repo=~\"$repo\",outcome=\"failed\"}[$period])) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"})",
+          "legendFormat": "",
+          "refId": "C",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (repo) (increase(lazycortex_runtime_expert_jobs_total{repo=~\"$repo\",outcome=\"dead\"}[$period])) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"})",
+          "legendFormat": "",
+          "refId": "D",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (repo) (increase(lazycortex_runtime_routine_errors_total{repo=~\"$repo\"}[$period])) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"})",
+          "legendFormat": "",
+          "refId": "E",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "(\nsum by (repo) (increase(lazycortex_runtime_routine_tick_duration_seconds_sum{repo=~\"$repo\"}[$period])) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"})\n) / 3600",
+          "legendFormat": "",
+          "refId": "H",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (repo) (\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-fable.*|claude-mythos.*\",kind=\"input\"}[$period]) * 1e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-fable.*|claude-mythos.*\",kind=\"output\"}[$period]) * 5e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-fable.*|claude-mythos.*\",kind=\"cache_read\"}[$period]) * 1e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-fable.*|claude-mythos.*\",kind=\"cache_write\"}[$period]) * 1.25e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-opus.*\",kind=\"input\"}[$period]) * 5e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-opus.*\",kind=\"output\"}[$period]) * 2.5e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-opus.*\",kind=\"cache_read\"}[$period]) * 5e-07\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-opus.*\",kind=\"cache_write\"}[$period]) * 6.25e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-5.*\",kind=\"input\"}[$period]) * 2e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-5.*\",kind=\"output\"}[$period]) * 1e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-5.*\",kind=\"cache_read\"}[$period]) * 2e-07\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-5.*\",kind=\"cache_write\"}[$period]) * 2.5e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-4.*\",kind=\"input\"}[$period]) * 3e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-4.*\",kind=\"output\"}[$period]) * 1.5e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-4.*\",kind=\"cache_read\"}[$period]) * 3e-07\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-4.*\",kind=\"cache_write\"}[$period]) * 3.75e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-haiku.*\",kind=\"input\"}[$period]) * 1e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-haiku.*\",kind=\"output\"}[$period]) * 5e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-haiku.*\",kind=\"cache_read\"}[$period]) * 1e-07\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-haiku.*\",kind=\"cache_write\"}[$period]) * 1.25e-06\n) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"})",
+          "legendFormat": "",
+          "refId": "I",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "0.25 * count_over_time(vector(1)[$period:1m]) / 60",
+          "legendFormat": "",
+          "refId": "PMAX",
+          "instant": true,
+          "format": "table",
+          "hide": false
+        },
+        {
+          "expr": "250 / 1440 * count_over_time(vector(1)[$period:1m])",
+          "legendFormat": "",
+          "refId": "CMAX",
+          "instant": true,
+          "format": "table",
+          "hide": false
+        }
+      ],
+      "transformations": [
+        {
+          "id": "configFromData",
+          "options": {
+            "configRefId": "CMAX",
+            "mappings": [
+              {
+                "fieldName": "Value",
+                "handlerKey": "max"
+              },
+              {
+                "fieldName": "Value #CMAX",
+                "handlerKey": "max"
+              }
+            ],
+            "applyTo": {
+              "id": "byFrameRefID",
+              "options": "I"
+            }
+          }
+        },
+        {
+          "id": "configFromData",
+          "options": {
+            "configRefId": "PMAX",
+            "mappings": [
+              {
+                "fieldName": "Value",
+                "handlerKey": "max"
+              },
+              {
+                "fieldName": "Value #PMAX",
+                "handlerKey": "max"
+              }
+            ],
+            "applyTo": {
+              "id": "byFrameRefID",
+              "options": "H"
+            }
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "exported_repo": true
+            },
+            "indexByName": {
+              "repo": 0,
+              "Value #B": 1,
+              "Value #Q": 2,
+              "Value #C": 3,
+              "Value #D": 4,
+              "Value #E": 5,
+              "Value #H": 6,
+              "Value #I": 7
+            },
+            "renameByName": {
+              "repo": "Daemon",
+              "Value #B": "Status",
+              "Value #C": "Failed",
+              "Value #D": "Dead",
+              "Value #E": "Errors",
+              "Value #H": "Busy time",
+              "Value #I": "Cost",
+              "Value #Q": "Queue"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": false,
+            "inspect": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "OK",
+                        "color": "#6c9b6c"
+                      },
+                      "1": {
+                        "text": "WORK",
+                        "color": "#c49a6d"
+                      },
+                      "2": {
+                        "text": "HALTED",
+                        "color": "#c46d6d"
+                      },
+                      "3": {
+                        "text": "HALTED",
+                        "color": "#c46d6d"
+                      },
+                      "4": {
+                        "text": "PAUSED",
+                        "color": "#c9a94e"
+                      },
+                      "5": {
+                        "text": "PAUSED",
+                        "color": "#c9a94e"
+                      },
+                      "6": {
+                        "text": "PAUSED",
+                        "color": "#c9a94e"
+                      },
+                      "7": {
+                        "text": "PAUSED",
+                        "color": "#c9a94e"
+                      },
+                      "8": {
+                        "text": "LIMIT",
+                        "color": "#c9a94e"
+                      },
+                      "9": {
+                        "text": "LIMIT",
+                        "color": "#c9a94e"
+                      },
+                      "12": {
+                        "text": "PAUSED",
+                        "color": "#c9a94e"
+                      },
+                      "13": {
+                        "text": "PAUSED",
+                        "color": "#c9a94e"
+                      },
+                      "16": {
+                        "text": "OFFLINE",
+                        "color": "#c9a94e"
+                      },
+                      "17": {
+                        "text": "OFFLINE",
+                        "color": "#c9a94e"
+                      },
+                      "20": {
+                        "text": "PAUSED",
+                        "color": "#c9a94e"
+                      },
+                      "21": {
+                        "text": "PAUSED",
+                        "color": "#c9a94e"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Queue"
+            },
+            "properties": [
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 70
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^(Failed|Dead|Errors)$"
+            },
+            "properties": [
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "transparent",
+                      "value": null
+                    },
+                    {
+                      "color": "rgba(245, 54, 54, 0.22)",
+                      "value": 0.5
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 70
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Busy time"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: h"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "gradient"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 106
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "percentage",
+                  "steps": [
+                    {
+                      "color": "transparent",
+                      "value": null
+                    },
+                    {
+                      "color": "rgba(115, 191, 105, 0.10)",
+                      "value": 0.001
+                    },
+                    {
+                      "color": "rgba(250, 222, 42, 0.14)",
+                      "value": 50
+                    },
+                    {
+                      "color": "rgba(255, 152, 48, 0.16)",
+                      "value": 75
+                    },
+                    {
+                      "color": "rgba(245, 54, 54, 0.22)",
+                      "value": 100
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Cost"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 90
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "gradient"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "percentage",
+                  "steps": [
+                    {
+                      "color": "transparent",
+                      "value": null
+                    },
+                    {
+                      "color": "rgba(115, 191, 105, 0.10)",
+                      "value": 0.001
+                    },
+                    {
+                      "color": "rgba(250, 222, 42, 0.14)",
+                      "value": 50
+                    },
+                    {
+                      "color": "rgba(255, 152, 48, 0.16)",
+                      "value": 75
+                    },
+                    {
+                      "color": "rgba(245, 54, 54, 0.22)",
+                      "value": 100
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "fields": [],
+          "countRows": false,
+          "enablePagination": false
+        },
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Errors"
+          }
+        ]
+      }
+    },
+    {
+      "type": "table",
+      "title": "Routines ($period)",
+      "description": "One row per routine \u00d7 repo: how long since the last tick, tick and error counts over the selected period. Cost is an estimate: tokens priced at Anthropic list rates per model family (fable/mythos $10, opus $5, sonnet-5 $2, sonnet-4 $3, haiku $1 per 1M input; output 5x, cache read 0.1x, cache write 1.25x). Models outside those families count as $0.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "targets": [
+        {
+          "expr": "sum by (routine, repo) (increase(lazycortex_runtime_routine_ticks_total{repo=~\"$repo\"}[$period]))",
+          "legendFormat": "",
+          "refId": "B",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (routine, repo) (increase(lazycortex_runtime_routine_runs_total{repo=~\"$repo\"}[$period])) or 0 * sum by (routine, repo) (increase(lazycortex_runtime_routine_ticks_total{repo=~\"$repo\"}[$period]))",
+          "legendFormat": "",
+          "refId": "E",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (routine, repo) (increase(lazycortex_runtime_routine_errors_total{repo=~\"$repo\"}[$period])) or 0 * sum by (routine, repo) (increase(lazycortex_runtime_routine_ticks_total{repo=~\"$repo\"}[$period]))",
+          "legendFormat": "",
+          "refId": "C",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "(\nsum by (routine, repo) (increase(lazycortex_runtime_routine_tick_duration_seconds_sum{repo=~\"$repo\"}[$period]))\n) / 60",
+          "legendFormat": "",
+          "refId": "D",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "label_replace(\nsum by (routine, repo) (\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-fable.*|claude-mythos.*\",kind=\"input\"}[$period]) * 1e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-fable.*|claude-mythos.*\",kind=\"output\"}[$period]) * 5e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-fable.*|claude-mythos.*\",kind=\"cache_read\"}[$period]) * 1e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-fable.*|claude-mythos.*\",kind=\"cache_write\"}[$period]) * 1.25e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-opus.*\",kind=\"input\"}[$period]) * 5e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-opus.*\",kind=\"output\"}[$period]) * 2.5e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-opus.*\",kind=\"cache_read\"}[$period]) * 5e-07\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-opus.*\",kind=\"cache_write\"}[$period]) * 6.25e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-5.*\",kind=\"input\"}[$period]) * 2e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-5.*\",kind=\"output\"}[$period]) * 1e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-5.*\",kind=\"cache_read\"}[$period]) * 2e-07\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-5.*\",kind=\"cache_write\"}[$period]) * 2.5e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-4.*\",kind=\"input\"}[$period]) * 3e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-4.*\",kind=\"output\"}[$period]) * 1.5e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-4.*\",kind=\"cache_read\"}[$period]) * 3e-07\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-4.*\",kind=\"cache_write\"}[$period]) * 3.75e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-haiku.*\",kind=\"input\"}[$period]) * 1e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-haiku.*\",kind=\"output\"}[$period]) * 5e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-haiku.*\",kind=\"cache_read\"}[$period]) * 1e-07\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-haiku.*\",kind=\"cache_write\"}[$period]) * 1.25e-06\n)\n, \"routine\", \"lazy-expert.pump\", \"routine\", \"expert-pump\")\nor 0 * sum by (routine, repo) (increase(lazycortex_runtime_routine_ticks_total{repo=~\"$repo\"}[$period]))",
+          "legendFormat": "",
+          "refId": "Z",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "0.25 * count_over_time(vector(1)[$period:1m])",
+          "legendFormat": "",
+          "refId": "PMAX",
+          "instant": true,
+          "format": "table",
+          "hide": false
+        },
+        {
+          "expr": "250 / 1440 * count_over_time(vector(1)[$period:1m])",
+          "legendFormat": "",
+          "refId": "CMAX",
+          "instant": true,
+          "format": "table",
+          "hide": false
+        },
+        {
+          "expr": "2500 / 1440 * count_over_time(vector(1)[$period:1m])",
+          "legendFormat": "",
+          "refId": "RMAX",
+          "instant": true,
+          "format": "table",
+          "hide": false
+        }
+      ],
+      "transformations": [
+        {
+          "id": "configFromData",
+          "options": {
+            "configRefId": "RMAX",
+            "mappings": [
+              {
+                "fieldName": "Value",
+                "handlerKey": "max"
+              },
+              {
+                "fieldName": "Value #RMAX",
+                "handlerKey": "max"
+              }
+            ],
+            "applyTo": {
+              "id": "byFrameRefID",
+              "options": "E"
+            }
+          }
+        },
+        {
+          "id": "configFromData",
+          "options": {
+            "configRefId": "CMAX",
+            "mappings": [
+              {
+                "fieldName": "Value",
+                "handlerKey": "max"
+              },
+              {
+                "fieldName": "Value #CMAX",
+                "handlerKey": "max"
+              }
+            ],
+            "applyTo": {
+              "id": "byFrameRefID",
+              "options": "Z"
+            }
+          }
+        },
+        {
+          "id": "configFromData",
+          "options": {
+            "configRefId": "PMAX",
+            "mappings": [
+              {
+                "fieldName": "Value",
+                "handlerKey": "max"
+              },
+              {
+                "fieldName": "Value #PMAX",
+                "handlerKey": "max"
+              }
+            ],
+            "applyTo": {
+              "id": "byFrameRefID",
+              "options": "D"
+            }
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true,
+              "exported_repo": true
+            },
+            "indexByName": {
+              "routine": 0,
+              "repo": 1,
+              "Value #B": 3,
+              "Value #E": 4,
+              "Value #C": 5,
+              "Value #D": 6,
+              "Value #Z": 7
+            },
+            "renameByName": {
+              "routine": "Routine",
+              "repo": "Repo",
+              "Value #B": "Ticks",
+              "Value #C": "Errors",
+              "Value #D": "Busy time",
+              "Value #E": "Runs",
+              "Value #Z": "Cost"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": false,
+            "inspect": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Ticks"
+            },
+            "properties": [
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 70
+              },
+              {
+                "id": "min",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Busy time"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: m"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "gradient"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 106
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "percentage",
+                  "steps": [
+                    {
+                      "color": "transparent",
+                      "value": null
+                    },
+                    {
+                      "color": "rgba(115, 191, 105, 0.10)",
+                      "value": 0.001
+                    },
+                    {
+                      "color": "rgba(250, 222, 42, 0.14)",
+                      "value": 50
+                    },
+                    {
+                      "color": "rgba(255, 152, 48, 0.16)",
+                      "value": 75
+                    },
+                    {
+                      "color": "rgba(245, 54, 54, 0.22)",
+                      "value": 100
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Errors"
+            },
+            "properties": [
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "transparent",
+                      "value": null
+                    },
+                    {
+                      "color": "rgba(245, 54, 54, 0.22)",
+                      "value": 0.5
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 70
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Runs"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 70
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "gradient"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "percentage",
+                  "steps": [
+                    {
+                      "color": "transparent",
+                      "value": null
+                    },
+                    {
+                      "color": "rgba(115, 191, 105, 0.10)",
+                      "value": 0.001
+                    },
+                    {
+                      "color": "rgba(250, 222, 42, 0.14)",
+                      "value": 50
+                    },
+                    {
+                      "color": "rgba(255, 152, 48, 0.16)",
+                      "value": 75
+                    },
+                    {
+                      "color": "rgba(245, 54, 54, 0.22)",
+                      "value": 100
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Repo"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 120
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Cost"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 90
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "gradient"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "percentage",
+                  "steps": [
+                    {
+                      "color": "transparent",
+                      "value": null
+                    },
+                    {
+                      "color": "rgba(115, 191, 105, 0.10)",
+                      "value": 0.001
+                    },
+                    {
+                      "color": "rgba(250, 222, 42, 0.14)",
+                      "value": 50
+                    },
+                    {
+                      "color": "rgba(255, 152, 48, 0.16)",
+                      "value": 75
+                    },
+                    {
+                      "color": "rgba(245, 54, 54, 0.22)",
+                      "value": 100
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "fields": [],
+          "countRows": false,
+          "enablePagination": false
+        },
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Ticks"
+          }
+        ]
+      }
+    },
+    {
+      "type": "table",
+      "title": "Experts ($period)",
+      "description": "One row per expert \u00d7 repo: job attempts over the selected period by outcome (done / failed / dead), attempt-level errors that left the job queued for retry, and busy time. Cost is an estimate: tokens priced at Anthropic list rates per model family (fable/mythos $10, opus $5, sonnet-5 $2, sonnet-4 $3, haiku $1 per 1M input; output 5x, cache read 0.1x, cache write 1.25x). Models outside those families count as $0.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 19
+      },
+      "targets": [
+        {
+          "expr": "sum by (expert, repo) (increase(lazycortex_runtime_expert_jobs_total{repo=~\"$repo\"}[$period]))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "(\nsum by (expert, repo) (increase(lazycortex_runtime_expert_jobs_total{repo=~\"$repo\",outcome=\"done\"}[$period])) or 0 * sum by (expert, repo) (increase(lazycortex_runtime_expert_jobs_total{repo=~\"$repo\"}[$period]))\n) / clamp_min(sum by (expert, repo) (increase(lazycortex_runtime_expert_jobs_total{repo=~\"$repo\"}[$period])), 1)",
+          "legendFormat": "",
+          "refId": "B",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (expert, repo) (increase(lazycortex_runtime_expert_jobs_total{repo=~\"$repo\",outcome=\"failed\"}[$period])) or 0 * sum by (expert, repo) (increase(lazycortex_runtime_expert_jobs_total{repo=~\"$repo\"}[$period]))",
+          "legendFormat": "",
+          "refId": "C",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (expert, repo) (increase(lazycortex_runtime_expert_jobs_total{repo=~\"$repo\",outcome=\"dead\"}[$period])) or 0 * sum by (expert, repo) (increase(lazycortex_runtime_expert_jobs_total{repo=~\"$repo\"}[$period]))",
+          "legendFormat": "",
+          "refId": "D",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (expert, repo) (increase(lazycortex_runtime_expert_jobs_total{repo=~\"$repo\",outcome=\"error\"}[$period])) or 0 * sum by (expert, repo) (increase(lazycortex_runtime_expert_jobs_total{repo=~\"$repo\"}[$period]))",
+          "legendFormat": "",
+          "refId": "E",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "(\nsum by (expert, repo) (increase(lazycortex_runtime_expert_job_duration_seconds_sum{repo=~\"$repo\"}[$period])) or 0 * sum by (expert, repo) (increase(lazycortex_runtime_expert_jobs_total{repo=~\"$repo\"}[$period]))\n) / 3600",
+          "legendFormat": "",
+          "refId": "F",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (expert, repo) (increase(lazycortex_runtime_expert_jobs_total{repo=~\"$repo\",outcome=\"deferred\"}[$period])) or 0 * sum by (expert, repo) (increase(lazycortex_runtime_expert_jobs_total{repo=~\"$repo\"}[$period]))",
+          "legendFormat": "",
+          "refId": "G",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (expert, repo) (\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-fable.*|claude-mythos.*\",kind=\"input\"}[$period]) * 1e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-fable.*|claude-mythos.*\",kind=\"output\"}[$period]) * 5e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-fable.*|claude-mythos.*\",kind=\"cache_read\"}[$period]) * 1e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-fable.*|claude-mythos.*\",kind=\"cache_write\"}[$period]) * 1.25e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-opus.*\",kind=\"input\"}[$period]) * 5e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-opus.*\",kind=\"output\"}[$period]) * 2.5e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-opus.*\",kind=\"cache_read\"}[$period]) * 5e-07\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-opus.*\",kind=\"cache_write\"}[$period]) * 6.25e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-5.*\",kind=\"input\"}[$period]) * 2e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-5.*\",kind=\"output\"}[$period]) * 1e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-5.*\",kind=\"cache_read\"}[$period]) * 2e-07\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-5.*\",kind=\"cache_write\"}[$period]) * 2.5e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-4.*\",kind=\"input\"}[$period]) * 3e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-4.*\",kind=\"output\"}[$period]) * 1.5e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-4.*\",kind=\"cache_read\"}[$period]) * 3e-07\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-4.*\",kind=\"cache_write\"}[$period]) * 3.75e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-haiku.*\",kind=\"input\"}[$period]) * 1e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-haiku.*\",kind=\"output\"}[$period]) * 5e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-haiku.*\",kind=\"cache_read\"}[$period]) * 1e-07\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-haiku.*\",kind=\"cache_write\"}[$period]) * 1.25e-06\n) or 0 * sum by (expert, repo) (increase(lazycortex_runtime_expert_jobs_total{repo=~\"$repo\"}[$period]))",
+          "legendFormat": "",
+          "refId": "H",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "0.25 * count_over_time(vector(1)[$period:1m]) / 60",
+          "legendFormat": "",
+          "refId": "PMAX",
+          "instant": true,
+          "format": "table",
+          "hide": false
+        },
+        {
+          "expr": "250 / 1440 * count_over_time(vector(1)[$period:1m])",
+          "legendFormat": "",
+          "refId": "CMAX",
+          "instant": true,
+          "format": "table",
+          "hide": false
+        }
+      ],
+      "transformations": [
+        {
+          "id": "configFromData",
+          "options": {
+            "configRefId": "CMAX",
+            "mappings": [
+              {
+                "fieldName": "Value",
+                "handlerKey": "max"
+              },
+              {
+                "fieldName": "Value #CMAX",
+                "handlerKey": "max"
+              }
+            ],
+            "applyTo": {
+              "id": "byFrameRefID",
+              "options": "H"
+            }
+          }
+        },
+        {
+          "id": "configFromData",
+          "options": {
+            "configRefId": "PMAX",
+            "mappings": [
+              {
+                "fieldName": "Value",
+                "handlerKey": "max"
+              },
+              {
+                "fieldName": "Value #PMAX",
+                "handlerKey": "max"
+              }
+            ],
+            "applyTo": {
+              "id": "byFrameRefID",
+              "options": "F"
+            }
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true,
+              "exported_repo": true
+            },
+            "indexByName": {
+              "expert": 0,
+              "repo": 1,
+              "Value #A": 2,
+              "Value #B": 3,
+              "Value #C": 4,
+              "Value #D": 5,
+              "Value #E": 7,
+              "Value #F": 8,
+              "Value #G": 6,
+              "Value #H": 9
+            },
+            "renameByName": {
+              "expert": "Expert",
+              "repo": "Repo",
+              "Value #A": "Jobs",
+              "Value #B": "Done",
+              "Value #C": "Failed",
+              "Value #D": "Dead",
+              "Value #E": "Errors",
+              "Value #F": "Busy time",
+              "Value #G": "Deferred",
+              "Value #H": "Cost"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": false,
+            "inspect": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Jobs"
+            },
+            "properties": [
+              {
+                "id": "min",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Busy time"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: h"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "gradient"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 106
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "percentage",
+                  "steps": [
+                    {
+                      "color": "transparent",
+                      "value": null
+                    },
+                    {
+                      "color": "rgba(115, 191, 105, 0.10)",
+                      "value": 0.001
+                    },
+                    {
+                      "color": "rgba(250, 222, 42, 0.14)",
+                      "value": 50
+                    },
+                    {
+                      "color": "rgba(255, 152, 48, 0.16)",
+                      "value": 75
+                    },
+                    {
+                      "color": "rgba(245, 54, 54, 0.22)",
+                      "value": 100
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^(Failed|Dead|Errors)$"
+            },
+            "properties": [
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "transparent",
+                      "value": null
+                    },
+                    {
+                      "color": "rgba(245, 54, 54, 0.22)",
+                      "value": 0.5
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^(Jobs|Done|Failed|Dead|Deferred|Errors)$"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 70
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Cost"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 90
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "gradient"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "percentage",
+                  "steps": [
+                    {
+                      "color": "transparent",
+                      "value": null
+                    },
+                    {
+                      "color": "rgba(115, 191, 105, 0.10)",
+                      "value": 0.001
+                    },
+                    {
+                      "color": "rgba(250, 222, 42, 0.14)",
+                      "value": 50
+                    },
+                    {
+                      "color": "rgba(255, 152, 48, 0.16)",
+                      "value": 75
+                    },
+                    {
+                      "color": "rgba(245, 54, 54, 0.22)",
+                      "value": 100
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Repo"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 120
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Deferred"
+            },
+            "properties": [
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "transparent",
+                      "value": null
+                    },
+                    {
+                      "color": "rgba(250, 222, 42, 0.16)",
+                      "value": 0.5
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Done"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 1
+              },
+              {
+                "id": "custom.width",
+                "value": 70
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "fields": [],
+          "countRows": false,
+          "enablePagination": false
+        },
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Jobs"
+          }
+        ]
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Open jobs (queued / active, $period)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 29
+      },
+      "timeFrom": "$period",
+      "targets": [
+        {
+          "expr": "sum by (expert, repo, state) (lazycortex_runtime_queue_depth{repo=~\"$repo\",state=~\"queued|active\"})",
+          "legendFormat": "{{expert}} / {{repo}} \u00b7 {{state}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "last"
+          ]
+        }
+      }
+    },
+    {
+      "type": "table",
+      "title": "Tokens by expert ($period)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 43
+      },
+      "targets": [
+        {
+          "expr": "sum by (expert, repo) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"input\"}[$period]))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (expert, repo) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"output\"}[$period]))",
+          "legendFormat": "",
+          "refId": "B",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (expert, repo) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"cache_read\"}[$period]))",
+          "legendFormat": "",
+          "refId": "C",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (expert, repo) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"cache_write\"}[$period]))",
+          "legendFormat": "",
+          "refId": "D",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (expert, repo) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\"}[$period])) > 0",
+          "legendFormat": "",
+          "refId": "E",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "exported_repo": true,
+              "model": true,
+              "routine": true
+            },
+            "indexByName": {
+              "expert": 0,
+              "repo": 1,
+              "Value #A": 2,
+              "Value #B": 3,
+              "Value #C": 4,
+              "Value #D": 5,
+              "Value #E": 6
+            },
+            "renameByName": {
+              "repo": "Repo",
+              "expert": "Expert",
+              "Value #A": "Input",
+              "Value #B": "Output",
+              "Value #C": "Cache read",
+              "Value #D": "Cache write",
+              "Value #E": "Total"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": false,
+            "inspect": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Repo"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 120
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": true,
+          "reducer": [
+            "sum"
+          ],
+          "fields": [
+            "Input",
+            "Output",
+            "Cache read",
+            "Cache write",
+            "Total"
+          ],
+          "countRows": false,
+          "enablePagination": false
+        },
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Total"
+          }
+        ]
+      }
+    },
+    {
+      "type": "piechart",
+      "title": "Tokens share by expert ($period)",
+      "description": "Requires the metrics.py fix that exports the expert label on lazycortex_runtime_tokens_total; shows No data until then.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 53
+      },
+      "targets": [
+        {
+          "expr": "sum by (expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\"}[$period]))",
+          "legendFormat": "{{expert}}",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        }
+      }
+    },
+    {
+      "type": "piechart",
+      "title": "Tokens by model ($period)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 53
+      },
+      "targets": [
+        {
+          "expr": "label_replace(sum by (model) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\"}[$period])), \"model\", \"$1\", \"model\", \"claude-(.+)\")",
+          "legendFormat": "{{model}}",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        }
+      }
+    },
+    {
+      "type": "piechart",
+      "title": "Tokens by repo ($period)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 61
+      },
+      "targets": [
+        {
+          "expr": "sum by (repo) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\"}[$period]))",
+          "legendFormat": "{{repo}}",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        }
+      }
+    },
+    {
+      "type": "piechart",
+      "title": "Tokens by kind ($period)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 61
+      },
+      "targets": [
+        {
+          "expr": "sum by (kind) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\"}[$period]))",
+          "legendFormat": "{{kind}}",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        }
+      }
+    }
+  ]
+}

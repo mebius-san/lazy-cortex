@@ -1,0 +1,83 @@
+---
+name: lazy-routine.offer-protocols
+description: "Run when the operator asks to attach optional protocol references to a writer-dispatching routine — it discovers the flagged candidates, offers the contextually relevant ones, and unions the picks into the routine's flat `protocols` list. Operator-invoked only: install skills never dispatch it, a system routine's protocol set is fixed by design and seeded without questions."
+execution-discipline-waiver: "single offer-and-append interaction — a numbered step list would outweigh the one decision the skill mediates"
+allowed-tools: Read, Write, Glob, AskUserQuestion, Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Agent
+---
+# lazy-routine.offer-protocols
+
+The operator invokes this to attach optional protocol references to a writer-dispatching routine. Install and configure skills never dispatch it: a system routine's protocol set is fixed by design and seeded without questions, so the only optional attachments are the ones the operator asks for here. Mandatory protocols are whatever the owning install already seeded into the routine's `protocols` list — they are never analyzed and never offered. This helper only ever appends operator-chosen optional references; it never removes, reorders, or adds a field to the routine config, and the runtime keeps reading the same flat `protocols` list.
+
+## Inputs
+
+Passed as `keyword=value` / flags in the dispatch prompt:
+
+- **`--routine`** *(required)* — the routine key under `routines` in `.claude/lazy.settings.json` whose `protocols` list the chosen references are unioned into.
+- **`--context`** *(required)* — one line describing what the routine's writers produce (e.g. `review of authored markdown documents`, `spec design/tech/plan authoring`). This is the yardstick for the relevance judgment in the Process below.
+
+## Process
+
+### Discover candidates
+
+Glob both source roots and `Read` each match's frontmatter:
+
+- `plugins/claude/*/references/*.md` — monorepo plugin sources (present only inside the marketplace repo; absent in a consumer install).
+- `~/.claude/plugins/cache/**/references/*.md` — installed plugins.
+
+Keep every file whose frontmatter carries `routine_protocol_candidate: true`. For each, record:
+
+- `id` = `<plugin>:<stem>` — `<plugin>` is the path segment under `plugins/claude/` (monorepo) or under `…/cache/<registry>/<plugin>/<version>/` (cache); `<stem>` is the filename without `.md`. This is the same string `reference_resolver` resolves.
+- `description` = the file's `description` frontmatter (its essence).
+
+Dedupe by `id`, preferring the monorepo hit when the same id appears in both.
+
+### Subtract the routine's current protocols
+
+`Read` `.claude/lazy.settings.json` and take `routines.<routine>.protocols` (absent → empty). The **optional pool** is every discovered candidate whose `id` is NOT already in that list — the mandatory set the configurator seeded is therefore excluded with no analysis.
+
+### Judge relevance — offer only what fits the context
+
+Do NOT offer the whole optional pool. For each optional candidate, read its `description` and decide whether it is genuinely relevant to `--context`. Keep only the relevant ones. A candidate whose essence has nothing to do with what this routine's writers produce is dropped silently — the operator is never asked about it.
+
+If no optional candidate survives the relevance judgment, stop with outcome `no-relevant-candidates`.
+
+### Ask the operator
+
+```
+Context (print before asking):
+- Where: /lazy-routine.offer-protocols — Ask the operator; target `routines.<routine>.protocols` in `.claude/lazy.settings.json`
+- Found: on record `[<current ids>]`; <n> optional candidates judged relevant to `--context` "<context>": `<id>` — <description>, …
+- Why asking: optional protocols attach only on the operator's word — nothing derives which ones this routine's writers should follow
+- Answers: each picked `<id>` — unioned into `routines.<routine>.protocols` now, idempotent, never removed by this skill; none picked — nothing written, outcome `declined`
+AskUserQuestion: multiSelect true, header "Optional protocols", question "Which optional protocols should the writers of routine `<routine>` (<context>) follow? Pick any, or none.", one option per relevant optional candidate: label = its `id`, description = its `description`.
+```
+
+The operator may pick none.
+
+### Attach the chosen
+
+For the chosen ids run:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" add-protocols --routine <routine> --ids "<comma-separated-chosen-ids>")
+```
+
+The CLI unions them into the routine's existing `protocols` list idempotently (already-present ids are no-ops) and writes `.claude/lazy.settings.json`. If the operator chose none, run nothing.
+
+## Outcome
+
+Return one line to the caller: `attached:<n>` (n ids unioned in) / `declined` (offered but none chosen) / `no-relevant-candidates` (nothing in the pool survived the relevance judgment) / `routine-absent` (the named routine is not registered, e.g. the daemon gate removed it).
+
+## Logging
+
+Log the run to `./.logs/claude/lazy-routine.offer-protocols/YYYY-MM-DD_HH-MM-SS.md` per `lazy-log.logging`. The `execution-discipline-waiver` above covers step discipline only — it is not a logging waiver, and this skill takes an operator decision and mutates settings, so the run is recorded.
+
+1. `Bash(mkdir -p ./.logs/claude/lazy-routine.offer-protocols)` — a separate step from the `Write`, never chained.
+2. `Bash(date -u +%Y-%m-%d_%H-%M-%S)` for the filename; `Bash(git rev-parse HEAD)` and `Bash(git rev-parse --abbrev-ref HEAD)` for `git_sha` / `git_branch` (`no-git` when either fails).
+3. `Write` the file. Frontmatter: `git_sha`, `git_branch`, `date` (UTC), `input` (the `--routine` / `--context` arguments passed).
+4. Body: `# lazy-routine.offer-protocols` heading, then `## Actions` — the candidate pool, which ids were offered, and the operator's pick — and `## Result` with the outcome word from § Outcome.
+
+## Failure modes
+
+- **Nothing is offered though a candidate exists** — the candidate's `description` was judged irrelevant to `--context`, or it is already in the routine's `protocols`. Both are correct silent drops, not errors.
+- **`add-protocols` reports `routine_absent`** — the `--routine` is not registered in `.claude/lazy.settings.json` → the caller should invoke this only after the routine is seeded (and only when it survives any daemon-gate unregister).

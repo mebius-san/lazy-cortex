@@ -8,47 +8,47 @@
     {
       "name": "lazycortex-core",
       "description": "Core skills, agents, and runtime daemon for Claude Code (expert runtime + agent-model routing + settings management)",
-      "source": "./claude/lazycortex-core"
+      "source": "./plugins/claude/lazycortex-core"
     },
     {
       "name": "lazycortex-diagram",
       "description": "Format-agnostic diagram engine: /lazy-diagram.draw dispatcher + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.",
-      "source": "./claude/lazycortex-diagram"
+      "source": "./plugins/claude/lazycortex-diagram"
     },
     {
       "name": "lazycortex-experts",
       "description": "Generic lifecycle experts (interpreter, use-case-writer, designer, architect, ui-designer, planner, implementer, data-implementer, docs-writer, debugger, reviewer, tester, editor) plus fiction-writer and fiction-editor agents, a starter set of domain aspects (claude-plugin, game-dev, dotfiles, obsidian-plugin, data-pipeline, sci-fi, fantasy), and five cross-cutting aspects (discipline, research, tech-writing, terms, structure). Building blocks — compose specialists in lazy.settings.json[experts] with one agent + one or more aspects.",
-      "source": "./claude/lazycortex-experts"
+      "source": "./plugins/claude/lazycortex-experts"
     },
     {
       "name": "lazycortex-observe",
       "description": "Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.",
-      "source": "./claude/lazycortex-observe"
+      "source": "./plugins/claude/lazycortex-observe"
     },
     {
       "name": "lazycortex-obsidian",
       "description": "Obsidian vault bootstrap and configuration management for Claude Code",
-      "source": "./claude/lazycortex-obsidian"
+      "source": "./plugins/claude/lazycortex-obsidian"
     },
     {
       "name": "lazycortex-python",
       "description": "Python coding discipline as a plugin: shared rules + reference guidelines + chk/tst checkers + PostToolUse hook + docstring-writer/test-writer agents + canonical file template. Installs once per repo via /lazy-python.install.",
-      "source": "./claude/lazycortex-python"
+      "source": "./plugins/claude/lazycortex-python"
     },
     {
       "name": "lazycortex-review",
       "description": "Coordinator-driven markdown document review loop: a closed set of Python primitive verbs (parse-note / set-key / paint-banner / collect-job), an LLM coordinator that owns every decision from a prose playbook, and a git-watch wake plus an interval postman that carry commits and finished expert jobs back into the loop.",
-      "source": "./claude/lazycortex-review"
+      "source": "./plugins/claude/lazycortex-review"
     },
     {
       "name": "lazycortex-specs",
       "description": "Specification and design skills for Claude Code",
-      "source": "./claude/lazycortex-specs"
+      "source": "./plugins/claude/lazycortex-specs"
     },
     {
       "name": "lazycortex-wiki",
       "description": "Maintains a curated, LLM-navigable semantic wiki over a markdown+code base — summaries, hierarchical topic tags, and glossed See-also links, kept in sync via git-watch and weekly full-scan routines.",
-      "source": "./claude/lazycortex-wiki"
+      "source": "./plugins/claude/lazycortex-wiki"
     }
   ]
 }

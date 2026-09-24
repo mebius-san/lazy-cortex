@@ -1,0 +1,190 @@
+# Prometheus recording + alerting rules for lazycortex-core runtime metrics.
+# Drop into your Prometheus rule_files glob, e.g. /etc/prometheus/rules.d/.
+# Alert routing (severity → channel) is operator's responsibility.
+# `<core-cli>` in the annotations stands for the core plugin's `bin/lazycortex-core` file (its cached
+# install or the dev checkout); it runs as "${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>, never bare.
+
+groups:
+  - name: lazycortex-runtime
+    interval: 1m
+    rules:
+      # Recording rule — denominator-safe error rate.
+      - record: lazycortex:routine_error_rate:5m
+        expr: |
+          sum by (routine, repo, reason) (rate(lazycortex_runtime_routine_errors_total[5m]))
+            /
+          sum by (routine, repo) (rate(lazycortex_runtime_routine_ticks_total[5m]))
+
+      - alert: LazyCortexRoutineStaleNoTick
+        expr: time() - lazycortex_runtime_routine_last_tick_timestamp > 3600
+        for: 5m
+        labels:
+          severity: warning
+          component: lazycortex-runtime
+        annotations:
+          summary: "Routine {{ $labels.routine }} on {{ $labels.repo }} has not ticked in over 1h"
+          description: |
+            The runtime daemon has not run routine {{ $labels.routine }}
+            on repo {{ $labels.repo }} for at least one hour. Check the
+            daemon process is alive and the routine's interval / schedule
+            is configured correctly.
+
+      - alert: LazyCortexRoutineErrorRateHigh
+        expr: lazycortex:routine_error_rate:5m > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          component: lazycortex-runtime
+        annotations:
+          summary: "Routine {{ $labels.routine }} on {{ $labels.repo }} error rate > 10% for 10m"
+          description: |
+            More than 10% of {{ $labels.routine }} ticks on {{ $labels.repo }}
+            have failed (reason={{ $labels.reason }}) over the last 10
+            minutes. Inspect .logs/lazy-core/runtime/<date>.jsonl on the
+            host for stderr tails.
+
+      - alert: LazyCortexDaemonHalted
+        expr: lazycortex_runtime_daemon_halted{reason!~"rate_limit|git_remote_unavailable|git_local_failed"} == 1
+        for: 1m
+        labels:
+          severity: critical
+          component: lazycortex-runtime
+        annotations:
+          summary: "LazyCortex daemon halted on {{ $labels.repo }} — manual recovery required"
+          description: |
+            The runtime daemon stopped scheduling routines for a reason it
+            cannot clear on its own. The reason label says which condition
+            tripped it — the working tree left dirty by a tick, diverged or
+            unpushable history, the loop detector, or a routine entry that no
+            longer matches its config schema. A closed rate-limit window and an
+            unreachable remote are not here: those halts lift themselves and
+            raise LazyCortexDaemonRateLimited / LazyCortexDaemonOffline instead.
+
+            Triggered by: {{ $labels.triggered_by }}
+            Reason: {{ $labels.reason }}
+
+            uncommitted_changes    — a routine or expert left uncommitted work
+                                     behind; state.json lists `dirty_paths`,
+                                     and a pump-internal failure also names the
+                                     offending expert + job_id.
+            git_pull_diverged      — local and origin each carry commits the
+            git_push_failed          other lacks, a push kept being refused, or
+            git_remote_unavailable   the remote could not be reached.
+            suspected_loop         — one file was committed over and over by the
+                                     same bot author; the halt block names the
+                                     (author, file) pair.
+            routine_config_invalid — the routine named above fails schema
+                                     validation and was dropped; the schema
+                                     error is in its own incident, readable via
+                                     `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> error-list`.
+
+            Every reason listed here needs a human. Operator runs
+            `/lazy-runtime.recover` on the affected host, which branches on the
+            reason and clears the halt block in state.json.
+
+      - alert: LazyCortexDaemonRateLimited
+        expr: lazycortex_runtime_daemon_halted{reason="rate_limit"} == 1
+        for: 5m
+        labels:
+          severity: warning
+          component: lazycortex-runtime
+        annotations:
+          summary: "LazyCortex daemon on {{ $labels.repo }} is waiting out a rate-limit window"
+          description: |
+            An expert spawn hit the subscription's closed rate-limit window and
+            the daemon parked itself until it reopens. Nothing is broken: the
+            halt block in state.json carries `resets_at`, the daemon sleeps
+            toward that moment (an hour at most per nap) and resumes on its
+            own. The queue keeps its bundles; the dashboard reads LIMIT.
+
+            Triggered by: {{ $labels.triggered_by }}
+
+            Act only if the wait outlives the window it names — then the
+            reopening was misread, and `/lazy-runtime.recover` clears the
+            block by hand.
+
+      - alert: LazyCortexDaemonOffline
+        expr: lazycortex_runtime_daemon_halted{reason=~"git_remote_unavailable|git_local_failed"} == 1
+        for: 30m
+        labels:
+          severity: warning
+          component: lazycortex-runtime
+        annotations:
+          summary: "LazyCortex daemon on {{ $labels.repo }} cannot sync with its remote"
+          description: |
+            The pre- or post-tick git sync could not reach the remote, or a
+            local sync step failed with no remote involved. The daemon parks
+            until the hourly doctor tick probes the remote again and clears the
+            halt once it answers; the dashboard reads OFFLINE meanwhile.
+
+            Reason: {{ $labels.reason }}
+            Triggered by: {{ $labels.triggered_by }}
+
+            Act if the host has network and the alert still holds past the
+            next doctor tick: check the remote URL and credentials on that
+            host, then `/lazy-runtime.recover`.
+
+      - alert: LazyCortexExpertJobsFailing
+        expr: |
+          sum by (repo, expert) (increase(lazycortex_runtime_expert_jobs_total{outcome!="done"}[15m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: lazycortex-runtime
+        annotations:
+          summary: "Expert {{ $labels.expert }} on {{ $labels.repo }} finished a job without completing it"
+          description: |
+            At least one job of {{ $labels.expert }} ended in something other
+            than a finished outcome in the last 15 minutes — an error, a
+            deferral, a dead bundle, or a response that violated the runtime's
+            response envelope. An autonomous runtime fails silently otherwise:
+            the work stops, nothing tells anyone.
+
+            Inspect with `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> error-list --repo <repo>` and the
+            bundles under .experts/.jobs/{{ $labels.expert }}/ on the host.
+
+      - alert: LazyCortexDeadLetterQueueGrowing
+        expr: |
+          sum by (repo, expert) (lazycortex_runtime_queue_depth{state=~"failed|deferred|dead"}) > 0
+        for: 30m
+        labels:
+          severity: warning
+          component: lazycortex-runtime
+        annotations:
+          summary: "{{ $labels.expert }} on {{ $labels.repo }} has parked bundles waiting for triage"
+          description: |
+            Bundles in state {{ $labels.state }} stay on disk holding their
+            dedup key, so the input they own is never re-dispatched until an
+            operator consumes them. A deferral clears itself once its routine's
+            window elapses; a failed or dead bundle does not.
+
+            Triage with `/lazy-runtime.recover` or `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> error-list`.
+
+      - alert: LazyCortexIncidentsOpening
+        expr: |
+          sum by (repo, kind, cause) (increase(lazycortex_runtime_incidents_total[15m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: lazycortex-runtime
+        annotations:
+          summary: "New {{ $labels.kind }} incident ({{ $labels.cause }}) on {{ $labels.repo }}"
+          description: |
+            The error ledger opened at least one incident of kind
+            {{ $labels.kind }} with cause {{ $labels.cause }} in the last 15
+            minutes. Read the journal with
+            `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> error-list --repo <repo>`.
+
+      - alert: LazyCortexNoMetricsScraped
+        expr: up{job=~".*lazycortex.*"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          component: lazycortex-runtime
+        annotations:
+          summary: "Prometheus is not scraping lazycortex-runtime on {{ $labels.instance }}"
+          description: |
+            The Prometheus `up` metric for lazycortex-runtime has been 0
+            for at least 5 minutes. Either the shipping agent (Alloy /
+            otelcol) is down, or the daemon's metrics endpoint is not
+            reachable. Check `/lazy-observe.audit` on the host.

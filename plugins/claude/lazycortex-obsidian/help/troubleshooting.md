@@ -1,0 +1,348 @@
+---
+chapter_type: troubleshooting
+summary: Symptoms, likely causes, and fixes for lazycortex-obsidian — install, iconize, diagram render, plugin updates, tag pages, and vault manifest capture/deploy.
+last_regen: 2026-09-23
+diagram_spec:
+  anchor: "Diagnostic flowchart"
+  request: "Decision tree branching first on which skill aborted or misbehaved (install / iconize-install / iconize-config / iconize-sync / diagram-install / update-plugin / gen-tag-pages); each branch then splits on the specific symptom; each leaf names the troubleshooting entry that resolves it"
+source_skills:
+  - lazy-obsidian.install
+  - lazy-obsidian.iconize-install
+  - lazy-obsidian.iconize-config
+  - lazy-obsidian.iconize-sync
+  - lazy-obsidian.diagram-install
+  - lazy-obsidian.gen-tag-pages
+  - lazy-obsidian.update-plugin
+  - lazy-obsidian.audit
+  - lazy-obsidian.capture
+  - lazy-obsidian.deploy
+source_sha: d646145dc19da6bfbae3e0c00253f21e2d5c4ad2
+surface_sha: 6beeba2cb74a3d684439a23b99b0cff537ee86030853a3b4e0f0be02842384e2
+---
+# Troubleshooting
+
+## `/lazy-obsidian.install` aborts: "plugin not installed"
+
+**Symptom**: Running `/lazy-obsidian.install` immediately exits with a message saying the plugin is not installed or the key `lazycortex-obsidian@lazycortex` is absent from `installed_plugins.json`.
+
+**Likely cause**: The plugin is not listed in `enabledPlugins` in your `settings.json`, or Claude Code has not been restarted since the entry was added.
+
+**Fix**: Add `"lazycortex-obsidian@lazycortex": true` to the `enabledPlugins` block in your `~/.claude/settings.json` (for global scope) or `.claude/settings.json` (for project scope), restart Claude Code, then run `/lazy-obsidian.install` again.
+
+---
+
+## `/lazy-obsidian.install` aborts: "plugin cache is empty"
+
+**Symptom**: `/lazy-obsidian.install` reports that the plugin glob returned zero rule files and tells you the plugin cache is empty.
+
+**Likely cause**: The plugin is enabled but the local cache was never populated or has become stale.
+
+**Fix**: Run `/plugin update lazycortex-obsidian@lazycortex` to refresh the plugin cache, then re-run `/lazy-obsidian.install`.
+
+---
+
+## No Obsidian vault found when running `/lazy-obsidian.iconize-install` or `/lazy-obsidian.diagram-install`
+
+**Symptom**: The skill aborts with "No Obsidian vault found at `<repo-root>/.obsidian/`".
+
+**Likely cause**: The current repo has not been opened in Obsidian yet, so `.obsidian/` does not exist at the repo root.
+
+**Fix**: Open the repo as an Obsidian vault (File → Open folder as vault, select the repo root), then re-run the skill. The skill requires `.obsidian/` to exist before it can scaffold vault-local artifacts.
+
+---
+
+## `/lazy-obsidian.iconize-install` aborts: "Hard dependency could not be installed"
+
+**Symptom**: `/lazy-obsidian.iconize-install` aborts partway through Step 1.5 with a message like "Hard dependency `folder-notes` (or `obsidian-icon-folder` or `iconize-reloader`) could not be installed/updated."
+
+**Likely cause**: `/lazy-obsidian.update-plugin` returned FAIL for one of the three required plugins — most commonly a network failure reaching the Obsidian community registry or GitHub releases.
+
+**Fix**: Check network connectivity. Run `/lazy-obsidian.update-plugin <id>` for the failing plugin directly to see the underlying error. Once the network issue is resolved, re-run `/lazy-obsidian.iconize-install` — the skill is idempotent and will resume from a clean state.
+
+---
+
+## `/lazy-obsidian.iconize-config` aborts: icon-map not found
+
+**Symptom**: `/lazy-obsidian.iconize-config` reports that `.claude/iconize/obsidian-icon-map.json` is missing and exits immediately.
+
+**Likely cause**: `/lazy-obsidian.iconize-install` has not been run yet for this repo, so the icon-map has not been scaffolded.
+
+**Fix**: Run `/lazy-obsidian.iconize-install` to scaffold the icon-map and dependency plugins. Then re-run `/lazy-obsidian.iconize-config` to add or edit registry entries.
+
+---
+
+## Icons are not painting in Obsidian after running `/lazy-obsidian.iconize-sync`
+
+**Symptom**: `/lazy-obsidian.iconize-sync` runs without errors, but files and folders show no icons in Obsidian.
+
+**Likely cause**: One of two things: Iconize's `data.json` does not exist yet (Obsidian has never launched with the plugin enabled, so it hasn't initialized the file), or the Iconize plugin is not configured to read icons from frontmatter (`iconInFrontmatterEnabled` is not `true`).
+
+**Fix**: Open Obsidian once with the Iconize plugin enabled so it initializes `data.json`. Then re-run `/lazy-obsidian.iconize-install` — Step 2.6 asserts the required frontmatter-feature settings (`iconInFrontmatterEnabled: true`, `iconInFrontmatterFieldName: "iconize_icon"`, `iconColorInFrontmatterFieldName: "iconize_color"`) and writes them if absent. After that, re-run `/lazy-obsidian.iconize-sync reconcile` to repopulate the frontmatter keys.
+
+---
+
+## `/lazy-obsidian.iconize-sync` exits with code 5 (version drift)
+
+**Symptom**: The iconize-sync worker exits with code 5. The error message mentions an incompatible icon-map schema.
+
+**Likely cause**: The plugin was updated via `/plugin update lazycortex-obsidian@lazycortex` and the vault's icon-map declares a `schema_version` this worker no longer supports (or a `min_hook_version` the worker does not satisfy).
+
+**Fix**: Run `/lazy-obsidian.iconize-sync check-versions` to confirm the drift report, then re-run `/lazy-obsidian.iconize-install` — it migrates the icon-map schema where a migration path exists.
+
+---
+
+## The vault's repaint routine stops committing icon fixes (`reconcile-commit` exits 6)
+
+**Symptom**: New commits land in the vault, but notes whose icons should have changed as a result never get their `iconize_icon` / `iconize_color` frontmatter committed by the automatic repaint. Running `/lazy-obsidian.iconize-sync reconcile-commit` by hand exits with code 6.
+
+**Likely cause**: `reconcile-commit` (invoked automatically by the `lazy-obsidian.repaint` routine after every new commit, once `/lazy-obsidian.iconize-install` has registered it) repaints the directories one commit touched, then tries to commit only the notes whose entire diff is confined to their own `iconize_icon` / `iconize_color` lines. Exit code 6 means that commit did not land — most commonly because there was nothing eligible to commit (every touched note also carries unrelated uncommitted changes, so none qualifies), or because git itself refused the commit (a dirty index the operator is mid-work on, or a lock held by another process).
+
+**Fix**: Run `/lazy-obsidian.iconize-sync reconcile` by hand to see which files it would repaint and why none committed cleanly. If a note's diff mixes icon frontmatter with other edits, commit or stash the other edits first, then re-run `reconcile-commit`. If git itself is the blocker (dirty index, lock), resolve that before the next automatic tick.
+
+---
+
+## A lot of notes' icons changed after `/lazy-obsidian.iconize-sync reconcile` following a plugin update
+
+**Symptom**: After updating the plugin, running `/lazy-obsidian.iconize-sync reconcile` (directly, or via the repaint routine / `check-versions`) rewrites `iconize_icon` / `iconize_color` on far more notes than you expected, producing a large frontmatter diff across the vault.
+
+**Likely cause**: Two changes land together in a worker update. First, several document types that used to share one generic icon now each get their own, so every note of those types picks up a new icon on its next resolve. Second, a bug fix in how a state rule (one that only paints a colour, like a stage or status matcher) resolves its icon: it used to borrow whatever icon the note already carried through a self-referential token, and that borrowed value was wrongly treated as the rule naming a real icon — so a note whose icon had gone stale, or was wrong for its type, kept that icon forever, because the walk stopped there and the rule that actually owns the icon (keyed off the note's declared type) was never reached. The worker no longer treats that borrow as a name: the state's colour now carries down to the rule that owns the icon, which re-resolves it from the note's type.
+
+**Fix**: Expected, not a bug. Review the diff the same way you would after `/lazy-obsidian.capture` (see above) — a note whose icon disagreed with its declared type is now corrected; a note no rule claims is left exactly as it was. Commit the repaint once you've confirmed it looks right. Re-running `reconcile` is safe and idempotent.
+
+---
+
+## A custom iconize callback matcher produces no icon, or now refuses instead of staying silent
+
+**Symptom**: A registry matcher of shape `{"callback": "<id>"}` never produces an icon or colour for notes it should match, with no error visible anywhere. After updating the plugin, the same callback instead reports `callback '<id>' unusable: ...` on stderr during `/lazy-obsidian.iconize-sync reconcile` (or `reconcile-plugin <plugin>` for a shipped registry callback) and still paints nothing.
+
+**Likely cause**: The worker used to launch a callback script as a bare executable, requiring its execute bit to be set, and returned no answer at all — no error, no icon — when that bit was missing. A mode-blind git client strips execute bits on checkout (Obsidian's mobile sync is the common case, along with some Windows checkouts), so a callback that worked on the machine that authored it silently stopped answering everywhere else. The worker no longer checks or requires the execute bit: it reads the callback script's own first line and launches it through whatever interpreter that shebang names. A script with no `#!` line, or naming an interpreter that can't be resolved, is now refused out loud instead of failing dark.
+
+**Fix**: Give the callback script a proper shebang (`#!/usr/bin/env python3` or similar) — the execute bit is never checked and does not need setting. If a shebang is already present and the callback still fails, the stderr message names what interpreter resolution didn't find; fix that path in the shebang line or the environment. Re-run `/lazy-obsidian.iconize-sync reconcile` once fixed.
+
+---
+
+## Icons stopped painting outside `specs/` after re-running `/lazy-obsidian.iconize-install`
+
+**Symptom**: After a plugin update and a fresh `/lazy-obsidian.iconize-install`, notes and folders outside your spec content root (or wherever `spec.vault_root` points, `specs` by default) no longer get an icon, even though the registry still carries a rule that used to match them. Nothing was removed — icons already there stay put, but nothing new gets painted.
+
+**Likely cause**: The icon-map now carries a `paint_roots` key — the only repo-relative directory prefixes the sync worker may read or write. `/lazy-obsidian.iconize-install` seeds this key from `spec.vault_root` in `.claude/lazy.settings.json` (defaulting to `specs`) the first time it introduces the key into an icon-map that predates it. Outside those prefixes the worker no longer parses frontmatter, runs matchers, or writes anything for that note — the same behaviour the whole vault had before this key existed, just scoped down.
+
+**Fix**: Open `.claude/iconize/obsidian-icon-map.json` and widen `paint_roots` to include the directories you want painted, e.g. `["specs", "plugins/claude"]`, then re-run `/lazy-obsidian.iconize-sync reconcile`. Removing the key entirely restores whole-vault painting. Narrowing the list never cleans up after itself — icons already written in an area the list no longer covers are left standing until removed by hand.
+
+---
+
+## A scaffolding template still shows a stale icon after upgrading
+
+**Symptom**: A `.md` file under a `templates/**` tree — a plugin's own `plugins/claude/<plugin>/templates/**`, or the consumer's `.claude/templates/**` override tree — keeps an `iconize_icon` / `iconize_color` pair from before an upgrade, and every new note scaffolded from that template inherits the same stale icon.
+
+**Likely cause**: Template trees are exempt from painting — the worker never enumerates them during reconcile and no matcher resolves against them regardless of frontmatter — but the worker only ever writes keys it currently owns; it never strips keys it has stopped writing. A template painted by an earlier version of the worker (before this exemption existed) keeps whatever it wrote back then.
+
+**Fix**: One-time manual cleanup after upgrading — strip the `iconize_icon` / `iconize_color` keys by hand from every `.md` under the affected template trees. Notes scaffolded from them afterward take their icon from the matchers again, as intended.
+
+---
+
+## `/lazy-obsidian.update-plugin` aborts: "Could not fetch Obsidian community registry"
+
+**Symptom**: `/lazy-obsidian.update-plugin` fails immediately with a message saying it could not fetch the community registry from `obsidianmd/obsidian-releases`.
+
+**Likely cause**: No network access, or the GitHub raw content endpoint is temporarily unavailable.
+
+**Fix**: Check network connectivity and retry. No vault files are modified before the registry fetch, so retrying is safe with no cleanup needed.
+
+---
+
+## `/lazy-obsidian.update-plugin` aborts: plugin id not in registry
+
+**Symptom**: `/lazy-obsidian.update-plugin <id>` reports that `<id>` was not found in the Obsidian community registry.
+
+**Likely cause**: The plugin id is misspelled, or you are trying to install a plugin that ships bundled inside lazycortex-obsidian (such as `iconize-reloader`) without the `--bundled` flag.
+
+**Fix**: Verify the id against the Obsidian community plugins list. For bundled plugins, add `--bundled`: `/lazy-obsidian.update-plugin iconize-reloader --bundled`. If unsure whether a plugin is bundled, check whether a directory exists at `<installPath>/templates/obsidian/plugins/<id>/`.
+
+---
+
+## `/lazy-obsidian.update-plugin` aborts: binary download failed
+
+**Symptom**: The skill starts successfully but fails during Step 5 with a message about being unable to fetch `manifest.json` or `main.js` from a GitHub release. It reports restoring from `.bak` files.
+
+**Likely cause**: The GitHub releases endpoint for the plugin was unreachable mid-install (transient network error, or the latest release tag has no attached binaries).
+
+**Fix**: The vault is restored to its pre-run state via the `.bak` files — no cleanup is needed. Check network connectivity and re-run `/lazy-obsidian.update-plugin <id>`.
+
+---
+
+## `/lazy-obsidian.update-plugin` aborts: `community-plugins.json` is not a JSON array
+
+**Symptom**: The skill reaches Step 7 and aborts with "`community-plugins.json` is not a JSON array; cannot register `<id>` safely."
+
+**Likely cause**: The vault's `<vault>/.obsidian/community-plugins.json` was corrupted — likely by a partial write during an Obsidian crash or a manual edit that introduced invalid JSON.
+
+**Fix**: Open Obsidian once to let it repair the file, or fix the JSON manually (the file is a plain array of plugin id strings, e.g. `["dataview", "obsidian-icon-folder"]`). Then re-run `/lazy-obsidian.update-plugin <id>`.
+
+---
+
+## `/lazy-obsidian.update-plugin --bundled` aborts: plugin not found in templates
+
+**Symptom**: `/lazy-obsidian.update-plugin <id> --bundled` aborts with "`<id>` is not bundled in `templates/obsidian/plugins/`."
+
+**Likely cause**: The `--bundled` flag was passed for a plugin that is not shipped inside lazycortex-obsidian's templates directory, or the plugin cache is stale.
+
+**Fix**: Remove `--bundled` to install from the community registry instead. If you expect the plugin to be bundled, run `/plugin update lazycortex-obsidian@lazycortex` to refresh the plugin cache and try again.
+
+---
+
+## `mermaid-popup` fails to install during `/lazy-obsidian.diagram-install`
+
+**Symptom**: `/lazy-obsidian.diagram-install` Step 2 reports `failed:<reason>` for the `mermaid-popup` plugin. The skill continues and completes, but click-to-zoom on mermaid fences is unavailable.
+
+**Likely cause**: The Obsidian community registry was unreachable, or `mermaid-popup` was not found in it at the time of install.
+
+**Fix**: The mermaid/ascii fit CSS snippets are installed and enabled by `/lazy-obsidian.install`'s own shared snippet step (not by `diagram-install` itself) — so mermaid SVG fit and background/theme color already work without click-to-zoom, as long as you have run `/lazy-obsidian.install` at least once. When network access is restored, run `/lazy-obsidian.update-plugin mermaid-popup` to install the plugin, or install it via Obsidian's Community Plugins UI. Re-running `/lazy-obsidian.diagram-install` later is also safe (idempotent).
+
+---
+
+## `/lazy-obsidian.audit` reports vault manifest drift
+
+**Symptom**: `/lazy-obsidian.audit` reports `drift: <N>` and lists entries where the live vault config and `.obsidian.manifest.json` disagree.
+
+**Likely cause**: Something changed on one side since the manifest was last captured — you installed or updated a plugin, tweaked a setting, or added a snippet locally without recapturing, or you pulled a manifest change from another checkout without deploying it here yet.
+
+**Fix**: The audit never auto-resolves drift — only you know which side is right. If the live vault is correct, run `/lazy-obsidian.capture` to record it. If the manifest is correct (for example, you just pulled a teammate's change), run `/lazy-obsidian.deploy` to restore it here.
+
+---
+
+## `/lazy-obsidian.audit` reports `worker-refused`
+
+**Symptom**: `/lazy-obsidian.audit` reports `worker-refused` as its outcome instead of `clean` or `drift: <N>`.
+
+**Likely cause**: The drift check itself could not run — either `.obsidian.manifest.json` at the repo root does not parse, or the repo has no `.obsidian/` config directory at all to compare against.
+
+**Fix**: An unparseable manifest is rewritten from the live vault by `/lazy-obsidian.capture` — run it if the vault itself is in the state you want recorded. A checkout with no `.obsidian/` directory at all needs `/lazy-obsidian.install` first (or opening the repo as a vault in Obsidian), before any drift check makes sense.
+
+---
+
+## `/lazy-obsidian.capture` aborts: "No `.obsidian/` under `<repo_root>`"
+
+**Symptom**: `/lazy-obsidian.capture` aborts immediately, reporting no `.obsidian/` directory at the repo root.
+
+**Likely cause**: The checkout has no vault config to capture yet — either the repo was never opened as a vault in Obsidian, or the vault should be rebuilt from an existing manifest instead.
+
+**Fix**: If `.obsidian.manifest.json` already exists in the repo, run `/lazy-obsidian.deploy` to build `.obsidian/` from it. Otherwise, open the repo folder as a vault in Obsidian first, then re-run `/lazy-obsidian.capture`.
+
+---
+
+## `/lazy-obsidian.capture` report lists `secrets_omitted`
+
+**Symptom**: The capture report includes entries under `secrets_omitted`.
+
+**Likely cause**: This is expected, not an error — the skill found an API token or password value in the vault config and deliberately left it out of the manifest.
+
+**Fix**: Nothing to fix. Whoever deploys the vault on another machine enters that value by hand after `/lazy-obsidian.deploy` runs.
+
+---
+
+## `/lazy-obsidian.capture`'s manifest diff is huge on a vault that barely changed
+
+**Symptom**: Committing after `/lazy-obsidian.capture` shows a large diff in `.obsidian.manifest.json` even though you only changed one setting.
+
+**Likely cause**: A plugin rewrote its whole settings file — most commonly a schema migration triggered by a plugin update.
+
+**Fix**: Read the diff before committing; the manifest is a reviewed file precisely so a wholesale rewrite like this is visible instead of landing silently. If the rewrite looks legitimate (matches a plugin update you just did), commit as usual.
+
+---
+
+## `/lazy-obsidian.deploy` aborts: "No `.obsidian.manifest.json`"
+
+**Symptom**: `/lazy-obsidian.deploy` aborts immediately, reporting no manifest file in the repo.
+
+**Likely cause**: This vault was never captured — nobody has run `/lazy-obsidian.capture` for this repo yet, so there is nothing to deploy from.
+
+**Fix**: On a machine where the vault is already configured, run `/lazy-obsidian.capture` there, commit the manifest, pull it here, then re-run `/lazy-obsidian.deploy`.
+
+---
+
+## `/lazy-obsidian.deploy` reports a plugin `served from cache`
+
+**Symptom**: The deploy report shows one or more plugins as `served from cache` instead of fetched fresh.
+
+**Likely cause**: GitHub was unreachable, or the plugin's latest release had no attached binary assets, so deploy fell back to a vendored copy under the user's local cache.
+
+**Fix**: Nothing is broken — the vault still works. Re-run `/lazy-obsidian.deploy` once network access to GitHub is available to pull the actual latest release.
+
+---
+
+## `/lazy-obsidian.deploy` reports a plugin `not in the community catalog`
+
+**Symptom**: The deploy report shows a plugin as `not in the community catalog`.
+
+**Likely cause**: The plugin the manifest references has no public Obsidian community-plugins catalog entry, so deploy has no `owner/name` repo to resolve it from.
+
+**Fix**: Add a `repo` key (`owner/name`) to that plugin's entry in `.obsidian.manifest.json`, or, if the plugin ships bundled inside lazycortex-obsidian's own templates, deploy it via that bundled path instead.
+
+---
+
+## `/lazy-obsidian.deploy` reports a theme it could not fetch
+
+**Symptom**: The deploy report names the vault's theme in `errors`, and the vault renders with default heading colours.
+
+**Likely cause**: Deploy installs a theme the way Obsidian does — it looks the name up in the community theme catalogue and reads `theme.css` and `manifest.json` off that repository's default branch. The error names why that failed: the theme is not in the catalogue, the repository answered with an HTTP error, or the network was unreachable and no earlier run had cached the theme.
+
+**Fix**: Re-run the deploy with working network access; the first successful fetch caches the theme, so later offline deploys install it from the cache. A theme with no catalogue entry is not fetchable at all — copy its directory into `.obsidian/themes/` by hand, and deploy will then leave that copy alone.
+
+---
+
+## Icons and folder colours are missing right after `/lazy-obsidian.deploy`
+
+**Symptom**: `.obsidian/` rebuilds successfully, but files and folders show no icons immediately afterward.
+
+**Likely cause**: Expected — icons are painted live by Iconize and the bundled `iconize-reloader` from note frontmatter, not written by the deploy skill itself.
+
+**Fix**: Open Obsidian (it repaints on load), or run `/lazy-obsidian.iconize-sync reconcile` to force the frontmatter reconciliation immediately.
+
+---
+
+## Tag-page generation stops: "Missing tag-page template"
+
+**Symptom**: Regenerating tag pages (`lazy-obsidian.gen-tag-pages`) stops immediately with a message about a missing tag-page template at `.claude/templates/lazy-obsidian.tag-page-template.md`.
+
+**Likely cause**: `/lazy-obsidian.install` has not been run yet at project scope, so the template was never seeded into this repo. The generator refuses to fall back to a bundled default once a local template is expected — the local copy is the single source of truth once it exists.
+
+**Fix**: Run `/lazy-obsidian.install` to scaffold the default template, then re-run tag-page generation.
+
+---
+
+## Diagnostic flowchart
+
+```mermaid
+%%{init: {'themeVariables':{'lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
+flowchart TD
+  whichSkill{Which skill misbehaved?}
+
+  leafInstall[See that skill's troubleshooting entry below.]
+  leafIconizeInstall[See that skill's troubleshooting entry below.]
+  leafIconizeConfig[See that skill's troubleshooting entry below.]
+  leafIconizeSync[See that skill's troubleshooting entry below.]
+  leafDiagramInstall[See that skill's troubleshooting entry below.]
+  leafUpdatePlugin[See that skill's troubleshooting entry below.]
+  leafGenTagPages[See that skill's troubleshooting entry below.]
+
+  whichSkill -->|install| leafInstall
+  whichSkill -->|iconize-install| leafIconizeInstall
+  whichSkill -->|iconize-config| leafIconizeConfig
+  whichSkill -->|iconize-sync| leafIconizeSync
+  whichSkill -->|diagram-install| leafDiagramInstall
+  whichSkill -->|update-plugin| leafUpdatePlugin
+  whichSkill -->|gen-tag-pages| leafGenTagPages
+
+  classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
+  classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+
+  class whichSkill guard
+  class leafInstall success
+  class leafIconizeInstall success
+  class leafIconizeConfig success
+  class leafIconizeSync success
+  class leafDiagramInstall success
+  class leafUpdatePlugin success
+  class leafGenTagPages success
+```

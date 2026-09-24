@@ -1,0 +1,330 @@
+---
+name: lazy-core.scaffold-local
+description: "Run when the operator asks to add or drop a repo-specific template type — a `_local` scaffold entry with its own group, kind, and path globs, so new files matching those globs start from that template. Use instead of hand-editing the registry in `.claude/rules/lazy-core.scaffold.md`; plugin-shipped entries belong to `/lazy-core.scaffold-sync`."
+allowed-tools: Read, Write, Glob, Bash(find *), Bash(ls *), Bash(test *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), AskUserQuestion, Agent
+---
+# Manage Local Scaffold Entries
+
+Adds or removes repo-specific scaffold types under the reserved `_local` key in the consumer's scaffold registry. The `_local` key has no plugin manifest — the registry entry is its own source of truth, and the template is authored in place inside the consumer repo. Use this skill instead of hand-editing `lazy-core.scaffold.md` directly.
+
+Invoked with optional args: `mode=<add|remove>` (default: `add`), `group=<group>`, `kind=<kind>`.
+
+Note: `_local` is just another top-level key to the `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" scaffold` primitive — no special-casing; the same surgical write protects sibling plugin keys and surrounding prose.
+
+## Execution discipline (MANDATORY — read before any action)
+
+This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+   - `Step 1 — Resolve inputs and registry path`
+   - `Step 2 — Resolve core CLI`
+   - `Step 3 — Gather user inputs`
+   - `Step 4 — Execute add or remove`
+   - `Step 5 — Validate registry`
+   - `Step 6 — Report`
+   - `Log the run`
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". No-ops count only if they emit an explicit outcome (`skipped-per-user-choice`, `absent`, `unchanged`, …).
+3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
+4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
+
+## Step 1 — Resolve inputs and registry path
+
+Determine the mode from args: `add` (default) or `remove`.
+
+Resolve the scaffold registry path. Scope is always `project` for `_local` entries (they belong in the consumer repo):
+
+| Scope | Registry path |
+|---|---|
+| `project` | `<repo-root>/.claude/rules/lazy-core.scaffold.md` |
+
+Where `<repo-root>` is `git rev-parse --show-toplevel`.
+
+Verify the registry file exists with `Bash(test -f <regPath>)`. If absent → FAIL with:
+
+> `scaffold-local: registry not found at <regPath>; run /lazy-core.install to initialise the scaffold registry`
+
+State outcome `resolved`.
+
+## Step 2 — Resolve core CLI
+
+When this repo authors the plugin itself (`<repo-root>/plugins/claude/lazycortex-core/.claude-plugin/plugin.json` exists), `<core-cli>` is `<repo-root>/plugins/claude/lazycortex-core/bin/lazycortex-core` — the sources in the tree, never the cached copy, which lags them until the next publish. Otherwise read `~/.claude/plugins/installed_plugins.json`. Find the `lazycortex-core@lazycortex` key. If absent or its array is empty → FAIL with:
+
+> `scaffold-local: cannot resolve core CLI — lazycortex-core not installed; run /lazy-core.install first`
+
+Take the `installPath` of the entry with the highest `version` — the registry keeps one record per project that ever installed the plugin, so the first or last entry may name an older cache dir. `<core-cli>` is `<installPath>/bin/lazycortex-core`; every verb below runs it through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`, because the file carries no exec bit.
+
+Verify the file exists with `Bash(test -f <core-cli>)`. If not → FAIL with:
+
+> `scaffold-local: core CLI not found at <core-cli>; run /plugin update lazycortex-core@lazycortex to restore`
+
+Note: `$LAZYCORTEX_PLUGIN_DIRS` may be unset at install time — outside an authoring repo, always resolve via `installed_plugins.json`.
+
+State outcome `resolved`.
+
+## Step 3 — Gather user inputs
+
+Ask one `AskUserQuestion` at a time. Wait for each answer before the next. Print each question's context block first.
+
+**3a. Collect the groups the installed plugins supply (`add` only).**
+
+A `_local` template must not share a group with a plugin. The plugin re-syncs that whole directory on every install, so a file filed there is a namesake collision waiting to happen — `/lazy-core.scaffold-sync` protects it once it is registered, but the operator should never be put in that position to begin with. Read the registry before asking for anything:
+
+```bash
+"${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold list --registry <regPath>
+```
+
+Parse the JSON output and take `registry`. For every top-level key other than `_local`, each of its template paths contributes one group — the name of that path's parent directory. The union of those names is the occupied set.
+
+Check `group` against that set: if it arrived as an argument, check it now; otherwise check the answer to question 1 the moment it arrives. On a match → FAIL with:
+
+> `scaffold-local: group \`<group>\` is supplied by installed plugin \`<plugin>\` — a _local template cannot share a plugin's group, because the plugin re-syncs that directory on every install; choose another group name`
+
+Do not offer to proceed anyway, and do not pick a substitute name — the group is the operator's to choose, so the refusal ends the run and the operator re-invokes with one of their own.
+
+`remove` skips this check entirely: an entry already filed in an occupied group must stay removable.
+
+State outcome `occupied-N` where N is the number of groups in the set (`occupied-0` when no plugin key holds a template path).
+
+**For both `add` and `remove`:**
+
+1. If `group` was not provided in args:
+
+```
+Context (print before asking):
+- Where: /lazy-core.scaffold-local · Step 3 — Gather user inputs; target <regPath> [_local]
+- Found: mode `<add|remove>`; groups present under .claude/templates/: <list, or none>; `_local` entries on record: <list, or none>; groups supplied by installed plugins and therefore refused: <list from 3a, or none>
+- Why asking: the group is a repo-specific naming decision nothing on disk derives
+- Answers: free-form text — the subdirectory under `.claude/templates/` this entry lives in; builds the template path in Step 4 and is recorded in the registry, never re-asked once the entry exists
+AskUserQuestion: header "Template group", question "Which template group under .claude/templates/ does this `_local` entry belong to? It may not be one of the groups an installed plugin supplies (listed above).", free-form text.
+```
+
+2. If `kind` was not provided in args:
+
+```
+Context (print before asking):
+- Where: /lazy-core.scaffold-local · Step 3 — Gather user inputs; target .claude/templates/<group>/<kind>-template.md
+- Found: group `<group>`; kinds already in that group: <list, or none>
+- Why asking: the kind names the template file — for `add` it is created if absent, for `remove` the entry and its file are deleted
+- Answers: free-form text — becomes `<kind>` in the template path; `add` creates the file (or keeps it after Step 4a's prompt), `remove` targets the existing entry
+AskUserQuestion: header "Template kind", question "What is the kind (template name) for the `_local` entry in group `<group>`? The file becomes .claude/templates/<group>/<kind>-template.md", free-form text.
+```
+
+**For `add` only:**
+
+3. Glob list:
+
+```
+Context (print before asking):
+- Where: /lazy-core.scaffold-local · Step 3 — Gather user inputs; target registry entry `.claude/templates/<group>/<kind>-template.md` in <regPath>
+- Found: globs already registered under `_local`: <list, or none>
+- Why asking: which new files start from this template is a repo convention only the operator can state
+- Answers: free-form, one glob per line — written as the entry's glob list in Step 4c, checked for overlap in Step 5; re-run `add` to change them
+AskUserQuestion: header "Match globs", question "Which file globs should start from .claude/templates/<group>/<kind>-template.md (one per line, e.g. `.claude/rules/*.md` or `plugins/claude/*/references/*-schema.md`)?", free-form text.
+```
+
+   - Parse the answer into a list by splitting on newlines; trim whitespace; discard empty lines.
+
+**For `remove` only:**
+
+After collecting `group` and `kind`, read the current `_local` map (Step 4 — `scaffold list`) to confirm the entry exists. If the entry is absent → FAIL with:
+
+> `scaffold-local: entry \`.claude/templates/<group>/<kind>-template.md\` not found in the _local registry map`
+
+State outcome `gathered`.
+
+## Step 4 — Execute add or remove
+
+### `add` path
+
+**4a. Create the template in place.**
+
+Template path: `.claude/templates/<group>/<kind>-template.md` (relative to `<repo-root>`).
+
+Check whether the file exists:
+
+- **Absent** → `mkdir -p <repo-root>/.claude/templates/<group>/` then `Write` the file with a minimal seed header:
+
+  ```markdown
+  ---
+  # <kind> template
+  # Group: <group>
+  # Created by: lazy-core.scaffold-local
+  ---
+  # <Kind> — <brief description>
+
+  <Replace this with the template body.>
+  ```
+
+  State **created**.
+
+- **Present** →
+
+```
+Context (print before asking):
+- Where: /lazy-core.scaffold-local · Step 4 — Execute add (4a); target <repo-root>/.claude/templates/<group>/<kind>-template.md
+- Found: file present — <size> bytes, first heading "<heading>"
+- Why asking: overwriting replaces an authored template with the bare seed — irreversible outside git
+- Answers: `keep` — file untouched, only the registry entry is upserted in 4c; `overwrite` — file replaced with the seed header, then the registry upsert
+AskUserQuestion: header "Template exists", question "Template .claude/templates/<group>/<kind>-template.md already exists — keep it or overwrite it with a fresh seed?", options with descriptions.
+```
+
+  - options: **keep** / **overwrite**
+  - **keep** → no file write. State **kept**.
+  - **overwrite** → write the seed as above. State **overwritten**.
+
+**4b. Read the current `_local` map.**
+
+Run:
+
+```bash
+"${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold list --registry <regPath>
+```
+
+Parse the JSON output. Extract `registry._local` — if the key is absent, start with `{}`.
+
+**4c. Merge and upsert.**
+
+Add or update the entry:
+
+```json
+".claude/templates/<group>/<kind>-template.md": ["<glob1>", "<glob2>", ...]
+```
+
+Write the updated `_local` map to `~/tmp/scaffold-local-entries-<timestamp>.json`:
+
+```bash
+mkdir -p ~/tmp
+```
+
+Then `Write` the JSON to that path.
+
+Run:
+
+```bash
+"${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold upsert --plugin _local --entries @~/tmp/scaffold-local-entries-<timestamp>.json --registry <regPath>
+```
+
+Capture the JSON output. On `error` status → FAIL, surfacing the full output.
+
+State outcome: value of `status` from the returned JSON.
+
+### `remove` path
+
+**4a. Read the current `_local` map.**
+
+Run:
+
+```bash
+"${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold list --registry <regPath>
+```
+
+Parse `registry._local`. If the key is absent or the target entry is missing → FAIL with:
+
+> `scaffold-local: entry \`.claude/templates/<group>/<kind>-template.md\` not found; nothing to remove`
+
+**4b. Drop the entry and write.**
+
+Remove the key `.claude/templates/<group>/<kind>-template.md` from the map.
+
+- If the resulting map is empty → run:
+
+  ```bash
+  "${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold remove --plugin _local --registry <regPath>
+  ```
+
+  Capture JSON output. On `error` → FAIL.
+  State outcome: `removed-plugin`.
+
+- If the map still has entries → write the reduced map to `~/tmp/scaffold-local-entries-<timestamp>.json`, then:
+
+  ```bash
+  "${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold upsert --plugin _local --entries @~/tmp/scaffold-local-entries-<timestamp>.json --registry <regPath>
+  ```
+
+  Capture JSON output. On `error` → FAIL.
+  State outcome: value of `status` from returned JSON.
+
+**4c. Delete the template file (confirm first).**
+
+```
+Context (print before asking):
+- Where: /lazy-core.scaffold-local · Step 4 — Execute remove (4c); target <repo-root>/.claude/templates/<group>/<kind>-template.md
+- Found: registry entry removed in 4b; file <present — <size> bytes | absent>
+- Why asking: deleting an authored template is irreversible outside git
+- Answers: `delete` — file removed now; `keep` — file stays on disk, referenced by no registry entry
+AskUserQuestion: header "Delete template file", question "Also delete the now-unregistered template file .claude/templates/<group>/<kind>-template.md?", options with descriptions.
+```
+
+- options: **delete** / **keep**
+- **delete** → `Bash(rm "<repo-root>/.claude/templates/<group>/<kind>-template.md")`. State **deleted**.
+- **keep** → no action. State **kept**.
+
+## Step 5 — Validate registry
+
+Run:
+
+```bash
+"${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold validate --registry <regPath>
+```
+
+Parse the JSON output. Surface any `WARN` findings (e.g. `glob_overlap`) to the operator:
+
+> `scaffold-local: validation warnings — <finding>. Confirm intended or narrow the glob before proceeding.`
+
+`FAIL`-level findings are hard errors; surface them and stop.
+
+If no findings → state outcome `clean`. If warnings only → state outcome `warned`. If hard errors → FAIL.
+
+## Step 6 — Report
+
+Emit the mode, the template file's state (Step 4), the registry outcome (Step 4), and the validation verdict (Step 5):
+
+```
+Mode: <add|remove>
+Entry: .claude/templates/<group>/<kind>-template.md
+  Template file: <state>
+  Registry: <status>
+  Validation: <verdict>
+```
+
+Template file state is one of: `created`, `kept`, `overwritten`, `deleted`, `absent`. Registry status is the value returned by the core CLI (`registered`, `unchanged`, `created-and-registered`, `removed-plugin`, `removed`, `absent`). Validation verdict is one of: `clean`, `warned`.
+
+## Failure modes
+
+- **`scaffold-local: registry not found at <path>`** — `.claude/rules/lazy-core.scaffold.md` does not exist → run `/lazy-core.install` to initialise the scaffold registry, then re-run.
+- **`scaffold-local: cannot resolve core CLI — lazycortex-core not installed`** — `installed_plugins.json` has no `lazycortex-core@lazycortex` entry → install the plugin first (`/lazy-core.install`), then re-run.
+- **`scaffold-local: core CLI not found at <path>`** — the `installPath` in `installed_plugins.json` points to a missing path → run `/plugin update lazycortex-core@lazycortex` to refresh, then re-run.
+- **`scaffold-local: group \`<group>\` is supplied by installed plugin \`<plugin>\``** — the named group is one an installed plugin re-syncs on every install, so a `_local` template there would collide with a shipped namesake → re-invoke `add` with a group name of your own. Removing an entry already filed in such a group is not blocked.
+- **`scaffold-local: entry … not found in the _local registry map`** — attempting to remove an entry that is not registered → check the entry name with `scaffold list --registry <regPath>`.
+- **`scaffold upsert` / `scaffold remove` returns `error`** — the core CLI rejected the operation → inspect the full error output, fix the input, then re-run.
+- **`scaffold validate` returns FAIL-level findings** — the registry has structural errors after the upsert → inspect the validation output and edit `.claude/rules/lazy-core.scaffold.md` directly to resolve, then validate again.
+
+## Logging
+
+Log each run to `./.logs/claude/lazy-core.scaffold-local/YYYY-MM-DD_HH-MM-SS.md`.
+
+Timestamp: `date -u +%Y-%m-%d_%H-%M-%S`.
+
+Use two separate steps:
+
+```
+Bash(mkdir -p ./.logs/claude/lazy-core.scaffold-local)
+```
+
+Then `Write` the log file with this structure:
+
+```markdown
+---
+git_sha: <git rev-parse HEAD>
+git_branch: <git rev-parse --abbrev-ref HEAD>
+date: <YYYY-MM-DD HH:MM:SS UTC>
+input: "mode=<add|remove> group=<group> kind=<kind>"
+---
+# lazy-core.scaffold-local
+
+## Actions
+- <bullet per action, file modified, or decision>
+
+## Result
+<success/failure + one-line summary>
+```

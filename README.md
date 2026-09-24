@@ -27,7 +27,7 @@ Core skills, agents, and runtime daemon for Claude Code (expert runtime + agent-
 
 32 skills, 8 agents, 6 hooks.
 
-See [`claude/lazycortex-core/`](claude/lazycortex-core/) for details.
+See [`plugins/claude/lazycortex-core/`](plugins/claude/lazycortex-core/) for details.
 
 ### lazycortex-diagram
 
@@ -37,7 +37,7 @@ Format-agnostic diagram engine: /lazy-diagram.draw dispatcher + per-format write
 
 Requires: lazycortex-core
 
-See [`claude/lazycortex-diagram/`](claude/lazycortex-diagram/) for details.
+See [`plugins/claude/lazycortex-diagram/`](plugins/claude/lazycortex-diagram/) for details.
 
 ### lazycortex-experts
 
@@ -47,7 +47,7 @@ Generic lifecycle experts (interpreter, use-case-writer, designer, architect, ui
 
 Requires: lazycortex-core
 
-See [`claude/lazycortex-experts/`](claude/lazycortex-experts/) for details.
+See [`plugins/claude/lazycortex-experts/`](plugins/claude/lazycortex-experts/) for details.
 
 ### lazycortex-observe
 
@@ -57,7 +57,7 @@ Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafan
 
 Requires: lazycortex-core
 
-See [`claude/lazycortex-observe/`](claude/lazycortex-observe/) for details.
+See [`plugins/claude/lazycortex-observe/`](plugins/claude/lazycortex-observe/) for details.
 
 ### lazycortex-obsidian
 
@@ -67,7 +67,7 @@ Obsidian vault bootstrap and configuration management for Claude Code
 
 Requires: lazycortex-core
 
-See [`claude/lazycortex-obsidian/`](claude/lazycortex-obsidian/) for details.
+See [`plugins/claude/lazycortex-obsidian/`](plugins/claude/lazycortex-obsidian/) for details.
 
 ### lazycortex-python
 
@@ -77,7 +77,7 @@ Python coding discipline as a plugin: shared rules + reference guidelines + chk/
 
 Requires: lazycortex-core
 
-See [`claude/lazycortex-python/`](claude/lazycortex-python/) for details.
+See [`plugins/claude/lazycortex-python/`](plugins/claude/lazycortex-python/) for details.
 
 ### lazycortex-review
 
@@ -87,7 +87,7 @@ Coordinator-driven markdown document review loop: a closed set of Python primiti
 
 Requires: lazycortex-core
 
-See [`claude/lazycortex-review/`](claude/lazycortex-review/) for details.
+See [`plugins/claude/lazycortex-review/`](plugins/claude/lazycortex-review/) for details.
 
 ### lazycortex-specs
 
@@ -97,7 +97,7 @@ Specification and design skills for Claude Code
 
 Requires: lazycortex-core, lazycortex-diagram, lazycortex-review
 
-See [`claude/lazycortex-specs/`](claude/lazycortex-specs/) for details.
+See [`plugins/claude/lazycortex-specs/`](plugins/claude/lazycortex-specs/) for details.
 
 ### lazycortex-wiki
 
@@ -107,7 +107,7 @@ Maintains a curated, LLM-navigable semantic wiki over a markdown+code base — s
 
 Requires: lazycortex-core
 
-See [`claude/lazycortex-wiki/`](claude/lazycortex-wiki/) for details.
+See [`plugins/claude/lazycortex-wiki/`](plugins/claude/lazycortex-wiki/) for details.
 
 ## Requirements
 

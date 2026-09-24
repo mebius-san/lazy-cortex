@@ -4,6 +4,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 10.1.0 — 2026-09-24 UTC
+
+- New `Lazy-Watch: skip` commit trailer drops a commit out of every git watch entirely — no item, and any path it last touched re-keys to the next ordinary commit — so a comment sweep, formatting pass, or mechanical rename no longer wakes a watcher.
+- **Breaking:** File-level git routines now take one `group` key (`all` / `file` / `dir` / a list of directory globs) instead of the old boolean `group` + `group_globs`, for both `command` and `expert` routines. Old-shape registrations fail validation with a message naming the fix; run the new `routine-migrate --apply` verb, then `/lazy-runtime.recover`.
+- `lazy-runtime.preflight` now reports a `claude` binary that fails to spawn as a proper verdict (with a `spawn_error` field) instead of crashing with a traceback and leaving a stray debug file behind.
+- The `daemon_halted` metric now updates the moment a halt is declared, instead of lagging up to an hour behind the queue-wait window.
+
 ### 9.8.0 — 2026-09-23 UTC
 
 - Two new expert roles ship with `lazycortex-experts` and are seeded here: an editor for technical documents and a fiction editor for literary text, both on the opus tier.
@@ -696,6 +703,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 9.7.1 — 2026-09-24 UTC
+
+- **Breaking:** Product routine registration drops `group_globs` in favor of a single whole-repo watch item; an existing install must run the core CLI's `routine-migrate --apply` followed by `/lazy-runtime.recover` after upgrading.
+- Spec-document templates got a cleanup: plainer section comments, a purpose note under each document's heading, an optional Value Proposition in vision docs, and removal of the duplicate `spec.change` architecture template and the Decisions section (now owned by `decisions.md`).
+
 ### 9.6.0 — 2026-09-23 UTC
 
 - The level tech document is now a narrow statement of the technologies a level is built with. Its template keeps Terms, Stack and Platforms and drops the constraints, infrastructure-decision and boundary sections that pulled architecture into it.
@@ -1341,6 +1353,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+### 6.9.0 — 2026-09-24 UTC
+
+- Review coordinator watch now handles a whole grouped git-watch tick in one pass, judging each changed document by its own last commit (bounded to the triggering tick) and retrying only the documents whose dispatch failed.
+
 ### 6.8.0 — 2026-09-23 UTC
 
 - The audit writes a run log again, carries its repair route in the line that reports each finding, and matches the severity vocabulary every other audit uses.
@@ -1528,6 +1544,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-observe
 
+### 2.2.0 — 2026-09-24 UTC
+
+- Metrics token file is now created owner-only (0600) from the first byte written, closing a brief window where a local user could read the credential before permissions were tightened.
+- Installer's core-CLI resolver no longer searches `$PATH` for the `lazycortex-core` binary, avoiding accidental pickup of an unrelated binary of that name.
+- Daemons dashboard and alerts now distinguish a daemon waiting out a rate-limit window (LIMIT) or unable to reach its git remote (OFFLINE) from a real halt, replacing false-critical `LazyCortexDaemonHalted` noise with warning-level `LazyCortexDaemonRateLimited` / `LazyCortexDaemonOffline` alerts for those self-clearing cases.
+
 ### 2.1.0 — 2026-09-23 UTC
 
 - The audit gained an `INFO` severity level and a run-log step, and every finding now carries its own repair route instead of one route stated for the whole skill.
@@ -1656,6 +1678,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.
 
 ## lazycortex-experts
+
+### 1.9.1 — 2026-09-24 UTC
+
+- _no user-visible changes_
 
 ### 1.9.0 — 2026-09-23 UTC
 
@@ -2025,6 +2051,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 3.3.0 — 2026-09-24 UTC
+
+- **Breaking:** Structure-scan and terms-scan git-watch routines now batch every changed path from one git tick into a single curator job, instead of one job per directory, and the routine registration no longer takes a `group_globs` key — a repo with an old-shape registration halts on daemon startup until migrated (`routine-migrate --apply`, then `/lazy-runtime.recover`).
+- Domain-spec digests now hash a contract's symbol and text instead of its file path, so moving a source file no longer marks its generated doc stale; run `domain-tick --restamp` once to apply the new rule to existing docs.
 
 ### 3.2.1 — 2026-09-23 UTC
 
