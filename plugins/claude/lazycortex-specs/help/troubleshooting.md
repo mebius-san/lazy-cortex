@@ -25,8 +25,8 @@ source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
   - lazy-spec.audit
-source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
-surface_sha: 4cb71551eb8a4f832aa87a0af42d9ba6073416800585de75d37c90500c5aa09f
+source_sha: 800e7ebfd4ae569f3daf6ddf146dc8dc0ada2c26
+surface_sha: 59de1742a6dade8f9d04e147533860f38b755b1a8c04728349f6f1fce2210269
 ---
 # Troubleshooting
 

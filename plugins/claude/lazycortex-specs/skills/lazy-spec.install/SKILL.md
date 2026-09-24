@@ -358,7 +358,7 @@ lazy-spec.request-open:
   interval_sec: 60
   timeout_sec: 30
   priority: 30
-  paths: ["requests/*.md"]
+  paths: ["<vault_root>/requests/*.md"]
   filter:
     folder_note: false
     frontmatter:
@@ -366,6 +366,8 @@ lazy-spec.request-open:
       review_result: {in: [null], not_in: []}
   command: ["lazycortex-specs", "open-request"]
 ```
+
+`<vault_root>` is the `spec.vault_root` setting (default `specs`), resolved exactly as Step 5's `paths` glob resolves it; when it is `.`, drop the segment and the glob is `requests/*.md`. A routine `paths` glob is repo-relative, unlike the `review.classes[]` globs of 6d, which are relative to `review.watch_root`. The daemon matches a `**`-free glob right-anchored, so a bare `requests/*.md` still finds `<vault_root>/requests/`, but it also fires on every other `requests/` folder in the repository — an inbox the open-request worker would stamp and commit as a spec request. The prefix keeps the sieve on the one inbox this plugin owns.
 
 The joint filter `review_active: [null] + review_result: [null]` catches files that have not yet entered the review loop — naked files (no frontmatter at all) AND partial-bootstrap files (`request_status: draft` set but `review_active` missing). The `review_result: [null]` clause excludes post-finalize files: finalize strips `review_active` AND stamps `review_result` (`approved` / `approved-with-concerns`), so those files match `review_active: [null]` alone but must be routed to the apply gate, not re-bootstrapped. The `folder_note: false` clause excludes the `requests/` folder-note (`requests/requests.md` — the Obsidian folder-note convention `<dir>/<dir>.md`): it is an inbox description carrying no `review_active` / `review_result`, so without this clause it matches the filter on every tick and the routine re-dispatches it forever (open-request finds nothing to do and never stamps the frontmatter that would drop it out). The command brings the file to canonical opt-in shape, atomic commit under `lazy-spec.request-open` bot identity.
 
@@ -383,7 +385,7 @@ lazy-spec.request-apply:
   interval_sec: 60
   timeout_sec: 60
   priority: 20
-  paths: ["requests/*.md"]
+  paths: ["<vault_root>/requests/*.md"]
   filter:
     folder_note: false
     frontmatter:
@@ -391,6 +393,8 @@ lazy-spec.request-apply:
       review_result: {in: ["approved", "approved-with-concerns"], not_in: []}
   command: ["lazycortex-specs", "apply-request"]
 ```
+
+`<vault_root>` resolves exactly as in 6a.
 
 **Resolve `<review-cli>` once, before the first call.** It is the review plugin's `bin/lazycortex-review` file: when this repo authors the plugin itself (`plugins/claude/lazycortex-review/.claude-plugin/plugin.json` exists) that is `<repo-root>/plugins/claude/lazycortex-review/bin/lazycortex-review`; otherwise `Read` `$HOME/.claude/plugins/installed_plugins.json` and take `<installPath>/bin/lazycortex-review` from the last `lazycortex-review@lazycortex` record. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <review-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
 
@@ -963,7 +967,7 @@ Outcome: `cli-allow-added` or `cli-allow-already-present`.
 - Confirm the `lazy-spec.coordinator-watch` routine is present in `lazy.settings.json` (`routines.lazy-spec.coordinator-watch`) and that its `protocols` list carries both `lazycortex-specs:lazy-spec.coordination-playbook` AND `lazycortex-core:lazy-core.markdown-style`.
 - If Step 4 set a language: confirm `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get spec` reports the chosen `language`.
 - Project scope only: confirm `<content-root>/vision.md` exists (Step 6.9), or a pre-vision `design.md` without one.
-- Unless Step 6 was `skipped-user-scope`: confirm the blocks are present in `lazy.settings.json` (`experts.spec.coordinator`, at least one `review.classes[]` entry covering `requests/*.md` with `terminal.routing` naming `spec.catalog-coordinator` at `position: top`; and `routines.lazy-spec.request-open` / `routines.lazy-spec.request-apply` unless the daemon gate skipped them). Note: no `experts.lazy-spec.request-apply` entry — the apply routine is `command:`-shape, not expert-based.
+- Unless Step 6 was `skipped-user-scope`: confirm the blocks are present in `lazy.settings.json` (`experts.spec.coordinator`, at least one `review.classes[]` entry covering `requests/*.md` with `terminal.routing` naming `spec.catalog-coordinator` at `position: top`; and `routines.lazy-spec.request-open` / `routines.lazy-spec.request-apply` with `paths` of `<vault_root>/requests/*.md`, unless the daemon gate skipped them). Note: no `experts.lazy-spec.request-apply` entry — the apply routine is `command:`-shape, not expert-based.
 - Confirm every 6d/6e `review.classes` entry carries `lazycortex-specs:lazy-spec.expert-signals-protocol` in its `protocols` list (Step 6f).
 - **Wiki companion check (report-only).** The spec experts (architect above all) work best with the research surfaces `lazycortex-wiki` provides — the structure map, the domain tree, the terms dictionary, wiki query. Check the pairing and append one INFO line to the report; never ask a question, never install anything:
   - `lazycortex-wiki@lazycortex` absent from `installed_plugins.json` → `info: lazycortex-wiki is not installed — spec experts fall back to reading code directly; install and configure it (structure map, domain tree, terms dictionary, wiki scopes) for cheaper, better-grounded expert research.`

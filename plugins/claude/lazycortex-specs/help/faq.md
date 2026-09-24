@@ -31,8 +31,8 @@ source_skills:
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
   - lazy-spec.resolve-dependency
-source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
-surface_sha: a3cceda032d3c8c14393579fbf750f4ff57f44037123c6722b540ae465bd0261
+source_sha: 800e7ebfd4ae569f3daf6ddf146dc8dc0ada2c26
+surface_sha: ef4e2d20391d160fdff15a2e48651002d3ce1bfd39161e3db84e6b98ebe04509
 ---
 # Frequently asked questions
 

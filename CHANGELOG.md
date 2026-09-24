@@ -712,6 +712,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 9.7.3 — 2026-09-25 UTC
+
+- Fixed the request routines (`lazy-spec.request-open`, `lazy-spec.request-apply`) matching any `requests/` folder in the repo instead of only the vault's `<vault_root>/requests/` folder — previously a manual fix would even get overwritten on the next install/autosetup run.
+
 ### 9.7.2 — 2026-09-24 UTC
 
 - `lazy-spec.*` skills and agents stopped writing run logs on every invocation — logging is now opt-in and this plugin's artifacts don't use it, so runs are a couple of tool calls leaner.
