@@ -14,8 +14,8 @@ source_skills:
   - lazy-spec.create-from-code
   - lazy-spec.create-request
   - lazy-spec.record-decision
-source_sha: 70d7cafcb16785355f25b2ed0df5310aaa5e2c4e
-surface_sha: 4fc59ada891cd96ed05ab61eabbc2c78dd1520af389f05ec6c54919b816e09a3
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: 6dea487760660f19b01e8cb35277b3904ae25c564bf6d6235dc2822ec744ddd1
 ---
 # Authoring spec assets and capturing requests
 

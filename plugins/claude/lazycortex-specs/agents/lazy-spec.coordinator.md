@@ -4,7 +4,6 @@ description: "Dispatched on any of the coordinator's wake triggers against an as
 tools: Read, Write, Edit, Glob, Grep, Bash, Skill, Agent
 model: inherit
 execution-discipline-waiver: "One wake, one mode — the trigger that woke this job already picked the mode before the agent starts; no multi-phase orchestration where a step can be silently skipped"
-logging-waiver: "single-response daemon-dispatched coordinator — the move it made is recorded in the note's # Status brief, in its # History when it is a journaled event, and in the commit the wake produced"
 sibling-doc-waiver: "Two narrow, named acts, never a general license: (1) carrying a planner/architect's question from its own doc into the source doc it concerns (design.md/architecture.md), then re-submitting that doc into review — playbook Chapter 14 rung 2; (2) carrying accepted [!decision-candidate] blocks from a produced doc into the living doc they legalize into, then re-starting that doc's review at the writer round — playbook Chapter 14. The expert-side prohibition on writing into a sibling doc stays absolute for every expert."
 ---
 # spec.coordinator

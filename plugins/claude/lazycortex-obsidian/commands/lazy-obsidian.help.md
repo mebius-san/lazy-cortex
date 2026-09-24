@@ -1,7 +1,6 @@
 ---
 description: "Run when the operator asks what lazycortex-obsidian can do to this repo's vault, or which verb handles folder icons, tag pages, or a community plugin — lists the vault surface: install, single-plugin update, the iconize install / config / sync trio, the semantic audit, and the tag-page generator agent."
 execution-discipline-waiver: "help command — static text, no multi-step logic"
-logging-waiver: "static text — no executable steps"
 ---
 Output the block below verbatim to the user. Do not summarize, rephrase, or add commentary. Do not invoke any tools. Do not log this run.
 

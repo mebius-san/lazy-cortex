@@ -17,7 +17,7 @@ This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 3 — Stale-canonical age check`
    - `Step 4 — Rename-candidate review`
    - `Step 5 — Pattern-clustered orphan review`
-   - `Step 6 — Waivered-bucket review`
+   - `Step 6 — Unlogged-bucket review`
    - `Step 7 — Other orphan review`
    - `Step 8 — Distill execution`
    - `Step 9 — Apply deletions`
@@ -40,7 +40,7 @@ Run the helper script and parse its JSON output:
 "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-log.clean/scripts/resolve-canonical.py"
 ```
 
-The script returns `{ "canonical": [...], "by_kind": {...}, "sources": {...} }`. Read the `canonical` array into a set called `CANONICAL`.
+The script returns `{ "canonical": [...], "by_kind": {...}, "logged": [...], "sources": {...} }`. Read the `canonical` array into a set called `CANONICAL` and the `logged` array — the artifacts whose frontmatter declares `logging: true` — into a set called `LOGGED`.
 
 Outcome line: `resolved <N> canonical names from <sources.files_scanned> files` — or `failed: <reason>` if the script errors. If `failed`, abort the skill (skip to Step 10) — without a canonical set, every folder would be flagged as orphan.
 
@@ -56,15 +56,15 @@ Classify each folder into exactly one bucket:
 
 | Bucket | Definition |
 |---|---|
-| `waivered` | `name` is a key in `waivered` (from Step 1's JSON). |
-| `canonical` | `name` is in `CANONICAL` and NOT in `waivered`. |
+| `unlogged` | `name` is in `CANONICAL` and NOT in `LOGGED` — the artifact exists but no longer writes a log, so every file here is residue. |
+| `canonical` | `name` is in `LOGGED`. |
 | `orphan-rename-candidate` | not in `CANONICAL`; `difflib.SequenceMatcher(None, name, c).ratio() ≥ 0.8` for some `c` in `CANONICAL`. Pair with the highest-ratio match. |
 | `orphan-pattern` | not in `CANONICAL`; matches one of: `^task-\d+$`, `^subagent-task-\d+$`, `^subagent-audit-fixup$`, `^plan-execute$`, `^plan-execute-\d+$` |
 | `orphan-other` | none of the above |
 
-Use a one-shot Python invocation (via `Bash(python3 *)`) to do the enumeration and classification — pass both `CANONICAL` and the `waivered` keys as JSON on stdin so a name appearing in both routes to the `waivered` bucket first. Capture the five bucket lists as in-memory state.
+Use a one-shot Python invocation (via `Bash(python3 *)`) to do the enumeration and classification — pass both `CANONICAL` and `LOGGED` as JSON on stdin so a canonical name missing from `LOGGED` routes to the `unlogged` bucket. Capture the five bucket lists as in-memory state.
 
-Outcome line: `enumerated <total>: waivered=<w>, canonical=<a>, rename=<b>, pattern=<c>, other=<d>`.
+Outcome line: `enumerated <total>: unlogged=<u>, canonical=<a>, rename=<b>, pattern=<c>, other=<d>`.
 
 ## Step 3: Stale-canonical age check
 
@@ -131,26 +131,26 @@ AskUserQuestion: header "Orphan cluster", question "<count> log folders under ./
 
 Append to intent lists. Outcome line: `cluster-decided <cluster_count>` or `no-pattern-orphans`.
 
-## Step 6: Waivered-bucket review
+## Step 6: Unlogged-bucket review
 
-For each folder in the `waivered` bucket, print the context block, then issue **one** `AskUserQuestion`; each iteration fills the block from that folder:
+For each folder in the `unlogged` bucket, print the context block, then issue **one** `AskUserQuestion`; each iteration fills the block from that folder:
 
 ```
 Context (print before asking):
-- Where: /lazy-log.clean · Step 6 — Waivered-bucket review; target ./.logs/claude/<name>/
-- Found: `<name>` maps to a live artifact carrying `logging-waiver: "<reason>"` (from Step 1's JSON); <file_count> logs, <oldest> → <newest>; `## Result` preview of up to three logs: <one line each, or none>
-- Why asking: the artifact still exists and only its logging was switched off — the logs are residue, but deletion is irreversible
-- Answers: `delete` — deleted in Step 9; `distill-then-delete` — distilled in Step 8, deleted in Step 9; `leave` — untouched, re-asked on the next run; `delete-all-waivered` — (first prompt only) every remaining waivered folder scheduled for deletion, no further Step 6 prompts
-AskUserQuestion: header "Waivered logs", question "Log folder ./.logs/claude/<name>/ belongs to an artifact whose logging is waived (\"<reason>\") — delete, distill then delete, leave, or delete every waivered folder?", options with descriptions.
+- Where: /lazy-log.clean · Step 6 — Unlogged-bucket review; target ./.logs/claude/<name>/
+- Found: `<name>` maps to a live artifact whose frontmatter declares no `logging: true` (from Step 1's JSON); <file_count> logs, <oldest> → <newest>; `## Result` preview of up to three logs: <one line each, or none>
+- Why asking: the artifact still exists but nothing writes here any more — the logs are residue, but deletion is irreversible
+- Answers: `delete` — deleted in Step 9; `distill-then-delete` — distilled in Step 8, deleted in Step 9; `leave` — untouched, re-asked on the next run; `delete-all-unlogged` — (first prompt only) every remaining unlogged folder scheduled for deletion, no further Step 6 prompts
+AskUserQuestion: header "Unlogged logs", question "Log folder ./.logs/claude/<name>/ belongs to an artifact that no longer logs — delete, distill then delete, leave, or delete every unlogged folder?", options with descriptions.
 ```
 
 - options, each with a `description` restating its Answers line:
   - `delete` (Recommended) — schedule for deletion in Step 9
   - `distill-then-delete` — distill in Step 8, delete in Step 9
   - `leave` — no action
-  - `delete-all-waivered` — first-prompt-only escape; schedule every remaining `waivered` folder for deletion
+  - `delete-all-unlogged` — first-prompt-only escape; schedule every remaining `unlogged` folder for deletion
 
-Append to intent lists. Outcome line: `waivered-decided <count>` or `no-waivered`.
+Append to intent lists. Outcome line: `unlogged-decided <count>` or `no-unlogged`.
 
 ## Step 7: Other orphan review
 
@@ -159,7 +159,7 @@ For each folder in the `orphan-other` bucket (including any "per-folder" fall-th
 ```
 Context (print before asking):
 - Where: /lazy-log.clean · Step 7 — Other orphan review; target ./.logs/claude/<name>/
-- Found: `<name>` matches no canonical name, no waiver, no known pattern; <file_count> logs, <oldest> → <newest>; `## Result` preview of up to three logs: <one line each, or none>
+- Found: `<name>` matches no canonical name and no known pattern; <file_count> logs, <oldest> → <newest>; `## Result` preview of up to three logs: <one line each, or none>
 - Why asking: the folder may be a retired artifact worth distilling or plain noise — only the operator knows
 - Answers: `distill-then-delete` — distilled in Step 8, deleted in Step 9; `delete` — deleted in Step 9; `leave` — untouched, re-asked on the next run
 AskUserQuestion: header "Orphan logs", question "Log folder ./.logs/claude/<name>/ matches no live skill, agent, or command — distill then delete, delete, or leave it?", options with descriptions.
@@ -214,7 +214,7 @@ Render exactly one line per Step 1–9, in order, using the outcome strings coll
 
 ```
 | Bucket | Before | Kept | Merged | Deleted | Distilled |
-| waivered               |  N |  N |  – |  N |  N |
+| unlogged               |  N |  N |  – |  N |  N |
 | canonical              |  N |  N |  – |  N |  N |
 | orphan-rename-candidate|  N |  N |  N |  N |  N |
 | orphan-pattern         |  N |  N |  – |  N |  N |
@@ -222,12 +222,3 @@ Render exactly one line per Step 1–9, in order, using the outcome strings coll
 ```
 
 A missing per-step line is a bug. Do not render the report with gaps.
-
-### Log the run
-
-Per the `lazy-log.logging` rule:
-
-1. `Bash(mkdir -p .logs/claude/lazy-log.clean)`
-2. `Write` to `./.logs/claude/lazy-log.clean/<UTC-timestamp>.md` with the required frontmatter (`git_sha`, `git_branch`, `date`, `input`) and the report body.
-
-Outcome line: `reported`.

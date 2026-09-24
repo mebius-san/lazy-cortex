@@ -13,7 +13,7 @@ Note: `_local` is just another top-level key to the `"${LAZYCORTEX_PYTHON:-pytho
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 6 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Resolve inputs and registry path`
@@ -22,7 +22,6 @@ This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 4 — Execute add or remove`
    - `Step 5 — Validate registry`
    - `Step 6 — Report`
-   - `Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". No-ops count only if they emit an explicit outcome (`skipped-per-user-choice`, `absent`, `unchanged`, …).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -298,33 +297,3 @@ Template file state is one of: `created`, `kept`, `overwritten`, `deleted`, `abs
 - **`scaffold-local: entry … not found in the _local registry map`** — attempting to remove an entry that is not registered → check the entry name with `scaffold list --registry <regPath>`.
 - **`scaffold upsert` / `scaffold remove` returns `error`** — the core CLI rejected the operation → inspect the full error output, fix the input, then re-run.
 - **`scaffold validate` returns FAIL-level findings** — the registry has structural errors after the upsert → inspect the validation output and edit `.claude/rules/lazy-core.scaffold.md` directly to resolve, then validate again.
-
-## Logging
-
-Log each run to `./.logs/claude/lazy-core.scaffold-local/YYYY-MM-DD_HH-MM-SS.md`.
-
-Timestamp: `date -u +%Y-%m-%d_%H-%M-%S`.
-
-Use two separate steps:
-
-```
-Bash(mkdir -p ./.logs/claude/lazy-core.scaffold-local)
-```
-
-Then `Write` the log file with this structure:
-
-```markdown
----
-git_sha: <git rev-parse HEAD>
-git_branch: <git rev-parse --abbrev-ref HEAD>
-date: <YYYY-MM-DD HH:MM:SS UTC>
-input: "mode=<add|remove> group=<group> kind=<kind>"
----
-# lazy-core.scaffold-local
-
-## Actions
-- <bullet per action, file modified, or decision>
-
-## Result
-<success/failure + one-line summary>
-```

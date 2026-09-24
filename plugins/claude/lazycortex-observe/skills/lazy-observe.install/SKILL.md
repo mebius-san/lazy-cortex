@@ -293,10 +293,6 @@ Render a markdown report. Severity: `PASS` / `WARN` / `FAIL`. One line per Step 
 
 Outcome: `reported`.
 
-## Logging
-
-Per the project's `lazy-log.logging` rule, log this run to `./.logs/claude/lazy-observe.install/<UTC timestamp>.md`. Frontmatter: `git_sha`, `git_branch`, `date`, `input`. Body: `## Actions` (one bullet per Step) and `## Result` (PASS/WARN/FAIL summary). Use `Bash(mkdir -p ...)` then `Write` — never chain.
-
 ## Failure modes
 
 - **`/lazy-observe.install` reports `skipped-no-grafana`** — the probe found no Grafana provisioning directory on this host → cause: Grafana is not installed here, is not running, or keeps its provisioning tree outside the probed locations → fix: record the absolute dashboards directory as `grafana_dashboards_dir` in `${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.toml` and re-run. A host that renders dashboards in a remote Grafana needs no fix — the skip is correct there.

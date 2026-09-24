@@ -9,8 +9,8 @@ source_skills:
   - lazy-wiki.relink
   - lazy-wiki.curator
   - lazy-wiki.tag-curator
-source_sha: 54cf10bd426bde9d8b4fa93a26835bc6393ced58
-surface_sha: 0e4166f55159b4b1de90f9ce765a9c136a6f83d02d5d890b3e546430bf9a3b9b
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: 2b70616af3b30fbd4f6c16f2d72978bc3c60346af2222899078f4c728ff2bf1f
 ---
 # Curation
 

@@ -2,7 +2,6 @@
 name: lazy-core.git-status
 description: "Run when a git command was refused because another Claude session is staging, or the operator asks who holds the git staging lock and whether it can be broken. Read-only — `/lazy-core.git-unlock` is the one that breaks it."
 allowed-tools: 'Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(git rev-parse *), Bash(mkdir -p *), Bash(date -u *), Read, Write, Agent'
-logging-waiver: "read-only status query — single read, no mutation, no decision"
 ---
 
 # /lazy-core.git-status
@@ -13,12 +12,11 @@ This skill never mutates the lock. For manual breakage see `/lazy-core.git-unloc
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 3 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 2 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Resolve repo root`
    - `Step 2 — Run the inspect helper`
-   - `Step 3 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". No-ops count only if they emit an explicit outcome (`asserted`, `unchanged`, `skipped-per-user-choice`, …).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -46,19 +44,6 @@ Run the lock report:
 It prints one of: `Lock: N/A (git guard disabled for this repo)`; `Lock: N/A (pathspec mode — the guard never opens a staging window)` plus a hint line; `Lock: NONE (no staging in progress)`; or, for a held lock, the multi-line report — `Lock: HELD by session <id> (PID <pid>)`, `Branch:`, `Held for:`, `Index touched:`, `Liveness:` (PID alive, this/other host), `Breakable:` (`YES (<reason>)` / `NO (within thresholds)`), `Owner:` (`this session` / `peer`).
 
 **Outcome: `inspected`, `no-lock-in-play` (pathspec row), or `guard-disabled`.**
-
-## Step 3 — Log the run
-
-Per `.claude/rules/lazy-log.logging.md`. Use `mkdir -p` then `Write`, never chained with `&&`.
-
-```bash
-mkdir -p .logs/claude/lazy-core.git-status
-date -u +%Y-%m-%d_%H-%M-%S
-```
-
-Use the timestamp to write `.logs/claude/lazy-core.git-status/<ts>.md` with the standard frontmatter (`git_sha`, `git_branch`, `date`, `input: none`) and the captured output in the body.
-
-**Outcome: `logged`.**
 
 ## Report
 

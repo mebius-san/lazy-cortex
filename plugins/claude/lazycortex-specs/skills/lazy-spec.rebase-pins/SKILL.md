@@ -11,7 +11,7 @@ Pin reconciliation, the five flat gates, and source URLs are owned by `${CLAUDE_
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Discover repo records`
@@ -21,7 +21,6 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 5 — Report`
    - `Step 6 — Propose spec_released for affected assets`
    - `Step 7 — Verify`
-   - `Step 8 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -136,14 +135,6 @@ Re-check the rewritten files for any surviving source URL whose prefix matches t
 - **Deleted = merged** — once a branch is gone locally and remotely (after `fetch --prune`), its pins are rewritten to the default.
 - **Squash-merges**: the `merge-base --is-ancestor` check returns false because the squashed commit is not an ancestor of the source branch tip. Use `lazy-spec.rebase-pins <branch> --force-merged` for a one-shot, or delete the squashed branch and let the "deleted = merged" rule pick it up.
 - **Idempotent** — re-running on an already-finalized branch is a no-op; the rebase finds no matching pins and `flip_gate` leaves an already-`true` `spec_released` untouched (a re-proposal is declined or the gate is already set).
-
-## Log the run
-
-Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/lazy-spec.rebase-pins/YYYY-MM-DD_HH-MM-SS.md`. Create the dir with `Bash(mkdir -p ./.logs/claude/lazy-spec.rebase-pins)`, then `Write` the file — never chain. Frontmatter: `git_sha`, `git_branch`, `date` (UTC), `input`. Body: `# lazy-spec.rebase-pins` heading, then `## Actions` and `## Result`. The `## Actions` list MUST record one line per task in the canonical list. Record:
-
-- Invocation mode (`<branch>`, `--merged`, with or without `--force-merged`).
-- Files rewritten, skipped (with reason), and any fetch failures.
-- `spec_released` flips proposed / applied / refused.
 
 ## Key Rules
 

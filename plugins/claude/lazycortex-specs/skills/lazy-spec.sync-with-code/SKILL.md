@@ -18,7 +18,7 @@ Product config, the five flat gates, per-file stages, source URLs, and pin recon
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 11 ordered steps. The diagram seam set is **runtime-computed** — it depends on which sections were actually rewritten in Step 4 — so the preamble ledger contains one meta-step (`Step 4a — Compute runtime seam list`) that fans out into one dynamic task per discovered seam (`diagram <file>:<anchor>:<kind>` × N) before Step 5 begins. In **asset mode** (Step 0 resolves `mode = asset`), most of these 11 steps are `skipped-per-mode` — see each step's own **Asset mode:** note and Step 5's **Asset mode — anchor reconciliation** subsection. The executing agent MUST NOT skip, merge, reorder, or silently omit any step — including a mode-skip, which still needs its own explicit outcome, not a silent absence.
+This skill has 10 ordered steps. The diagram seam set is **runtime-computed** — it depends on which sections were actually rewritten in Step 4 — so the preamble ledger contains one meta-step (`Step 4a — Compute runtime seam list`) that fans out into one dynamic task per discovered seam (`diagram <file>:<anchor>:<kind>` × N) before Step 5 begins. In **asset mode** (Step 0 resolves `mode = asset`), most of these 11 steps are `skipped-per-mode` — see each step's own **Asset mode:** note and Step 5's **Asset mode — anchor reconciliation** subsection. The executing agent MUST NOT skip, merge, reorder, or silently omit any step — including a mode-skip, which still needs its own explicit outcome, not a silent absence.
 
 1. **Before calling any other tool**, write out the step ledger — one line per static step below, each marked `pending`. Use these canonical titles verbatim:
    - `Step 0 — Resolve the product`
@@ -34,7 +34,6 @@ This skill has 11 ordered steps. The diagram seam set is **runtime-computed** �
    - `Step 6 — Update state`
    - `Step 7 — Run doctor`
    - `Step 8 — Verify`
-   - `Step 9 — Log the run`
 
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". For dynamically-created `Step 4b` child tasks, the outcome word IS the `lazycortex-diagram:lazy-diagram.draw` return value (`created` | `replaced` | `unchanged` | `skipped-below-threshold` | `failed:<reason>` | `split-into-N`). When Step 4 rewrites zero sections (no commits touched documented prose), `Step 4a` produces the empty list and `Step 4b` records outcome `no-seams-this-run` — the task list still resolves cleanly.
 
@@ -301,10 +300,6 @@ The seam-kind map in Step 4a is owned by the parallel definitions in `lazy-spec.
 - **`/lazy-spec.sync-with-code <asset>` refuses naming a bug asset** — asset mode only reconciles `design.md` / `architecture.md`, and a bug folder ships neither → use product mode's per-asset gate proposals for a bug instead (Step 5, product mode).
 - **`/lazy-spec.sync-with-code <asset>` reports `no-design-doc`** — the asset has no `design.md` yet (e.g. still `--empty`-scaffolded) → author and approve `design.md` first, or re-invoke in product mode instead.
 - **Asset mode reports `no-anchors` on every run** — the asset has no `code-plan.md` / `test-plan.md` (source-links), no `wiki.domains` configured (domain-groups), and no `docs/structure.md` (structure) → this is a valid, not a failed, outcome; the doc still gets `lazy-spec.audit`'s structural pass in Step 7. Configure `wiki.domains` / run `/lazy-wiki.structure rebuild` to sharpen future runs, or author a `code-plan.md` for precise source-links.
-
-## Log the run
-
-Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/lazy-spec.sync-with-code/YYYY-MM-DD_HH-MM-SS.md`. Create the dir with `Bash(mkdir -p ./.logs/claude/lazy-spec.sync-with-code)`, then `Write` the file — never chain. Frontmatter: `git_sha`, `git_branch`, `date` (UTC), `input`. Body: `# lazy-spec.sync-with-code` heading, then `## Actions` and `## Result`. The `## Actions` list MUST record one line per task in the preamble's canonical list AND one line per dynamically-created `Step 4b` child task with its outcome word — a missing line is a bug. **Asset mode:** the same rule applies with the mode's own outcome vocabulary — one line per `skipped-per-mode` step, plus one line per anchor finding from Step 5's Asset mode subsection (`attention-written` | `change-proposed` | `gate-proposed` | `no-finding` | `no-anchors`).
 
 ## Asset-mode triggers
 

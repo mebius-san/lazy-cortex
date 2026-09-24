@@ -1,7 +1,6 @@
 ---
 description: "Run when the operator asks what lazycortex-observe can do or how lazycortex runtime metrics get off this host into their dashboards — lists the metrics-shipper surface: install / audit / uninstall for the Grafana Alloy or OpenTelemetry agent that remote-writes to a Prometheus-compatible observer."
 execution-discipline-waiver: "help command — static text, no multi-step logic"
-logging-waiver: "static text — no executable steps"
 ---
 Output the block below verbatim to the user. Do not summarize, rephrase, or add commentary. Do not invoke any tools. Do not log this run.
 

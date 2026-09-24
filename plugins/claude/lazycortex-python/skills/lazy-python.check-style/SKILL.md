@@ -10,7 +10,7 @@ Deep style + docstring review for modified Python files in the current change se
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 6 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Read guidelines`
@@ -19,7 +19,6 @@ This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 4 — Automated checks`
    - `Step 5 — Fix remaining issues`
    - `Step 6 — Re-verify`
-   - `Step 7 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a one-word outcome for it". A no-op step counts only if it emits an explicit outcome (`manual-clean`, `chk-clean`, `no-fixes-needed`, …).
 3. **Do not reach the Report step until the ledger shows every prior task `completed`.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -119,17 +118,6 @@ Confirm the fixes landed cleanly:
 If any check still reports violations, do not loop back to Step 5 silently — escalate to the user with the remaining issue list and ask how to proceed.
 
 Outcome: `verified-clean` or `<N>-issues-remain`.
-
-## Step 7 — Log the run
-
-Write a run log per `lazy-log.logging`:
-
-- Path: `./.logs/claude/lazy-python.check-style/YYYY-MM-DD_HH-MM-SS.md` (timestamp via `date -u +%Y-%m-%d_%H-%M-%S`).
-- Steps: `Bash(mkdir -p ./.logs/claude/lazy-python.check-style)` then a single `Write` to the file — never chain with `&&`.
-- Frontmatter: `git_sha`, `git_branch`, `date` (`YYYY-MM-DD HH:MM:SS UTC`), `input` (file list or `none`).
-- Body: `# lazy-python.check-style` heading; `## Actions` with one bullet per step + its outcome word; `## Result` with the final state (`verified-clean` / `<N>-issues-remain` / `no-files-changed`).
-
-Outcome: `logged`.
 
 ## Report
 

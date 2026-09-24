@@ -10,14 +10,13 @@ One file per repository, `docs/structure.md` — a compact map of what lives whe
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 5 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 4 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 1 — Load structure config`
    - `Phase 2 — Resolve mode and target`
    - `Phase 3 — Rebuild the map`
    - `Phase 4 — Answer a query`
-   - `Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means the step's logic ran AND an outcome word was produced. The phase that does not match the resolved mode is marked `skipped` with outcome `skipped-per-mode` — not left `pending`.
 3. **Do not reach the Log step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.**
 4. **The Log step is a structural verifier.** Its output MUST contain one line per task above.
@@ -78,33 +77,6 @@ Non-empty `<path>` → escape it for `Grep` (`[ ] ( ) { } * + ? | ^ $ \ .` each 
 Return only the matched slice to the caller. Never paste the full `docs/structure.md` into the response or into this session's context.
 
 Outcome: `answered: <path-or-top-level>` or `no-match` or `no-map`.
-
-## Logging
-
-Write a run log to `./.logs/claude/lazy-wiki.structure/` per `lazy-log.logging`.
-
-1. `Bash(mkdir -p ./.logs/claude/lazy-wiki.structure)`
-2. Capture `git_sha` via `Bash(git rev-parse HEAD)` and `git_branch` via `Bash(git rev-parse --abbrev-ref HEAD)`; use `no-git` if either fails.
-3. `Bash(date -u +%Y-%m-%d_%H-%M-%S)` → timestamp for the filename.
-4. `Write` the log to `./.logs/claude/lazy-wiki.structure/<timestamp>.md` with frontmatter:
-
-```
----
-git_sha: <sha>
-git_branch: <branch>
-date: <YYYY-MM-DD HH:MM:SS UTC>
-input: "<mode> <path-or-blank>"
----
-# lazy-wiki.structure
-
-## Actions
-- <one line per Phase/step above with its outcome word>
-
-## Result
-<success/failure + one-sentence summary>
-```
-
-Outcome: `logged`.
 
 ## Report
 

@@ -10,8 +10,8 @@ source_skills:
   - lazy-memory.index
   - lazy-memory.reflect
   - lazy-memory.mark-persona
-source_sha: 54cf10bd426bde9d8b4fa93a26835bc6393ced58
-surface_sha: f9c20477494f065ed08c730ee6a217797a0940654eb412dbc08ea13ac7b72491
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: d149748336cffaf2d040561f93031a566dcd00091738df19767e8d50a785a8c8
 ---
 # Expert memory — notes that survive runs
 

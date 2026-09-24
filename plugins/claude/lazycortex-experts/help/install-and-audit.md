@@ -6,8 +6,8 @@ no_diagram: true
 source_skills:
   - lazy-experts.install
   - lazy-experts.audit
-source_sha: 54cf10bd426bde9d8b4fa93a26835bc6393ced58
-surface_sha: d14d23a73abb2d67a8e0a01681d7f9e6d0074ad11ca71dc7e846c54817c348de
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: 8f4195ae0b3f1694cc1cca57a55718324165134dce07f89bb3c0cfe1c7161392
 ---
 # Installing and auditing lazycortex-experts
 
@@ -91,7 +91,7 @@ On a re-run against a project that already has domain-class expert entries, the 
 
 **Checking system-expert completeness.** Separately from the classes you compose yourself, several sibling plugins register their own "system experts" the same way — each plugin declares the expert keys its own install skill seeds in a `provides_experts` array in its `.claude-plugin/plugin.json`, and `/lazy-experts.install` reads that array from every installed plugin's manifest at run time rather than from a hardcoded list, so a plugin update that adds a new system expert is picked up without this skill needing an edit. As shipped today, `lazycortex-core` declares `runtime.doctor` and `core.autocheckup`, `lazycortex-review` declares `review.coordinator` and `review.doc_doctor`, `lazycortex-specs` declares `spec.coordinator` and `spec.catalog-coordinator`, and `lazycortex-wiki` declares `wiki.curator`, `wiki.terms-curator`, `wiki.structure-curator`, `wiki.tag-curator`, and `wiki.domain-writer`. `/lazy-experts.install` never seeds any of these itself (the owning plugin's own install is the sole writer), but for every one of those plugins that's enabled in your project, it checks whether each declared key is present and reports any that are missing, pointing you at that plugin's own install skill to fill the gap.
 
-After both seeding passes, the skill reads the file back to confirm every entry is present and parseable. For each seeded expert it also verifies the `agent` ref resolves to an actual agent file in the plugin cache — catching a stale or mistyped agent reference before you ever dispatch a job against it — then logs the run.
+After both seeding passes, the skill reads the file back to confirm every entry is present and parseable. For each seeded expert it also verifies the `agent` ref resolves to an actual agent file in the plugin cache — catching a stale or mistyped agent reference before you ever dispatch a job against it.
 
 **Checking it afterwards.** `/lazy-experts.audit` is the read-only counterpart — it never seeds, edits, or removes anything in `lazy.settings.json`, it only reports. Run it any time you want to confirm your composition is still sound, whether or not you've made hand edits since the last install. It runs two passes:
 

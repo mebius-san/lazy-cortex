@@ -7,18 +7,17 @@ allowed-tools: Read, Glob, Grep, Write, Bash(python3 *), Bash("${LAZYCORTEX_PYTH
 
 Verify that what `/lazy-experts.install` promised is still true: the class map's roles all resolve to shipped agent files, the aspect references the map assigns all exist, and every seeded `experts` entry still points at an agent and a set of aspects this plugin actually ships. Read-only — it collects findings and names the fix per finding; it never edits `lazy.settings.json`, never seeds an entry, and never asks a question.
 
-This skill follows the shared audit form in `plugins/claude/lazycortex-core/references/lazy-core.audit-contract.md` — `references/lazy-core.audit-contract.md` inside the installed `lazycortex-core`: read-only, the four severity words `PASS` / `INFO` / `WARN` / `FAIL` and no others, the repair route standing in the finding line itself, and no estimate of what a repair would save. The one file it writes is its own run log under `./.logs/claude/lazy-experts.audit/`, which `lazy-log.logging` mandates for every run.
+This skill follows the shared audit form in `plugins/claude/lazycortex-core/references/lazy-core.audit-contract.md` — `references/lazy-core.audit-contract.md` inside the installed `lazycortex-core`: read-only, the four severity words `PASS` / `INFO` / `WARN` / `FAIL` and no others, the repair route standing in the finding line itself, and no estimate of what a repair would save. It writes nothing at all — its report is its return value.
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 6 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 5 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 1 — Resolve plugin root and settings`
    - `Phase 2 — Shipped surface`
    - `Phase 3 — Seeded expert entries`
    - `Phase 4 — Render report`
-   - `Phase 5 — Log the run`
    - `Report`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". Each check inside a phase ends with one of `PASS` / `WARN` / `FAIL` / `INFO`.
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
@@ -83,14 +82,6 @@ Print one bullet per finding grouped by severity, `FAIL` first, then `WARN`, the
 Nothing is written to `lazy.settings.json` in this phase or any other.
 
 Outcome: `rendered`.
-
-## Phase 5 — Log the run
-
-Log to `./.logs/claude/lazy-experts.audit/YYYY-MM-DD_HH-MM-SS.md` per `lazy-log.logging`. Required frontmatter: `git_sha`, `git_branch`, `date` (UTC), `input`.
-
-Use two separate steps: `Bash(mkdir -p ./.logs/claude/lazy-experts.audit)` then the `Write` tool. Never chain.
-
-Outcome: `logged: <path>`.
 
 ## Report
 

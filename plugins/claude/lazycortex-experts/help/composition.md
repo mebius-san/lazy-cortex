@@ -5,8 +5,8 @@ last_regen: 2026-09-24
 no_diagram: true
 source_skills:
   - lazy-experts.install
-source_sha: 54cf10bd426bde9d8b4fa93a26835bc6393ced58
-surface_sha: d128d1a4b2cd7f992212a16c9d3c1274445683e9e8db0b7ddc0276f01e83e3e3
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: 4349601d2ec08e62db02a302a8c06b2f435b4b55246a91a57c1d724c4632e4bd
 ---
 # Assembling a specialist from agents and aspects
 

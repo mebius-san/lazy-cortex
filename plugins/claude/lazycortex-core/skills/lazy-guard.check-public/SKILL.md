@@ -13,7 +13,7 @@ Read `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md` before dispat
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 6 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 5 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 1 — Prepare`
@@ -21,7 +21,6 @@ This skill has 6 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Phase 3 — Collect, dedupe, apply waivers`
    - `Phase 4 — Report`
    - `Phase 5 — Fix`
-   - `Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -222,32 +221,3 @@ Show for approval, then append to `.guard-public.json` (create file if needed).
 
 After all fixes: re-run the scan (re-dispatch the four agents) to show updated summary.
 
-## Logging
-
-Log to `./.logs/claude/lazy-guard.check-public/YYYY-MM-DD_HH-MM-SS.md`. Use `Bash(mkdir -p ...)` then `Write` tool (never chain).
-
-Log format:
-```markdown
-# lazy-guard.check-public
-
-**Date**: YYYY-MM-DD HH:MM:SS UTC
-**Input**: <repo path or "current repo">
-
-## Actions
-
-- Scanned N files (skipped M encrypted, K excluded)
-- Loaded W waivers
-- Found: X FAIL, Y WARN, Z INFO, W WAIVED
-
-## Findings
-
-<full findings list including WAIVED items>
-
-## Fixes Applied
-
-<list of fixes applied, or "none">
-
-## Result
-
-<success/failure, summary>
-```

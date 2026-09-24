@@ -12,7 +12,6 @@ A single, idempotent operation that takes a document out of the review loop. The
 
 1. **Resolve the file** — argument is the markdown path.
 2. **Apply + commit** — `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/stop.py" <file>`. Single subprocess, leaves the working tree clean.
-3. **Run-log** — `./.logs/claude/lazy-review.stop/<UTC ts>.md`.
 
 ## Report
 

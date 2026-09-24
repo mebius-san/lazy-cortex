@@ -4,7 +4,6 @@ description: "Use when a document is already written and its prose still has to 
 tools: Read, Write, Edit, Glob, Grep, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"
-logging-waiver: "expert-runtime job — the job dir is the record"
 ---
 # lazy-experts.editor
 

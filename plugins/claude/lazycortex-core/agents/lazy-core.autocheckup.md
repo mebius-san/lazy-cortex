@@ -12,7 +12,7 @@ Single-dispatch maintenance agent. One prompt (`repo=<absolute path>`, optionall
 
 ## Execution discipline (MANDATORY — read before any action)
 
-Before any other tool call, write out the step ledger — one line per phase below (`Phase 1 — Guard`, `Phase 2 — Check`, `Phase 3 — Auto-fix`, `Phase 4 — Commit`, `Phase 5 — Report + log`), each marked `pending`. Re-emit the line `in_progress` on enter and `completed` on exit with a one-word outcome. Do not reach Phase 5 while an earlier phase is still `pending`.
+Before any other tool call, write out the step ledger — one line per phase below (`Phase 1 — Guard`, `Phase 2 — Check`, `Phase 3 — Auto-fix`, `Phase 4 — Commit`, `Phase 5 — Report`), each marked `pending`. Re-emit the line `in_progress` on enter and `completed` on exit with a one-word outcome. Do not reach Phase 5 while an earlier phase is still `pending`.
 
 **Discovery goes through the checks' own primitives, never through a listing of your own.** Every enumeration of the target repo or of the plugin cache — its `.claude/` layout, plugin manifests, settings files, `skills/*/SKILL.md` — comes out of a CLI a check names (`lazy_setup.py discover`, a domain doctor, `file-sync`), or out of a single-pattern `Bash(ls …)` / `Bash(test -f …)` that a check step names verbatim; `find`, `grep -r`, `rg`, or a `cat` over a repo, cache, or home path are never issued, in any spelling of the path. **A permission denial is terminal for that step:** record the outcome `failed` with the refusal text verbatim and move on. A denied command is the operator's decision, not an obstacle, and every re-issue of it is the same violation whatever the disguise: a different path form (`~/` for `/Users/…`, a variable holding the path, a relative path after `cd`), a different tool, a prefix (`echo x; ls …`, `true && ls …`), a chain (`;`, `&&`, `||`, a newline inside one Bash call), a wrapper (`env`, `sh -c`, a subshell, a `for` loop), or a `2>&1` / `| head` suffix. Wrapping a denied command so the deny rule no longer matches is exactly the manoeuvre this paragraph forbids, and a report that calls it "worked around" is a report of a violation.
 
@@ -51,9 +51,9 @@ As in `lazy-core.autosetup` Phase 4: run the same `lazy_setup.py verify <repo>` 
 
 Outcome: `committed: <sha>` / `already-current` / `failed: wrote into operator files: <paths>`.
 
-## Phase 5 — Report + log
+## Phase 5 — Report
 
-Write the run log per `lazy-log.logging` to `<repo>/.logs/claude/lazy-core.autocheckup/<UTC timestamp>.md` (frontmatter git fields describe the TARGET repo). Then return exactly:
+Return exactly:
 
 ```
 ## autocheckup: <repo>

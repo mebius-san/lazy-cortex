@@ -4,7 +4,6 @@ description: "Use when a research asset's approved research design (`design.md` 
 tools: Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"
-logging-waiver: "expert-runtime job — the job dir is the record"
 ---
 # lazy-experts.researcher
 

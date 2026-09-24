@@ -16,7 +16,6 @@ Re-running on an already-opted-in document is a no-op (no commit, exit 0).
 
 1. **Resolve the file** — argument is the markdown path.
 2. **Apply + commit** — `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/start.py" <file> [--expert <name>]`. The bin script does the frontmatter edit + banner insertion + `git add` + `git commit` in one subprocess, leaving the working tree clean.
-3. **Run-log** — `./.logs/claude/lazy-review.start/<UTC ts>.md`.
 
 ## Report
 

@@ -17,7 +17,7 @@ Read `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md` before dispat
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 0 — Mode detection`
@@ -29,7 +29,6 @@ This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Phase 2.7 — Waiver reconciliation`
    - `Phase 3 — Delegated audits`
    - `Phase 4 — Present + fix + waive (Report)`
-   - `Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -793,16 +792,3 @@ On confirmation, resolve the backend via the Phase 2.7a priority ladder using th
 - **Fix L3 "unregister_routine" raises "settings file not writable"** — `.claude/lazy.settings.json` is read-only or the process lacks write permission → fix file permissions, then re-run `/lazy-core.doctor`.
 - **Fix L3 offered but routine reappears on next doctor run** — the settings write completed but the installed plugin's default-routines bootstrap re-added the entry. Re-run `/lazy-core.install` with the `skip expert-pump routine` option, or add the routine to a local exclusion list in `lazy.settings.json`.
 - **Phase 3 § 11f skipped unexpectedly** — neither a non-empty `experts` section nor a non-empty `external_dirs.paths` list was found in `lazy.settings.json`. If expert runtime is configured but the file is in a non-standard location, run `/lazy-core.audit` directly to surface Agent D findings without the skip guard.
-
-## Logging
-
-Log to `./.logs/claude/lazy-core.doctor/YYYY-MM-DD_HH-MM-SS.md`. Use `Bash(mkdir -p ...)` then `Write` tool (never chain).
-
-The `## Actions` section must include, in addition to the usual run details:
-
-- **Resolution counts** — one line with the finding count per resolution class: `resolution: mechanical=<N>, selective=<N>, report-only=<N>`.
-- **Backend discovery** — one line per scope recording which backends were reachable (e.g. `backend discovery (project): file=ok, mcp=<discovered server name or 'none'>`).
-- **Waiver recall counts** — per backend / per scope (`recall: file=<N>, mcp=<N>`), plus an `INFO` line for any fingerprint held by both backends (`both-backends: <fingerprint> (file wins)`).
-- **Suppressed findings** — one line per finding dropped by Phase 2.7: `waived finding suppressed: <check_id> | <normalized_path>`.
-- **Newly written waivers** — one line per write: `waiver written: <check_id> | <normalized_path> → <backend>:<location>`.
-- **Waive-option downgrades** — one line per finding where every backend for the resolved scope failed and the option was gracefully downgraded to Skip: `waive unreachable: <check_id> | <normalized_path> — all backends failed, treated as skip`.

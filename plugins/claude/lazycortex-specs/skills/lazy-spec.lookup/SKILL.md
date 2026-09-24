@@ -9,13 +9,12 @@ Answers one question against the spec tree (`specs/` by default) without loading
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 4 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 3 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 1 — Resolve anchor and query`
    - `Phase 2 — Walk the spec tree`
    - `Phase 3 — Assemble matches`
-   - `Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". No-ops count only if they emit an explicit outcome (`refused: <reason>`, `assembled: 0`, …).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -78,33 +77,6 @@ Outcome: `walked: up=<n> down=<n> across=<n>`.
 4. No matches anywhere → say so plainly, naming the anchor and the query token, rather than returning an empty list silently.
 
 Outcome: `assembled: <n> matches` or `assembled: 0`.
-
-## Logging
-
-Per `.claude/rules/lazy-log.logging.md`:
-
-1. `Bash(mkdir -p ./.logs/claude/lazy-spec.lookup)`
-2. Capture `git_sha` via `Bash(git rev-parse HEAD)` and `git_branch` via `Bash(git rev-parse --abbrev-ref HEAD)`; use `no-git` if either fails.
-3. `Bash(date -u +%Y-%m-%d_%H-%M-%S)` → timestamp for the filename.
-4. `Write` the log to `./.logs/claude/lazy-spec.lookup/<timestamp>.md` with frontmatter:
-
-```
----
-git_sha: <sha>
-git_branch: <branch>
-date: <YYYY-MM-DD HH:MM:SS UTC>
-input: "<query token> [anchor]"
----
-# lazy-spec.lookup
-
-## Actions
-- <one line per Phase above with its outcome word>
-
-## Result
-<success/failure + one-sentence summary>
-```
-
-Outcome: `logged`.
 
 ## Report
 

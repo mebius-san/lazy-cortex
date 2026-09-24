@@ -4,7 +4,6 @@ description: "Dispatch when a document just changed and the scope's terms dictio
 tools: Read, Write, Edit, Glob, Grep, Bash, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response-per-kind expert — one dispatch in, one dictionary commit or one findings reply out; the terms protocol is the contract"
-logging-waiver: "single-response expert — output is result/terms.json plus the dictionary commit, or the findings reply; no session log adds anything"
 ---
 # lazy-wiki.terms-curator
 

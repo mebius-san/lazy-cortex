@@ -9,7 +9,7 @@ Recompose an existing diagram fence so it satisfies the current drawer-agent con
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Validate inputs and locate fence`
@@ -19,7 +19,6 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 5 — Dispatch drawer agent`
    - `Step 6 — Byte-compare and replace`
    - `Step 7 — Report`
-   - `Step 8 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome line for it".
 3. **Do not reach Step 7 (Report) until the ledger shows every prior task `completed`.**
 4. **The Report step is a structural verifier.** Output one line per task — gaps are a bug.
@@ -111,15 +110,6 @@ target_file=<path> anchor=<anchor> kind=<kind> format=<format> outcome=<unchange
 ```
 
 Outcome: `reported`.
-
-### Step 8: Log the run
-
-Per `./.claude/rules/lazy-log.logging.md`:
-
-1. `Bash: mkdir -p ./.logs/claude/lazy-diagram.fix`
-2. `Write: ./.logs/claude/lazy-diagram.fix/<UTC-timestamp>.md` with frontmatter and report body.
-
-Outcome: `logged`.
 
 ## Failure modes
 

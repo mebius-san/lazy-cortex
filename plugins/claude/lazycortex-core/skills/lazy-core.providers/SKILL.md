@@ -10,7 +10,7 @@ Manages the `providers` block: named LLM endpoints (base URL, token variable, fo
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Parse mode and target`
@@ -21,7 +21,6 @@ This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 6 — Validate before write`
    - `Step 7 — Write back`
    - `Step 8 — Report`
-   - `Step 9 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". Steps 3–7 that don't apply to the resolved mode are `skipped — mode is <mode>`; that counts as a valid outcome.
 3. **Do not reach Step 8 until every prior step is `completed` or explicitly `skipped` with an outcome.** A still-`pending` step is a bug — stop and execute it first.
 4. **Step 8 is a structural verifier.** Its output MUST contain one line per step above. A missing line is a bug.
@@ -166,29 +165,6 @@ Outcome: `written (<name> added|updated)`, `written (<name> removed)`, or `skipp
 ## Step 8 — Report
 
 One line per step in the canonical list, with its outcome word. For `add`/`update`/`remove` add a final summary line naming the provider and the resulting state; for `list`, the rendered table from Step 3.
-
-## Step 9 — Log the run
-
-```
-Bash(mkdir -p .logs/claude/lazy-core.providers)
-```
-
-Then `Write` to `.logs/claude/lazy-core.providers/<UTC-timestamp>.md`:
-
-```yaml
----
-git_sha: <git rev-parse HEAD>
-git_branch: <git rev-parse --abbrev-ref HEAD>
-date: <YYYY-MM-DD HH:MM:SS UTC>
-input: "<mode> <name, if any>"
----
-```
-
-`# lazy-core.providers`
-
-`## Actions` — bullet per step actually taken (parsed mode, loaded registry, validated, wrote/removed entry, ...).
-
-`## Result` `<success|failure>` — `<mode> <name>`.
 
 ## Failure modes
 

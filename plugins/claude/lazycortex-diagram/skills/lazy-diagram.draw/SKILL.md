@@ -2,6 +2,7 @@
 name: lazy-diagram.draw
 description: "Use when a NEW diagram should land under a named heading in a markdown file — an authoring skill reaching a declared draw seam, or a direct request to draw a flow / sequence / state / architecture / layout picture of something. Picks (kind, format) from the free-form request, dispatches the per-format drawer agent, and writes one fenced diagram. For re-conforming a fence that already exists, see `/lazy-diagram.fix`."
 allowed-tools: Read, Write, Edit, Bash, AskUserQuestion, Agent
+logging: true
 ---
 # lazy-diagram.draw
 

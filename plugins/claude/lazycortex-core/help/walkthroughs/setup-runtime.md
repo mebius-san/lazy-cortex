@@ -9,8 +9,8 @@ diagram_spec:
 source_skills:
   - lazy-core.install
   - lazy-runtime.recover
-source_sha: 54cf10bd426bde9d8b4fa93a26835bc6393ced58
-surface_sha: d41c3906113195c998ba85b58b6cda967c38fbaeb082cd5d2d1c9888bfb5b94e
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: 16308085e7a209f25ca0f428b59e26afcb1699269fc3360758de342cb56b835c
 ---
 # How do I bootstrap the runtime daemon and recover it if it halts?
 

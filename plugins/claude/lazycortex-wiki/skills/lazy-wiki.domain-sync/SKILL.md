@@ -13,7 +13,7 @@ Prerequisites: `/lazy-wiki.install` has run and `wiki.domains` is configured in 
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 6 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 5 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Compute the domain plan`
@@ -21,7 +21,6 @@ This skill has 6 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 3 — Remove orphaned docs`
    - `Step 4 — Rebuild the index`
    - `Step 5 — Commit touched files`
-   - `Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means the step's logic ran AND an outcome word was produced. No-ops must emit an explicit outcome (`empty-set`, `unchanged`, …).
 3. **Do not reach the Log step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug.
@@ -94,33 +93,6 @@ Bash(git commit -m "wiki(domains): sync (write N / drop M)" -- <doc-1> … <orph
 No `git add` — the pathspec carries the worktree content straight into the commit, which is what `lazy-core.git`'s pathspec discipline requires and what leaves the operator's index alone (new files were registered with `git add -N` in Step 2). Do NOT invoke any project-level pre-commit pipeline — these are generated data files, not plugin source. If nothing changed (idempotent re-run produced no byte change), report `unchanged` and do not create an empty commit.
 
 Outcome: `committed` / `unchanged`.
-
-## Logging
-
-Write a run log to `./.logs/claude/lazy-wiki.domain-sync/` per `lazy-log.logging`.
-
-1. `Bash(mkdir -p ./.logs/claude/lazy-wiki.domain-sync)`
-2. Capture `git_sha` via `Bash(git rev-parse HEAD)` and `git_branch` via `Bash(git rev-parse --abbrev-ref HEAD)`; use `no-git` if either fails.
-3. `Bash(date -u +%Y-%m-%d_%H-%M-%S)` → timestamp for the filename.
-4. `Write` the log to `./.logs/claude/lazy-wiki.domain-sync/<timestamp>.md` with frontmatter:
-
-```
----
-git_sha: <sha>
-git_branch: <branch>
-date: <YYYY-MM-DD HH:MM:SS UTC>
-input: none
----
-# lazy-wiki.domain-sync
-
-## Actions
-- <bullet per step with outcome>
-
-## Result
-<success/failure + one-sentence summary: written/dropped counts, index and commit outcomes>
-```
-
-Outcome: `logged`.
 
 ## Report
 

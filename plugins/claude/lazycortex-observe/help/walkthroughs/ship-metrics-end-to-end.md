@@ -11,8 +11,8 @@ source_skills:
   - lazy-expert.dispatch-job
   - lazy-observe.install
   - lazy-observe.audit
-source_sha: 54cf10bd426bde9d8b4fa93a26835bc6393ced58
-surface_sha: de8bd1d1fbadd74d8153581a0eabff000914366b8513c0cdfd7abfb194e6acf1
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: a3856919176e1b94d782034858d2df6e38cb634dc1da6e30a39e0dd5b2081697
 ---
 # Ship your first runtime metric to a self-hosted Prometheus stack
 
@@ -71,7 +71,7 @@ Right after the smoke test, install also looks for a Grafana provisioning direct
 
 ### Step 4 — Verify end to end
 
-Run `/lazy-observe.audit`. The skill runs through 9 ordered steps — reading its answer file, then six read-only checks (service unit loaded, agent process up, local `/metrics` reachable for every daemon on this host, agent's self-metrics show successful `remote_write`, observer URL reachable, WAL directory bounds), then logging the run and rendering the report — and reports each check as `PASS` / `INFO` / `WARN` / `FAIL` with a one-line fix on any non-`PASS` result.
+Run `/lazy-observe.audit`. The skill runs through 8 ordered steps — reading its answer file, then six read-only checks (service unit loaded, agent process up, local `/metrics` reachable for every daemon on this host, agent's self-metrics show successful `remote_write`, observer URL reachable, WAL directory bounds), then rendering the report — and reports each check as `PASS` / `INFO` / `WARN` / `FAIL` with a one-line fix on any non-`PASS` result.
 
 Expected output: all `PASS`, with `Step 5 — Agent self-metrics show successful remote_write` at `rate=N/min` (N > 0). If `Step 5` is `WARN zero-rate` your agent is up but not delivering — the audit will name the likely cause (token expired / observer unreachable / WAL recovering). `Step 7 — WAL directory bounds` may report `INFO empty` instead of `PASS` on a fresh install — nothing has accumulated in the WAL yet, and there's nothing to act on.
 

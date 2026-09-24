@@ -9,14 +9,13 @@ Opt one expert into the memory subsystem. After running this skill, the expert m
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 5 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 4 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Validate inputs`
    - `Step 2 — Read expert entry`
    - `Step 3 — Append persona aspect`
    - `Step 4 — Report`
-   - `Step 5 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.**
 3. **Do not reach the Report step until every prior task is `completed`.**
 4. **The Report step is a structural verifier.**
@@ -66,14 +65,6 @@ One line per task. Print to the caller:
 expert:        <name>
 aspects_after: <comma list>
 ```
-
-## Step 5 — Log the run
-
-```
-Bash(mkdir -p .logs/claude/lazy-memory.mark-persona)
-```
-
-Write to `.logs/claude/lazy-memory.mark-persona/<UTC-timestamp>.md` per the logging rule.
 
 ## Failure modes
 

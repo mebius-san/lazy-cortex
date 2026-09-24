@@ -55,10 +55,6 @@ For a GitLab-hosted repo, the same call would produce `https://gitlab.com/<owner
 - **Default branch, tree**: `lazy-spec.source-url("backend", "myapp/", kind="tree")` — directory references.
 - **Pinned branch**: `lazy-spec.source-url("backend", "myapp/chapter.py", branch="feat/foo")` — when a `tech` or feature `tasks` file pins a branch via `source_branches: backend: feat/foo`.
 
-## Run Log
-
-Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/lazy-spec.source-url/YYYY-MM-DD_HH-MM-SS.md` **only** when this skill is invoked as a top-level call (rare — typically used by humans debugging URL construction). When invoked as a primitive from another skill, the calling skill's log covers the work; do not write a separate log per call.
-
 ## Key Rules
 
 - **Never inline forge-specific path schemes.** All of `/blob/…`, `/-/blob/…`, `/src/…`, `/src/branch/…`, `/tree/…/item/…` variants live in the known-forges table — this skill is the only consumer.

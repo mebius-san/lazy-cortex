@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Carry a vault's whole Obsidian configuration as one tracked, reviewable file that any checkout can rebuild from.
-last_regen: 2026-09-23
+last_regen: 2026-09-24
 diagram_spec:
   anchor: "How capture and deploy fit together"
   request: "Flow diagram: on the source machine, lazy-obsidian.capture snapshots .obsidian/ into .obsidian.manifest.json and commits it; that commit reaches a second checkout via git; on the second machine (fresh clone, .obsidian/ absent), lazy-obsidian.deploy reads the manifest and rebuilds .obsidian/ — fetching each plugin at its latest release from GitHub, falling back to a vendored cache, or using a bundled copy — then the operator opens Obsidian once so plugins run their own settings migrations."
@@ -9,8 +9,8 @@ diagram_spec:
 source_skills:
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: 1268ddde908fd66ba20f4106a5d934925e8e61fb
-surface_sha: 0cbda058cc520d6ae2ef33b43e45298bf1704e2d2f6978f7db20ec68e2868851
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: 5607a8ab4ccd3ae41ff2e955618853881f82521367752a678eaf509759cd2b57
 ---
 # Vault manifest — carry your Obsidian config as one tracked file
 

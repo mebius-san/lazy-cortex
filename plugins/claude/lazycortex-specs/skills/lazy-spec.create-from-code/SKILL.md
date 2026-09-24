@@ -33,14 +33,12 @@ This skill has two modes (`product` + `feature`) with mode-specific step lists. 
    - `Step P5 — Author product-tech prose`
    - `Step P6 — Scaffold candidate features (delegate)`
    - `Step P7 — Verify`
-   - `Step P8 — Log the run`
 
    **Feature mode**:
    - `Step F1 — Determine the feature slug`
    - `Step F2 — Delegate to lazy-spec.create-asset`
    - `Step F2b — Author the docs from code`
    - `Step F3 — Verify`
-   - `Step F4 — Log the run`
 
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". A no-op counts only when it emits an explicit outcome word (`created`, `unchanged`, `no-candidates`, `delegated`, …).
 3. **Do not reach Verify until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task at Verify time is a bug — stop and execute it first.
@@ -375,10 +373,6 @@ This step emits `no-candidates` if Agent D returned an empty `findings` list.
 - Every nested product the operator chose carries its level note and a seeded `vision.md`, and is registered under `products` with a `spec_path` under this product's; no candidate landed under a dedicated `features` folder — candidates sit at the product root, under the group folder the operator chose, or at a nested product's root.
 - Wikilinks use path-qualified form per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md` and target existing pages.
 
-### P8 — Log the run
-
-Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/lazy-spec.create-from-code/YYYY-MM-DD_HH-MM-SS.md`. Create the dir with `Bash(mkdir -p ./.logs/claude/lazy-spec.create-from-code)`, then `Write` the file — never chain. Frontmatter: `git_sha` (`git rev-parse HEAD`), `git_branch`, `date` (UTC, `date -u +'%Y-%m-%d %H:%M:%S UTC'`), `input` (the arguments passed, or `none`). Body: `# lazy-spec.create-from-code` heading, then `## Actions` and `## Result`. The `## Actions` list MUST record one line per task in the product-mode canonical list with its outcome word — a missing line is a bug.
-
 ## Feature Mode Process
 
 Feature mode documents ONE feature-candidate from code. `lazy-spec.create-asset` owns the scaffold, invoked with `--empty` so none of its wizard questions fire; this skill owns every word inside the documents that scaffold seeds.
@@ -450,10 +444,6 @@ Outcome: `authored:<N>` where `<N>` is the document count, suffixed `+decided` w
 - Both documents keep the empty `spec_source_docs` the scaffold wrote, and their `# Sources` sub-sections are untouched under the `#protected/spec/sources` tag — an asset-level document cites no sibling of its own level.
 - Both documents read `spec_stage: draft`, the vision's set through `lazy-spec.set-stage`; the folder-note's `# Summary` carries the asset précis.
 - This skill wrote nothing in the folder-note beyond the précis line and invoked no drawer — confirm `.logs/claude/lazy-diagram.draw/` gained no entries from this run.
-
-### F4 — Log the run
-
-Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/lazy-spec.create-from-code/YYYY-MM-DD_HH-MM-SS.md` exactly as in Step P8, with one `## Actions` line per feature-mode task and its outcome word — the ledger's five lines, `Step F2b — Author the docs from code` among them. A missing line is a bug.
 
 ## Report
 

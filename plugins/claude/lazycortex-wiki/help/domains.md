@@ -10,8 +10,8 @@ source_skills:
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
   - lazy-wiki.domain-spec-writer
-source_sha: 70d7cafcb16785355f25b2ed0df5310aaa5e2c4e
-surface_sha: 21a55631b884960d1702800f0e31de184b8e83fb0a9ced1a84d39538963286e4
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: c4390c32283f752020c37f16f688356afd70d5a3c8c02121ca6fbbefc2b51940
 ---
 # Domain knowledge lookup
 

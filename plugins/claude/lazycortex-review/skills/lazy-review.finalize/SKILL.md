@@ -14,7 +14,6 @@ Normally the dispatcher fires this branch automatically once every final writer 
 
 1. **Resolve the file** — argument is the markdown path.
 2. **Apply + commit** — `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/finalize.py" <file>`. The bin script resolves the edit-marker style from the document's own `review_marker_style` frontmatter pin, falling back to `review.edit_marker_style` in `lazy.settings.json` (default `simple`) when the pin is absent or names an unsupported style, folds the markup via `bin/edit_markup.py:strip_markers`, strips review-loop scaffolding, sets `review_active: false`, and commits with the `Doc-Review-Phase: finalize` trailer under the bot identity. For `diff` style, folding resolves cross-fence `+`/`-` cancellation as one pass over the whole document: each `-` line cancels the first surviving `+` (or `!`) emission from an earlier fence whose content matches byte-for-byte (context `  ` lines are never cancellable), matching is one-shot per `-` line, and a `-` with no matching prior `+` is dropped from its own fence without cancelling anything.
-3. **Run-log** — `./.logs/claude/lazy-review.finalize/<UTC ts>.md`.
 
 ## Report
 

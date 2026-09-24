@@ -28,7 +28,7 @@ This skill has 13 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 10 — Workflow mode (full vs spec-only)`
    - `Step 11 — Write product record + scaffold folders + folder-notes`
    - `Step 12 — Built-in review classes + routine sync + audit`
-   - `Step 13 — Verify + log the run`
+   - `Step 13 — Verify`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". A no-op counts only when it emits an explicit outcome (`unchanged`, `skipped-per-user-choice`, `design-only`, `taken-from-arg`, …).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -400,7 +400,6 @@ Context (print before asking, one block per role):
 AskUserQuestion: header "<role>", question "Which registered expert is product `<key>`'s `<role>` — <landing>? See: ${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md", options: each registered expert name + `other — define a new persona`, with the descriptions above.
 ```
 
-
 Validate that every chosen role expert (use-case-writer / designer / system-designer / architect / ui-designer / planner / developer / tester / data-writer / researcher) is a key in `settings-get experts`. If any chosen name is the "other" sentinel, abort with the `lazycortex-experts` pointer and do NOT write — the product is not registered until real expert names exist.
 
 Outcome: `assigned`, `shared-set`, or `override` (or abort `expert-undefined`).
@@ -639,13 +638,11 @@ Finally, verify the generated classes by invoking `/lazy-review.audit` via the `
 
 Outcome: `wired` (carry the audit level into the report).
 
-## Step 13 — Verify + log the run
+## Step 13 — Verify
 
 Invoke `/lazy-spec.audit <compound-key>` via the `Skill` tool (`skill: "lazycortex-specs:lazy-spec.audit"`) to confirm the product record, folder tree, and folder-notes are consistent. Surface its findings.
 
-Then, per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/lazy-spec.product-config/YYYY-MM-DD_HH-MM-SS.md`. Create the dir with `Bash(mkdir -p ./.logs/claude/lazy-spec.product-config)`, then `Write` the file — never chain. Frontmatter: `git_sha` (`git rev-parse HEAD`), `git_branch`, `date` (UTC, `date -u +'%Y-%m-%d %H:%M:%S UTC'`), `input` (the arguments passed, or `none`). Body: `# lazy-spec.product-config` heading, then `## Actions` and `## Result`. The `## Actions` list MUST record one line per task in the preamble's canonical list with its outcome word — a missing line is a bug.
-
-Outcome: `verified` + `logged`.
+Outcome: `verified`.
 
 ## Report
 

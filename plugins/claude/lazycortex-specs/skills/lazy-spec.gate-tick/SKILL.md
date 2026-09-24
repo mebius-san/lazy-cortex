@@ -2,7 +2,6 @@
 name: lazy-spec.gate-tick
 description: "Dispatched per status folder-note by the daemon's `lazy-spec.gate-tick` md-scan routine to poll one asset's active job and structurally check its folder-note; not for direct use — it is a pure script and makes no Claude calls. Read it when asked why an active-job marker was cleared, why an asset went `spec_halted` from a dead job, or what a `note-check` violation folded into a tick result means. For why a launch checkbox appeared, disappeared, or dispatched a job — or why a gate flipped at all — see `lazy-spec.coordination-playbook.md`; none of that is this worker's decision anymore."
 execution-discipline-waiver: "Documents a pure script (bin/gate_tick.py) dispatched by the daemon — there is no Claude-side execution to discipline."
-logging-waiver: "script-only md-scan worker invoked per-file by the daemon; the routine's daemon log records execution"
 ---
 # Gate Tick
 
@@ -29,7 +28,3 @@ A no-op tick (no terminal marker yet, note structurally clean) reports `{"action
 ```
 
 `--today` overrides the date stamped into callouts (used by tests). Normal runs read the current UTC date.
-
-## Run Log
-
-This worker is exempt from `.claude/rules/lazy-log.logging.md` per the `logging-waiver` in frontmatter — it is a script-only md-scan worker invoked per-file by the daemon, and the routine's daemon log records each execution. The `lazycortex-review` subprocess it opens on a `DONE` report sibling writes its own log, per `lazycortex-review`'s own contract.

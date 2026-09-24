@@ -9,13 +9,12 @@ Write one memory note for an expert. Validates frontmatter, picks a non-collidin
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 4 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 3 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Validate inputs`
    - `Step 2 — Write note via worker`
    - `Step 3 — Report`
-   - `Step 4 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it".
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.**
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above.
@@ -58,14 +57,6 @@ note_path:   <path>
 touched_tags: <comma-list of topic names whose .tags/ files were regenerated>
 consolidated: <count of dropped paths>
 ```
-
-## Step 4 — Log the run
-
-```
-Bash(mkdir -p .logs/claude/lazy-memory.write)
-```
-
-Write to `.logs/claude/lazy-memory.write/<UTC-timestamp>.md` per the logging rule.
 
 ## Failure modes
 

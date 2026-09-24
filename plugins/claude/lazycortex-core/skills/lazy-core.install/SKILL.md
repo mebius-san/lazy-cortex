@@ -9,7 +9,7 @@ Bootstrap the plugin in the right scope: copy every rule template shipped by the
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 23 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 22 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 0 — Verify Python ≥ 3.12 (floor)`
@@ -34,7 +34,6 @@ This skill has 23 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 13.5 — Configure expert-spawn sandbox in .runtime/sandbox.settings.json`
    - `Step 13.6 — Provision metrics (port + repo label + scrape-targets file)`
    - `Step 14 — Report`
-   - `Step 15 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -951,12 +950,6 @@ Report to the user:
 - Daemon supervisor install outcome (Step 13)
 - Sandbox/permissions merge outcome (Step 13.5)
 - Metrics provisioning outcome (Step 13.6)
-
-## Step 15: Log the run
-
-Log to `./.logs/claude/lazy-core.install/YYYY-MM-DD_HH-MM-SS.md` per the logging rule (include `git_sha` frontmatter).
-
-Use two separate steps: `Bash(mkdir -p ...)` then the `Write` tool. Never chain with `&&` or use `cat > file <<'EOF'`.
 
 ## Failure modes
 

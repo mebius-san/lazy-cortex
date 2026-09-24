@@ -23,10 +23,10 @@ This skill has six mutually exclusive branches; exactly one runs per invocation.
    - `Phase 5 — Collect tag_axes`
    - `Phase 6 — Collect topics_index`
    - `Phase 7 — Collect filter`
-   - `Phase 8 — Write back + log`
+   - `Phase 8 — Write back`
    - `Phase 9 — Refresh navigation-rule Coverage`
    - `Report`
-2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** Outcomes: `verified` / `collected` / `derived` / `skipped-per-user-choice` / `written` / `logged` / `refreshed` / `unchanged` / `absent` / `report-emitted`.
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** Outcomes: `verified` / `collected` / `derived` / `skipped-per-user-choice` / `written` / `refreshed` / `unchanged` / `absent` / `report-emitted`.
 3. **Do not reach the Report step until every prior task is `completed`.**
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 5. **Orient before the branch's first `AskUserQuestion`.** Print two to four lines naming what the section governs, which artifact it produces and where that artifact lives, and what the values being collected mean — the vocabulary of the questions ahead (`depth_profiles` classes and their three depths, `source_exclude` versus `exclude_paths`, `tag_axes`, a `mirror` block). An operator who has not read this SKILL.md cannot answer a question phrased in its internal vocabulary, and a guessed answer is written to settings as a decision. Say it once per invocation, before the first question; do not repeat it per question.
@@ -130,7 +130,7 @@ Richer predicates (other frontmatter keys, `in` allow-lists) follow the same sch
 
 Outcome: `derived`.
 
-## Phase 8 — Write back + log
+## Phase 8 — Write back
 
 Build the scope object:
 
@@ -146,9 +146,7 @@ Build the scope object:
 
 Write the updated settings back: set `lazy.settings.json[wiki.scopes][<id>]` to the constructed object. Preserve all other keys. Use `Write` to the target file.
 
-Then log to `./.logs/claude/lazy-wiki.configure/<UTC-timestamp>.md` — two separate steps: `Bash(mkdir -p ./.logs/claude/lazy-wiki.configure)` then `Write` tool. Log frontmatter: `git_sha` (`Bash(git rev-parse HEAD)`), `git_branch` (`Bash(git rev-parse --abbrev-ref HEAD)`), `date` (UTC), `input: "scope_id=<id>"`.
-
-Outcome: `written` and `logged`.
+Outcome: `written`.
 
 ## Phase 9 — Refresh navigation-rule Coverage
 
@@ -174,7 +172,7 @@ Configures `lazy.settings.json[wiki.domains]` — the section that drives domain
 - `Domains 2 — Collect code globs`
 - `Domains 3 — Collect dictionary path + seed`
 - `Domains 4 — Collect output + language`
-- `Domains 5 — Write back + log + pointers`
+- `Domains 5 — Write back + pointers`
 - `Report`
 
 ### Domains 1 — Verify install + load settings
@@ -237,7 +235,7 @@ AskUserQuestion (language): header "Domain docs language", question — new mode
 
 Outcome: `collected` (+ `overlap-warned` when the warning fired).
 
-### Domains 5 — Write back + log + pointers
+### Domains 5 — Write back + pointers
 
 Build the section and set `lazy.settings.json[wiki.domains]`:
 
@@ -250,13 +248,13 @@ Build the section and set `lazy.settings.json[wiki.domains]`:
 }
 ```
 
-Preserve all other keys; write with `Write`. Log to `./.logs/claude/lazy-wiki.configure/<UTC-timestamp>.md` per the Phase 8 recipe (`input: "domains"`).
+Preserve all other keys; write with `Write`.
 
 Print two pointers (no questions):
 - *"Run `/lazy-wiki.install` to register the `wiki.domain-writer` expert and the domain routines (daemon repos); `/lazy-wiki.domain-sync` is the manual run."*
 - *"To backfill `Domain(…)` markers across existing code — or re-file them after a dictionary change — run `/lazy-python.knowledge-sweep`."*
 
-Outcome: `written` and `logged`.
+Outcome: `written`.
 
 ## Mirror branch — `/lazy-wiki.configure mirror`
 
@@ -266,7 +264,7 @@ Configures the nested `mirror` block of an **existing** scope in `lazy.settings.
 - `Mirror 2 — Collect url + branch`
 - `Mirror 3 — Collect source_paths + exclude`
 - `Mirror 4 — Collect mirror_path`
-- `Mirror 5 — Write back + log + pointers`
+- `Mirror 5 — Write back + pointers`
 - `Report`
 
 ### Mirror 1 — Verify install + pick scope
@@ -331,7 +329,7 @@ AskUserQuestion: header "Mirror directory", question "Directory in this vault wh
 
 Outcome: `collected`.
 
-### Mirror 5 — Write back + log + pointers
+### Mirror 5 — Write back + pointers
 
 Set `lazy.settings.json[wiki.scopes][<id>].mirror` to:
 
@@ -347,13 +345,11 @@ Set `lazy.settings.json[wiki.scopes][<id>].mirror` to:
 
 Then add the glob `<mirror_path>/**` to the same scope's `paths` array when it is not already there — the mirror files become nodes only through `paths`, and this wizard owns that wiring (`/lazy-wiki.audit` flags the desync as `mirror-paths-uncovered`). Preserve all other keys; write with `Write`. Because `paths` changed, refresh the navigation rule's `## Coverage` per the Phase 9 recipe (same locate/replace/commit rules).
 
-Log to `./.logs/claude/lazy-wiki.configure/<UTC-timestamp>.md` per the Phase 8 recipe (`input: "mirror scope_id=<id>"`).
-
 Print two pointers (no questions):
 - *"Re-run `/lazy-wiki.install` to register the daemon schedule routine; the manual run is `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" mirror-sync <id>)` from any session — fetch, sync, commit, and the git-watch `lazy-wiki.scan` picks the changed files up for curation."*
 - *"Mirror bodies are written by the sync — hand-edits to a mirrored node's body are overwritten; operator state lives in the pin keys and survives."*
 
-Outcome: `written`, `logged`, and `coverage-<refreshed|unchanged|absent>`.
+Outcome: `written` and `coverage-<refreshed|unchanged|absent>`.
 
 ## Terms branch — `/lazy-wiki.configure terms`
 
@@ -365,7 +361,7 @@ Configures one scope of `lazy.settings.json[terms.scopes]` — the terms diction
 - `Terms 4 — Collect source_exclude`
 - `Terms 5 — Write back + exclude from wiki scopes`
 - `Terms 6 — Register the scan routine`
-- `Terms 7 — Log + pointers`
+- `Terms 7 — Pointers`
 - `Report`
 
 ### Terms 1 — Verify install + pick scope + mode
@@ -498,15 +494,13 @@ Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=lazy-wiki.term
 
 Outcome: `registered` / `refreshed` / `unchanged` / `unregistered`.
 
-### Terms 7 — Log + pointers
-
-Log to `./.logs/claude/lazy-wiki.configure/<UTC-timestamp>.md` per the Phase 8 recipe (`input: "terms <mode> scope_id=<id>"`).
+### Terms 7 — Pointers
 
 Print two pointers (no questions):
 - *"A writing expert consults this dictionary through `/lazy-wiki.terms`; the curator fills it from finished documents on its own."*
 - *"The corpus written before this scope existed was never seen by the routine — run the terms section of `/lazy-wiki.audit` for a full pass over it."*
 
-Outcome: `logged`.
+Outcome: `printed`.
 
 ## Structure branch — `/lazy-wiki.configure structure`
 
@@ -517,7 +511,7 @@ Configures `lazy.settings.json[structure]` — the section that drives the proje
 - `Structure 3 — Collect exclude`
 - `Structure 4 — Write back`
 - `Structure 5 — Register the scan routines`
-- `Structure 6 — Initial map + log`
+- `Structure 6 — Initial map`
 - `Report`
 
 ### Structure 1 — Verify install + load section
@@ -606,16 +600,12 @@ Edit mode needs no special case: re-running this branch re-registers each routin
 
 Outcome: `registered` / `refreshed` / `already-present`.
 
-### Structure 6 — Initial map + log
+### Structure 6 — Initial map
 
 **Build the initial map when it is missing.** The routines registered in Structure 5 only keep an existing map current — the curator refuses to create one, so a repo that leaves this section without `docs/structure.md` has every incremental dispatch fail with a `logical` error until someone remembers the rebuild. `Bash(test -f docs/structure.md && echo present || echo absent)`; on `absent`, invoke `Skill(skill: "lazycortex-wiki:lazy-wiki.structure", args: "rebuild")` now — never defer it to a printed pointer. Outcome: `map-present` / `map-built`.
 
-Log to `./.logs/claude/lazy-wiki.configure/<UTC-timestamp>.md` per the Phase 8 recipe (`input: "structure"`).
-
 Print one pointer (no questions):
 - *"Re-run `/lazy-wiki.install` to register the `wiki.structure-curator` expert if it is not on record yet."*
-
-Outcome: `logged`.
 
 ## Vault branch — `/lazy-wiki.configure vault`
 
@@ -625,7 +615,7 @@ Configures the three repository-wide keys of `lazy.settings.json[wiki]` — `tag
 - `Vault 2 — Collect tag_axes`
 - `Vault 3 — Collect exclude`
 - `Vault 4 — Collect language`
-- `Vault 5 — Write back + log`
+- `Vault 5 — Write back`
 - `Report`
 
 ### Vault 1 — Verify install + load section
@@ -695,13 +685,11 @@ AskUserQuestion: header "Language code", question "ISO 639-1 code the wiki write
 
 Outcome: `language-on-record:<code>`, `language-inherited`, or `language-set:<code>`.
 
-### Vault 5 — Write back + log
+### Vault 5 — Write back
 
 Set `lazy.settings.json[wiki].tag_axes` and `lazy.settings.json[wiki].exclude` to the collected arrays, and `lazy.settings.json[wiki].language` to the collected code when Vault 4 collected one (a step that resolved `inherit` writes no key at all), preserving `scopes`, `domains`, `_version`, and every other key; write with `Write`.
 
-Log to `./.logs/claude/lazy-wiki.configure/<UTC-timestamp>.md` per the Phase 8 recipe (`input: "vault"`).
-
-Outcome: `written` and `logged`.
+Outcome: `written`.
 
 ## Report
 

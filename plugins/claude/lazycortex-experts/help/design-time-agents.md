@@ -13,8 +13,8 @@ source_skills:
   - lazy-experts.architect
   - lazy-experts.planner
   - lazy-experts.researcher
-source_sha: 70d7cafcb16785355f25b2ed0df5310aaa5e2c4e
-surface_sha: 1adff6747d965b5ec1ca92ebae005ae61da64506909a3c597e5565b59c79d540
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: dc1db77f01bbb7e737337f6f1aeba9d20f8c60fc9c3e6094d1af34ca7bf9cd48
 ---
 # Design-time agents
 

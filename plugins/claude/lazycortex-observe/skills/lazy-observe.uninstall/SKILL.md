@@ -94,10 +94,6 @@ Render a markdown report. One line per Step 1–5 with its outcome word.
 
 Outcome: `reported`.
 
-## Logging
-
-Per the project's `lazy-log.logging` rule, log this run to `./.logs/claude/lazy-observe.uninstall/<UTC timestamp>.md`.
-
 ## Failure modes
 
 - **`launchctl bootout` returns 5 ("Input/output error")** — symptom: bootout fails on macOS after a system update → cause: stale plist label registration → fix: `launchctl remove com.lazycortex.observe`, then rerun.

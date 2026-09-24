@@ -32,8 +32,8 @@ source_skills:
   - lazy-expert.cancel-job
   - lazy-expert.list-jobs
   - lazy-memory.write
-source_sha: d8ce7b256f62dbc95a0e3f5a7aeccf166afd57a6
-surface_sha: 18a155c69a7c766c610f191d9c46388fee36543f1aec5fe707537538044f613d
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: 86d75c30c0e3c35b8576d69f5c0ea585185688232bf40b49101ad97fd436a373
 ---
 # FAQ
 

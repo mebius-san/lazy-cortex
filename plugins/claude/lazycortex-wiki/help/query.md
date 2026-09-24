@@ -9,8 +9,8 @@ source_skills:
   - lazy-wiki.query
   - lazy-wiki.seeker
   - lazy-wiki.gatherer
-source_sha: 70d7cafcb16785355f25b2ed0df5310aaa5e2c4e
-surface_sha: c33bda342df7ac70a8e3eb908bee5d02d89b5dcfbce0e3e78d17e53140b63f6b
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: 452cdbbfaa94e2bf73aaf9450b44b7610395daea148f9c13f941d189cad7a510
 ---
 # Wiki query
 

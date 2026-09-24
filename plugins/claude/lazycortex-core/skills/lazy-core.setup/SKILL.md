@@ -19,7 +19,7 @@ Single command that brings the current project up-to-date with every enabled plu
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 0 — Migrate settings`
@@ -29,7 +29,6 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 4 — Proceed`
    - `Step 5 — Execute`
    - `Step 6 — Report`
-   - `Step 7 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `up-to-date`, `migrated`, `discovered`, `planned`, `previewed`, `proceed`, `ran`, `failed`, `dry-run`, `nothing-to-do`).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -150,12 +149,6 @@ Step 5 — ran: X/N ok, Y failed, Z skipped | dry-run | aborted-by-migration-fai
 ```
 
 If failures exist, append: `Re-run /lazy-core.setup after fixing — idempotent.` Never offer interactive retry mid-run.
-
-## Step 7: Log the run
-
-Log to `./.logs/claude/lazy-core.setup/YYYY-MM-DD_HH-MM-SS.md` per `lazy-log.logging`. Use two separate steps: `Bash(mkdir -p ...)` then the `Write` tool. Never chain with `&&` or use `cat > file <<'EOF'`.
-
-Frontmatter: `git_sha`, `git_branch`, `date`, `input` (the args passed, or `none`). Body: `# lazy-core.setup` heading, `## Actions` (per-step bullets including each dispatched child + its outcome), `## Result` (success / partial-failure / dry-run / aborted).
 
 ## Failure modes
 

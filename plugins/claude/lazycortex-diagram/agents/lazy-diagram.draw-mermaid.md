@@ -147,7 +147,7 @@ flowchart LR
 ## Notes
 
 - **No `AskUserQuestion`** — agents have no user channel.
-- **No logging** — the dispatcher (`/lazy-diagram.draw` or `/lazy-diagram.fix`) is the coordinator and owns the run log per `lazy-log.logging`.
+- **No logging** — the drawer never logs; `/lazy-diagram.draw` writes the run log its callers verify seams against.
 - **No file writes** — the agent returns text; the dispatcher writes.
 - **No hex literals** in the agent prompt or in any inferred-but-not-from-scheme value. Every hex in the composed fence comes from `styles-<scheme>.json` (init block, roles, or textConstants); composing a hex the scheme does not contain is a failure.
 - **No `click` handlers, no embedded URLs** in the produced fence.

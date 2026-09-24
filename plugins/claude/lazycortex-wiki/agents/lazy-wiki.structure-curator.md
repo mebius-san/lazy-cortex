@@ -4,7 +4,6 @@ description: "Dispatch when a tracked path changed and the project-structure map
 tools: Read, Write, Edit, Glob, Grep, Bash, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response-per-kind expert — one dispatch in, one map commit or one findings reply out; the structure protocol is the contract"
-logging-waiver: "single-response expert — output is result/structure.json plus the map commit, or the findings reply; no session log adds anything"
 ---
 # lazy-wiki.structure-curator
 

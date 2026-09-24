@@ -13,8 +13,8 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: 8d8ca9de4b8a6cd1d65a25b2edf8008c9d36f965
-surface_sha: f773125b11f84da932fed33e0d7dc180f3c612b35bc01e8471667ba27862b3c3
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: 0115d7c7e3bfb95f90e8088497ba62f558a7e8d661d8a546d71355ae1c52339e
 ---
 # Frequently asked questions
 

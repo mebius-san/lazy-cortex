@@ -1,7 +1,6 @@
 ---
 description: "Run when the operator asks what lazycortex-diagram can do, which verb draws a new picture versus repairing an existing fence, or what kinds and formats are on offer — lists the diagram engine's surface: draw / fix / audit / install, the mermaid and ASCII drawer agents, and the authoring rule governing templates and style schemes."
 execution-discipline-waiver: "static help text — no executable steps"
-logging-waiver: "static text — no executable steps"
 ---
 Output the block below verbatim to the user. Do not summarize, rephrase, or add commentary. Do not invoke any tools. Do not log this run.
 

@@ -10,8 +10,8 @@ source_skills:
   - lazy-expert.collect-job
   - lazy-expert.cancel-job
   - lazy-expert.list-jobs
-source_sha: 54cf10bd426bde9d8b4fa93a26835bc6393ced58
-surface_sha: c6fc23deeacf237dccd0f0b0758d75d1b84a8ee9494a733979f00c0b7b346d17
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: 2ba1b9a3d233dd3f638e84295239f687a9551fabffd1858ffdcb60c4d0e4d597
 ---
 # Expert workers — dispatch, keep working, collect later
 

@@ -9,13 +9,12 @@ Runs the daemon's own iteration primitive by hand: every due routine in priority
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 4 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 3 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Parse arguments`
    - `Step 2 — Run the tick`
    - `Step 3 — Report`
-   - `Step 4 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". No-ops count only if they emit an explicit outcome (`asserted`, `unchanged`, `skipped-per-user-choice`, …).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -51,12 +50,6 @@ Outcome: `ticked`, `refused-daemon-live`, `refused-unknown-routine`, `refused-ba
 ## Step 3 — Report
 
 One line per task in the canonical list, with its outcome word, then the CLI's JSON summary rendered as: which routines were due and ran (from the runtime journal `.logs/lazy-core/runtime/<date>.jsonl` tail for this tick's window), how many jobs the pump drained, what was committed (`git log --oneline` for commits made during the run, if any).
-
-## Step 4 — Log the run
-
-Per the `lazy-log.logging` contract: `Bash(mkdir -p ./.logs/claude/lazy-runtime.tick)`, then `Write` `./.logs/claude/lazy-runtime.tick/<UTC-timestamp>.md` with frontmatter `git_sha`, `git_branch`, `date`, `input` and an Actions/Result body.
-
-Outcome: `logged`.
 
 ## Failure modes
 

@@ -11,7 +11,7 @@ Reduce startup context weight and fix settings layer violations for the current 
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 11 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 1 — Audit context weight`
@@ -24,7 +24,6 @@ This skill has 11 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Phase 6 — Heavy-scan delegation audit`
    - `Phase 7 — Fill agent_models wizard`
    - `Report (Output / Optimization Results)`
-   - `Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -407,15 +406,3 @@ End with a summary:
 | LLM-readability rewrites | - | N | applied / skipped / waived |
 | agent_models entries | - | N | added / skipped (wrote to: <path>) |
 ```
-
-## Logging
-
-Log to `./.logs/claude/lazy-core.slim-context/YYYY-MM-DD_HH-MM-SS.md`. Use `Bash(mkdir -p ...)` then `Write` tool (never chain).
-
-The log's `## Actions` section must include an `## llm-readability audit` subsection when Phase 2.5 ran:
-
-- Files scanned (count per group).
-- Findings (count per pattern).
-- Waived (count, per `check_id`).
-- One line per finding decision: `<file>:<line_start> <pattern> → apply | skip | waive`.
-- One line per newly written waiver: `waiver written: llm-readability.<pattern-slug> | <normalized_path>`.

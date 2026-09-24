@@ -23,7 +23,7 @@ Scan all `.md` files in the vault for `tags:` in YAML frontmatter, collect all u
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This agent has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This agent has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 0 — Collect Tags from Notes`
@@ -33,7 +33,6 @@ This agent has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Phase 4 — Delete Stale Tag Pages`
    - `Phase 5 — Create New Tag Pages`
    - `Phase 6 — Report`
-   - `Phase 7 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -136,16 +135,3 @@ Print a summary:
 - Number of stale tag pages deleted (list them)
 
 ---
-
-## Phase 7 — Log the run
-
-After completing all work, write a run log to `.logs/claude/lazy-obsidian.gen-tag-pages/YYYY-MM-DD_HH-MM-SS.md`. Use UTC time: `date -u +%Y-%m-%d_%H-%M-%S` for the filename. Create directories with `mkdir -p` (never chain with `&&`; use two separate steps: `Bash(mkdir -p ...)` then the `Write` tool).
-
-Log frontmatter (YAML, all required):
-
-- `git_sha` — `git rev-parse HEAD`, or `no-git`
-- `git_branch` — `git rev-parse --abbrev-ref HEAD`, or `no-git`
-- `date` — `YYYY-MM-DD HH:MM:SS UTC`
-- `input` — arguments passed, or `none`
-
-Body: `# lazy-obsidian.gen-tag-pages` heading, then `## Actions` (bullet list of actions, files modified, decisions) and `## Result` (success/failure + summary).

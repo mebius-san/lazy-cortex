@@ -15,8 +15,8 @@ source_skills:
   - lazy-experts.editor
   - lazy-experts.fiction-writer
   - lazy-experts.fiction-editor
-source_sha: 70d7cafcb16785355f25b2ed0df5310aaa5e2c4e
-surface_sha: e393a1b216aba64ea637f2ea66bca967bc99a190b2c8178a099cc0bed20f140a
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: cafae4ba15b1a52ffa910f5ebc483340aad9a7d976db032ac2c3a37cc3d211ad
 ---
 # Execution-stage agents
 

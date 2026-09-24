@@ -67,7 +67,3 @@ When the operator declares a new asset type mid-life-of-a-request, the classifie
 - **File path provided but file does not exist** — abort with a clear error naming the path. Do not fall back to the empty body.
 - **Body has no readable content** (empty after frontmatter strip) — return `unknown`. The caller will treat this as "ask for content".
 - **`lazy.settings.json` unreadable or missing** — fall back to the shipped asset types (`feature`, `change`, `bug`, `content`, `research`) plus the closed meta classes. Surface this as a `--verbose` log line (still emit the classification token; the caller decides whether to flag the config gap separately).
-
-## Run logging
-
-Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/lazy-spec.request-classify/YYYY-MM-DD_HH-MM-SS.md` with the body excerpt (first 300 chars), the resolved valid set (closed meta + asset types from the dispatch), the chosen class, and one-sentence rationale.

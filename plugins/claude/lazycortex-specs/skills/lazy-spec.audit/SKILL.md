@@ -14,7 +14,7 @@ Fix/waive orchestration over these findings belongs to `/lazy-core.doctor`, whic
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 0 — Resolve product (Check 0)`
@@ -24,7 +24,6 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 4 — Wiki companion check (Check 10, inline in coordinator)`
    - `Step 5 — Vault-spec check (Check 11, inline in coordinator)`
    - `Step 6 — Output (Report)`
-   - `Step 7 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `clean`, `no-source-binding`, `read-only`).
 3. **Do not reach the Report step until the ledger shows the prior tasks `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per Agent (A/B/C/D) plus Check 0, Check 8, Check 9, Check 10, and Check 11. A missing line is a bug; do not render the report with gaps.
@@ -448,7 +447,3 @@ The rest have no owning skill or CLI verb — report the concrete edit and leave
 - **Layout/body-shape findings name no automatable route** — findings about stray repo-root `requests/`, content outside `vault_root`, or old-shape note bodies (missing protected sections, old title H1) are flagged, and the report says outright that no skill or CLI verb moves, relocates, or rewrites the content. The operator resolves these by hand.
 - **Halt reasons are a closed four-item list** — every `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" flip-gate <asset> --halt <reason>` call, including this skill's own fix-loop escalation, draws `<reason>` verbatim from `HaltReason` in `${CLAUDE_PLUGIN_ROOT}/bin/spec_keys.py`. The full trigger table (which worker fires which reason, and when) is documented in `lazy-spec.lifecycle-protocol.md` Part 5 — this skill never invents a new reason string.
 - **Upstream sources (§ 13) are a separate, vault-wide scope** — `upstream/` sits outside every product's `spec_path` (like `requests/`); Check 9 covers it once per audit run, never per-product, and stays silent when `spec.upstream` has no configured source (wiki.domains-style honesty — a scope the operator never set up has nothing to be wrong). It never reports on `orphaned` / `invalid` / `excluded` / `postponed` units or an active `in-review` freeze — those are the documented steady states, not findings.
-
-## Logging
-
-Per `lazy-log.logging`, write a run log to `./.logs/claude/lazy-spec.audit/YYYY-MM-DD_HH-MM-SS.md`: `mkdir -p` then the `Write` tool (never chain). Frontmatter `git_sha` / `git_branch` / `date` / `input`; body `## Actions` (products checked, findings by severity, routes named) and `## Result`.

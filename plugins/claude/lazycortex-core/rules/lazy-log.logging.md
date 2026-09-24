@@ -1,15 +1,16 @@
 ---
-description: Logging conventions for skills, agents, and commands.
-always_loaded: every skill/agent/command must log on every run
+description: Run-log format for the skills, agents, and commands that opt into logging.
+always_loaded: "the opt-in key and the log format must be known on any turn that runs a logging artifact"
 ---
-# Run Logging (MANDATORY)
+# Run Logging
 
-Every skill, agent, and command **must** log each run to `./.logs/claude/<name>/YYYY-MM-DD_HH-MM-SS.md` in the current working repository — including globals and plugin-shipped artifacts, which log in whichever repo is the cwd.
+A skill, agent, or command writes a run log only when its frontmatter declares `logging: true`. Everything else writes no log and carries no logging section. An artifact opts in when something reads its log mechanically — a caller that verifies the run against it — never for history alone; git and `.logs/commits.jsonl` hold the history.
 
-- `<name>` is the skill/agent/command name (e.g., `lazy-core.audit`, `config.add-project`)
-- Timestamp uses UTC: `date -u +%Y-%m-%d_%H-%M-%S`
-- Create directories with `mkdir -p` (project-relative, never under `~/.claude/`)
-- Log writes must never prompt for permission: `Bash(mkdir -p ...)` then the `Write` tool, as two separate steps — never chained with `&&`, never `cat > file <<'EOF'`
+An opted-in artifact logs each run to `./.logs/claude/<name>/YYYY-MM-DD_HH-MM-SS.md` in the current working repository — plugin-shipped artifacts log in whichever repo is the cwd.
+
+- `<name>` is the artifact's filename stem (`<skill>` from `<skill>/SKILL.md`, `<name>` from `<name>.md`) — never a phase, task, or dispatch description.
+- Timestamp uses UTC: `date -u +%Y-%m-%d_%H-%M-%S`.
+- Create the directory with `Bash(mkdir -p ...)`, then write with the `Write` tool, as two separate steps — never chained with `&&`, never `cat > file <<'EOF'`.
 
 ## Log format
 
@@ -22,29 +23,6 @@ Frontmatter (YAML, all required):
 
 Body: `# <name>` heading, then `## Actions` (bullet list of actions, files modified, decisions) and `## Result` (success/failure + summary).
 
-## Waiver
+## Validation
 
-A skill, agent, or command may opt out by declaring a non-empty string in frontmatter:
-
-    logging-waiver: "<concrete one-line reason>"
-
-- The value must be a concrete reason. `true` / `yes` / `""` are rejected as `FAIL` by `lazy-core.audit`.
-- Waivered artifacts are silently skipped — no log file written, no audit listing.
-- Patterns / suggested reasons: see `${CLAUDE_PLUGIN_ROOT}/references/lazy-log.waiver-candidates.md`.
-
-**Class-level exemption (no per-file frontmatter required):** agents dispatched by a coordinator skill via `Agent(subagent_type: ...)` and returning a structured findings block do NOT log; the coordinator owns the log.
-
-**Log dir name MUST be the artifact's filename** (`<skill>` from `<skill>/SKILL.md`, `<name>` from `<name>.md`) — never a phase / task / dispatch description. Self-named subagent dirs (`task-N`, `expert-runtime-X`, etc.) are `lazy-core.audit` findings.
-
-## Distill cadence
-
-Decide whether to invoke `Agent(subagent_type: "lazycortex-core:lazy-log.distill", prompt: "distill pending commits")` on the **current turn**. Walk the gates in order; stop at the first match:
-
-1. **No commit this turn → SKIP** (only `git commit` in *this* turn counts; not session-earlier, not `.logs/commits.jsonl`-pending).
-2. **User said "don't distill" → SKIP.**
-3. **User asked to distill / catch up → RUN** (bypasses throttle + qualitative gate).
-4. **`mtime(./.logs/changelog.md)` < 4h → SKIP** (4h floor is a ceiling).
-5. **Just-landed commit not narration-worthy → SKIP** (notable feat/fix/refactor = yes; state-refresh / README-rerender / version-bump = no).
-6. **Otherwise → RUN.**
-
-Pending commits accumulate in `.logs/commits.jsonl`; the next eligible turn catches up.
+`lazy-core.audit` reads the key: only the literal `true` opts in; any other value is a `FAIL`. Subagents dispatched by a coordinator never log on their own — the coordinator owns whatever log its own key calls for.

@@ -136,10 +136,6 @@ This primitive only edits the doc's own per-file `spec_stage`. It does NOT evalu
 - **`/lazy-spec.set-stage` refuses with: document is deferred** — the target is parked and the requested stage is anything but `draft` → set it to `draft` first; that is the only exit from `deferred`, and the coordinators start reacting to the document again the moment it lands.
 - **`/lazy-spec.set-stage` refuses with: cancelled not allowed on `<file>`** — attempted `cancelled` on a type mandatory for the asset's category (`design`, `bug`, `architecture`) → cancellation belongs on `system-tech`, `code-plan`, or `test-plan`; use those instead.
 
-## Run Log
-
-Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/lazy-spec.set-stage/YYYY-MM-DD_HH-MM-SS.md` with frontmatter (`git_sha`, `git_branch`, `date`, `input`), a short `## Actions` bullet list, and a `## Result` line.
-
 ## Key Rules
 
 - **One primitive, one file** — never accept a list of files. Callers loop over files themselves.

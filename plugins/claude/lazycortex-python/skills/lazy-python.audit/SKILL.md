@@ -14,7 +14,7 @@ A check that reports `FAIL` is a finding, and its exit code stays 0. A non-zero 
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 13 ordered steps (12 checks plus the log write). The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 12 ordered steps (12 checks plus the log write). The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Check 1 — Rules mirror integrity`
@@ -29,8 +29,7 @@ This skill has 13 ordered steps (12 checks plus the log write). The executing ag
    - `Check 10 — PostToolUse hook registration`
    - `Check 11 — Venv bootstrap state`
    - `Check 12 — Domain-groups dictionary`
-   - `Step 13 — Log the run`
-2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND captured an outcome word for it" — `PASS` / `WARN` / `FAIL` for the check steps, `logged` for Step 13.
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND captured an outcome word for it" — `PASS` / `WARN` / `FAIL` for the check steps.
 3. **Do not reach the Report block until the ledger shows every prior task `completed`.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report block is a structural verifier.** Its output MUST contain one line per check above with its severity. A missing line is a bug; do not render the report with gaps.
 
@@ -177,14 +176,6 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.a
 ```
 
 Outcome: `PASS` (dictionary present, or no `Domain(…)` blocks in the sources yet) / `WARN` (the sources file knowledge under `Domain(…)` groups but the configured or conventional dictionary does not exist, so no group is validated against anything → run `/lazy-python.knowledge-sweep`, which builds it and refiles what is parked).
-
-## Step 13: Log the run
-
-Log to `./.logs/claude/lazy-python.audit/YYYY-MM-DD_HH-MM-SS.md` per the logging rule (include `git_sha`, `git_branch`, `date`, `input` frontmatter).
-
-Use two separate steps: `Bash(mkdir -p ./.logs/claude/lazy-python.audit)` then the `Write` tool. Never chain with `&&` or `cat > file <<'EOF'`.
-
-Outcome: `logged`.
 
 ## Report
 

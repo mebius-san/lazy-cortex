@@ -9,8 +9,8 @@ source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.rebase-pins
   - lazy-spec.coverage
-source_sha: 70d7cafcb16785355f25b2ed0df5310aaa5e2c4e
-surface_sha: 27842aba996ed4fd9335be210eca7f0b73ca78d574c5a33b86430077ee17b127
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: a80c6be77572051c6c631f8620c48b67112ccfa8cd17bb3acf8f6c326580e2ef
 ---
 # Keeping specs aligned with source code
 

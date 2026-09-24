@@ -3,7 +3,6 @@ name: lazy-wiki.query
 description: "Use when a question needs material the wiki curates — 'why is it built this way', 'where is X described', 'what relates to Y', or any request whose answer lives in files a wiki scope covers. Run it BEFORE grepping or opening files in a covered scope, and whenever the user asks about a topic rather than a specific file. A research skill: given a question, it hands back a bounded matched slice of the wiki graph, never the whole topic index. With the `Agent` tool available it dispatches per-scope seekers plus one gatherer so the topic index and traversed node bodies never enter the calling context; without `Agent` (a one-shot expert job or subagent) it runs the same lookup agentless, reading the scope's topics.md directly in its own context."
 research: true
 allowed-tools: Read, Grep, Agent, Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(test -f *), Bash(date -u *), Bash(git rev-parse *), Bash(mkdir -p *), Write
-dirty-tree-waiver: "writes only its run log under .logs/ (untracked) — never a tracked file"
 ---
 # lazy-wiki.query
 
@@ -18,14 +17,13 @@ Prerequisites: `/lazy-wiki.install` has run and at least one scope is configured
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 5 ordered steps, run in either mode. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 4 ordered steps, run in either mode. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 1 — Load wiki config`
    - `Phase 2 — Resolve entry points`
    - `Phase 3 — Gather answer`
    - `Phase 4 — Present answer and seed`
-   - `Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means the step's logic ran AND an outcome word was produced. No-ops must emit an explicit outcome (`no-scopes`, `no-entry-points`, …).
 3. **Do not reach the Log step until the ledger shows every prior task `completed`.**
 4. **The Log step is a structural verifier.** Its output MUST contain one line per task above.
@@ -101,29 +99,3 @@ Dispatcher mode: do not re-read node bodies or the index into this context — r
 
 Outcome: `presented`.
 
-## Logging
-
-Write a run log to `./.logs/claude/lazy-wiki.query/` per `lazy-log.logging`.
-
-1. `Bash(mkdir -p ./.logs/claude/lazy-wiki.query)`
-2. Capture `git_sha` via `Bash(git rev-parse HEAD)` and `git_branch` via `Bash(git rev-parse --abbrev-ref HEAD)`; use `no-git` if either fails.
-3. `Bash(date -u +%Y-%m-%d_%H-%M-%S)` → timestamp for the filename.
-4. `Write` the log to `./.logs/claude/lazy-wiki.query/<timestamp>.md` with frontmatter:
-
-```
----
-git_sha: <sha>
-git_branch: <branch>
-date: <YYYY-MM-DD HH:MM:SS UTC>
-input: "<question>"
----
-# lazy-wiki.query
-
-## Actions
-- <one line per Phase/step above with its outcome word>
-
-## Result
-<success/failure + one-sentence summary>
-```
-
-Outcome: `logged`.

@@ -51,10 +51,6 @@ Signature: `lazy-spec.refresh-sources <file-path>`.
 
 - **`/lazy-spec.refresh-sources` refuses naming a non-authored doc** — the target's `spec_role` is `status` (folder-note), `code-report` / `test-report`, or otherwise not an authored doc that carries `spec_source_docs` → run on a stage-bearing authored doc (`design` / `code-plan` / `test-plan` / `bug` / `tech`) instead.
 
-## Run Log
-
-Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/lazy-spec.refresh-sources/YYYY-MM-DD_HH-MM-SS.md`. Create the dir with `Bash(mkdir -p ./.logs/claude/lazy-spec.refresh-sources)`, then `Write` the file — never chain. Frontmatter: `git_sha` (`git rev-parse HEAD`), `git_branch`, `date` (UTC), `input` (the file path passed). Body: `# lazy-spec.refresh-sources` heading, then `## Actions` and `## Result`.
-
 ## Key Rules
 
 - **One primitive, one file** — never accept a list of files. Callers loop themselves.

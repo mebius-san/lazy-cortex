@@ -9,7 +9,7 @@ This is pure orchestration — it does **not** re-implement scan logic. It calls
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This command has 6 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This command has 5 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 1 — Read-only audit pass`
@@ -18,8 +18,7 @@ This command has 6 ordered steps. The executing agent MUST NOT skip, merge, reor
    - `Phase 3.5 — Decide whether anything is fixable`
    - `Phase 4 — Prompt next action`
    - `Report`
-   - `Log the run`
-2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `audited`, `built`, `presented`, `dispatched`, `skipped-per-user-choice`, `logged`).
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `audited`, `built`, `presented`, `dispatched`, `skipped-per-user-choice`).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
@@ -97,7 +96,7 @@ Options, in dispatch order:
 3. One option per collected `provides_fix_flows` entry, ordered by plugin name, labelled with the entry's `label`
 4. `Nothing — done`
 
-If the user picks `Nothing — done` (or selects nothing else), proceed directly to the log step. Otherwise, invoke each chosen item in the order listed above via `Skill(skill: "<name>")`. Items run sequentially in the main agent — let each finish before invoking the next.
+If the user picks `Nothing — done` (or selects nothing else), proceed directly to the Report step. Otherwise, invoke each chosen item in the order listed above via `Skill(skill: "<name>")`. Items run sequentially in the main agent — let each finish before invoking the next.
 
 A published flow's behaviour belongs to the plugin that published it. This command lists it and invokes it; it never re-implements its steps, adds its own confirmations, or re-runs it on failure.
 
@@ -116,18 +115,6 @@ Example shape:
 - Phase 3.5 — Decide whether anything is fixable: fixable (4 of 23 resolvable)
 - Phase 4 — Prompt next action: dispatched (lazy-core.slim-context)
 - Report: reported
-- Log the run: logged (./.logs/claude/lazy-core.checkup/2026-04-26_HH-MM-SS.md)
 ```
 
 Outcome word: `reported`.
-
-## Log the run
-
-Per `lazy-log.logging`:
-
-1. `Bash(mkdir -p ./.logs/claude/lazy-core.checkup)` — separate step from the Write.
-2. `Write` to `./.logs/claude/lazy-core.checkup/<UTC-ts>.md` where the timestamp is `date -u +%Y-%m-%d_%H-%M-%S`.
-3. Frontmatter: `git_sha` (from `git rev-parse HEAD` or `no-git`), `git_branch`, `date`, `input` (the user's raw command args or `none`).
-4. Body: `# lazy-core.checkup` heading, `## Actions` listing each Phase outcome word, the Phase 3.5 resolution counts, and the Phase 4 user choices, `## Result` with success/failure summary.
-
-Outcome word: `logged`.

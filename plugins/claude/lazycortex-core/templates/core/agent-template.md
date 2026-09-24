@@ -49,9 +49,8 @@ Authoring notes (delete before saving):
   § 5 Tool allowlist hygiene — `tools: ["*"]` without justification is WARN.
   § 8 Register the agent's model tier in `lazy.settings.json` if that file exists.
 - Filename: `<namespace.name>.md` under `.claude/agents/` or `<plugin>/agents/`.
-- Logging: only if your project has a logging contract installed (e.g. `lazy-log.logging` from
-  `lazycortex-core`). If so, add a `## Logging` section: ephemeral subagents do not log;
-  multi-phase non-ephemeral agents log to `./.logs/claude/<namespace.name>/<UTC-timestamp>.md`
-  with the contract's required frontmatter. If no logging plugin is installed, omit the section
-  entirely — agents do not need to log.
+- Logging: off by default — agents write no run log and carry no `## Logging` section. Only when
+  a caller reads the log mechanically, declare `logging: true` in frontmatter and add a
+  `## Logging` section pointing at `./.logs/claude/<namespace.name>/<UTC-timestamp>.md` with the
+  `lazy-log.logging` frontmatter.
 -->

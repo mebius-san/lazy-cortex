@@ -3,7 +3,6 @@ name: lazy-log.summary
 description: "Use when the user wants the whole story of a feature, refactor, or area — 'how did the plugin system evolve', 'catch me up on the logging skills', 'explain the auth middleware migration'. Returns multi-paragraph prose clustered by sub-theme, deliberately not by date. Pick this over `lazy-log.recall` (ranked individual matches with SHAs) and `lazy-log.timeline` (dated what-happened-when list) when the answer is an explanation rather than a list."
 tools: Read, Glob, Grep, Bash, Skill, Agent
 model: inherit
-logging-waiver: "single-response synthesizer — output IS the prose response, no mutations to record"
 ---
 # Topic Summary
 
@@ -11,7 +10,7 @@ Aggregate every change related to a topic and write a synthesized summary. Unlik
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This agent has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This agent has 6 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Extract keywords`
@@ -20,7 +19,6 @@ This agent has 7 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 4 — Cluster by sub-theme`
    - `Step 5 — Write the summary`
    - `Step 6 — Report`
-   - `Step 7 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -35,11 +33,10 @@ A topic. Examples:
 ## Sources
 
 Same as `lazy-log.recall` and `lazy-log.timeline`:
-1. `./.logs/changelog.md`
-2. `.logs/claude/**/*.md`
-3. `.logs/commits.jsonl`
-4. `git log --all --grep "<keyword>"` and `git log --all -S "<keyword>"`
-5. Memory files
+1. `.logs/claude/**/*.md`
+2. `.logs/commits.jsonl`
+3. `git log --all --grep "<keyword>"` and `git log --all -S "<keyword>"`
+4. Memory files
 
 ## Process
 
@@ -75,7 +72,6 @@ began with `8ab5c73` when...">
 
 | Date | SHA | Source | Note |
 |---|---|---|---|
-| 2026-03-15 | `abc1234` | changelog | Renamed cortex.* to lazy-core.* |
 | 2026-03-15 | `abc1234` | run log | lazy-core.migrate session |
 | 2026-03-16 | `def5678` | commit | Fixed two broken cross-references |
 
@@ -94,7 +90,3 @@ discussion is not captured.">
 - **Cite sources inline** — every claim in the prose should have an SHA or log reference nearby. Never assert a fact without a source.
 - **Acknowledge uncertainty** — if the history is incomplete or contradictory, say so rather than papering over it.
 - **Stay scoped to the topic** — don't drag in tangentially related changes.
-
-## Logging
-
-Log to `./.logs/claude/lazy-log.summary/YYYY-MM-DD_HH-MM-SS.md` per the logging rule (include `git_sha` frontmatter). Use `Bash(mkdir -p ...)` then `Write` tool (never chain).

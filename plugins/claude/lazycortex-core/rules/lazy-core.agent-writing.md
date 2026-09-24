@@ -46,7 +46,7 @@ Apply identically to agents; see `lazy-core.skill-writing`: § 2 (no Optional he
 
 ## 7. Logging
 
-Non-ephemeral agents log per `lazy-log.logging` to `./.logs/claude/<agent-name>/<timestamp>.md`. Ephemeral Explore dispatches are exempt — coordinator owns the log.
+Agents write no run log unless their frontmatter declares `logging: true`, and then per `lazy-log.logging` to `./.logs/claude/<agent-name>/<timestamp>.md`. Subagents a coordinator dispatches never log on their own.
 
 ## 8. Model tier registration
 

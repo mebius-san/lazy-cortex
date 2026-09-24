@@ -4,7 +4,6 @@ description: "Dispatched hourly by the `lazy-runtime.doctor` routine when someth
 tools: Read, Bash, Glob, Grep, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response autonomous triage — one context bundle in, one response.json out; the routine is the contract, not multi-phase orchestration"
-logging-waiver: "single-response autonomous triage — actions are recorded inline in response.json and in the git history of the commits this agent makes"
 ---
 # lazy-runtime.doctor
 

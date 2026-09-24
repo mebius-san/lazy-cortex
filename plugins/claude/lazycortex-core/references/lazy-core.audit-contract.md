@@ -25,7 +25,7 @@ plugins/claude/<plugin>/skills/<namespace>.audit/SKILL.md
 
 An audit reads and reports. It changes no configuration and asks the operator nothing. It carries no apply-style flag and runs no fix loop of its own.
 
-The one file it writes is its own run log, which `lazy-log.logging` makes mandatory for every run. That log records the run; it repairs nothing, and it is not a reason to drop the read-only guarantee.
+It writes no file at all: an audit's report is its return value, and it does not opt into `lazy-log.logging`.
 
 Repair belongs to a separate run the operator starts: the plugin's own install or fix skill, or the per-finding loop in `lazy-core.doctor`. An audit names that run inside the finding; it never performs it.
 

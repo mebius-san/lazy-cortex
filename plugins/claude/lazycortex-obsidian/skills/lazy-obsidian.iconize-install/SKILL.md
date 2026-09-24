@@ -14,7 +14,7 @@ Project-local only. There is no global scope — iconize-sync is inherently per-
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 16 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 15 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Locate repo root and vault`
@@ -32,7 +32,6 @@ This skill has 16 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 4.6 — Report visible plugin registries`
    - `Step 5 — Verify`
    - `Step 6 — Report`
-   - `Step 7 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `kept-orphan`).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -349,10 +348,6 @@ One bullet per step, in order — missing bullet = skipped step, back up and run
 - **Step 5** verify: `check-versions` status + `reconcile --dry-run` summary.
 
 Next steps: "run `lazy-obsidian.iconize-config` to seed registries, then `lazy-obsidian.iconize-sync reconcile`." Add consequence lines for any **kept-local** outcome (2.6, 2.7, 3) and for any **kept-orphan** (2, 2.5 — note the file is a retired duplicate the user can delete by hand). Hard-dep failures abort before Step 6.
-
-## Step 7 — Log the run
-
-Log to `./.logs/claude/lazy-obsidian.iconize-install/YYYY-MM-DD_HH-MM-SS.md` per the logging rule. Two-step write: `Bash(mkdir -p ...)` then `Write`.
 
 ## Failure modes
 

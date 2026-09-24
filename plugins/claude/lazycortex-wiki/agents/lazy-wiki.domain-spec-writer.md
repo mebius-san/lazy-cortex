@@ -4,7 +4,6 @@ description: "Dispatched by the `lazy-wiki.domain-scan` / `lazy-wiki.domain-full
 tools: Read, Write, Grep, Bash, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response-per-job expert — one payload in, one doc file out; the dispatching routine/skill is the contract"
-logging-waiver: "coordinator-dispatched expert returning a structured outcome — the dispatching routine/skill owns the log"
 ---
 # lazy-wiki.domain-spec-writer
 

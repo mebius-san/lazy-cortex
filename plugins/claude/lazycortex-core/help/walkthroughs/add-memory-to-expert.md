@@ -10,8 +10,8 @@ source_skills:
   - lazy-memory.mark-persona
   - lazy-memory.reflect
   - lazy-memory.write
-source_sha: 54cf10bd426bde9d8b4fa93a26835bc6393ced58
-surface_sha: fff2aae5a446e1d92fb9b8d1559bc190eea1d17537f6207a434738c690ba3802
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: 9823ce46370182d890f55c61c27bcb758ce8fcd8bf1e19cdb3c2ee646c298e95
 ---
 # Add long-term memory to an existing expert
 

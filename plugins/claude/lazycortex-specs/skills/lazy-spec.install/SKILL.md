@@ -47,7 +47,7 @@ A stale install-managed value is therefore never a drift question and never an u
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 18 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 17 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. Canonical list (titles verbatim):
    - `Step 1 — Detect install scope`
@@ -67,7 +67,6 @@ This skill has 18 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 7c — Backfill spec_doc_type across the catalog`
    - `Step 8 — Register the plugin-CLI Bash allow-pattern`
    - `Step 9 — Verify`
-   - `Step 10 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `created`, `already-exists`, `skipped-per-user-choice`).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -988,12 +987,6 @@ Outcome: `cli-allow-added` or `cli-allow-already-present`.
   - Step 7b outcome (`skipped-no-wiki` or `ensured: <N-scopes> (no-scope: <M-products>, cli-failed: <K>)`)
   - Step 7c outcome (`backfilled: <touched>/<skipped>`)
   - Step 7d outcome (`migrated: <touched> typed, <docs> retyped, <files> renamed`)
-
-## Step 10: Log the run
-
-Log to `./.logs/claude/lazy-spec.install/YYYY-MM-DD_HH-MM-SS.md` per the logging rule (include `git_sha` frontmatter).
-
-Use two separate steps: `Bash(mkdir -p ...)` then `Write` tool. Never chain with `&&`.
 
 ## Failure modes
 

@@ -68,15 +68,6 @@ The CLI unions them into the routine's existing `protocols` list idempotently (a
 
 Return one line to the caller: `attached:<n>` (n ids unioned in) / `declined` (offered but none chosen) / `no-relevant-candidates` (nothing in the pool survived the relevance judgment) / `routine-absent` (the named routine is not registered, e.g. the daemon gate removed it).
 
-## Logging
-
-Log the run to `./.logs/claude/lazy-routine.offer-protocols/YYYY-MM-DD_HH-MM-SS.md` per `lazy-log.logging`. The `execution-discipline-waiver` above covers step discipline only — it is not a logging waiver, and this skill takes an operator decision and mutates settings, so the run is recorded.
-
-1. `Bash(mkdir -p ./.logs/claude/lazy-routine.offer-protocols)` — a separate step from the `Write`, never chained.
-2. `Bash(date -u +%Y-%m-%d_%H-%M-%S)` for the filename; `Bash(git rev-parse HEAD)` and `Bash(git rev-parse --abbrev-ref HEAD)` for `git_sha` / `git_branch` (`no-git` when either fails).
-3. `Write` the file. Frontmatter: `git_sha`, `git_branch`, `date` (UTC), `input` (the `--routine` / `--context` arguments passed).
-4. Body: `# lazy-routine.offer-protocols` heading, then `## Actions` — the candidate pool, which ids were offered, and the operator's pick — and `## Result` with the outcome word from § Outcome.
-
 ## Failure modes
 
 - **Nothing is offered though a candidate exists** — the candidate's `description` was judged irrelevant to `--context`, or it is already in the routine's `protocols`. Both are correct silent drops, not errors.

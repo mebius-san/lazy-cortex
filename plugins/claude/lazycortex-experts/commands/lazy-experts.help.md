@@ -1,7 +1,6 @@
 ---
 description: "Run when the operator asks what lazycortex-experts ships, which generic expert fits a piece of work, or how to assemble a named specialist — lists the sixteen persona agents (interpreter, designer, architect, planner, researcher, use-case-writer, ui-designer, implementer, data-implementer, docs-writer, debugger, reviewer, tester, editor, fiction-writer, fiction-editor), the domain and cross-cutting aspects that layer onto them, and the `lazy.settings.json[experts]` composition shape."
 execution-discipline-waiver: "static help text — no executable steps"
-logging-waiver: "static text — no executable steps"
 ---
 Output the block below verbatim to the user. Do not summarize, rephrase, or add commentary. Do not invoke any tools. Do not log this run.
 

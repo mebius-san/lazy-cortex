@@ -10,7 +10,7 @@ Sweeps the repo's Python sources with the `lazy-python.domain-writer` and `lazy-
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step.
+This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step.
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Resolve dictionary`
@@ -21,7 +21,6 @@ This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 6 — Consolidate the contracts`
    - `Step 7 — Verify`
    - `Step 8 — Commit`
-   - `Step 9 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means the step's logic ran AND emitted a one-word outcome. A step the run skips must be marked explicitly with the outcome that justified the skip (`no-files`, …).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly skipped with an outcome.** A still-`pending` task is a bug — execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above.
@@ -131,17 +130,6 @@ git commit -m "docs(py): backfill Domain/Contract knowledge markers" -- <touched
 The commit is what wakes the domain-spec generation routine in repos that run one — group hashes changed, the affected docs regenerate. On a checkout without a daemon, tell the operator to run `/lazy-wiki.domain-sync` next. In transactional git state (merge/rebase markers), skip the commit and report the paths instead.
 
 Outcome: `committed` or `commit-skipped`.
-
-## Step 9 — Log the run
-
-Write a run log per `lazy-log.logging`:
-
-- Path: `./.logs/claude/lazy-python.knowledge-sweep/YYYY-MM-DD_HH-MM-SS.md` (timestamp via `date -u +%Y-%m-%d_%H-%M-%S`).
-- Steps: `Bash(mkdir -p ./.logs/claude/lazy-python.knowledge-sweep)` then a single `Write` — never chain with `&&`.
-- Frontmatter: `git_sha`, `git_branch`, `date` (`YYYY-MM-DD HH:MM:SS UTC`), `input` (explicit paths or `none`).
-- Body: `# lazy-python.knowledge-sweep` heading; `## Actions` with one bullet per step + outcome; `## Result` with the final state.
-
-Outcome: `logged`.
 
 ## Report
 

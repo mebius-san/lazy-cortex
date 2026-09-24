@@ -9,14 +9,13 @@ The no-daemon session orchestrator for the spec system (taskdoc `lazycortex-spec
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 5 ordered phases. The executing agent MUST NOT skip, merge, reorder, or silently omit any phase. To make dropped phases structurally impossible:
+This skill has 4 ordered phases. The executing agent MUST NOT skip, merge, reorder, or silently omit any phase. To make dropped phases structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per phase below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 1 — Resolve asset + preflight`
    - `Phase 2 — Resume: settle outstanding state`
    - `Phase 3 — Drive the dialog loop`
    - `Phase 4 — Close the session`
-   - `Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the phase's logic AND produced an outcome word for it".
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.**
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above.
@@ -115,10 +114,6 @@ AskUserQuestion: header "Next gesture", question "What should happen next on <pr
 Final `Bash(git status --porcelain -- <spec content root>)`. Non-empty → warn plainly: this checkout must not run the daemon (or have `daemon.run_here` point at it) until everything here is committed — its clean-tree invariant would halt on exactly this state. Print the final `# Status brief`. Outcome: `closed-clean` or `closed-dirty`.
 
 **Branch check.** This session's manual `expert-pump-once` calls (the drive loop, step 4) run with none of the daemon's own per-iteration `_git_pre` safety net — an interrupted pump mid-`workspace: branch` job can leave this checkout on the job's branch with nothing to restore it (`lazy-core.expert-runtime-schema.md` § Workspace, "A claimant killed mid-job leaves only an orphan directory", describes the daemon-only case; this session has no equivalent). `Bash(git rev-parse --abbrev-ref HEAD)`; compare against `daemon.git.base_branch` in `.claude/lazy.settings.json` when configured. Match (or `base_branch` unset) → outcome `branch-clean`. Mismatch → `Bash(git checkout <base_branch>)`; success → outcome `branch-restored`; failure → warn plainly that the checkout is stranded on the job branch and must be resolved by hand before the daemon (or another drive session) touches it, outcome `branch-stranded`.
-
-## Log the run
-
-Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/lazy-spec.drive/YYYY-MM-DD_HH-MM-SS.md`. Create the dir with `Bash(mkdir -p ./.logs/claude/lazy-spec.drive)`, then `Write` the file — never chain. Frontmatter: `git_sha` (`git rev-parse HEAD`), `git_branch`, `date` (UTC), `input` (the `$ARGUMENTS` asset path, or `none`). Body: `# lazy-spec.drive` heading, then `## Actions` (one line per gesture translated and per drive-loop settle, with the resulting action word) and `## Result` (`closed-clean` / `closed-dirty` / `refused-daemon-live` / `no-asset-picked` + one-line summary).
 
 ## Report
 

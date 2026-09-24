@@ -10,8 +10,8 @@ source_skills:
   - lazy-review.start
   - lazy-review.status
   - lazy-review.finalize
-source_sha: 70d7cafcb16785355f25b2ed0df5310aaa5e2c4e
-surface_sha: 8f4d23d78552910cbccf733cfa87e1f015116a0feb9ab55b35cba3b0c57308b1
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: 4ca777fc0e47d8913103f1d871c09fe972e850793466ece6a26f725026cc4b64
 ---
 # Run a document through the review loop
 

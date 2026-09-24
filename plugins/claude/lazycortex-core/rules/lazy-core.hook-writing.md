@@ -106,7 +106,7 @@ A hook that auto-commits MUST refuse to do so when the repo has any of: `MERGE_H
 
 ## 8. Logging
 
-Cross-reference `lazy-log.logging`. Hooks log to `./.logs/claude/<hook-name>/<timestamp>.md` like every other artifact. Naming: `<dot-namespace>.hook`.
+Hooks write no run log: `lazy-log.logging` is opt-in through a skill's or agent's frontmatter, and a hook script has none. A hook that must leave a trace appends to the repository's error ledger or its own journal under `./.logs/`, never a per-run markdown file.
 
 ## 9. The daemon gate
 

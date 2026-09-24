@@ -5,8 +5,8 @@ last_regen: 2026-09-24
 no_diagram: true
 source_skills:
   - lazy-spec.lookup
-source_sha: 70d7cafcb16785355f25b2ed0df5310aaa5e2c4e
-surface_sha: 37f6f70f7c99586225c3805d68e7ec71175f41a7567621513f5ce3e808855352
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: bb1deb57a61ed338bc3bbe77c04814f27432024c00cce614e53f4455091164eb
 ---
 # Research: bounded lookups over the spec tree
 

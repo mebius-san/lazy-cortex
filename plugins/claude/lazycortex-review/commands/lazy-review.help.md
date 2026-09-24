@@ -1,7 +1,6 @@
 ---
 description: "Run when the operator asks what lazycortex-review does, how a document gets into or out of the unattended review loop, or where its state and logs land — lists the review loop's surface: the start / submit / stop / status / finalize verbs, the install → configure → audit setup order, the two routines that wake the coordinator, and the job-queue and log paths."
 execution-discipline-waiver: "help command — static text, no multi-step logic"
-logging-waiver: "static text — no executable steps"
 ---
 Output the block below verbatim to the user. Do not summarize, rephrase, or add commentary. Do not invoke any tools. Do not log this run.
 

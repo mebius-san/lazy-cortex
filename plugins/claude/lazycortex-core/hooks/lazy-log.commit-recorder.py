@@ -7,8 +7,8 @@ Fires after any `Bash` command containing a `git commit` invocation (leading, ch
 `git add … && git commit … && git push`, or flag-prefixed like `git -C dir commit`) or after
 `mcp__git__git_commit`. Writes one JSON line per commit with the
 SHA, ISO date, author, branch, subject, body, file list, and aggregate insertions / deletions. The
-file is the raw commit feed that `lazy-log.distill` later converts into functional prose in
-`.logs/changelog.md`, and that `lazy-log.recall` searches.
+file is the raw commit feed that `lazy-log.recall`, `lazy-log.timeline`, and `lazy-log.summary`
+search, and that the daemon's journal rotation keeps.
 
 Notes:
   - No LLM call, no network, fast (~50ms).
@@ -112,7 +112,7 @@ def get_commit_info() -> dict | None:
   except (subprocess.CalledProcessError, FileNotFoundError):
     branch = ""
 
-  # commit body below the subject line — trailers and prose the distiller later reads
+  # commit body below the subject line — trailers and prose the history searches later read
   try:
     body = subprocess.check_output(
       [ "git", "log", "-1", "--pretty=format:%b" ],
@@ -349,7 +349,7 @@ def main() -> None:
     record_failure(root, CAUSE_DIR_UNWRITABLE, f"cannot create the journal directory: {e}")
     return
 
-  # the ledger downstream distill and recall read from
+  # the ledger downstream recall reads from
   # waiver: filesystem filename idiom (commit-ledger file), not a domain constant
   path = os.path.join(logs_dir, "commits.jsonl")
 

@@ -4,7 +4,6 @@ description: "Dispatch when a wiki node needs classification (kind=classify) or 
 tools: Read, Write, Edit, Glob, Grep, Bash, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response-per-kind expert — one job dir in, one response.json out; the dispatching routine + curator protocol are the contract"
-logging-waiver: "single-response C-hybrid expert — output is result/curation.json + node commit; no session log needed beyond what the protocol records"
 ---
 # lazy-wiki.curator
 

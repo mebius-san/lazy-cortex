@@ -11,7 +11,7 @@ the merged result to stdout as a single JSON object.
 The output object carries:
   - `canonical`: sorted unique names across every kind.
   - `by_kind`: per-kind sorted name lists (`skill`, `agent`, `command`).
-  - `waivered`: artifact-name → `logging-waiver:` reason for every file that declared one.
+  - `logged`: sorted names of the artifacts whose frontmatter declares `logging: true`.
   - `sources`: per-root counters (number of roots visited per category plus total files scanned).
 
 Missing sources are silently skipped — the script tolerates absent directories and unreadable
@@ -35,7 +35,7 @@ HOME = Path.home()
 INSTALLED = HOME / ".claude" / "plugins" / "installed_plugins.json"
 
 NAME_RE = re.compile(r"^name:\s*[\"']?([^\"'\n]+?)[\"']?\s*$", re.MULTILINE)
-WAIVER_RE = re.compile(r"^logging-waiver:\s*[\"']?([^\"'\n]+?)[\"']?\s*$", re.MULTILINE)
+LOGGING_RE = re.compile(r"^logging:\s*true\s*$", re.MULTILINE)
 
 
 def _extract_frontmatter_block(path: Path) -> str | None:
@@ -87,28 +87,27 @@ def read_frontmatter_name(path: Path) -> str | None:
   return match.group(1).strip() if match else None
 
 
-def read_frontmatter_waiver(path: Path) -> str | None:
+def read_frontmatter_logging(path: Path) -> bool:
   """
-  Return the `logging-waiver:` reason declared in a file's frontmatter.
+  Return whether a file's frontmatter opts into run logging.
 
   Args:
     path: Absolute path to the markdown file to inspect.
 
   Returns:
-    The stripped reason string, or `None` when the file has no frontmatter or no
-    `logging-waiver:` declaration.
+    `True` when the frontmatter carries the literal `logging: true`, `False` when the file has no
+    frontmatter or no such declaration.
   """
   block = _extract_frontmatter_block(path)
 
   # guard: no frontmatter — nothing to extract
   if block is None:
-    return None
-  match = WAIVER_RE.search(block)
-  return match.group(1).strip() if match else None
+    return False
+  return LOGGING_RE.search(block) is not None
 
 
 def harvest_root(
-    root: Path, counters: dict[str, int], waivered: dict[str, str]
+    root: Path, counters: dict[str, int], logged: set[str]
 ) -> dict[ str, set[str] ]:
   """
   Collect skill / agent / command names from one artifact root.
@@ -119,8 +118,8 @@ def harvest_root(
   Args:
     root: Absolute path to the artifact root to scan; missing directories yield empty sets.
     counters: Counter dict updated in place; the `files` entry is incremented per artifact found.
-    waivered: Mapping updated in place; artifact name is added with its `logging-waiver:` reason
-      for every file that declared one.
+    logged: Set updated in place; the artifact name is added for every file whose frontmatter
+      declares `logging: true`.
 
   Returns:
     A mapping with keys `skill`, `agent`, `command`, each pointing at the set of names found
@@ -148,9 +147,8 @@ def harvest_root(
       found["skill"].add(name)
       # waiver: internal counter/summary dict subkey, single-source set in this script
       counters["files"] += 1
-      reason = read_frontmatter_waiver(skill_md)
-      if reason is not None:
-        waivered[name] = reason
+      if read_frontmatter_logging(skill_md):
+        logged.add(name)
 
   # agents live flat at <root>/agents/<file>.md
   # waiver: Claude Code artifact-directory name, not a domain key
@@ -171,9 +169,8 @@ def harvest_root(
       found["agent"].add(name)
       # waiver: internal counter/summary dict subkey, single-source set in this script
       counters["files"] += 1
-      reason = read_frontmatter_waiver(agent_md)
-      if reason is not None:
-        waivered[name] = reason
+      if read_frontmatter_logging(agent_md):
+        logged.add(name)
 
   # commands live flat at <root>/commands/<file>.md
   # waiver: Claude Code artifact-directory name, not a domain key
@@ -194,9 +191,8 @@ def harvest_root(
       found["command"].add(name)
       # waiver: internal counter/summary dict subkey, single-source set in this script
       counters["files"] += 1
-      reason = read_frontmatter_waiver(cmd_md)
-      if reason is not None:
-        waivered[name] = reason
+      if read_frontmatter_logging(cmd_md):
+        logged.add(name)
 
   # hand back the per-kind name sets accumulated across every artifact directory
   return found
@@ -341,34 +337,34 @@ def main() -> int:
     "files": 0,
   }
   aggregate: dict[ str, set[str] ] = { "skill": set(), "agent": set(), "command": set() }
-  waivered: dict[str, str] = {}
+  logged: set[str] = set()
 
   # every root below is resolved relative to the repository the script was invoked in
   repo = repo_root()
 
   # scan in-repo plugin sources first so authoring overrides win on tie
   for root in in_repo_plugin_roots(repo):
-    merge(aggregate, harvest_root(root, counters, waivered))
+    merge(aggregate, harvest_root(root, counters, logged))
     # waiver: internal counter/summary dict subkey, single-source set in this script
     counters["in_repo_plugin_roots"] += 1
 
   # then the project-local `.claude/` tree (consumer-side artifacts)
   proj = project_local_root(repo)
   if proj is not None:
-    merge(aggregate, harvest_root(proj, counters, waivered))
+    merge(aggregate, harvest_root(proj, counters, logged))
     # waiver: internal counter/summary dict subkey, single-source set in this script
     counters["project_local_root"] = 1
 
   # then every installed plugin recorded in the marketplace registry
   for root in installed_plugin_roots():
-    merge(aggregate, harvest_root(root, counters, waivered))
+    merge(aggregate, harvest_root(root, counters, logged))
     # waiver: internal counter/summary dict subkey, single-source set in this script
     counters["installed_roots"] += 1
 
   # finally the user-level `~/.claude/` root
   global_dir = global_root()
   if global_dir.is_dir():
-    merge(aggregate, harvest_root(global_dir, counters, waivered))
+    merge(aggregate, harvest_root(global_dir, counters, logged))
     # waiver: internal counter/summary dict subkey, single-source set in this script
     counters["global_root"] = 1
 
@@ -380,7 +376,7 @@ def main() -> int:
   output = {
     "canonical": canonical,
     "by_kind": by_kind,
-    "waivered": waivered,
+    "logged": sorted(logged),
     "sources": {
       # waiver: internal counter/summary dict subkey, single-source set in this script
       "in_repo_plugin_roots": counters["in_repo_plugin_roots"],

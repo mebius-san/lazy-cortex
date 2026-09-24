@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Install, keep current, and audit the lazycortex-obsidian plugin — vault bootstrap, Obsidian plugin management, and vault-manifest drift checks in one pass.
-last_regen: 2026-09-23
+last_regen: 2026-09-24
 diagram_spec:
   anchor: "How the three skills compose"
   request: "Flow diagram showing how lazy-obsidian.install orchestrates lazy-obsidian.update-plugin (for Dataview, and indirectly for Obsidian community plugins via iconize-install), syncs and enables its own CSS snippets (diagram-fit + callouts), and how lazy-obsidian.audit runs independently as a read-only drift report — every finding line already names its own repair route (lazy-obsidian.capture / lazy-obsidian.deploy), the audit itself never asks a question or writes anything but its run log; show the idempotent re-run loop"
@@ -10,8 +10,8 @@ source_skills:
   - lazy-obsidian.install
   - lazy-obsidian.audit
   - lazy-obsidian.update-plugin
-source_sha: d646145dc19da6bfbae3e0c00253f21e2d5c4ad2
-surface_sha: 65873b90cbf6e237c2e1524f2c936b8f1f2cad8bafd8567f4de2d1538ca71e85
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: ed7fc4b096376f9845067542c808d28cdca8a42fb94447fd88fa89a61bef5f99
 ---
 # Install and audit
 

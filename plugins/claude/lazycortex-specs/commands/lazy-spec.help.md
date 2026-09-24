@@ -1,7 +1,6 @@
 ---
 description: "Run when the operator asks what lazycortex-specs can do, which verb creates or advances a spec, or how the readiness gates work — lists the spec-vault surface grouped by phase: product bootstrap, asset authoring, gates and per-doc stages, request intake and routing, code sync and doctor, plus the resolver primitives other skills call."
 execution-discipline-waiver: "help command — static text, no multi-step logic"
-logging-waiver: "static text — no executable steps"
 ---
 Output the block below verbatim to the user. Do not summarize, rephrase, or add commentary. Do not invoke any tools. Do not log this run.
 

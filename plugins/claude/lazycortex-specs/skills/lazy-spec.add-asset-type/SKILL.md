@@ -13,7 +13,7 @@ The type's per-block config is `{ "icon": <icon>, "color"?: <hex>, "playbook": <
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. Use these canonical titles verbatim:
    - `Step 1 — Resolve the product`
@@ -24,7 +24,6 @@ This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 6 — Ask the default path`
    - `Step 7 — Write the type block`
    - `Step 8 — Choose the type playbook`
-   - `Step 9 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". A no-op counts only when it emits an explicit outcome (`unchanged`, `skipped-per-user-choice`, …).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -228,12 +227,6 @@ State in the stub, above the headings, that until a heading is filled the coordi
 **Append the field.** Whichever branch ran, write `playbook: <playbook-ref>` into `products[<key>].asset_types.<name>` with the same atomic read-modify-write as Step 7 (`settings-get products` → edit → `settings-set products`), preserving every field Step 7 already wrote.
 
 Outcome: `playbook-set` (carrying the `shipped` / `stub-written` sub-tag) or `skipped-alias`.
-
-## Step 9 — Log the run
-
-Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/lazy-spec.add-asset-type/YYYY-MM-DD_HH-MM-SS.md`. Create the dir with `Bash(mkdir -p ./.logs/claude/lazy-spec.add-asset-type)`, then `Write` the file — never chain. Frontmatter: `git_sha` (`git rev-parse HEAD`), `git_branch`, `date` (UTC), `input` (the arguments passed). Body: `# lazy-spec.add-asset-type` heading, then `## Actions` and `## Result`. The `## Actions` list MUST record one line per task in the preamble's canonical list with its outcome word — a missing line is a bug.
-
-Outcome: `logged`.
 
 ## Report
 

@@ -9,8 +9,8 @@ source_skills:
   - lazy-wiki.structure
   - lazy-wiki.structure-curator
   - lazy-wiki.configure
-source_sha: 0d62a86bf599c9ea915e15430033befea65bfc75
-surface_sha: 764571e07d5a7b7b9bf839e69ece68a73e34c1a360da3d06bd72b094cc24eb56
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: 0af358e67ea31252223d1dbc0a332e951b5aa28305557995c0284dd42678bb17
 ---
 # Structure
 

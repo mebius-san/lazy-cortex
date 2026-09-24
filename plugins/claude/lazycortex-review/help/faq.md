@@ -12,8 +12,8 @@ source_skills:
   - lazy-review.stop
   - lazy-review.finalize
   - lazy-review.audit
-source_sha: 0d62a86bf599c9ea915e15430033befea65bfc75
-surface_sha: 476ec5798987efef1f8ae6fd30072bdd016ff0a25dfb8b9d9f7795e4b4d64ccc
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: fdab8f9198b210fd9f935838b7d44273c61c1021616b787831b21504c1c75ba7
 ---
 # Frequently asked questions
 
@@ -142,4 +142,4 @@ A product-scoped `<type>@<product>` class carries a glob that fixes the asset's 
 
 ## Where do run logs land?
 
-Each skill writes a timestamped log under `.logs/claude/<skill-name>/` in the current repo. For example, a `start` run lands at `.logs/claude/lazy-review.start/<UTC-timestamp>.md`, and an `audit` run lands at `.logs/claude/lazy-review.audit/<UTC-timestamp>.md`. The `status` skill is the one read-only call that writes no log — it only prints its JSON summary.
+None of the review skills writes a run log of its own. The background runtime still writes its tick logs under `.logs/lazy-review/`, and each skill that changes a document records the change in its commit.

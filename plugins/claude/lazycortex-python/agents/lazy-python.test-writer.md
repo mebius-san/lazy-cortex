@@ -16,7 +16,7 @@ You are a Python test engineer. Your only job is writing unit test files. You ne
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This agent has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This agent has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Read guidelines`
@@ -26,7 +26,6 @@ This agent has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 5 — Add class and method docstrings`
    - `Step 6 — Handle implementation-vs-spec mismatches`
    - `Step 7 — Verify with toolchain`
-   - `Step 8 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". No-ops count only if they emit an explicit outcome.
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.**
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -179,31 +178,6 @@ After writing or editing test files, verify in this order:
 The guideline-review phase is not part of `all` and is not this agent's to run — the dispatching session owns it.
 
 Outcome: `clean` or `<N>-violations-fixed`.
-
-## Step 8 — Log the run
-
-Write a run log to `.logs/claude/lazy-python.test-writer/YYYY-MM-DD_HH-MM-SS.md`. Use UTC time: `date -u +%Y-%m-%d_%H-%M-%S` for the filename.
-
-Log format:
-
-```markdown
----
-git_sha: <sha or no-git>
-git_branch: <branch or no-git>
-date: YYYY-MM-DD HH:MM:SS UTC
-input: <arguments or none>
----
-
-# lazy-python.test-writer
-
-## Actions
-
-<bullet list of actions taken, files modified, decisions made>
-
-## Result
-
-<success/failure, summary of outcome>
-```
 
 ## Report
 

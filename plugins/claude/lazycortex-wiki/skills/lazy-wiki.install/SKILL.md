@@ -21,7 +21,7 @@ This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 7 — Seed agent_models`
    - `Step 8 — Register curator experts + routines`
    - `Step 9 — Register the plugin-CLI Bash allow-pattern`
-   - `Step 10 — Verify / Report + Log`
+   - `Step 10 — Verify / Report`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". No-ops count only if they produced an explicit outcome (`unchanged`, `merged`, `kept-local`, `already-present`, …).
 3. **Do not reach the Report step until every prior task is `completed`.**
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -517,7 +517,7 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> permission-allow <settings-local
 
 Outcome: `cli-allow-added` or `cli-allow-already-present`.
 
-## Step 10: Verify / Report + Log
+## Step 10: Verify / Report
 
 - Read back the written `lazy.settings.json` and confirm it parses.
 - Confirm `wiki`, `structure`, `terms`, and `agent_models.lazycortex` are present, that `wiki.exclude` carries `docs/structure.md`, and that `wiki.tag_axes` includes `doc-kind` — the last one holds on a fresh install too, since the vocabulary is the repository's and does not wait for a scope. Do NOT expect `doc-kind` in any scope's own `tag_axes`: a scope list is a narrowing, and an absent or empty one means the scope uses the whole vocabulary.
@@ -533,11 +533,7 @@ Routine keys carry the plugin namespace and expert keys do not, per `lazy-core.h
   - Per-rule outcome from Step 4.
   - Settings-section outcomes from Steps 5–8.
 
-Log to `./.logs/claude/lazy-wiki.install/<UTC-timestamp>.md` per `lazy-log.logging`. Required frontmatter: `git_sha`, `git_branch`, `date` (UTC), `input`.
-
-Two separate steps: `Bash(mkdir -p ./.logs/claude/lazy-wiki.install)` then `Write` tool. Never chain.
-
-Outcome: `verified` / `logged`.
+Outcome: `verified`.
 
 ## Report
 

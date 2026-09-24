@@ -1,9 +1,8 @@
 ---
 name: lazy-log.bullets
-description: "Use when one plugin is being released and its CHANGELOG.public.md needs a release block drafted from a commit range — dispatched by any release-drafting flow, or directly with plugin + range + version. Renders the `### <version> — <date> UTC` block of user-visible bullets: the per-release public counterpart to lazy-log.distill's running internal changelog."
+description: "Use when one plugin is being released and its CHANGELOG.public.md needs a release block drafted from a commit range — dispatched by any release-drafting flow, or directly with plugin + range + version. Renders the `### <version> — <date> UTC` block of user-visible bullets, the one release-facing writer in the lazy-log family."
 tools: Bash, Write, Skill, Agent
 model: inherit
-logging-waiver: "single-response synthesizer — output IS the prose response, no mutations to record"
 ---
 # Draft user-facing changelog bullets for one plugin release
 
@@ -11,7 +10,7 @@ Read commits in a given range scoped to one plugin tree, drop internal-only comm
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This agent has 6 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This agent has 5 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Parse input`
@@ -19,7 +18,6 @@ This agent has 6 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 3 — Filter to user-visible`
    - `Step 4 — Rewrite as bullets`
    - `Step 5 — Render release block`
-   - `Step 6 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `no-commits`, `all-internal`, `kept-N-of-M`).
 3. **Do not reach the Render step until the ledger shows every prior task `completed`.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Render step's output IS the agent's return value.** Output the release block as-is at the very end of the response, after the per-step report lines. Do NOT wrap it in commentary, do NOT prepend "Here is the bullet list".
@@ -53,7 +51,7 @@ If any field is missing or malformed, fail with a single-line error (`invalid in
 git log --format="%h%x00%s%x00%b%x1e" <range> -- <plugin_dir>
 ```
 
-Parse each `\x1e`-delimited record into `(short_sha, subject, body)`. If the record list is empty, mark Steps 3–4 `skipped (no-commits)`, render an empty release block (`- _no commits in range_`) and proceed to Step 6.
+Parse each `\x1e`-delimited record into `(short_sha, subject, body)`. If the record list is empty, mark Steps 3–4 `skipped (no-commits)`, render an empty release block (`- _no commits in range_`).
 
 For commits whose subject doesn't make the user-visible change clear, run `git show --stat --format="" <sha>` to see which files moved. Don't read full diffs — file list + body is usually enough.
 
@@ -104,10 +102,6 @@ Emit the block exactly as:
 
 This is the agent's return value. Place it at the very end of the response, after the per-step report lines.
 
-### Step 6 — Log the run
-
-Log to `./.logs/claude/lazy-log.bullets/YYYY-MM-DD_HH-MM-SS.md` per the `lazy-log.logging` rule. Use `Bash(mkdir -p ...)` then `Write` (never chain with `&&`). Frontmatter: `git_sha`, `git_branch`, `date`, `input` (the parsed `plugin`/`range`/`new_version`). Body: commits read, commits dropped (with SHAs), commits kept, bullet count.
-
 ## Report
 
 One line per canonical task showing its outcome — the Report is a structural verifier, every step from the canonical list must appear:
@@ -117,7 +111,6 @@ One line per canonical task showing its outcome — the Report is a structural v
 - `Step 3 — Filter to user-visible: kept <K> of <N> | all-internal | skipped (no-commits)>`
 - `Step 4 — Rewrite as bullets: <B bullets | skipped>`
 - `Step 5 — Render release block: rendered`
-- `Step 6 — Log the run: written to <path>`
 
 Then output the rendered release block on its own — that is the agent's primary return value.
 

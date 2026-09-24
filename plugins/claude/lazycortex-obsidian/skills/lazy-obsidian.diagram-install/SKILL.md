@@ -25,14 +25,13 @@ Project-local only. There is no global scope — Obsidian render glue is inheren
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 5 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 4 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Locate repo root and vault`
    - `Step 2 — Install/update mermaid-popup`
    - `Step 3 — Detect legacy mermaid-no-bg.css`
    - `Step 4 — Report`
-   - `Step 5 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome word (e.g. `updated`, `unchanged`, `kept-orphan`, `absent`).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -76,15 +75,6 @@ One bullet per step, in order — missing bullet = skipped step, back up and run
 Next steps shown to user:
 - If Step 3 outcome was **kept-orphan**, remind: "`mermaid-no-bg.css` is present but redundant (the engine emits a transparent-background directive natively) — remove it manually if you want a clean snippets dir."
 - If Step 2 outcome was **failed:**, remind: "click-to-zoom is unavailable until `mermaid-popup` is installed; re-run `/lazy-obsidian.update-plugin mermaid-popup` later or install via Obsidian's Community Plugins UI."
-
-## Step 5 — Log the run
-
-Per `./.claude/rules/lazy-log.logging.md`:
-
-1. `Bash(mkdir -p ./.logs/claude/lazy-obsidian.diagram-install)`
-2. `Write` to `./.logs/claude/lazy-obsidian.diagram-install/<UTC-timestamp>.md` with frontmatter (`git_sha`, `git_branch`, `date`, `input`) and the Step 4 report body.
-
-Two-step write: never chain with `&&`.
 
 ## Failure modes
 

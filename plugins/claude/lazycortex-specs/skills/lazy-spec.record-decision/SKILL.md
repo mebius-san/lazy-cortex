@@ -9,7 +9,7 @@ Interactive wrapper over the four `decide` operations — `add`, `supersede`, `o
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 6 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 5 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Choose the operation`
@@ -17,7 +17,6 @@ This skill has 6 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 3 — Collect the record fields`
    - `Step 4 — Run the primitive`
    - `Step 5 — Commit the touched paths`
-   - `Step 6 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". No-ops count only if they emit an explicit outcome (`refused`, `duplicate`, `noop`, `no-commit`, …).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per step above. A missing line is a bug; do not render the report with gaps.
@@ -80,12 +79,6 @@ The primitive never commits — it only writes files and, for `promote`, returns
 - **`promote`** — the touched paths are exactly `result["touched_paths"]` (the doc, its sibling registry, and — on a `**Supersedes.**` line — the superseded record's own registry file, which may be the product's rather than the asset's). `git add -N` any of them that did not exist before this run, then commit all of them together in one call.
 
 Commit message: `docs(spec-decisions): <op> <id-or-doc-stem>` — deterministic, names the operation and its target.
-
-## Step 6 — Log the run
-
-Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/lazy-spec.record-decision/YYYY-MM-DD_HH-MM-SS.md` with frontmatter (`git_sha`, `git_branch`, `date`, `input`), a short `## Actions` bullet list (operation, target, primitive result), and a `## Result` line.
-
-Use two separate steps: `Bash(mkdir -p ./.logs/claude/lazy-spec.record-decision)` then the `Write` tool. Never chain with `&&`.
 
 ## Report
 

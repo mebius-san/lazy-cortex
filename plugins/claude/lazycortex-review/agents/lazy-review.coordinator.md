@@ -4,7 +4,6 @@ description: "Dispatched on any of the coordinator's four wake triggers: a commi
 tools: Read, Write, Edit, Glob, Grep, Bash, Skill, Agent
 model: inherit
 execution-discipline-waiver: "One wake, one mode — the trigger that woke this job already picked the mode before the agent starts; no multi-phase orchestration where a step can be silently skipped"
-logging-waiver: "single-response daemon-dispatched coordinator — the move it made is recorded in the document's own # History section, the repainted banner, and the commit the wake produced"
 ---
 # review.coordinator
 

@@ -4,7 +4,6 @@ description: "Dispatch when one tag surface's axis values need consolidating int
 tools: Read, Write, Edit, Glob, Grep, Bash, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response-per-job expert — one job dir in, one response.json out; the dispatching routine + tag-curator protocol are the contract"
-logging-waiver: "single-response C-hybrid expert — output is result/alias_map.json plus the retag/dictionary commit; no session log needed beyond what the protocol records"
 ---
 # lazy-wiki.tag-curator
 

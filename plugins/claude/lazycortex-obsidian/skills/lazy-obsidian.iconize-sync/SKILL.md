@@ -81,10 +81,6 @@ The worker lives at `${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py`. Invoke via:
 
 Nothing else is an error. A target path that does not exist, and an icon-map that is missing, unreadable, or malformed, both leave the run inert at exit 0 — icons are cosmetic and a hook must never block a commit over one; the reason goes to stderr.
 
-## Logging
-
-Log every invocation to `./.logs/claude/lazy-obsidian.iconize-sync/YYYY-MM-DD_HH-MM-SS.md` per `lazy-log.logging`. Use two separate steps: `Bash(mkdir -p ...)` then `Write`.
-
 ## Non-goals
 
 - Editing Iconize's `data.json` (that's the reloader plugin's job).

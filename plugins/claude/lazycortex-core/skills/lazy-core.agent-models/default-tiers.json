@@ -9,7 +9,6 @@
     "lazycortex-core:lazy-core.autocheckup": "opus",
     "lazycortex-core:lazy-core.autosetup": "opus",
     "lazycortex-core:lazy-log.bullets": "sonnet",
-    "lazycortex-core:lazy-log.distill": "sonnet",
     "lazycortex-core:lazy-log.recall": "sonnet",
     "lazycortex-core:lazy-log.summary": "sonnet",
     "lazycortex-core:lazy-log.timeline": "haiku",

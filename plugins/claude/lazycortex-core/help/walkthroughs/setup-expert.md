@@ -11,8 +11,8 @@ source_skills:
   - lazy-expert.dispatch-job
   - lazy-expert.list-jobs
   - lazy-expert.collect-job
-source_sha: 54cf10bd426bde9d8b4fa93a26835bc6393ced58
-surface_sha: d6fc863da20b03bfb8de63214e3c45d88cd09235878e682f0385268aa5ad2156
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: 6ee1dac291040474336631c23ff88b44fa59a630bf228b069c0f90a3e8a2c21b
 ---
 # Add a named expert and dispatch your first async job
 

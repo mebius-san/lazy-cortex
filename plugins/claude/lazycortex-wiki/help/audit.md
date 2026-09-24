@@ -5,8 +5,8 @@ last_regen: 2026-09-24
 no_diagram: true
 source_skills:
   - lazy-wiki.audit
-source_sha: 8d8ca9de4b8a6cd1d65a25b2edf8008c9d36f965
-surface_sha: 66770de23c4667aacf4edd0f76a8023d891276eccc8a508e97e3fe08068d3d87
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: 8c2d89219a692906104db0510c3b2ae00938870d155d2ccab446b0d1ed7be0af
 ---
 # Wiki integrity audit
 

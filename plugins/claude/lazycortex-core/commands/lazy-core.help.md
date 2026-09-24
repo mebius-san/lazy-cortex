@@ -1,7 +1,6 @@
 ---
 description: "Run when the operator asks what lazycortex-core can do, which of its verbs handles a job, or what is available now that it is installed — lists this plugin's whole surface: config install / audit / doctor / slim-context / setup, the expert job runtime with its routines and per-expert memory, model-tier and LLM-provider routing, the git staging-lock verbs, the guard scans that catch secrets and PII before a repo goes public, the change-history log agents, and the ten authoring rules it ships."
 execution-discipline-waiver: "help command — static text, no multi-step logic"
-logging-waiver: "static text — no executable steps"
 ---
 Output the block below verbatim to the user. Do not summarize, rephrase, or add commentary. Do not invoke any tools. Do not log this run.
 
@@ -53,9 +52,8 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 
 - `lazy-core.autosetup` — non-interactive install-chain executor for one repo (`repo=<path>`, optional `ignore=<prefix>`): applies derivable/recorded install steps, skips question-gated ones with a `needs-interactive` report, refuses only when uncommitted work sits in a file the chain writes, and commits its own writes by explicit path. Built for cross-project rollout loops.
 - `lazy-core.autocheckup` — non-interactive checkup for one repo (`repo=<path>`, optional `ignore=<prefix>`): runs the checkup passes read-only, applies only mechanically derivable fixes, reports everything operator-owned, and commits its own fixes by explicit path under the same dirty-tree guard as autosetup.
-- `lazy-log.bullets` — drafts user-facing changelog bullet blocks from recent distilled entries.
-- `lazy-log.distill` — rolls commits in `.logs/commits.jsonl` into themed changelog entries in `.logs/changelog.md`.
-- `lazy-log.recall` — searches change history across `.logs/changelog.md`, per-run log files, `.logs/commits.jsonl`, and git log; returns ranked results with git SHAs.
+- `lazy-log.bullets` — drafts user-facing changelog bullet blocks from a plugin's commit range.
+- `lazy-log.recall` — searches change history across per-run log files, `.logs/commits.jsonl`, and git log; returns ranked results with git SHAs.
 - `lazy-log.summary` — synthesises a multi-source narrative summary for a given topic or time range.
 - `lazy-log.timeline` — produces a chronological view of changes for a date range or topic.
 - `lazy-runtime.doctor` — dispatched hourly by its own routine when something looks stuck: a DEAD-marked job the pump keeps skipping, or a dirty-tree halt older than an hour. Decides retry / permanent-fail / commit on its own. Not for direct use.
@@ -71,7 +69,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 - `lazy-core.scaffold` — registry of authoring templates: read the matching template before composing any new artifact. Always loaded.
 - `lazy-core.skill-writing` — authoring contract for skills and commands: Execution-Discipline preamble, outcome vocabulary, no-Optional headings, the waiver mechanism.
 - `lazy-guard.security` — security posture the `lazy-guard.*` scanners and pre-commit hooks enforce: credential safety, secret blocking everywhere, public-repo readiness. Always loaded.
-- `lazy-log.logging` — run-logging contract; every skill, agent, and command must log each run to `.logs/claude/<name>/YYYY-MM-DD_HH-MM-SS.md`. Always loaded.
+- `lazy-log.logging` — run-log format for artifacts that opt in with `logging: true` in frontmatter; everything else writes no log. Always loaded.
 
 <!-- help-block:start -->
 **Documentation:**

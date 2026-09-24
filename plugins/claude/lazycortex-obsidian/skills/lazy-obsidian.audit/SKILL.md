@@ -8,17 +8,16 @@ argument-hint: "(no arguments — runs the vault-manifest drift check)"
 
 Vault-manifest drift check: does the live `.obsidian/` config still match the manifest `/lazy-obsidian.capture` recorded. Consumer-facing only — the plugin's own shipped artifacts are audited by the maintainer's tooling, not here.
 
-The run follows the shared audit shape in `plugins/claude/lazycortex-core/references/lazy-core.audit-contract.md` — severity vocabulary, finding shape, and the read-only boundary come from there. This skill asks nothing and resolves no drift: it names the repair route on the finding line and stops. The one file it writes is its own run log, which `lazy-log.logging` makes mandatory for every run.
+The run follows the shared audit shape in `plugins/claude/lazycortex-core/references/lazy-core.audit-contract.md` — severity vocabulary, finding shape, and the read-only boundary come from there. This skill asks nothing and resolves no drift: it names the repair route on the finding line and stops. It writes nothing at all — its report is its return value.
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 3 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 2 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 1 — Vault manifest drift`
    - `Phase 2 — Report`
-   - `Phase 3 — Log the run`
-2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `clean`, `no-manifest`, `logged`).
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `clean`, `no-manifest`).
 3. **Do not reach the Report step until the ledger shows Phase 1 `completed`.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
@@ -53,14 +52,3 @@ Render the findings as one line each, in the contract's finding shape, grouped b
 The route on each line is the one Phase 1's outcome list names for that severity, repeated per line; there is no trailing recommendations section, and nothing is dispatched. Close with the contract's summary line — `audit: <PASS|WARN|FAIL> (<n> findings)`, the verdict being the highest severity present and `INFO` counting as `PASS`.
 
 Outcome: `reported`.
-
-## Phase 3 — Log the run
-
-Log the run to `./.logs/claude/lazy-obsidian.audit/YYYY-MM-DD_HH-MM-SS.md` per `lazy-log.logging`. Read-only is not an exemption: the finding set this skill produces is variable-shaped, so it is `should-log`, never a waiver candidate. The log is the one file this skill writes.
-
-1. `Bash(mkdir -p ./.logs/claude/lazy-obsidian.audit)` — a separate step from the `Write`, never chained.
-2. `Bash(date -u +%Y-%m-%d_%H-%M-%S)` for the filename; `Bash(git rev-parse HEAD)` and `Bash(git rev-parse --abbrev-ref HEAD)` for `git_sha` / `git_branch` (`no-git` when either fails).
-3. `Write` the file. Frontmatter: `git_sha`, `git_branch`, `date` (UTC), `input` (the arguments passed, or `none`).
-4. Body: `# lazy-obsidian.audit` heading, then `## Actions` — one line per step with its outcome word, plus the per-severity finding counts — and `## Result` with the outcome word and a one-sentence summary.
-
-Outcome: `logged`.

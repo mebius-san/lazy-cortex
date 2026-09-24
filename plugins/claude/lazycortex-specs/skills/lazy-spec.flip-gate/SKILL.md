@@ -51,7 +51,3 @@ Run `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs
 - **`/lazy-spec.flip-gate` refuses with "asset is cancelled"** — `spec_cancelled: true` freezes all gates, the one refusal the primitive still enforces on its own → uncancel the asset before flipping.
 - **`/lazy-spec.flip-gate` cannot resolve the asset** — the input maps to zero or more than one asset → pass an unambiguous asset directory or slug.
 - **A gate was flipped that shouldn't have been** — the primitive trusted the caller; there is no precondition to have caught it. Flip it back with `--off` (also unconditional, refused only while cancelled), then check `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.coordination-playbook.md` Chapter 3 for what the gate's readiness actually requires before flipping forward again.
-
-## Run Log
-
-Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/lazy-spec.flip-gate/YYYY-MM-DD_HH-MM-SS.md` with frontmatter (`git_sha`, `git_branch`, `date`, `input`), a short `## Actions` bullet list, and a `## Result` line. The `flip_gate` primitive also writes its own log under the same dir on a successful flip; this skill's log records the wrapper run (resolution + confirmation outcome) regardless of whether the primitive ran.

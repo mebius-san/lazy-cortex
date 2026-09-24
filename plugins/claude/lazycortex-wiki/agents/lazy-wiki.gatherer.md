@@ -4,7 +4,6 @@ description: "Dispatch from /lazy-wiki.query once, after the seekers have return
 tools: Read, Grep, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response traversal agent — one prompt (question + entry points) in, one answer out; the /lazy-wiki.query skill is the contract"
-logging-waiver: "ephemeral traversal subagent dispatched by /lazy-wiki.query — the coordinating skill owns the run log"
 ---
 # lazy-wiki.gatherer
 

@@ -7,8 +7,8 @@ source_skills:
   - lazy-observe.install
   - lazy-observe.uninstall
   - lazy-observe.audit
-source_sha: 54cf10bd426bde9d8b4fa93a26835bc6393ced58
-surface_sha: 737381b208aeff5fad984a51c963c4477de9b64618aa44e024a83b50983bdfd1
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: b44e80b78775e3afbb0087f470516c8dfbcac68db876e12d93af3ada958e252a
 ---
 # Frequently asked questions
 
@@ -104,7 +104,7 @@ Nothing breaks. Every step treats an already-absent target as a silent no-op, ne
 
 ## How do I check whether the pipeline is working end-to-end?
 
-Run `/lazy-observe.audit`. It runs seven checks in sequence, then writes its own run log as an eighth step — it never restarts a service, edits a config, or touches WAL/answer-file contents, but the run itself is now recorded to `./.logs/claude/lazy-observe.audit/`: reads your answer file (or, if that file is absent, checks whether collection is already working on this host anyway — see the next question), confirms the service unit is loaded and the agent process is up, verifies every local lazycortex-core daemon's `/metrics` endpoint contains `lazycortex_runtime_*` series, checks the agent's own self-metrics for a non-zero remote_write success rate (or, in integrate mode, that the scrape-targets file exists and matches the daemon count), reaches out to your observer URL to confirm it's reachable, and reports the WAL directory size. Each check resolves to `PASS`, `INFO`, `WARN`, or `FAIL` with a one-line suggested fix — `INFO` marks a check that found nothing actionable, such as a WAL directory that hasn't been written to yet. It is safe to run at any time.
+Run `/lazy-observe.audit`. It runs seven checks in sequence and writes nothing — it never restarts a service, edits a config, or touches WAL/answer-file contents, and its report is its only output. The checks: it reads your answer file (or, if that file is absent, checks whether collection is already working on this host anyway — see the next question), confirms the service unit is loaded and the agent process is up, verifies every local lazycortex-core daemon's `/metrics` endpoint contains `lazycortex_runtime_*` series, checks the agent's own self-metrics for a non-zero remote_write success rate (or, in integrate mode, that the scrape-targets file exists and matches the daemon count), reaches out to your observer URL to confirm it's reachable, and reports the WAL directory size. Each check resolves to `PASS`, `INFO`, `WARN`, or `FAIL` with a one-line suggested fix — `INFO` marks a check that found nothing actionable, such as a WAL directory that hasn't been written to yet. It is safe to run at any time.
 
 ---
 

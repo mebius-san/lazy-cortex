@@ -4,7 +4,6 @@ description: "Use when an expert or a live session is about to name a concept in
 research: true
 allowed-tools: Read, Grep, Agent
 execution-discipline-waiver: "nested-from-agent — invoked from a writing expert's body mid-document; a numbered step list here would re-anchor the caller and drop its own remaining steps"
-logging-waiver: "read-only lookup with no mutations and no decisions — a run log would record only that a word was looked up"
 ---
 # lazy-wiki.terms
 

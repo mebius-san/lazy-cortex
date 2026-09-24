@@ -116,10 +116,6 @@ The `RepoInfo` record above. Callers pass the repo key and path to `lazy-spec.so
 - **`/lazy-spec.resolve-repo` aborts: nested GitLab subgroup path** — the remote URL path has more than two segments (`owner/group/repo`) → nested subgroups are not yet supported; use an explicit `forge:` override and a two-segment owner/repo or wait for subgroup support.
 - **`/lazy-spec.resolve-repo` aborts: unknown forge** — the remote's hostname is not in the known-forges table and no `forge:` key is set in the record → add `forge: <key>` (one of `github`, `gitlab`, `bitbucket`, `gitea`, `forgejo`, `sourcehut`) to `lazy.settings.json[repos][<key>]`.
 
-## Run Log
-
-Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/lazy-spec.resolve-repo/YYYY-MM-DD_HH-MM-SS.md`. Note in Actions: which repo key was resolved, the remote URL, and the detected forge.
-
 ## Key Rules
 
 - **Never hardcode GitHub assumptions.** The remote URL is the single source of truth.

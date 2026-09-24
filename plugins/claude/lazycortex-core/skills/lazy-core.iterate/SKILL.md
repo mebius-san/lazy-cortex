@@ -11,14 +11,13 @@ Drive a closed do → verify → fix → verify cycle against a target until one
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 5 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 4 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Frame target`
    - `Step 2 — Set stop conditions`
    - `Step 3 — Run iteration loop`
    - `Step 4 — Final report`
-   - `Step 5 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". No-ops count only if they emit an explicit outcome (`framed`, `aborted-no-target`, `conditions-set`, …).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -126,33 +125,6 @@ Print a structured summary to the user. Required fields:
 The report is the deliverable — make it scannable, not a wall of text. Tables, bullet lists, short labels.
 
 Outcome: `reported`.
-
-## Step 5 — Log the run
-
-Write a run log to `.logs/claude/lazy-core.iterate/YYYY-MM-DD_HH-MM-SS.md`. Use UTC time: `date -u +%Y-%m-%d_%H-%M-%S` for the filename. Create the directory with `Bash(mkdir -p ...)` then write with the `Write` tool — two separate steps, never chained.
-
-Log format:
-
-```markdown
----
-git_sha: <sha or no-git>
-git_branch: <branch or no-git>
-date: YYYY-MM-DD HH:MM:SS UTC
-input: <target + overrides or none>
----
-
-# lazy-core.iterate
-
-## Actions
-
-<one bullet per cycle: cycle N — issues found / fixed / outcome>
-
-## Result
-
-<stop reason + cycles run + fixed-total + remaining count>
-```
-
-Outcome: `logged`.
 
 ## Report
 

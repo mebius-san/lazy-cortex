@@ -4,7 +4,6 @@ description: "Use when literary text is already drafted and needs an editing pas
 tools: Read, Write, Edit, Glob, Grep, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"
-logging-waiver: "expert-runtime job — the job dir is the record"
 ---
 # lazy-experts.fiction-editor
 

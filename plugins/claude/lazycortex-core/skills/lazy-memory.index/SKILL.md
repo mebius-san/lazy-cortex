@@ -9,13 +9,12 @@ Walk every expert in `.memory/`, recompute the topic set each carries from note 
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 4 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 3 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Verify .memory/ exists`
    - `Step 2 — Rebuild tag index via worker`
    - `Step 3 — Report`
-   - `Step 4 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.**
 3. **Do not reach the Report step until every prior task is `completed`.**
 4. **The Report step is a structural verifier.**
@@ -47,14 +46,6 @@ experts: <N>
 notes:   <N>
 tags:    <N>
 ```
-
-## Step 4 — Log the run
-
-```
-Bash(mkdir -p .logs/claude/lazy-memory.index)
-```
-
-Write to `.logs/claude/lazy-memory.index/<UTC-timestamp>.md` per the logging rule.
 
 ## Failure modes
 

@@ -8,12 +8,11 @@ Run one full upstream tick over every source configured under the `spec` setting
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 3 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step.
+This skill has 2 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step.
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. Canonical list:
    - `Step 1 — Run the fetch/detect pass`
    - `Step 2 — Render the summary`
-   - `Step 3 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.**
 3. **Do not finalise until the ledger shows every prior task `completed`.**
 
@@ -56,17 +55,6 @@ Below the table, list `statuses` as one line per status token present (`new: <n>
   config shape.
 
 Outcome: `rendered`.
-
-## Step 3 — Log the run
-
-Per `.claude/rules/lazy-log.logging.md`, write a run log to
-`./.logs/claude/lazy-spec.upstream-run/YYYY-MM-DD_HH-MM-SS.md`. Create the dir with
-`Bash(mkdir -p ./.logs/claude/lazy-spec.upstream-run)`, then `Write` the file — never chain with
-`&&`. Frontmatter: `git_sha` (`git rev-parse HEAD`), `git_branch`, `date` (UTC), `input: none`.
-Body: `# lazy-spec.upstream-run` heading, `## Actions` (the parsed counts), `## Result` (the
-rendered table plus any budget/error notes).
-
-Outcome: `logged`.
 
 ## Failure modes
 

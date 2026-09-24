@@ -36,7 +36,7 @@ This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 6 — Offer entries in three ordered batches`
    - `Step 7 — Per-agent wizard loop (review-bound only)`
    - `Step 8 — Write back`
-   - `Step 9 — Report and log`
+   - `Step 9 — Report`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** A no-op counts only if it produced an explicit outcome line in the Report (e.g. `nothing to do`, `dry-run — N entries would write`).
 3. **Do not reach Report until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.**
 4. **The Report step is a structural verifier.** Its output MUST contain one line per step above. A missing line is a bug.
@@ -230,7 +230,7 @@ The verb does steps 1–2 itself (it loads the section, creates the missing grou
 
 If `dryRun = true`, skip all writes. Report what *would* have been written, per destination.
 
-## Step 9: Report and log
+## Step 9: Report
 
 ### Report
 
@@ -248,10 +248,6 @@ Plus one line per *added* entry: `<group>.<dispatch> = <tier> → <destination>`
 If `dryRun = true`, wrap the whole table with `[DRY RUN — no files modified]`.
 
 If both Step 4 lists were empty, render: `nothing to do — all agents have routing entries, none stale`.
-
-### Log
-
-Log the run to `./.logs/claude/lazy-core.agent-models/YYYY-MM-DD_HH-MM-SS.md` per the logging rule (`git_sha` frontmatter, Actions + Result body). Use two separate steps: `Bash(mkdir -p ...)` then `Write`.
 
 ## Failure modes
 

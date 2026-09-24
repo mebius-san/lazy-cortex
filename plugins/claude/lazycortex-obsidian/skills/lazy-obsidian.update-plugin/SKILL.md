@@ -10,7 +10,7 @@ Primitive skill. Installs or updates a single Obsidian community plugin into the
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Locate plugin install path and vault`
@@ -21,7 +21,6 @@ This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 6 — Apply opinionated overrides`
    - `Step 7 — Register in community-plugins.json`
    - `Step 8 — Report`
-   - `Step 9 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -152,12 +151,6 @@ Print one structured line the caller can parse:
 ```
 
 Return verbatim so chaining skills can key off the state tuple without re-parsing natural language.
-
-## Step 9 — Log the run
-
-Log to `./.logs/claude/lazy-obsidian.update-plugin/YYYY-MM-DD_HH-MM-SS.md` per the logging rule. Include `git_sha`, `git_branch`, and the input argument (`<id> [--bundled]`) in frontmatter. Body lists `<id>` and the final state tuple.
-
-Two separate steps: `Bash(mkdir -p ...)` then the `Write` tool. Never chain with `&&` or use `cat > file <<'EOF'`.
 
 ## Failure modes
 

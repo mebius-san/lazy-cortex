@@ -10,14 +10,13 @@ This skill is the human-facing intake helper. It wraps a 3–5 question wizard a
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 5 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step.
+This skill has 4 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step.
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. Canonical list:
    - `Step 0 — Confirm intent + collect raw idea`
    - `Step 1 — Resolve slug`
    - `Step 2 — Wizard refinement (3-5 questions)`
    - `Step 3 — Write body-only file`
-   - `Step 4 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.**
 3. **Do not finalise until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.**
 
@@ -90,14 +89,6 @@ Write `<vault-root>/requests/<slug>.md` with the following body shape (NO frontm
 ```
 
 If the user gave structured content (e.g. pasted a complete design doc, a `superpowers:writing-plans` output, a bug report with repro steps), preserve the structure as-is — the agent's body-distribution rules use whole-doc detection (per `lazy-spec.request-protocol.md` → "Body distribution rules") and benefit from preserved sections like `## Plan`, `## Design`, `## Repro`. Do NOT flatten or paraphrase structured content into prose paragraphs.
-
-### 4. Log the run
-
-Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/lazy-spec.create-request/<timestamp>.md`. Record:
-
-- Final slug
-- Number of wizard questions asked
-- Whether the body retained structured content (whole-doc preserved) or was prose-only
 
 ## Failure modes
 

@@ -10,8 +10,8 @@ source_skills:
   - lazy-spec.create-from-code
   - lazy-spec.create-feature
   - lazy-spec.coverage
-source_sha: 0d62a86bf599c9ea915e15430033befea65bfc75
-surface_sha: 6e9312e925b375ec039499ddd50e4ff679e3f282fd99ed9931ddc83559375686
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: cbfe2fa66f2e3a91334bb42cd05c81a50bb7e64c95110859ac5945814a253608
 ---
 # How do I get specs for a codebase that already exists?
 

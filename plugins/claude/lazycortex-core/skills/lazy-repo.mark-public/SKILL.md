@@ -10,7 +10,7 @@ End-to-end workflow for taking a private/local repo public — or for marking a 
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Preflight`
@@ -20,7 +20,6 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 4 — Create .guard-public.json`
    - `Step 5 — Go public on GitHub (whole-repo mode only)`
    - `Step 6 — Post-flight (Report)`
-   - `Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -117,7 +116,3 @@ If no: tell the user the repo is audit-clean and ready — they can run `gh repo
 
 - **Step 4 won't proceed: "FAIL findings remain unresolved"** — at least one secret (category A) was not encrypted, template-ized, or redacted → re-run Step 3, choose encrypt / template-ize / redact for every FAIL finding, then continue.
 - **`gh repo edit --visibility public` was not run** — `gh` is not on PATH or is unauthenticated → install GitHub CLI and run `gh auth login`, then execute `gh repo edit --visibility public` manually when ready.
-
-## Logging
-
-Log to `./.logs/claude/lazy-repo.mark-public/YYYY-MM-DD_HH-MM-SS.md`. Use `Bash(mkdir -p ...)` then `Write` tool (never chain).

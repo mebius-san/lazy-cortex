@@ -12,14 +12,13 @@ Used by plugin install skills (programmatic call) and by humans via `/lazy-routi
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 5 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 4 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Collect + validate inputs`
    - `Step 2 — Check for existing registration`
    - `Step 3 — Register routine`
    - `Step 4 — Report`
-   - `Step 5 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". No-ops count only if they emit an explicit outcome (`asserted`, `unchanged`, `skipped-per-user-choice`, …).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -125,32 +124,6 @@ Outcome: `registered`, `refreshed`, `unchanged`, or `error`.
 One line per task in the canonical list, with its outcome word. A missing line is a bug.
 
 Print: "registered routine `<name>` (type=<type>, <key params>)", or in reconcile mode "`<outcome>` routine `<name>` (managed: <keys>)".
-
-## Step 5 — Log the run
-
-```
-Bash(mkdir -p .logs/claude/lazy-routine.register)
-```
-
-Then `Write` to `.logs/claude/lazy-routine.register/<UTC-timestamp>.md`:
-
-```yaml
----
-git_sha: <git rev-parse HEAD>
-git_branch: <git rev-parse --abbrev-ref HEAD>
-date: <YYYY-MM-DD HH:MM:SS UTC>
-input: "name=<name> type=<type>"
----
-```
-
-`# lazy-routine.register`
-
-`## Actions`
-- Collected + validated inputs (type=`<type>`)
-- Checked existing registration
-- Registered routine in lazy.settings.json
-
-`## Result` `<success|failure>` — name=`<name>`, type=`<type>`.
 
 ## Failure modes
 

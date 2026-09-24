@@ -9,8 +9,8 @@ source_skills:
   - lazy-spec.flip-gate
   - lazy-spec.gate-tick
   - lazy-spec.set-stage
-source_sha: 70d7cafcb16785355f25b2ed0df5310aaa5e2c4e
-surface_sha: 38d61a26add344769d21c4731095180ed734fb3d444e97f4edbd23a305a7500d
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: 22852b21d62687da4496c9f9efeffc7319165ee2916c3b32c73377e1cc7a2a0b
 ---
 # Gates — driving asset readiness from design to release
 
@@ -52,7 +52,7 @@ The old fully-automatic tick-driven chain from a freshly approved `design.md` to
 - **Approve a doc that still carries an open decision-candidate.** `/lazy-spec.set-stage <path> approved` refuses when the body has a `[!decision-candidate]` callout — ticked or not — anywhere outside a code fence. Resolve it through the document's own review loop first, then re-run the approval; a hand deletion of the callout doesn't satisfy the check.
 - **Flip a human-signal gate.** Run `/lazy-spec.flip-gate <asset-dir-or-slug> spec_develop_done` after the work is deployed. For assets where the deploy is rolled back, run `/lazy-spec.flip-gate <asset> spec_develop_done --off`.
 - **Skip the confirmation prompt.** Pass `--auto` to `/lazy-spec.flip-gate` when scripting or orchestrating from another skill. Without `--auto` the skill asks one wizard question before acting.
-- **Check what the coordinator last did on an asset.** Read the asset folder-note's `# Status brief` (its own rewritten-every-invocation narration) for its reasoning, and its frontmatter `spec_<gate>_at` stamps plus each doc's own `spec_approved_at` for exactly when a gate or stage last moved — `# History` records other coordinator actions (command completions and the like), but neither `/lazy-spec.set-stage` nor `/lazy-spec.flip-gate` write a line there. The daemon log records each `gate-tick` and `coordinator-watch` dispatch, and `lazy-spec.flip-gate` writes its own log under `.logs/claude/lazy-spec.flip-gate/` for every flip.
+- **Check what the coordinator last did on an asset.** Read the asset folder-note's `# Status brief` (its own rewritten-every-invocation narration) for its reasoning, and its frontmatter `spec_<gate>_at` stamps plus each doc's own `spec_approved_at` for exactly when a gate or stage last moved — `# History` records other coordinator actions (command completions and the like), but neither `/lazy-spec.set-stage` nor `/lazy-spec.flip-gate` write a line there. The daemon log records each `gate-tick` and `coordinator-watch` dispatch.
 - **Re-open a rejected doc.** Run `/lazy-spec.set-stage <path/to/design.md> draft` — `rejected` is not terminal; moving back to `draft` re-opens the review loop.
 - **Advance a doc that has markdown attachments beside it.** Run `/lazy-spec.set-stage` on the owner doc as usual — the cascade re-stamps every attachment's `spec_stage` and `spec/<stage>` tag in the same commit. Do not target the attachment itself; the skill refuses it and points you back at the owner.
 - **Check why a stage or gate regressed on its own.** Read the folder-note's `# Status brief` — a sentence naming a dependent whose source was re-approved is source staleness, not an operator action or a bug (compare the source's `spec_approved_at` with the dependent's to see the order yourself). Reconcile the dependent against its freshly re-approved source, then send it back through the review loop as usual (`/lazy-spec.set-stage <dependent> draft` already ran for you; you only need to bring the content current and resubmit).

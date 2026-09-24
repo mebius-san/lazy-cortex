@@ -7,7 +7,7 @@ allowed-tools: Read, Glob, Grep, Bash, Agent, Write
 
 Audit the `lazycortex-diagram` plugin for template well-formedness and contract conformance on exemplars. Read-only: it reports and names the repair route per finding, and repairs nothing — the routes are separate runs the operator starts.
 
-This skill follows the shared audit form in `plugins/claude/lazycortex-core/references/lazy-core.audit-contract.md` — `references/lazy-core.audit-contract.md` inside the installed `lazycortex-core`: read-only, the four severity words `PASS` / `INFO` / `WARN` / `FAIL` and no others, the repair route standing in the finding line itself, and no estimate of what a repair would save. The one file it writes is its own run log under `./.logs/claude/lazy-diagram.audit/`, which `lazy-log.logging` mandates for every run.
+This skill follows the shared audit form in `plugins/claude/lazycortex-core/references/lazy-core.audit-contract.md` — `references/lazy-core.audit-contract.md` inside the installed `lazycortex-core`: read-only, the four severity words `PASS` / `INFO` / `WARN` / `FAIL` and no others, the repair route standing in the finding line itself, and no estimate of what a repair would save. It writes nothing at all — its report is its return value.
 
 This skill is a **parallel-scan coordinator** per `lazy-core.skill-writing § 5`. Phase 1 dispatches Explore agents in a single message; Phase 2+ merges their structured reports.
 
@@ -15,14 +15,13 @@ This skill is a **parallel-scan coordinator** per `lazy-core.skill-writing § 5`
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 5 ordered steps. The executor MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 4 ordered steps. The executor MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Pre-flight`
    - `Step 2 — Dispatch A2–A3 + A5 in parallel`
    - `Step 3 — Merge structured reports`
    - `Step 4 — Present unified report`
-   - `Step 5 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it".
 3. **Do not reach Step 4 (Present unified report) until the ledger shows steps 1–3 `completed`.** Reports without merge are a bug.
 4. **The Step 4 report is a structural verifier.** Its output MUST contain one section per A2 / A3 / A5 finding plus a summary line.
@@ -139,12 +138,3 @@ Outcome: `presented`.
 ## Failure modes
 
 - **`/lazy-diagram.audit` aborts: "[FAIL] plugin not installed"** — `lazycortex-diagram` is not found in `~/.claude/plugins/installed_plugins.json` → install the plugin via `/lazy-core.install`, restart Claude Code, then re-run.
-
-## Step 5: Log the run
-
-Two separate calls:
-
-1. `Bash: mkdir -p ./.logs/claude/lazy-diagram.audit`
-2. `Write: ./.logs/claude/lazy-diagram.audit/<UTC-timestamp>.md` with frontmatter (`git_sha`, `git_branch`, `date`, `input`) and the unified report from Step 4. This is the only file the skill writes.
-
-Outcome: `logged`.

@@ -4,7 +4,6 @@ description: "Dispatched on any of the catalog coordinator's wake triggers again
 tools: Read, Write, Edit, Glob, Grep, Bash, Skill, Agent
 model: inherit
 execution-discipline-waiver: "One wake, one mode — the trigger that woke this job already picked the mode before the agent starts; no multi-phase orchestration where a step can be silently skipped"
-logging-waiver: "single-response daemon-dispatched coordinator — the move it made is recorded in the level note's # Status brief, in its # History when it is a journaled event, and in the commit the wake produced"
 ---
 # spec.catalog-coordinator
 

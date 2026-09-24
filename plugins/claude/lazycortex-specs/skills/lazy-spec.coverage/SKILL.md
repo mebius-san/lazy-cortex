@@ -8,7 +8,7 @@ Gap-scan for one product: what the code visibly does, against what the spec tree
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 1 — Resolve the product`
@@ -18,7 +18,6 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Phase 5 — Compute gap candidates`
    - `Phase 6 — Report to the operator`
    - `Phase 7 — Offer materialization`
-   - `Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". A no-op counts only when it emits an explicit outcome (`structure-absent`, `domains-absent`, `no-gaps`, `skipped-per-user-choice`, …).
 3. **Do not reach Phase 6 until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **Phase 6 is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -123,33 +122,6 @@ AskUserQuestion: header "Gap <n>/<N>", question "The code of <product> has <capa
 - **`skip`** — no trace.
 
 Outcome per gap: `materialized-via-create-from-code` / `printed-asset-proposal` / `skipped-per-user-choice`.
-
-## Logging
-
-Per `.claude/rules/lazy-log.logging.md`:
-
-1. `Bash(mkdir -p ./.logs/claude/lazy-spec.coverage)`
-2. Capture `git_sha` via `Bash(git rev-parse HEAD)` and `git_branch` via `Bash(git rev-parse --abbrev-ref HEAD)`; use `no-git` if either fails.
-3. `Bash(date -u +%Y-%m-%d_%H-%M-%S)` → timestamp for the filename.
-4. `Write` the log to `./.logs/claude/lazy-spec.coverage/<timestamp>.md` with frontmatter:
-
-```
----
-git_sha: <sha>
-git_branch: <branch>
-date: <YYYY-MM-DD HH:MM:SS UTC>
-input: "<product>"
----
-# lazy-spec.coverage
-
-## Actions
-- <one line per Phase above with its outcome word>
-
-## Result
-<success/failure + one-sentence summary: N gaps found, M materialized, K printed, J skipped>
-```
-
-Outcome: `logged`.
 
 ## Report
 

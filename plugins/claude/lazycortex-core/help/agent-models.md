@@ -7,8 +7,8 @@ source_skills:
   - lazy-core.agent-models
   - lazy-core.agent-models-seed
   - lazy-core.providers
-source_sha: 54cf10bd426bde9d8b4fa93a26835bc6393ced58
-surface_sha: b11f84d947b21184e07eeaff30b98d781787c94cff2d68cc6e0c15c8b5e3bf43
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: d8f8798968e38d6925b816f3cce3e89d8190347ed291a3cd54f11b1f6edd2e51
 ---
 # Per-agent model routing
 

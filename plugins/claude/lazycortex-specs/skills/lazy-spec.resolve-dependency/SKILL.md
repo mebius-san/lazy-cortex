@@ -68,10 +68,6 @@ A single record with the four fields above. Skills consume the record and decide
 - **`/lazy-spec.resolve-dependency` refuses: product not found** — a `product:` entry's key does not match any product registered under `lazy.settings.json[products]` → register the missing product with `lazy-spec.product-config` or correct the key spelling.
 - **`/lazy-spec.resolve-dependency` refuses: repo not found** — a `repo:` entry's key is not registered in `lazy.settings.json[repos]` → register the repo via `/lazy-spec.product-config` or correct the key spelling.
 
-## Run Log
-
-Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/lazy-spec.resolve-dependency/YYYY-MM-DD_HH-MM-SS.md` with input, resolution output, and a `## Result` line.
-
 ## Key Rules
 
 - **Pure function** — given the same dep entry and the same cfg files, always produces the same record. No side effects.

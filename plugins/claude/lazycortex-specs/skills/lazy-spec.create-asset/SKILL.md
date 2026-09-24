@@ -11,7 +11,7 @@ Folder layout, filenames, status-file shape, and wikilink format are owned by `$
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. Use these canonical titles verbatim:
    - `Step 1 — Resolve the product`
@@ -21,7 +21,6 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 5 — Scaffold the asset folder`
    - `Step 6 — Author the asset précis`
    - `Step 7 — Author the prose`
-   - `Step 8 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". A no-op counts only when it emits an explicit outcome (`skipped-empty-mode`, `unchanged`, `skipped-per-user-choice`, …).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -46,7 +45,6 @@ When invoked with `--empty`:
 - Step 5 (scaffold) runs as usual; the seeded doc is set to `draft` via `lazy-spec.set-stage` as in normal mode — see Step 5 note. The scaffold seeds ONLY the type's start doc; every further document is opt-in and is never created here (see Step 4).
 - Skip Step 6 (no précis) — emit outcome `skipped-empty-mode`.
 - Skip Step 7 (no prose) — emit outcome `skipped-empty-mode`.
-
 
 A caller that owns the prose itself scaffolds with `--empty` and authors afterwards — `lazy-spec.create-from-code`'s feature mode does exactly that, so the clarifying questions of Step 3 and the opt-in-document question of Step 4 are never asked for an asset derived from code, whose answers are in the code already.
 
@@ -192,10 +190,6 @@ One prose pass per document the scaffold actually seeded, driven by that documen
 In every authored doc, record a real decision fork the clarification settled (per the weight test in `${CLAUDE_PLUGIN_ROOT}/rules/spec.decisions.md`) as a `[!decision] <thesis> #spec/decision` callout whose body is the justification in plain prose per `lazy-core.markdown-style` — on the document's approve these transfer automatically into the sibling `decisions.md`. Never force a fork that is not there.
 
 This skill never authors plan or report documents — they are not part of the scaffold (Step 4/5) and stay out of scope here too.
-
-## Step 8 — Log the run
-
-Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/lazy-spec.create-asset/YYYY-MM-DD_HH-MM-SS.md`. Create the dir with `Bash(mkdir -p ./.logs/claude/lazy-spec.create-asset)`, then `Write` the file — never chain. Frontmatter: `git_sha` (`git rev-parse HEAD`), `git_branch`, `date` (UTC), `input` (the arguments passed). Body: `# lazy-spec.create-asset` heading, then `## Actions` and `## Result`. The `## Actions` list MUST record one line per task in the preamble's canonical list with its outcome word — a missing line is a bug.
 
 ## Report
 

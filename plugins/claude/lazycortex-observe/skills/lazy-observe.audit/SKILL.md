@@ -5,13 +5,13 @@ allowed-tools: Read, Glob, Bash(launchctl *), Bash(systemctl *), Bash(curl *), B
 ---
 # Audit lazy-observe
 
-Confirm the metrics shipping pipeline is healthy end-to-end. The skill is intentionally read-only — it returns findings, but never restarts services, never edits configs, never wipes WAL directories. Mutating fixes are the operator's call. The one file it writes is its own run log, which `lazy-log.logging` makes mandatory for every run.
+Confirm the metrics shipping pipeline is healthy end-to-end. The skill is intentionally read-only — it returns findings, but never restarts services, never edits configs, never wipes WAL directories. Mutating fixes are the operator's call. It writes nothing at all — its report is its return value.
 
 The run follows the shared audit shape in `plugins/claude/lazycortex-core/references/lazy-core.audit-contract.md` — severity vocabulary, finding shape, and the read-only boundary come from there.
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Read answer file`
@@ -21,9 +21,8 @@ This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 5 — Agent self-metrics show successful remote_write`
    - `Step 6 — Observer URL reachable`
    - `Step 7 — WAL directory bounds`
-   - `Step 8 — Log the run`
    - `Step 9 — Report`
-2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** Each check step ends with one of `PASS` / `INFO` / `WARN` / `FAIL`; the log step ends with `logged`.
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** Each check step ends with one of `PASS` / `INFO` / `WARN` / `FAIL`.
 3. **Do not reach the Report step until the ledger shows every prior task `completed`.**
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above with the severity word and that step's repair route.
 
@@ -124,17 +123,6 @@ Outcomes:
 - `PASS <size>` — the WAL is within the bounds the operator judged.
 - `INFO empty` — the agent has written no WAL yet; nothing to act on.
 - `WARN oversized` — the observer was offline long enough to accumulate WAL beyond expected bounds → leave it alone and fix the observer (Step 6's route); the WAL drains itself once the observer is back, and truncating it by hand drops samples.
-
-## Step 8 — Log the run
-
-Log the run to `./.logs/claude/lazy-observe.audit/YYYY-MM-DD_HH-MM-SS.md` per `lazy-log.logging`. Read-only is not an exemption: the finding set this skill produces is variable-shaped, so it is `should-log`, never a waiver candidate. The log is the one file this skill writes.
-
-1. `Bash(mkdir -p ./.logs/claude/lazy-observe.audit)` — a separate step from the `Write`, never chained.
-2. `Bash(date -u +%Y-%m-%d_%H-%M-%S)` for the filename; `Bash(git rev-parse HEAD)` and `Bash(git rev-parse --abbrev-ref HEAD)` for `git_sha` / `git_branch` (`no-git` when either fails).
-3. `Write` the file. Frontmatter: `git_sha`, `git_branch`, `date` (UTC), `input` (the arguments passed, or `none`).
-4. Body: `# lazy-observe.audit` heading, then `## Actions` — one line per step with its outcome word, plus the per-severity finding counts — and `## Result` with the outcome word and a one-sentence summary.
-
-Outcome: `logged`.
 
 ## Step 9 — Report
 

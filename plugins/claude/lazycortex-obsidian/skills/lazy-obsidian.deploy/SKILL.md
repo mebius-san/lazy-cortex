@@ -13,14 +13,13 @@ Never pins a version. The manifest records what a plugin was captured under, not
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 5 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 4 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Locate the manifest`
    - `Step 2 — Guard an existing vault`
    - `Step 3 — Run the deploy worker`
    - `Step 4 — Report what landed`
-   - `Step 5 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means the step's logic ran AND an outcome word was produced.
 3. **Do not reach the Log step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.**
 4. **The Log step is a structural verifier.** Its output MUST contain one line per task above.
@@ -79,17 +78,6 @@ Surface in the final summary:
 Then tell the operator to open Obsidian once: plugins load their settings and run their own schema migrations on first launch, which is what makes a captured-under-an-older-version snapshot land correctly.
 
 Outcome: `reported`.
-
-## Step 5 — Log the run
-
-Write a run log to `./.logs/claude/lazy-obsidian.deploy/` per `lazy-log.logging`.
-
-1. `Bash(mkdir -p ./.logs/claude/lazy-obsidian.deploy)`
-2. Capture `git_sha` via `Bash(git rev-parse HEAD)` and `git_branch` via `Bash(git rev-parse --abbrev-ref HEAD)`; use `no-git` if either fails.
-3. `Bash(date -u +%Y-%m-%d_%H-%M-%S)` → timestamp for the filename.
-4. `Write` the log to `./.logs/claude/lazy-obsidian.deploy/<timestamp>.md` with frontmatter `git_sha`, `git_branch`, `date`, `input`, then a `# lazy-obsidian.deploy` heading, `## Actions` (one line per step with its outcome) and `## Result`.
-
-Outcome: `logged`.
 
 ## Report
 

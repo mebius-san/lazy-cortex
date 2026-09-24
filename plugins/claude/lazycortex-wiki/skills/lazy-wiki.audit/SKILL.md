@@ -17,13 +17,12 @@ Fix/waive orchestration over these findings belongs to `/lazy-core.doctor`, whic
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 4 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 3 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 1 — Run the audit`
    - `Phase 2 — Audit the terms scopes + the structure map`
    - `Phase 3 — Present findings`
-   - `Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means the step's logic ran AND an outcome word was produced. No-ops must emit an explicit outcome (`asserted`, `unchanged`, `clean`, …).
 3. **Do not reach the Log step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.**
 4. **The Log step is a structural verifier.** Its output MUST contain one line per task above.
@@ -103,33 +102,6 @@ And the structure findings, with per-finding routes:
 If neither phase found anything, report "scope clean".
 
 Outcome: `presented` or `clean`.
-
-## Logging
-
-Write a run log to `./.logs/claude/lazy-wiki.audit/` per `lazy-log.logging`.
-
-1. `Bash(mkdir -p ./.logs/claude/lazy-wiki.audit)`
-2. Capture `git_sha` via `Bash(git rev-parse HEAD)` and `git_branch` via `Bash(git rev-parse --abbrev-ref HEAD)`; use `no-git` if either fails.
-3. `Bash(date -u +%Y-%m-%d_%H-%M-%S)` → timestamp for the filename.
-4. `Write` the log to `./.logs/claude/lazy-wiki.audit/<timestamp>.md` with frontmatter:
-
-```
----
-git_sha: <sha>
-git_branch: <branch>
-date: <YYYY-MM-DD HH:MM:SS UTC>
-input: "<scope-id or 'all scopes'>"
----
-# lazy-wiki.audit
-
-## Actions
-- <bullet per step with outcome>
-
-## Result
-<success/failure + one-sentence summary of finding counts by severity>
-```
-
-Outcome: `logged`.
 
 ## Report
 

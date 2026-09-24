@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Project-specific guideline files in docs/guidelines/ plus [tool.pcf] declarations in pyproject.toml let you extend the project-neutral canon per repo.
-last_regen: 2026-09-23
+last_regen: 2026-09-24
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -10,8 +10,8 @@ source_skills:
   - lazy-python.comment-guidelines
   - lazy-python.testing-guidelines
   - lazy-python.guidelines-index
-source_sha: d646145dc19da6bfbae3e0c00253f21e2d5c4ad2
-surface_sha: 780ccf0c21263774a22a3238be469a95aabb7630be381f3f623239981a703e9d
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: 78ff4a51dacc5cd6e8c1145e1d8c32360fc26012107beff90512981e7738c495
 ---
 # Per-repo overlay guidelines
 

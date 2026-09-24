@@ -81,10 +81,6 @@ agent-models-seed(<prefix>, <scope>): <outcome>
 
 One line per seed-set entry with its state. On `no-entries`, say so plainly and name `default-tiers.json` as the file to extend.
 
-## Logging
-
-Log to `./.logs/claude/lazy-core.agent-models-seed/YYYY-MM-DD_HH-MM-SS.md` per `lazy-log.logging`. Create the dir with `Bash(mkdir -p ./.logs/claude/lazy-core.agent-models-seed)`, then `Write` the file — never chain. Frontmatter: `git_sha`, `git_branch`, `date` (UTC), `input` (the args string). Body: `# lazy-core.agent-models-seed` heading, `## Actions` (resolved SOT path, per-key states), `## Result` (outcome word + summary).
-
 ## Failure modes
 
 - **Install reports `sot-missing` while seeding tiers** — `lazycortex-core`'s `default-tiers.json` could not be found on `$LAZYCORTEX_PLUGIN_DIRS` or in the plugin cache → install `lazycortex-core` first, then re-run the plugin's install.

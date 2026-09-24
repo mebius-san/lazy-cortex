@@ -9,8 +9,8 @@ source_skills:
   - lazy-spec.resolve-repo
   - lazy-spec.resolve-dependency
   - lazy-spec.source-url
-source_sha: 70d7cafcb16785355f25b2ed0df5310aaa5e2c4e
-surface_sha: 6c22fd48f8b5c6006138eba2c9ebeb4586042c07e601b323d3459a54f9b961ab
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: 7c1d263a639af1c444b9aab377ad7e109afc732f0f5bb2a8372a6db3b46f9840
 ---
 # Source links — repos, dependencies, and forge-correct URLs
 

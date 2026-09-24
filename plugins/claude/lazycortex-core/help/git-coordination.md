@@ -9,8 +9,8 @@ diagram_spec:
 source_skills:
   - lazy-core.git-status
   - lazy-core.git-unlock
-source_sha: 54cf10bd426bde9d8b4fa93a26835bc6393ced58
-surface_sha: ef8b1eab04e5021e39b407f080f1277459c6bf0b384d15b5e0d26ffe40257b68
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: f0a36985a2a0bbe40d96c8f3a221298f0eb3c21b624ec9aa5e59f047945fa2c5
 ---
 # git staging coordination
 

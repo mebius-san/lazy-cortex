@@ -260,8 +260,8 @@ if __name__ == "__main__":
 #                             _is_real_event); time/counter guards forbidden.
 #   § 7 Transactional skip  — never auto-commit during merge/rebase/cherry-pick
 #                             (this template's _in_transactional_state).
-#   § 8 Logging             — log to ./.logs/claude/<hook-name>/<timestamp>.md
-#                             per lazy-log.logging.
+#   § 8 Logging             — hooks write no per-run log; a trace goes to the
+#                             error ledger or the hook's own journal.
 #
 # Reference implementations
 #   See lazy-core.hook-writing §§ 1-8 for worked patterns covering full

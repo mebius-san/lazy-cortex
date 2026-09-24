@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Bootstrap lazycortex-python with a 10-step install wizard (incl. env_source detection) and verify with the 12-check read-only audit.
-last_regen: 2026-09-23
+last_regen: 2026-09-24
 diagram_spec:
   anchor: "How install and audit relate"
   request: "Show the two-skill lifecycle: /lazy-python.install runs its install steps (mirror rules → deploy wrappers → detect PyCharm → bootstrap pyproject (pch auto when PyCharm present) → scaffold overlays → sync scaffold templates, python-template.py for regular files and init-template.py for __init__.py → record python.env_source, disambiguating if multiple candidate bootstrap scripts exist) producing a verified install state, then /lazy-python.audit walks its read-only checks against that state and emits PASS/WARN/FAIL/INFO per check. Depict the flow from user invocation through install steps to installed-state artifacts, then through audit checks to the audit report. Highlight that re-running install is the fix for any FAIL."
@@ -9,8 +9,8 @@ diagram_spec:
 source_skills:
   - lazy-python.install
   - lazy-python.audit
-source_sha: d646145dc19da6bfbae3e0c00253f21e2d5c4ad2
-surface_sha: b2f295c43e1b8463ae6c17801e0078ae9d68ac6f5bbfc498b411ada939429ad1
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: 8a253c7c7e015f6220f7396ddf5e27dcc64b59fd11d9baf72534983b22929d67
 ---
 # Install and audit
 

@@ -1,16 +1,16 @@
 ---
 chapter_type: walkthrough
 summary: Dispatch lazy-python.test-writer against a new class and get a test file that covers all nine Paranoid-Testing categories, verified by tst-py.
-last_regen: 2026-09-21
+last_regen: 2026-09-24
 diagram_spec:
   anchor: "How test-writer walks a class"
-  request: "Sequence diagram showing: user invokes lazy-python.test-writer for a target class; agent reads plugin canon (testing-guidelines + checking-guidelines) then project overlay (testing_guidelines.md, checking_guidelines.md, CLAUDE.md ## Testing section); agent identifies test targets (init paths, public methods, properties, documented guarantees, exceptions, operator overloads, Contract: blocks, Domain(...): blocks, opt: clauses); agent writes test file covering all 9 Paranoid-Testing categories; agent runs chk-py per file then chk-py all then tst-py on the module; agent logs the run. Show the guideline read order (canon first, overlay second, CLAUDE.md ## Testing third) and the three-step toolchain verification."
+  request: "Sequence diagram showing: user invokes lazy-python.test-writer for a target class; agent reads plugin canon (testing-guidelines + checking-guidelines) then project overlay (testing_guidelines.md, checking_guidelines.md, CLAUDE.md ## Testing section); agent identifies test targets (init paths, public methods, properties, documented guarantees, exceptions, operator overloads, Contract: blocks, Domain(...): blocks, opt: clauses); agent writes test file covering all 9 Paranoid-Testing categories; agent runs chk-py per file then chk-py all then tst-py on the module. Show the guideline read order (canon first, overlay second, CLAUDE.md ## Testing third) and the three-step toolchain verification."
 source_skills:
   - lazy-python.test-writer
   - lazy-python.testing-guidelines
   - tst
-source_sha: 672d1b9bda5f90edef93fde43a07d7981f74be83
-surface_sha: 4193f247a073c661c721bdda3cacf0cc63df0ac7ee36bfcc176390898e4c1261
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: 2bc94268ece335af3c750c8e66e28201369deacbb06287b93f6e17327bb68078
 ---
 # Generate tests that cover all nine Paranoid-Testing categories for a new class
 
@@ -24,7 +24,6 @@ After completing this walkthrough you have:
 
 - A test file at the mirrored path (e.g. `src/mymodule/widget.py` → `tests/mymodule/widget.py`) that covers all nine Paranoid-Testing categories.
 - The file passing `chk-py all -q` (style + type clean) and `tst-py <module> -q` (suite green, or `# FAILS:` comments on any test the implementation does not yet satisfy).
-- A run log at `.logs/claude/lazy-python.test-writer/YYYY-MM-DD_HH-MM-SS.md` recording every action the agent took.
 
 ## What you need
 
@@ -88,7 +87,7 @@ Use the lazy-python.test-writer agent to write tests for the Widget class in src
 
 The agent's very first action is to create a task list — one task per step — before any file read or write. This structural discipline makes dropped steps impossible: you can watch each task move from pending to completed in the sidebar as the agent works.
 
-The agent then runs its eight ordered steps:
+The agent then runs its seven ordered steps:
 
 1. **Read guidelines** — reads the plugin canon (`lazy-python.testing-guidelines.md`, `lazy-python.checking-guidelines.md`), then your project overlay (`docs/guidelines/testing_guidelines.md`, `docs/guidelines/checking_guidelines.md`), then the `## Testing` section of `CLAUDE.md`. Outcome: `guidelines-loaded`.
 2. **Read production class** — reads the full source file, including `Contract:`, `Domain(…):`, and `opt:` markers in method bodies, and the interface's `Contract:` blocks when the class implements one. Outcome: `read`.
@@ -97,7 +96,6 @@ The agent then runs its eight ordered steps:
 5. **Add class and method docstrings** — ensures every test class starts with `"Test unit for "` and every test method starts with `"Test that "`. Outcome: `done` or `already-present`.
 6. **Handle implementation-vs-spec mismatches** — if a test correctly reflects documented behavior but the implementation does not satisfy it yet, the agent adds a `# FAILS: <reason>` comment above that method and reports the divergence. It does not delete the test or fix production code. Outcome: `none` or `<N>-mismatches-flagged`.
 7. **Verify with toolchain** — runs `chk-py all <test_file>.py -q`, then `chk-py all -q` for the full project, then `tst-py <module> -q`. Guideline review (`chk-py review`) is not a step of `chk-py all` at all — it runs on its own cadence, and the agent never touches it; that decision is left to you (see Step 6). Outcome: `clean` or `<N>-violations-fixed`.
-8. **Log the run** — writes a structured log to `.logs/claude/lazy-python.test-writer/`. Outcome: `logged`.
 
 Watch for the Step 3 outcome line. It tells you the exact test targets the agent found — if the count is lower than you expect, the missing targets are likely undocumented methods or unmarked knowledge blocks.
 
@@ -182,7 +180,6 @@ sequenceDiagram
   participant docs as Guideline Docs
   participant targetClass as Target Class
   participant toolchain as Toolchain (chk-py / tst-py)
-  participant runLog as Run Log
 
   user->>testWriter: invoke lazy-python.test-writer for target class
   testWriter->>docs: read canon (testing-guidelines + checking-guidelines)
@@ -198,6 +195,4 @@ sequenceDiagram
   toolchain-->>testWriter: full-project check result
   testWriter->>toolchain: tst-py on module
   toolchain-->>testWriter: test run result
-  testWriter->>runLog: log the run
-  runLog-->>testWriter: run logged
 ```

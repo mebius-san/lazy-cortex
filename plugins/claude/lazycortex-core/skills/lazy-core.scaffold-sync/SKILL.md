@@ -11,7 +11,7 @@ Note: `lazy-core.install` Step 4 becomes an invocation of this skill for `lazyco
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Resolve inputs and registry path`
@@ -21,7 +21,6 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 5 — Resolve core CLI`
    - `Step 6 — Upsert registry`
    - `Step 7 — Report`
-   - `Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". No-ops count only if they emit an explicit outcome (`none`, `unchanged`, `skipped-per-user-choice`, …).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -165,33 +164,3 @@ One line per template file. State one of: `installed`, `unchanged`, `refreshed`,
 - **`scaffold-sync: core CLI not found at <path>`** — the `installPath` in `installed_plugins.json` points to a path that no longer exists → run `/plugin update lazycortex-core@lazycortex` to refresh the cache, then re-run.
 - **`scaffold upsert` returns `error`** — the core CLI rejected the entries (malformed JSON, schema mismatch, or registry write failure) → inspect the full error output, fix the manifest, then re-run.
 - **A template reports `protected`** — the consumer path is registered under `_local`, so the operator's own file was kept and the shipped template did not land → not an error; the `_local` entry sits in a group this plugin supplies, which `/lazy-core.scaffold-local` refuses to create. Re-file that entry under a group of its own with `/lazy-core.scaffold-local mode=remove` followed by `mode=add`, then re-run this skill.
-
-## Logging
-
-Log each run to `./.logs/claude/lazy-core.scaffold-sync/YYYY-MM-DD_HH-MM-SS.md`.
-
-Timestamp: `date -u +%Y-%m-%d_%H-%M-%S`.
-
-Use two separate steps:
-
-```
-Bash(mkdir -p ./.logs/claude/lazy-core.scaffold-sync)
-```
-
-Then `Write` the log file with this structure:
-
-```markdown
----
-git_sha: <git rev-parse HEAD>
-git_branch: <git rev-parse --abbrev-ref HEAD>
-date: <YYYY-MM-DD HH:MM:SS UTC>
-input: "plugin=<plugin> installPath=<installPath> scope=<scope>"
----
-# lazy-core.scaffold-sync
-
-## Actions
-- <bullet per action, file modified, or decision>
-
-## Result
-<success/failure + one-line summary>
-```

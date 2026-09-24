@@ -11,8 +11,8 @@ source_skills:
   - lazy-spec.flip-gate
   - lazy-spec.sync-with-code
   - lazy-spec.rebase-pins
-source_sha: 70d7cafcb16785355f25b2ed0df5310aaa5e2c4e
-surface_sha: b1c697b0f50760a3a1f8cc715232e3b6909c12662a98fd7928600573aa8332a4
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: 79ca6dfb94d093d3eeaddb11d276b0ffa1d8df85558b7076eae1e0787a350839
 ---
 # How do I take an asset from creation all the way to release?
 

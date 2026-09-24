@@ -13,7 +13,7 @@ Prerequisites: `/lazy-wiki.install` has run, at least one scope is configured in
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Resolve scope + compute plan`
@@ -23,7 +23,6 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 5 — Prune dropped nodes`
    - `Step 6 — Commit touched files + record anchor`
    - `Step 7 — Clean up scratch`
-   - `Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means the step's logic ran AND an outcome word was produced. No-ops must emit an explicit outcome (`empty-set`, `unchanged`, `skipped-per-user-choice`, …).
 3. **Do not reach the Log step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug.
@@ -147,33 +146,6 @@ Outcome: `committed` / `unchanged`.
 ## Step 7 — Clean up scratch
 
 This skill creates no scratch — no job dirs, no out-of-tree dir; each curator removes its own `mktemp` curation file inside its run. So there is nothing for the skill to delete. Assert the worktree carries no relink residue (no `.experts/.wiki-relink/`, no stray curation files) — there should be none. Outcome: `cleaned` (nothing to remove).
-
-## Logging
-
-Write a run log to `./.logs/claude/lazy-wiki.relink/` per `lazy-log.logging`.
-
-1. `Bash(mkdir -p ./.logs/claude/lazy-wiki.relink)`
-2. Capture `git_sha` via `Bash(git rev-parse HEAD)` and `git_branch` via `Bash(git rev-parse --abbrev-ref HEAD)`; use `no-git` if either fails.
-3. `Bash(date -u +%Y-%m-%d_%H-%M-%S)` → timestamp for the filename.
-4. `Write` the log to `./.logs/claude/lazy-wiki.relink/<timestamp>.md` with frontmatter:
-
-```
----
-git_sha: <sha>
-git_branch: <branch>
-date: <YYYY-MM-DD HH:MM:SS UTC>
-input: "<scope-id>"
----
-# lazy-wiki.relink
-
-## Actions
-- <bullet per step with outcome>
-
-## Result
-<success/failure + one-sentence summary: mode, classify/link/drop counts, commit outcome>
-```
-
-Outcome: `logged`.
 
 ## Report
 

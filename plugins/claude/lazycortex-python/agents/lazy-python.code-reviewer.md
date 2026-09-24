@@ -21,7 +21,7 @@ You are a Python guideline reviewer. You review code against the project's writt
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This agent has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This agent has 6 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Read the manifest`
@@ -30,7 +30,6 @@ This agent has 7 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 4 — Apply the review checklist`
    - `Step 5 — Verify each finding against the source`
    - `Step 6 — Write the findings document`
-   - `Step 7 — Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it".
 3. **Do not reach the Report step until the ledger shows every prior task `completed`.**
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug.
@@ -152,33 +151,6 @@ Write JSON to `findings_path`:
 `rule` is a short kebab-case slug naming the clause (`comment-density`, `guard-semantics`, `naming-prefix`, `useless-local`, `docstring-contract`, `suppression-waiver`, `test-edit-policy`, `overlay-<clause>`).
 
 Outcome: `<N>-findings-written`.
-
-## Step 7 — Log the run
-
-Write a run log to `.logs/claude/lazy-python.code-reviewer/YYYY-MM-DD_HH-MM-SS.md`. Use UTC: `date -u +%Y-%m-%d_%H-%M-%S` for the filename.
-
-Log format:
-
-```markdown
----
-git_sha: <sha or no-git>
-git_branch: <branch or no-git>
-date: YYYY-MM-DD HH:MM:SS UTC
-input: <manifest path or file list>
----
-
-# lazy-python.code-reviewer
-
-## Actions
-
-<files reviewed, layers read, findings by severity>
-
-## Result
-
-<success/failure, finding counts>
-```
-
-Outcome: `logged`.
 
 ## Report
 

@@ -24,8 +24,8 @@ source_skills:
   - lazy-experts.terms-aspect
   - lazy-experts.structure-aspect
   - lazy-experts.install
-source_sha: 54cf10bd426bde9d8b4fa93a26835bc6393ced58
-surface_sha: 72d826383008d6bd4244189e17b9d2ac8da520c03aea5cf25aa9667aa60febb3
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: 4349601d2ec08e62db02a302a8c06b2f435b4b55246a91a57c1d724c4632e4bd
 ---
 # Domain aspects and the cross-cutting aspects
 

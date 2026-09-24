@@ -4,6 +4,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 10.2.0 — 2026-09-24 UTC
+
+- **Breaking:** Run logging is now opt-in — skills, agents, and commands only write a run log under `.logs/claude/<name>/` when their frontmatter declares `logging: true`; the `logging-waiver:` key is retired (and flagged by `lazy-core.audit` if still used), and the `lazy-log.distill` changelog agent is removed. Only `lazy-diagram.draw` ships with logging enabled by default.
+- `lazy-log.clean` now correctly finds artifacts that no longer log and offers their leftover log folders for deletion, archiving, or keeping — previously this bucket was always empty.
+
 ### 10.1.1 — 2026-09-24 UTC
 
 - The unattended checkup agent (`lazy-core.autocheckup`) now automatically repairs a structure-scan routine whose path filter has drifted from what the wiki install derives, instead of leaving it as a manual finding; a routine that's missing entirely still surfaces for the operator to register.
@@ -707,6 +712,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 9.7.2 — 2026-09-24 UTC
+
+- `lazy-spec.*` skills and agents stopped writing run logs on every invocation — logging is now opt-in and this plugin's artifacts don't use it, so runs are a couple of tool calls leaner.
+
 ### 9.7.1 — 2026-09-24 UTC
 
 - **Breaking:** Product routine registration drops `group_globs` in favor of a single whole-repo watch item; an existing install must run the core CLI's `routine-migrate --apply` followed by `/lazy-runtime.recover` after upgrading.
@@ -1039,6 +1048,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 6.0.1 — 2026-09-24 UTC
+
+- This plugin's skills and agent no longer write a run log on every invocation — logging is now opt-in per artifact, so a typical run costs fewer tool calls.
+
 ### 6.0.0 — 2026-09-23 UTC
 
 - The audit no longer offers to repair the vault. It used to ask the operator to pick between two routes and then run the chosen one; now it names both routes in the finding and runs neither.
@@ -1267,6 +1280,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-diagram
 
+### 2.0.1 — 2026-09-24 UTC
+
+- Run logs are now opt-in: `lazy-diagram.audit`, `lazy-diagram.fix`, and `lazy-diagram.install` no longer write to `.logs/`; only `lazy-diagram.draw` keeps logging its runs, since other tooling verifies drawn diagram seams against its log.
+
 ### 2.0.0 — 2026-09-23 UTC
 
 - The audit no longer fixes anything. It used to ask which findings to repair and then edit the shipped templates; now it reports and stops, and each finding names the route that repairs it.
@@ -1356,6 +1373,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
 
 ## lazycortex-review
+
+### 6.9.1 — 2026-09-24 UTC
+
+- Skills, agents, and commands in this plugin no longer write per-run logs under `.logs/claude/lazy-review.*/` — run logging is off by default repo-wide now.
 
 ### 6.9.0 — 2026-09-24 UTC
 
@@ -1548,6 +1569,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-observe
 
+### 2.2.1 — 2026-09-24 UTC
+
+- Run logging switched from on-by-default to opt-in: `lazy-observe.audit`, `.install`, and `.uninstall` no longer write a log file on every run.
+
 ### 2.2.0 — 2026-09-24 UTC
 
 - Metrics token file is now created owner-only (0600) from the first byte written, closing a brief window where a local user could read the credential before permissions were tightened.
@@ -1682,6 +1707,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.
 
 ## lazycortex-experts
+
+### 1.9.2 — 2026-09-24 UTC
+
+- Expert agents and the `lazy-experts.help` command no longer write a run log on every invocation — logging is opt-in and off by default for this plugin's artifacts.
 
 ### 1.9.1 — 2026-09-24 UTC
 
@@ -1853,6 +1882,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 4.7.2 — 2026-09-24 UTC
+
+- Skills and agents no longer write a run log on every invocation — logging is now opt-in per artifact, and none of this plugin's skills or agents (install, check-style, audit, knowledge-sweep, code-reviewer, contract-writer, docstring-writer, domain-writer, test-writer) enable it, saving a couple of tool calls per run.
 
 ### 4.7.1 — 2026-09-23 UTC
 
@@ -2055,6 +2088,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 3.3.2 — 2026-09-24 UTC
+
+- Skills, agents, and commands stopped writing a run log on every invocation — logging is now opt-in, so `.logs/claude/lazy-wiki.*/` no longer fills up by default.
 
 ### 3.3.1 — 2026-09-24 UTC
 

@@ -214,7 +214,7 @@ Allowed: one invocation of a file that lives on disk — a plugin CLI verb throu
 
 - `lazy-core.agent-writing` — agent-specific authoring (single-response model, tool allowlist, structured-report contract).
 - `lazy-core.rule-writing` — rule-file authoring (mandatory frontmatter, scope, size budget).
-- `lazy-log.logging` — every skill/agent/command logs to `./.logs/claude/<name>/…`.
+- `lazy-log.logging` — an artifact logs to `./.logs/claude/<name>/…` only when its frontmatter declares `logging: true`; the default is no log and no logging section.
 - `lazy-core.hygiene` — scope, naming (dot-namespace), settings split, MCP scope, path hygiene.
 - `lazy-guard.security` — public-repo credential/PII rules.
 

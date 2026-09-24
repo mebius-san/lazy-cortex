@@ -19,7 +19,7 @@ Register `mcp__<server>__<tool>` entries for one or more MCP servers using a **3
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 1 — Parse input`
@@ -31,7 +31,6 @@ This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Phase 6.5 — Strip cross-scope leaks`
    - `Phase 7 — SessionStart preload hook`
    - `Phase 8 — Report`
-   - `Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -499,20 +498,6 @@ The setup chain never reaches here headless — `requires_live_session: true` in
 
 - **`/lazy-guard.allow-mcp` stops: "server not found — discovered servers are: …"** — the server name passed as input is not defined in `~/.mcp.json` or `./.mcp.json` → check the server name against the list shown, correct the typo or add the server to `.mcp.json`, then re-run.
 - **Server skipped with warning: "server isn't loaded — restart Claude Code and re-run"** — the server is defined in `.mcp.json` but has zero matching tools in the current session → restart Claude Code so the server loads, then re-run `/lazy-guard.allow-mcp`.
-
-## Logging
-
-Log to `./.logs/claude/lazy-guard.allow-mcp/YYYY-MM-DD_HH-MM-SS.md` (UTC timestamp).
-
-Use two separate tool calls: `Bash(mkdir -p ./.logs/claude/lazy-guard.allow-mcp)` then the `Write` tool. Never chain with `&&` or heredoc-redirect.
-
-Frontmatter must include:
-- `git_sha` — output of `git rev-parse HEAD` (or `no-git`)
-- `git_branch` — output of `git rev-parse --abbrev-ref HEAD` (or `no-git`)
-- `date` — UTC timestamp
-- `input` — the server names / flags passed in, or `none`
-
-Body sections: `## Actions` (bullet list: files read, servers resolved, scope chosen for global servers, entries added to allow, entries added to ask, entries skipped, entries promoted allow→ask, entries removed from paired tracked settings, preload-hook install choice + scope + tool names added to `select:`, files written) and `## Result` (success / warnings / skipped).
 
 ## Safety notes
 

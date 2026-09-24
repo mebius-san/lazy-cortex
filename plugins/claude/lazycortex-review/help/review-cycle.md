@@ -12,8 +12,8 @@ source_skills:
   - lazy-review.status
   - lazy-review.stop
   - lazy-review.finalize
-source_sha: 70d7cafcb16785355f25b2ed0df5310aaa5e2c4e
-surface_sha: 6750624097dedefb3d0075c3a6636a4824bd5ec1fbf69166bb817fd75e5c5e43
+source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
+surface_sha: fd4b649aac1cf1fbe6031715e77fffc9dcc34de802645ce45a31cf0d29d84e34
 ---
 # Review cycle
 

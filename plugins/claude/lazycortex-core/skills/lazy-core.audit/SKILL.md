@@ -7,7 +7,7 @@ allowed-tools: Read, Write, Glob, Grep, Bash(wc *), Bash(command -v python3), Ba
 
 Coordinator skill. Runs inline logging compliance checks, then dispatches four **Explore** subagents in parallel to measure context weight and hygiene. Read-only — no changes made.
 
-This skill follows the shared audit form in `plugins/claude/lazycortex-core/references/lazy-core.audit-contract.md` — `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.audit-contract.md` in an install: read-only, the four severity words, the repair route standing in the finding line itself, no estimate of what a repair would save. Read it before adding or rewording a check here. The one file this skill writes is its own run log under `./.logs/claude/lazy-core.audit/`, which `lazy-log.logging` mandates for every run.
+This skill follows the shared audit form in `plugins/claude/lazycortex-core/references/lazy-core.audit-contract.md` — `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.audit-contract.md` in an install: read-only, the four severity words, the repair route standing in the finding line itself, no estimate of what a repair would save. Read it before adding or rewording a check here. This skill writes nothing.
 
 Read `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md` before dispatching for the coordinator pattern.
 
@@ -33,13 +33,12 @@ A check added here is assigned a resolution in the same edit; an unassigned find
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 4 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 3 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 1 — Inline logging compliance checks`
    - `Phase 2 — Dispatch parallel scans`
    - `Phase 3 — Render (Report)`
-   - `Log the run`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -69,14 +68,14 @@ Check two paths: `${CLAUDE_PLUGIN_ROOT}/rules/lazy-log.logging.md` (plugin sourc
 - If present but neither `.logs/` nor `.logs` appears in the file → `[WARN] .gitignore does not exclude .logs/ — commits will include runtime journal | .gitignore`.
 - If present but neither `.runtime/` nor `.runtime` appears in the file → `[WARN] .gitignore does not exclude .runtime/ — commits will include daemon state.json | .gitignore`.
 
-### L4 — `logging-waiver:` value validation
+### L4 — `logging:` key validation
 
-Glob `.claude/skills/*/SKILL.md`, `.claude/agents/*.md`, `.claude/commands/*.md`. For each file, parse YAML frontmatter and inspect `logging-waiver:` if present:
+Glob `.claude/skills/*/SKILL.md`, `.claude/agents/*.md`, `.claude/commands/*.md`. For each file, parse YAML frontmatter and inspect `logging:` if present:
 
-- `[FAIL]` if value is the empty string, the literal `true`, or the literal `yes`.
-- `[FAIL]` if the key is present but no value follows (key + colon with empty mapping value).
+- `[FAIL]` if the value is anything but the literal `true` (`yes`, `"true"`, a reason string, or an empty value).
+- `[FAIL]` if the file still carries the retired `logging-waiver:` key — logging is off by default, the key means nothing.
 
-Valid concrete strings → no finding.
+A literal `true` → no finding.
 
 ## Phase 2 — Dispatch parallel scans
 
@@ -735,22 +734,13 @@ Render Phase 1 inline findings.
 - **Logging rule presence** (FAIL / WARN) — one line per L1 finding; route: run `/lazy-core.setup` to copy `lazy-log.logging.md` into the consumer scope, or write the missing frontmatter `description:` in the plugin source. Omit the sub-section if all pass.
 - **`.logs/` and `.runtime/` directories** (WARN) — one line per L2 finding (each directory is checked independently); route: run `/lazy-core.setup` to bootstrap the directory. Omit if both present.
 - **`.gitignore` coverage** (WARN) — one line per L3 finding (`.logs/` and `.runtime/` are checked independently); route: add the missing line to `.gitignore`, by hand or via `/lazy-core.setup`. Omit if both covered.
-- **`logging-waiver:` value** (FAIL) — one line per L4 finding; route: replace the empty or boolean value with a concrete string reason per `lazy-log.logging` § Waiver. Omit if all valid.
+- **`logging:` key** (FAIL) — one line per L4 finding; route: set the key to the literal `true` or drop it, and delete any retired `logging-waiver:` line. Omit if all valid.
 
-If all L1–L4 checks pass: emit a single `PASS: logging rule installed, .logs/ + .runtime/ present, .gitignore covers both, all waiver values valid` summary line.
+If all L1–L4 checks pass: emit a single `PASS: logging rule installed, .logs/ + .runtime/ present, .gitignore covers both, all logging keys valid` summary line.
 
 ### Verdict
 
 Close the report with the contract's summary line — `audit: <LEVEL> (<N> findings)`, where `<LEVEL>` is the highest severity present with `INFO` counted as `PASS`, and `<N>` counts every finding rendered above. Nothing follows it.
-
-## Logging
-
-Log the run to `./.logs/claude/lazy-core.audit/YYYY-MM-DD_HH-MM-SS.md` per `lazy-log.logging`. Read-only is not an exemption: the finding set this skill produces is variable-shaped, so it is `should-log`, never a waiver candidate.
-
-1. `Bash(mkdir -p ./.logs/claude/lazy-core.audit)` — a separate step from the `Write`, never chained.
-2. `Bash(date -u +%Y-%m-%d_%H-%M-%S)` for the filename; `Bash(git rev-parse HEAD)` and `Bash(git rev-parse --abbrev-ref HEAD)` for `git_sha` / `git_branch` (`no-git` when either fails).
-3. `Write` the file. Frontmatter: `git_sha`, `git_branch`, `date` (UTC), `input` (the arguments passed, or `none`).
-4. Body: `# lazy-core.audit` heading, then `## Actions` — one line per Phase with its outcome word, plus the per-severity and per-resolution finding counts — and `## Result` with the outcome word and a one-sentence summary.
 
 ## Failure modes
 
