@@ -2,7 +2,7 @@
 Level-note backfill — the Python primitive backing the `lazycortex-specs catalog-note` verb.
 
 A level note is the folder-note of the catalog root or of one product: the document the catalog
-coordinator owns, carrying the level role, the four level gates, the halt flag, the paint keys,
+coordinator owns, carrying the level role, the five level gates, the halt flag, the paint keys,
 and the coordinator's own body sections. `lazy-spec.install` seeds the root note through this
 verb, and `lazy-spec.product-config` brings each existing product note up to the same schema.
 
@@ -180,7 +180,7 @@ def _managed_keys(role: str, record: dict) -> list[tuple[str, str]]:
     record: The owning product's settings record, empty for the catalog root.
 
   Returns:
-    The role key, the four level gates closed, the halt flag, and the role's paint keys, in
+    The role key, the five level gates closed, the halt flag, and the role's paint keys, in
     write order; the colour literal is quoted so YAML never reads it as a comment.
   """
 

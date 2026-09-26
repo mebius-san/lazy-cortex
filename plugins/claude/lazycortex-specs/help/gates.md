@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Drive an asset's readiness gates and per-file doc stages from creation through release using a two-layer progression model.
-last_regen: 2026-09-24
+last_regen: 2026-09-26
 diagram_spec:
   anchor: "How the layers feed each other"
   request: "Show the two-layer progression model: per-file spec_stage transitions (empty→draft→approved) feeding into the five flat gates (spec_design_done through spec_released) via spec.coordinator's auto-flips and human-signal callouts, with lazy-spec.set-stage, lazy-spec.flip-gate, and spec.coordinator as the labeled actors — lazy-spec.gate-tick is a pure poller and decides no gate, so it is not one of the actors."
@@ -9,8 +9,8 @@ source_skills:
   - lazy-spec.flip-gate
   - lazy-spec.gate-tick
   - lazy-spec.set-stage
-source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
-surface_sha: 22852b21d62687da4496c9f9efeffc7319165ee2916c3b32c73377e1cc7a2a0b
+source_sha: 7a2ab2bc75bf9bafa1340246e6c6969c517c4bc7
+surface_sha: de0b5e9d349e9d29a8c4de904b841810a326267e5a3ba9bed9412887f3f70de8
 ---
 # Gates — driving asset readiness from design to release
 
@@ -33,7 +33,7 @@ When docs get approved in the review loop, the gates still advance without you h
 
 You reach for `/lazy-spec.set-stage` whenever you want to record a conscious authoring decision on a single doc: moving it from `empty` to `draft` when you start writing, or from `draft` to `approved` manually before the review machinery has run. You pass it one file path and one stage value from the closed set `empty | draft | approved | rejected | cancelled | deferred`; the skill rewrites `spec_stage` in frontmatter, keeps the `spec/<stage>` Obsidian tag in sync, and on `approved` stamps `spec_approved_at` (an ISO 8601 UTC datetime) on the doc itself; nothing is written to the folder-note. You never need to touch `spec_stage` or the mirror tag directly — the skill does both in a single edit and refuses any value outside the closed set, including the removed `review`, `done`, and `wtr` stages from older plugin versions. `deferred` is the park: a document you want to keep but not work on right now. Nothing automatic acts on a parked document — an approval landing on it moves nothing, no gate closes on it, nothing edits it, and no checkbox offers to write a replacement beside it. The coordinator still notices your commit and keeps the folder note tidy around it. What you get instead is a `Review <doc>` row on the folder note; ticking it unparks the document back to `draft` and reopens its review in one move. `draft` is the only way out, whether you tick that row or run `/lazy-spec.set-stage <doc> draft` yourself. When the asset sits inside a group folder that has a container note (e.g. `bugs/bugs.md`), the same commit refreshes that note's stats summary so the bucket counts stay accurate — and because a group folder is transparent to the tally, the refresh climbs through every such shelf above it up to and including the product note, so a nested group folder's own note and the product's both stay current from one stage move. You never re-run a separate rollup step. An asset sitting straight at the product root refreshes the product's own note directly, since that note's stats region counts the product's children. Only the catalog root's own note is never refreshed from below. Approving a living doc — `use-cases.md`, `design.md`, `architecture.md`, `ui-design.md`, or `tech.md`, any type declared `stages: true` and `append_only: false` — also promotes its `[!decision]` blocks into the decisions registry via `lazy-spec.record-decision`, in the same commit; a refusal there (the asset is cancelled, halted, or released) is reported back to you rather than worked around, and `code-plan.md` / `test-plan.md` never trigger this since they aren't living docs. Before any of that runs, approving a doc whose body still carries a `[!decision-candidate]` callout — ticked or not, anywhere outside a code fence — is refused outright: fold the callout through the document's own review loop first, since deleting it by hand only hides the marker rather than resolving it.
 
-A stage change on a system-level doc — `vision.md`, `design.md`, or `tech.md` sitting loose at a product root or at the vault's own content root, or `ui-design.md` at a product root, rather than inside an asset folder — works the same way: the stamp lands on the document itself, and the level note beside it (the note carrying `spec_role: product` or `spec_role: catalog`) is left alone. That level note is owned by the catalog-level coordinator, not by you — read it, never hand-edit it.
+A stage change on a system-level doc — `vision.md`, `design.md`, or `tech.md` sitting loose at a product root or at the vault's own content root, or `use-cases.md` / `ui-design.md` at a product root, rather than inside an asset folder — works the same way: the stamp lands on the document itself, and the level note beside it (the note carrying `spec_role: product` or `spec_role: catalog`) is left alone. That level note is owned by the catalog-level coordinator, not by you — read it, never hand-edit it.
 
 A markdown attachment sitting beside an owner doc — one carrying `spec_owner_doc` in its own frontmatter — never takes a stage change directly: `/lazy-spec.set-stage` refuses it as a target, because its `spec_stage` is a mirror of the owner's, not an independent value. Every stage write on the owner doc cascades the same stage and the same `spec/<stage>` tag to each of its markdown attachments, folded into that one commit — skipping only an attachment that is currently in its own review (`review_active: true`), which the review coordinator re-stamps once that review finalizes. A doc with no attachments makes the cascade a silent no-op.
 

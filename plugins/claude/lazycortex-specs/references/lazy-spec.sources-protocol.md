@@ -22,7 +22,7 @@ The pattern is cross-spec — every stage-bearing authored doc at every level (a
 A list of path-qualified wikilinks pointing at request files in the vault-root `requests/` inbox. Forward-only — the reverse link (request → asset) lives in the request's terminal status callout body, not as a separate field.
 
 Lives on:
-- every stage-bearing authored spec doc (the full stage-bearing set of [file-roles](./lazy-spec.file-roles-protocol.md) § Frontmatter fields — `vision`, `system-vision`, `use-cases`, `design`, `system-design`, `architecture`, `ui-design`, `system-ui-design`, `code-plan`, `test-plan`, `bug`, `system-tech`, `research-design`, `research-report`) — the per-doc subset of requests that contributed to THIS doc;
+- every stage-bearing authored spec doc (the full stage-bearing set of [file-roles](./lazy-spec.file-roles-protocol.md) § Frontmatter fields — `vision`, `system-vision`, `use-cases`, `system-use-cases`, `design`, `system-design`, `architecture`, `ui-design`, `system-ui-design`, `code-plan`, `test-plan`, `bug`, `system-tech`, `research-design`, `research-report`) — the per-doc subset of requests that contributed to THIS doc;
 - the asset's status folder-note — the union of every request that has ever attached to the asset.
 
 `[]` when the doc / asset was created directly (no request origin).

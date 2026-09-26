@@ -9,8 +9,8 @@ gates (`spec_design_done`, `spec_plan_done`, `spec_develop_done`,
 
 A level note — a product's `<spec_path>/<leaf>.md` or the catalog root's
 `<vault_root>/<root>.md` — carries the level ladder instead
-(`spec_vision_done`, `spec_design_done`, `spec_ui_design_done`,
-`spec_tech_done`). The note's own `spec_role` says which ladder it runs, and
+(`spec_vision_done`, `spec_use_cases_done`, `spec_design_done`,
+`spec_ui_design_done`, `spec_tech_done`). The note's own `spec_role` says which ladder it runs, and
 a gate off that ladder is refused; `spec_design_done` is the one key both
 ladders share, so the role is what tells the two apart. A note declaring no
 role at all is read as an asset status note.
@@ -620,8 +620,8 @@ def flip_gate(
   # An asset that ships its own deliverable moves through five yes/no checkpoints — design,
   # plan, build, tests passing, and release — plus a cancelled flag that, once raised, ends its
   # life to any further sequencing regardless of which checkpoints were already met. A product,
-  # or the whole catalog, runs a different four-checkpoint ladder instead — vision, design, UI
-  # design, and technical readiness — because it accumulates approved decisions rather than
+  # or the whole catalog, runs a different five-checkpoint ladder instead — vision, use cases,
+  # design, UI design, and technical readiness — because it accumulates approved decisions rather than
   # shipping one deliverable. Which ladder a note runs is the note's own declared stance, not a
   # guess from its position in the tree; a checkpoint belonging to the other ladder is refused
   # outright. Design readiness is the one checkpoint both ladders share, which is why it means

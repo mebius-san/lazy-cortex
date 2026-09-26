@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Take one spec asset from a blank slate through all five readiness gates to a confirmed release.
-last_regen: 2026-09-24
+last_regen: 2026-09-26
 diagram_spec:
   anchor: "How the journey flows"
   request: "Sequence diagram showing the five-skill lifecycle of one asset: lazy-spec.create-asset scaffolds and authors the asset, lazy-spec.set-stage marks the design approved and then the plan approved, lazy-spec.flip-gate advances each gate (spec_design_done through spec_tests_passing), lazy-spec.sync-with-code reconciles code reality and proposes spec_develop_done, lazy-spec.rebase-pins rebases branch pins and proposes spec_released."
@@ -11,8 +11,8 @@ source_skills:
   - lazy-spec.flip-gate
   - lazy-spec.sync-with-code
   - lazy-spec.rebase-pins
-source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
-surface_sha: 79ca6dfb94d093d3eeaddb11d276b0ffa1d8df85558b7076eae1e0787a350839
+source_sha: 7a2ab2bc75bf9bafa1340246e6c6969c517c4bc7
+surface_sha: 57907bc1a095cc3248cb771c96d6ec8e6f13a1ca1929a4c56bcbaed153a0616d
 ---
 # How do I take an asset from creation all the way to release?
 
@@ -39,17 +39,27 @@ After completing this journey you have:
 
 Run `/lazy-spec.create-asset <product> <asset-type> <slug> [--path <dir>]`, where `<product>` is the compound key for your registered product, `<asset-type>` is `feature`, `change`, `bug`, or an operator-declared type, and `<slug>` is a lowercase-with-hyphens name for this asset. `--path` names the folder under the product root the asset lands in; leave it off and the type's own `default_path` decides.
 
-`lazy-spec.create-asset` opens a wizard (2–5 questions, one at a time) to gather scope, behavior, and edge-case detail for the category. Before scaffolding, it also settles the document set for the type: a mandatory definition document rides in automatically when the type declares one — the shipped `feature` type always seeds `vision.md` ahead of `design.md`, so goals and value proposition are captured before behavior — and a multiSelect question offers whichever opt-in documents the type playbook allows (`vision.md` where it isn't mandatory, e.g. a `change`; `use-cases.md`; `ui-design.md`), each with a one-line description of what it's for. Declining one leaves it available as a later launch checkbox, never a gap. For a `change`, one clarifying question also asks which existing asset(s) it modifies — the answer is recorded as `spec_targets` on the freshly-scaffolded folder-note, and once the change's own design is approved, that design cascades into each named target's own docs. After you answer, it scaffolds the asset folder at `<spec_path>/<slug>/` by default, or at `<spec_path>/<folder>/<slug>/` when the type or the caller named a folder, authors every doc the resolved set named — the type's own start doc (`design.md` for a feature, starting at `draft` stage) plus any mandatory or selected definition documents — and fills in the folder-note's `# Summary` précis. Any real decision fork the clarification settled lands in the authored prose as a `[!decision]` callout, ready to transfer into the product's `decisions.md` once you approve the doc it lives in (Step 2 below). The scaffold draws no diagrams of its own — once a doc's prose is settled, ask for one explicitly via `/lazy-diagram.draw` if it needs a picture. The folder-note (`<slug>.md`) is created with all five gates at `false` and an empty `# History` H1 section — scaffolding and per-file stage seeding are not journaled events, so nothing is appended there yet. `code-plan.md` and `test-plan.md` stay opt-in in a stronger sense — the scaffold never creates either at all; Step 4 below covers authoring a code plan when your asset needs one.
+`lazy-spec.create-asset` opens a wizard (2–5 questions, one at a time) to gather scope, behavior, and edge-case detail for the category. Before scaffolding, it also settles the document set for the type: a mandatory definition document REPLACES the type's own start doc when the type declares one — the shipped `feature` type seeds only `vision.md` this way, so goals and value proposition are captured and approved before `design.md` even exists — and a multiSelect question offers whichever opt-in documents the type playbook allows (`vision.md` where it isn't mandatory, e.g. a `change`; `use-cases.md`; `ui-design.md`), each with a one-line description of what it's for. Declining one leaves it available as a later launch checkbox, never a gap. For a `change`, one clarifying question also asks which existing asset(s) it modifies — the answer is recorded as `spec_targets` on the freshly-scaffolded folder-note, and once the change's own design is approved, that design cascades into each named target's own docs. After you answer, it scaffolds the asset folder at `<spec_path>/<slug>/` by default, or at `<spec_path>/<folder>/<slug>/` when the type or the caller named a folder, and authors every doc the resolved set named, each starting at `draft` stage: `vision.md` standing in for the start doc on a mandatory-vision type (the shipped `feature`'s case — `design.md` isn't created yet), or the type's own start doc directly otherwise (`design.md` for a `change`, `bug.md` for a `bug`), plus any opt-in documents you selected. It also fills in the folder-note's `# Summary` précis. Any real decision fork the clarification settled lands in the authored prose as a `[!decision]` callout, ready to transfer into the product's `decisions.md` once you approve the doc it lives in (Step 2 below). The scaffold draws no diagrams of its own — once a doc's prose is settled, ask for one explicitly via `/lazy-diagram.draw` if it needs a picture. The folder-note (`<slug>.md`) is created with all five gates at `false` and an empty `# History` H1 section — scaffolding and per-file stage seeding are not journaled events, so nothing is appended there yet. `code-plan.md` and `test-plan.md` stay opt-in in a stronger sense — the scaffold never creates either at all; Step 4 below covers authoring a code plan when your asset needs one.
 
-`design.md` describes the intended behavior only — it never writes in "not yet supported" or half-built code paths as if they were spec limitations. If a section feels narrower than you expected, that's an explicit scope decision from the wizard answers, not a reflection of what the code currently does.
-
-**Verification gate:** confirm the asset folder exists, `design.md` carries `spec_stage: draft`, the folder-note's `# Summary` précis is filled in (not a placeholder), and the folder-note lists all five gates as `false`.
+**Verification gate:** confirm the asset folder exists, the doc Step 1 actually seeded carries `spec_stage: draft` — `vision.md` for a mandatory-vision type like `feature` (`design.md` doesn't exist yet; Step 2 below is what creates it), or the type's own start doc otherwise — the folder-note's `# Summary` précis is filled in (not a placeholder), and the folder-note lists all five gates as `false`.
 
 If the skill refuses naming an unknown product, run `/lazy-spec.product-config` to register it, then re-invoke. If it refuses naming an unknown category, run `/lazy-spec.add-asset-type` to declare it, then re-invoke.
 
 ### Step 2 — Review and approve the design doc
 
-Read `design.md` and iterate on its prose as needed (the skill authored a first draft; refinement is yours). If your asset also seeded a `vision.md`, review and approve it the same way, on its own schedule — `vision.md` and `design.md` advance independently, each through its own `set-stage` call, so approving one never forces the other. When the design is ready for implementation, run:
+If Step 1 seeded a mandatory `vision.md` in place of the start doc (the shipped `feature` type always does), review and approve it first: read `vision.md` and iterate on its prose (the skill authored a first draft; refinement is yours), then run:
+
+```
+/lazy-spec.set-stage <vision.md path> approved
+```
+
+Approving the vision is what unblocks `design.md` — the playbook holds the design doc back until the vision is approved. If a daemon runs in this project, `spec.coordinator` would ordinarily have seeded `design.md` — at `spec_stage: draft` — the moment it saw the vision approved, through its own launch row; this step is what you'd otherwise wait for. Continue with the rest of this step once `design.md` exists.
+
+For a type with no mandatory vision (a `change`, a `bug`), `design.md` — or the type's own start doc — already exists from Step 1; skip straight to reviewing it below. If you opted into a `vision.md` on such a type anyway, review and approve it the same way, on its own schedule — `vision.md` and `design.md` advance independently, each through its own `set-stage` call, so approving one never forces the other.
+
+`design.md` describes the intended behavior only — it never writes in "not yet supported" or half-built code paths as if they were spec limitations. If a section feels narrower than you expected, that's an explicit scope decision from the wizard answers, not a reflection of what the code currently does.
+
+Read `design.md` and iterate on its prose as needed (the skill authored a first draft; refinement is yours). When the design is ready for implementation, run:
 
 ```
 /lazy-spec.set-stage <design.md path> approved

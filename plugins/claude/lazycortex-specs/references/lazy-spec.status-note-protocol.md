@@ -136,6 +136,7 @@ Both are created and brought to schema by one verb, `"${LAZYCORTEX_PYTHON:-pytho
 ---
 spec_role: product            # or `catalog` on the vault's one root note
 spec_vision_done: false
+spec_use_cases_done: false
 spec_design_done: false
 spec_ui_design_done: false
 spec_tech_done: false
@@ -145,7 +146,7 @@ iconize_color: <from the level's registry entry, or the product's own colour>
 ---
 ```
 
-- The four gate booleans are the level's whole progression state. Every one is derived from the stage of one system document beside the note; their semantics live in [lifecycle](./lazy-spec.lifecycle-protocol.md) Part 2b.
+- The five gate booleans are the level's whole progression state. Every one is derived from the stage of one system document beside the note; their semantics live in [lifecycle](./lazy-spec.lifecycle-protocol.md) Part 2b.
 - A level note carries **no** `spec_asset_type` and **no** `spec_tools`: the level's type IS its role, and the ladder comes from the level playbook, not from a per-type declaration. It carries no `spec_cancelled` and no `spec_released` either — a level is not abandoned and not shipped; `spec_halted` is its only overlay.
 - `spec_design_done` shares its name with the asset gate of the same name. They are different objects on different notes, and nothing that reads asset gates ever reads a level note.
 - The coordinator's recorded review state of the level's documents lives here too, under the same closed-schema marker key a status note uses; `note-check` validates it.
@@ -161,5 +162,5 @@ Seven plugin-owned H1 sections, each with its `#protected/spec/<region>` tag as 
 
 What each section is for is identical to the status note's (Part 4 above), read at the level's altitude: `# Gates` holds the level's launch checkboxes, `# History` is the level's journal on the same closed event list (a system document's approval stamps `spec_approved_at` on the document itself and lands no line here), and `# Attachments` registers the level's non-markdown attachments.
 
-The level's system documents — `vision.md`, `design.md`, `tech.md`, and on a product root `ui-design.md` — sit loose beside the note, exactly as [file-roles](./lazy-spec.file-roles-protocol.md) Part 2's path constraints already describe, and are the only documents the level note coordinates.
+The level's system documents — `vision.md`, `design.md`, `tech.md`, and on a product root `use-cases.md` and `ui-design.md` — sit loose beside the note, exactly as [file-roles](./lazy-spec.file-roles-protocol.md) Part 2's path constraints already describe, and are the only documents the level note coordinates.
 

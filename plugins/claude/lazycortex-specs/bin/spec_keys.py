@@ -172,7 +172,7 @@ class Outcome:
 class Gate:
   """
   Flat top-level boolean gate key names carried by an asset status folder-note, or — for the
-  four level gates — by a product's or the catalog root's own level note.
+  five level gates — by a product's or the catalog root's own level note.
 
   `DESIGN_DONE` serves both ladders: the key is the same string on either note, and the note's
   own `spec_role` says which ladder it belongs to.
@@ -185,16 +185,18 @@ class Gate:
     RELEASED: The released gate.
     SPEC_CANCELLED: The asset-cancelled flag that refuses every gate flip.
     VISION_DONE: The level ladder's vision-accepted gate.
+    USE_CASES_DONE: The level ladder's use-cases-accepted gate.
     UI_DESIGN_DONE: The level ladder's ui-design-accepted gate.
     TECH_DONE: The level ladder's tech-accepted gate.
   """
 
   # Domain(spec.lifecycle):
   # # Derived gates versus human-confirmed gates
-  # A checkpoint closes one of two ways. Every checkpoint of the four-step ladder, and the first
-  # two checkpoints of the five-step ladder, are settled entirely by a sibling document's own
-  # approval — once that document is accepted, the checkpoint simply reflects it, with no
-  # separate confirmation of its own. The remaining three checkpoints of the five-step ladder —
+  # A checkpoint closes one of two ways. Every checkpoint of a product's or the catalog's ladder,
+  # and the first two checkpoints of an asset's five-step ladder, are settled entirely by a
+  # sibling document's own approval — once that document is accepted, the checkpoint simply
+  # reflects it, with no separate confirmation of its own. The remaining three checkpoints of the
+  # asset ladder —
   # the deliverable being built, its tests passing, its release — answer a question no document
   # approval can settle by itself, so each one waits for an explicit confirmation from outside
   # the automation before it closes.
@@ -206,6 +208,7 @@ class Gate:
   RELEASED = "spec_released"
   SPEC_CANCELLED = "spec_cancelled"
   VISION_DONE = "spec_vision_done"
+  USE_CASES_DONE = "spec_use_cases_done"
   UI_DESIGN_DONE = "spec_ui_design_done"
   TECH_DONE = "spec_tech_done"
 
@@ -304,6 +307,7 @@ ASSET_STATES = frozenset({
 # Linear precedence order of the level ladder — the order the level documents are written in.
 LEVEL_GATE_ORDER = [
     Gate.VISION_DONE,
+    Gate.USE_CASES_DONE,
     Gate.DESIGN_DONE,
     Gate.UI_DESIGN_DONE,
     Gate.TECH_DONE,
@@ -408,30 +412,34 @@ class LevelDoc:
   The system documents a level note owns, paired with their doc types and gates.
 
   A level note is a product's or the catalog root's own folder-note. Only `VISION` is
-  mandatory; the other three are opt-in and hang as launch checkboxes once the vision gate
-  closes. `DESIGN` and `TECH` share their basenames with the product-level docs the asset
-  coordinator already reads, and the doc types keep them apart.
+  mandatory; the other four are opt-in and hang as launch checkboxes once the vision gate
+  closes — `USE_CASES` and `UI_DESIGN` on a product root only. `DESIGN` and `TECH` share their
+  basenames with the product-level docs the asset coordinator already reads, and the doc types
+  keep them apart.
 
   Attributes:
     VISION: The level vision doc.
+    USE_CASES: The level use-cases doc.
     DESIGN: The level design doc.
     UI_DESIGN: The level ui-design doc.
     TECH: The level tech doc.
     CHAIN: The ladder as `(filename, doc_type, gate)` triples, in writing order.
-    BASENAMES: The four filenames, for deciding whether a changed file is a level document.
+    BASENAMES: The five filenames, for deciding whether a changed file is a level document.
   """
 
   VISION = "vision.md"
+  USE_CASES = "use-cases.md"
   DESIGN = "design.md"
   UI_DESIGN = "ui-design.md"
   TECH = "tech.md"
   CHAIN = [
       ( VISION, "system-vision", Gate.VISION_DONE ),
+      ( USE_CASES, "system-use-cases", Gate.USE_CASES_DONE ),
       ( DESIGN, "system-design", Gate.DESIGN_DONE ),
       ( UI_DESIGN, "system-ui-design", Gate.UI_DESIGN_DONE ),
       ( TECH, "system-tech", Gate.TECH_DONE ),
   ]
-  BASENAMES = frozenset({ VISION, DESIGN, UI_DESIGN, TECH })
+  BASENAMES = frozenset({ VISION, USE_CASES, DESIGN, UI_DESIGN, TECH })
 
 
 # ----------------------------------------------------------------------------------------

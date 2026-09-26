@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-09-24
+last_regen: 2026-09-26
 no_diagram: true
 source_skills:
   - lazy-spec.add-asset-type
@@ -25,8 +25,8 @@ source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
   - lazy-spec.audit
-source_sha: 800e7ebfd4ae569f3daf6ddf146dc8dc0ada2c26
-surface_sha: 59de1742a6dade8f9d04e147533860f38b755b1a8c04728349f6f1fce2210269
+source_sha: 7a2ab2bc75bf9bafa1340246e6c6969c517c4bc7
+surface_sha: 8f00700e1354b9b6ef0b79803685c70d45ad28baa4c8e60604f4ee8ba4faa5f2
 ---
 # Troubleshooting
 

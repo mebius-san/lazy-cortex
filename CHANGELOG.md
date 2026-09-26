@@ -716,6 +716,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 9.8.0 — 2026-09-26 UTC
+
+- New optional product-level use-cases document, gated by its own level in the product ladder.
+- Fixed `lazy-spec.create-asset` for asset types with a mandatory vision: it now seeds only the vision document, and the start document (e.g. the design) is seeded later, once the vision is approved — instead of scaffolding both up front.
+
 ### 9.7.3 — 2026-09-25 UTC
 
 - Fixed the request routines (`lazy-spec.request-open`, `lazy-spec.request-apply`) matching any `requests/` folder in the repo instead of only the vault's `<vault_root>/requests/` folder — previously a manual fix would even get overwritten on the next install/autosetup run.
@@ -1890,6 +1895,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 4.7.3 — 2026-09-26 UTC
+
+- `Contract:` blocks now state the principle of an interaction — what a caller may rely on — never how the code delivers it (no internal steps, data structures, algorithms, or call sequences), with a narrow exception for contracts whose substance is a specific mandated method or formula. Applies to both the comment guidelines and the `lazy-python.contract-writer` agent.
 
 ### 4.7.2 — 2026-09-24 UTC
 

@@ -64,8 +64,8 @@ one apply commit.
 
 An `attach` target naming a level document (`vision.md` / `design.md` /
 `tech.md` sitting directly in the content root or in a registered product's
-`spec_path`, plus `ui-design.md` at a product root) is stamped on the document itself: a level
-has no status folder-note above its documents, so none is looked for.
+`spec_path`, plus `use-cases.md` / `ui-design.md` at a product root) is stamped on the
+document itself: a level has no status folder-note above its documents, so none is looked for.
 
 A spawn line's asset type is validated against the shipped
 declarations plus whatever every registered product declares, so an
@@ -196,6 +196,7 @@ _OVERRIDE_CLASSES = {
     "architecture": ( "architect", [ f"{_SPEC_PATH_TOKEN}/*/**/architecture.md" ] ),
     "ui-design": ( "ui-designer", [ f"{_SPEC_PATH_TOKEN}/*/**/ui-design.md" ] ),
     "system-ui-design": ( "ui-designer", [ f"{_SPEC_PATH_TOKEN}/ui-design.md" ] ),
+    "system-use-cases": ( "use-case-writer", [ f"{_SPEC_PATH_TOKEN}/use-cases.md" ] ),
     "code-plan": ( "planner", [ f"{_SPEC_PATH_TOKEN}/*/**/code-plan.md" ] ),
     "test-plan": ( "tester", [ f"{_SPEC_PATH_TOKEN}/*/**/test-plan.md" ] ),
     "bug": ( "tester", [ f"{_SPEC_PATH_TOKEN}/*/**/bug.md" ] ),

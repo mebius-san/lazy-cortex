@@ -128,6 +128,7 @@ A block marker is **not a comment to the code** — it is a standalone block, se
   - Override obligations: "subclasses must override X".
   - Coordinate / spatial invariants: "coordinates MUST always be in local space".
   - Algorithm invariants: "all effects must be correctly sorted before applying".
+- What the text states: the principle of the interaction — what a caller may rely on and what the code on the other side owes it — never how the code delivers it. A contract survives any rewrite of the body that keeps the promise, so it names no internal step, data structure, algorithm, or call sequence. The one exception is a contract whose substance IS a specific method or formula — a mandated algorithm, an exact computation callers depend on — and then the contract names that method or formula and nothing else of the implementation.
 - When **not** to use:
   - Pure implementation details that are invisible to callers.
   - Information that is already obvious from the method signature and type hints.

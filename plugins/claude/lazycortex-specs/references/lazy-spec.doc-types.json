@@ -105,6 +105,13 @@
       "icon": "LiListChecks",
       "color": "#94a3b8"
     },
+    "system-use-cases": {
+      "stages": true,
+      "review": true,
+      "append_only": false,
+      "icon": "LiListChecks",
+      "color": "#94a3b8"
+    },
     "ui-design": {
       "stages": true,
       "review": true,

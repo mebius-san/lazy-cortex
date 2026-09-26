@@ -1,6 +1,7 @@
 ---
 spec_role: {{role}}
 spec_vision_done: false
+spec_use_cases_done: false
 spec_design_done: false
 spec_ui_design_done: false
 spec_tech_done: false

@@ -223,7 +223,7 @@ _WRITABLE_SCHEMA = {
     # the coordinator's tool verdict — LIST of open-vocabulary tool names (products declare
     # their own beyond the shipped four), so no member regex; an empty list is a legal verdict
     AssetTypeKey.TOOLS: _Kind.LIST,
-    # the level ladder's own four gates, spread from the closed set so the schema cannot drift
+    # the level ladder's own five gates, spread from the closed set so the schema cannot drift
     # from it; `spec_design_done` is already above and the two ladders share that one key name
     **dict.fromkeys(LEVEL_GATES, _Kind.BOOL),
 }

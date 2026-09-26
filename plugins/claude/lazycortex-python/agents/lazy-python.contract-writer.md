@@ -43,6 +43,7 @@ A `# Contract:` block marks a **caller-visible guarantee** that must survive ref
 
 - Never remove or alter an existing `Contract:` block without the dispatching prompt explicitly approving that exact block.
 - Never write a contract for pure implementation details invisible to callers, or for what is already obvious from the signature and type hints.
+- A contract states the principle of the interaction — what a caller may rely on — never how the code delivers it: no internal steps, data structures, algorithms, or call sequences. The only exception is a contract whose substance IS a specific method or formula; then it names that method or formula and nothing else of the implementation.
 - Never write a contract pinning presentation details — exact human-readable message text, log lines, pretty-print or repr formatting. Such a block is justified only when a caller demonstrably parses the string programmatically, and then it names the parsed structure, not the prose.
 - Before writing a block, find whether the method is declared on an interface or abstract base. If it is, the block goes on that declaration only; the implementation gets a synced `Guarantees` section and no block. Never mirror a contract onto both layers.
 - One guarantee per block; several guarantees in one scope are separate `# Contract:` blocks.

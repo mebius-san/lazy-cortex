@@ -612,7 +612,7 @@ def _is_tracked_document(path: Path, basenames: frozenset[str] | None = None) ->
   """
   Check whether one changed path is a document the woken note's own ladder tracks.
 
-  The level ladder owns a closed set of four filenames, so a level caller names it. The asset
+  The level ladder owns a closed set of five filenames, so a level caller names it. The asset
   ladder owns none: `lazy-spec.layout-protocol.md` gives an authored document's basename no
   semantics, and the `lazy-spec.coordinator-watch` routine's own second `filter.any_of` member
   selects on the PRESENCE of a non-null `spec_doc_type` rather than on any filename list.
