@@ -33,14 +33,14 @@ write back dirties the tracked tree and trips the daemon's own dirty-tree halt.
 from __future__ import annotations
 
 import json
-import os
 import sys
-import tempfile
 from importlib import import_module
 from pathlib import Path
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from constants import SettingsKey  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import runtime_state  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -501,23 +501,8 @@ def _atomic_write(path: Path, data: dict) -> None:
     OSError: If the destination file or its parent directory cannot be written.
     TypeError: If `data` is not JSON-serialisable.
   """
-  path.parent.mkdir(parents = True, exist_ok = True)
-  # waiver: temp-file naming idiom, not a domain constant
-  fd, tmp = tempfile.mkstemp(dir = path.parent, prefix = ".lazy_settings_", suffix = ".json")
-  # noinspection PyBroadException
-  try:
-    # waiver: stdlib file-mode idiom
-    with os.fdopen(fd, "w") as f:
-      json.dump(data, f, indent = 2, sort_keys = False)
-      f.write("\n")
-    os.replace(tmp, path)
-  except Exception:
-    # best-effort cleanup of the temp file before re-raising the original failure
-    try:
-      os.unlink(tmp)
-    except OSError:
-      pass
-    raise
+  # the shared writer keeps the file's mode and writes through a symlink to its real target
+  runtime_state.atomic_write_text(path, json.dumps(data, indent = 2, sort_keys = False) + "\n")
 
 
 def _cli() -> None:

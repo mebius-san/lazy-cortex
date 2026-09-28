@@ -9,7 +9,7 @@ Bootstrap the plugin in the right scope: copy every rule template shipped by the
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 22 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 23 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 0 — Verify Python ≥ 3.12 (floor)`
@@ -21,6 +21,7 @@ This skill has 22 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 6 — Seed lazy.settings.json`
    - `Step 6.5 — Seed git-guard flags`
    - `Step 7 — Bootstrap .logs/, .runtime/, lazy.settings.local.json gitignore, and .lazyignore`
+   - `Step 7.5 — Pin LF line endings in .gitattributes`
    - `Step 8 — Migrate stale lazycortex-log hook registrations`
    - `Step 9 — Bootstrap runtime defaults`
    - `Step 10 — Bootstrap experts directory`
@@ -314,6 +315,18 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core"
 ```
 
 Outcome per helper: `bootstrapped` (something was created/appended) or `already-present` for the first two; `seeded` / `already-present` / `template-missing` for `.lazyignore`.
+
+## Step 7.5: Pin LF line endings in .gitattributes
+
+Ensure `<repo>/.gitattributes` carries `* text=auto eol=lf` as its first rule, so git on every machine — any OS, any `core.autocrlf` — stores and checks out text files with LF, and a checkout synced between Windows and macOS never gets CRLF from git. The line goes first because a later, more specific rule wins; operator lines are never removed or reordered, and a re-run leaves the file byte-identical. Runs unconditionally, like Step 7.
+
+Run via:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" install-phase gitattributes)
+```
+
+The verb prints two lines. `.gitattributes: created` / `updated` / `already-present`. `renormalize: needed` / `not-needed` — `needed` means the index already holds CRLF text files (`git ls-files --eol` reports `i/crlf`), which the new rule does not rewrite on its own. On `needed`, report a follow-up for the operator: run `git add --renormalize .` once and commit the result. Never run it from this skill — it stages content, and the index is the operator's.
 
 ## Step 8: Migrate stale lazycortex-log hook registrations
 
@@ -684,6 +697,8 @@ Which machine drives this project, and from which checkout on it, (Gate 2) is re
 
 The map lives in the **tracked** file so it travels with the project to every clone — a gitignored overlay never reaches a machine that cloned the repo independently, which is exactly where a second daemon appears.
 
+**The checkout the map names must be a git-only clone outside Dropbox**, such as `~/lazy-runtime/<repo>`. Dropbox syncs bytes outside git and can bring CRLF files and half-written files from other machines, so the daemon refuses to start in any checkout whose resolved path has a component equal to `Dropbox`, starting with `Dropbox` (`Dropbox (Personal)`, `~/Library/CloudStorage/Dropbox…`), or ending in ` Dropbox` (`Auriglaci Dropbox`): it prints a one-line refusal, records a `daemon_error` incident with cause `dropbox_denied`, and exits non-zero — whatever `run_here` says.
+
 ```bash
 Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" daemon-run-here --cwd <repo-root> check)
 ```
@@ -939,6 +954,7 @@ Report to the user:
 - Per-key `agent_models` seed outcome from Step 6
 - Per-key `git` flag seed outcome (Step 6.5), including the pathspec behaviour-change note when `pathspec_enabled` was newly written
 - `.logs/` directory + `.lazyignore` seed bootstrap outcome (Step 7)
+- `.gitattributes` outcome (Step 7.5), plus the `git add --renormalize .` follow-up when it printed `renormalize: needed`
 - Hook migration outcome (Step 8): one line per settings path (`migrated` or `no-stale-entries`)
 - Runtime bootstrap outcome (Step 9), including the `daemon.git` derivation outcome (`seeded` / `kept-local` / `skipped-no-branch`)
 - Experts directory bootstrap outcome (Step 10)
@@ -959,6 +975,7 @@ Report to the user:
 - **Step 6 fails: "default-tiers.json missing or invalid"** — `lazy-core.agent-models/default-tiers.json` cannot be read or parsed → reinstall `lazycortex-core` to restore the file, then re-run.
 - **Step 7 fails: `.logs/` or `.runtime/` not a directory** — a file by either of those names already exists at the repo root → remove or rename it, then re-run.
 - **Step 7 fails: `.gitignore` unwritable** — `bootstrap_logs_dir` raised a permission or I/O error → check permissions on the repo root, then re-run.
+- **Git still shows CRLF files after Step 7.5** — `renormalize: needed` was reported and the one-time renormalize was not run yet; the rule governs new writes, not content already in the index → run `git add --renormalize .` and commit.
 - **Step 9c reports `git: skipped-no-branch`** — the checkout is on a detached `HEAD`, so there is no branch for the daemon to ride → `git checkout <branch>`, then re-run; until then the daemon does no remote sync.
 - **The daemon commits but never pushes** — `daemon.git` carries `base_branch` without `remote_sync`, which is what a checkout with no `origin` remote gets → add the remote (`git remote add origin <url>`), delete the `git` block from `.claude/lazy.settings.json`, and re-run to have it re-derived.
 - **Step 8 fails: settings.json malformed JSON** — one of the four standard settings paths contains invalid JSON → fix the file manually, then re-run.
@@ -970,6 +987,7 @@ Report to the user:
 - **Step 13 fails: `launchctl bootstrap` error** — the plist was written but `launchctl bootstrap` returned a non-zero exit code → inspect the plist at `~/Library/LaunchAgents/` for substitution errors, then run `launchctl bootout gui/$UID/<label>; launchctl bootstrap gui/$UID <path>` manually.
 - **Step 13 fails: `systemctl --user enable --now` error** — the service unit was written but `systemctl` returned a non-zero exit code → run `systemctl --user status lazy-core-runtime-<REPO_ID>.service` to inspect the error, then correct and re-enable manually.
 - **Daemon never starts for this checkout after install** — either `daemon.enabled` is `false` (the seeded default: routines are registered and run through `/lazy-runtime.tick`, no supervisor is installed), or it is true and `daemon.run_here` names a different machine or checkout → set the flag to `true`, point the map at this checkout (`{"<this host>": "<this path>"}`) in the tracked `lazy.settings.json`, and re-run `/lazy-core.install`.
+- **The supervisor is installed but the daemon exits at once with `refuses to start: … inside a Dropbox folder`** — the checkout `run_here` names sits under a Dropbox folder, where the daemon never runs → clone the project with git to a path outside Dropbox (for example `~/lazy-runtime/<repo>`), point this host's `run_here` entry at the clone, and re-run `/lazy-core.install` from the clone.
 - **A second machine or checkout started its own daemon for the same project** — the map was left as a boolean or a bare host list by an older install, which cannot say which checkout drives the project → replace it with a hostname-to-path map naming the one checkout that should drive it, and re-run `/lazy-core.install` on the others; each removes its stray supervisor unit instead of installing one.
 - **A declared external directory stays absent after install** — the checkout has no `external_dirs.root` on record and the operator answered "Leave as is", so `declined` is set in the local overlay and Step 12.5 never asks again → delete `external_dirs.declined` from `.claude/lazy.settings.local.json` and re-run `/lazy-core.install` to be asked once more.
 - **The daemon halts with `uncommitted_changes` right after install, and `git status` lists the external directories** — the links are visible to git: either Step 12.5 stated `ignores-declined`, or `.gitignore` covers the names as directories only (`Data/`) while the slots hold symlinks → re-run `/lazy-core.install` and accept the ignore-coverage question, which appends the anchored slashless lines (`/Data`) next to the existing ones.

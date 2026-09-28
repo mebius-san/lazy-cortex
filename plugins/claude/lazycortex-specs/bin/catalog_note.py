@@ -37,6 +37,8 @@ import note_ops  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import scaffold_asset  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import spec_frontmatter  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import spec_paths  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 # pylint: disable-next=import-error
@@ -181,7 +183,8 @@ def _managed_keys(role: str, record: dict) -> list[tuple[str, str]]:
 
   Returns:
     The role key, the five level gates closed, the halt flag, and the role's paint keys, in
-    write order; the colour literal is quoted so YAML never reads it as a comment.
+    write order, as bare values — the scalar writer quotes the colour so YAML never reads it as
+    a comment.
   """
 
   # Domain(spec.notes):
@@ -203,7 +206,7 @@ def _managed_keys(role: str, record: dict) -> list[tuple[str, str]]:
   if icon:
     pairs.append(( note_ops.ICONIZE_ICON_KEY, icon ))
   if color:
-    pairs.append(( note_ops.ICONIZE_COLOR_KEY, f'"{color}"' ))
+    pairs.append(( note_ops.ICONIZE_COLOR_KEY, color ))
   return pairs
 
 
@@ -248,7 +251,7 @@ def _section_blocks(text: str) -> dict[str, list[str]]:
   """
   blocks: dict[str, list[str]] = {}
   current = ""
-  for line in text.splitlines():
+  for line in spec_frontmatter.split_lines(text):
     if line.startswith("# "):
       current = line.strip()
       blocks[current] = [ current ]
@@ -270,7 +273,7 @@ def _rendered_block(lines: list[str], lang: str) -> list[str]:
     The section's lines followed by one blank line, so consecutive insertions stay separated.
   """
   healed = note_explainers.ensure_explainers("\n".join(lines).rstrip("\n") + "\n", lang)
-  return [ *healed.rstrip("\n").splitlines(), "" ]
+  return [ *spec_frontmatter.split_lines(healed.rstrip("\n")), "" ]
 
 
 def _anchor(heading: str, positions: dict[str, int], end: int) -> int:
@@ -317,7 +320,7 @@ def _insert_sections(body: str, blocks: dict[str, list[str]], lang: str) -> tupl
   # converges toward the same order no matter how many passes it takes to complete.
 
   # locate every canonical section already present, and note the schema's still-missing ones
-  lines = body.splitlines()
+  lines = spec_frontmatter.split_lines(body)
   positions = { line.strip(): idx for idx, line in enumerate(lines) if line.strip() in _SECTION_ORDER }
   missing = [ heading for heading in _SECTION_ORDER if heading not in positions ]
 
@@ -356,14 +359,10 @@ def _apply_keys(text: str, role: str, record: dict) -> tuple[str, list[str]]:
   frontmatter, fm_end = flip_gate.parse_frontmatter(text)
   pairs = _managed_keys(role, record)
 
-  # guard: no parseable frontmatter at all — the whole block is written from the managed set
-  if fm_end == 0:
-    block = "".join(f"{key}: {value}\n" for key, value in pairs)
-    return f"---\n{block}---\n" + text, [ key for key, _value in pairs ]
-
-  # an existing key is the operator's or another writer's — only the absent ones are filled in
+  # a note without frontmatter gets an empty block to fill; an existing key is the operator's
+  # or another writer's, so only the absent ones are filled in
   missing = [ pair for pair in pairs if pair[0] not in frontmatter ]
-  fm_text = text[:fm_end]
+  fm_text = text[:fm_end] or "---\n---\n"
   for key, value in missing:
     fm_text = note_ops.set_fm_scalar(fm_text, key, value)
   return fm_text + text[fm_end:], [ key for key, _value in missing ]
@@ -418,7 +417,7 @@ def backfill(repo: Path, *, product: str | None, root: bool, today: str | None =
 
   # a fresh note starts as the rendered template; an existing one starts as its own bytes
   seeded = _seed_text(repo, role, "" if root else (product or ""), record)
-  text = seeded if created else note.read_text()
+  text = seeded if created else spec_paths.read_text(note)
   lang = note_explainers.lang_for_note(note)
 
   # fill in the managed frontmatter, then the missing sections — the template supplies the shape
@@ -437,7 +436,7 @@ def backfill(repo: Path, *, product: str | None, root: bool, today: str | None =
   if created:
     text = note_explainers.heal_note_text(note, text)
   note.parent.mkdir(parents = True, exist_ok = True)
-  note.write_text(text)
+  spec_paths.write_text_atomic(note, text)
   return { _Out.OUTCOME: _Outcome.CREATED if created else _Outcome.UPDATED,
            _Out.NOTE: str(note.relative_to(repo)), _Out.ADDED: added }
 

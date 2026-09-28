@@ -18,9 +18,70 @@ from __future__ import annotations
 
 import re
 
+# waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
+import parser as _parser  # pylint: disable=import-error,deprecated-module
+
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   from collections.abc import Callable
+
+
+# ------------------------------------------------------- paragraphs
+
+
+# an ATX heading line of any level — a paragraph never runs across one
+_HEADING_LINE_RE = re.compile(r"^#{1,6}(?:[ \t]|$)")
+
+
+def _fold_paragraphs(text: str, fold: Callable[[str], str]) -> str:
+  """
+  Apply an inline-markup fold to each paragraph of `text` on its own, skipping code fences.
+
+  Guarantees:
+    - `fold` never sees text from two paragraphs at once, a heading line together with any other
+      line, or any line of a fenced code block; fenced blocks are returned byte-for-byte.
+
+  Args:
+    text: Markdown text to fold.
+    fold: Inline-markup fold applied to one paragraph at a time.
+
+  Returns:
+    `text` with every paragraph folded and everything else unchanged.
+  """
+
+  # Contract:
+  # `fold` MUST never see text from two paragraphs at once, a heading line together with any
+  # other line, or any line of a fenced code block; fenced blocks MUST come back byte-for-byte.
+
+  # Domain(review.markup):
+  # # Inline edit markup never crosses a paragraph
+  # An inline edit mark — a deletion, an insertion, a hidden note, a highlight — opens and closes
+  # within one paragraph. A lone opening mark with no partner in its own paragraph is literal text,
+  # never the start of a span reaching into later paragraphs, headings, or sections; and a code
+  # block holds literal content where no edit mark is ever read.
+
+  out: list[str] = []
+  for chunk in _parser.split_fenced(text):
+    # guard: fenced content is literal
+    if chunk.fenced:
+      out.append(chunk.text)
+      continue
+
+    # a paragraph ends at a blank line and at a heading line, which folds on its own
+    units: list[str] = []
+    para: list[str] = []
+    for line in chunk.text.split("\n"):
+      if not line.strip() or _HEADING_LINE_RE.match(line):
+        if para:
+          units.append(fold("\n".join(para)))
+          para = []
+        units.append(fold(line))
+        continue
+      para.append(line)
+    if para:
+      units.append(fold("\n".join(para)))
+    out.append("\n".join(units))
+  return "".join(out)
 
 
 # -------------------------------------------------------- simple style
@@ -37,6 +98,24 @@ _SIMPLE_RULES: list[tuple[re.Pattern[str], Callable[[re.Match[str]], str]]] = [
 ]
 
 
+def _apply_rules(
+    text: str, rules: list[tuple[re.Pattern[str], Callable[[re.Match[str]], str]]],
+) -> str:
+  """
+  Apply each substitution rule to `text` in order.
+
+  Args:
+    text: One paragraph of text.
+    rules: `(pattern, replacement)` pairs applied one after another.
+
+  Returns:
+    `text` with every rule applied.
+  """
+  for pattern, repl in rules:
+    text = pattern.sub(repl, text)
+  return text
+
+
 def _strip_simple(text: str) -> str:
   """
   Fold `simple`-style edit-annotation markup into plain text.
@@ -44,21 +123,55 @@ def _strip_simple(text: str) -> str:
   Returns:
     The input text with deletions, comments, and insertion wrappers resolved.
   """
-  for pattern, repl in _SIMPLE_RULES:
-    text = pattern.sub(repl, text)
-  return text
+  return _fold_paragraphs(text, lambda para: _apply_rules(para, _SIMPLE_RULES))
 
 
 # --------------------------------------------------------- diff style
 
 
-# Closing fence consumes only horizontal whitespace on its own line
-# (`[ \t]*$`), never the trailing newline(s) — otherwise the blank-line
-# separator after the fence collapses and the resolved `+` content glues
-# to the next paragraph / heading. (Bug 85.)
-_DIFF_FENCE_RE = re.compile(
-    r"(?ms)^```diff\s*\n(.*?)\n```[ \t]*$"
-)
+# the info string of an edit-annotation fence
+_DIFF_INFO = "diff"
+
+# a line only a real unified diff carries — a hunk header, a marker glued to its content, or a
+# one-space context line; the edit protocol always separates a marker from its content by a space
+_REAL_DIFF_LINE_RE = re.compile(r"^(?:@@|[-+][^ ]| [^ ])")
+
+
+def _diff_edit_fences(text: str) -> list[tuple[int, int, str]]:
+  """
+  Locate every closed `diff` fence of `text` that holds edit annotations.
+
+  Guarantees:
+    - A fence holding any line only a real unified diff carries, an unclosed fence, and a
+      `diff` fence nested inside another code block are never returned.
+
+  Args:
+    text: Markdown text to scan.
+
+  Returns:
+    One `(start, end, body)` tuple per fence: `start` is the offset of the opening fence line,
+    `end` the offset just past the closing fence's text (before its line ending), and `body` the
+    lines between the two fence lines, without the line ending before the closing fence.
+  """
+
+  # Contract:
+  # A fence holding any line only a real unified diff carries, an unclosed fence, and a `diff`
+  # fence nested inside another code block MUST never be returned.
+
+  fences: list[tuple[int, int, str]] = []
+  offset = 0
+  for chunk in _parser.split_fenced(text):
+    lines = chunk.text.splitlines(keepends = True)
+
+    # guard: only a closed top-level `diff` fence of edit annotations counts; the closing fence
+    # keeps its own line ending, so the blank line after it never collapses (Bug 85)
+    if chunk.fenced and chunk.closed and chunk.info == _DIFF_INFO:
+      body = "".join(lines[1:-1])
+      body = body[:-2] if body.endswith("\r\n") else body.removesuffix("\n")
+      if not any(_REAL_DIFF_LINE_RE.match(line) for line in body.splitlines()):
+        fences.append((offset, offset + len(chunk.text.rstrip("\r\n")), body))
+    offset += len(chunk.text)
+  return fences
 
 
 def _resolve_diff_block(block_body: str) -> str:
@@ -178,12 +291,12 @@ def _strip_diff(text: str) -> str:
   # change. A removal with no matching earlier insertion falls back to being dropped from its
   # own block, the plain reading of a deletion against unedited body text.
 
-  fences = list(_DIFF_FENCE_RE.finditer(text))
+  fences = _diff_edit_fences(text)
 
   # guard: no fences present — return source verbatim
   if not fences:
     return text
-  parsed = [_parse_fence_body(m.group(1)) for m in fences]
+  parsed = [_parse_fence_body(body) for _start, _end, body in fences]
 
   # cancelled[(fence_idx, emit_idx)] — emissions retracted by a later fence's deletion.
   cancelled: set[tuple[int, int]] = set()
@@ -206,8 +319,8 @@ def _strip_diff(text: str) -> str:
           break
   pieces: list[str] = []
   last_end = 0
-  for fence_idx, m in enumerate(fences):
-    pieces.append(text[last_end:m.start()])
+  for fence_idx, (start, end, _body) in enumerate(fences):
+    pieces.append(text[last_end:start])
     emissions = parsed[fence_idx][0]
     surviving = [
         content
@@ -215,7 +328,7 @@ def _strip_diff(text: str) -> str:
         if (fence_idx, emit_idx) not in cancelled
     ]
     pieces.append("\n".join(surviving))
-    last_end = m.end()
+    last_end = end
   pieces.append(text[last_end:])
   return "".join(pieces)
 
@@ -267,8 +380,10 @@ def drop_whitespace_only_diff_fences(text: str) -> str:
   # `-` and `+` payload differ solely in whitespace is replaced with its
   # resolved text.
 
-  def repl(match: re.Match[str]) -> str:
-    body = match.group(1)
+  def repl(body: str, fence_text: str) -> str:
+    # guard: an empty fence wraps no paragraph, so there is no reflow to undo
+    if not body.strip():
+      return fence_text
     minus_lines: list[str] = []
     plus_lines: list[str] = []
     for raw in body.splitlines():
@@ -287,8 +402,17 @@ def drop_whitespace_only_diff_fences(text: str) -> str:
       return _resolve_diff_block(body)
 
     # Real content change: keep the fence intact.
-    return match.group(0)
-  return _DIFF_FENCE_RE.sub(repl, text)
+    return fence_text
+
+  # rebuild the text with each whitespace-only fence swapped for its resolved content
+  pieces: list[str] = []
+  last_end = 0
+  for start, end, body in _diff_edit_fences(text):
+    pieces.append(text[last_end:start])
+    pieces.append(repl(body, text[start:end]))
+    last_end = end
+  pieces.append(text[last_end:])
+  return "".join(pieces)
 
 
 # ----------------------------------------------------- criticmarkup style
@@ -315,9 +439,7 @@ def _strip_criticmarkup(text: str) -> str:
   Returns:
     The input text with substitutions, insertions, deletions, comments, and highlights resolved.
   """
-  for pattern, repl in _CRITIC_RULES:
-    text = pattern.sub(repl, text)
-  return text
+  return _fold_paragraphs(text, lambda para: _apply_rules(para, _CRITIC_RULES))
 
 
 # ----------------------------------------------------------- html style
@@ -342,9 +464,7 @@ def _strip_html(text: str) -> str:
   Returns:
     The input text with comments, deletions, insertions, and highlights resolved.
   """
-  for pattern, repl in _HTML_RULES:
-    text = pattern.sub(repl, text)
-  return text
+  return _fold_paragraphs(text, lambda para: _apply_rules(para, _HTML_RULES))
 
 
 # ------------------------------------------------------------ public api
@@ -379,7 +499,7 @@ def _collapse_blank_runs(text: str) -> str:
   Returns:
     The input text with excess blank-line runs normalized.
   """
-  return _BLANK_RUN_RE.sub("\n\n", text)
+  return _parser.sub_outside_fences(_BLANK_RUN_RE, "\n\n", text)
 
 
 def strip_markers(text: str, *, style: str) -> str:
@@ -391,7 +511,8 @@ def strip_markers(text: str, *, style: str) -> str:
   gaps (Bug 90).
 
   Guarantees:
-    - The returned text never contains a run of three or more consecutive newlines.
+    - Outside code fences, the returned text never contains a run of three or more consecutive
+      newlines; a fenced code block is never altered.
 
   Args:
     text: Source text containing edit-annotation markup.
@@ -406,9 +527,9 @@ def strip_markers(text: str, *, style: str) -> str:
   """
 
   # Contract:
-  # The returned text never contains a run of three or more consecutive
-  # newlines; any such run is always collapsed to a single paragraph
-  # break (two newlines).
+  # Outside code fences, the returned text never contains a run of three or more consecutive
+  # newlines — any such run is collapsed to a single paragraph break (two newlines); a fenced
+  # code block is never altered.
 
   # Domain(review.markup):
   # # Edit-annotation styles

@@ -45,6 +45,8 @@ import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-impor
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_doc_types  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 # The document type this module's registry files declare themselves as.
 _DECISIONS_TYPE = "decisions"
@@ -517,7 +519,7 @@ def _protected_boundary_line(lines: list[str]) -> int:
       the registry's own content.
 
   Args:
-    lines: The registry body's lines (via `str.splitlines()`).
+    lines: The registry body's lines (via `spec_frontmatter.split_lines`).
 
   Returns:
     The line index of the first H1 heading whose next non-blank line is a `#protected/` tag, or
@@ -530,9 +532,11 @@ def _protected_boundary_line(lines: list[str]) -> int:
 
   # scan every H1 heading in order; the first one whose next non-blank line is a `#protected/`
   # tag marks the boundary
+  fenced = spec_frontmatter.fenced_lines(lines)
   i = 0
   while i < len(lines):
-    if re.match(r"^#\s", lines[i]):
+    # a heading quoted inside a record's code fence is content, never a section boundary
+    if not fenced[i] and re.match(r"^#\s", lines[i]):
       j = i + 1
       while j < len(lines) and not lines[j].strip():
         j += 1
@@ -554,9 +558,11 @@ def _parse_records(body: str) -> list[dict]:
     `origin`, `body` (the full body text below `Origin:`, verbatim, trailing blank lines
     trimmed).
   """
-  lines = body.splitlines()
+  lines = spec_frontmatter.split_lines(body)
   content_end = _protected_boundary_line(lines)
-  headings = [(i, m) for i in range(content_end) if (m := _HEADING_RE.match(lines[i])) is not None]
+  fenced = spec_frontmatter.fenced_lines(lines)
+  headings = [(i, m) for i in range(content_end)
+              if not fenced[i] and (m := _HEADING_RE.match(lines[i])) is not None]
   records = []
 
   # each record's chunk runs from its own heading to the next record's heading, or the content
@@ -577,6 +583,9 @@ def _parse_records(body: str) -> list[dict]:
       elif origin_m:
         origin = origin_m.group(1).strip()
         body_start = k + 1
+
+        # the `Origin:` line closes the header — a later line opening with a header word is body
+        break
 
     # the body starts after the blank line separating it from the Origin metadata line
     while body_start < len(meta_lines) and not meta_lines[body_start].strip():
@@ -600,9 +609,10 @@ def _next_number(body: str) -> int:
   Compute the next free `D-NNN` number within one registry body.
 
   Returns:
-    `max(existing) + 1`, or `1` when the body carries no records yet.
+    `max(existing) + 1`, or `1` when the body carries no records yet. A record heading quoted
+    inside a code fence is not a record.
   """
-  nums = [int(m.group(1)) for m in _HEADING_RE.finditer(body)]
+  nums = [ record[_K.NUMBER] for record in _parse_records(body) ]
   return (max(nums) + 1) if nums else 1
 
 
@@ -640,7 +650,8 @@ def _set_status(body: str, number: int, new_status: str) -> tuple[str, bool]:
 
   Returns:
     `(new_body, changed)` — `changed` is False (body returned unmodified) when the record or its
-    `Status:` line could not be located.
+    `Status:` line could not be located. A record heading quoted inside a code fence is not the
+    record.
   """
 
   # Domain(spec.decisions):
@@ -650,18 +661,23 @@ def _set_status(body: str, number: int, new_status: str) -> tuple[str, bool]:
   # Either mark is final for the record's own life span, but the record itself is never removed
   # from the registry — it stays as history, just no longer read as the live word on the subject.
 
-  heading_m = re.search(rf"(?m)^## D-{number:03d} — .*$", body)
+  # the record's own heading line — a copy quoted inside a code fence is content, never the record
+  lines = spec_frontmatter.split_lines(body, keepends = True)
+  fenced = spec_frontmatter.fenced_lines(lines)
+  head = next(( idx for idx, row in enumerate(lines)
+                if not fenced[idx] and row.startswith(f"## D-{number:03d} — ") ), None)
 
   # guard: no such record in this body
-  if heading_m is None:
+  if head is None:
     return body, False
-  status_m = re.search(r"(?m)^Status:.*$", body[heading_m.end():])
+  after = sum(len(row) for row in lines[:head + 1])
+  status_m = re.search(r"(?m)^Status:.*$", body[after:])
 
   # guard: record found but malformed — no Status line to rewrite
   if status_m is None:
     return body, False
-  start = heading_m.end() + status_m.start()
-  end = heading_m.end() + status_m.end()
+  start = after + status_m.start()
+  end = after + status_m.end()
   return body[:start] + f"Status: {new_status}" + body[end:], True
 
 
@@ -683,7 +699,7 @@ def _insert_record(body: str, record_text: str) -> str:
   Returns:
     The updated body text, newline-terminated.
   """
-  lines = body.splitlines()
+  lines = spec_frontmatter.split_lines(body)
   insert_at = _protected_boundary_line(lines)
 
   # trim trailing blank lines directly above the insertion point so the new record sits flush
@@ -697,7 +713,7 @@ def _insert_record(body: str, record_text: str) -> str:
   assembled = lines[:trim_end]
   if assembled:
     assembled.append("")
-  assembled.extend(record_text.splitlines())
+  assembled.extend(spec_frontmatter.split_lines(record_text))
   if after:
     assembled.append("")
     assembled.extend(after)
@@ -818,7 +834,7 @@ def add(decisions_path: Path, thesis: str, body: str, *,
   # read the current file (or its lazy shell) inside the lock, so the count below is never stale
   with _decisions_lock(decisions_path):
     if decisions_path.is_file():
-      fm_text, existing_body = _split(decisions_path.read_text())
+      fm_text, existing_body = _split(spec_paths.read_text(decisions_path))
 
       # a decisions.md with no parseable frontmatter (fm_end == 0) still needs its canonical
       # shell — prepend fresh frontmatter + header rather than writing a still-headerless file
@@ -848,7 +864,7 @@ def add(decisions_path: Path, thesis: str, body: str, *,
     number = _next_number(existing_body)
     record_text = _format_record(number, thesis, body, origin = origin, today = today_str)
     new_body = _insert_record(existing_body, record_text)
-    decisions_path.write_text(fm_text + new_body)
+    spec_paths.write_text_atomic(decisions_path, fm_text + new_body)
   return {_K.STATUS: _Result.ADDED, _K.ID: f"D-{number:03d}", _K.FILE: str(decisions_path)}
 
 
@@ -864,14 +880,14 @@ def _write_status(decisions_path: Path, number: int, new_status: str) -> bool:
   if not decisions_path.is_file():
     return False
   with _decisions_lock(decisions_path):
-    text = decisions_path.read_text()
+    text = spec_paths.read_text(decisions_path)
     fm_text, body = _split(text)
     new_body, changed = _set_status(body, number, new_status)
 
     # guard: no such record — nothing written
     if not changed:
       return False
-    decisions_path.write_text(fm_text + new_body)
+    spec_paths.write_text_atomic(decisions_path, fm_text + new_body)
   return True
 
 
@@ -980,7 +996,7 @@ def _find_decision_blocks(body: str) -> list[dict]:
   # cycle, and its content is never read as this document's own decision content.
 
   # set up the scan state before the single forward pass below
-  lines = body.splitlines()
+  lines = spec_frontmatter.split_lines(body)
   n = len(lines)
   blocks: list[dict] = []
   in_fence = False
@@ -1151,7 +1167,7 @@ def promote(doc_path: Path, *, today: str | None = None) -> dict:
   # never a source either.
 
   # only a living doc (the closed `_LIVING_ROLES` set) is a legal source for a promote call
-  text = doc_path.read_text()
+  text = spec_paths.read_text(doc_path)
   fm_values, fm_end = flip_gate.parse_frontmatter(text)
   role = fm_values.get(_K.SPEC_ROLE, "")
 
@@ -1197,7 +1213,7 @@ def promote(doc_path: Path, *, today: str | None = None) -> dict:
                  f"|{_doc_title_line(body) or doc_path.stem}]]")
   touched: set[str] = set()
   records: list[dict] = []
-  lines = body.splitlines()
+  lines = spec_frontmatter.split_lines(body)
 
   # Contract:
   # promoting the same document a second time performs no duplicate work — a block whose
@@ -1245,7 +1261,7 @@ def promote(doc_path: Path, *, today: str | None = None) -> dict:
   new_body = "\n".join(lines)
   if body.endswith("\n") and not new_body.endswith("\n"):
     new_body += "\n"
-  doc_path.write_text(text[:fm_end] + new_body)
+  spec_paths.write_text_atomic(doc_path, text[:fm_end] + new_body)
   touched.add(str(doc_path))
   return {_K.STATUS: _Result.PROMOTED, _K.TOUCHED_PATHS: sorted(touched), _K.RECORDS: records}
 

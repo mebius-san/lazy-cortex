@@ -274,6 +274,7 @@ class TagOps:
       - Collapsing an alias onto a value a node already carries leaves a single copy of that tag, never a
         duplicate.
       - A repeated call with the same alias map after a successful one changes nothing.
+      - A retag never changes a node's summary or its stored source hash.
 
     Args:
       alias_map: `{<axis>: {<old-value>: <new-value>}}`.
@@ -293,6 +294,10 @@ class TagOps:
     # Contract:
     # A repeated call with the same alias map after a successful one changes
     # nothing.
+
+    # Contract:
+    # A retag NEVER changes a node's summary or its stored source hash; only the topic tags the
+    # alias map matches are rewritten.
 
     # Domain(wiki.taxonomy):
     # # Normalising values within an axis
@@ -319,9 +324,10 @@ class TagOps:
       # guard: nothing changed for this node — skip the write
       if remapped == bare:
         continue
-      summary = self._summary(node)
+      # only the topics are rewritten: the summary stays, and so does the stored source hash, so an
+      # operator edit made since the last curation still reads as pending
       prefixed = [ f"{self._WIKI_PREFIX}{t}" for t in remapped ]
-      node.apply_classify(wiki_summary = summary or "", topics = prefixed, connectors = None)
+      node.apply_classify(topics = prefixed, stamp_src_hash = False)
       nodes_changed += 1
       tags_remapped += hits
     return {

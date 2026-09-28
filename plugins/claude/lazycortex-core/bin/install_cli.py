@@ -31,6 +31,8 @@ from lazy_install_phases import (  # pylint: disable=import-error
   bootstrap_lazyignore,
   bootstrap_logs_dir,
   bootstrap_memory_dir,
+  ensure_gitattributes_lf,
+  index_has_crlf,
   migrate_log_hooks,
 )
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -88,6 +90,21 @@ def _run_phase_logs(root: Path, template: Path) -> None:
   print(".lazyignore:", bootstrap_lazyignore(root, template))
 
 
+def _run_phase_gitattributes(root: Path) -> None:
+  """
+  Run the gitattributes phase: pin LF in `.gitattributes`, then say whether the index needs renormalizing.
+
+  Args:
+    root: Repository root the phase bootstraps.
+  """
+  # waiver: outcome-line labels read by the install skill, not reusable domain keys
+  print(".gitattributes:", ensure_gitattributes_lf(root))
+
+  # CRLF already in the index is not rewritten by the rule; the operator renormalizes it once
+  # waiver: outcome-line label and tokens read by the install skill, not reusable domain keys
+  print("renormalize:", "needed" if index_has_crlf(root) else "not-needed")
+
+
 def _run_phase_log_hooks(root: Path) -> None:
   """
   Run the log-hooks phase: strip retired log-hook commands from project and user settings.
@@ -105,6 +122,10 @@ def _run_phase_log_hooks(root: Path) -> None:
 def _run_phase_daemon_defaults(root: Path) -> None:
   """
   Run the daemon-defaults phase: seed absent daemon keys, the git block, and the routines section.
+
+  Notes:
+    - The daemon section is written back only when seeding actually added a key; a run that finds
+      every key already present leaves the settings file untouched.
 
   Args:
     root: Repository root whose tracked settings receive the seeds.
@@ -129,7 +150,10 @@ def _run_phase_daemon_defaults(root: Path) -> None:
   before = dict(section)
   for key, value in _DAEMON_DEFAULTS.items():
     section.setdefault(key, value)
-  save_section(settings, SettingsKey.DAEMON, section)
+
+  # a run that seeded nothing leaves the file untouched — a rewrite would only reformat it
+  if section != before:
+    save_section(settings, SettingsKey.DAEMON, section)
   # waiver: outcome-line labels and tokens read by the install skill, not reusable domain keys
   print("daemon: bootstrapped" if section != before else "daemon: already-present")
 
@@ -167,6 +191,7 @@ def _compute_repo_id(root: Path) -> str:
 # module-level table cannot forward-reference functions defined later in the file
 _PHASES: dict[str, Callable[[Path, Path], None]] = {
   "logs": _run_phase_logs,
+  "gitattributes": lambda root, _template: _run_phase_gitattributes(root),
   "log-hooks": lambda root, _template: _run_phase_log_hooks(root),
   "memory-dir": lambda root, _template: print(bootstrap_memory_dir(root)),
   "daemon-defaults": lambda root, _template: _run_phase_daemon_defaults(root),

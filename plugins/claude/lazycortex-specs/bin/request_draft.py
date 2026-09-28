@@ -291,7 +291,7 @@ def draft(
   # attribution follows the catalog's own wikilink convention: content-root-relative, suffix-free
   source_link = str(source.resolve().relative_to(content_root.resolve()).with_suffix(""))
   request_path = _unique_path(requests_dir, _slug(title))
-  request_path.write_text(_render(source_link, title, body))
+  spec_paths.write_text_atomic(request_path, _render(source_link, title, body))
   _commit(repo, request_path, author_name, author_email)
   return {
       _K.OUT_OUTCOME: _K.OUTCOME_CREATED,

@@ -15,6 +15,9 @@ import os
 import re
 from pathlib import Path, PurePath
 
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import nodes as _nodes  # pylint: disable=import-error
+
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
@@ -155,17 +158,20 @@ class GlobMatcher:
 
 def _unquote(s: str) -> str:
   """
-  Return `s` with one matched layer of surrounding single or double quotes removed.
+  Strip one layer of YAML scalar quoting from `s` and resolve its escapes.
+
+  Recognises both single-quoted (with `''` unescaped to `'`) and double-quoted (with backslash
+  escapes resolved) YAML scalars. A string carrying neither quoting style passes through unchanged.
 
   Args:
     s: Candidate string that may be wrapped in matching `"` or `'`.
 
   Returns:
-    The unquoted string when both ends carry the same quote character; the input unchanged otherwise.
+    The inner string with its quote layer removed and escapes resolved, or `s` unchanged when no
+    matching quote pair wraps it.
   """
-  if len(s) >= 2 and s[0] == s[-1] and s[0] in ('"', "'"):
-    return s[1:-1]
-  return s
+  # waiver: sibling-module private YAML unquoter reused so both modules unescape one way
+  return _nodes._yaml_unquote(s)  # pylint: disable=protected-access
 
 
 def _coerce_scalar(s: str) -> bool | int | float | str | None:
@@ -182,7 +188,9 @@ def _coerce_scalar(s: str) -> bool | int | float | str | None:
   Returns:
     A `bool`, `None`, `int`, `float`, or `str` value depending on the literal shape.
   """
-  s = _unquote(s)
+  # guard: a quoted scalar is a string by definition — never retyped
+  if len(s) >= 2 and s[0] == s[-1] and s[0] in ('"', "'"):
+    return _unquote(s)
   low = s.lower()
   # waiver: YAML scalar keywords, external-format tokens, not internal keys
   if low in ("true", "false"):
@@ -204,10 +212,11 @@ def _parse_frontmatter(text: str) -> dict:
   """
   Return the YAML frontmatter at the head of `text` as a flat dict.
 
-  Permissive and minimal: flat `key: value` scalars (coerced via `_coerce_scalar`), blank values
-  (mapped to None), and indented `- item` lists attached to the most recent key. Missing or
-  malformed frontmatter yields `{}`. Only the flat key→scalar/list shape the filter needs is
-  supported — nested mappings, anchors, and multi-line scalars are out of scope.
+  Permissive and minimal: only column-0 `key: value` lines become top-level keys. Blank values
+  become `None`. Other unquoted values are coerced to booleans, numbers, or null when the text
+  matches, and a quoted value always stays a string. An indented `- item` line attaches only to
+  the most recent key whose inline value was empty; any other indented line — block-scalar
+  content, a nested mapping — is skipped. Missing or malformed frontmatter yields `{}`.
 
   Args:
     text: Full document text whose frontmatter block (if any) is delimited by lines that are
@@ -250,6 +259,10 @@ def _parse_frontmatter(text: str) -> dict:
       result[current_key].append(_unquote(stripped[2:].strip()))
       continue
 
+    # guard: any other indented line continues a block scalar or a nested mapping — never a top-level key
+    if indent > 0:
+      continue
+
     # guard: not a key:value line
     if ":" not in raw:
       continue
@@ -261,7 +274,9 @@ def _parse_frontmatter(text: str) -> dict:
     if not key:
       continue
     result[key] = None if value == "" else _coerce_scalar(value)
-    current_key = key
+
+    # only a key with no inline value can own the `- item` lines that follow it
+    current_key = key if value == "" else None
   return result
 
 
@@ -529,6 +544,7 @@ class ScopeResolver:
   def resolve_scope_by_path(
     self,
     path: Path | str,
+    apply_filter: bool = True,
   ) -> tuple[str, dict] | None:
     """
     Return the first scope whose `paths` globs match and no `exclude_paths` glob matches.
@@ -556,9 +572,14 @@ class ScopeResolver:
       - When several scopes match the same path, the first declared match owns it.
       - A node its home scope's `filter` rejects resolves to `None` and is never offered to a
         scope declared after that home.
+      - With `apply_filter` false, the home scope's frontmatter filter no longer affects the
+        answer; membership still depends on the configured path globs and the topics-index
+        exclusion.
 
     Args:
       path: Absolute or repo-relative path to the file being resolved.
+      apply_filter: False skips the home scope's frontmatter `filter`, answering which scope
+        covers the path whatever the node's current state.
 
     Returns:
       `(scope_id, cfg)` for the first matching scope, or `None` when no
@@ -603,6 +624,11 @@ class ScopeResolver:
     # A node its home scope's filter rejects MUST resolve to nothing and
     # MUST NEVER be offered to a scope declared after that home.
 
+    # Contract:
+    # With the filter switched off, the home scope's frontmatter filter MUST NOT
+    # affect the answer; membership still depends on the configured path globs
+    # and the topics-index exclusion.
+
     # first scope whose globs claim the path owns it
     scopes = self.load_scopes()
     for scope_id, cfg in scopes.items():
@@ -618,7 +644,7 @@ class ScopeResolver:
       # guard: the home scope's frontmatter filter rejects this node (e.g. it carries
       # review_active: true) — treat it as out of scope so process-file skips it without
       # dispatching the curator. First path-match wins, mirroring the no-filter path.
-      if not self._passes_filter(cfg, abs_path):
+      if apply_filter and not self._passes_filter(cfg, abs_path):
         return None
       return scope_id, cfg
     return None

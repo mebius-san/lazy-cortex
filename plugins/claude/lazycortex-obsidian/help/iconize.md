@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Scaffold, configure, and run the iconize-sync system to keep Obsidian file and folder icons in sync with your vault's frontmatter-driven icon registry.
-last_regen: 2026-09-24
+last_regen: 2026-09-28
 diagram_spec:
   anchor: "How the three skills fit together"
   request: "Flow diagram showing the three-skill iconize block: iconize-install scaffolds plugins + icon-map + hooks; iconize-config edits the icon-map registry; iconize-sync runs the worker to write iconize_icon/iconize_color into note frontmatter; Iconize plugin and iconize-reloader plugin then paint icons on screen from frontmatter and data.json respectively."
@@ -10,8 +10,8 @@ source_skills:
   - lazy-obsidian.iconize-install
   - lazy-obsidian.iconize-config
   - lazy-obsidian.iconize-sync
-source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
-surface_sha: edeaf78f5e7d9e5a971afe9a8c3b20a6381b80d4acf79c7065fc938275b674e3
+source_sha: e6f72e6c9fd925c00e50fcee5fc5b447600cce7a
+surface_sha: a24bbbd38e35fddd8da842f82062f20192fe072c2942d89726d2675f7946d70f
 ---
 # Iconize — frontmatter-driven icon management for Obsidian vaults
 

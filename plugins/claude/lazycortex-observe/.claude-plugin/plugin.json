@@ -1,6 +1,6 @@
 {
   "name": "lazycortex-observe",
-  "version": "2.2.1",
+  "version": "2.2.2",
   "description": "Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) \u2014 vendor-neutral, observer-server-blind, headless-portable.",
   "author": {
     "name": "Mebius-san"

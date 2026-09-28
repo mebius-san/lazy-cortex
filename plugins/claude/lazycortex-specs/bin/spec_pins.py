@@ -81,7 +81,7 @@ _PIN_ROLES = frozenset({
     "test-plan", "test-report", "bug", "tech", "status", "decisions", "research",
 })
 
-_SPEC_ROLE_LINE_RE = re.compile(r"(?m)^spec_role:\s*(\S+)\s*$")
+_SPEC_ROLE_LINE_RE = re.compile(r"(?m)^spec_role:\s*(\S+)(?:[ \t]+#.*)?\s*$")
 
 
 def _pin_block(role: str, product: str | None, category: str | None) -> str:
@@ -159,7 +159,7 @@ def backfill(repo: Path) -> dict:
       if not name.endswith(Keys.MD_SUFFIX):
         continue
       path = Path(dirpath) / name
-      text = path.read_text(encoding = Keys.ENCODING)
+      text = spec_paths.read_text(path)
       fm_values, fm_end = flip_gate.parse_frontmatter(text)
       role = fm_values.get(Keys.SPEC_ROLE, "")
 
@@ -184,7 +184,7 @@ def backfill(repo: Path) -> dict:
       if new_fm == fm_text:
         skipped += 1
         continue
-      path.write_text(new_fm + text[fm_end:], encoding = Keys.ENCODING)
+      spec_paths.write_text_atomic(path, new_fm + text[fm_end:])
       touched += 1
   return { Keys.TOUCHED: touched, Keys.SKIPPED: skipped }
 

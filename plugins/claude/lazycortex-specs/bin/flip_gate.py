@@ -52,6 +52,8 @@ import iconize_inline  # noqa: E402  # pylint: disable=import-error,wrong-import
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import note_explainers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from spec_keys import (  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -147,37 +149,7 @@ def parse_frontmatter(text: str) -> tuple[dict, int]:
     top-level scalar keys and `fm_end_idx` is the index just past the closing
     `---` line; `({}, 0)` when there is no parseable frontmatter.
   """
-  # guard: no opening fence — the file carries no frontmatter
-  if not text.startswith("---\n"):
-    return {}, 0
-  rest = text[4:]
-  end_idx = rest.find("\n---\n")
-
-  # guard: no closing fence — the block never terminates, so nothing parses
-  if end_idx < 0:
-    return {}, 0
-  block = rest[:end_idx]
-  # waiver: inline numeric literal -- length of the leading '---\n' fence consumed above
-  fm_end = 4 + end_idx + len("\n---\n")
-  values: dict = {}
-  for line in block.splitlines():
-    stripped = line.lstrip()
-
-    # guard: skip blank lines and comment / bullet markers
-    if not stripped or stripped.startswith(("#", "-")):
-      continue
-
-    # guard: skip lines without a key:value separator
-    if ":" not in line:
-      continue
-    key, _, val = line.partition(":")
-    key = key.strip()
-
-    # guard: skip entries with an empty key
-    if not key:
-      continue
-    values[key] = val.strip()
-  return values, fm_end
+  return spec_frontmatter.parse(text)
 
 
 def is_true(values: dict, key: str) -> bool:
@@ -231,12 +203,7 @@ def _set_scalar(fm_text: str, key: str, literal: str) -> str:
   pat = re.compile(rf"(?m)^{re.escape(key)}\s*:.*$")
   if pat.search(fm_text):
     return pat.sub(f"{key}: {literal}", fm_text, count = 1)
-  close_idx = fm_text.rfind("---\n")
-
-  # guard: malformed frontmatter without a closing fence
-  if close_idx < 0:
-    return fm_text
-  return fm_text[:close_idx] + f"{key}: {literal}\n" + fm_text[close_idx:]
+  return spec_frontmatter.insert_before_close(fm_text, f"{key}: {literal}\n")
 
 
 def _drop_scalar(fm_text: str, key: str) -> str:
@@ -260,7 +227,9 @@ def append_under_heading(body: str, heading: str, line: str) -> str:
   Inserts after the heading and any existing section lines, before the next
   ATX heading (`^#{1,6}\\s`); appends a fresh section at end-of-body when
   the heading is absent. Lines beginning with `#` but no space (e.g.
-  `#protected/spec/…` tags) are NOT treated as section boundaries.
+  `#protected/spec/…` tags) are NOT treated as section boundaries, and a
+  heading inside a fenced code block is neither the target nor a boundary.
+  A fence left unclosed at the end of the body is closed before the line.
 
   Args:
     body: The note body (post-frontmatter) to insert into.
@@ -270,22 +239,27 @@ def append_under_heading(body: str, heading: str, line: str) -> str:
   Returns:
     The body text with the new line placed inside the named section.
   """
-  lines = body.splitlines()
-  head_idx = None
-  for idx, row in enumerate(lines):
-    if row.strip() == heading:
-      head_idx = idx
-      break
+  lines = spec_frontmatter.split_lines(body)
+
+  # a heading quoted inside a fenced code block is code, never the section
+  fenced = spec_frontmatter.fenced_lines(lines)
+  head_idx = next(( idx for idx, row in enumerate(lines) if not fenced[idx] and row.strip() == heading ), None)
+
+  # a fence left open at the end of the body is closed before anything is appended after it,
+  # so the new line never lands inside it
+  closer = spec_frontmatter.open_fence(lines)
 
   # guard: heading missing — append a fresh section
   if head_idx is None:
     suffix = "" if body.endswith("\n") else "\n"
-    return body + f"{suffix}\n{heading}\n\n{line}\n"
+    closing = f"{closer}\n" if closer else ""
+    return body + f"{suffix}{closing}\n{heading}\n\n{line}\n"
   insert_at = len(lines)
   for pos in range(head_idx + 1, len(lines)):
     # the next real ATX heading closes the section; a `#protected/...` tag
-    # line has no space after `#` and is NOT a boundary
-    if re.match(r"^#{1,6}\s", lines[pos]):
+    # line has no space after `#` and is NOT a boundary, and neither is a
+    # `#` line quoted inside a fenced code block
+    if not fenced[pos] and re.match(r"^#{1,6}\s", lines[pos]):
       insert_at = pos
       break
 
@@ -293,7 +267,8 @@ def append_under_heading(body: str, heading: str, line: str) -> str:
   end = insert_at
   while end > head_idx + 1 and not lines[end - 1].strip():
     end -= 1
-  new_lines = [*lines[:end], line, *lines[end:]]
+  fence_close = [ closer ] if closer and insert_at == len(lines) else []
+  new_lines = [*lines[:end], *fence_close, line, *lines[end:]]
   return "\n".join(new_lines) + ("\n" if body.endswith("\n") else "")
 
 
@@ -365,7 +340,7 @@ def _write_log(asset_dir: Path, gate: str, value: bool, reason: str) -> None:
       "## Result\n\n"
       f"- success — `{gate}` set to {str(value).lower()}\n"
   )
-  (log_dir / f"{stamp}.md").write_text(body)
+  spec_paths.write_text_atomic((log_dir / f"{stamp}.md"), body)
 
 
 def git_field(cwd: Path, args: list[str], fallback: str) -> str:
@@ -636,7 +611,7 @@ def flip_gate(
 
   # the folder-note's frontmatter carries every gate this function can flip
   note = asset_dir / f"{asset_dir.name}.md"
-  text = note.read_text()
+  text = spec_paths.read_text(note)
   fm_values, fm_end = parse_frontmatter(text)
 
   # the note's own role decides which of the two ladders it runs
@@ -670,7 +645,7 @@ def flip_gate(
   # write and commit only when the note actually changed — a gate already at this value leaves
   # it byte-identical, there is no history line to add, and a commit of nothing would fail
   if new_text != text:
-    note.write_text(new_text)
+    spec_paths.write_text_atomic(note, new_text)
 
     # atomic commit of the folder-note edit under the flip-gate bot identity; without this the
     # daemon's next iteration trips its dirty-tree guard and silently skips every routine until
@@ -870,7 +845,7 @@ def halt_asset(
 
   # the status folder-note's frontmatter carries the halt flag this function sets
   note = asset_dir / f"{asset_dir.name}.md"
-  text = note.read_text()
+  text = spec_paths.read_text(note)
   _, fm_end = parse_frontmatter(text)
   fm_text, body, changed = halt_asset_text(
       text[:fm_end], text[fm_end:], reason, today = today,
@@ -883,7 +858,8 @@ def halt_asset(
 
   # a fresh halt writes the note, then commits under the caller's bot identity, mirroring
   # `flip_gate`'s own commit-inline shape
-  note.write_text(fm_text + note_explainers.ensure_explainers(body, note_explainers.lang_for_note(note)))
+  spec_paths.write_text_atomic(
+      note, fm_text + note_explainers.ensure_explainers(body, note_explainers.lang_for_note(note)))
   _commit_halt(
       asset_dir, note, reason,
       author_name = author_name, author_email = author_email, extra_paths = extra_paths,

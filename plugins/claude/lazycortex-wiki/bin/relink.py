@@ -250,7 +250,7 @@ class RelinkPlanner:
       abs_path = (self._repo / rel).resolve()
       if status == self._STATUS_DELETE:
         # A deleted file: include only if it resolved into this scope by path.
-        if self._resolves_into_scope(rel):
+        if self._resolves_into_scope(rel, apply_filter = False):
           drop.append(str(abs_path))
         continue
 
@@ -380,16 +380,17 @@ class RelinkPlanner:
       out.append((status[0], parts[1]))
     return out
 
-  def _resolves_into_scope(self, rel_path: str) -> bool:
+  def _resolves_into_scope(self, rel_path: str, apply_filter: bool = True) -> bool:
     """
     Return True when `rel_path` resolves into THIS scope.
 
-    Uses `ScopeResolver.resolve_scope_by_path` against the repo-relative path
-    and checks the resulting scope id equals this planner's scope id.  A path
-    that matches a different scope (or none) is excluded.
+    A path counts only when it resolves to this planner's own scope id; a path that resolves to a
+    different scope, or to none at all, is excluded.
 
     Args:
       rel_path: Repo-relative POSIX path string.
+      apply_filter: False decides membership by path globs alone, for a file that no longer exists
+        and so has no frontmatter left to filter on.
 
     Returns:
       True when the path belongs to this scope, False otherwise.
@@ -404,7 +405,7 @@ class RelinkPlanner:
     # the scope's own.
 
     # a path belongs here only when it resolves into this very scope
-    result = self._resolver.resolve_scope_by_path(rel_path)
+    result = self._resolver.resolve_scope_by_path(rel_path, apply_filter = apply_filter)
 
     # guard: path matches no scope at all
     if result is None:

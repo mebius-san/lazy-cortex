@@ -19,11 +19,14 @@ rather than importing from `lazycortex-core` or `lazycortex-review`.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from markers import Markers  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from textfile import TextFile  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -34,7 +37,7 @@ if TYPE_CHECKING:
 # Module-level helpers — private, not part of public API
 # ────────────────────────────────────────────────────────────────────────────
 
-_FENCE_RE = re.compile(r"^---[ \t]*$", re.MULTILINE)
+_FENCE_RE = re.compile(r"^---[ \t]*\r?$", re.MULTILINE)
 
 # Matches a top-level YAML key line (no leading space, `key:` shape).
 _KEY_LINE_RE = re.compile(r"^([A-Za-z_][\w.-]*)\s*:(?:\s|$)")
@@ -67,6 +70,47 @@ _SEE_ALSO_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 
 # Directory whose presence marks a repository root.
 _GIT_DIR = ".git"
+
+# Plain scalars YAML would read as a number, a timestamp, or a special float rather than a string.
+_YAML_RETYPED_RE = re.compile(
+  r"^(?:[-+]?(?:\d[\d_]*(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
+  r"|0x[0-9a-fA-F_]+|0o?[0-7_]+|0b[01_]+"
+  r"|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN)"
+  r"|\d{4}-\d\d?-\d\d?(?:[Tt ].*)?"
+  r"|[-+]?\d+(?::[0-5]?\d)+(?:\.\d*)?)$"
+)
+
+# One escape sequence inside a double-quoted YAML scalar.
+_DQ_ESCAPE_RE = re.compile(r"\\(x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|.)")
+
+# Single-character double-quoted escapes and the characters they stand for.
+_DQ_ESCAPES = {
+  "0": "\0", "a": "\a", "b": "\b", "t": "\t", "\t": "\t", "n": "\n", "v": "\v", "f": "\f",
+  "r": "\r", "e": "\x1b", " ": " ", '"': '"', "/": "/", "\\": "\\", "N": "\x85", "_": "\xa0",
+  "L": "\u2028", "P": "\u2029",
+}
+
+# Radix of the code point a `\x` / `\u` / `\U` escape spells.
+_HEX_BASE = 16
+
+# Header value of a block scalar: a `|` or `>` style, then chomping and indentation indicators in
+# either order, then an optional comment.
+_BLOCK_SCALAR_RE = re.compile(r"^([|>])([-+]?)\d?([-+]?)\s*(?:#.*)?$")
+
+# Block-scalar style and chomping indicators.
+_LITERAL_STYLE = "|"
+_CHOMP_STRIP = "-"
+_CHOMP_KEEP = "+"
+
+# Quote characters of the two quoted YAML scalar styles.
+_SINGLE_QUOTE = "'"
+_DOUBLE_QUOTE = '"'
+
+# Character that opens a YAML comment when it starts a value or follows whitespace outside quotes.
+_COMMENT_CHAR = "#"
+
+# Characters YAML reads as a line break, and the double-quoted escapes that keep each on one line.
+_LINE_BREAK_ESCAPES = { "\n": "\\n", "\r": "\\r", "\x85": "\\N", "\u2028": "\\L", "\u2029": "\\P" }
 
 
 def _repo_root_for(node_path: Path) -> Path | None:
@@ -342,30 +386,34 @@ def _key_block_span(block: str, key: str) -> tuple[int, int] | None:
   if cursor == -1:
     return start, len(block)
 
-  # indented continuation lines belong to the same logical entry — swallow them
+  # indented lines and list items continue the entry; anything else at column 0 ends it
   cursor += 1
+  kept = cursor
   while cursor < len(block):
     next_nl = block.find("\n", cursor)
     line_end = next_nl if next_nl != -1 else len(block)
     line = block[cursor:line_end]
-
-    # guard: next top-level key — stop here
-    if _line_starts_top_level_key(line):
-      break
     cursor = (line_end + 1) if next_nl != -1 else line_end
 
+    # guard: a blank line belongs to the entry only when a continuation line follows it
+    if not line.strip():
+      continue
+
+    # guard: a column-0 line that is no list item — a key, a comment — is not this entry's
+    if not (line[0] in (" ", "\t") or line == "-" or line.startswith("- ")):
+      break
+    kept = cursor
+
   # the span is what a caller replaces to rewrite the whole entry at once
-  return start, cursor
+  return start, kept
 
 
 def _parse_tags_block(block: str) -> list[str]:
   """
   Parse all tag values from a `tags:` key entry in the frontmatter block.
 
-  Handles three YAML shapes:
-  - Block sequence: `tags:\\n  - foo\\n  - bar`
-  - Inline flow sequence: `tags: [foo, bar]`
-  - Bare scalar (unusual but tolerated): `tags: foo`
+  Accepts a block-sequence entry, an inline flow sequence, or a bare scalar value, so any of the
+  three input shapes yields the same tag list.
 
   Args:
     block: The raw text of the `tags:` key entry (header + continuation lines).
@@ -373,40 +421,110 @@ def _parse_tags_block(block: str) -> list[str]:
   Returns:
     List of tag strings in their original order, with quoting stripped.
   """
-  header_end = block.find("\n")
-  header_line = block if header_end == -1 else block[:header_end]
-  after_colon = header_line.partition(":")[2].strip()
+  lines = [ _strip_yaml_comment(line) for line in block.splitlines() ]
+  after_colon = lines[0].partition(":")[2].strip() if lines else ""
 
-  # Inline flow sequence — e.g. `tags: [foo, bar, "baz qux"]`
-  if after_colon.startswith("[") and after_colon.endswith("]"):
-    inner = after_colon[1:-1]
-    return [ _unquote_tag(t.strip()) for t in inner.split(",") if t.strip() ]
+  # Flow sequence, possibly spread over several lines — e.g. `tags: [foo,\n  "baz, qux"]`
+  if after_colon.startswith("["):
+    flow = " ".join([ after_colon, *( line.strip() for line in lines[1:] ) ])
+    close = flow.rfind("]")
+    inner = flow[1:close] if close > 0 else flow[1:]
+    return [ _yaml_unquote(item) for item in _split_flow_items(inner) if item ]
 
-  # Block sequence — continuation lines starting with `  - `
+  # guard: a scalar on the header line is a single tag
+  if after_colon:
+    return [ _yaml_unquote(after_colon) ]
+
+  # Block sequence — continuation lines starting with `- `
   tags: list[str] = []
-  for line in block.splitlines()[1:]:
+  for line in lines[1:]:
     stripped = line.strip()
 
     # guard: not a list item
     if not stripped.startswith("- "):
       continue
-    tags.append(_unquote_tag(stripped[2:].strip()))
+    tags.append(_yaml_unquote(stripped[2:].strip()))
   return tags
 
 
-def _unquote_tag(s: str) -> str:
+def _split_flow_items(inner: str) -> list[str]:
   """
-  Remove one layer of surrounding single or double quotes from a YAML scalar.
+  Split the inside of a YAML flow sequence on the commas that separate its items.
 
   Args:
-    s: Raw tag string that may be surrounded by matching quote characters.
+    inner: Text between the flow sequence's brackets.
 
   Returns:
-    Unquoted string, or the input unchanged when no matching quotes surround it.
+    The stripped item texts, quoting kept, with commas inside quoted items left in place.
   """
-  if len(s) >= _MIN_QUOTED_LEN and s[0] == s[-1] and s[0] in ('"', "'"):
-    return s[1:-1]
-  return s
+  items: list[str] = []
+  current: list[str] = []
+  quote = ""
+  i = 0
+
+  # one pass, tracking which quoted scalar (if any) the cursor is inside
+  while i < len(inner):
+    char = inner[i]
+    if quote == _DOUBLE_QUOTE and char == "\\":
+      current.append(inner[i:i + 2])
+      i += 2
+      continue
+    if quote and char == quote:
+      # a doubled single quote is an escaped quote, not the closing one
+      if quote == _SINGLE_QUOTE and inner[i + 1:i + 2] == _SINGLE_QUOTE:
+        current.append(char * 2)
+        i += 2
+        continue
+      quote = ""
+    elif not quote and char in ( _SINGLE_QUOTE, _DOUBLE_QUOTE ) and not "".join(current).strip():
+      quote = char
+    elif not quote and char == ",":
+      items.append("".join(current).strip())
+      current = []
+      i += 1
+      continue
+    current.append(char)
+    i += 1
+
+  # the last item has no trailing comma to flush it
+  items.append("".join(current).strip())
+  return items
+
+
+def _strip_yaml_comment(value: str) -> str:
+  """
+  Remove a trailing YAML comment from one line of a value.
+
+  Args:
+    value: One frontmatter line fragment, possibly holding quoted scalars.
+
+  Returns:
+    The fragment up to the first `#` that starts it or follows whitespace outside any quoted scalar,
+    right-stripped; the fragment unchanged when it carries no comment.
+  """
+  quote = ""
+  pos = 0
+
+  # one pass, tracking which quoted scalar (if any) the cursor is inside
+  while pos < len(value):
+    char = value[pos]
+    if quote == _DOUBLE_QUOTE and char == "\\":
+      pos += 2
+      continue
+    if quote and char == quote:
+      # a doubled single quote is an escaped quote, not the closing one
+      if quote == _SINGLE_QUOTE and value[pos + 1:pos + 2] == _SINGLE_QUOTE:
+        pos += 2
+        continue
+      quote = ""
+    elif not quote and char in ( _SINGLE_QUOTE, _DOUBLE_QUOTE ):
+      quote = char
+    elif not quote and char == _COMMENT_CHAR and (pos == 0 or value[pos - 1] in " \t"):
+      return value[:pos].rstrip()
+    pos += 1
+
+  # no comment on this line
+  return value
 
 
 def _yaml_needs_quote(value: str) -> bool:
@@ -454,10 +572,12 @@ def _yaml_needs_quote(value: str) -> bool:
   if value != value.strip():
     return True
 
-  # newlines break the single-line value contract
-  if "\n" in value:
+  # any YAML line break — LF, CR, NEL, line or paragraph separator — breaks the single-line value contract
+  if any(char in value for char in _LINE_BREAK_ESCAPES):
     return True
-  return False
+
+  # a plain number, timestamp, or special float would be read back as something other than a string
+  return bool(_YAML_RETYPED_RE.match(value))
 
 
 def _yaml_scalar(value: str) -> str:
@@ -477,6 +597,13 @@ def _yaml_scalar(value: str) -> str:
   # guard: value is safe as plain scalar — keep it unquoted to avoid churn
   if not _yaml_needs_quote(value):
     return value
+
+  # guard: a line break only survives on one line as a double-quoted escape
+  if any(char in value for char in _LINE_BREAK_ESCAPES):
+    rendered = json.dumps(value, ensure_ascii = False)
+    for char, escape in _LINE_BREAK_ESCAPES.items():
+      rendered = rendered.replace(char, escape)
+    return rendered
   return "'" + value.replace("'", "''") + "'"
 
 
@@ -498,10 +625,28 @@ def _yaml_unquote(value: str) -> str:
   if len(value) >= _MIN_QUOTED_LEN and value[0] == "'" and value[-1] == "'":
     return value[1:-1].replace("''", "'")
 
-  # guard: double-quoted form — strip the outer quotes
+  # guard: double-quoted form — strip the outer quotes and resolve the escapes
   if len(value) >= _MIN_QUOTED_LEN and value[0] == '"' and value[-1] == '"':
-    return value[1:-1]
+    return _DQ_ESCAPE_RE.sub(_dq_unescape, value[1:-1])
   return value
+
+
+def _dq_unescape(match: re.Match) -> str:
+  """
+  Return the character one double-quoted YAML escape sequence stands for.
+
+  Args:
+    match: Match of one escape sequence, its code (without the backslash) in group 1.
+
+  Returns:
+    The escaped character, or the sequence unchanged when YAML defines no such escape.
+  """
+  code = match.group(1)
+
+  # guard: a hex escape carries its code point after the escape letter
+  if len(code) > 1:
+    return chr(int(code[1:], _HEX_BASE))
+  return _DQ_ESCAPES.get(code, match.group(0))
 
 
 def _set_scalar_field(text: str, key: str, value: str) -> str:
@@ -639,7 +784,7 @@ def _render_block_seq(key: str, values: list[str]) -> str:
   """
   lines = [f"{key}:"]
   for value in values:
-    lines.append(f"  - {value}")
+    lines.append(f"  - {_yaml_scalar(value)}")
   return "\n".join(lines) + "\n"
 
 
@@ -732,12 +877,72 @@ def _get_scalar_field(text: str, key: str) -> str | None:
   start, end = existing
   entry = block[start:end]
   header_line = entry.split("\n")[0]
-  after_colon = header_line.partition(":")[2].strip()
+  after_colon = _strip_yaml_comment(header_line.partition(":")[2].strip())
 
   # guard: empty post-colon means the key has no scalar value on its header line
   if not after_colon:
     return None
+
+  # a block scalar keeps its value on the indented lines below the indicator
+  block_style = _BLOCK_SCALAR_RE.match(after_colon)
+  if block_style is not None:
+    style, chomp_a, chomp_b = block_style.groups()
+    # the entry span stops at its last content line; the blank lines after it are chomping material
+    trailing = re.match(r"(?:[ \t]*\n)*", block[end:])
+    scalar_text = entry + (trailing.group(0) if trailing else "")
+    lines = scalar_text.split("\n")[1:]
+    # a terminating line break is not a blank line of its own
+    if scalar_text.endswith("\n"):
+      lines.pop()
+    return _read_block_scalar(lines, style, chomp_a or chomp_b)
   return _yaml_unquote(after_colon)
+
+
+def _read_block_scalar(lines: list[str], style: str, chomp: str) -> str:
+  """
+  Return the value a literal or folded YAML block scalar spells.
+
+  Args:
+    lines: The block scalar's content lines, below its header line, including any trailing blank
+      lines after the last content line.
+    style: `|` for a literal scalar, `>` for a folded one.
+    chomp: `-` (strip) drops every trailing line break, empty (clip) keeps exactly one final line
+      break, `+` (keep) keeps the final line break plus one per trailing blank line after the last
+      content line.
+
+  Returns:
+    The scalar's string value.
+  """
+  # trailing blank lines are chomping material, not content: count them for keep chomping
+  trailing_breaks = 0
+  while lines and not lines[-1].strip():
+    lines = lines[:-1]
+    trailing_breaks += 1
+  indents = [ len(line) - len(line.lstrip()) for line in lines if line.strip() ]
+  indent = min(indents) if indents else 0
+  body = [ line[indent:] if line.strip() else "" for line in lines ]
+
+  # a literal scalar keeps its line breaks; a folded one joins lines, a blank line marking a break
+  if style == _LITERAL_STYLE:
+    text = "\n".join(body)
+  else:
+    text = ""
+    for line in body:
+      if not line:
+        text += "\n"
+      elif text and not text.endswith("\n"):
+        text += " " + line
+      else:
+        text += line
+
+  # strip drops every trailing line break, clip keeps exactly one, keep also keeps one per blank line
+  if chomp == _CHOMP_STRIP:
+    return text
+  # an empty scalar has no final line break of its own
+  final_break = "\n" if text else ""
+  if chomp == _CHOMP_KEEP:
+    return text + final_break + "\n" * trailing_breaks
+  return text + final_break
 
 
 def _get_array_field(text: str, key: str) -> list[str]:
@@ -928,19 +1133,19 @@ def _drop_see_also_section(text: str) -> str:
     Document text with the See-also heading and managed block removed;
     unchanged when the markers are absent.
   """
-  start_marker = f"<!-- auto:{Markers.SEE_ALSO_MARKER_ID}:start -->"
   end_marker = f"<!-- auto:{Markers.SEE_ALSO_MARKER_ID}:end -->"
+  region = Markers().find_region(text, Markers.SEE_ALSO_MARKER_ID)
 
   # guard: markers absent — nothing to strip
-  if start_marker not in text or end_marker not in text:
+  if region is None:
     return text
-  start_idx = text.index(start_marker)
-  end_idx = text.index(end_marker, start_idx) + len(end_marker)
+  start_idx, end_idx = region
+  end_idx += len(end_marker)
 
   # Pull the cut back over a preceding See-also heading (and its owner-tag line) if present.
   heading = Markers.SEE_ALSO_HEADING
   head_idx = text.rfind(heading, 0, start_idx)
-  between = text[head_idx:start_idx].strip() if head_idx != -1 else ""
+  between = text[head_idx:start_idx].replace("\r\n", "\n").strip() if head_idx != -1 else ""
   if head_idx != -1 and between in (
       heading,
       f"{heading}\n{Markers.SEE_ALSO_PROTECTED_TAG}",
@@ -973,6 +1178,7 @@ class MarkdownNode:
     - Each write phase touches only the regions it owns: classifying leaves the `# See also` section
       alone, and linking leaves frontmatter alone.
     - Every write operation is idempotent: identical inputs leave byte-identical content on the second call.
+    - A write preserves the file's original line ending; a file read with CRLF stays CRLF.
   """
 
   # Contract:
@@ -991,6 +1197,10 @@ class MarkdownNode:
   # Contract:
   # Every write operation is idempotent: applying identical inputs twice leaves byte-identical file
   # content on the second call.
+
+  # Contract:
+  # A write preserves the file's original line ending: a file read with CRLF line endings is written
+  # back with CRLF, never silently converted to LF.
 
   # Frontmatter key names wiki owns or reads.
   _KEY_WIKI_SUMMARY        = "wiki_summary"
@@ -1015,7 +1225,8 @@ class MarkdownNode:
       path: Absolute path to the markdown file to manage.
     """
     self._path = path
-    self._text = path.read_text(encoding = self._ENCODING)
+    self._file = TextFile(path = path)
+    self._text = self._file.read()
     self._markers = Markers()
 
   # ── read properties ────────────────────────────────────────────────────────
@@ -1158,9 +1369,9 @@ class MarkdownNode:
   def apply(
     self,
     *,
-    wiki_summary: str,
-    topics: list[str],
     see_also_lines: list[str],
+    wiki_summary: str | None = None,
+    topics: list[str] | None = None,
     connectors: list[str] | None = None,
   ) -> None:
     """
@@ -1170,14 +1381,17 @@ class MarkdownNode:
       - Applying identical `wiki_summary`, `topics`, `connectors`, and `see_also_lines`
         twice produces byte-identical file content on the second call.
       - Non-`wiki/`-prefixed tags survive untouched; only the `wiki/*` subset is replaced.
+      - A `None` `wiki_summary` or `topics` argument leaves the currently stored value unchanged.
 
     Args:
-      wiki_summary: One-line summary string (no newlines).
-      topics: Full list of `wiki/<axis>/<value>` tag strings to apply.
-        These replace the current `wiki/*` subset; non-`wiki/` tags survive.
       see_also_lines: Ready-to-graft markdown list-item strings for the
         See-also section, one per list item.  An empty list produces an
         empty (but present) managed block.
+      wiki_summary: One-line summary string (no newlines); `None` leaves the currently stored
+        value unchanged.
+      topics: Full list of `wiki/<axis>/<value>` tag strings to apply.
+        These replace the current `wiki/*` subset; non-`wiki/` tags survive. `None` leaves the
+        currently stored subset unchanged.
       connectors: Short linkable-facet phrases for `wiki_connectors`; `None`
         leaves the existing block untouched, an empty list removes it.
     """
@@ -1187,9 +1401,10 @@ class MarkdownNode:
   def apply_classify(
     self,
     *,
-    wiki_summary: str,
-    topics: list[str],
+    wiki_summary: str | None = None,
+    topics: list[str] | None = None,
     connectors: list[str] | None = None,
+    stamp_src_hash: bool = True,
   ) -> None:
     """
     Write the classify-phase managed regions: `wiki_summary`, `wiki/*` tags, `wiki_connectors`.
@@ -1203,13 +1418,19 @@ class MarkdownNode:
         `wiki/*` subset is replaced.
       - A connectors-only change never perturbs the recorded `wiki_src_hash`, since
         `wiki_connectors` is excluded from `source_hash`.
+      - A `None` `wiki_summary` or `topics` argument leaves the currently stored value unchanged.
+      - `stamp_src_hash=False` leaves the stored `wiki_src_hash` value untouched.
 
     Args:
-      wiki_summary: One-line summary string (no newlines).
+      wiki_summary: One-line summary string (no newlines); `None` leaves the currently stored
+        value unchanged.
       topics: Full list of `wiki/<axis>/<value>` tag strings to apply.
-        These replace the current `wiki/*` subset; non-`wiki/` tags survive.
+        These replace the current `wiki/*` subset; non-`wiki/` tags survive. `None` leaves the
+        currently stored subset unchanged.
       connectors: Short linkable-facet phrases for `wiki_connectors`; `None`
         leaves the existing block untouched, an empty list removes it.
+      stamp_src_hash: `False` leaves the stored `wiki_src_hash` value untouched instead of
+        recomputing it.
     """
 
     # Contract:
@@ -1219,6 +1440,14 @@ class MarkdownNode:
     # Contract:
     # A connectors-only change never perturbs the recorded source hash, because the connectors
     # block is excluded from the operator-authored content the hash covers.
+
+    # Contract:
+    # A `None` `wiki_summary` or `topics` argument leaves the corresponding stored value exactly as
+    # it was before the call; only a non-`None` value ever replaces it.
+
+    # Contract:
+    # `stamp_src_hash=False` leaves the stored `wiki_src_hash` value untouched, whatever the freshly
+    # computed hash would be.
 
     # Domain(wiki.graph):
     # # Curated facets of a node
@@ -1239,26 +1468,28 @@ class MarkdownNode:
       _markdown_source_for_hash(text).encode(_ENCODING)
     ).hexdigest()[:_SRC_HASH_LEN]
 
-    # Step 1 — wiki_summary
-    text = _set_scalar_field(text, _KEY_WIKI_SUMMARY, wiki_summary)
+    # Step 1 — wiki_summary; a None leaves the current one as it is
+    if wiki_summary is not None:
+      text = _set_scalar_field(text, _KEY_WIKI_SUMMARY, wiki_summary)
 
-    # Step 2 — tags: merge wiki/* subset, preserve non-wiki/* tags in order
-    current_tags = _get_array_field(text, _KEY_TAGS)
-    non_wiki = [ t for t in current_tags if not t.startswith(self._WIKI_TAG_PREFIX) ]
-    merged = non_wiki + topics
-    text = _set_tags_field(text, merged)
+    # Step 2 — tags: merge wiki/* subset, preserve non-wiki/* tags in order; a None leaves them
+    if topics is not None:
+      current_tags = _get_array_field(text, _KEY_TAGS)
+      non_wiki = [ t for t in current_tags if not t.startswith(self._WIKI_TAG_PREFIX) ]
+      text = _set_tags_field(text, non_wiki + topics)
 
     # Step 3 — wiki_connectors (managed block, excluded from source_hash)
     # a None means "leave the block as it is"; an empty list means "clear it"
     if connectors is not None:
       text = _set_block_seq_field(text, _KEY_CONNECTORS, connectors)
 
-    # Step 4 — wiki_src_hash (backstop for incremental relink on anchor loss)
-    text = _set_scalar_field(text, _KEY_SRC_HASH, src_hash)
+    # Step 4 — wiki_src_hash (backstop for incremental relink on anchor loss), only for a curation
+    if stamp_src_hash:
+      text = _set_scalar_field(text, _KEY_SRC_HASH, src_hash)
 
     # all four steps land in a single write, so the file is never seen half-applied
     self._text = text
-    self._path.write_text(text, encoding = _ENCODING)
+    self._file.write(text)
 
   def apply_link(
     self,
@@ -1308,7 +1539,7 @@ class MarkdownNode:
 
     # frontmatter and body go back to disk as one document
     self._text = text
-    self._path.write_text(text, encoding = _ENCODING)
+    self._file.write(text)
 
   # ── helpers ───────────────────────────────────────────────────────────────
 
@@ -1390,6 +1621,14 @@ _WIKI_TAG_PREFIX = "wiki/"
 
 # Regex to detect a shebang line.
 _SHEBANG_RE = re.compile(r"^#!")
+
+# A run of line breaks (JavaScript and Python's line splitting also break on NEL, U+2028, and U+2029)
+# with the whitespace around it, collapsed to one space in a `<wiki>` value.
+_LINE_BREAKS_RE = re.compile(r"\s*[\r\n\x85\u2028\u2029]+\s*")
+
+# The terminator of a block comment, and the spelling a value uses for it so the comment never ends early.
+_BLOCK_COMMENT_END = "*/"
+_BLOCK_COMMENT_END_SAFE = "* /"
 
 # Field keys used in the parsed wiki-block dict (internal snake_case).
 _FK_SUMMARY          = "summary"
@@ -1551,6 +1790,9 @@ def _find_wiki_block_line_comment(
   """
   Find the `<wiki>` / `</wiki>` block delimited by line-comment prefixes.
 
+  Only the header comment region at the top of the file is searched: an optional shebang, then
+  comment and blank lines up to the first line of code.
+
   Args:
     lines: List of source lines with trailing newlines.
     prefix: Line-comment prefix (e.g. `#`, `//`, `--`, `;`).
@@ -1563,9 +1805,12 @@ def _find_wiki_block_line_comment(
     line = raw.rstrip("\n").rstrip("\r")
     inner = _strip_comment_prefix(line, prefix)
 
-    # guard: not a comment line
+    # a non-comment line other than the shebang or a blank one is code — the header region ends there
     if inner is None:
-      continue
+      # guard: the shebang and blank lines still belong to the header region
+      if (i == 0 and _SHEBANG_RE.match(line)) or not line.strip():
+        continue
+      break
     tag = inner.strip()
     if tag == _WIKI_OPEN_TAG and open_idx is None:
       open_idx = i
@@ -1728,6 +1973,11 @@ def _render_wiki_block_lines(
   For block-comment languages, the opening is `/* <wiki>`, the closing is
   `</wiki> */`, and interior lines have no prefix.
 
+  Guarantees:
+    - A line break in any rendered value collapses to one space, so it never ends the comment early.
+    - In the block-comment style, the comment's own closing sequence inside a value is rewritten so
+      the block's own closing line is the only place the rendered comment terminates.
+
   Args:
     fields: Dict of field name → value (string or list) to emit.
     prefix: Comment prefix or `"/*"`.
@@ -1735,6 +1985,14 @@ def _render_wiki_block_lines(
   Returns:
     List of line strings without trailing newlines.
   """
+
+  # Contract:
+  # A line break in a rendered value — LF, CR, NEL, the line separator, or the paragraph separator —
+  # MUST collapse to one space, together with any surrounding whitespace, so it can never end the
+  # comment early. In the block-comment style, the comment's own closing sequence inside a value is
+  # NEVER emitted as-is; it is rewritten so the block's own closing line is the only place the
+  # rendered comment terminates.
+
   block_comment = prefix == _BLOCK_COMMENT_SENTINEL
   out: list[str] = []
 
@@ -1744,10 +2002,13 @@ def _render_wiki_block_lines(
   else:
     out.append(_build_wiki_line(_WIKI_OPEN_TAG, prefix))
 
-  # inside a block comment the interior needs no prefix; a line-comment file does
+  # inside a block comment the interior needs no prefix; a line-comment file does. A line break in a
+  # value would end a line comment and a `*/` a block comment, so each is neutralised and every
+  # rendered line stays inside the comment.
   def _line(content: str) -> str:
+    content = _LINE_BREAKS_RE.sub(" ", content)
     if block_comment:
-      return content
+      return content.replace(_BLOCK_COMMENT_END, _BLOCK_COMMENT_END_SAFE)
     return _build_wiki_line(content, prefix)
 
   # emit the curated fields in a fixed order so a re-render is byte-stable
@@ -1864,6 +2125,7 @@ class CodeNode:
     - The four operator-pin fields are read and never written.
     - Each write phase leaves the block fields it does not own untouched.
     - Every write operation is idempotent: identical inputs leave byte-identical content on the second call.
+    - A write preserves the file's original line ending; a file read with CRLF stays CRLF.
   """
 
   # Contract:
@@ -1886,6 +2148,10 @@ class CodeNode:
   # Every write operation is idempotent: applying identical inputs twice leaves byte-identical file
   # content on the second call.
 
+  # Contract:
+  # A write preserves the file's original line ending: a file read with CRLF line endings is written
+  # back with CRLF, never silently converted to LF.
+
   # File encoding for read/write.
   _ENCODING = "utf-8"
 
@@ -1899,7 +2165,8 @@ class CodeNode:
     """
     self._path = path
     self._prefix = prefix
-    self._text = path.read_text(encoding = self._ENCODING)
+    self._file = TextFile(path = path)
+    self._text = self._file.read()
     self._lines: list[str] = self._text.splitlines(keepends = True)
 
   # ── read properties ────────────────────────────────────────────────────────
@@ -2071,21 +2338,25 @@ class CodeNode:
   def apply(
     self,
     *,
-    wiki_summary: str,
-    topics: list[str],
     see_also_lines: list[str],
+    wiki_summary: str | None = None,
+    topics: list[str] | None = None,
     connectors: list[str] | None = None,
   ) -> None:
     """
     Write all wiki-managed fields in one atomic pass.
 
-    The operation is idempotent: applying identical inputs twice produces
-    byte-identical file content on the second call.
+    Guarantees:
+      - Applying identical `wiki_summary`, `topics`, `connectors`, and `see_also_lines` twice
+        produces byte-identical file content on the second call.
+      - A `None` `wiki_summary` or `topics` argument leaves the currently stored value unchanged.
 
     Args:
-      wiki_summary: One-line summary string (no newlines).
-      topics: Full list of topic strings to set in the `topics:` field.
       see_also_lines: Lines to set as `see-also:` items (bare `path — gloss` strings).
+      wiki_summary: One-line summary string (no newlines); `None` leaves the currently stored
+        value unchanged.
+      topics: Full list of topic strings to set in the `topics:` field; `None` leaves the
+        currently stored value unchanged.
       connectors: Short linkable-facet phrases for the `connectors:` field;
         `None` leaves the existing value untouched.
     """
@@ -2095,31 +2366,46 @@ class CodeNode:
   def apply_classify(
     self,
     *,
-    wiki_summary: str,
-    topics: list[str],
+    wiki_summary: str | None = None,
+    topics: list[str] | None = None,
     connectors: list[str] | None = None,
+    stamp_src_hash: bool = True,
   ) -> None:
     """
     Write the classify-phase fields: `summary`, `topics`, `connectors`.
 
-    Leaves `see-also`, all pin fields, and code outside the block untouched.
-    The operation is idempotent.  The `connectors:` field lives inside the
-    `<wiki>` block, which is excluded from `source_hash` in full, so writing
-    it never perturbs the recorded `src-hash`.
-
     Guarantees:
+      - Applying identical `wiki_summary`, `topics`, and `connectors` twice produces
+        byte-identical file content on the second call.
+      - Leaves `see-also`, all pin fields, and code outside the block untouched.
       - Topics are persisted bare, as `<axis>/<value>`; the `wiki/` prefix is never stored.
+      - A connectors-only change never perturbs the recorded `src-hash`, since the `connectors:`
+        field is excluded from `source_hash`.
+      - A `None` `wiki_summary` or `topics` argument leaves the currently stored field unchanged.
+      - `stamp_src_hash=False` leaves the stored `src-hash` value untouched.
 
     Args:
-      wiki_summary: One-line summary string (no newlines).
-      topics: Full list of topic strings to set.
+      wiki_summary: One-line summary string (no newlines); `None` leaves the currently stored
+        value unchanged.
+      topics: Full list of topic strings to set; `None` leaves the currently stored value
+        unchanged.
       connectors: Short linkable-facet phrases for the `connectors:` field;
         `None` leaves the existing value untouched.
+      stamp_src_hash: `False` leaves the stored `src-hash` value untouched instead of
+        recomputing it.
     """
 
     # Contract:
     # Topics are persisted bare — `<axis>/<value>`, with no `wiki/` prefix — whichever of the two
     # spellings the caller passes in.
+
+    # Contract:
+    # A `None` `wiki_summary` or `topics` argument leaves the corresponding stored field exactly as
+    # it was before the call; only a non-`None` value ever replaces it.
+
+    # Contract:
+    # `stamp_src_hash=False` leaves the stored `src-hash` value untouched, whatever the freshly
+    # computed hash would be.
 
     # Domain(wiki.taxonomy):
     # # How a code node states its topics
@@ -2136,22 +2422,27 @@ class CodeNode:
       _code_source_for_hash(self._lines, self._prefix).encode(self._ENCODING)
     ).hexdigest()[:_SRC_HASH_LEN]
 
-    # merge onto the existing block so fields this phase does not own survive
+    # merge onto the existing block so fields this phase does not own survive; a None leaves a field
     current = self._read_block() or {}
-    current[_FK_SUMMARY] = wiki_summary
+    if wiki_summary is not None:
+      current[_FK_SUMMARY] = wiki_summary
 
     # Code topics are stored BARE (`<axis>/<value>`) — strip the `wiki/` prefix
     # the curator emits.  build-index re-adds `wiki/` for code nodes, so storing
     # the prefixed form here would double it (`wiki/wiki/<axis>/…`).
-    current[_FK_TOPICS] = [
-      t[len(_WIKI_TAG_PREFIX):] if t.startswith(_WIKI_TAG_PREFIX) else t
-      for t in topics
-    ]
+    if topics is not None:
+      current[_FK_TOPICS] = [
+        t[len(_WIKI_TAG_PREFIX):] if t.startswith(_WIKI_TAG_PREFIX) else t
+        for t in topics
+      ]
 
     # a None means "leave connectors as they are"; an empty list clears them
     if connectors is not None:
       current[_FK_CONNECTORS] = connectors
-    current[_FK_SRC_HASH] = src_hash
+
+    # only a curation re-anchors the source hash; a tag rewrite keeps the stored one
+    if stamp_src_hash:
+      current[_FK_SRC_HASH] = src_hash
     self._write_block(current)
 
   def apply_link(
@@ -2263,7 +2554,7 @@ class CodeNode:
     # keep the in-memory view and the file in step after the write
     self._lines = new_lines
     self._text = "".join(new_lines)
-    self._path.write_text(self._text, encoding = self._ENCODING)
+    self._file.write(self._text)
 
 
 # ────────────────────────────────────────────────────────────────────────────

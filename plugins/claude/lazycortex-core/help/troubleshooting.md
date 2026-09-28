@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-09-24
+last_regen: 2026-09-28
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, generic iteration loops, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys, seed data gaps), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models, plugin-path resolution, stale source paths at claim time), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources, worker import errors), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
@@ -39,8 +39,8 @@ source_skills:
   - lazy-runtime.preflight
   - lazy-runtime.recover
   - lazy-runtime.tick
-source_sha: f65d48e838d0f6b1517b240cc91d3b51162cc445
-surface_sha: 1dbae9df2d283611dc5e90d8902cf7e90513bf0bd84d7f08451a2f0f89c9f267
+source_sha: 1dfbbbfa9cc7fc1d270e280c4829e643a8bc9db9
+surface_sha: 098f79460c3f6adf07a14b94d75d1ef91c46f896faf1cc8e60892c5ac2e201f7
 ---
 # Troubleshooting
 
@@ -162,6 +162,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ---
 
+## The daemon refuses to start: checkout is inside a Dropbox folder
+
+**Symptom**: The supervisor is installed and `daemon.enabled` is `true`, but the daemon process exits immediately with a message like "refuses to start: ... inside a Dropbox folder", and a `daemon_error` incident with cause `dropbox_denied` appears on the repo's error ledger — regardless of what `daemon.run_here` says.
+
+**Likely cause**: The checkout `daemon.run_here` names sits under a Dropbox-synced path — a component of the resolved checkout path equals `Dropbox`, starts with `Dropbox` (`Dropbox (Personal)`, `~/Library/CloudStorage/Dropbox…`), or ends in ` Dropbox` (`Auriglaci Dropbox`). Dropbox syncs bytes outside git and can bring CRLF files or half-written files in from another machine mid-sync, which the daemon refuses to run against. The guard is unconditional — the daemon never starts inside such a path, no matter how `run_here` is configured.
+
+**Fix**: Clone the project with git to a path outside any Dropbox-synced folder — for example `~/lazy-runtime/<repo>` — then point this host's `daemon.run_here` entry at that clone and re-run `/lazy-core.install` from the clone. Until then, run due routines and expert jobs by hand with `/lazy-runtime.tick` from the Dropbox checkout instead.
+
+---
+
 ## `/lazy-core.install` never asks whether to use the daemon
 
 **Symptom**: You want this project to run on a schedule via the background daemon, but `/lazy-core.install` never asks the question — not on a first run, not on a re-run.
@@ -209,6 +219,20 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: The bootstrap step hit a permission or I/O error while appending the standard ignore lines to `.gitignore` at the repo root — the file or its parent directory is read-only for your current user.
 
 **Fix**: Check permissions on `.gitignore` and the repo root, then re-run `/lazy-core.install`. The step is idempotent — retrying after fixing permissions completes cleanly.
+
+---
+
+## `/lazy-core.install` reports `renormalize: needed`, or `/lazy-core.audit` warns `.gitattributes` doesn't pin LF
+
+**Symptom**: `/lazy-core.install`'s Step 7.5 output includes `renormalize: needed` after reporting `.gitattributes: created` / `updated` / `already-present`. Or, separately, `/lazy-core.audit` reports a WARN like "`.gitattributes` does not pin LF — git may store or check out CRLF text files on some machines".
+
+**Likely cause (`renormalize: needed`)**: Step 7.5 writes `* text=auto eol=lf` as the first rule in `<repo>/.gitattributes` on every run, so every machine — any OS, any `core.autocrlf` — stores and checks out text files with LF. That new rule only governs future writes; it never rewrites content already committed. `renormalize: needed` means git already reports CRLF-stored text files in the index (`git ls-files --eol` shows `i/crlf`), left over from before the rule existed or from a checkout that committed CRLF directly.
+
+**Likely cause (audit WARN)**: `.gitattributes` either doesn't exist yet, or exists but carries no line that reads `* text=auto eol=lf` once stripped — this repo has never run the install step that writes it, or the file was hand-edited and the rule was removed.
+
+**Fix (`renormalize: needed`)**: Run `git add --renormalize .` once from the repo root and commit the result — this is a staging operation and stays yours to run, never something a skill does on your behalf. Re-run `/lazy-core.install` afterward; a clean renormalize reports `not-needed` on the next Step 7.5.
+
+**Fix (audit WARN)**: Run `/lazy-core.install` (or `/lazy-core.setup`) — Step 7.5 writes the rule unconditionally, as the first line of `.gitattributes`, without touching any existing rules already in the file. Re-run `/lazy-core.audit` to confirm the WARN clears.
 
 ---
 
@@ -865,7 +889,7 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Symptom**: The preflight report includes a note that plugin-dir resolution was best-effort, and a server that should be fine shows up as failing.
 
-**Likely cause**: The preflight ran interactively with no `LAZYCORTEX_PLUGIN_DIRS` environment variable set, so it fell back to deriving plugin directories from the repo and the plugin cache rather than the daemon's authoritative resolution. This fallback can misidentify a plugin's `bin/` location in unusual cache layouts, producing a false-negative probe failure.
+**Likely cause**: The preflight ran interactively with no `LAZYCORTEX_PLUGIN_DIRS` environment variable set, and it found neither a dev plugin source in the repo nor any cached plugin to confirm the probe against, so a probe failure may be a false negative.
 
 **Fix**: Treat a failure alongside this warning as unconfirmed. Re-run the same expert under the daemon (which always exports `LAZYCORTEX_PLUGIN_DIRS`), or export `LAZYCORTEX_PLUGIN_DIRS` yourself before running `/lazy-runtime.preflight` interactively, then confirm the result.
 

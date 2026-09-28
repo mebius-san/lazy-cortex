@@ -469,7 +469,7 @@ def backfill(repo: Path) -> dict:
     if name not in filenames:
       continue
     note = folder / name
-    text = note.read_text(encoding = _K.ENCODING)
+    text = spec_paths.read_text(note)
     # waiver: sibling-module frontmatter parser -- the one parser every specs primitive shares
     fm_values, fm_end = flip_gate.parse_frontmatter(text)
 
@@ -487,7 +487,7 @@ def backfill(repo: Path) -> dict:
     if count != 1:
       skipped += 1
       continue
-    note.write_text(new_fm + text[fm_end:], encoding = _K.ENCODING)
+    spec_paths.write_text_atomic(note, new_fm + text[fm_end:])
     touched += 1
   return { _K.TOUCHED: touched, _K.SKIPPED: skipped }
 

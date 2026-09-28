@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Non-obvious answers on install, LLM providers, the runtime daemon and experts, routines, scaffolding, git staging, and MCP permissions.
-last_regen: 2026-09-24
+last_regen: 2026-09-28
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -32,8 +32,8 @@ source_skills:
   - lazy-expert.cancel-job
   - lazy-expert.list-jobs
   - lazy-memory.write
-source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
-surface_sha: 86d75c30c0e3c35b8576d69f5c0ea585185688232bf40b49101ad97fd436a373
+source_sha: 1dfbbbfa9cc7fc1d270e280c4829e643a8bc9db9
+surface_sha: aee32183e038c76608b28beedce913846a68905dfe728246affac15e98c72f06
 ---
 # FAQ
 
@@ -192,6 +192,8 @@ It would, if `run_here` only accepted `true`/`false` — but that shape is retir
 `/lazy-core.install` compares the map against the machine's own hostname (lowercased) and the checkout's own resolved path (symlinks included, so a symlinked path still matches). The named pair installs the supervisor as normal. Every other machine — and every other checkout on the named machine — both skips the supervisor install AND tears down any supervisor unit it already has for that checkout, so re-running `/lazy-core.install` anywhere that shouldn't be running the daemon self-heals a leaked one instead of leaving it running. The daemon itself also refuses to start on a checkout the map doesn't name, even while `daemon.enabled` stays `true`, so a leaked supervisor can't outlive the map even if you never get around to re-running install there. An empty map (`{}`) names nothing at all — the project stays daemon-enabled but nothing drives it until you point the map at a checkout.
 
 Edit the map by hand — add or remove a `"<hostname>": "<path>"` entry — then re-run `/lazy-core.install` to apply it; entries recorded for other machines are left untouched. If the file still carries the retired shape (a bare boolean, or a plain list of hostnames from an install that predates the map), `/lazy-core.install` reports `run-here-invalid`, prints the offending value, and re-asks the question so your answer replaces it outright — the daemon refuses to start until the map is in the current shape.
+
+One pairing the map can never make valid: the checkout `run_here` names must itself sit outside Dropbox. Dropbox syncs bytes outside git and can bring CRLF files or half-written files in from another machine, so the daemon checks the resolved checkout path on every start and refuses outright — printing a one-line refusal and recording a `daemon_error` incident with cause `dropbox_denied` — whenever a path component equals `Dropbox`, starts with `Dropbox` (`Dropbox (Personal)`, `~/Library/CloudStorage/Dropbox…`), or ends in ` Dropbox` (`Auriglaci Dropbox`). This check runs regardless of what `run_here` says; naming a Dropbox-synced path there does not override it. The fix is to clone the project with git to a path outside Dropbox — `~/lazy-runtime/<repo>` is the pattern the install skill itself suggests — point this host's `run_here` entry at that clone, and re-run `/lazy-core.install` from inside it.
 
 ---
 
@@ -530,6 +532,16 @@ Because the heal runs automatically on this cadence, you should rarely see the p
 The staging-window mutex is the previous default and is now dormant on a fresh install — it only takes over when you flip `lazy.settings.json["git"]["pathspec_enabled"]` to `false` and `["mutex_enabled"]` to `true`. In that mode, multiple Claude Code sessions sharing one checkout serialize the staging window — from the first `git add` that makes the index non-empty to the `git commit` that empties it again — so only one session stages at a time, with the same auto-break heuristics as before (holder process dead, on a different host, or idle for a while).
 
 `/lazy-core.git-status` and `/lazy-core.git-unlock` only have something to act on under mutex mode; on the pathspec-discipline default no session ever opens a staging window, so there is nothing to inspect or break. Run `/lazy-core.git-status` to check the lock (holder, age, liveness, whether it's currently breakable) without changing anything, and reach for `/lazy-core.git-unlock` — which asks for confirmation before deleting the lock file — only when status shows a lock the automatic heuristics won't break on their own. Setting `lazy.settings.json["git"]["enabled"]` to `false` silences the hook entirely, in either mode.
+
+---
+
+## Does `/lazy-core.install` do anything about CRLF/LF line endings, and what does `/lazy-core.audit` check for it?
+
+Yes. Step 7.5 of `/lazy-core.install` (folded into `/lazy-core.setup` too, and it runs unconditionally on every install/setup) ensures `<repo>/.gitattributes` carries `* text=auto eol=lf` as its **first** rule, so git on every machine — any OS, any local `core.autocrlf` setting — stores and checks out text files with LF. This is what keeps a checkout synced between Windows and macOS (or just cloned fresh on either) from picking up CRLF from git itself. The step reports `created` / `updated` / `already-present` and never removes or reorders a rule you already added below it; a re-run when the line is already first leaves the file byte-identical.
+
+The rule only governs new writes, not content already committed. If your existing tracked files were stored as CRLF before this line was added, the step also reports `renormalize: needed` (checked via `git ls-files --eol`) — that's your cue to run `git add --renormalize .` once yourself and commit the result; the install skill never stages or commits that for you, since the index is yours.
+
+`/lazy-core.audit` checks the same thing independently, as its L5 logging-and-hygiene finding: a missing `.gitattributes`, or one whose first matching rule isn't `* text=auto eol=lf`, is reported `[WARN] .gitattributes does not pin LF — git may store or check out CRLF text files on some machines`. The fix named in the finding is to run `/lazy-core.setup`, which inserts the rule; the audit itself only reports, it never writes.
 
 ---
 

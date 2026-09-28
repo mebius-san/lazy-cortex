@@ -8,7 +8,10 @@ group opens after the section's last non-blank line. Frontmatter and every other
 returned byte-identical; the section is created at the end of the note when it is missing.
 
 Reached over the `lazycortex-core history-append` CLI in file mode (rewrite a note in place) or
-stdin mode (transform a JSON-carried text, touching no file).
+stdin mode (transform a JSON-carried text, touching no file). File mode rewrites the note
+atomically — an interrupted call leaves the previous content intact — keeps the note's own
+permission bits, writes through a symlink to its real target, and preserves the note's
+line-ending style throughout.
 """
 from __future__ import annotations
 
@@ -18,6 +21,9 @@ import re
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import runtime_state  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -72,6 +78,9 @@ _UTF8 = "utf-8"
 _EXIT_USAGE = 2
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _DAY_HEADING_RE = re.compile(r"^#### (\d{4}-\d{2}-\d{2})\s*$")
+# a CommonMark fence line: up to three spaces of indent, then a run of 3+ backticks or tildes
+_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+_CRLF = "\r\n"
 
 
 def _bullet(line: str) -> str:
@@ -122,9 +131,59 @@ def _body_start(lines: list[str]) -> int:
   return 0
 
 
+def _fenced_lines(lines: list[str]) -> set[int]:
+  """
+  Collect the indexes of lines that belong to a fenced code block, fence lines included.
+
+  Args:
+    lines: The note split into lines.
+
+  Returns:
+    The set of line indexes inside a backtick or tilde fence; an unclosed fence runs to the end.
+  """
+  return _scan_fences(lines)[0]
+
+
+def _scan_fences(lines: list[str]) -> tuple[set[int], str | None]:
+  """
+  Walk the note's fenced code blocks.
+
+  Args:
+    lines: The note split into lines.
+
+  Returns:
+    The indexes of fenced lines (an unclosed fence runs to the end), and the opening fence run of
+    a fence still open at the end of the note, or None when every fence is closed.
+  """
+  fenced: set[int] = set()
+  opener: str | None = None
+  for index, line in enumerate(lines):
+    match = _FENCE_RE.match(line)
+
+    # outside a fence only an opening line matters; a backtick info string may not hold a backtick
+    if opener is None:
+      if match and not (match.group(1)[0] == "`" and "`" in match.group(2)):
+        opener = match.group(1)
+        fenced.add(index)
+      continue
+
+    # inside a fence every line belongs to it, the closing line included
+    fenced.add(index)
+
+    # a closer repeats the opener's character at least as long, with nothing after it
+    if match and match.group(1)[0] == opener[0] and len(match.group(1)) >= len(opener) \
+        and not match.group(2).strip():
+      opener = None
+  return fenced, opener
+
+
 def _section_bounds(lines: list[str], heading: str) -> tuple[int, int] | None:
   """
   Find the history section as a half-open line range.
+
+  Guarantees:
+    - A line inside a fenced code block is never treated as the section heading or as the
+      boundary that closes the section.
 
   Args:
     lines: The note split into lines.
@@ -134,15 +193,23 @@ def _section_bounds(lines: list[str], heading: str) -> tuple[int, int] | None:
     `(start, end)` where `start` indexes the heading line and `end` the next H1 or the line
     count; None when no such heading exists outside the frontmatter.
   """
+  fenced = _fenced_lines(lines)
   start = next(
-    (idx for idx in range(_body_start(lines), len(lines)) if lines[idx].strip() == heading), None,
+    (
+      idx for idx in range(_body_start(lines), len(lines))
+      if idx not in fenced and lines[idx].strip() == heading
+    ),
+    None,
   )
 
   # guard: no heading — the caller creates the section
   if start is None:
     return None
   end = next(
-    (idx for idx in range(start + 1, len(lines)) if lines[idx].startswith(HistoryShape.H1_PREFIX)),
+    (
+      idx for idx in range(start + 1, len(lines))
+      if idx not in fenced and lines[idx].startswith(HistoryShape.H1_PREFIX)
+    ),
     len(lines),
   )
   return start, end
@@ -153,8 +220,14 @@ def append_line(text: str, line: str, date: str, heading: str = HISTORY_HEADING)
   Append one history bullet under the given day, opening the day group when needed.
 
   Guarantees:
-    - Frontmatter and every line outside the history section are returned unchanged.
+    - Frontmatter and every line outside the history section are returned unchanged, except that
+      a closing fence line is appended before a brand-new history section when the note ends
+      inside an unclosed fence, so the new heading is never itself read as fenced.
     - The result ends with exactly one newline.
+    - The note's line-ending style is preserved: a CRLF note is returned CRLF throughout,
+      including any line this call adds.
+    - A line inside a fenced code block is never read as the section heading, a section
+      boundary, or a day heading.
 
   Args:
     text: The whole note, frontmatter included.
@@ -170,8 +243,19 @@ def append_line(text: str, line: str, date: str, heading: str = HISTORY_HEADING)
   """
 
   # Contract:
-  # Every line outside the history section, frontmatter included, is returned unchanged;
-  # the result ends with exactly one newline.
+  # Every line outside the history section, frontmatter included, is returned unchanged; the
+  # only addition ever made outside the section is a closing fence line, appended when the note
+  # has no history section yet and ends inside an unclosed fence, so the new section heading is
+  # never itself read as fenced. The result ends with exactly one newline.
+
+  # Contract:
+  # A CRLF note is returned with CRLF line endings throughout, including any line this
+  # call adds; an LF note is returned as LF.
+
+  # Contract:
+  # A line inside a fenced code block (CommonMark backtick or tilde fence rules; an
+  # unclosed fence runs to the end of the note) is never read as the section heading,
+  # a section boundary, or a day heading.
 
   bullet = _bullet(line)
 
@@ -179,10 +263,20 @@ def append_line(text: str, line: str, date: str, heading: str = HISTORY_HEADING)
   if not _DATE_RE.match(date):
     raise ValueError(f"date must be YYYY-MM-DD, got {date!r}")
 
+  # a CRLF note is edited as LF and converted back on output, so its line endings survive
+  newline = _CRLF if _CRLF in text else "\n"
+  text = text.replace(_CRLF, "\n")
+
   # trailing newlines are re-normalised on output, so they are dropped before splitting
   lines = text.rstrip("\n").split("\n") if text.strip() else []
   bounds = _section_bounds(lines, heading)
   if bounds is None:
+    # a fence left open at the end would swallow the new heading, so it is closed first — the
+    # section is then found again on the next append instead of being created once more
+    open_fence = _scan_fences(lines)[1]
+    if open_fence is not None:
+      lines.append(open_fence)
+
     # one blank line separates the new section from whatever precedes it
     if lines:
       lines.append("")
@@ -193,16 +287,21 @@ def append_line(text: str, line: str, date: str, heading: str = HISTORY_HEADING)
   # the insertion point is right after the section's last non-blank line, so trailing blanks
   # keep separating the section from what follows
   insert_at = next((idx + 1 for idx in range(end - 1, start, -1) if lines[idx].strip()), start + 1)
+  fenced = _fenced_lines(lines)
   last_day = next(
-    (match.group(1) for idx in range(end - 1, start, -1) if (match := _DAY_HEADING_RE.match(lines[idx]))), None,
+    (
+      match.group(1) for idx in range(end - 1, start, -1)
+      if idx not in fenced and (match := _DAY_HEADING_RE.match(lines[idx]))
+    ),
+    None,
   )
   if last_day == date:
     lines.insert(insert_at, bullet)
-    return "\n".join(lines) + "\n", False
+    return newline.join(lines) + newline, False
 
   # a new day: one blank line, the group heading, then the bullet
   lines[insert_at:insert_at] = [ "", HistoryShape.DAY_PREFIX + date, bullet ]
-  return "\n".join(lines) + "\n", True
+  return newline.join(lines) + newline, True
 
 
 def _today() -> str:
@@ -269,8 +368,13 @@ def _run_file(file: str | None, line: str | None, date: str | None, heading: str
   if not path.is_file():
     raise ValueError(f"no such file: {file}")
   day = date or _today()
-  new_text, new_day = append_line(path.read_text(encoding = _UTF8), line, day, heading)
-  path.write_text(new_text, encoding = _UTF8)
+
+  # read without newline translation so a CRLF note keeps its endings; the write is atomic and
+  # keeps the note's mode and symlink
+  with path.open(encoding = _UTF8, newline = "") as handle:
+    original = handle.read()
+  new_text, new_day = append_line(original, line, day, heading)
+  runtime_state.atomic_write_text(path, new_text)
   print(json.dumps({ IoKey.FILE: file, IoKey.DATE: day, IoKey.NEW_DAY: new_day }))
   return 0
 

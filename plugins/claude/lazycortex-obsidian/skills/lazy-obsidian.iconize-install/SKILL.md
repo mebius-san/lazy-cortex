@@ -313,7 +313,7 @@ Idempotent: re-running reports **already-ignored** every time after the first wr
 
 Plugin-shipped iconize registries (`plugins/claude/<plugin>/references/<ns>.iconize-registry.json`, see `${CLAUDE_PLUGIN_ROOT}/references/lazy-obsidian.iconize-registry-contract.md`) are **never merged into the icon-map** — the worker discovers and composes them live on every run. This step only shows the operator which registries the worker will see from here.
 
-Enumerate them the way the worker does: walk each root in `$LAZYCORTEX_PLUGIN_DIRS` (when set), else `<vault>/plugins/claude/*` (dev-vault fallback), else the newest cached version of every plugin under `~/.claude/plugins/cache/*/` (consumer install) for `references/*.iconize-registry.json`, and list `<plugin>: <registry filename> (<N> matchers)` per hit. An empty result is normal on a vault with no registry-shipping plugins installed.
+Enumerate them the way the worker does: walk each root in `$LAZYCORTEX_PLUGIN_DIRS` (when set — dev trees only), else `<vault>/plugins/claude/*` (dev-vault fallback), plus the newest cached version of every other plugin under `~/.claude/plugins/cache/*/` (consumer install) for `references/*.iconize-registry.json`, and list `<plugin>: <registry filename> (<N> matchers)` per hit. An empty result is normal on a vault with no registry-shipping plugins installed.
 
 Outcome: **registries-visible-<count>** / **no-registries**.
 

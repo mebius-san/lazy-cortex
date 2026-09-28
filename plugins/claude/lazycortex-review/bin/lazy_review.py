@@ -47,6 +47,9 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import atomic_io as _atomic_io  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+
 
 def cmd_status(args: argparse.Namespace) -> int:
   """
@@ -133,16 +136,16 @@ def cmd_set_key(args: argparse.Namespace) -> int:
     return 2
 
   # read the document and attempt to set the key
-  text = file_path.read_text()
+  lf_text, ending = _atomic_io.to_lf(_atomic_io.read_text(file_path))
   try:
     # waiver: type: ignore — note_ops is a deferred/late-bound sibling import; mypy cannot resolve it
-    updated_text = note_ops.set_key(text, args.key, parsed_value)  # type: ignore[attr-defined]
+    updated_text = note_ops.set_key(lf_text, args.key, parsed_value)  # type: ignore[attr-defined]
   except ValueError as e:
     sys.stderr.write(f"{e}\n")
     return 2
 
   # write the updated document
-  file_path.write_text(updated_text)
+  _atomic_io.write_text_atomic(file_path, _atomic_io.restore_ending(updated_text, ending))
   return 0
 
 
@@ -203,12 +206,12 @@ def cmd_paint_banner(args: argparse.Namespace) -> int:
 
   # repaint and write back — no commit, per the verb's contract. Whether a job is out on the
   # document is runtime state now, so the banner's in-process state comes from the sidecar
-  text = file_path.read_text()
+  lf_text, ending = _atomic_io.to_lf(_atomic_io.read_text(file_path))
   in_flight = bool(job_markers.read(repo, file_path)[JobMarker.ACTIVE_JOB])
   # waiver: type: ignore — note_ops is a deferred/late-bound sibling import; mypy cannot resolve it
   updated_text = note_ops.repaint_banner(  # type: ignore[attr-defined]
-      text, job_in_flight = in_flight, lang = note_ops.resolve_language(file_path))  # type: ignore[attr-defined]
-  file_path.write_text(updated_text)
+      lf_text, job_in_flight = in_flight, lang = note_ops.resolve_language(file_path))  # type: ignore[attr-defined]
+  _atomic_io.write_text_atomic(file_path, _atomic_io.restore_ending(updated_text, ending))
   return 0
 
 

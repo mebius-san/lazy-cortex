@@ -1935,10 +1935,10 @@ def load_plugin_registries(vault: Path) -> list[tuple[str, Path, dict]]:
   """
   Enumerate the iconize registries every visible plugin ships, freshly on each run.
 
-  Plugin roots come from the `LAZYCORTEX_PLUGIN_DIRS` environment the runtime daemon
-  exports; outside a daemon context (an operator shell) the walk falls back to the
-  dev-vault sibling layout `<vault>/plugins/claude/*`, then to the plugin cache this plugin itself
-  runs from (every plugin's newest installed version). A plugin that is not visible simply
+  Plugin roots come from the `LAZYCORTEX_PLUGIN_DIRS` dev trees the runtime daemon exports; when
+  that is empty the walk takes the dev-vault sibling layout `<vault>/plugins/claude/*` instead.
+  Every plugin those roots do not cover then comes from the plugin cache this plugin itself runs
+  from (that plugin's newest installed version). A plugin that is not visible simply
   contributes no rules — best-effort, like every other part of the hook surface.
 
   Args:
@@ -1957,7 +1957,7 @@ def load_plugin_registries(vault: Path) -> list[tuple[str, Path, dict]]:
   # current run cannot see for any reason simply contributes no rules of its own; nothing about resolving
   # a note's icon depends on any particular plugin being present.
 
-  # the daemon-exported plugin roots decide what is visible; an operator shell sees none
+  # the daemon-exported dev trees lead; an operator shell and a consumer daemon export none
   raw = os.environ.get(PLUGIN_DIRS_ENV, "")
   roots = [ Path(d) for d in raw.split(os.pathsep) if d ]
 
@@ -1968,9 +1968,10 @@ def load_plugin_registries(vault: Path) -> list[tuple[str, Path, dict]]:
     if dev.is_dir():
       roots = [ dev / name for name in sorted(os.listdir(dev)) ]
 
-  # guard: no dev-vault tree either — a consumer install reads the cache it runs from
-  if not roots:
-    roots = _cached_plugin_roots()
+  # the env carries dev trees only, never a cached install, so every plugin they do not cover comes
+  # from the cache this plugin runs from — resolved now, never frozen at daemon start
+  covered = { _plugin_root_name(root) for root in roots }
+  roots += [ root for root in _cached_plugin_roots() if _plugin_root_name(root) not in covered ]
 
   # collect every registry file each visible plugin root ships
   out: list[tuple[str, Path, dict]] = []

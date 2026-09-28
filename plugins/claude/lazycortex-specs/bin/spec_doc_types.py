@@ -408,7 +408,7 @@ def backfill(repo: Path) -> dict:
       if not name.endswith(_MD_SUFFIX):
         continue
       path = Path(dirpath) / name
-      text = path.read_text(encoding = _K.ENCODING)
+      text = spec_paths.read_text(path)
       # waiver: sibling-module frontmatter parser -- the one parser every specs primitive shares
       fm_values, fm_end = flip_gate.parse_frontmatter(text)
       role = fm_values.get(_SPEC_ROLE, "")
@@ -419,7 +419,7 @@ def backfill(repo: Path) -> dict:
         # guard: no stale key on this level note — nothing to take back
         if _K.DOC_TYPE not in fm_values:
           continue
-        path.write_text(_remove_type(text[:fm_end]) + text[fm_end:], encoding = _K.ENCODING)
+        spec_paths.write_text_atomic(path, _remove_type(text[:fm_end]) + text[fm_end:])
         cleaned += 1
         continue
       doc_type = _derive_type(path, role)
@@ -438,7 +438,7 @@ def backfill(repo: Path) -> dict:
       if count != 1:
         skipped += 1
         continue
-      path.write_text(new_fm + text[fm_end:], encoding = _K.ENCODING)
+      spec_paths.write_text_atomic(path, new_fm + text[fm_end:])
       touched += 1
   return { _TOUCHED: touched, _SKIPPED: skipped, _CLEANED: cleaned }
 
@@ -513,11 +513,13 @@ def _retype_frontmatter(text: str, old: str, new: str) -> tuple[str, bool, bool]
   roled = fm_values.get(_SPEC_ROLE) == old
 
   # rewrite only the lines that actually carry the retired name, whitespace-tolerant like the
-  # parser that just matched them, normalizing to the single-space form
-  if typed:
-    head = re.sub(rf"(?m)^{_K.DOC_TYPE}:\s*{re.escape(old)}\s*$", f"{_K.DOC_TYPE}: {new}", head, count = 1)
-  if roled:
-    head = re.sub(rf"(?m)^{_SPEC_ROLE}:\s*{re.escape(old)}\s*$", f"{_SPEC_ROLE}: {new}", head, count = 1)
+  # parser that just matched them, normalizing to the single-space form and keeping a trailing
+  # comment the parser read past
+  literal = new.replace("\\", "\\\\")
+  for key, hit in (( _K.DOC_TYPE, typed ), ( _SPEC_ROLE, roled )):
+    if hit:
+      head = re.sub(rf"(?m)^{key}:[ \t]*{re.escape(old)}(?P<tail>[ \t]+#.*)?[ \t]*$",
+                    rf"{key}: {literal}\g<tail>", head, count = 1)
   return head + text[fm_end:], typed, roled
 
 
@@ -541,8 +543,8 @@ def _move_retyped(source: Path, target: Path, old: str, new: str) -> bool:
 
   # a worktree copy-then-unlink, never `git mv` — this primitive leaves the index alone
   shutil.copy2(source, target)
-  updated, _typed, _roled = _retype_frontmatter(target.read_text(encoding = _K.ENCODING), old, new)
-  target.write_text(updated, encoding = _K.ENCODING)
+  updated, _typed, _roled = _retype_frontmatter(spec_paths.read_text(target), old, new)
+  spec_paths.write_text_atomic(target, updated)
   source.unlink()
   return True
 
@@ -617,9 +619,9 @@ def _rename_copies(repo: Path, old: str, new: str) -> int:
           continue
 
         # a template under another filename that declares the retired type is retyped in place
-        updated, typed, roled = _retype_frontmatter(path.read_text(encoding = _K.ENCODING), old, new)
+        updated, typed, roled = _retype_frontmatter(spec_paths.read_text(path), old, new)
         if typed or roled:
-          path.write_text(updated, encoding = _K.ENCODING)
+          spec_paths.write_text_atomic(path, updated)
           count += 1
   return count
 
@@ -718,12 +720,12 @@ def rename(repo: Path, old: str, new: str) -> dict:
       if not name.endswith(_MD_SUFFIX):
         continue
       path = Path(dirpath) / name
-      updated, typed, roled = _retype_frontmatter(path.read_text(encoding = _K.ENCODING), old, new)
+      updated, typed, roled = _retype_frontmatter(spec_paths.read_text(path), old, new)
 
       # guard: a document of another type and role is none of this rename's business
       if not typed and not roled:
         continue
-      path.write_text(updated, encoding = _K.ENCODING)
+      spec_paths.write_text_atomic(path, updated)
       docs += typed
       roles += roled
 

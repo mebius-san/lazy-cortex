@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Go from a bare repo to a fully-wired Obsidian vault — tag pages, Iconize sync, diagram glue, click-to-zoom — one chained install.
-last_regen: 2026-09-24
+last_regen: 2026-09-28
 diagram_spec:
   anchor: "Journey at a glance"
   request: "Sequence diagram showing the vault bootstrap journey: user runs /lazy-obsidian.install, which installs Dataview, chains into /lazy-obsidian.iconize-install (installs folder-notes, obsidian-icon-folder, iconize-reloader, scaffolds icon-map and repaint routine), then itself syncs and enables its CSS snippets (mermaid-fit.css, ascii-fit.css, callouts.css) in appearance.json, and finally chains into /lazy-obsidian.diagram-install (installs mermaid-popup for click-to-zoom), ending with the user reloading Obsidian and verifying."
@@ -10,8 +10,8 @@ source_skills:
   - lazy-obsidian.iconize-install
   - lazy-obsidian.diagram-install
   - lazy-obsidian.gen-tag-pages
-source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
-surface_sha: 3c7d5c15a4607a97b508ee133b21b513314ced9a245f7a58ab9c31b6ae7fad80
+source_sha: e6f72e6c9fd925c00e50fcee5fc5b447600cce7a
+surface_sha: 350147a81ad5bb74b425b30a8d6566dcd4cafb22a341533098173f62f2be2d55
 ---
 # How do I wire up a fresh vault from scratch?
 

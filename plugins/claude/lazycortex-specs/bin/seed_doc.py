@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 from pathlib import Path
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -44,6 +43,8 @@ import resolve_product  # pylint: disable=import-error
 import scaffold_asset  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import spec_doc_types  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import spec_frontmatter  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import spec_paths  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -85,11 +86,7 @@ def _note_source_requests(note_text: str) -> list[str]:
     The list values in declaration order, unquoted; empty when the key is absent or empty.
   """
   _fm, fm_end = apply_request.parse_frontmatter(note_text)
-
-  # guard: key absent or carrying no block items — nothing to inherit
-  if not (match := re.search(rf"(?m)^{_SOURCE_REQUESTS_KEY}:\n((?:^  - .*\n)*)", note_text[:fm_end])):
-    return []
-  return [ line.strip()[2:].strip().strip('"') for line in match.group(1).splitlines() ]
+  return spec_frontmatter.read_list(note_text[:fm_end], _SOURCE_REQUESTS_KEY)
 
 
 def _set_stage_empty(fm_text: str) -> str:
@@ -103,10 +100,8 @@ def _set_stage_empty(fm_text: str) -> str:
     The frontmatter with `spec_stage: empty` — replacing a template-supplied value, or inserted
     before the closing fence when the template carried none.
   """
-  if re.search(rf"(?m)^{_STAGE_KEY}:", fm_text):
-    return re.sub(rf"(?m)^{_STAGE_KEY}:.*$", f"{_STAGE_KEY}: {scaffold_asset.Keys.STAGE_EMPTY}",
-                  fm_text, count = 1)
-  return fm_text.rstrip("\n").removesuffix("---") + f"{_STAGE_KEY}: {scaffold_asset.Keys.STAGE_EMPTY}\n---\n"
+  # a template without frontmatter gets a whole block, never a lone closing fence
+  return spec_frontmatter.set_scalar(fm_text or "---\n---\n", _STAGE_KEY, scaffold_asset.Keys.STAGE_EMPTY)
 
 
 def _product_for_note(repo: Path, note_path: Path) -> tuple[str, dict]:
@@ -300,10 +295,9 @@ def main(argv: list[str]) -> int:
   _doc_fm, doc_fm_end = apply_request.parse_frontmatter(doc_text)
   fm_text = _set_stage_empty(doc_text[:doc_fm_end])
 
-  # quoted like every other writer of the key — bare `[[...]]` parses as a nested YAML list
-  fm_text = apply_request.set_fm_list(fm_text, _SOURCE_REQUESTS_KEY,
-                                       [ f"\"{link}\"" for link in _note_source_requests(note_text) ])
-  doc_path.write_text(fm_text + doc_text[doc_fm_end:])
+  # the list writer quotes each `[[...]]` member — bare, it parses as a nested YAML list
+  fm_text = apply_request.set_fm_list(fm_text, _SOURCE_REQUESTS_KEY, _note_source_requests(note_text))
+  spec_paths.write_text_atomic(doc_path, fm_text + doc_text[doc_fm_end:])
 
   # the caller folds the reported path into its commit and review dispatch; the seed itself
   # leaves no `# History` line — the journal is for events the operator reads, and the commit

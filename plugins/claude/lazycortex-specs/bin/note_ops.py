@@ -54,6 +54,10 @@ import iconize_inline  # noqa: E402  # pylint: disable=import-error,wrong-import
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import note_explainers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from spec_keys import (  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -328,34 +332,23 @@ _OPTIONAL_PROTECTED_MARKERS = {
 _AUTHOR_NAME = "lazy-spec.note-set-key"
 _AUTHOR_EMAIL = f"{_AUTHOR_NAME}@bot.invalid"
 
-# Regex template for locating a frontmatter key's line, mirroring `flip_gate.set_bool`'s own.
-_FM_KEY_RE_TEMPLATE = r"(?m)^{key}\s*:.*$"
-
 
 def set_fm_scalar(fm_text: str, key: str, value: str) -> str:
   """
-  Add or replace a bare scalar `key: value` line inside a frontmatter block.
+  Add or replace a scalar `key: value` line inside a frontmatter block.
 
-  The value is written unquoted, not JSON-encoded — a str-typed key is read back elsewhere as a
-  bare scalar, so a quoted form would silently break that comparison.
+  The value is written bare when YAML reads it back verbatim, and double-quoted (escapes
+  included) otherwise, so the key always stays one line.
 
   Args:
     fm_text: The frontmatter block text (including its opening/closing `---` fences).
     key: The scalar frontmatter key to set.
-    value: The replacement value, written verbatim (no quoting).
+    value: The replacement string value.
 
   Returns:
     The updated frontmatter text.
   """
-  pat = re.compile(_FM_KEY_RE_TEMPLATE.format(key = re.escape(key)))
-  if pat.search(fm_text):
-    return pat.sub(f"{key}: {value}", fm_text, count = 1)
-  close_idx = fm_text.rfind("---\n")
-
-  # guard: malformed frontmatter without a closing fence
-  if close_idx < 0:
-    return fm_text
-  return fm_text[:close_idx] + f"{key}: {value}\n" + fm_text[close_idx:]
+  return spec_frontmatter.set_scalar(fm_text, key, value)
 
 
 def _is_asset_path_token(member: str) -> bool:
@@ -599,7 +592,7 @@ def note_set_key(asset_dir: Path, key: str, raw_value: str, *, today: str | None
 
   # read the note's current frontmatter so the value write lands precisely
   note = asset_dir / f"{asset_dir.name}.md"
-  text = note.read_text()
+  text = spec_paths.read_text(note)
   _, fm_end = flip_gate.parse_frontmatter(text)
   fm_text = text[:fm_end]
 
@@ -615,7 +608,8 @@ def note_set_key(asset_dir: Path, key: str, raw_value: str, *, today: str | None
   # reads, and the commit below already records the write
   value_str = _format_value(kind, value)
   body = text[fm_end:]
-  note.write_text(new_fm_text + note_explainers.ensure_explainers(body, note_explainers.lang_for_note(note)))
+  spec_paths.write_text_atomic(
+      note, new_fm_text + note_explainers.ensure_explainers(body, note_explainers.lang_for_note(note)))
   _commit(asset_dir, note, key, value_str)
   return {_ResultKey.STATUS: _SetKeyStatus.SET, _ResultKey.KEY: key, _ResultKey.VALUE: value_str}
 
@@ -645,7 +639,8 @@ def _drop_fm_key(fm_text: str, key: str) -> str:
       continue
 
     # guard: still inside the dropped key's block-form value — its continuation lines go too
-    if dropping and (line.startswith((" ", "\t", "-"))) and line.strip():
+    # — the closing fence also starts with `-` and is never one of them
+    if dropping and line.startswith((" ", "\t", "-")) and line.strip() and line.rstrip() != "---":
       continue
     dropping = False
     kept.append(line)
@@ -718,7 +713,7 @@ def note_drop_key(asset_dir: Path, key: str, *, today: str | None = None) -> dic
 
   # read the note's current frontmatter so the removal lands precisely
   note = asset_dir / f"{asset_dir.name}.md"
-  text = note.read_text()
+  text = spec_paths.read_text(note)
   fm_values, fm_end = flip_gate.parse_frontmatter(text)
 
   # guard: the note carries no such key — nothing to remove or commit
@@ -729,7 +724,8 @@ def note_drop_key(asset_dir: Path, key: str, *, today: str | None = None) -> dic
   # for a key write — the commit records the drop
   new_fm_text = _drop_fm_key(text[:fm_end], key)
   body = text[fm_end:]
-  note.write_text(new_fm_text + note_explainers.ensure_explainers(body, note_explainers.lang_for_note(note)))
+  spec_paths.write_text_atomic(
+      note, new_fm_text + note_explainers.ensure_explainers(body, note_explainers.lang_for_note(note)))
   _commit(asset_dir, note, key, _DropKeyStatus.DROPPED)
   return {_ResultKey.STATUS: _DropKeyStatus.DROPPED, _ResultKey.KEY: key}
 
@@ -822,7 +818,7 @@ def note_check(asset_note: Path) -> dict:
   # Read-only — the note is never written and no violation is repaired.
 
   # split the note into the two halves the checks below read, and open the findings list
-  text = asset_note.read_text()
+  text = spec_paths.read_text(asset_note)
   frontmatter, fm_end = flip_gate.parse_frontmatter(text)
   body = text[fm_end:]
   violations: list[dict] = []

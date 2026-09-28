@@ -35,6 +35,8 @@ if str(_BIN) not in sys.path:
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import resolve_language  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from spec_keys import HistoryEvent, Section  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -50,6 +52,10 @@ _PROTECTED_PREFIX = "#protected/"
 # underscore-italic placeholders are content, and so is any `<!-- spec:... -->` marker comment.
 # Public: section readers (e.g. the commands-wake detector) use it to skip the explainer line.
 EXPLAINER_LINE_RE = re.compile(r"^(?:\*[^*].*\*|<!--(?!\s*spec:).*-->)\s*$")
+
+# sections the operator writes into: an italic line or a comment right under the heading may be
+# theirs, so only an explainer this plugin ships — word for word — is replaced there
+OPERATOR_SECTIONS = frozenset({ Section.COORD_RULES, Section.COORD_COMMANDS })
 
 # one-liners rendered as `<!-- ... -->` under the generated sections of asset/container
 # folder-notes — the note documents itself so the operator never has to guess what a section means
@@ -129,6 +135,34 @@ HISTORY_LINES: dict[tuple[str, str], str] = {
         # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
         "запрос [[{wikilink}]] принят → обработан",  # noqa: RUF001
 }
+
+
+def is_explainer_line(line: str, heading: str, table: dict[tuple[str, str], str] | None = None) -> bool:
+  """
+  Judge whether a line under a section heading is that section's explainer rather than content.
+
+  Guarantees:
+    - Under an operator-written heading (`# Coordinator rules`, `# Coordinator commands`), only a
+      line matching one of this plugin's own explainer texts verbatim, in either the comment or
+      the legacy italic form, counts as the explainer.
+    - Under any other heading, any line matching the explainer shape counts as the explainer.
+
+  Args:
+    line: The candidate line, found directly under the heading.
+    heading: The H1 heading line the candidate line sits under.
+    table: The `(heading, lang) -> text` table checked against under an operator-written
+      heading; defaults to `ASSET_EXPLAINERS`.
+
+  Returns:
+    Whether `line` is the section's explainer rather than operator-written or generated content.
+  """
+  # outside an operator-written section any line of the explainer shape is one
+  if heading not in OPERATOR_SECTIONS:
+    return bool(EXPLAINER_LINE_RE.match(line))
+
+  # an operator-written section only gives up a line this plugin wrote, in either form
+  texts = ( ASSET_EXPLAINERS if table is None else table ).values()
+  return line.strip() in { form for text in texts for form in ( f"<!-- {text} -->", f"*{text}*" ) }
 
 
 def explainer_text(heading: str, lang: str, table: dict[tuple[str, str], str]) -> str | None:
@@ -238,16 +272,15 @@ def ensure_explainers(
   # line per heading.
 
   texts = ASSET_EXPLAINERS if table is None else table
-  lines = body.splitlines()
+  lines = spec_frontmatter.split_lines(body)
   idx = 0
-  in_fence = False
+
+  # a fenced code block may quote a section heading verbatim — never write inside one; the mask
+  # is taken once, and each insertion below shifts it along with the lines
+  fenced = spec_frontmatter.fenced_lines(lines)
   while idx < len(lines):
-    # a fenced code block may quote a section heading verbatim — never write inside one
-    if lines[idx].lstrip().startswith("```"):
-      in_fence = not in_fence
-      idx += 1
-      continue
-    note = None if in_fence else explainer_text(lines[idx].strip(), lang, texts)
+    heading = lines[idx].strip()
+    note = None if fenced[idx] else explainer_text(heading, lang, texts)
 
     # guard: not a known section heading — keep scanning
     if note is None:
@@ -262,10 +295,11 @@ def ensure_explainers(
     # replace a line wearing the explainer shape — any non-`spec:` HTML comment, or a legacy
     # italic render; anything else (an underscore placeholder, a `spec:` marker comment,
     # operator prose) is content and the explainer is inserted above it instead
-    if insert_at < len(lines) and EXPLAINER_LINE_RE.match(lines[insert_at]):
+    if insert_at < len(lines) and is_explainer_line(lines[insert_at], heading, texts):
       lines[insert_at] = f"<!-- {note} -->"
     else:
       lines.insert(insert_at, f"<!-- {note} -->")
+      fenced.insert(insert_at, False)
 
     # resume past the line just written so the scan never re-reads its own output
     idx = insert_at + 1
@@ -388,10 +422,5 @@ def heal_note_text(note_path: Path, text: str) -> str:
   # returned byte-for-byte unchanged; only the body below it is modified.
 
   # split the frontmatter off so heading scans never look inside it
-  fm_end = 0
-  if text.startswith("---\n"):
-    close = text.find("\n---\n", 4)
-    if close >= 0:
-      # waiver: magic literal 5 -- length of the '\n---\n' closing fence just located
-      fm_end = close + 5
+  fm_end = spec_frontmatter.block(text)[1]
   return text[:fm_end] + ensure_explainers(text[fm_end:], lang_for_note(note_path))

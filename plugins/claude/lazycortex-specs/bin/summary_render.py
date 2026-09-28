@@ -13,6 +13,8 @@ from pathlib import Path
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import note_explainers  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import spec_paths  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from spec_keys import Gate, GATE_ORDER, SpecKey, SpecValue  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
@@ -181,7 +183,7 @@ def _read_request_status(text: str) -> str | None:
   # waiver: magic literal 3 -- length of the leading '---\n' fence start consumed by find()
   end = text.find("\n---", 3)
   fm = text[: end if end > 0 else len(text)]
-  m = re.search(r"^request_status:\s*(\S+)\s*$", fm, re.MULTILINE)
+  m = re.search(r"^request_status:\s*(\S+)(?:[ \t]+#.*)?\s*$", fm, re.MULTILINE)
   return m.group(1) if m is not None else None
 
 
@@ -392,7 +394,7 @@ def apply_container_stats(note_path: Path) -> bool:
     True when the file content changed.
   """
   # the marker pair decides whether this note is a managed container summary
-  text = note_path.read_text()
+  text = spec_paths.read_text(note_path)
 
   # guard: no stats markers, nothing this function owns
   if _STATS_START not in text or _STATS_END not in text:
@@ -410,7 +412,7 @@ def apply_container_stats(note_path: Path) -> bool:
   # guard: skip the write when nothing changed
   if new == text:
     return False
-  note_path.write_text(new)
+  spec_paths.write_text_atomic(note_path, new)
   return True
 
 

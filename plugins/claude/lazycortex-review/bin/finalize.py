@@ -39,6 +39,8 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import atomic_io as _atomic_io  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import body as _body  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import edit_markup as _edit_markup  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -50,6 +52,9 @@ import frontmatter as _fm  # noqa: E402  # pylint: disable=import-error,wrong-im
 import git_ops as _git_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import job_markers as _job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
+import parser as _parser  # noqa: E402  # pylint: disable=import-error,wrong-import-position,deprecated-module
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from keys import Bucket, JobKey, Paths, ResultValue, ReviewKey, Style  # noqa: E402
@@ -277,9 +282,10 @@ def finalize_text(
   # erase the inline review machinery — edit markers, the waiting banner, the approve
   # checkbox line and the system callouts — none of it belongs to a finalized document
   body = _edit_markup.strip_markers(body, style=style)
-  body = _BANNER_RE.sub("", body, count=1)
-  body = _APPROVE_LINE_RE.sub("", body)
-  body = _SYSTEM_CALLOUT_RE.sub("", body)
+  # (a fenced example of any of them is literal content and is left alone)
+  body = _parser.sub_outside_fences(_BANNER_RE, "", body, count = 1)
+  body = _parser.sub_outside_fences(_APPROVE_LINE_RE, "", body)
+  body = _parser.sub_outside_fences(_SYSTEM_CALLOUT_RE, "", body)
 
   # Drop section-writer artefacts (Routing, Final check, Implementation
   # risks, …) — every H1 with `#expert/<flat>/<section-id>` ownership
@@ -374,9 +380,6 @@ def leftover_callouts(text: str) -> list[tuple[int, str]]:
     callout (answered or not) and per `[!todo] #review/command` callout with a non-empty body,
     both scanned outside code fences. Empty when the document is clean.
   """
-  # waiver: deferred sibling import matching this module's established import shape
-  # waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
-  import parser as _parser  # pylint: disable=deprecated-module,import-error
   _meta, body = _fm.parse(text)
   fm_lines = text[: len(text) - len(body)].count("\n")
   scan_body = _parser.strip_code_fences(body)
@@ -488,7 +491,7 @@ def main(argv: list[str]) -> int:
     sys.stderr.write(f"file not found: {file_path}\n")
     return 2
   style = document_edit_marker_style(file_path)
-  original = file_path.read_text()
+  original = _atomic_io.read_text(file_path)
 
   # guard: a questionnaire the writer never folded must not ship inside an approved document
   leftovers = leftover_callouts(original)
@@ -503,15 +506,17 @@ def main(argv: list[str]) -> int:
   settings = _load_settings(repo)
   class_cfg = _doc_class.class_for_file(settings, repo, file_path)
   preserve_section_ids = _section_ids_for_finalize(class_cfg, with_concerns=with_concerns)
+  lf_text, ending = _atomic_io.to_lf(original)
   new_text = finalize_text(
-      original, style=style,
+      lf_text, style=style,
       preserve_section_ids=preserve_section_ids,
       with_concerns=with_concerns,
   )
+  new_text = _atomic_io.restore_ending(new_text, ending)
   if new_text == original:
     print(f"already finalized: {file_path}")
     return 0
-  file_path.write_text(new_text)
+  _atomic_io.write_text_atomic(file_path, new_text)
 
   # the finalized document carries no review machinery, and its runtime job markers are part
   # of that machinery — a stale one would paint the next cycle's banner from a dead job

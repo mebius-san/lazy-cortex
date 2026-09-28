@@ -272,7 +272,7 @@ def _read_section_body(body: str, heading: str) -> str:
     section_lines = section_lines[1:]
 
   # drop the section's own explainer line the same way — self-description, never operator content
-  if section_lines and note_explainers.EXPLAINER_LINE_RE.match(section_lines[0]):
+  if section_lines and note_explainers.is_explainer_line(section_lines[0], heading):
     section_lines = section_lines[1:]
 
   # strip HTML comments before the emptiness test — the shipped template placeholder is one,
@@ -1273,7 +1273,7 @@ def scan_dependents(asset_dir: Path) -> list[Path]:
     # guard: never wake the asset that just woke off its own dependency list
     if candidate_dir == woken_dir:
       continue
-    text = candidate_note.read_text()
+    text = spec_paths.read_text(candidate_note)
     _, fm_end = flip_gate.parse_frontmatter(text)
     for token in gate_tick.read_fm_list(text[:fm_end], SpecDependsOnKey.DEPENDS_ON):
       if gate_tick.target_asset_dir(candidate_dir, token) == woken_dir:
@@ -2049,7 +2049,7 @@ def coordinator_dispatch(  # pylint: disable=too-many-branches
 
   # snapshot the note once — every branch below decides off this one read
   today_str = flip_gate.effective_today(today)
-  text = asset_note.read_text()
+  text = spec_paths.read_text(asset_note)
   original_text = text
   frontmatter, fm_end = flip_gate.parse_frontmatter(text)
   body = text[fm_end:]
@@ -2373,7 +2373,7 @@ def coordinator_dispatch(  # pylint: disable=too-many-branches
         what = f"recorded gate crossing on {asset_dir.name}"
       else:
         what = f"recorded child wake on {asset_dir.name}"
-      asset_note.write_text(note_explainers.heal_note_text(asset_note, text))
+      spec_paths.write_text_atomic(asset_note, note_explainers.heal_note_text(asset_note, text))
       _commit(asset_dir, asset_note, f"{_DISPATCH_AUTHOR_NAME}: {what}")
 
     # both hops run after the record lands, so a failing neighbour can't lose the stamp
@@ -2502,7 +2502,7 @@ def coordinator_dispatch(  # pylint: disable=too-many-branches
     _stamp_dispatch_cursor(repo_root, asset_note, item.get(_ITEM_SHA))
     new_text = fm_text + body
     if new_text != original_text:
-      asset_note.write_text(note_explainers.heal_note_text(asset_note, new_text))
+      spec_paths.write_text_atomic(asset_note, note_explainers.heal_note_text(asset_note, new_text))
       _commit(
           asset_dir, asset_note,
           f"{_DISPATCH_AUTHOR_NAME}: stale dispatch for {trigger} on {asset_dir.name}",
@@ -2555,7 +2555,7 @@ def coordinator_dispatch(  # pylint: disable=too-many-branches
   # byte-identical and costs no commit at all, so explainer healing rides real writes only
   new_text = fm_text + new_body
   if new_text != original_text:
-    asset_note.write_text(note_explainers.heal_note_text(asset_note, new_text))
+    spec_paths.write_text_atomic(asset_note, note_explainers.heal_note_text(asset_note, new_text))
     _commit(
         asset_dir, asset_note,
         f"{_DISPATCH_AUTHOR_NAME}: wake {trigger} on {asset_dir.name} → {expert} ({job_id})",

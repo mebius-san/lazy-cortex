@@ -23,6 +23,8 @@ from constants import (  # pylint: disable=import-error
   SettingsFile,
   SettingsKey,
 )
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import runtime_state  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -266,6 +268,11 @@ def append_ignore_lines(repo: Path | str, lines: list[str]) -> list[str]:
   """
   Append ignore lines to the `.gitignore` of a repository, leaving every existing line alone.
 
+  Guarantees:
+    - The file's existing line-ending style is preserved — a CRLF `.gitignore` is written back
+      CRLF, an LF one LF, including any line this call appends.
+    - The write is atomic: an interrupted call never corrupts or truncates the file.
+
   Notes:
     - A line already present verbatim is not written twice, so a repeated pass is a no-op.
       The comparison is exact: a directory-only rule for the same name is a different line and
@@ -281,18 +288,25 @@ def append_ignore_lines(repo: Path | str, lines: list[str]) -> list[str]:
   """
   # waiver: filesystem filename idiom, not a domain constant
   path = Path(repo) / ".gitignore"
+  # read untranslated so a CRLF file is written back CRLF
   # waiver: stdlib encoding idiom
-  existing = path.read_text(encoding = "utf-8") if path.exists() else ""
+  existing = path.read_bytes().decode("utf-8") if path.exists() else ""
+  newline = "\r\n" if "\r\n" in existing else "\n"
   present = { line.strip() for line in existing.splitlines() }
   fresh = [ line for line in lines if line.strip() not in present ]
 
   # guard: nothing new to record — leave the file byte-identical
   if not fresh:
     return []
-  separator = "" if existing.endswith("\n") or not existing else "\n"
-  body = "".join(f"{line}\n" for line in fresh)
-  # waiver: stdlib encoding idiom
-  path.write_text(f"{existing}{separator}{body}", encoding = "utf-8")
+
+  # Contract:
+  # The file's existing line-ending style is preserved: a CRLF `.gitignore` is written back
+  # CRLF throughout, an LF one LF, including any line this call appends.
+
+  # assemble the appended body using the file's own line ending, then write it atomically
+  separator = "" if existing.endswith("\n") or not existing else newline
+  body = "".join(f"{line}{newline}" for line in fresh)
+  runtime_state.atomic_write_text(path, f"{existing}{separator}{body}")
   return fresh
 
 

@@ -5,11 +5,56 @@ from __future__ import annotations
 
 import hashlib
 import sys
+from importlib.machinery import ModuleSpec, PathFinder
 from pathlib import Path
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
+
+
+# ----------------------------------------------------------------------------------------
+class _ImportObserver:
+  """
+  Meta-path observer that records a watched module's source hash at the moment it is imported.
+
+  It never loads anything itself: it looks the module up the way the path finder will, records the
+  source it is about to load, and declines, so the regular finders load the module as usual.
+  """
+
+  def __init__(self, fingerprint: CodeFingerprint) -> None:
+    """
+    Create an observer feeding the given fingerprint's import-time baseline.
+
+    Args:
+      fingerprint: The tracker whose watched roots and import-time hashes this observer serves.
+    """
+    self._fp = fingerprint
+
+  def find_spec(self, name: str, path: object = None, target: object = None) -> ModuleSpec | None:
+    """
+    Record the source hash of a watched module about to be imported, then decline.
+
+    Args:
+      name: Fully qualified module name being imported.
+      path: The parent package's search path, or None for a top-level import.
+      target: The module object being reloaded, if any.
+
+    Returns:
+      Always None, so the import proceeds through the remaining finders.
+    """
+    # a lookup failure here must never break the import it merely observes
+    try:
+      spec = PathFinder.find_spec(name, path, target)  # type: ignore[arg-type]
+    # waiver: broad except — observing an import must never be what makes it fail
+    except Exception:  # pylint: disable=broad-except
+      return None
+
+    # guard: not a file-backed module — nothing to record
+    if spec is None or not spec.has_location or not spec.origin:
+      return None
+    self._fp.record_import(Path(spec.origin).resolve())
+    return None
 
 
 # ----------------------------------------------------------------------------------------
@@ -33,6 +78,40 @@ class CodeFingerprint:
     self._explicit = [ Path(p) for p in paths ] if paths is not None else None
     self._base: dict[str, str] = {}
     self._pending: dict[str, str] | None = None
+    # source hashes taken at import time for watched modules imported after construction
+    self._imported: dict[str, str] = {}
+
+    # a module imported later is baselined from what it loaded, not from its first sighting
+    # ponytail: the observer stays on sys.meta_path for the process lifetime (one per daemon)
+    if self._explicit is None and self._roots:
+      sys.meta_path.insert(0, _ImportObserver(self))
+
+  def _watched(self, p: Path) -> bool:
+    """
+    Tell whether a resolved source path lives under a watched plugin root.
+
+    Args:
+      p: Resolved absolute source path.
+
+    Returns:
+      True when `p` is under one of the watched roots.
+    """
+    return any(str(p).startswith(str(r)) for r in self._roots)
+
+  def record_import(self, p: Path) -> None:
+    """
+    Record a watched module's source hash as it is being imported.
+
+    Args:
+      p: Resolved absolute source path of the module about to load.
+    """
+    # guard: outside the watched roots, or already recorded by an earlier import
+    if not self._watched(p) or str(p) in self._imported:
+      return
+    try:
+      self._imported[str(p)] = hashlib.sha256(p.read_bytes()).hexdigest()
+    except OSError:
+      return
 
   def _tracked_paths(self) -> list[Path]:
     """
@@ -63,7 +142,7 @@ class CodeFingerprint:
       p = Path(f).resolve()
 
       # only modules living under a watched plugin root are our own code
-      if any(str(p).startswith(str(r)) for r in self._roots):
+      if self._watched(p):
         out.append(p)
     return out
 
@@ -104,19 +183,23 @@ class CodeFingerprint:
     """
     Return True only when a hash change is stable across two consecutive observations.
 
-    Comparison is restricted to paths present in BOTH the baseline snapshot and the current
-    observation. New paths appearing in the current set (typically lazy imports adding modules to
-    `sys.modules` between `snapshot()` and `changed()`) are discovery events, not code edits, and
-    do NOT trigger a change signal — without this restriction every iteration that triggered a new
-    lazy import would flap a false-positive restart. Paths that disappear from the current set
-    (rare — would require a module unload) are also out of the comparison set.
+    Comparison on each call is restricted to paths present in both the baseline and the current
+    observation. A path seen for the first time joins the baseline immediately with its current
+    hash, so the discovery itself never signals a change — a later edit to that path is then
+    detected the same way as an edit to a path already present at startup. A path that disappears
+    from the current observation (rare — would require a module unload) is excluded from the
+    comparison and never by itself signals a change.
 
     Guarantees:
       - Returns True only once the same difference from the accepted baseline has been
         observed on two consecutive calls in a row.
-      - Excludes any tracked path that newly appears or disappears between two observations
-        from the comparison, so discovery or disappearance of a path never by itself
-        triggers a change.
+      - A tracked path discovered for the first time joins the baseline with the hash it had
+        when it was imported, when an import was observed, or with its hash at first sighting
+        otherwise; either way the discovery never by itself triggers a change, and a later
+        edit to that path is then detected under the same two-observation stability rule as a
+        path present at startup.
+      - A tracked path that disappears between two observations is excluded from the
+        comparison and never by itself triggers a change.
 
     Returns:
       True if the same change was observed on both this and the previous call; False otherwise.
@@ -132,9 +215,22 @@ class CodeFingerprint:
     now = self._hashes()
 
     # Contract:
-    # The comparison only ever considers tracked paths present in both the baseline and the
-    # current observation; a path that newly appears or disappears between two observations
-    # is excluded from the comparison and never by itself causes a True verdict.
+    # A tracked path discovered for the first time since the baseline was taken joins the
+    # baseline with the hash recorded when it was imported, when an import observer captured
+    # one; otherwise it joins with its hash at first sighting. Either way, discovering it never
+    # by itself causes this call to return True. A later edit to that same path is then reported
+    # once the identical edit has been observed on two consecutive calls, exactly as for a path
+    # already present in the baseline.
+
+    # a path seen for the first time joins the baseline with the hash it had when it was imported
+    # (its current hash when the import was not observed), so the discovery itself is never a
+    # change but an edit made after the import is compared like any startup path
+    for path in now.keys() - self._base.keys():
+      self._base[path] = self._imported.get(path, now[path])
+
+    # Contract:
+    # A tracked path that disappears between two observations is left out of the comparison and
+    # never by itself causes a True verdict.
 
     # restrict the comparison to paths present in both the baseline and the current observation
     shared = self._base.keys() & now.keys()
@@ -146,10 +242,13 @@ class CodeFingerprint:
     # A daemon watching its own loaded source treats a change as real only once the exact
     # same difference from the accepted baseline appears on two consecutive checks in a row;
     # a difference seen once and then reverted, or replaced by a different difference before
-    # the second check, is never treated as a change. The comparison only ever considers
-    # source files present in both the baseline and the current observation, so a newly
-    # loaded module that was not part of the baseline is a discovery of already-existing
-    # code, never an edit, and cannot by itself trigger a change.
+    # the second check, is never treated as a change. A source file observed for the first
+    # time since the baseline was taken joins the baseline carrying the content it had at the
+    # moment the daemon loaded it, falling back to its content at first sighting only when
+    # that load was never observed — so an edit landing between the load and the next check is
+    # still detected, while the discovery itself is never by itself treated as a change. A
+    # later edit to that same file is then detected under the identical two-observation
+    # stability rule as a file that was already part of the baseline at startup.
 
     # guard: identical to the accepted baseline on the shared key set — no change
     if now_shared == base_shared:

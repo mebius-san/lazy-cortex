@@ -41,6 +41,8 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import atomic_io as _atomic_io  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import doc_class as _doc_class  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import frontmatter as _fm  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -161,12 +163,13 @@ def open_submit(
   # the operator's own waiting state rather than dispatching that round's writers.
   # Re-submitting an already-skipped document changes nothing further.
 
-  text = file_path.read_text()
+  text = _atomic_io.read_text(file_path)
 
   # Reuse start's bootstrap (review_active / round / approved / banner /
   # review_result clear / optional review_expert).
   _start.open_review(file_path, expert=expert)  # bootstrap, writes in place, no commit
-  bootstrapped = file_path.read_text()
+  # the edits run on LF text; the document's own ending comes back once, on write
+  bootstrapped, ending = _atomic_io.to_lf(_atomic_io.read_text(file_path))
   meta, _body = _fm.parse(bootstrapped)
 
   # Contract:
@@ -186,7 +189,7 @@ def open_submit(
 
   # a prior run already applied the leapfrog, so the bootstrapped content stands as-is
   if already_settled:
-    new_text = bootstrapped
+    new_text = _atomic_io.restore_ending(bootstrapped, ending)
   else:
     # submit always seeds the FULL main-writer set in one shot, so the done-set
     # covers every main writer by construction — the phase always lands on
@@ -204,7 +207,8 @@ def open_submit(
     # waiver: type: ignore — note_ops is a deferred/late-bound sibling import; mypy cannot resolve it
     new_text = _note_ops.repaint_banner(  # type: ignore[attr-defined]
         new_text, lang = _note_ops.resolve_language(file_path))  # type: ignore[attr-defined]
-    file_path.write_text(new_text)
+    new_text = _atomic_io.restore_ending(new_text, ending)
+    _atomic_io.write_text_atomic(file_path, new_text)
   if new_text == text:
     return False
   return True

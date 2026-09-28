@@ -894,8 +894,8 @@ def _capture_snippets(vault: Path) -> dict:  # waiver: snippet entries of mixed 
   """
   Snapshot CSS snippets, recording plugin-shipped ones by name only.
 
-  A snippet byte-identical to what this plugin ships is the plugin's file: storing its
-  body would pin today's version and stop plugin updates from reaching the vault. A
+  A snippet identical to what this plugin ships, line endings aside, is the plugin's file:
+  storing its body would pin today's version and stop plugin updates from reaching the vault. A
   snippet that differs — personal, or an edited copy — travels with its body.
 
   Args:
@@ -907,8 +907,8 @@ def _capture_snippets(vault: Path) -> dict:  # waiver: snippet entries of mixed 
 
   # Domain(obsidian.vault-capture):
   # # Provenance of a stylesheet snippet in a captured configuration
-  # A snippet that is byte-identical to the one the tooling itself installs belongs to the tooling,
-  # not to the vault, and travels by name alone. Recording its text instead would freeze the copy
+  # A snippet whose text matches the one the tooling itself installs, line endings aside, belongs
+  # to the tooling, not to the vault, and travels by name alone. Recording its text instead would freeze the copy
   # taken on the day of the capture, so a later improvement to that snippet would never reach any
   # vault restored from the record.
   # A snippet whose text differs — written by hand, or an installed one since edited — belongs to
@@ -920,12 +920,15 @@ def _capture_snippets(vault: Path) -> dict:  # waiver: snippet entries of mixed 
   snippets: dict[str, Any] = {}  # waiver: snippet entries of mixed shapes
   for path in find_all_matching(vault / VaultPath.SNIPPETS, VaultPath.CSS_GLOB):
     reference = shipped / path.name
-    if reference.is_file() and reference.read_bytes() == path.read_bytes():
+    body = path.read_text(encoding = Encoding.UTF8)
+
+    # both sides are read as LF text, so a CRLF copy of a shipped snippet stays the plugin's
+    if reference.is_file() and reference.read_text(encoding = Encoding.UTF8) == body:
       snippets[path.name] = { SnippetKey.SOURCE: SnippetSourceKind.PLUGIN, SnippetKey.BODY: None }
     else:
       snippets[path.name] = {
         SnippetKey.SOURCE: SnippetSourceKind.VAULT,
-        SnippetKey.BODY: path.read_text(encoding = Encoding.UTF8),
+        SnippetKey.BODY: body,
       }
   return snippets
 

@@ -20,6 +20,10 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import runtime_state  # pylint: disable=import-error
+
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
@@ -92,8 +96,7 @@ def ensure_permission_allow(settings_path: Path, pattern: str) -> str:
   if pattern in allow:
     return _Outcome.ALREADY_PRESENT
   allow.append(pattern)
-  settings_path.parent.mkdir(parents=True, exist_ok=True)
-  settings_path.write_text(json.dumps(data, indent=2) + "\n")
+  runtime_state.atomic_write_text(settings_path, json.dumps(data, indent = 2) + "\n")
   return _Outcome.ADDED
 
 

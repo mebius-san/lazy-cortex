@@ -9,9 +9,129 @@ rewriting it.
 """
 from __future__ import annotations
 
+import re
+
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
+
+
+# Opening or closing line of a fenced code block: up to three spaces of indent, then a run of at
+# least three backticks or tildes (CommonMark).
+_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+
+# Character that opens a backtick fence; its info string may not carry another one.
+_BACKTICK = "`"
+
+
+# Line endings the marker code recognises: a CRLF pair counts as one line break, like a bare LF.
+_CRLF = "\r\n"
+_LF = "\n"
+
+
+def _inner_block(inner: str, eol: str) -> str:
+  """
+  Render region content as whole lines ending in `eol`, or an empty string when there is none.
+
+  Args:
+    inner: Region content, its lines separated by LF or CRLF.
+    eol: Line ending every rendered line carries.
+
+  Returns:
+    The content with surrounding blank lines stripped and each line ending in `eol`.
+  """
+  stripped = inner.replace(_CRLF, _LF).strip(_LF)
+
+  # guard: an empty region renders as nothing between the markers
+  if not stripped:
+    return ""
+  return stripped.replace(_LF, eol) + eol
+
+
+# ────────────────────────────────────────────────────────────────────────────
+class CodeFence:
+  """
+  Line-by-line tracker of whether a markdown line sits inside a fenced code block.
+
+  Guarantees:
+    - A fence closes only on a line of the same character it opened with, at least as long as the
+      opening run, with nothing but whitespace after it; a shorter run or the other fence
+      character is reported as ordinary content, never a closing delimiter.
+  """
+
+  def __init__(self) -> None:
+    """
+    Start outside any fenced block.
+    """
+    # the fence character of the open block, empty while outside one
+    self._char = ""
+
+    # the length of the run that opened the current block
+    self._length = 0
+
+  @property
+  def inside(self) -> bool:
+    """
+    True while a fenced block is open.
+    """
+    return bool(self._char)
+
+  @property
+  def closer(self) -> str:
+    """
+    Delimiter line that closes the open fenced block, or an empty string while outside one.
+    """
+    return self._char * self._length
+
+  def step(self, line: str) -> bool:
+    """
+    Feed the next line and report whether it opens or closes a fenced block.
+
+    Guarantees:
+      - A fence closes only on a line made of the same character it opened with, at least as long as
+        the opening run, with nothing after it but whitespace; a shorter run or the other fence
+        character is reported as ordinary content, never a closing delimiter.
+
+    Args:
+      line: One markdown line, without its line ending.
+
+    Returns:
+      True when the line is a fence delimiter; False for any other line, fenced content included.
+    """
+
+    # Domain(wiki.terms):
+    # # Where a fenced code block ends
+    # A fenced block closes only on a line made of the same fence character it opened with, at least as
+    # long as the opening run, with nothing after it but whitespace. A shorter run or the other fence
+    # character inside the block is quoted content, so an example of one fence style inside another never
+    # ends the block early.
+
+    # Contract:
+    # A fence closes only on a line made of the same character it opened with, at least as long as the
+    # opening run, with nothing after it but whitespace; any other line — a shorter run or the other
+    # fence character — is reported as ordinary content, NEVER as a closing delimiter.
+
+    match = _FENCE_RE.match(line)
+
+    # guard: not a fence-shaped line at all
+    if match is None:
+      return False
+    run = match.group(1)
+    rest = line[match.end():]
+
+    # outside a block: any fence-shaped line opens one, unless a backtick info string carries a backtick
+    if not self._char:
+      # guard: an inline code span, not a fence
+      if run[0] == _BACKTICK and _BACKTICK in rest:
+        return False
+      self._char, self._length = run[0], len(run)
+      return True
+
+    # guard: inside a block only a matching, long-enough, bare run closes it
+    if run[0] != self._char or len(run) < self._length or rest.strip():
+      return False
+    self._char, self._length = "", 0
+    return True
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -77,6 +197,72 @@ class Markers:
     """
     return f"<!-- auto:{marker_id}:end -->"
 
+  def find_region(self, text: str, marker_id: str) -> tuple[int, int] | None:
+    """
+    Locate the managed region a marker pair actually delimits.
+
+    Guarantees:
+      - A marker is recognised only on a line of its own, outside fenced code blocks; a marker
+        mentioned inline in prose or quoted inside a fenced example never anchors a region.
+      - For the `see-also` marker id, a pair whose start marker lies inside the `# See also` section
+        is returned over any other pair present in the document.
+
+    Args:
+      text: Full document text (or body text) that may contain the markers.
+      marker_id: Logical identifier of the managed region.
+
+    Returns:
+      `(start_idx, end_idx)` — offsets of the start marker and of the end marker that closes it — or
+      `None` when no real marker pair is present.
+    """
+
+    # Contract:
+    # A marker is recognised only on a line of its own outside fenced code blocks; a marker mentioned
+    # inline in prose or quoted inside a fenced example NEVER anchors a region.
+
+    # Contract:
+    # For the `see-also` marker id, a pair whose start marker lies inside the `# See also` section
+    # MUST win over any other pair present in the document; a pair outside that section is used only
+    # when no pair inside it exists.
+
+    start = self._start_marker(marker_id)
+    end = self._end_marker(marker_id)
+    fence = CodeFence()
+    section = ""
+    open_at: int | None = None
+    open_in_see_also = False
+    fallback: tuple[int, int] | None = None
+    offset = 0
+
+    # walk the lines once, pairing each own-line start marker with the next own-line end marker
+    for line in text.splitlines(keepends = True):
+      bare = line.rstrip("\r\n")
+      stripped = bare.strip()
+      line_start = offset
+      offset += len(line)
+
+      # guard: fence delimiters and fenced content are never markers
+      if fence.step(bare) or fence.inside:
+        continue
+
+      # an H1 names the section the following lines belong to
+      if bare.startswith("# "):
+        section = stripped
+      elif stripped == start:
+        open_at = line_start + bare.index(start)
+        open_in_see_also = section == self.SEE_ALSO_HEADING
+      elif stripped == end and open_at is not None:
+        pair = ( open_at, line_start + bare.index(end) )
+
+        # guard: a pair inside the See-also section is the canonical one
+        if open_in_see_also or marker_id != self.SEE_ALSO_MARKER_ID:
+          return pair
+        fallback = fallback or pair
+        open_at = None
+
+    # no canonical pair — fall back to the first own-line pair outside the section
+    return fallback
+
   # ──────────────────────────────────────────────────────────────────────────
   def rewrite_between(self, text: str, marker_id: str, inner: str) -> str:
     """
@@ -96,12 +282,19 @@ class Markers:
     Guarantees:
       - Rewriting a region with the same `inner` twice produces byte-identical output.
       - Text carrying no marker pair is returned unchanged, and no region is inserted.
+      - A marker mentioned only in prose or inside a fenced code example is never mistaken for a region
+        boundary, so an example of the marker syntax elsewhere in the text is left untouched.
+      - A CRLF right after the start marker counts as its own line break, and the content placed
+        between the markers takes that same line ending — CRLF after a CRLF marker line, LF
+        otherwise — so a region in a mixed-ending document rewrites idempotently and is never
+        glued onto the marker line.
 
     Args:
       text: Full document text (or body text) containing the markers.
       marker_id: Logical identifier of the managed region to rewrite.
-      inner: New content to place between the markers. Leading/trailing
-        newlines are normalized so the markers sit on their own lines.
+      inner: New content to place between the markers, its lines separated by LF or CRLF.
+        Leading/trailing newlines are normalized, and every line is re-emitted with the
+        start-marker line's own ending, so the markers sit on their own lines.
 
     Returns:
       Document text with the inner region replaced.  Unchanged when the
@@ -124,33 +317,35 @@ class Markers:
     # so a refresh may run on every pass without churning the document.
 
     start = self._start_marker(marker_id)
-    end = self._end_marker(marker_id)
 
     # Contract:
     # A document carrying no marker pair MUST be returned unchanged;
     # the managed region is never inserted here and never guessed at.
 
-    # guard: marker pair absent — caller must insert via ensure_see_also
-    if start not in text or end not in text:
-      return text
-
     # bound the managed region so everything outside it survives the rewrite
-    start_idx = text.index(start)
-    end_idx = text.index(end, start_idx)
+    region = self.find_region(text, marker_id)
 
-    # Advance past the start marker and its trailing newline
+    # guard: marker pair absent — caller must insert via ensure_see_also
+    if region is None:
+      return text
+    start_idx, end_idx = region
+
+    # Contract:
+    # A CRLF pair right after the start marker counts as its line break, exactly like a bare LF;
+    # the content spliced between the markers MUST use that same line ending — CRLF when the
+    # start-marker line ends in CRLF, LF otherwise — so a region in a mixed-ending document
+    # rewrites idempotently and its content is never glued onto the marker line.
+
+    # Advance past the start marker; inserted lines take the start-marker line's own ending
     after_start = start_idx + len(start)
+    eol = _CRLF if text.startswith(_CRLF, after_start) else _LF
 
-    # consume the newline after the start marker so the marker keeps its own line
-    if after_start < len(text) and text[after_start] == "\n":
-      after_start += 1
+    # consume the line ending after the start marker so the marker keeps its own line
+    if text.startswith(eol, after_start):
+      after_start += len(eol)
 
     # Normalise inner: strip surrounding newlines, then re-add exactly one trailing
-    inner_stripped = inner.strip("\n")
-    if inner_stripped:
-      inner_block = inner_stripped + "\n"
-    else:
-      inner_block = ""
+    inner_block = _inner_block(inner, eol)
 
     # splice the new content in, leaving both markers and the surrounding document intact
     return text[:after_start] + inner_block + text[end_idx:]
@@ -165,6 +360,11 @@ class Markers:
 
     Guarantees:
       - Reading a region back returns exactly the content a rewrite placed in it.
+      - A marker mentioned only in prose or inside a fenced code example is never mistaken for a region
+        boundary, so it is never read back as if it delimited a region.
+      - A CRLF or LF right after the start marker is consumed as the marker's own line ending, and
+        every CRLF inside the returned span is turned into LF, so an LF region and a CRLF region
+        holding the same logical lines are read back identically.
 
     Args:
       text: Full document text (or body text) that may contain the markers.
@@ -172,7 +372,7 @@ class Markers:
         to the canonical See-also region.
 
     Returns:
-      The inner content with surrounding newlines stripped, or `None` when
+      The inner content as LF-joined lines with surrounding newlines stripped, or `None` when
       the marker pair is not present.
     """
 
@@ -180,24 +380,29 @@ class Markers:
     # Reading a region MUST return exactly the content a rewrite placed in it,
     # normalised identically on both sides.
 
-    start = self._start_marker(marker_id)
-    end = self._end_marker(marker_id)
+    region = self.find_region(text, marker_id)
 
     # guard: marker pair absent
-    if start not in text or end not in text:
+    if region is None:
       return None
 
+    # Contract:
+    # A CRLF or LF right after the start marker MUST be consumed as the marker's own line ending,
+    # never returned as content, and the returned span MUST have every CRLF turned into LF — the
+    # exact content a rewrite with that content would have placed, for LF and CRLF regions alike.
+
     # walk past the start marker to the first byte the caller actually owns
-    start_idx = text.index(start)
-    after_start = start_idx + len(start)
+    start_idx, end_idx = region
+    after_start = start_idx + len(self._start_marker(marker_id))
 
-    # consume the newline after the start marker so it is not read as content
-    if after_start < len(text) and text[after_start] == "\n":
-      after_start += 1
+    # consume the line ending after the start marker so it is not read as content
+    for eol in (_CRLF, _LF):
+      if text.startswith(eol, after_start):
+        after_start += len(eol)
+        break
 
-    # hand back the span between the markers, normalised the way a write leaves it
-    end_idx = text.index(end, start_idx)
-    return text[after_start:end_idx].strip("\n")
+    # hand back the span between the markers as LF lines, normalised the way a write leaves it
+    return text[after_start:end_idx].replace(_CRLF, _LF).strip(_LF)
 
   # ──────────────────────────────────────────────────────────────────────────
   def ensure_see_also(self, body: str, inner: str) -> str:
@@ -217,6 +422,14 @@ class Markers:
     Guarantees:
       - A body never ends up with more than one canonical See-also section.
       - A newly created section is placed at the end of the body.
+      - A marker mentioned only in prose or inside a fenced code example is never mistaken for the
+        existing section, so it never causes a second See-also section to be created.
+      - A body ending inside a fenced code block left open has that block closed with a matching
+        delimiter before the new section is appended, so the section is recognised on the next call
+        and repeated calls never add a second one.
+      - A newly appended section, including a closing fence line added for an unclosed fence, uses
+        the body's majority line ending — CRLF when CRLF line breaks outnumber bare LF ones, LF
+        otherwise.
 
     Args:
       body: Markdown body text (the part after the frontmatter fences, or the
@@ -248,23 +461,40 @@ class Markers:
     end = self._end_marker(mid)
 
     # guard: section already present — just rewrite the inner
-    if start in body and end in body:
+    if self.find_region(body, mid) is not None:
       return self.rewrite_between(body, mid, inner)
 
+    # Contract:
+    # A newly appended section, and a closing fence line added for a fence left open, MUST use
+    # the body's majority line ending — CRLF when CRLF line breaks outnumber bare LF ones,
+    # LF otherwise — so a CRLF body is never given LF-terminated lines.
+
+    # a new section takes the body's majority line ending, so a CRLF body is not given LF lines
+    crlf = body.count(_CRLF)
+    eol = _CRLF if crlf > body.count(_LF) - crlf else _LF
+
     # Build the normalised inner block
-    inner_stripped = inner.strip("\n")
-    if inner_stripped:
-      inner_block = inner_stripped + "\n"
-    else:
-      inner_block = ""
+    inner_block = _inner_block(inner, eol)
+
+    # Contract:
+    # A fenced code block left open to the end of the body is closed with a matching delimiter line
+    # before the new section is appended, keeping the appended section outside any fence so it is
+    # recognised as the canonical section on the next call and a second section is NEVER created.
+
+    # a fenced block left open to the end of the body would swallow the section, so it is closed first
+    fence = CodeFence()
+    for line in body.splitlines():
+      fence.step(line)
+    if fence.inside:
+      body = (body if body.endswith(_LF) else body + eol) + fence.closer + eol
 
     # assemble the whole section so later runs find the heading, tag and markers
     section = (
-      f"\n{self.SEE_ALSO_HEADING}\n"
-      f"{self.SEE_ALSO_PROTECTED_TAG}\n"
-      f"{start}\n"
+      f"{eol}{self.SEE_ALSO_HEADING}{eol}"
+      f"{self.SEE_ALSO_PROTECTED_TAG}{eol}"
+      f"{start}{eol}"
       f"{inner_block}"
-      f"{end}\n"
+      f"{end}{eol}"
     )
 
     # Contract:
@@ -272,6 +502,6 @@ class Markers:
     # never inserted between existing prose.
 
     # Append after a trailing newline (ensure exactly one blank separator)
-    if body.endswith("\n"):
+    if body.endswith(_LF):
       return body + section
-    return body + "\n" + section
+    return body + eol + section

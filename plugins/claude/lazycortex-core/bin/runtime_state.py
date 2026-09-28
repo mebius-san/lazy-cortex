@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
+import secrets
+import stat
 from pathlib import Path
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -89,13 +90,63 @@ def save(repo_root: Path, state: dict) -> None:
   atomic_write_text(_state_path(repo_root), json.dumps(state, indent = 2))
 
 
+def _write_in_place(target: Path, data: bytes) -> None:
+  """
+  Overwrite an existing file's content in place, restoring its original bytes if the write fails.
+
+  Args:
+    target: Real path of the existing file to overwrite.
+    data: Encoded bytes of the new content.
+
+  Raises:
+    PermissionError: If the file cannot be read, so its original bytes could not be restored;
+      the file is left untouched.
+    OSError: If the new content cannot be written; the original bytes are back on disk first.
+  """
+  # a file that cannot be read back cannot be rolled back either: the read refuses before any write
+  original = target.read_bytes()
+  try:
+    # write over the old bytes, cut the old tail, then flush to disk — the file keeps its inode and mode
+    # waiver: stdlib file-mode idiom
+    with open(target, "r+b") as handle:
+      handle.write(data)
+      handle.truncate()
+      handle.flush()
+      os.fsync(handle.fileno())
+  except BaseException:
+    # a failed write (full disk, file-size limit) must not leave a truncated file: put the old bytes back
+    # waiver: stdlib file-mode idiom
+    with open(target, "r+b") as handle:
+      handle.write(original)
+      handle.truncate()
+      handle.flush()
+      os.fsync(handle.fileno())
+    raise
+
+
 def atomic_write_text(path: Path, text: str) -> None:
   """
   Write text to a file, replacing its previous content in one atomic step.
 
   Guarantees:
-    - An interrupted call leaves the previous content at `path` intact; readers never
-      observe a corrupted or partially written file.
+    - An interrupted call leaves the previous content at `path` intact, and readers never
+      observe a corrupted or partially written file, whenever the temp file beside `path`
+      can be created. On the in-place fallback, the original bytes are restored when the
+      write fails, but a concurrent reader may observe a partial write while it is in progress.
+    - An existing destination keeps its own permission bits; a destination that does not
+      yet exist gets the mode a plain write would produce under the process umask.
+    - When `path` is a symlink, the link itself is left in place and its real target
+      receives the new content.
+    - The text is written byte-exact in UTF-8 with no newline translation, so a CRLF
+      line ending in `text` is preserved as CRLF.
+    - When the containing directory refuses to create the temp file with a `PermissionError`
+      and `path` already exists as a file, the content is rewritten in place instead: a failed
+      write restores the file's previous bytes before the error propagates, so a caller
+      catching the failure finds the previous content intact. A file that cannot be read back
+      is refused with a `PermissionError` and left untouched. This path is not atomic — a
+      concurrent reader may observe a partial write while it is in progress, and a process
+      crash mid-write, as opposed to a raised exception, can still leave partial content. A
+      missing destination still raises rather than falling back. Every other case stays atomic.
 
   Notes:
     - Creates the parent directory of `path` when it does not already exist.
@@ -110,19 +161,66 @@ def atomic_write_text(path: Path, text: str) -> None:
 
   # Contract:
   # An interrupted call never corrupts or truncates the previously persisted content at
-  # `path`; a reader always sees either the old content in full or the new content in full.
+  # `path`, and a reader always sees either the old content in full or the new content in
+  # full, whenever the temp file beside `path` can be created. On the in-place fallback,
+  # the original bytes are restored when the write fails, but a concurrent reader may
+  # observe a partial write while it is in progress.
 
-  path.parent.mkdir(parents = True, exist_ok = True)
+  # Contract:
+  # An existing destination keeps its own permission bits across the write; a destination
+  # that does not yet exist gets the mode a plain write would produce under the process umask.
 
-  # write to a sibling temp file first so an interrupted call leaves the previous content intact
+  # Contract:
+  # When `path` is a symlink, the link itself is left in place and its real target receives
+  # the new content.
+
+  # Contract:
+  # The text is written byte-exact: UTF-8 encoded with no newline translation, so a CRLF
+  # line ending in `text` is written back as CRLF.
+
+  # a symlinked destination is written through: the link stays, its real target gets the content
+  target = Path(os.path.realpath(path))
+  target.parent.mkdir(parents = True, exist_ok = True)
+
+  # write to a sibling temp file first so an interrupted call leaves the previous content intact;
+  # created with the default 0o666 request so the process umask applies exactly as for a plain write
   # waiver: temp-file naming idiom, not a domain constant
-  fd, tmp_name = tempfile.mkstemp(prefix = f".{path.name}.", suffix = ".tmp", dir = str(path.parent))
+  tmp_name = str(target.parent / f".{target.name}.{secrets.token_hex(8)}.tmp")
+
+  # Contract:
+  # When the containing directory refuses to create the temp file with a PermissionError and
+  # `path` already exists as a file, the content is rewritten in place instead: a failed write
+  # restores the file's previous bytes before the exception propagates, so a failed write never
+  # corrupts or truncates the previous content. A file that cannot be read back cannot be restored,
+  # so it is refused with a PermissionError and left untouched. This path is NOT atomic — a concurrent reader may observe
+  # a partial write while it is in progress, and a process crash mid-write, as opposed to a
+  # raised exception, can still leave partial content. A missing destination still raises
+  # instead of falling back.
+
+  # attempt the atomic replace first; only a directory that refuses the temp file falls back
+  try:
+    # waiver: the default 0o666 creation mode a plain write requests, umask applied on top
+    fd = os.open(tmp_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+  except PermissionError:
+    # guard: a directory that refuses the temp file cannot take a rename either; a file that
+    # already exists and is readable and writable is rewritten in place instead — truncate, write,
+    # fsync — trading the all-or-nothing replace for a write that lands at all
+    if not target.is_file():
+      raise
+    # waiver: stdlib encoding idiom
+    _write_in_place(target, text.encode("utf-8"))
+    return
   # noinspection PyBroadException
   try:
+    # an existing file keeps its own permission bits across the replace
+    if target.exists():
+      os.chmod(fd, stat.S_IMODE(target.stat().st_mode))
+
+    # newline translation is off so CRLF content is written byte-exact
     # waiver: stdlib file-mode idiom
-    with os.fdopen(fd, "w") as f:
+    with os.fdopen(fd, "w", encoding = "utf-8", newline = "") as f:
       f.write(text)
-    os.replace(tmp_name, path)
+    os.replace(tmp_name, target)
   except Exception:
     # best-effort cleanup of the temp file before re-raising the original failure
     try:

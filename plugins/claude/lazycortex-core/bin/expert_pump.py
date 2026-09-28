@@ -1386,14 +1386,17 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
 
   When the job carries a resolved provider, the spawn's environment is remapped to that
   provider's endpoint — tier aliases, `ANTHROPIC_BASE_URL`, and `ANTHROPIC_AUTH_TOKEN` are
-  overridden, and `CLAUDE_CODE_OAUTH_TOKEN` is stripped so the operator's own Anthropic
-  token never reaches it. A token that cannot be found in the environment or in
+  overridden, and `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, the variable named by
+  `daemon.token_env`, and the daemon's own token digest marker are all stripped from the spawn
+  environment so neither the operator's own Anthropic credentials nor the daemon's own token
+  source ever reaches it. A token that cannot be found in the environment or in
   `~/.claude/.env` fails the job before the Claude subprocess is spawned.
 
   Guarantees:
-    - For a provider-bound job, `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY` are absent
-      from the spawn environment — neither of the operator's own Anthropic credentials ever
-      reaches a foreign endpoint.
+    - For a provider-bound job, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, the variable
+      named by `daemon.token_env`, and the daemon's own digest marker are all absent from the
+      spawn environment — neither the operator's own Anthropic credentials nor the daemon's own
+      token source ever reaches a foreign endpoint.
 
   Args:
     repo: Repository root the spawn runs inside.
@@ -1590,14 +1593,21 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
       env.update(build_spawn_env(provider, token))
 
       # Contract:
-      # For a provider-bound job, `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY` MUST be
-      # absent from the spawn environment — neither of the operator's own Anthropic credentials
-      # may travel to a foreign endpoint.
+      # For a provider-bound job, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, the variable
+      # named by `daemon.token_env`, and the daemon's own digest marker MUST all be absent from
+      # the spawn environment — neither the operator's own Anthropic credentials nor the
+      # daemon's own token source may travel to a foreign endpoint.
 
       # the Anthropic OAuth token and API key must never travel to a foreign endpoint
       # waiver: CLAUDE_CODE_OAUTH_TOKEN and ANTHROPIC_API_KEY are harness-canonical env var names
       env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
       env.pop("ANTHROPIC_API_KEY", None)
+
+      # nor may the daemon's own token source variable or its digest marker
+      env.pop(EnvVar.DAEMON_TOKEN_MARK, None)
+      daemon_token_env = daemon.get(DaemonKey.TOKEN_ENV)
+      if isinstance(daemon_token_env, str) and daemon_token_env.strip():
+        env.pop(daemon_token_env.strip(), None)
 
     # the buckets are filled now, not at dispatch — a job that waited in the queue starts from
     # the tree as it stands at claim, which is what makes the serial queue safe against a

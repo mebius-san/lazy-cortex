@@ -14,13 +14,17 @@ from typing import Iterable, TypedDict
 
 import argparse
 import configparser
+import contextlib
 import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
+import tempfile
 import time
+import tomllib
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -51,6 +55,14 @@ _TOML_FALSE = "false"
 _TOKEN_FILE_MODE = 0o600
 # suffix of the sibling temp file every atomic write goes through
 _TMP_SUFFIX = ".tmp"
+# default mode of a newly created file before the process umask is applied
+_NEW_FILE_MODE = 0o666
+# answer-file key written bare; any other key is written as a quoted TOML key
+_BARE_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
+# a line that opens with a bare or quoted key followed by `=`
+# A double-quoted value as the old answer-file writer emitted it: only `\` and `"` escaped inside.
+_LEGACY_QUOTED_RE = re.compile(r'"((?:[^"\\]|\\["\\])*)"', re.DOTALL)
+_ANSWER_LINE_RE = re.compile(r'^(?:"(?:[^"\\]|\\.)*"|[A-Za-z_][A-Za-z0-9_-]*)\s*=\s*(.*)$')
 # metric-family name of the core runtime's own exposition
 _RUNTIME_METRIC_FAMILY = "lazycortex_runtime"
 # number of leading bytes of the metrics body the probe inspects for the runtime family
@@ -138,17 +150,27 @@ def detect_host() -> str:
   raise ValueError(f"unsupported platform: {sys.platform!r}")
 
 
-def _write_atomic(target: Path, data: str | bytes) -> None:
+def _write_atomic(target: Path, data: str | bytes, *, mode: int | None = None) -> None:
   """
   Replace the target file's content in one atomic step through a sibling temp file.
 
   Guarantees:
     - An interrupted, killed, or crashed call always leaves either the previous complete file
       content or the new complete content at `target`, never a partial write.
+    - A symlink target is written through: the symlink itself is left in place, pointing at the
+      same file, and the new content lands in the file it resolves to.
+    - The written file's permission mode is `mode` when supplied, otherwise the file's own
+      existing mode, otherwise the umask-derived default for a newly created file; the mode is
+      applied before the first byte of content is written.
+    - The temp file is created fresh under a unique name and never reuses or overwrites an
+      existing file before the final rename.
 
   Args:
-    target: Final path the content lands at; its parent directory must already exist.
-    data: Content to write — text is written in the platform's text encoding, bytes verbatim.
+    target: Final path the content lands at; its parent directory must already exist. A symlink
+      is followed to the file it resolves to.
+    data: Content to write — text is encoded as UTF-8, bytes are written verbatim.
+    mode: Permission bits to set on the written file. Read from the existing file, or the umask
+      default for a new file, when omitted.
 
   Raises:
     OSError: If the temp file cannot be written or moved into place.
@@ -158,13 +180,47 @@ def _write_atomic(target: Path, data: str | bytes) -> None:
   # An interrupted, killed, or crashed call always leaves either the previous complete file
   # content or the new complete content at `target`, never a partial write.
 
-  # the sibling temp file is fully written before the single rename that publishes it
-  tmp = target.with_name(target.name + _TMP_SUFFIX)
-  if isinstance(data, bytes):
-    tmp.write_bytes(data)
-  else:
-    tmp.write_text(data)
-  os.replace(tmp, target)
+  # Contract:
+  # When `target` is a symlink, the call writes through it: the symlink itself is left in place,
+  # pointing at the same file, and the new content lands in the file it resolves to.
+
+  # Contract:
+  # The written file's permission mode is `mode` when the caller supplies one, otherwise the
+  # file's own existing mode, otherwise the umask-derived default for a newly created file; this
+  # mode is applied before the first byte of content is written, so the file is never briefly
+  # readable under a different mode.
+
+  # Contract:
+  # The temp file is created fresh under a unique name; the call never reuses or overwrites any
+  # existing file, including a leftover from a previous crashed run, before the final rename.
+
+  # a symlink is written through to the file it names; the mode comes from the caller, the file
+  # being replaced, or the umask default for a new file
+  real = target.resolve()
+  # waiver: stdlib encoding idiom
+  payload = data.encode("utf-8") if isinstance(data, str) else data
+  if mode is None:
+    try:
+      mode = stat.S_IMODE(real.stat().st_mode)
+    except FileNotFoundError:
+      umask = os.umask(0)
+      os.umask(umask)
+      mode = _NEW_FILE_MODE & ~umask
+
+  # a uniquely named sibling, born 0600, is given its final mode before any byte lands, fully
+  # written, and published by one rename; any failure removes it
+  fd, tmp = tempfile.mkstemp(dir = real.parent, prefix = f".{real.name}.", suffix = _TMP_SUFFIX)
+  try:
+    os.fchmod(fd, mode)
+    with open(fd, "wb") as handle:
+      handle.write(payload)
+      handle.flush()
+      os.fsync(handle.fileno())
+    os.replace(tmp, real)
+  except BaseException:
+    with contextlib.suppress(FileNotFoundError):
+      os.unlink(tmp)
+    raise
 
 
 # waiver: `vars` is the public substitution-dict param name; shadowing builtin vars() is harmless,
@@ -277,6 +333,8 @@ def write_token_file(token: str) -> Path:
     - The token file's permission mode is owner-read-write-only (0600) before the first byte of the
       token lands in it, regardless of the process umask and of the file's or its parent
       directory's prior permission state.
+    - An interrupted, killed, or crashed call leaves the previous complete token file in place,
+      never a partial one.
 
   Args:
     token: Token string to persist. A trailing newline is appended on write.
@@ -294,6 +352,10 @@ def write_token_file(token: str) -> Path:
   # token lands in it, regardless of the process umask and of the file's or its parent directory's
   # prior permission state.
 
+  # Contract:
+  # An interrupted, killed, or crashed call leaves the previous complete token file in place,
+  # never a partial one.
+
   # Domain(observe.install-state):
   # # Secret material is split from ordinary installer answers
   # Persistent state gathered during installation is split by sensitivity. Everyday configuration
@@ -306,43 +368,120 @@ def write_token_file(token: str) -> Path:
   # create the file already restricted (the open mode only applies on creation, under the umask), then
   # tighten the open descriptor so a pre-existing loose file is closed down before the token is written
   TOKEN_FILE.parent.mkdir(parents = True, exist_ok = True)
-  token_fd = os.open(TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, _TOKEN_FILE_MODE)
-  # waiver: stdlib encoding/mode/escape idiom
-  with os.fdopen(token_fd, "w") as handle:
-    os.fchmod(token_fd, _TOKEN_FILE_MODE)
-    handle.write(token + "\n")
+  _write_atomic(TOKEN_FILE, token + "\n", mode = _TOKEN_FILE_MODE)
   return TOKEN_FILE
+
+
+def _toml_key(key: str) -> str:
+  """
+  Return `key` as a TOML key: bare when TOML reads it back unchanged, quoted otherwise.
+
+  Args:
+    key: Answer key to encode.
+
+  Returns:
+    The key text to place before ` = ` on its answer-file line.
+  """
+  return key if _BARE_KEY_RE.fullmatch(key) else _toml_string(key)
+
+
+def _toml_string(text: str) -> str:
+  """
+  Return `text` as a single-line TOML basic string.
+
+  Args:
+    text: String to encode.
+
+  Returns:
+    The double-quoted, escaped form; control characters, newlines included, are escaped so
+    the result always stays on one line.
+  """
+  # waiver: JSON escapes every control character TOML forbids except DEL, which it leaves raw
+  return json.dumps(text, ensure_ascii = False).replace("\x7f", "\\u007f")
+
+
+def _toml_value(value: object) -> str:
+  """
+  Return `value` as a single-line TOML value.
+
+  Args:
+    value: A string, boolean, integer, float, list, or string-keyed dict, nested freely.
+
+  Returns:
+    The TOML literal that reads back as an equal value.
+
+  Raises:
+    ValueError: If `value` or anything nested in it has no TOML form, such as `None`.
+  """
+
+  # scalars map one-to-one; bool is checked before int because it is one
+  if isinstance(value, bool):
+    return _TOML_TRUE if value else _TOML_FALSE
+  # Python's own int / float text (`inf` and `nan` included) is valid TOML as is
+  if isinstance(value, (int, float)):
+    return str(value)
+  if isinstance(value, str):
+    return _toml_string(value)
+
+  # containers nest as an inline array or inline table
+  if isinstance(value, list):
+    return "[ " + ", ".join(_toml_value(item) for item in value) + " ]"
+  if isinstance(value, dict):
+    return "{ " + ", ".join(f"{_toml_key(str(k))} = {_toml_value(v)}" for k, v in value.items()) + " }"
+
+  # guard: TOML has no null and no other types; refuse rather than write a lossy stand-in
+  raise ValueError(f"answer value {value!r} has no TOML representation")
 
 
 def write_answer_file(answers: dict[str, object]) -> Path:
   """
   Persist non-secret operator answers to a trivial top-level TOML file.
 
-  Only top-level `key = "value"` pairs are emitted. Booleans render as `true`
-  / `false`, numerics as their literal form, and everything else as quoted
-  strings with backslashes and double quotes escaped. Token-like keys are
-  refused so that secret material never accidentally leaks into the file.
+  Only top-level `key = "value"` pairs are emitted, each value written as a single-line TOML
+  literal — a string, boolean, integer, float, list, or string-keyed dict nested freely. Token-like
+  keys are refused so that secret material never accidentally leaks into the file.
 
   Guarantees:
     - A token-like key is refused before the answer file is written; the file is never left
       with partial content or with a secret-looking key present.
+    - An interrupted, killed, or crashed call leaves the previous complete answer file in place,
+      never a partial one.
+    - Every answer value is serialised as a single-line TOML literal: string control characters,
+      newlines included, are always escaped so a value can never inject another key onto the
+      line; booleans, integers, floats, lists, and string-keyed dicts nest to any depth; and a
+      key that is not a bare TOML key is written quoted.
+    - A value with no TOML representation raises `ValueError` before the answer file is touched.
 
   Args:
-    answers: Mapping of answer keys to scalar values (URL, agent kind, auth
-      kind, etc.).
+    answers: Mapping of answer keys to values — a string, boolean, integer, float, list, or
+      string-keyed dict nested freely (URL, agent kind, auth kind, etc.).
 
   Returns:
     The path to the answer file that was written.
 
   Raises:
     ValueError: If `answers` contains a token-like key such as `token` or
-      `LAZYCORTEX_OBSERVE_TOKEN`.
+      `LAZYCORTEX_OBSERVE_TOKEN`, or a value with no TOML representation, such as `None`.
     OSError: If the answer file or its parent directory cannot be written.
   """
 
   # Contract:
   # A token-like key is refused before the answer file is written; the file is never left
   # with partial content or with a secret-looking key present.
+
+  # Contract:
+  # An interrupted, killed, or crashed call leaves the previous complete answer file in place,
+  # never a partial one.
+
+  # Contract:
+  # Every answer value is serialised as a single-line TOML literal: string control characters,
+  # newlines included, are always escaped so a value can never inject another key onto the line;
+  # booleans, integers, floats, lists, and string-keyed dicts nest to any depth; and a key that is
+  # not a bare TOML key is written quoted.
+
+  # Contract:
+  # A value with no TOML representation — `None` is the standing example — raises `ValueError`
+  # before the answer file is touched.
 
   # the rendered TOML lines are collected before anything touches the answer file
   ANSWER_FILE.parent.mkdir(parents = True, exist_ok = True)
@@ -362,20 +501,11 @@ def write_answer_file(answers: dict[str, object]) -> Path:
     if key in _SECRET_ANSWER_KEYS:
       raise ValueError(f"refused to write secret key {key!r} into the answer file")
 
-    # boolean values render as lowercase TOML literals
-    if isinstance(value, bool):
-      lines.append(f"{key} = {_TOML_TRUE if value else _TOML_FALSE}")
-    # numerics render as their literal form
-    elif isinstance(value, (int, float)):
-      lines.append(f"{key} = {value}")
-    # everything else is treated as a quoted string with escaping
-    else:
-      # waiver: the escape chain stays out of the f-string, which would have to nest the quote it escapes
-      escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
-      lines.append(f'{key} = "{escaped}"')
+    # a value with no TOML form refuses the whole write here, before the file is touched
+    lines.append(f"{_toml_key(key)} = {_toml_value(value)}")
 
-  # every key passed the secret check, so the whole file is written in one go
-  ANSWER_FILE.write_text("\n".join(lines) + "\n")
+  # every key passed the secret check, so the whole file is published in one atomic step
+  _write_atomic(ANSWER_FILE, "\n".join(lines) + "\n")
   return ANSWER_FILE
 
 
@@ -383,11 +513,12 @@ def read_answer_file() -> dict[str, object]:
   """
   Read the previously saved non-secret answer file back into a mapping.
 
-  Lines are parsed permissively: blank lines and `#`-prefixed comments are
-  skipped, malformed lines are silently ignored, and unquoted values are
-  decoded as booleans, ints, floats, or strings in that order.
+  Each line is parsed as TOML, so every key and value the writer produces reads back equal; a
+  hand-written line whose value is bare and not valid TOML falls back to its raw text. Blank lines
+  and `#`-prefixed comments are skipped, and malformed lines are silently ignored.
 
   Guarantees:
+    - Every key and value written by the answer-file writer reads back equal to what was written.
     - Malformed or unparseable lines never raise; the call always returns a best-effort
       mapping, empty when no answer file is present.
 
@@ -400,6 +531,9 @@ def read_answer_file() -> dict[str, object]:
   """
 
   # Contract:
+  # Every key and value written by the answer-file writer reads back equal to what was written.
+
+  # Contract:
   # Malformed or unparseable lines in the answer file are tolerated, never raised; the call
   # always returns a best-effort mapping (empty when no file is present) instead of aborting.
 
@@ -407,35 +541,29 @@ def read_answer_file() -> dict[str, object]:
   if not ANSWER_FILE.exists():
     return {}
 
-  # decode the file line by line into the answer mapping
+  # decode the file line by line into the answer mapping; each pair is one line of TOML
   out: dict[str, object] = {}
-  pat = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$')
-  for raw in ANSWER_FILE.read_text().splitlines():
+  # waiver: stdlib encoding idiom
+  for raw in ANSWER_FILE.read_text(encoding = "utf-8").splitlines():
     line = raw.strip()
 
-    # guard: skip blank lines and comments
-    if not line or line.startswith("#"):
+    # guard: skip blank lines, comments, and anything that does not open with a key and `=`
+    if not (match := _ANSWER_LINE_RE.match(line)):
       continue
 
-    # guard: skip malformed entries silently
-    if not (match := pat.match(line)):
-      continue
+    # a valid TOML pair decodes as such; a hand-written bare value falls back to its raw text
+    try:
+      out.update(tomllib.loads(line))
+    except tomllib.TOMLDecodeError:
+      # guard: only a bare key has a raw-text fallback; an undecodable quoted key is skipped
+      if line.startswith('"'):
+        continue
+      value = match.group(1).strip()
 
-    # the raw value text is decoded by shape: boolean, quoted string, then number
-    key, value = match.group(1), match.group(2).strip()
-
-    # decode booleans first to avoid them being eaten by the numeric branch
-    if value.lower() in (_TOML_TRUE, _TOML_FALSE):
-      out[key] = value.lower() == _TOML_TRUE
-    # quoted string with escape sequences
-    elif value.startswith('"') and value.endswith('"'):
-      out[key] = value[1:-1].replace('\\"', '"').replace("\\\\", "\\")
-    # otherwise attempt int / float, falling back to a raw string
-    else:
-      try:
-        out[key] = int(value) if "." not in value else float(value)
-      except ValueError:
-        out[key] = value
+      # an old-writer string escaped only `\` and `"`, so a raw control character left it invalid TOML
+      if (legacy := _LEGACY_QUOTED_RE.fullmatch(value)) is not None:
+        value = re.sub(r'\\(["\\])', r"\1", legacy.group(1))
+      out[line.partition("=")[0].strip()] = value
 
   # the best-effort mapping, empty when every line was skipped
   return out
@@ -1246,6 +1374,19 @@ def detect_grafana_dashboards_dir() -> Path | None:
   return None
 
 
+def _lf_bytes(data: bytes) -> bytes:
+  """
+  Return file bytes with every CRLF line ending turned into LF.
+
+  Args:
+    data: The file's bytes as read from disk.
+
+  Returns:
+    `data` with each `\\r\\n` replaced by `\\n`.
+  """
+  return data.replace(b"\r\n", b"\n")
+
+
 def deploy_dashboards(target_dir: Path | None = None) -> dict[str, object]:
   """
   Copy the plugin's shipped Grafana dashboards into the host's provisioning directory.
@@ -1256,7 +1397,7 @@ def deploy_dashboards(target_dir: Path | None = None) -> dict[str, object]:
   Guarantees:
     - Each written dashboard file is always either the previous complete content or the new
       complete content, never a partial write.
-    - A dashboard payload already byte-identical to the file on disk is left untouched and
+    - A dashboard payload already identical to the file on disk, line endings aside, is left untouched and
       counted as unchanged rather than rewritten.
 
   Notes:
@@ -1286,7 +1427,7 @@ def deploy_dashboards(target_dir: Path | None = None) -> dict[str, object]:
   written: list[str] = []
   unchanged: list[str] = []
 
-  # copy every shipped dashboard, skipping the ones already byte-identical on disk
+  # copy every shipped dashboard, skipping the ones already on disk with the same text
   for name in sorted(os.listdir(DASHBOARD_DIR)):
     # guard: reject directory entries that are not JSON payloads
     if not name.endswith(_JSON_SUFFIX):
@@ -1297,11 +1438,12 @@ def deploy_dashboards(target_dir: Path | None = None) -> dict[str, object]:
     installed = target / name
 
     # Contract:
-    # A dashboard payload already byte-identical to the file on disk is left untouched and
-    # counted as unchanged rather than rewritten.
+    # A dashboard payload already identical to the file on disk, line endings aside (a CRLF copy
+    # of the payload counts as identical), is left untouched and counted as unchanged rather
+    # than rewritten.
 
-    # guard: reject a rewrite of a payload already identical on disk
-    if installed.is_file() and installed.read_bytes() == payload:
+    # guard: reject a rewrite of a payload already identical on disk once both are read as LF
+    if installed.is_file() and _lf_bytes(installed.read_bytes()) == _lf_bytes(payload):
       unchanged.append(name)
       continue
 

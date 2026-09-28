@@ -45,7 +45,7 @@ This skill has 3 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 ## Phase 1 — Inline logging compliance checks
 
-Absorbed from the retired `lazy-log.audit` skill. These four checks run inline (no subagent dispatch) before Phase 2's parallel scan. Record findings in a local list for inclusion in the Phase 3 render.
+L1–L4 are absorbed from the retired `lazy-log.audit` skill; L5 covers the install-managed `.gitattributes` line. These five checks run inline (no subagent dispatch) before Phase 2's parallel scan. Record findings in a local list for inclusion in the Phase 3 render.
 
 Severity vocabulary: the four words from **Finding shape** above — `PASS` / `INFO` / `WARN` / `FAIL`. A check that ran clean emits `PASS`; the Phase 3 render folds the `PASS` lines into the section's summary line.
 
@@ -76,6 +76,10 @@ Glob `.claude/skills/*/SKILL.md`, `.claude/agents/*.md`, `.claude/commands/*.md`
 - `[FAIL]` if the file still carries the retired `logging-waiver:` key — logging is off by default, the key means nothing.
 
 A literal `true` → no finding.
+
+### L5 — `.gitattributes` pins LF line endings
+
+- Read `.gitattributes`. If absent, or no line of it reads `* text=auto eol=lf` once stripped → `[WARN] .gitattributes does not pin LF — git may store or check out CRLF text files on some machines | .gitattributes`.
 
 ## Phase 2 — Dispatch parallel scans
 
@@ -735,8 +739,9 @@ Render Phase 1 inline findings.
 - **`.logs/` and `.runtime/` directories** (WARN) — one line per L2 finding (each directory is checked independently); route: run `/lazy-core.setup` to bootstrap the directory. Omit if both present.
 - **`.gitignore` coverage** (WARN) — one line per L3 finding (`.logs/` and `.runtime/` are checked independently); route: add the missing line to `.gitignore`, by hand or via `/lazy-core.setup`. Omit if both covered.
 - **`logging:` key** (FAIL) — one line per L4 finding; route: set the key to the literal `true` or drop it, and delete any retired `logging-waiver:` line. Omit if all valid.
+- **`.gitattributes` LF rule** (WARN) — one line per L5 finding; route: run `/lazy-core.setup`, which inserts `* text=auto eol=lf` as the first rule. Omit if pinned.
 
-If all L1–L4 checks pass: emit a single `PASS: logging rule installed, .logs/ + .runtime/ present, .gitignore covers both, all logging keys valid` summary line.
+If all L1–L5 checks pass: emit a single `PASS: logging rule installed, .logs/ + .runtime/ present, .gitignore covers both, all logging keys valid, .gitattributes pins LF` summary line.
 
 ### Verdict
 

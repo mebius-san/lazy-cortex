@@ -39,6 +39,8 @@ import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-posi
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import iconize_inline  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from spec_keys import SpecKey  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -67,11 +69,15 @@ _LAND_AUTHOR_EMAIL = "lazy-spec.land-result@bot.invalid"
 
 # A link target pointing into the job's own result dir — what a writer spells when it references
 # an attachment it is returning alongside the document. Four shapes carry such a target: an inline
-# link `(result/x)`, a titled inline link `(result/x "t")`, a reference definition `[a]: result/x`,
-# and an HTML source attribute `src="result/x"`. Only the opening delimiter is captured and
-# replayed, so whatever closes each shape is left exactly as the writer spelled it.
+# link `[a](result/x)`, a titled inline link `[a](result/x "t")`, a reference definition
+# `[a]: result/x`, and an HTML source attribute `src="result/x"`. A bare `(result/x)` in prose is
+# no link and stays as written. Only the opening delimiter is captured and replayed, so whatever
+# closes each shape is left exactly as the writer spelled it.
 _RESULT_LINK_RE = re.compile(
-    r"""(?P<open>\(|\]:[ \t]*|src[ \t]*=[ \t]*["'])result/(?P<name>[^)"'\s]+)""")
+    r"""(?P<open>\]\(|\]:[ \t]*|src[ \t]*=[ \t]*["'])result/(?P<name>[^)"'\s]+)""")
+
+# An inline code span: a backtick run, the shortest text, and a closing run of the same length.
+_CODE_SPAN_RE = re.compile(r"(`+).+?(?<!`)\1(?!`)")
 
 # `_RESULT_LINK_RE`'s capture groups: the delimiter that opened the shape, replayed verbatim,
 # and the returned file's name behind the `result/` prefix.
@@ -343,8 +349,18 @@ def _fix_links(body: str, names: list[str], job_dir: Path) -> str:
       sys.stderr.write(f"land-result: {job_dir.name}: link to missing neighbour {name!r}\n")
     return f"{match.group(_GROUP_OPEN)}{name}"
 
-  # rewrite every link in one pass, then report what the two sides did not agree on
-  out = _RESULT_LINK_RE.sub(_neighbour, body)
+  # rewrite the links of every line outside a fenced block, skipping inline code spans — a link
+  # quoted as code is an example, not a target
+  lines = body.split("\n")
+  fenced = spec_frontmatter.fenced_lines(lines)
+  for idx, line in enumerate(lines):
+    # guard: a fenced line is code, never a link
+    if fenced[idx]:
+      continue
+    prose = [ _RESULT_LINK_RE.sub(_neighbour, part) for part in _CODE_SPAN_RE.split(line)[::2] ]
+    spans = [ span.group(0) for span in _CODE_SPAN_RE.finditer(line) ]
+    lines[idx] = "".join(piece for pair in zip(prose, [ *spans, "" ], strict = True) for piece in pair)
+  out = "\n".join(lines)
 
   # a file nobody references is still landed — the operator is told, the job is not failed
   for name in sorted(delivered - linked):
@@ -516,7 +532,7 @@ def land_result(job_dir: Path, target_doc: Path) -> dict:
     # the document first, with its links pointed at the neighbours it will sit beside
     body = (job_dir / _RESULT_DIR / names[0]).read_text()
     target_doc.parent.mkdir(parents = True, exist_ok = True)
-    target_doc.write_text(_fix_links(body, names[1:], job_dir))
+    spec_paths.write_text_atomic(target_doc, _fix_links(body, names[1:], job_dir))
     landed.append(str(target_doc.resolve().relative_to(repo.resolve())))
 
     # then every attachment, beside it, under the basename the response declared

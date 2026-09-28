@@ -26,6 +26,8 @@ from pathlib import Path
 import explainers as _explainers  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import scope as _scope  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from textfile import TextFile  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -798,7 +800,7 @@ class DomainIndex:
     if existing == rendered:
       return False
     index_abs.parent.mkdir(parents = True, exist_ok = True)
-    index_abs.write_text(rendered, encoding = _ENCODING)
+    TextFile(path = index_abs).write(rendered)
     return True
 
   def _preserved_tail(self) -> str:
@@ -1108,8 +1110,8 @@ class DomainPlanner:
     # every fix of one doc is applied in a single read-modify-write pass
     touched: list[str] = []
     for doc_rel in sorted({ fix[FIX_DOC] for fix in fixes }):
-      doc_abs = self.cfg.repo / doc_rel
-      text = doc_abs.read_text(encoding = _ENCODING)
+      doc_file = TextFile(path = self.cfg.repo / doc_rel)
+      text = doc_file.read()
       rewritten = text
       for fix in fixes:
         if fix[FIX_DOC] == doc_rel:
@@ -1118,7 +1120,7 @@ class DomainPlanner:
       # guard: nothing changed (already repaired) — do not touch the file
       if rewritten == text:
         continue
-      doc_abs.write_text(rewritten, encoding = _ENCODING)
+      doc_file.write(rewritten)
       touched.append(doc_rel)
     return touched
 
@@ -1175,13 +1177,14 @@ class DomainPlanner:
       touched.update(self.apply_anchor_fixes(fixes))
 
       # the stamp: the doc as it stands, re-anchored to the current digest
-      text = doc_abs.read_text(encoding = _ENCODING)
+      doc_file = TextFile(path = doc_abs)
+      text = doc_file.read()
       stamped = self._with_hash(text, self.group_hash(blocks, contracts))
 
       # guard: the digest is already the current one — the anchors above were the whole change
       if stamped == text:
         continue
-      doc_abs.write_text(stamped, encoding = _ENCODING)
+      doc_file.write(stamped)
       touched.add(doc_rel)
     return { RESTAMP_DOCS: sorted(touched), RESTAMP_ANCHORS: anchors }
 

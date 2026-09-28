@@ -43,6 +43,8 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import atomic_io as _atomic_io  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import banner as _banner  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import body as _body  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -95,18 +97,58 @@ def _history_explainer(file_path: Path) -> str:
 
 
 # an explainer is one HTML-comment line, or a legacy asterisk-italic line left by earlier
-# seeders — both are replaced with the fresh comment form; underscore-italic lines are content
-_EXPLAINER_LINE_RE = re.compile(r"^(?:\*[^*].*\*|<!-- .* -->)\s*$")
+# seeders — both are replaced with the fresh comment form; any other line is content
+_COMMENT_EXPLAINER_RE = re.compile(r"^<!-- .* -->\s*$")
+_ITALIC_LINE_RE = re.compile(r"^\*([^*].*)\*\s*$")
+
+
+def _first_sentence(text: str) -> str:
+  """
+  Return the first sentence of `text`, without its closing period.
+
+  Args:
+    text: Prose to cut.
+
+  Returns:
+    The text up to its first sentence break, stripped of surrounding whitespace and the period.
+  """
+  return text.split(". ", 1)[0].strip().rstrip(".")
+
+
+# the opening sentence of every explainer ever seeded, which identifies a legacy italic explainer
+_EXPLAINER_OPENINGS = frozenset(_first_sentence(text) for text in _HISTORY_EXPLAINERS.values())
+
+
+def _is_explainer_line(line: str) -> bool:
+  """
+  Report whether `line` is a History explainer, in the comment form or the legacy italic form.
+
+  Args:
+    line: One line of the History section, its line ending removed.
+
+  Returns:
+    `True` for an HTML-comment line, or an asterisk-italic line opening with the first sentence
+    of a seeded explainer; `False` for any other line, an operator's own italic note included.
+  """
+  italic = _ITALIC_LINE_RE.match(line)
+  if italic is not None:
+    return _first_sentence(italic.group(1)) in _EXPLAINER_OPENINGS
+  return bool(_COMMENT_EXPLAINER_RE.match(line))
 
 
 def _reconcile_history_explainer(body: str, explainer: str) -> str:
   """
-  Insert or refresh the explainer line under an existing `# History` tag.
+  Insert or refresh the explainer line under the review-owned `# History` tag.
 
   Idempotent: an explainer line (comment form, or the legacy italic form) already sitting right under the
   `#protected/review/history` tag is replaced (stale language), any other line
-  gets the explainer inserted above it, and a body without the tag is returned
+  gets the explainer inserted above it, and a body without the section is returned
   unchanged.
+
+  Guarantees:
+    - Only the review-owned History section is touched; a History example inside a code fence
+      and every other byte of `body` are left as they are.
+    - The line endings of `body` (LF or CRLF) are kept.
 
   Args:
     body: The document body (post-frontmatter).
@@ -115,17 +157,33 @@ def _reconcile_history_explainer(body: str, explainer: str) -> str:
   Returns:
     The body with exactly one explainer line under the History tag.
   """
-  lines = body.splitlines()
 
-  # guard: no tag line — nothing to reconcile against
-  if Tag.HISTORY not in lines:
-    return body
-  at = lines.index(Tag.HISTORY) + 1
-  if at < len(lines) and _EXPLAINER_LINE_RE.match(lines[at]):
-    lines[at] = explainer
-  else:
-    lines.insert(at, explainer)
-  return "\n".join(lines) + ("\n" if body.endswith("\n") else "")
+  # Contract:
+  # Only the review-owned History section MUST be touched — a fenced History example and every
+  # other byte of `body` stay as they are — and the body's LF or CRLF line endings MUST be kept.
+
+  headings = _parser.h1_headings(body)
+  for idx, (start, _match_end, _title) in enumerate(headings):
+    end = headings[idx + 1][0] if idx + 1 < len(headings) else len(body)
+    lines = body[start:end].splitlines(keepends = True)
+
+    # guard: only the review-owned History section carries the explainer
+    if not _parser.is_historian_section("".join(lines[1:])):
+      continue
+
+    # the tag is the first non-blank line under the heading; the explainer goes right below it
+    tag_at = next(i for i in range(1, len(lines)) if lines[i].strip())
+    tag_line = lines[tag_at]
+    newline = tag_line[len(tag_line.rstrip("\r\n")):] or _parser.line_ending(body)
+    if not tag_line.endswith("\n"):
+      lines[tag_at] = tag_line + newline
+    at = tag_at + 1
+    if at < len(lines) and _is_explainer_line(lines[at].rstrip("\r\n")):
+      lines[at] = explainer + lines[at][len(lines[at].rstrip("\r\n")):]
+    else:
+      lines.insert(at, explainer + (newline if at < len(lines) or body.endswith("\n") else ""))
+    return body[:start] + "".join(lines) + body[end:]
+  return body
 
 
 def open_review(file_path: Path, *, expert: str | None = None) -> bool:
@@ -154,8 +212,9 @@ def open_review(file_path: Path, *, expert: str | None = None) -> bool:
   # above the document's first heading — because entering review again means the outcome
   # no longer describes the document.
 
-  text = file_path.read_text()
-  new_text = text
+  # the edits run on LF text; the document's own ending comes back once, on write
+  text = _atomic_io.read_text(file_path)
+  new_text, ending = _atomic_io.to_lf(text)
   new_text = _fm.set_field(new_text, ReviewKey.ACTIVE, True)
   meta, _ = _fm.parse(new_text)
 
@@ -224,19 +283,20 @@ def open_review(file_path: Path, *, expert: str | None = None) -> bool:
 # tagged `#protected/review/history` (persistent under the protected-section
 # contract) and stays the terminal section for the document's whole life.
   if _parser.find_history(body) is None:
+    body = _parser.close_open_fence(body, ending)
     if not body.endswith("\n"):
       body += "\n"
     if not body.endswith("\n\n"):
       body += "\n"
-    body += f"# History\n{Tag.HISTORY}\n{_history_explainer(file_path)}\n"
+    body += "\n".join(("# History", Tag.HISTORY, _history_explainer(file_path), ""))
   else:
     # a pre-existing section gets its explainer reconciled — inserted when a document from
     # before this line existed re-enters review, replaced when the vault language changed
     body = _reconcile_history_explainer(body, _history_explainer(file_path))
-  new_text = fm_text + body
+  new_text = _atomic_io.restore_ending(fm_text + body, ending)
   if new_text == text:
     return False
-  file_path.write_text(new_text)
+  _atomic_io.write_text_atomic(file_path, new_text)
   return True
 
 

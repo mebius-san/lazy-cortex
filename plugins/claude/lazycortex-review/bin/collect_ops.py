@@ -64,6 +64,8 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import atomic_io as _atomic_io  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import body as _body  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import frontmatter as _fm  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -409,7 +411,9 @@ def _build_agent_body(
   result_source = jdir / _RESULT_DIR / result_name
   _require_entry_lands(result_source, None, document)
   attachments = _attachment_names(request, response, jdir, document)
-  result_text = result_source.read_text()
+  # the payload is processed as LF like the document; `collect_for_file` gives it the document's
+  # own ending on write
+  result_text = _atomic_io.read_text(result_source).replace("\r\n", "\n")
   _result_meta, result_body = _fm.parse(result_text)
 
   # guard: a main-writer payload is the full document body, no owned section
@@ -428,17 +432,18 @@ def _build_agent_body(
 
 
 def _apply_one_job(
-    text: str, jdir: Path, request: dict, response: dict, document: Path,
+    text: str, jdir: Path, request: dict, response: dict, document: Path, ending: str,
 ) -> tuple[str, list[str]] | None:
   """
   Apply one DONE job's response to `text`.
 
   Args:
-    text: Current document text (frontmatter + body).
+    text: Current document text (frontmatter + body), LF outside its fenced code blocks.
     jdir: Job-bundle directory the response's `result` path resolves against.
     request: Parsed `request.json` contents.
     response: Parsed `response.json` contents.
     document: The review document this job targets, which the attachments land beside.
+    ending: The document's line ending, which the payload's fenced code blocks take.
 
   Returns:
     A `(document_text, attachments)` tuple — the updated document text and the attachment
@@ -462,6 +467,13 @@ def _apply_one_job(
     agent_body, phase, owner, attachments = _build_agent_body(jdir, request, response, document)
   except (KeyError, OSError, PayloadError):
     return None
+
+  # the payload's fenced blocks take the document's ending now, since the write-back conversion
+  # never reaches inside a fence; every other line stays LF through the whole pipeline
+  agent_body = _atomic_io.to_fence_ending(agent_body, ending)
+
+  # a fence the agent left open would swallow every operator section grafted after the payload
+  agent_body = _parser.close_open_fence(agent_body, ending)
   section_layout = (
       {owner: request[JobKey.POSITION]} if owner is not None and JobKey.POSITION in request else None
   )
@@ -630,8 +642,9 @@ def collect_for_file(repo: Path, file_path: Path, *, commit: bool = True) -> dic
   candidates = [jdir for jdir in _job_dirs_for_file(repo, file_path) if _job_status(jdir) == JobStatus.DONE]
 
   # the document text accumulates payloads across the batch; `applied` collects what to consume
-  original = file_path.read_text()
-  text = original
+  # the ending is decided once from the file as read; every payload is applied to the LF text
+  original = _atomic_io.read_text(file_path)
+  text, ending = _atomic_io.to_lf(original)
   applied: list[Path] = []
 
   # every attachment this batch delivered, as repo-relative paths, for the commit pathspec
@@ -655,7 +668,7 @@ def collect_for_file(repo: Path, file_path: Path, *, commit: bool = True) -> dic
     if response.get(JobKey.OUTCOME) == Outcome.EMPTY:
       applied.append(jdir)
       continue
-    outcome_applied = _apply_one_job(text, jdir, request, response, file_path)
+    outcome_applied = _apply_one_job(text, jdir, request, response, file_path, ending)
 
     # guard: nothing to apply for this job — leave it uncollected
     if outcome_applied is None:
@@ -677,6 +690,9 @@ def collect_for_file(repo: Path, file_path: Path, *, commit: bool = True) -> dic
   # waiver: 'collected'/'landed' are this verb's own wire-shape keys, read by its callers
   summary: dict = {"collected": len(applied), **({"landed": landed} if landed else {})}
 
+  # the LF result takes the document's own line ending once, just before it is written
+  text = _atomic_io.restore_ending(text, ending)
+
   # drain the queue either way; the wake plumbing differs per caller below
   for jdir in applied:
     _consume_job(repo, jdir)
@@ -686,7 +702,7 @@ def collect_for_file(repo: Path, file_path: Path, *, commit: bool = True) -> dic
   if not commit:
     _job_markers.update(repo, file_path, { JobMarker.ACTIVE_JOB: None })
     if text != original:
-      file_path.write_text(text)
+      _atomic_io.write_text_atomic(file_path, text)
     return summary
 
   # standalone shape: hand the turn back — the `active_job` marker comes off and the
@@ -702,7 +718,7 @@ def collect_for_file(repo: Path, file_path: Path, *, commit: bool = True) -> dic
   # postman its own wake channel if experts start landing no-op edits routinely
   if text != original or landed:
     if text != original:
-      file_path.write_text(text)
+      _atomic_io.write_text_atomic(file_path, text)
     _git_ops.commit_mechanical(
         repo, file_path,
         author = {JobKey.NAME: BotIdentity.NAME, JobKey.EMAIL: BotIdentity.EMAIL},

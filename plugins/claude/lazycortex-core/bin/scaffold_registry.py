@@ -14,7 +14,10 @@ from __future__ import annotations
 import json
 import os
 import sys
-import tempfile
+from pathlib import Path
+
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import runtime_state  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -264,6 +267,10 @@ def _rewrite_block(md: str, body_lines: list[str]) -> str:
   `body_lines`, preserving every other byte in the source including the final
   newline when originally present.
 
+  Guarantees:
+    - The source's own line ending is kept: a CRLF source is rewritten CRLF throughout,
+      including the fence markers and `body_lines`; an LF source stays LF.
+
   Args:
     md: Full markdown source containing a `## Registry` ```yaml block.
     body_lines: Replacement lines to place between the fence markers.
@@ -273,10 +280,45 @@ def _rewrite_block(md: str, body_lines: list[str]) -> str:
   """
   lines, open_idx, close_idx = _locate_block(md)
   new_lines = lines[: open_idx + 1] + body_lines + lines[close_idx:]
-  text = "\n".join(new_lines)
+
+  # Contract:
+  # The source's own line ending is kept: a CRLF source is rewritten CRLF throughout, an LF
+  # source stays LF.
+
+  # the source's own line ending is kept, so a CRLF file stays CRLF
+  newline = _newline_of(md)
+  text = newline.join(new_lines)
   if md.endswith("\n"):
-    text += "\n"
+    text += newline
   return text
+
+
+def _newline_of(md: str) -> str:
+  """
+  Return the line ending a markdown source uses.
+
+  Args:
+    md: Full markdown source.
+
+  Returns:
+    `\\r\\n` when the source carries any CRLF line ending, otherwise `\\n`.
+  """
+  return "\r\n" if "\r\n" in md else "\n"
+
+
+def _read(path: str) -> str:
+  """
+  Read a rule file as stored, with no newline translation.
+
+  Args:
+    path: File to read.
+
+  Returns:
+    The file's text with its line endings untouched.
+  """
+  # waiver: stdlib file-mode idiom
+  with open(path, encoding = "utf-8", newline = "") as fle:
+    return fle.read()
 
 
 def splice_upsert(md: str, plugin: str, entries: dict) -> str:
@@ -594,18 +636,8 @@ def _atomic_write(path: str, text: str) -> None:
     path: Destination file path (created or overwritten).
     text: Full text content to write.
   """
-  dir_path = os.path.dirname(os.path.abspath(path)) or "."
-  os.makedirs(dir_path, exist_ok = True)
-  # waiver: stdlib idiom, not a domain constant
-  tmp_fd, tmp = tempfile.mkstemp(dir = dir_path, suffix = ".tmp")
-  try:
-    # waiver: stdlib idiom, not a domain constant
-    with os.fdopen(tmp_fd, "w", encoding = "utf-8") as fle:
-      fle.write(text)
-    os.replace(tmp, path)
-  finally:
-    if os.path.exists(tmp):
-      os.unlink(tmp)
+  # the shared writer keeps the file's mode and writes through a symlink to its real target
+  runtime_state.atomic_write_text(Path(path), text)
 
 
 def _emit(obj: dict) -> int:
@@ -654,6 +686,10 @@ def _sync_rule(src: str, registry: str, *, exists: bool) -> int:
   is carried over from the consumer's current copy. The written file is re-read
   and compared before the outcome is reported.
 
+  Guarantees:
+    - Refreshing an existing consumer file preserves that file's own line ending in the
+      merged result, regardless of the shipped source's line ending.
+
   Args:
     src: Path of the shipped rule file.
     registry: Path of the consumer's rule file.
@@ -665,8 +701,7 @@ def _sync_rule(src: str, registry: str, *, exists: bool) -> int:
   # guard: without the shipped source there is nothing to refresh from
   if not os.path.exists(src):
     return _emit({ "status": "error", "msg": f"shipped source not found: {src}" })
-  with open(src, encoding = "utf-8") as fle:
-    shipped = fle.read()
+  shipped = _read(src)
 
   # an absent target takes the shipped file whole, empty registry block included
   if not exists:
@@ -674,20 +709,25 @@ def _sync_rule(src: str, registry: str, *, exists: bool) -> int:
     new_md = shipped
     status = "installed"
   else:
-    with open(registry, encoding = "utf-8") as fle:
-      current = fle.read()
+    current = _read(registry)
     try:
       new_md = graft_registry(shipped, current)
     except ValueError as err:
       return _emit({ "status": "error", "msg": str(err) })
+
+    # Contract:
+    # Refreshing an existing consumer file preserves that file's own line ending in the
+    # merged result, regardless of the shipped source's line ending.
+
+    # the consumer's line ending survives a refresh from the shipped source
+    new_md = new_md.replace("\r\n", "\n").replace("\n", _newline_of(current))
     if new_md == current:
       return _emit({ "status": "unchanged", "registry": registry })
     _atomic_write(registry, new_md)
     status = "refreshed"
 
   # a write that did not land must never be reported as applied
-  with open(registry, encoding = "utf-8") as fle:
-    written = fle.read()
+  written = _read(registry)
 
   # guard: a target that does not hold the intended bytes is a failure, not a sync
   if written != new_md:
@@ -744,8 +784,7 @@ def main(argv: list[str]) -> int:  # pylint: disable=too-many-return-statements,
       new_md = splice_upsert(_MINIMAL, args.plugin, _load_entries(args.entries))
       _atomic_write(args.registry, new_md)
       return _emit({"status": "created-and-registered", "plugin": args.plugin})
-    with open(args.registry, encoding = "utf-8") as fle:
-      md = fle.read()
+    md = _read(args.registry)
     # waiver: external-result schema field name, not an internal key
     errs = [ fnd for fnd in validate(md) if fnd["severity"] == "FAIL" ]
 
@@ -769,8 +808,7 @@ def main(argv: list[str]) -> int:  # pylint: disable=too-many-return-statements,
   if args.cmd == "remove":
     if not exists:
       return _emit({"status": "absent", "plugin": args.plugin})
-    with open(args.registry, encoding = "utf-8") as fle:
-      md = fle.read()
+    md = _read(args.registry)
     new_md = splice_remove(md, args.plugin)
     if new_md == md:
       return _emit({"status": "absent", "plugin": args.plugin})
@@ -781,8 +819,7 @@ def main(argv: list[str]) -> int:  # pylint: disable=too-many-return-statements,
   # waiver: argparse CLI signature, not a domain key
   if args.cmd == "list":
     if exists:
-      with open(args.registry, encoding = "utf-8") as fle:
-        md = fle.read()
+      md = _read(args.registry)
     else:
       md = _MINIMAL
     return _emit({"status": "ok", "registry": parse_registry_block(md)})
@@ -791,8 +828,7 @@ def main(argv: list[str]) -> int:  # pylint: disable=too-many-return-statements,
   # waiver: argparse CLI signature, not a domain key
   if args.cmd == "validate":
     if exists:
-      with open(args.registry, encoding = "utf-8") as fle:
-        md = fle.read()
+      md = _read(args.registry)
     else:
       md = _MINIMAL
     # the registry's own location names the consumer scope its relative template paths live in

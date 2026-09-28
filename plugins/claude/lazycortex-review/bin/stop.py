@@ -20,6 +20,8 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import atomic_io as _atomic_io  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import frontmatter as _fm  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from keys import ReviewKey  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -66,11 +68,12 @@ def stop_review(file_path: Path) -> bool:
   # done-lists, approval state, and the document body are left unchanged.
 
   # flip the active flag; every other lifecycle key is left untouched
-  text = file_path.read_text()
-  new_text = _fm.set_field(text, ReviewKey.ACTIVE, False)
+  text = _atomic_io.read_text(file_path)
+  lf_text, ending = _atomic_io.to_lf(text)
+  new_text = _atomic_io.restore_ending(_fm.set_field(lf_text, ReviewKey.ACTIVE, False), ending)
   if new_text == text:
     return False
-  file_path.write_text(new_text)
+  _atomic_io.write_text_atomic(file_path, new_text)
   return True
 
 

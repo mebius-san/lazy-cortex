@@ -51,6 +51,10 @@ _GIT_DIR = ".git"
 # Mode string for a binary-content read probe.
 _READ_BINARY = "rb"
 
+# Line endings folded before a content comparison, so a CRLF copy of an LF file compares equal.
+_CRLF = b"\r\n"
+_LF = b"\n"
+
 
 class _Key:
   """
@@ -302,7 +306,8 @@ class RemoteMirror:
     # # Classification of a mirrored file subset
     # Every source file selected by the include and exclude patterns is classified against the
     # destination as added, updated, or unchanged, depending on whether it is missing, differs
-    # from, or is byte-identical to the destination's copy; a file the current selection no
+    # from, or is identical to the destination's copy, line endings aside (a CRLF copy of an LF
+    # file is the same text); a file the current selection no
     # longer names is classified removed. A symlink, a file over the configured size ceiling,
     # or a file that looks binary is classified skipped instead, so a mirror never dereferences
     # a symlink, pulls in an oversized file, or drops binary content into a destination meant
@@ -321,10 +326,11 @@ class RemoteMirror:
       dest_abs = self._dest / rel
       if not dest_abs.is_file():
         items.append({ _Key.PATH: rel, _Key.ACTION: ACTION_ADDED })
-      elif src_abs.read_bytes() == dest_abs.read_bytes():
+      elif src_abs.read_bytes().replace(_CRLF, _LF) == dest_abs.read_bytes().replace(_CRLF, _LF):
 
         # Contract:
-        # A destination file already byte-identical to its source classifies as unchanged, so
+        # A destination file already identical to its source once both are read with LF line
+        # endings classifies as unchanged, so
         # a second `sync` against an unchanged source plans all-unchanged and writes nothing.
 
         # file content matches — nothing for sync to do here

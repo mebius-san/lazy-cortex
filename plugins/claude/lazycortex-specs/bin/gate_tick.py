@@ -29,7 +29,9 @@ cascades into its targets. This worker keeps only the three concerns no LLM need
   sweep is `coordinator_dispatch.py`'s own backstop: that git-watch routine only re-checks a
   coordinator job's marker when a NEW commit wakes it, so a job that dies with no further commit
   landing would otherwise leave the marker stranded forever — this worker's periodic md-scan
-  cadence catches it regardless (4a debt, plan 4b Task 5).
+  cadence catches it regardless, because the routine is registered with `change_gate: false`
+  (the md-scan change gate would otherwise skip a note whose folder did not change, and a
+  finished job changes nothing there).
 - Structural note-check: `note_ops.note_check`'s violations (an unrecognized or mistyped
   frontmatter key, a missing or misordered required section) are folded into this tick's own
   result — read-only, repaired by the coordinator through its pen and `note-set-key`, never by
@@ -69,6 +71,10 @@ import iconize_inline  # noqa: E402  # pylint: disable=import-error,wrong-import
 import note_explainers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
@@ -124,18 +130,6 @@ _JOBS_BASE = ".experts/.jobs"
 # Bot identity for this worker's own commits (job-marker application + History line).
 _PROMOTE_AUTHOR_NAME = "lazy-spec.gate-tick"
 _PROMOTE_AUTHOR_EMAIL = "lazy-spec.gate-tick@bot.invalid"
-
-# Regex templates for a YAML block-list frontmatter value (`key:\n  - a\n  - b\n`), shared by
-# `read_fm_list` / `write_fm_list`. `flip_gate.parse_frontmatter`'s flat scalar parse skips
-# bullet lines entirely, so a list-typed key needs its own reader/writer.
-_FM_LIST_BLOCK_RE_TEMPLATE = r"(?m)^{key}\s*:\s*\n(?:\s+-\s*.*\n)*"
-_FM_LIST_INLINE_RE_TEMPLATE = r"(?m)^{key}\s*:\s*\[\s*\]\s*$\n?"
-# Populated inline form (`key: ["a", "b"]` / `key: [a, b]`) — the wizard-documented shape for
-# `spec_targets`, read-only (never written by `write_fm_list`, which only ever emits the block
-# or empty-inline forms above). `read_fm_list` matches this only after the two above fail, so an
-# empty `[]` still takes the dedicated empty-inline path.
-_FM_LIST_INLINE_POPULATED_RE_TEMPLATE = r"(?m)^{key}\s*:\s*\[(.*)\]\s*$"
-
 
 def commit_note_change(asset_dir: Path, asset_note: Path, subject: str) -> None:
   """
@@ -337,12 +331,7 @@ def set_fm_json(fm_text: str, key: str, value: dict) -> str:
   pat = _compile_key_pattern(key)
   if pat.search(fm_text):
     return pat.sub(lambda _m: f"{key}: {literal}", fm_text, count = 1)
-  close_idx = fm_text.rfind("---\n")
-
-  # guard: malformed frontmatter without a closing fence
-  if close_idx < 0:
-    return fm_text
-  return fm_text[:close_idx] + f"{key}: {literal}\n" + fm_text[close_idx:]
+  return spec_frontmatter.insert_before_close(fm_text, f"{key}: {literal}\n")
 
 
 def del_fm_key(fm_text: str, key: str) -> str:
@@ -365,8 +354,10 @@ def del_fm_key(fm_text: str, key: str) -> str:
 
 def read_fm_list(fm_text: str, key: str) -> list[str]:
   """
-  Read a YAML list-typed frontmatter value. Recognizes both the block form (`key:\\n  - a\\n
-  - b\\n`) and the wizard-documented populated inline form (`key: ["a", "b"]`).
+  Read a YAML list-typed frontmatter value.
+
+  Recognizes both the block form — indented or not, never reading the closing fence as an
+  item — and the inline form (`key: ["a", "b"]`), returning members unquoted.
 
   Args:
     fm_text: The frontmatter block text (including its opening/closing `---` fences), or any
@@ -377,68 +368,27 @@ def read_fm_list(fm_text: str, key: str) -> list[str]:
     The list's string members, in file order; empty when the key is an inline `[]`, absent, or
     written with no members.
   """
-  pat = re.compile(_FM_LIST_BLOCK_RE_TEMPLATE.format(key = re.escape(key)))
-  match = pat.search(fm_text)
-  if match is not None:
-    return [
-        stripped[1:].strip()
-        for stripped in (line.strip() for line in match.group(0).splitlines()[1:])
-        if stripped.startswith("-")
-    ]
-
-  # no block form — try the wizard-documented populated inline form (`key: ["a", "b"]`); an
-  # inline-`[]` or a genuinely absent key both fall through this to the empty return below
-  pat_inline = re.compile(_FM_LIST_INLINE_POPULATED_RE_TEMPLATE.format(key = re.escape(key)))
-  inline_match = pat_inline.search(fm_text)
-
-  # guard: no inline-populated form either — absent key, or written as empty inline `[]`
-  if inline_match is None:
-    return []
-  interior = inline_match.group(1).strip()
-
-  # guard: `key: []` matched here too (empty interior) — same empty result as the dedicated form
-  if not interior:
-    return []
-
-  # a trailing comma (`[a, b, ]`) splits to a final empty member — drop it rather than collect
-  # a blank token no caller declared
-  return [
-      stripped for member in interior.split(",")
-      if (stripped := member.strip().strip("'\""))
-  ]
+  return spec_frontmatter.read_list(fm_text, key)
 
 
 def write_fm_list(fm_text: str, key: str, values: list[str]) -> str:
   """
-  Set or insert a `key:` YAML block-list value in a frontmatter block.
+  Set or insert a `key:` YAML list value in a frontmatter block.
 
-  Mirrors `apply_request.py`'s `set_fm_list` (same replacement rule — an existing inline `[]`
-  or multi-line `- ` block is replaced in place, a missing key is appended before the closing
-  fence); duplicated here rather than imported per this `bin/` tree's own per-file small-helper
-  convention. Reused by `note_ops.note_set_key` (its `_Kind.LIST` writer).
+  Reused by `note_ops.note_set_key` (its `_Kind.LIST` writer). Members are written as YAML
+  scalars, quoted only when YAML would otherwise read them differently. An existing inline
+  (empty or populated) or block list — indented or not — is replaced in place, a missing key is
+  inserted before the closing fence, and an empty list is written as `key: []`.
 
   Args:
     fm_text: The frontmatter block text (including its opening/closing `---` fences).
     key: The list-typed frontmatter key.
-    values: Replacement member list, rendered as unquoted `- <value>` lines.
+    values: Replacement member list.
 
   Returns:
     The updated frontmatter text.
   """
-  block_lines = "\n".join(f"  - {value}" for value in values)
-  replacement = f"{key}:\n{block_lines}\n" if values else f"{key}: []\n"
-  pat_inline = re.compile(_FM_LIST_INLINE_RE_TEMPLATE.format(key = re.escape(key)))
-  pat_block = re.compile(_FM_LIST_BLOCK_RE_TEMPLATE.format(key = re.escape(key)))
-  if pat_inline.search(fm_text):
-    return pat_inline.sub(replacement, fm_text, count = 1)
-  if pat_block.search(fm_text):
-    return pat_block.sub(replacement, fm_text, count = 1)
-  close_idx = fm_text.rfind("---\n")
-
-  # guard: malformed frontmatter without a closing fence — leave untouched
-  if close_idx < 0:
-    return fm_text
-  return fm_text[:close_idx] + replacement + fm_text[close_idx:]
+  return spec_frontmatter.write_list(fm_text, key, values)
 
 
 def _compile_key_pattern(key: str) -> re.Pattern[str]:
@@ -572,7 +522,7 @@ def apply_job_marker(
 
     # the landing writes into the asset folder this call is about to edit, so the note text read
     # before it is now stale — re-read it, or the write below would revert what just landed
-    text = asset_note.read_text()
+    text = spec_paths.read_text(asset_note)
     _, fm_end = flip_gate.parse_frontmatter(text)
     fm_text, body = text[:fm_end], text[fm_end:]
 
@@ -607,7 +557,7 @@ def apply_job_marker(
     subject = f"{_PROMOTE_AUTHOR_NAME}: halt {asset_dir.name} — {reason}"
 
   # one write, one commit, shared by every branch above
-  asset_note.write_text(note_explainers.heal_note_text(asset_note, fm_text + body))
+  spec_paths.write_text_atomic(asset_note, note_explainers.heal_note_text(asset_note, fm_text + body))
   commit_note_change(asset_dir, asset_note, subject)
 
   # the applied marker's action plus the job identity it acted on, for every branch above
@@ -704,7 +654,7 @@ def _apply_coordinator_job_marker(
         body, coordinator_job_dead_line(trigger, job_id, lang = note_lang), today_str,
         repo = repo_root,
     )
-    asset_note.write_text(text[:fm_end] + note_explainers.ensure_explainers(body, note_lang))
+    spec_paths.write_text_atomic(asset_note, text[:fm_end] + note_explainers.ensure_explainers(body, note_lang))
     commit_note_change(
         asset_dir, asset_note,
         f"{_PROMOTE_AUTHOR_NAME}: coordinator job {job_id} ({trigger}) died on {asset_dir.name}",
@@ -751,7 +701,7 @@ def gate_tick(asset_note: Path, today: str | None = None) -> dict:
   repo_root = flip_gate.repo_root(asset_dir)
   # waiver: sibling-module date resolution -- the one today-pinning helper every specs worker shares
   today_str = flip_gate.effective_today(today)
-  text = asset_note.read_text()
+  text = spec_paths.read_text(asset_note)
   _, fm_end = flip_gate.parse_frontmatter(text)
   body = text[fm_end:]
   markers = spec_job_markers.read(repo_root, asset_note)

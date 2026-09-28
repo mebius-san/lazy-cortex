@@ -141,7 +141,9 @@ if str(_BIN) not in sys.path:
 from summary_render import apply_container_stats  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 # pylint: disable-next=import-error,wrong-import-position
-from spec_paths import find_settings_root, resolve_plugin_cli, spec_content_root  # noqa: E402
+from spec_paths import (  # noqa: E402
+    find_settings_root, read_text, resolve_plugin_cli, spec_content_root, write_text_atomic,
+)
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from spec_keys import (  # noqa: E402  # pylint: disable=import-error,wrong-import-position
     BOOL_TRUE,
@@ -167,6 +169,8 @@ import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-posi
 import iconize_inline  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
@@ -535,23 +539,7 @@ def parse_frontmatter(text: str) -> tuple[dict, int]:
     and `fm_end` is the byte offset of the first character after the closing fence.
     Returns `({}, 0)` when no frontmatter is present.
   """
-  if not text.startswith("---\n"):
-    return {}, 0
-  # waiver: inline numeric literal -- length of the leading '---\n' fence consumed below
-  rest = text[4:]
-
-  # guard: empty frontmatter block (`---\n---\n`) — recognise as valid, no values
-  if rest.startswith("---\n"):
-    # waiver: inline numeric literal -- length of the two stacked '---\n' fences
-    return {}, 8
-  end_idx = rest.find("\n---\n")
-
-  # guard: opening fence without closing fence — not a valid block
-  if end_idx < 0:
-    return {}, 0
-  block = rest[:end_idx]
-  # waiver: inline numeric literal -- length of the leading '---\n' fence
-  fm_end = 4 + end_idx + len("\n---\n")
+  block, fm_end = spec_frontmatter.block(text)
   values: dict = {}
   current_list_key: str | None = None
   for line in block.splitlines():
@@ -561,11 +549,9 @@ def parse_frontmatter(text: str) -> tuple[dict, int]:
     if not stripped or stripped.startswith("#"):
       continue
 
-    # guard: list continuation line (indented `- value`)
-    if stripped.startswith("- ") and line.startswith(("  ", "\t")):
-      if current_list_key:
-        item = stripped[2:].strip().strip('"').strip("'")
-        values[current_list_key].append(item)
+    # a list continuation line (`- value`, indented or not) joins the open list key
+    if stripped.startswith("- ") and current_list_key:
+      values[current_list_key].append(spec_frontmatter.strip_comment(stripped[2:].strip()).strip('"').strip("'"))
       continue
 
     # guard: not a key:value line
@@ -573,7 +559,7 @@ def parse_frontmatter(text: str) -> tuple[dict, int]:
       continue
     k, _, v = line.partition(":")
     k = k.strip()
-    v_str = v.strip()
+    v_str = spec_frontmatter.strip_comment(v.strip())
 
     # guard: empty key
     if not k:
@@ -1155,12 +1141,30 @@ def _strip_routing(body: str) -> str:
     body: Request body (post-frontmatter).
 
   Returns:
-    The body with the routing section excised; consecutive blank lines collapsed
-    to at most one blank line.
+    The body with the routing section excised; the blank lines meeting at the cut collapse to
+    at most one blank line, and blank runs anywhere else are left as they are. Lines inside a
+    fenced code block never start or end the section.
   """
-  pat = rf"(?ms)^{re.escape(_K.ROUTING_H1)}\s*$.*?(?=^# \S|\Z)"
-  out = re.sub(pat, "", body, count = 1)
-  return re.sub(r"\n{3,}", "\n\n", out)
+  lines = spec_frontmatter.split_lines(body, keepends = True)
+
+  # a `# Routing` or H1 line quoted inside a fenced code block is code, never a section edge
+  fenced = spec_frontmatter.fenced_lines(lines)
+  first = next(( idx for idx, row in enumerate(lines) if not fenced[idx] and row.rstrip() == _K.ROUTING_H1 ), None)
+
+  # guard: no routing section — nothing to excise, nothing to collapse
+  if first is None:
+    return body
+
+  # the section runs to the next real H1, or to the end of the body
+  last = next(( idx for idx in range(first + 1, len(lines)) if not fenced[idx] and re.match(r"# \S", lines[idx]) ),
+              len(lines))
+  start = sum(len(row) for row in lines[:first])
+  end = start + sum(len(row) for row in lines[first:last])
+
+  # only the seam the excision leaves is collapsed; blank runs elsewhere (a code block) are content
+  head, tail = body[:start].rstrip("\n"), body[end:].lstrip("\n")
+  seam = len(body[:start]) - len(head) + len(body[end:]) - len(tail)
+  return head + "\n" * min(seam, 2) + tail
 
 
 def _strip_prior_status_callout(body: str) -> str:
@@ -1183,7 +1187,7 @@ def _strip_prior_status_callout(body: str) -> str:
   tail = body[m_h1.start():]
   out_lines: list[str] = []
   in_status_callout = False
-  for line in head.splitlines(keepends = True):
+  for line in spec_frontmatter.split_lines(head, keepends = True):
     if line.startswith("> "):
       if re.search(_K.STATUS_TAG_PATTERN, line):
         in_status_callout = True
@@ -1258,20 +1262,7 @@ def _set_fm_scalar(fm_text: str, key: str, value: str) -> str:
     Frontmatter text with the key set; existing lines are replaced in place,
     missing keys are appended before the closing fence.
   """
-  pat = re.compile(rf"(?m)^{re.escape(key)}\s*:.*$")
-  if pat.search(fm_text):
-    return pat.sub(f"{key}: {value}", fm_text, count = 1)
-
-  # guard: closing fence absent — leave untouched (parser would not recognise this as a block)
-  _, fm_end_probe = parse_frontmatter(fm_text)
-  if fm_end_probe == 0:
-    return fm_text
-  close_idx = fm_text.rfind("---\n")
-
-  # guard: should be unreachable when fm_end_probe > 0, but defensive against partial fences
-  if close_idx <= 0:
-    return fm_text
-  return fm_text[:close_idx] + f"{key}: {value}\n" + fm_text[close_idx:]
+  return spec_frontmatter.set_scalar(fm_text, key, value)
 
 
 def set_fm_list(fm_text: str, key: str, values: list[str]) -> str:
@@ -1281,27 +1272,14 @@ def set_fm_list(fm_text: str, key: str, values: list[str]) -> str:
   Args:
     fm_text: Full frontmatter text including the opening / closing fences.
     key: List-typed key name.
-    values: Replacement member list, rendered as unquoted `- <value>` lines.
+    values: Replacement member list, each rendered as a YAML scalar (quoted only when YAML
+      would otherwise read it differently).
 
   Returns:
-    Frontmatter text with the list set; an existing inline `[]` or multi-line
-    `- ` block is replaced in place, a missing key is appended before the
-    closing fence.
+    Frontmatter text with the list set; an existing inline or multi-line list is replaced in
+    place, a missing key is appended before the closing fence.
   """
-  block_lines = "\n".join(f"  - {value}" for value in values)
-  replacement = f"{key}:\n{block_lines}\n" if values else f"{key}: []\n"
-  pat_inline = re.compile(rf"(?m)^{re.escape(key)}\s*:\s*\[\s*\]\s*$\n?")
-  pat_block = re.compile(rf"(?m)^{re.escape(key)}\s*:\s*\n(?:\s+- .*\n)*")
-  if pat_inline.search(fm_text):
-    return pat_inline.sub(replacement, fm_text, count = 1)
-  if pat_block.search(fm_text):
-    return pat_block.sub(replacement, fm_text, count = 1)
-
-  # guard: closing fence absent — leave untouched (parser would not recognise this as a block)
-  close_idx = fm_text.rfind("---\n")
-  if close_idx <= 0:
-    return fm_text
-  return fm_text[:close_idx] + replacement + fm_text[close_idx:]
+  return spec_frontmatter.write_list(fm_text, key, values)
 
 
 def _del_fm_key(fm_text: str, key: str) -> str:
@@ -1383,36 +1361,18 @@ def _sweep_request_tag(fm_text: str, new_tag_member: str) -> str:
     Frontmatter text with the `request/*` mirror-tag swept and rewritten;
     non-`request/*` members untouched.
   """
-  tags_re = re.compile(r"(?m)^tags\s*:\s*\n((?:\s+- .*\n)*)")
-  match = tags_re.search(fm_text)
-  if not match:
-    close_idx = fm_text.rfind("---\n")
+  # the first `request/*` member is replaced in place, every other one dropped, the rest kept
+  members: list[str] = []
+  for member in spec_frontmatter.read_list(fm_text, _K.TAGS):
+    if not member.startswith(_K.TAG_PREFIX):
+      members.append(member)
+    elif new_tag_member not in members:
+      members.append(new_tag_member)
 
-    # guard: cannot splice without a closing fence
-    if close_idx < 0:
-      return fm_text
-    return fm_text[:close_idx] + f"tags:\n  - {new_tag_member}\n" + fm_text[close_idx:]
-  existing = match.group(1)
-  kept: list[str] = []
-  added = False
-  for line in existing.splitlines(keepends = True):
-    stripped = line.strip()
-
-    # guard: not a `- ` list member, keep the line verbatim and move on
-    if not stripped.startswith("- "):
-      kept.append(line)
-      continue
-    member = stripped[2:].strip()
-    if member.startswith(_K.TAG_PREFIX):
-      if not added:
-        kept.append(f"  - {new_tag_member}\n")
-        added = True
-      continue
-    kept.append(line)
-  if not added:
-    kept.append(f"  - {new_tag_member}\n")
-  new_block = "".join(kept)
-  return fm_text[:match.start(1)] + new_block + fm_text[match.end(1):]
+  # a list carrying no `request/*` member yet gains the new one at its end
+  if new_tag_member not in members:
+    members.append(new_tag_member)
+  return spec_frontmatter.write_list(fm_text, _K.TAGS, members)
 
 
 def _stamp_request_terminal(fm_text: str, *, request_class: str, request_status: str) -> str:
@@ -1567,7 +1527,7 @@ class _Attach:
     Returns:
       `True` when the doc text changed, `False` when the request was already listed.
     """
-    text = doc_path.read_text()
+    text = read_text(doc_path)
     values, fm_end = parse_frontmatter(text)
     fm_text = text[:fm_end]
     body = text[fm_end:]
@@ -1582,7 +1542,7 @@ class _Attach:
         return False
     fm_text = _Attach._append_source_requests_fm(fm_text, target_member)
     body = _Attach._project_requests_body(body, request_wikilink, request_display)
-    doc_path.write_text(fm_text + body)
+    write_text_atomic(doc_path, fm_text + body)
     return True
 
   @staticmethod
@@ -1598,27 +1558,9 @@ class _Attach:
       Frontmatter text with the member appended to the list, or with the list
       created when the key was previously absent.
     """
-    pat_inline = re.compile(rf"(?m)^{re.escape(_K.SPEC_SOURCE_REQUESTS)}\s*:\s*\[\s*\]\s*$")
-    pat_block = re.compile(
-        rf"(?m)^{re.escape(_K.SPEC_SOURCE_REQUESTS)}\s*:\s*\n((?:\s+- .*\n)*)",
-    )
-    if pat_inline.search(fm_text):
-      replacement = (
-          f"{_K.SPEC_SOURCE_REQUESTS}:\n  - \"{member}\""
-      )
-      return pat_inline.sub(replacement, fm_text, count = 1)
-    match = pat_block.search(fm_text)
-    if match:
-      existing = match.group(1)
-      new_block = existing + f"  - \"{member}\"\n"
-      return fm_text[:match.start(1)] + new_block + fm_text[match.end(1):]
-    close_idx = fm_text.rfind("---\n")
-
-    # guard: cannot splice without a closing fence
-    if close_idx < 0:
-      return fm_text
-    inject = f"{_K.SPEC_SOURCE_REQUESTS}:\n  - \"{member}\"\n"
-    return fm_text[:close_idx] + inject + fm_text[close_idx:]
+    return spec_frontmatter.write_list(
+        fm_text, _K.SPEC_SOURCE_REQUESTS,
+        [ *spec_frontmatter.read_list(fm_text, _K.SPEC_SOURCE_REQUESTS), member ])
 
   @staticmethod
   def _project_requests_body(body: str, request_wikilink: str,
@@ -1711,7 +1653,7 @@ class _FolderNote:
     # union of requests ever appended through this method. A wikilink already present
     # under either projection MUST NOT be appended again.
 
-    text = folder_note.read_text()
+    text = read_text(folder_note)
     today = _today_iso()
     bullet = f"- [[{request_wikilink}|{request_display}]] — {today}"
     if f"[[{request_wikilink}]]" in text or f"[[{request_wikilink}|" in text:
@@ -1741,10 +1683,8 @@ class _FolderNote:
     # the frontmatter union is what seed-doc copies onto checkbox-seeded docs — the body bullet
     # alone is invisible to it, so both projections are maintained together
     _fm_values, fm_end = parse_frontmatter(new_text)
-    existing = re.findall(r'(?m)^  - "\[\[([^\]|]+)\]\]"$', new_text[:fm_end])
-    fm_text = set_fm_list(new_text[:fm_end], _K.SPEC_SOURCE_REQUESTS,
-                           [ f"\"[[{link}]]\"" for link in [ *existing, request_wikilink ] ])
-    folder_note.write_text(fm_text + new_text[fm_end:])
+    fm_text = _Attach._append_source_requests_fm(new_text[:fm_end], f"[[{request_wikilink}]]")
+    write_text_atomic(folder_note, fm_text + new_text[fm_end:])
     return True
 
 
@@ -2011,9 +1951,9 @@ class _Apply:
 
     # the router's own tool judgement overrides whatever the type's declaration seeded
     if tools:
-      note_text = folder_note.read_text()
+      note_text = read_text(folder_note)
       _values, fm_end = parse_frontmatter(note_text)
-      folder_note.write_text(
+      write_text_atomic(folder_note,
           set_fm_list(note_text[:fm_end], _K.SPEC_TOOLS_KEY, tools) + note_text[fm_end:])
     return folder_note, spec_path
 
@@ -2500,10 +2440,10 @@ class _Apply:
       valid_targets: Product-relative path tokens, of any depth, confirmed to resolve to real
         assets.
     """
-    text = folder_note.read_text()
+    text = read_text(folder_note)
     _, fm_end = parse_frontmatter(text)
     fm_text = set_fm_list(text[:fm_end], SpecTargetsKey.TARGETS, valid_targets)
-    folder_note.write_text(fm_text + text[fm_end:])
+    write_text_atomic(folder_note, fm_text + text[fm_end:])
 
   def _write_reference_targets(self, resolved_paths: list[str]) -> None:
     """
@@ -2529,10 +2469,10 @@ class _Apply:
     # `spec_source_requests` attribution, no review opened. The link lives ONLY on the request
     # file's own `spec_targets`.
 
-    text = self.file_path.read_text()
+    text = read_text(self.file_path)
     _, fm_end = parse_frontmatter(text)
     fm_text = set_fm_list(text[:fm_end], SpecTargetsKey.TARGETS, resolved_paths)
-    self.file_path.write_text(fm_text + text[fm_end:])
+    write_text_atomic(self.file_path, fm_text + text[fm_end:])
 
   def _cancel_active_job(self, job_info: dict) -> bool:
     """
@@ -2764,7 +2704,7 @@ class _Apply:
       resolved_wikilinks: Wikilink paths to enumerate in the success callout body.
       reject_reason: Optional one-line rejection reason.
     """
-    text = self.file_path.read_text()
+    text = read_text(self.file_path)
     _, fm_end = parse_frontmatter(text)
     fm_text = text[:fm_end]
     body = text[fm_end:]
@@ -2778,7 +2718,7 @@ class _Apply:
         accepted = accepted, wikilinks = resolved_wikilinks, reason = reject_reason,
     )
     body = _insert_status_callout(body, callout)
-    self.file_path.write_text(fm_text + body)
+    write_text_atomic(self.file_path, fm_text + body)
 
   def _touched_paths(self, inbox: Path) -> list[str]:
     """
@@ -2898,7 +2838,7 @@ class _Apply:
         carrying a JSON error object on stdout and exit `1`.
     """
     # the frontmatter status decides whether this pass has anything left to do
-    text = self.file_path.read_text()
+    text = read_text(self.file_path)
     values, fm_end = parse_frontmatter(text)
     status = values.get(_K.REQUEST_STATUS)
 

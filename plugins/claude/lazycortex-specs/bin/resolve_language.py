@@ -32,6 +32,8 @@ if str(_BIN) not in sys.path:
 
 # waiver: intentional suppression — bare-name sibling import resolved at runtime via sys.path
 import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: intentional suppression — bare-name sibling import resolved at runtime via sys.path
+import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 _SETTINGS_REL = Path(".claude") / "lazy.settings.json"
@@ -89,7 +91,7 @@ def _parse_frontmatter(text: str) -> dict:
     # guard: skip entries with an empty key
     if not k:
       continue
-    values[k] = v.strip()
+    values[k] = spec_frontmatter.strip_comment(v.strip())
   return values
 
 

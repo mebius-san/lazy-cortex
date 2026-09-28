@@ -284,7 +284,8 @@ def scope_key(repo: Path, files: list[str]) -> str:
 
   Guarantees:
     - Identical file lists, in the same order and with identical contents, always produce
-      the same digest, regardless of machine or process.
+      the same digest, regardless of machine or process; contents that differ only in CRLF
+      versus LF line endings count as identical.
 
   Args:
     repo: Repository root.
@@ -297,19 +298,21 @@ def scope_key(repo: Path, files: list[str]) -> str:
 
   # Domain(pytool.pipeline-idempotency):
   # # Review scope identity
-  # A review scope is identified by a hash over every covered file's path and its exact content,
-  # not by a timestamp or a scope description. Two runs that hash to the same value are the same
+  # A review scope is identified by a hash over every covered file's path and its content, not by a
+  # timestamp or a scope description. Content is read with LF line endings, so a CRLF copy of an
+  # unchanged file is the same content. Two runs that hash to the same value are the same
   # review: the later run reuses the earlier verdict instead of dispatching a fresh review, so an
   # unmodified scope is never reviewed twice.
 
   # Contract:
   # Two calls given the same file list, in the same order, with identical file
-  # contents always return the same digest, on any machine and in any process.
+  # contents always return the same digest, on any machine and in any process; contents that
+  # differ only in CRLF versus LF line endings count as identical.
 
   digest = hashlib.sha256()
   for name in files:
     digest.update(name.encode('utf-8'))
-    digest.update((repo / name).read_bytes())
+    digest.update((repo / name).read_bytes().replace(b'\r\n', b'\n'))
 
   # the digest is the cache key — identical content means the scope is already reviewed
   return digest.hexdigest()

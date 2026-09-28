@@ -54,6 +54,8 @@ import tags as _tags          # noqa: E402
 # waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
 import terms as _terms        # noqa: E402
 # waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
+import textfile as _textfile  # noqa: E402
+# waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
 import axes as _axes          # noqa: E402
 # pylint: enable=wrong-import-position
 
@@ -145,6 +147,9 @@ class Cli:
   _ARG_PATH_HELP      = "File path to resolve (absolute or repo-relative)."
   _ARG_REPO           = "--repo"
   _ARG_REPO_HELP      = "Repository root (defaults to $LAZY_REPO_ROOT or cwd)."
+  _ARG_GLOBS_ONLY      = "--globs-only"
+  _ARG_GLOBS_ONLY_DEST = "globs_only"
+  _ARG_GLOBS_ONLY_HELP = "Match the configured path globs only; ignore the scope's frontmatter filter."
   _ARG_FROM              = "--from"
   _ARG_FROM_DEST         = "from_file"
   _ARG_FROM_HELP         = "Path to curation.json produced by the curator."
@@ -400,6 +405,12 @@ class Cli:
       if name == self._CMD_RESOLVE_SCOPE:
         p.add_argument(self._ARG_PATH, help = self._ARG_PATH_HELP)
         p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+        p.add_argument(
+          self._ARG_GLOBS_ONLY,
+          dest = self._ARG_GLOBS_ONLY_DEST,
+          action = self._ACTION_STORE_TRUE,
+          help = self._ARG_GLOBS_ONLY_HELP,
+        )
       elif name == self._CMD_RESOLVE_LANGUAGE:
         p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
       elif name == self._CMD_TEXT:
@@ -605,9 +616,12 @@ class Cli:
     Guarantees:
       - A path that matches no configured scope is reported as data, never as a failure;
         the command always exits 0.
+      - Under `--globs-only` the answer depends only on the configured path globs and the
+        built-in topics-index exclusion, never on the file's existence or the scope's own
+        frontmatter filter.
 
     Args:
-      args: Parsed argument namespace; must carry `.path` and `.repo`.
+      args: Parsed argument namespace; must carry `.path`, `.repo` and `.globs_only`.
 
     Returns:
       Integer exit code (always 0).
@@ -617,10 +631,15 @@ class Cli:
     # A path matching no configured scope is reported as data and NEVER as a failure;
     # the command always exits 0.
 
+    # Contract:
+    # Under `--globs-only`, the printed scope MUST depend only on the configured path globs
+    # and the built-in topics-index exclusion; it MUST NOT depend on the file's existence or
+    # on the scope's own frontmatter filter.
+
     repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
     repo = Path(repo_raw).resolve()
     resolver = _scope.ScopeResolver(repo = repo)
-    result = resolver.resolve_scope_by_path(args.path)
+    result = resolver.resolve_scope_by_path(args.path, apply_filter = not args.globs_only)
     if result is None:
       print(json.dumps({ "scope_id": None }))
     else:
@@ -798,18 +817,19 @@ class Cli:
       )
       return 1
 
+    # a field the curation leaves out is passed as None, so the node keeps its current value
     if has_classify and has_link:
       node.apply(
-        wiki_summary = curation.get(self._FIELD_WIKI_SUMMARY, ""),
-        topics = curation.get(self._FIELD_TOPICS, []),
+        wiki_summary = curation.get(self._FIELD_WIKI_SUMMARY),
+        topics = curation.get(self._FIELD_TOPICS),
         see_also_lines = curation.get(self._FIELD_SEE_ALSO, []),
         connectors = curation.get(self._FIELD_CONNECTORS),
       )
       print(f"apply-node: ok (classify+link) {node_path.name}")
     elif has_classify:
       node.apply_classify(
-        wiki_summary = curation.get(self._FIELD_WIKI_SUMMARY, ""),
-        topics = curation.get(self._FIELD_TOPICS, []),
+        wiki_summary = curation.get(self._FIELD_WIKI_SUMMARY),
+        topics = curation.get(self._FIELD_TOPICS),
         connectors = curation.get(self._FIELD_CONNECTORS),
       )
       print(f"apply-node: ok (classify) {node_path.name}")
@@ -1373,10 +1393,11 @@ class Cli:
       return 1
 
     index_path = (repo / index_rel).resolve()
-    existing = index_path.read_text(encoding = self._ENCODING) if index_path.is_file() else ""
+    index_file = _textfile.TextFile(path = index_path)
+    existing = index_file.read() if index_path.is_file() else ""
     updated = _nodes.set_scalar_field(existing, self._KEY_WIKI_SYNCED_SHA, args.sha)
     index_path.parent.mkdir(parents = True, exist_ok = True)
-    index_path.write_text(updated, encoding = self._ENCODING)
+    index_file.write(updated)
     rel = index_path.relative_to(repo).as_posix()
     print(f"set-synced-sha: ok {args.scope_id} {self._KEY_WIKI_SYNCED_SHA}={args.sha} → {rel}")
     return 0
@@ -1712,8 +1733,9 @@ class Cli:
       print(f"prune-node: skip (file exists) {raw_path}")
       return 0
 
+    # a deleted file has no frontmatter left to filter on, so only the path globs decide its scope
     resolver = _scope.ScopeResolver(repo = repo)
-    result = resolver.resolve_scope_by_path(node_path)
+    result = resolver.resolve_scope_by_path(node_path, apply_filter = False)
     # guard: deleted path does not belong to any configured scope
     if result is None:
       print(f"prune-node: skip (no scope) {raw_path}")

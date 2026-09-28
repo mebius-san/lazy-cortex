@@ -56,6 +56,10 @@ RUNTIME_WRITTEN_TREES = ( ".memory", ".state" )
 # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
 WATCH_RUNTIME_TREES_KEY = "watch_runtime_trees"
 
+# the per-routine opt-out from the md-scan change gate
+# waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
+CHANGE_GATE_KEY = "change_gate"
+
 # the per-routine unit-of-work mode of a file-level git watch
 # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
 GROUP_KEY = "group"
@@ -114,7 +118,7 @@ SCHEMAS = {
     "required": { "paths", "interval_sec" },
     "optional": {
       "command", "expert", "request", "timeout_sec", "filter",
-      JobConfigKey.CAN_COMMIT_IN_REPO,
+      JobConfigKey.CAN_COMMIT_IN_REPO, CHANGE_GATE_KEY,
     },
   },
 }
@@ -670,6 +674,12 @@ def validate_routine_entry(name: str, cfg: dict) -> None:
     if not isinstance(cfg.get("paths"), list):
       raise RoutineConfigError(
         f"routine '{name}' (type=md-scan): 'paths' must be a list of globs"
+      )
+
+    # guard: the change-gate opt-out is a plain boolean
+    if not isinstance(cfg.get(CHANGE_GATE_KEY, True), bool):
+      raise RoutineConfigError(
+        f"routine '{name}' (type=md-scan): '{CHANGE_GATE_KEY}' must be a boolean"
       )
 
 
@@ -2666,9 +2676,15 @@ def _dir_signature(d: Path, walk_files: list[Path], memo: dict[str, str]) -> str
   # sibling files to decide whether anything is actually due. The fingerprint folds in only the files
   # the tick's own scan already considers relevant (paths, modification times, sizes); anything the
   # scan ignores, such as ever-churning runtime bookkeeping, can never by itself invalidate a
-  # previously clean signature. A candidate whose directory signature matches the one recorded after
-  # its last clean run is skipped entirely; a failed run is never recorded as clean, so it is retried
-  # on the very next tick rather than silently going stale.
+  # previously clean signature. The recorded fingerprint of a clean run also covers which program
+  # answers the command and which version of the plugin providing it is installed, plus the
+  # routine's whole configuration, so upgrading the consumer or editing the routine invalidates
+  # every candidate and re-runs each of them exactly once. A routine whose work depends on state
+  # living outside the candidate's own directory — which no directory fingerprint can ever see —
+  # opts out of the skip entirely and runs its command against every matching candidate on every
+  # tick. A candidate whose directory signature matches the one recorded after its last clean run
+  # is skipped entirely; a failed run is never recorded as clean, so it is retried on the very
+  # next tick rather than silently going stale.
 
   key = str(d)
 
@@ -2696,6 +2712,42 @@ def _dir_signature(d: Path, walk_files: list[Path], memo: dict[str, str]) -> str
   sig = hashlib.sha256(repr(entries).encode()).hexdigest()
   memo[key] = sig
   return sig
+
+
+def _hash_gate_identity(resolved_cmd: list[str], cfg: dict) -> str:
+  """
+  Fingerprint what a clean md-scan run depended on besides the candidate's directory.
+
+  Args:
+    resolved_cmd: The routine's command resolved to a runnable argument vector.
+    cfg: The routine's configuration.
+
+  Returns:
+    Hex digest that changes when the resolved command, the resolved plugin's version, or the
+    routine configuration changes.
+  """
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  import hashlib
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  import json
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  from pathlib import Path
+
+  # a resolved script sits in `<plugin>/bin/`; its plugin's manifest names the version it runs
+  versions: list[object] = []
+  for arg in resolved_cmd:
+    # waiver: plugin-manifest location fixed by the Claude Code plugin layout
+    manifest = Path(arg).parent.parent / ".claude-plugin" / "plugin.json"
+    try:
+      # waiver: plugin-manifest field name fixed by the Claude Code plugin layout
+      versions.append(json.loads(manifest.read_text(encoding = "utf-8")).get("version"))
+    # an argument that is no plugin script (the interpreter, a subcommand) has no manifest to read
+    except (OSError, ValueError, AttributeError):
+      continue
+
+  # one digest over the command, its versions, and the whole routine configuration
+  payload = json.dumps([ resolved_cmd, versions, cfg ], sort_keys = True, default = str)
+  return hashlib.sha256(payload.encode()).hexdigest()
 
 
 def _scan_state_path(repo: Path, name: str) -> Path:
@@ -2766,10 +2818,14 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
       from `request` templated in).
     - `command` shape: spawn `command + [str(f)]` as a blocking subprocess.
       A change-detection gate skips the spawn when the candidate's parent-dir
-      signature (file paths + mtimes + sizes) is unchanged since the last
-      clean run; the signature map persists under
-      `.logs/lazy-core/runtime/md-scan-state/<routine-name>.json`. Failed
-      runs are never recorded, so they retry on the next tick.
+      signature (file paths + mtimes + sizes), combined with the resolved
+      command, the providing plugin's version, and the routine's own
+      configuration, matches the one recorded after the last clean run; the
+      signature map persists under
+      `.logs/lazy-core/runtime/md-scan-state/<routine-name>.json`. Setting
+      `change_gate: false` on the routine disables the skip, so the command
+      runs against every matching candidate on every tick. Failed runs are
+      never recorded, so they retry on the next tick.
 
   In-place semantics: never moves the source file; the consumer reads and edits
   the file where it lies. Per-file errors accumulate; one bad file does NOT
@@ -2927,6 +2983,11 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
     next_state: dict = {}
     sig_memo: dict[str, str] = {}
 
+    # the gate keys on what the run depended on beyond the folder; a routine that polls state
+    # living outside the candidate's folder opts out and runs on every tick
+    gate_on = cfg.get(CHANGE_GATE_KEY, True)
+    gate_identity = _hash_gate_identity(resolved_cmd, cfg)
+
   # each candidate is re-read and re-filtered here — the glob only narrowed the field
   for f in candidates:
     try:
@@ -2941,13 +3002,13 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
       continue
     try:
       if use_command:
-        # waiver: resolved_cmd/timeout_sec/_subprocess/subprocess_env/scan_state/next_state/sig_memo are set in the use_command else-branch, used under the same guard
+        # waiver: resolved_cmd/timeout_sec/_subprocess/subprocess_env/scan_state/next_state/sig_memo/gate_on/gate_identity are set in the use_command else-branch, used under the same guard
         # pylint: disable=possibly-used-before-assignment
-        sig = _dir_signature(f.parent, walk_files, sig_memo)
+        sig = _dir_signature(f.parent, walk_files, sig_memo) + gate_identity
 
-        # guard: nothing under this candidate's directory changed since the last
-        # clean run — the consumer would re-derive the same no-op; skip the spawn
-        if scan_state.get(str(f)) == sig:
+        # guard: nothing under this candidate's directory, the resolved command, or the routine
+        # config changed since the last clean run — the consumer would re-derive the same no-op
+        if gate_on and scan_state.get(str(f)) == sig:
           next_state[str(f)] = sig
           unchanged += 1
           continue

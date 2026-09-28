@@ -21,6 +21,8 @@ import explainers as _explainers  # pylint: disable=import-error
 import nodes as _nodes  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import scope as _scope  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from textfile import TextFile  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -121,7 +123,7 @@ class TopicIndex:
     tree = self._collect_tree(node_paths, index_path)
     content = self._render(tree, synced_sha)
     index_path.parent.mkdir(parents = True, exist_ok = True)
-    index_path.write_text(content, encoding = _ENCODING)
+    TextFile(path = index_path).write(content)
     return index_path
 
   def _read_synced_sha(self, index_path: Path) -> str | None:

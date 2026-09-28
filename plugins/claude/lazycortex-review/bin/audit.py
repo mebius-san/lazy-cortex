@@ -52,8 +52,8 @@ if TYPE_CHECKING:
 _VALID_STYLES = {"simple", "diff", "criticmarkup", "html"}
 _SECTION_ID_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
 _FLAT_NAME_RE = re.compile(r"^[a-z0-9_-]+$")
-# Type-name prefix of the four level review classes (`system-vision`, `system-design`,
-# `system-ui-design`, `system-tech`) — their document is loose at a product root, so their
+# Type-name prefix of the five level review classes (`system-vision`, `system-use-cases`,
+# `system-design`, `system-ui-design`, `system-tech`) — their document is loose at a product root, so their
 # product-scoped glob names one file rather than fixing an asset depth.
 _LEVEL_TYPE_PREFIX = "system-"
 
@@ -223,7 +223,7 @@ def _check_override_globs(settings: dict, findings: list[dict]) -> None:
     if not sep:
       continue
 
-    # guard: a level class (`system-vision@<key>` and its three siblings) names one loose
+    # guard: a level class (`system-vision@<key>` and its four siblings) names one loose
     # document at the product root by design — it carries no asset depth to have fixed
     if type_part.startswith(_LEVEL_TYPE_PREFIX):
       continue

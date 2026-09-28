@@ -500,6 +500,8 @@ class EnvVar:
     GIT_CONFIG_PREFIX: Common prefix of every variable in git's environment-config protocol,
       numbered slots and config-file handles alike.
     GIT_HOOKS_PATH: The git config key naming the directory hooks are read from.
+    DAEMON_TOKEN_MARK: The marker the daemon exports beside a token it sourced itself — a SHA-256
+      digest of that token, never the token.
   """
 
   HOOKS_ALLOW_LIST = "LAZYCORTEX_HOOKS_ALLOW_LIST"
@@ -510,6 +512,7 @@ class EnvVar:
   GIT_CONFIG_VALUE = "GIT_CONFIG_VALUE_"
   GIT_CONFIG_PREFIX = "GIT_CONFIG_"
   GIT_HOOKS_PATH = "core.hooksPath"
+  DAEMON_TOKEN_MARK = "LAZYCORTEX_DAEMON_TOKEN_SHA256"
 
 
 # ----------------------------------------------------------------------------------------

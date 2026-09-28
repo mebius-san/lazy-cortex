@@ -46,11 +46,12 @@ unified; `response.json` carries only metadata.
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from errors import PayloadError  # pylint: disable=import-error
+# waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
+import parser as _parser  # pylint: disable=import-error,deprecated-module
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from keys import JobKey, Outcome, Phase, Tag  # pylint: disable=import-error
 
@@ -276,7 +277,6 @@ def validate_response(response: Mapping, *, kind: str) -> None:
 # ------------------------------------------- section-writer body guard
 
 
-_H1_RE = re.compile(r"^# (.+?)\s*$", re.MULTILINE)
 
 
 def _strip_owned_section(body: str, owned_expert: str) -> str:
@@ -291,17 +291,16 @@ def _strip_owned_section(body: str, owned_expert: str) -> str:
   Returns:
     Document body with the owned section removed; all other sections are preserved verbatim.
   """
-  matches = list(_H1_RE.finditer(body))
+  headings = _parser.h1_headings(body)
   keep_ranges: list[tuple[int, int]] = []
-  if not matches:
+  if not headings:
     return body
-  if matches[0].start() > 0:
-    keep_ranges.append((0, matches[0].start()))
-  for i, m in enumerate(matches):
-    start = m.start()
-    end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
+  if headings[0][0] > 0:
+    keep_ranges.append((0, headings[0][0]))
+  for i, (start, match_end, _title) in enumerate(headings):
+    end = headings[i + 1][0] if i + 1 < len(headings) else len(body)
     section = body[start:end]
-    line_end = body.find("\n", m.end())
+    line_end = body.find("\n", match_end)
     heading_len = (line_end + 1 - start) if line_end != -1 else (end - start)
     rest = section[heading_len:]
 

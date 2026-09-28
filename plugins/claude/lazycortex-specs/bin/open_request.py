@@ -66,7 +66,11 @@ if str(_BIN) not in sys.path:
 from spec_keys import BannerTag, Outcome, PlanReview, SpecKey, SpecValue, State  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 # pylint: disable-next=import-error,wrong-import-position
-from spec_paths import find_settings_root, resolve_plugin_cli, spec_content_root  # noqa: E402
+from spec_paths import (  # noqa: E402
+    find_settings_root, read_text, resolve_plugin_cli, spec_content_root, write_text_atomic,
+)
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from summary_render import apply_container_stats  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
@@ -104,6 +108,9 @@ _FRESH_FRONTMATTER = (
     "---\n"
 )
 
+# The frontmatter list key the request mirror tag is kept under.
+_TAGS_KEY = "tags"
+
 
 def _parse_frontmatter(text: str) -> tuple[dict, int, int]:
   """
@@ -118,33 +125,7 @@ def _parse_frontmatter(text: str) -> tuple[dict, int, int]:
     closing `---` line. Returns `({}, 0, 0)` when the text carries no parseable
     frontmatter.
   """
-  if not text.startswith("---\n"):
-    return {}, 0, 0
-  rest = text[4:]
-  end_idx = rest.find("\n---\n")
-  if end_idx < 0:
-    return {}, 0, 0
-  block = rest[:end_idx]
-  # waiver: inline numeric literal -- length of the leading '---\n' fence consumed above
-  fm_end = 4 + end_idx + len("\n---\n")
-  values: dict = {}
-  for line in block.splitlines():
-    stripped = line.lstrip()
-
-    # guard: skip blank lines and comment / bullet markers
-    if not stripped or stripped.startswith(("#", "-")):
-      continue
-
-    # guard: skip lines without a key:value separator
-    if ":" not in line:
-      continue
-    k, _, v = line.partition(":")
-    k = k.strip()
-
-    # guard: skip entries with an empty key
-    if not k:
-      continue
-    values[k] = v.strip()
+  values, fm_end = spec_frontmatter.parse(text)
   return values, 0, fm_end
 
 
@@ -238,15 +219,7 @@ def _set_field(fm_text: str, key: str, value: str) -> str:
   Returns:
     The updated frontmatter text with the key set to the given value.
   """
-  pat = re.compile(rf"(?m)^{re.escape(key)}\s*:.*$")
-  if pat.search(fm_text):
-    return pat.sub(f"{key}: {value}", fm_text, count=1)
-
-# Insert before closing ---
-  close_idx = fm_text.rfind("---\n")
-  if close_idx < 0:
-    return fm_text
-  return fm_text[:close_idx] + f"{key}: {value}\n" + fm_text[close_idx:]
+  return spec_frontmatter.set_scalar(fm_text, key, value)
 
 
 def _unset_field(fm_text: str, key: str) -> str:
@@ -279,20 +252,12 @@ def _ensure_tags_member(fm_text: str, member: str) -> str:
   Returns:
     The frontmatter text with the given member present in the `tags:` block.
   """
-  tags_re = re.compile(r"(?m)^tags\s*:\s*\n((?:\s+- .*\n)*)")
-  m = tags_re.search(fm_text)
-  if m:
-    existing = m.group(1)
-    if f"- {member}" in existing:
-      return fm_text
-    new_block = existing + f"  - {member}\n"
-    return fm_text[:m.start(1)] + new_block + fm_text[m.end(1):]
+  members = spec_frontmatter.read_list(fm_text, _TAGS_KEY)
 
-# No tags block — insert before closing ---
-  close_idx = fm_text.rfind("---\n")
-  if close_idx < 0:
+  # guard: already a member — nothing to write
+  if member in members:
     return fm_text
-  return fm_text[:close_idx] + f"tags:\n  - {member}\n" + fm_text[close_idx:]
+  return spec_frontmatter.write_list(fm_text, _TAGS_KEY, [ *members, member ])
 
 
 def _resolve_review_cli() -> Path:
@@ -383,7 +348,10 @@ def _repair(text: str, values: dict, fm_end: int) -> str:
   if SpecKey.REVIEW_RESULT in values:
     fm_text = _unset_field(fm_text, SpecKey.REVIEW_RESULT)
   fm_text = _ensure_tags_member(fm_text, SpecValue.TAG_DRAFT)
-  return fm_text + body.lstrip("\n")
+
+  # a closing fence at the very end of the file gets its line break, so whatever the review side
+  # appends below it starts on a line of its own
+  return fm_text.rstrip("\n") + "\n" + body.lstrip("\n")
 
 
 def open_naked_file(file_path: Path) -> str:
@@ -425,15 +393,16 @@ def open_naked_file(file_path: Path) -> str:
   # already landed, the file is left in a shape the next call classifies as `partial`, so a
   # retry on the same file always resumes and completes the interrupted opt-in.
 
-  text = file_path.read_text()
+  text = read_text(file_path)
   values, _, fm_end = _parse_frontmatter(text)
   state = _classify(values, text[fm_end:])
   if state == State.NAKED:
-    file_path.write_text(_FRESH_FRONTMATTER + text.lstrip("\n"))
+    # an empty frontmatter block the file already carries is replaced, never stacked under
+    write_text_atomic(file_path, _FRESH_FRONTMATTER + text[fm_end:].lstrip("\n"))
     _bootstrap_review(file_path)
     return Outcome.OPENED
   if state == State.PARTIAL:
-    file_path.write_text(_repair(text, values, fm_end))
+    write_text_atomic(file_path, _repair(text, values, fm_end))
     _bootstrap_review(file_path)
     return Outcome.REPAIRED
   if state == State.READY:

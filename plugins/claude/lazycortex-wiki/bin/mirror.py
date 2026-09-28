@@ -29,6 +29,8 @@ import nodes as _nodes  # pylint: disable=import-error
 import scope as _scope  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from markers import Markers  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from textfile import TextFile  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -439,19 +441,18 @@ class MirrorSync:
       mirror_abs = self._repo / mirror_rel
       mirror_abs.parent.mkdir(parents = True, exist_ok = True)
       source_rel = mirror_rel[len(self.mirror_path) + 1:]
-      mirror_abs.write_text(
-        (self.clone_dir / source_rel).read_text(encoding = _ENCODING), encoding = _ENCODING,
-      )
+      TextFile(path = mirror_abs).write((self.clone_dir / source_rel).read_bytes().decode(_ENCODING))
 
     # changed files are merged so the consumer layer survives the body swap
     for mirror_rel in report[K_UPDATED]:
       mirror_abs = self._repo / mirror_rel
       source_rel = mirror_rel[len(self.mirror_path) + 1:]
+      mirror_file = TextFile(path = mirror_abs)
       merged = self.merge(
         (self.clone_dir / source_rel).read_text(encoding = _ENCODING),
-        mirror_abs.read_text(encoding = _ENCODING),
+        mirror_file.read(),
       )
-      mirror_abs.write_text(merged, encoding = _ENCODING)
+      mirror_file.write(merged)
 
     # files the source dropped disappear from the mirror; prune handles dangling links
     for mirror_rel in report[K_REMOVED]:

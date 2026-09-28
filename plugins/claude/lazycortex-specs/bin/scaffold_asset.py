@@ -60,6 +60,8 @@ import resolve_product as product_registry  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import spec_doc_types  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import spec_frontmatter  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import spec_paths  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import summary_render  # pylint: disable=import-error
@@ -195,11 +197,9 @@ class Keys:
   GIT_DIR = ".git"
 
 
-# The two YAML spellings of the citation key a template may carry, and the body region the
-# projection owns. All three are matched over the whole file: the key never appears outside
-# frontmatter, and the markers never outside `# Sources`.
-_FM_DOCS_INLINE_RE = re.compile(rf"(?m)^{Keys.SPEC_SOURCE_DOCS}\s*:\s*\[\s*\]\s*$\n?")
-_FM_DOCS_BLOCK_RE = re.compile(rf"(?m)^{Keys.SPEC_SOURCE_DOCS}\s*:\s*\n(?:[ \t]+- .*\n)*")
+# The citation key's line in a template's frontmatter, in any YAML spelling, and the body region
+# the projection owns — the markers never appear outside `# Sources`.
+_FM_DOCS_KEY_RE = re.compile(rf"(?m)^{Keys.SPEC_SOURCE_DOCS}[ \t]*:")
 _DOCS_BLOCK_RE = re.compile(
     re.escape(Keys.DOCS_MARKER_START) + r".*?" + re.escape(Keys.DOCS_MARKER_END), re.DOTALL)
 
@@ -357,10 +357,8 @@ def template_doc_type(path: Path) -> str:
   Returns:
     The declared type, or an empty string when the file declares none.
   """
-  # guard: a structural note carries no frontmatter type
-  if not (match := re.match(r"^---\n(.*?)\n---\n", path.read_text(encoding = "utf-8"), re.DOTALL)):
-    return ""
-  typed = re.search(r"(?m)^spec_doc_type\s*:\s*(\S+)\s*$", match.group(1))
+  typed = re.search(r"(?m)^spec_doc_type[ \t]*:[ \t]*(\S+)(?:[ \t]+#.*)?[ \t]*$",
+                    spec_frontmatter.block(path.read_text(encoding = "utf-8"))[0])
   return typed.group(1) if typed else ""
 
 
@@ -563,11 +561,6 @@ def _inject_note_keys(text: str, asset_type: str, tools: list[str]) -> str:
   Returns:
     Text carrying the type key, and the tools key when there were tools to write.
   """
-  fm_match = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
-
-  # guard: no frontmatter block to stamp into
-  if not fm_match:
-    return text
 
   # Contract:
   # A type declaring no default tools never gets a `spec_tools` key at all — the key is written
@@ -577,7 +570,7 @@ def _inject_note_keys(text: str, asset_type: str, tools: list[str]) -> str:
   lines = [ f"{Keys.ASSET_TYPE}: {asset_type}" ]
   if tools:
     lines.append(f"{Keys.SPEC_TOOLS}: [ " + ", ".join(f'"{tool}"' for tool in tools) + " ]")
-  return f"---\n{fm_match.group(1)}\n" + "\n".join(lines) + "\n---\n" + text[fm_match.end():]
+  return spec_frontmatter.insert_before_close(text, "".join(f"{line}\n" for line in lines))
 
 
 def product_tag(record: dict) -> str:
@@ -624,17 +617,11 @@ def ensure_doc_type(text: str, doc_type: str) -> str:
   Returns:
     Text carrying exactly one `spec_doc_type` line in its frontmatter.
   """
-  fm_match = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
-
-  # guard: no frontmatter block to stamp into
-  if not fm_match:
+  # guard: the template already declares the key — nothing to add (a text without frontmatter
+  # has no block to stamp into, and the splice below leaves it untouched)
+  if re.search(r"(?m)^spec_doc_type[ \t]*:", spec_frontmatter.block(text)[0]):
     return text
-  fm_body = fm_match.group(1)
-
-  # guard: the template already declares the key — nothing to add
-  if re.search(r"(?m)^spec_doc_type\s*:", fm_body):
-    return text
-  return f"---\n{fm_body}\n{Keys.DOC_TYPE}: {doc_type}\n---\n" + text[fm_match.end():]
+  return spec_frontmatter.insert_before_close(text, f"{Keys.DOC_TYPE}: {doc_type}\n")
 
 
 def inject_iconize(text: str, icon: str, color: str) -> str:
@@ -651,17 +638,14 @@ def inject_iconize(text: str, icon: str, color: str) -> str:
   Returns:
     Text with the iconize keys spliced into the frontmatter.
   """
-  # guard: no frontmatter block to splice the keys into
-  if not (fm_match := re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)):
-    return text
-  fm_body = fm_match.group(1)
-  inject = f"{Keys.ICONIZE_ICON}: {icon}"
+  inject = f"{Keys.ICONIZE_ICON}: {icon}\n"
   if color:
     # the colour is always double-quoted: a bare `#rrggbb` opens a YAML comment and the key
     # parses as empty (`lazy-obsidian.iconize-protocol.md`, Data model)
-    inject += f'\n{Keys.ICONIZE_COLOR}: "{color}"'
-  new_fm = fm_body + "\n" + inject
-  return f"---\n{new_fm}\n---\n" + text[fm_match.end():]
+    inject += f'{Keys.ICONIZE_COLOR}: "{color}"\n'
+
+  # a text without a frontmatter block is returned untouched by the splice
+  return spec_frontmatter.insert_before_close(text, inject)
 
 
 def _default_source_docs() -> list[tuple[str, str]]:
@@ -716,20 +700,13 @@ def _set_source_docs(text: str, docs: list[tuple[str, str]]) -> str:
   # a block-form list in the frontmatter, bullets between the projection markers — MUST NOT
   # survive into the seeded document; the caller's list is the only source.
 
-  # render the frontmatter half first: a block list when the caller cited anything, the empty
-  # inline list when it cited nothing
-  fm_value = "\n".join(f"  - \"[[{target}]]\"" for target, _ in docs)
-  fm_replacement = (
-      f"{Keys.SPEC_SOURCE_DOCS}:\n{fm_value}\n" if docs
-      else f"{Keys.SPEC_SOURCE_DOCS}: []\n"
-  )
-
-  # both YAML spellings of the key are rewritten: the empty inline list the shipped templates
-  # carry, and the block form a project override may have filled in
-  if _FM_DOCS_INLINE_RE.search(text):
-    text = _FM_DOCS_INLINE_RE.sub(fm_replacement, text, count = 1)
-  else:
-    text = _FM_DOCS_BLOCK_RE.sub(fm_replacement, text, count = 1)
+  # the frontmatter half is rewritten whole in whatever YAML spelling the template carried —
+  # a block list when the caller cited anything, the empty inline list when it cited nothing;
+  # a template that never declared the key does not gain it
+  fm_lines, fm_end = spec_frontmatter.block(text)
+  if _FM_DOCS_KEY_RE.search(fm_lines):
+    text = spec_frontmatter.write_list(
+        text[:fm_end], Keys.SPEC_SOURCE_DOCS, [ f"[[{target}]]" for target, _ in docs ]) + text[fm_end:]
   body_proj = "\n".join(f"- [[{target}|{display}]]" for target, display in docs)
   body_replacement = (
       f"{Keys.DOCS_MARKER_START}\n{body_proj}\n{Keys.DOCS_MARKER_END}" if docs
@@ -807,7 +784,7 @@ def main(argv: list[str]) -> int:
   note_text = inject_iconize(note_text, icon, color)
   note_text = _inject_note_keys(note_text, args.asset_type, tools)
   note_path = target_folder / f"{args.slug}.md"
-  note_path.write_text(note_explainers.heal_note_text(note_path, note_text))
+  spec_paths.write_text_atomic(note_path, note_explainers.heal_note_text(note_path, note_text))
 
   # one doc per --doc entry, each seeded with its cross-reference block and its declared stage
   produced: list[dict] = []
@@ -825,7 +802,7 @@ def main(argv: list[str]) -> int:
     docs = _default_source_docs()
     doc_text = _set_source_docs(doc_text, docs)
     doc_path = target_folder / doc
-    doc_path.write_text(doc_text)
+    spec_paths.write_text_atomic(doc_path, doc_text)
     produced.append({ Keys.OUT_FILE: str(doc_path.relative_to(repo)),
                       Keys.OUT_STAGE: _initial_stage(repo, doc_type, args.product) })
 
@@ -871,7 +848,7 @@ def main(argv: list[str]) -> int:
     # state axis and a shelf has no state (the intake shelves are the deliberate exception)
     if owner and (owner_paint := asset_types.icon_color(owner, record)):
       group_text = inject_iconize(group_text, owner_paint[0], "")
-    group_note.write_text(note_explainers.heal_note_text(group_note, group_text))
+    spec_paths.write_text_atomic(group_note, note_explainers.heal_note_text(group_note, group_text))
     summary_render.apply_container_stats(group_note)
     seeded_group = str(group_note.relative_to(repo))
 

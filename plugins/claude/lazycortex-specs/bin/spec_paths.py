@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import os
+import stat
+import tempfile
 from pathlib import Path
 
 from typing import TYPE_CHECKING
@@ -23,6 +25,16 @@ _VAULT_ROOT_KEY = "vault_root"
 # waiver: sibling-plugin CLI env contract per dev.plugin-boundaries § 1c
 _ENV_PLUGIN_DIRS = "LAZYCORTEX_PLUGIN_DIRS"
 _BIN_DIR = "bin"
+_TMP_SUFFIX = ".tmp"
+_ENCODING = "utf-8"
+_WRITE_MODE = "w"
+# the mode a plain `open()` would give a new file before the umask is applied
+_NEW_FILE_MODE = 0o666
+_LF = "\n"
+_CRLF = "\r\n"
+_CR = "\r"
+_CRLF_BYTES = b"\r\n"
+_LF_BYTES = b"\n"
 
 
 def find_settings_root(start: Path) -> Path:
@@ -205,3 +217,98 @@ def spec_roots(start: Path) -> tuple[Path, Path]:
   """
   settings_root = find_settings_root(start)
   return settings_root, spec_content_root(settings_root)
+
+
+def read_text(path: Path) -> str:
+  """
+  Read a text file with `\\n` line endings.
+
+  Notes:
+    - Performs file I/O.
+
+  Args:
+    path: The file to read, followed through any symlink to its real target.
+
+  Returns:
+    The file's text with every `\\r\\n` turned into `\\n`.
+
+  Raises:
+    OSError: If the file cannot be read.
+  """
+  with open(path, encoding = _ENCODING, newline = "") as handle:
+    raw = handle.read()
+  return raw.replace(_CRLF, _LF)
+
+
+def _disk_ending(target: Path) -> str:
+  """
+  Read the line ending a file on disk uses now: the one its first line break carries.
+
+  Args:
+    target: The resolved file to inspect.
+
+  Returns:
+    `\\r\\n` when the file's first line break is CRLF; `\\n` otherwise, including for a file
+    that does not exist or carries no line break.
+  """
+  try:
+    raw = target.read_bytes()
+  except FileNotFoundError:
+    return _LF
+  first = raw.find(_LF_BYTES)
+  return _CRLF if first > 0 and raw[first - 1:first + 1] == _CRLF_BYTES else _LF
+
+
+def write_text_atomic(path: Path, text: str, newline: str | None = None) -> None:
+  """
+  Replace a file's content in one step, so a reader never sees it half-written.
+
+  Guarantees:
+    - Writes through a symlink to its real target rather than replacing the symlink itself.
+    - Writes the line ending the target on disk uses at write time — CRLF when its first line
+      break is CRLF — and LF for a new file, unless `newline` names the ending explicitly.
+    - An existing target keeps its own permission mode; a new file gets the mode a plain write
+      would give it under the current umask.
+    - On any failure, the temp file is removed and the exception re-raised, leaving the target
+      untouched.
+
+  Notes:
+    - Performs file I/O.
+    - For a new file, briefly sets and restores the process umask to read it — not thread-safe.
+    - A mixed-ending file is written back with its first line break's ending throughout.
+
+  Args:
+    path: The file to write, followed through any symlink to its real target.
+    text: The full text to write, its lines ended by `\\n`.
+    newline: The line ending to write, overriding the one detected on disk; None detects it.
+
+  Raises:
+    OSError: If the write, chmod, or rename into place fails for any reason.
+  """
+  target = path.resolve()
+
+  # the ending comes from the caller or from the file as it is on disk now, never from an earlier read
+  if (newline or _disk_ending(target)) == _CRLF:
+    text = text.replace(_CRLF, _LF).replace(_LF, _CRLF)
+
+  # a replaced file keeps its own mode; a new one gets what a plain write would have given it
+  try:
+    mode = stat.S_IMODE(target.stat().st_mode)
+  except FileNotFoundError:
+    umask = os.umask(0)
+    os.umask(umask)
+    mode = _NEW_FILE_MODE & ~umask
+
+  # the temp file sits beside the target so the final rename never crosses a filesystem
+  fd, tmp_name = tempfile.mkstemp(prefix = f".{target.name}.", suffix = _TMP_SUFFIX, dir = target.parent)
+  try:
+    with os.fdopen(fd, _WRITE_MODE, encoding = _ENCODING, newline = "") as handle:
+      handle.write(text)
+      handle.flush()
+      os.fsync(handle.fileno())
+    os.chmod(tmp_name, mode)
+    os.replace(tmp_name, target)
+  # waiver: broad catch -- an interrupt mid-write must remove the temp file too; the error is re-raised
+  except BaseException:
+    Path(tmp_name).unlink(missing_ok = True)
+    raise

@@ -27,6 +27,8 @@ from typing import TypeVar
 import enum
 import re
 
+# waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
+import parser as _parser  # pylint: disable=import-error,deprecated-module
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from keys import LANG_EN as _LANG_EN, Bucket, Phase  # pylint: disable=import-error
 
@@ -96,8 +98,6 @@ _TAG_TO_STATE = {
 
 _FIRST_LINE_RE = re.compile(r"^>\s*\[!\w+\][^#\n]*#review/([a-z-]+)\s*$")
 
-_H1_RE = re.compile(r"^# .+$", re.MULTILINE)
-
 
 # ------------------------------------------------------------ extract
 
@@ -137,8 +137,8 @@ def extract(body: str) -> State | None:
   # the document's first top-level heading is searched, because a banner-shaped line appearing
   # later in the body is a leftover scaffold trace or a stale snapshot, never the live status.
 
-  h1 = _H1_RE.search(body)
-  scan_end = h1.start() if h1 else len(body)
+  headings = _parser.h1_headings(body)
+  scan_end = headings[0][0] if headings else len(body)
   region = body[:scan_end]
   for line in region.splitlines():
     match = _FIRST_LINE_RE.match(line)
@@ -196,10 +196,6 @@ def _any_unanswered_question(body: str) -> bool:
   """
     # Strip code-fence regions — callout-shaped lines inside ```...```
     # fences are body content, never gating callouts (see parser.strip_code_fences).
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-  # waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
-  import parser as _parser  # pylint: disable=import-error,deprecated-module
   scan_body = _parser.strip_code_fences(body)
   for m in _QUESTION_OPEN_RE.finditer(scan_body):
     block = _find_callout_block(scan_body, m)
@@ -230,9 +226,6 @@ def _has_unanswered_candidate(body: str) -> bool:
 
   # same per-callout gate as questions: a candidate is answered only by a tick inside its
   # own block (the coordination playbook's finalize gate has no carve-outs)
-  # waiver: deferred sibling import matching this module's established parser-import shape
-  # waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
-  import parser as _parser  # pylint: disable=import-error,deprecated-module
   scan_body = _parser.strip_code_fences(body)
   for match in _CANDIDATE_OPEN_RE.finditer(scan_body):
     block = _find_callout_block(scan_body, match)
@@ -516,7 +509,30 @@ _BANNER_BLOCK_RE = re.compile(
 
 # A leading YAML frontmatter block, when the caller passes a full-document
 # body rather than a post-frontmatter one. The banner anchors BELOW it.
-_LEADING_FRONTMATTER_RE = re.compile(r"(?s)\A---\n.*?\n---\n")
+_LEADING_FRONTMATTER_RE = re.compile(r"(?s)\A---\n(.*?)\n---\n")
+
+# a line a YAML frontmatter block can hold: a top-level key, an indented continuation, a list
+# item, a comment, or a blank; any other line means the `---` pair is a pair of thematic breaks
+_FRONTMATTER_LINE_RE = re.compile(r"[A-Za-z_][\w.-]*[ \t]*:(?:\s|$)|[ \t]|-(?:\s|$)|#|$")
+
+
+def _leading_frontmatter(body: str) -> str:
+  """
+  Return the YAML frontmatter block leading `body`, fences included.
+
+  Args:
+    body: A full document or a post-frontmatter body.
+
+  Returns:
+    The leading frontmatter block, or an empty string when `body` does not open with one — a
+    leading pair of `---` thematic breaks around prose is not frontmatter.
+  """
+  match = _LEADING_FRONTMATTER_RE.match(body)
+
+  # guard: no fenced block at the top, or one holding prose rather than YAML
+  if match is None or not all(_FRONTMATTER_LINE_RE.match(line) for line in match.group(1).split("\n")):
+    return ""
+  return match.group(0)
 
 
 def replace_banner(
@@ -579,13 +595,12 @@ def replace_banner(
   ) + "\n"
 
   # Split a leading frontmatter block so the banner never lands above it.
-  fm = _LEADING_FRONTMATTER_RE.match(body)
-  fm_prefix = fm.group(0) if fm is not None else ""
+  fm_prefix = _leading_frontmatter(body)
   rest = body[len(fm_prefix):]
 
   # Strip the existing banner block wherever it sits (top OR mis-anchored
   # below the content), then anchor the fresh banner flush at the top of
   # the remaining content. Independent of where the first H1 is, so a
   # dropped title can no longer push the banner down to `# History`.
-  rest = _BANNER_BLOCK_RE.sub("", rest, count=1).lstrip("\n")
+  rest = _parser.sub_outside_fences(_BANNER_BLOCK_RE, "", rest, count = 1).lstrip("\n")
   return fm_prefix + new_banner + rest

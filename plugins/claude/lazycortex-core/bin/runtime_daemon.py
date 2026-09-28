@@ -8,6 +8,7 @@ detection on bot-author commits. Retry policy lives in routine implementations, 
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime
 import os
@@ -106,6 +107,12 @@ PLUGIN_CACHE_REL = ".claude/plugins/cache"
 # The main loop's termination event — module-level so tests can stub its `wait` as the loop seam.
 _STOP_EVENT = threading.Event()
 
+# the variable every spawn reads its OAuth token from, and the marker recording which value the daemon
+# itself exported there — a SHA-256 digest, never the token, so it survives an in-place restart safely
+# waiver: Claude Code's own environment-variable name, not a domain key
+_OAUTH_TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
+_TOKEN_MARK_ENV = EnvVar.DAEMON_TOKEN_MARK
+
 
 class GitPullDiverged(RuntimeError):
   """
@@ -154,24 +161,6 @@ def is_cache_root(path: Path) -> bool:
   return _VERSION_DIR_RE.fullmatch(path.name) is not None
 
 
-def _manifest_name(root: Path) -> str | None:
-  """
-  Read the plugin name a plugin root declares in its manifest.
-
-  Args:
-    root: Plugin root directory (dev source tree or one cached version).
-
-  Returns:
-    The manifest's name, or None when the manifest is missing or unreadable.
-  """
-  manifest = root / PluginFile.MANIFEST_DIR / PluginFile.MANIFEST
-  try:
-    name = json.loads(manifest.read_text()).get(PluginFile.NAME)
-  except (OSError, json.JSONDecodeError, AttributeError):
-    return None
-  return name if isinstance(name, str) else None
-
-
 def cached_plugin_roots(cache: Path) -> list[Path]:
   """
   Resolve the newest installed version of every plugin in the Claude Code plugin cache.
@@ -206,46 +195,36 @@ def cached_plugin_roots(cache: Path) -> list[Path]:
   ]
 
 
-def set_plugin_dirs(dirs: list[Path], cache_root: Path | None = None) -> None:
+def set_plugin_dirs(dirs: list[Path]) -> None:
   """
   Register plugin source directories the daemon should prefer over the plugin cache.
 
-  Also exports the visible plugin roots to the environment so downstream subprocess routines (such
-  as `lazycortex-core expert-pump-once` or `lazycortex-review tick`) and their own resolvers can
-  reach every enabled plugin: the dev-plugin paths first, then the newest cached version of every
-  other plugin, so a consumer install with no `--plugin-dir` at all still resolves its siblings.
-  Pins `EnvVar.MAX_SUBAGENT_SPAWN_DEPTH` for the same subprocesses.
+  Also exports those directories to the environment so downstream subprocess routines (such as
+  `lazycortex-core expert-pump-once` or `lazycortex-review tick`) and their own resolvers reach the
+  same dev sources. A cached plugin is never exported: every consumer resolves the newest cached
+  version itself when it needs one. Pins `EnvVar.MAX_SUBAGENT_SPAWN_DEPTH` for the same subprocesses.
 
   Guarantees:
-    - `LAZYCORTEX_PLUGIN_DIRS` always lists every registered dev-plugin directory before any cached
-      plugin root, and never lists a cached root for a plugin a dev directory already shadows.
+    - `LAZYCORTEX_PLUGIN_DIRS` lists exactly the registered dev-plugin directories and never a cached
+      plugin root, so a plugin updated after daemon start is never shadowed by its older cached copy.
 
   Args:
     dirs: Plugin source directories to register, in caller-preferred order. Each entry should be the
       root of a plugin source tree containing `.claude-plugin/` and `bin/`.
-    cache_root: The plugin-cache root whose newest versions join the export; None exports `dirs`
-      alone.
   """
   # waiver: a genuine module-level rebind, not a false positive — this is the one writer of that cache
   global _PLUGIN_DIRS  # noqa: PLW0603  # pylint: disable=global-statement
   _PLUGIN_DIRS = [ Path(d).resolve() for d in dirs ]
 
-  # a dev dir shadows the cached copy of the same plugin, so the cached one stays out of the export
-  shadowed = { _manifest_name(d) for d in _PLUGIN_DIRS } - { None }
-  cached = [] if cache_root is None else [
-    root for root in cached_plugin_roots(cache_root) if _manifest_name(root) not in shadowed
-  ]
-
   # Contract:
-  # `LAZYCORTEX_PLUGIN_DIRS` always lists every registered dev-plugin directory before any
-  # cached plugin root, and never lists a cached root for a plugin a dev directory already
-  # shadows. Downstream resolvers that split the variable and take the first match rely on
-  # this ordering to prefer a dev source over an installed version.
+  # `LAZYCORTEX_PLUGIN_DIRS` lists exactly the registered dev-plugin directories and never a cached
+  # plugin root. The daemon outlives plugin updates, so a cached root frozen here at startup would
+  # keep serving an old version; resolvers take the dev entries first and walk the cache themselves,
+  # at call time, for everything else.
 
-  # arguments are not ref-resolved (pass-through JSON values), but flow through to <jdir>/config.json
-  # the same way; daemon-internal `resolve_routine_command` uses `_PLUGIN_DIRS` directly, while this
-  # env handle exists for everyone else
-  os.environ["LAZYCORTEX_PLUGIN_DIRS"] = os.pathsep.join(str(p) for p in [ *_PLUGIN_DIRS, *cached ])
+  # daemon-internal `resolve_routine_command` uses `_PLUGIN_DIRS` directly, while this env handle
+  # exists for everyone else
+  os.environ["LAZYCORTEX_PLUGIN_DIRS"] = os.pathsep.join(str(p) for p in _PLUGIN_DIRS)
 
   # same pin as `expert_pump.py`'s own env construction (see its `Decision:` comment), applied
   # here too so every routine this daemon spawns inherits it, not only the pump's own spawn
@@ -314,7 +293,7 @@ def _rebuild_hook_dir(repo_root: Path, allowed: list[str]) -> Path:
   Only the operator hooks named in `allowed` are linked into it, so a hook the operator has not
   vetted never runs under the daemon. Symlinks rather than copies: an operator edit to a vetted
   hook takes effect without a rebuild. The directory is rebuilt from scratch on every call, so a
-  name dropped from the allow-list stops running on the next daemon start.
+  name dropped from the allow-list stops running on the next loop pass.
 
   Args:
     repo_root: Absolute path to the repository.
@@ -336,9 +315,12 @@ def _rebuild_hook_dir(repo_root: Path, allowed: list[str]) -> Path:
   # directory directly. Only hook names the operator has explicitly named as safe for automated
   # runs are linked into that filtered directory; every other hook the checkout carries, vetted
   # or not for interactive use, simply does not exist as far as the automated runtime's git is
-  # concerned. The filtered directory is rebuilt from scratch before every run, so removing a
-  # name from the vetted list takes effect the next time the runtime starts, without anyone
-  # having to clean up a stale link by hand.
+  # concerned. The runtime re-reads the vetted list on every pass of its own loop and rebuilds
+  # the filtered directory from scratch whenever that list changed since the previous pass, or
+  # whenever the set of vetted hooks actually present in the operator's hook directory changed,
+  # or whenever the operator pointed git at a different hook directory altogether — so a vetted
+  # hook added later, or a moved hook directory, takes effect on the very next pass, without a
+  # restart and without anyone having to clean up a stale link by hand.
 
   # a from-scratch rebuild is what makes a dropped allow-list entry stop running
   # waiver: filesystem path idiom, not a domain constant
@@ -1779,8 +1761,16 @@ def resolve_daemon_token(settings_path: Path, *, env_file: Path | None = None) -
   logged into — unpredictable, and it burns a usage window nobody chose. `daemon.token_env`
   names the environment variable holding this daemon's token.
 
+  Guarantees:
+    - An operator-provided value of the named environment variable takes precedence over the env
+      file; a value the daemon exported itself, identified by a SHA-256 digest marker it also
+      exports, never takes precedence over the env file, including after an in-place restart.
+    - The resolved token is exported only under `CLAUDE_CODE_OAUTH_TOKEN`; the marker variable
+      never carries the token itself, only a SHA-256 digest of it. The marker is exported only
+      beside a value read from the env file or the daemon's own earlier export of one; an
+      operator-provided value is exported with no marker, and any stale marker is removed.
+
   Notes:
-    - The environment variable's value takes precedence over the same variable's entry in the env file.
     - Sets `CLAUDE_CODE_OAUTH_TOKEN` in the process environment to the resolved token, so the pump's
       spawns and every routine started afterward inherit it.
 
@@ -1815,10 +1805,31 @@ def resolve_daemon_token(settings_path: Path, *, env_file: Path | None = None) -
       "machine's ambient login is refused"
     )
   var = var.strip()
-  value = os.environ.get(var) or _env_file_value(
-    # waiver: the operator's canonical env file location, a fixed convention
-    env_file if env_file is not None else Path.home() / ".claude" / ".env", var,
+  # waiver: the operator's canonical env file location, a fixed convention
+  source_file = env_file if env_file is not None else Path.home() / ".claude" / ".env"
+  env_value = os.environ.get(var, "")
+
+  # Contract:
+  # An operator-provided value of the named environment variable takes precedence over the env
+  # file. A value the daemon exported itself — recognised by the SHA-256 digest marker it exports
+  # alongside the token — never takes precedence over the env file, even when that value was
+  # carried forward by an in-place restart.
+
+  # a value the daemon exported itself — it survives an in-place restart — never shadows the env
+  # file, so a token rotated there reaches the running daemon; an operator's own value still wins
+  self_exported = (
+    var == _OAUTH_TOKEN_ENV and bool(env_value)
+    and os.environ.get(_TOKEN_MARK_ENV) == hashlib.sha256(env_value.encode()).hexdigest()
   )
+  # only a value taken from the env file (or the daemon's own earlier export of one) is marked:
+  # marking an operator's value would make the next pass read it as self-exported and let the
+  # file override it
+  if self_exported:
+    value = _env_file_value(source_file, var) or env_value
+    self_sourced = True
+  else:
+    value = env_value or _env_file_value(source_file, var)
+    self_sourced = not env_value
 
   # guard: the variable is named but resolves nowhere — a silent ambient fallback here
   # would defeat the gate
@@ -1827,8 +1838,145 @@ def resolve_daemon_token(settings_path: Path, *, env_file: Path | None = None) -
       f"lazycortex daemon: daemon.token_env names {var!r} but it is set neither in the "
       "environment nor in ~/.claude/.env"
     )
-  os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = value
+
+  # Contract:
+  # The resolved token is exported only under `CLAUDE_CODE_OAUTH_TOKEN`; the accompanying marker
+  # variable never carries the token itself, only a SHA-256 digest of it. The marker is exported
+  # only beside a value read from the env file, or from the daemon's own earlier export of
+  # one; an operator-provided value is exported with no marker, and a stale marker left over
+  # from an earlier pass is removed.
+
+  # export the resolved token for every subsequent spawn to inherit, with the digest marker only
+  # when the daemon itself sourced the value
+  os.environ[_OAUTH_TOKEN_ENV] = value
+  if self_sourced:
+    os.environ[_TOKEN_MARK_ENV] = hashlib.sha256(value.encode()).hexdigest()
+  else:
+    os.environ.pop(_TOKEN_MARK_ENV, None)
   return var
+
+
+def _refresh_daemon_token(repo_root: Path, settings_path: Path) -> None:
+  """
+  Re-resolve the daemon's token between iterations, keeping the previous one when that fails.
+
+  Args:
+    repo_root: Repository root whose journal receives a failed refresh.
+    settings_path: The repository's `lazy.settings.json` path.
+  """
+  # a refresh failure never stops a running daemon: the token exported earlier stays in force and
+  # the journal names the reason, which carries the variable name only, never its value
+  try:
+    resolve_daemon_token(settings_path)
+  # waiver: broad except — a failed refresh of any kind must keep the loop and the previous token alive
+  except (SystemExit, Exception) as e:  # pylint: disable=broad-except
+    _log_routine_result(repo_root, {
+      # waiver: daemon error/trigger token, not an internal key
+      TickResultKey.NAME: "_daemon_token", TickResultKey.EXIT: -1, TickResultKey.DURATION_SEC: 0.0,
+      TickResultKey.ERROR: f"token not refreshed, previous token kept: {e}",
+    })
+
+
+def _sync_hook_filter(repo_root: Path, settings_path: Path, applied: list[str] | None) -> list[str] | None:
+  """
+  Bring the daemon's git hook filter in line with the configured allow-list.
+
+  Guarantees:
+    - The filtered hook directory is rebuilt whenever the allow-list changes, or an allowed
+      hook appears or disappears in the operator's hook directory, or `core.hooksPath` now
+      names a different directory.
+
+  Args:
+    repo_root: Absolute path to the repository.
+    settings_path: The repository's `lazy.settings.json` path.
+    applied: The allow-list currently in force, or None when none has been applied yet.
+
+  Returns:
+    The allow-list in force after the call — `applied` itself when the setting did not change.
+
+  Raises:
+    subprocess.CalledProcessError: When git cannot answer for this path.
+    OSError: When the filtered directory cannot be rebuilt.
+  """
+  allowed = list(
+    (load_section(settings_path, SettingsKey.DAEMON).get(DaemonKey.GIT) or {}).get(GitConfigKey.ALLOWED_HOOKS) or []
+  )
+
+  # Contract:
+  # The filtered hook directory is rebuilt whenever the allow-list changes, or an allowed hook
+  # appears or disappears in the operator's hook directory, or `core.hooksPath` now names a
+  # different directory.
+
+  # guard: the allow-list in force already matches the setting and the links on disk still match
+  # the operator's hooks — nothing to rebuild
+  if allowed == applied and _hook_links_current(repo_root, allowed):
+    return applied
+  pin_hooks_path(_rebuild_hook_dir(repo_root, allowed))
+  return allowed
+
+
+def _hook_links_current(repo_root: Path, allowed: list[str]) -> bool:
+  """
+  Tell whether the filtered hook directory still mirrors the operator's allowed hooks.
+
+  Args:
+    repo_root: Absolute path to the repository.
+    allowed: Hook filenames the operator has vetted for daemon runs.
+
+  Returns:
+    True when every allowed name is linked exactly when the operator's hook directory carries it,
+    and every link points into that directory; False when a hook appeared or vanished there, or
+    `core.hooksPath` now names another directory.
+
+  Raises:
+    subprocess.CalledProcessError: When git cannot answer for this path.
+  """
+  # a cheap signature: one stat and one readlink per allowed name against the directory git would
+  # read hooks from right now
+  # waiver: filesystem path idiom, not a domain constant
+  hook_dir = _git_common_dir(repo_root) / "lazy-hooks"
+  source_dir = _operator_hooks_dir(repo_root)
+  for name in dict.fromkeys(allowed):
+    source = source_dir / name
+    link = hook_dir / name
+    linked = link.is_symlink() and Path(os.readlink(link)) == source
+
+    # guard: the link and the operator's hook disagree on whether this name runs
+    if linked != source.is_file():
+      return False
+  return True
+
+
+def _refresh_hook_filter(repo_root: Path, settings_path: Path, applied: list[str] | None) -> list[str] | None:
+  """
+  Sync the git hook filter, recording a failure instead of raising it.
+
+  Args:
+    repo_root: Absolute path to the repository.
+    settings_path: The repository's `lazy.settings.json` path.
+    applied: The allow-list currently in force, or None when none has been applied yet.
+
+  Returns:
+    The allow-list in force after the call; `applied` unchanged when the sync failed, so the next
+    call retries.
+  """
+
+  # Decision: pin best-effort rather than abort — a checkout git cannot answer for (no repository,
+  # git absent) is a broken environment the operator must see, not a reason to refuse to drive the
+  # rest of the runtime. The unpinned start is loud instead: journal line plus a ledger incident.
+
+  try:
+    return _sync_hook_filter(repo_root, settings_path, applied)
+  # waiver: broad except — the hook filter is best-effort; any failure is journalled and recorded
+  except Exception as e:  # pylint: disable=broad-except
+    _log_routine_result(repo_root, {
+      # waiver: daemon error/trigger token, not an internal key
+      TickResultKey.NAME: "_hook_filter", TickResultKey.EXIT: -1, TickResultKey.DURATION_SEC: 0.0,
+      TickResultKey.ERROR: f"hook filter not pinned: {e}",
+    })
+    # waiver: daemon error/trigger token, not an internal key
+    _record_daemon_error(repo_root, "hook_filter_exception", e)
+    return applied
 
 
 def _env_file_value(env_file: Path, var: str) -> str:
@@ -1864,6 +2012,74 @@ def _env_file_value(env_file: Path, var: str) -> str:
   return ""
 
 
+def _dropbox_refusal(repo_root: Path) -> str | None:
+  """
+  Check whether the checkout's real path lies inside a Dropbox folder.
+
+  Args:
+    repo_root: Repository root the daemon is about to drive.
+
+  Returns:
+    The refusal reason when a component of the resolved path equals `Dropbox`, starts with
+    `Dropbox`, or ends with ` Dropbox` (which covers `~/Library/CloudStorage/Dropbox*`); None otherwise.
+  """
+  here = repo_root.resolve()
+
+  # guard: no path component carries a Dropbox folder name — nothing to refuse
+  # waiver: Dropbox folder-naming convention, a fixed external token
+  if not any(part.startswith("Dropbox") or part.endswith(" Dropbox") for part in here.parts):
+    return None
+
+  # the reason names the resolved path and where the daemon belongs instead
+  return (
+    f"{str(here)!r} is inside a Dropbox folder; run the daemon in a git-only clone such as "
+    "~/lazy-runtime/<repo>"
+  )
+
+
+def _gate_dropbox(repo_root: Path) -> None:
+  """
+  Refuse to start the daemon in a checkout that lives inside a Dropbox folder.
+
+  Notes:
+    - Records a `daemon_error` incident with cause `dropbox_denied` in the repository's error
+      ledger and prints the refusal reason to stderr before exiting.
+
+  Args:
+    repo_root: Repository root the daemon is about to drive.
+
+  Raises:
+    SystemExit: When the resolved path of `repo_root` lies inside a Dropbox folder.
+  """
+
+  # Domain(runtime.authorization):
+  # # The runtime drives only a git-only checkout
+  # Dropbox syncs bytes outside git: it can deliver line-ending rewrites and half-written files from
+  # other machines into the tree the runtime commits from. A checkout living in a Dropbox folder is
+  # therefore never driven, whatever the host-and-checkout pairing says; the runtime runs only in a
+  # clone that git alone keeps up to date. The refusal is final for that process.
+
+  # limit: detects Dropbox folders only by name; other sync clients (iCloud, OneDrive) pass — add their
+  # folder shapes to the refusal check if a repository is ever driven from one
+
+  detail = _dropbox_refusal(repo_root)
+
+  # guard: outside every Dropbox folder — nothing to refuse
+  if detail is None:
+    return
+
+  # reported like the run_here refusal, and likewise without a halt block in the synced `.runtime/`
+  error_ledger.record(repo_root, {
+    IncidentKey.INCIDENT: f"daemon:{repo_root.name}", IncidentKey.PHASE: IncidentPhase.OPENED,
+    IncidentKey.KIND: IncidentKind.DAEMON_ERROR,
+    # waiver: closed-set cause token documented in lazy-core.state-schema
+    IncidentKey.CAUSE: "dropbox_denied",
+    IncidentKey.ACTOR: IncidentActor.DAEMON, IncidentKey.DETAIL: detail,
+  })
+  print(f"lazycortex daemon refuses to start: {detail}", file = sys.stderr)
+  sys.exit(1)
+
+
 def _gate_run_here(repo_root: Path) -> None:
   """
   Refuse to start the daemon on a machine or checkout that lacks authorization to run it.
@@ -1882,7 +2098,9 @@ def _gate_run_here(repo_root: Path) -> None:
 
   Raises:
     SystemExit: When `daemon.run_here` is missing, is not a mapping, does not include this
-      machine's hostname, or maps it to a checkout other than `repo_root`.
+      machine's hostname, or maps it to a checkout other than `repo_root` — including when the
+      tracked settings file or the local overlay is empty.
+    json.JSONDecodeError: When the tracked settings file or the local overlay holds invalid JSON.
   """
 
   # Domain(runtime.authorization):
@@ -1893,9 +2111,56 @@ def _gate_run_here(repo_root: Path) -> None:
   # repository, is refused outright rather than allowed to run alongside the authorized pair —
   # nothing in the runtime reconciles two drivers of one repository, so letting a second one
   # start would duplicate every dispatch and let the two silently overwrite each other's
-  # schedule. The refusal is permanent for that process; there is no self-recovery, because the
-  # fix is always an operator decision about which pairing should actually own the repository.
+  # schedule. Authorization is checked once when the runtime starts and again before every pass
+  # it drives afterwards; a runtime whose pairing was withdrawn since the previous check stops
+  # rather than driving the repository once more. A transient failure to read the configuration
+  # during one of the later checks is not itself a withdrawal — the runtime keeps driving the
+  # repository under the authorization already granted, and only records the failure. A later
+  # check that finds the pairing withdrawn looks once more after a short wait, since a save or a
+  # sync client may be replacing the configuration; only a second refusal read from cleanly
+  # readable configuration stops the runtime. The
+  # refusal at the initial check is permanent for that process; there is no self-recovery,
+  # because the fix is always an operator decision about which pairing should actually own the
+  # repository.
 
+  detail = _run_here_refusal(repo_root)
+
+  # guard: this machine is mapped, and to this very checkout — the only shape that grants a daemon
+  if detail is None:
+    return
+
+  # the refusal is reported and then final — a halt block would sit in `.runtime/`, which a synced
+  # checkout shares with the machine that legitimately owns the daemon
+  error_ledger.record(repo_root, {
+    IncidentKey.INCIDENT: f"daemon:{repo_root.name}", IncidentKey.PHASE: IncidentPhase.OPENED,
+    IncidentKey.KIND: IncidentKind.DAEMON_ERROR,
+    # waiver: closed-set cause token documented in lazy-core.errors functional spec
+    IncidentKey.CAUSE: "run_here_denied",
+    IncidentKey.ACTOR: IncidentActor.DAEMON, IncidentKey.DETAIL: detail,
+  })
+  print(f"lazycortex daemon refuses to start: {detail}", file = sys.stderr)
+  sys.exit(1)
+
+
+# Reason recorded when a per-pass re-check finds a settings file it cannot read.
+_UNREADABLE_RUN_HERE = "daemon.run_here unreadable: settings file empty or not valid JSON"
+_REGATE_REREAD_SEC = 1.0
+
+
+def _run_here_refusal(repo_root: Path) -> str | None:
+  """
+  Check `daemon.run_here` for this machine and checkout without reporting anything.
+
+  Args:
+    repo_root: Repository root the daemon drives.
+
+  Returns:
+    None when this machine and checkout are the authorised pairing, else the refusal reason.
+
+  Raises:
+    json.JSONDecodeError: When the tracked settings file or the local overlay holds invalid
+      JSON — an empty file of either reads as an empty mapping.
+  """
   gate = load_section(repo_root / SettingsFile.REL, SettingsKey.DAEMON).get(DaemonKey.RUN_HERE)
 
   # neither of the two facts the gate is matched against is knowable from the settings alone: the
@@ -1909,27 +2174,90 @@ def _gate_run_here(repo_root: Path) -> None:
 
   # guard: this machine is mapped, and to this very checkout — the only shape that grants a daemon
   if mapped is not None and Path(str(mapped)).expanduser().resolve() == here:
-    return
+    return None
 
   # a boolean, or a bare hostname, cannot say WHICH checkout drives the project: a machine holding
   # several of them would grant every one, and two daemons on one repository reconcile nothing
-  detail = (
+  return (
     f"daemon.run_here must map hostnames to checkout paths, got {json.dumps(gate)}"
     if not isinstance(gate, dict) else
     f"{host!r} at {str(here)!r} is not the checkout named in daemon.run_here {json.dumps(gate)}"
+  
   )
 
-  # the refusal is reported and then final — a halt block would sit in `.runtime/`, which a synced
-  # checkout shares with the machine that legitimately owns the daemon
-  error_ledger.record(repo_root, {
-    IncidentKey.INCIDENT: f"daemon:{repo_root.name}", IncidentKey.PHASE: IncidentPhase.OPENED,
-    IncidentKey.KIND: IncidentKind.DAEMON_ERROR,
-    # waiver: closed-set cause token documented in lazy-core.errors functional spec
-    IncidentKey.CAUSE: "run_here_denied",
-    IncidentKey.ACTOR: IncidentActor.DAEMON, IncidentKey.DETAIL: detail,
-  })
-  print(f"lazycortex daemon refuses to start: {detail}", file = sys.stderr)
-  sys.exit(1)
+
+def _has_unreadable_settings(repo_root: Path) -> bool:
+  """
+  Report whether the tracked settings file is momentarily unreadable.
+
+  Args:
+    repo_root: Repository root whose tracked settings file is checked.
+
+  Returns:
+    True when the tracked settings file exists and holds only whitespace or is not valid JSON;
+    False otherwise, a missing file included.
+  """
+  # an empty local overlay reads as `{}`, as `load_section` reads it; an invalid one already fails that read
+  try:
+    # waiver: stdlib encoding idiom
+    raw = (repo_root / SettingsFile.REL).read_text(encoding = "utf-8")
+  except FileNotFoundError:
+    return False
+
+  # guard: an empty file is a save caught between its truncate and its write
+  if not raw.strip():
+    return True
+  try:
+    json.loads(raw)
+  except json.JSONDecodeError:
+    return True
+  return False
+
+
+def _regate_run_here(repo_root: Path) -> None:
+  """
+  Re-check `daemon.run_here` for a running daemon, stopping it only on a confirmed revocation.
+
+  Notes:
+    - An authorised first read returns immediately, without waiting.
+    - Sleeps once for a short wait only after a clean refusal on the first read.
+    - Records a `daemon_error` incident when the first read fails to parse, without waiting, or
+      when the tracked settings file is still empty or invalid at the confirming read — the
+      daemon keeps running either way.
+    - Records a `run_here_denied` incident before stopping on a refusal confirmed by the second
+      read.
+
+  Args:
+    repo_root: Repository root the daemon is driving.
+
+  Raises:
+    SystemExit: When a clean refusal on the first read is confirmed by a second read a short
+      wait later, from a tracked settings file that reads cleanly.
+  """
+  # an authorised pairing passes on the first read and never waits; a refusal is looked at once
+  # more after a short wait, since a save or a sync client may have the file mid-replace. Only the
+  # second read decides: it reports and stops on a clean refusal, and a tracked file still empty or
+  # half-written there is a read failure recorded while the granted authorisation stands; a file
+  # that fails to parse on the first read is recorded at once, the next pass looks again
+  try:
+    # guard: the pairing is authorised — nothing to confirm; a file that fails to parse raises here
+    # and is recorded below without waiting
+    if _run_here_refusal(repo_root) is None:
+      return
+
+    # the confirming read after a short wait: a tracked file still empty or half-written is a read
+    # failure, never a refusal
+    time.sleep(_REGATE_REREAD_SEC)
+    # guard: the tracked file still answers nothing — a read failure, recorded below
+    if _has_unreadable_settings(repo_root):
+      raise ValueError(_UNREADABLE_RUN_HERE)
+
+    # a cleanly read refusal is reported and stops the daemon
+    _gate_run_here(repo_root)
+  # waiver: broad except — only an explicit refusal (SystemExit) may stop the daemon here
+  except Exception as e:  # pylint: disable=broad-except
+    # waiver: daemon error/trigger token, not an internal key
+    _record_daemon_error(repo_root, "internal_exception", e)
 
 
 def _record_daemon_error(repo_root: Path, cause: str, e: Exception) -> None:
@@ -1981,14 +2309,29 @@ def run(repo_root: Path) -> None:
   polling interval.
 
   Guarantees:
+    - A checkout whose resolved path lies inside a Dropbox folder is refused before any other
+      startup step — before the `daemon.run_here` check, token resolution, and metrics bring-up
+      — even when `daemon.run_here` authorises this host and checkout.
     - The daemon's own token resolves and exports before any spawn-capable machinery comes up, so
       no routine, hook, or subprocess this process starts ever runs under the machine's ambient
       login instead of the daemon's own token.
+    - `daemon.run_here` authorisation is re-checked at the start of every pass; losing it stops
+      the daemon before the repository is driven again.
     - A halt present on disk at the end of a pass is in the metrics exposition before that pass
       sleeps, together with the queue, token, job, and incident gauges — never deferred to the
       next iteration.
 
   Notes:
+    - The daemon's token and its git hook allow-list are both re-read at the start of every pass,
+      so a rotated token or an edited allow-list reaches a daemon that runs for days without a
+      restart; the filtered hook directory is also rebuilt when an allowed hook file appears or
+      disappears in the operator's hook directory, or when `core.hooksPath` now names a different
+      directory.
+    - `daemon.run_here` authorisation is checked once at startup and again at the start of every
+      loop pass; losing it while the daemon is already running stops the daemon with `SystemExit`
+      before the repository is driven again. A failure to read the settings file during that
+      re-check is not treated as a lost authorisation — the daemon keeps running under the
+      authorisation already granted and records a `daemon_error` incident instead.
     - Every pass ends by publishing the on-disk halt state and the disk-derived gauges, so a halt
       a worker raised in its own process reaches the dashboard on the pass that announces it.
     - When the daemon is halted, the loop sleeps for the polling interval directly to avoid a tight
@@ -2006,9 +2349,12 @@ def run(repo_root: Path) -> None:
     repo_root: Absolute path to the repository the daemon should drive.
 
   Raises:
-    SystemExit: If the `daemon.run_here` setting does not designate this host and checkout as the
-      pair that drives this repository, or if `daemon.token_env` is absent or blank, or the
-      variable it names resolves to no value in either the environment or the env file.
+    SystemExit: When the resolved checkout path lies inside a Dropbox folder, checked first at startup,
+      or when `daemon.run_here` does not designate this host and checkout as the pair that
+      drives this repository — checked once at startup and again at the start of every loop pass,
+      so losing authorisation while the daemon is running stops it before the next pass drives the
+      repository again — or when `daemon.token_env` is absent or blank, or the variable it names
+      resolves to no value in either the environment or the env file.
   """
   # The daemon's own git calls and everything it spawns run with optional locks off: a
   # background `git status` otherwise rewrites the shared `.git/index` on nearly every run,
@@ -2031,6 +2377,17 @@ def run(repo_root: Path) -> None:
   # GAP A: a startup failure (metrics bring-up, fingerprint snapshot, settings migration) must leave a
   # ledger trace rather than a silent dead daemon. The iteration body is guarded separately (#9).
   try:
+
+    # Contract:
+    # A checkout whose resolved path lies inside a Dropbox folder MUST be refused before any
+    # other startup step — before the `daemon.run_here` authorisation check, before token
+    # resolution, and before metrics bring-up. The refusal holds even when `daemon.run_here`
+    # authorises this host and checkout.
+
+    # a checkout inside a Dropbox folder receives bytes from other machines outside git — refused
+    # before any other gate, whatever run_here grants
+    _gate_dropbox(repo_root)
+
     # the gate is the only thing standing between this checkout and a second daemon driving it from
     # elsewhere, so it is answered before the metrics port is claimed. Inside the startup guard because
     # it reads the settings file: an unparseable one must land in the ledger like any other startup
@@ -2047,23 +2404,9 @@ def run(repo_root: Path) -> None:
     # spawn-capable machinery comes up
     resolve_daemon_token(settings_path)
 
-    # Decision: pin best-effort rather than abort — a checkout git cannot answer for (no repository,
-    # git absent) is a broken environment the operator must see, not a reason to refuse to drive the
-    # rest of the runtime. The unpinned start is loud instead: journal line plus a ledger incident.
-
     # the hook filter is pinned before anything else touches git: from here on every git call this
     # process makes — and every one its routines make — reads hooks from the vetted directory only
-    try:
-      git_cfg = load_section(settings_path, SettingsKey.DAEMON).get(DaemonKey.GIT) or {}
-      pin_hooks_path(_rebuild_hook_dir(repo_root, list(git_cfg.get(GitConfigKey.ALLOWED_HOOKS) or [])))
-    except Exception as e:
-      _log_routine_result(repo_root, {
-        # waiver: daemon error/trigger token, not an internal key
-        TickResultKey.NAME: "_hook_filter", TickResultKey.EXIT: -1, TickResultKey.DURATION_SEC: 0.0,
-        TickResultKey.ERROR: f"hook filter not pinned: {e}",
-      })
-      # waiver: daemon error/trigger token, not an internal key
-      _record_daemon_error(repo_root, "hook_filter_exception", e)
+    applied_hooks = _refresh_hook_filter(repo_root, settings_path, None)
 
     # metrics come up only once the git surface is settled
     _init_metrics_if_enabled(repo_root)
@@ -2096,6 +2439,23 @@ def run(repo_root: Path) -> None:
 
   # keep serving ticks until a stop is requested; nothing below may take the process down
   while not _STOP_EVENT.is_set():
+
+    # Contract:
+    # `daemon.run_here` authorisation is re-checked at the start of every pass; losing it stops
+    # the daemon with SystemExit before the repository is driven again. A failure to read the
+    # settings file during that check is not a revocation: the daemon keeps running on the
+    # authorisation already granted and records a daemon_error instead.
+
+    # authorisation is re-checked every pass: a daemon whose host or checkout was dropped from
+    # `daemon.run_here` stops here, before driving the repository once more
+    _regate_run_here(repo_root)
+
+    # the token and the hook allow-list are re-read every pass, so a rotated token or an edited
+    # allow-list reaches a daemon that runs for days without a restart
+    _refresh_daemon_token(repo_root, settings_path)
+    applied_hooks = _refresh_hook_filter(repo_root, settings_path, applied_hooks)
+
+    # one guarded pass over the routines and the pump
     _run_iteration_guarded(repo_root)
     sleep_s: float = 5.0   # safe default when the tail blows up
     try:

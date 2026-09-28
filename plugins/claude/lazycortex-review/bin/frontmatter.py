@@ -19,6 +19,7 @@ of the document untouched.
 """
 from __future__ import annotations
 
+import json
 import re
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -30,7 +31,10 @@ if TYPE_CHECKING:
 
 
 _FENCE = "---"
-_FENCE_LINE = re.compile(r"^---[ \t]*$", re.MULTILINE)
+_FENCE_LINE = re.compile(r"^---[ \t]*\r?$", re.MULTILINE)
+
+# the opening fence: an optional BOM, `---`, trailing blanks, then a line end or end of text
+_OPEN_FENCE = re.compile(r"\A\ufeff?---[ \t]*(?:\r?\n|\Z)")
 
 
 # ----------------------------------------------------------------- helpers
@@ -54,12 +58,13 @@ def _find_fences(text: str) -> tuple[int, int, int] | None:
   Raises:
     ParseError: If an opening fence exists but no matching closing fence is found.
   """
-  # guard: no opening fence on the first line → the document carries no frontmatter
-  if not text.startswith("---\n") and text != "---" and not text.startswith("---\r\n"):
+  # guard: no opening fence on the first line (after an optional BOM) → no frontmatter
+  opening = _OPEN_FENCE.match(text)
+  if opening is None:
     return None
 
   # locate the closing fence as the next `---`-only line after the opening fence
-  after_open = len("---\n") if text.startswith("---\n") else len("---\r\n")
+  after_open = opening.end()
   rest = text[after_open:]
   match = _FENCE_LINE.search(rest)
 
@@ -74,7 +79,7 @@ def _find_fences(text: str) -> tuple[int, int, int] | None:
   close_start = after_open + match.start()
   close_end = after_open + match.end()
 
-  # The fence may be followed by `\n` (typical) or end-of-file.
+  # The fence may be followed by `\n` (typical), `\r\n`, or end-of-file.
   if close_end < len(text) and text[close_end] == "\n":
     close_end += 1
 
@@ -84,22 +89,76 @@ def _find_fences(text: str) -> tuple[int, int, int] | None:
 
 def _serialise_scalar(value: object) -> str:
   """
-  Render a Python scalar into a bare YAML literal.
+  Render a Python scalar into a YAML literal, double-quoting a string that YAML cannot hold bare.
+
+  Guarantees:
+    - A Python bool, None, or int value is emitted using its YAML literal spelling.
+    - A string is emitted double-quoted when writing it bare would break the YAML line or
+      structure: empty, surrounding whitespace, a line break, a leading indicator character,
+      an embedded `: ` or ` #`, or a trailing colon.
+    - A string already written as a strict single-line flow list or mapping is emitted as is.
+    - A string that YAML would merely retype, such as `9`, `true`, `null`, or a date, is emitted
+      bare on purpose.
 
   Args:
     value: The Python value to serialise.
 
   Returns:
-    A bare YAML string representation of the value.
+    The YAML representation of the value.
   """
+
+  # Contract:
+  # A Python bool, None, or int value MUST be emitted using its YAML literal spelling.
+  # A string MUST be emitted double-quoted when writing it bare would break the YAML line or
+  # structure: an empty string, one with surrounding whitespace, one containing a line break, one
+  # starting with a leading indicator character, one containing `: ` or ` #`, or one ending in a
+  # trailing colon.
+  # A string already written as a strict single-line flow list or mapping MUST be emitted as is.
+  # A string that YAML would merely retype, such as `9`, `true`, `null`, or a date, MUST be
+  # emitted bare — a caller passes a real Python type when a number or boolean is meant.
+
+  # booleans, null, and numbers have one YAML spelling each
   if isinstance(value, bool):
     return "true" if value else "false"
   if value is None:
     return "null"
   if isinstance(value, (int, float)):
     return str(value)
-  return str(value)
+  # a Python list or mapping renders as JSON, which is a valid YAML flow collection
+  if isinstance(value, (list, tuple, dict)):
+    return json.dumps(value, ensure_ascii = False, default = str)
+  text = str(value)
 
+  # guard: a caller-rendered flow list or mapping is already YAML
+  if _FLOW_COLLECTION_RE.fullmatch(text):
+    return text
+
+  # a JSON string literal is a valid YAML double-quoted scalar
+  return json.dumps(text, ensure_ascii = False) if _NEEDS_QUOTES_RE.search(text) else text
+
+
+# one item of a single-line flow collection: a quoted scalar, or a plain scalar holding no flow
+# indicator, no comment `#`, and no `:` followed by a blank or an indicator
+_FLOW_ITEM = (
+    r"(?:\"(?:[^\"\\\r\n]|\\.)*\"|'(?:[^'\r\n]|'')*'"
+    r"|[^\s\-?:,\[\]{}#&*!|>'\"%@`](?:[^,\[\]{}#:\r\n]|:(?=[^\s,\[\]{}]))*)"
+)
+
+# a string a caller already rendered as a genuine YAML flow list or mapping, all on one line
+_FLOW_COLLECTION_RE = re.compile(
+    rf"\[[ \t]*(?:{_FLOW_ITEM}(?:[ \t]*,[ \t]*{_FLOW_ITEM})*[ \t]*)?\]"
+    rf"|\{{[ \t]*(?:{_FLOW_ITEM}[ \t]*:[ \t]+{_FLOW_ITEM}"
+    rf"(?:[ \t]*,[ \t]*{_FLOW_ITEM}[ \t]*:[ \t]+{_FLOW_ITEM})*[ \t]*)?\}}"
+)
+
+# any shape YAML's plain-scalar syntax cannot carry: empty, surrounding whitespace, a line break,
+# a leading indicator character, a `: ` or ` #` inside, or a trailing colon
+_NEEDS_QUOTES_RE = re.compile(
+    r"\A\Z|\A\s|\s\Z|[\r\n]|\A[-?:](?:\s|\Z)|\A[,\[\]{}#&*!|>'\"%@`]|:(?:\s|\Z)|\s#"
+)
+
+# a line that continues the previous key's value: indented, or a column-0 list item
+_CONTINUATION_LINE_RE = re.compile(r"^(?:[ \t]+\S|-(?:[ \t]|$))")
 
 _KEY_LINE = re.compile(r"^([A-Za-z_][\w.-]*)\s*:(?:\s|$)")
 
@@ -126,8 +185,9 @@ def _key_block_span(block: str, key: str) -> tuple[int, int] | None:
   """
   Return the byte offsets of the full logical entry for `key` within `block`.
 
-  The span covers the key's header line plus any indented continuation lines
-  that form a block-style value.
+  The span covers the key's header line plus its continuation lines: indented lines and list
+  items, with blank lines between them. A blank line or a comment line not followed by more of
+  the value ends the span.
 
   Args:
     block: The raw frontmatter YAML body (text between the two `---` fences).
@@ -137,28 +197,36 @@ def _key_block_span(block: str, key: str) -> tuple[int, int] | None:
     A `(start, end)` tuple of byte offsets inside `block`, or `None` if `key`
     is not present at the top level.
   """
+  # the header stays on its own line: horizontal whitespace only, so an empty `key:` never
+  # swallows its own newline and drags the next line into the span
   pattern = re.compile(
-      rf"(?m)^{re.escape(key)}\s*:(?:\s|$)",
+      rf"(?m)^{re.escape(key)}[ \t]*:(?=[ \t]|\r?$)",
   )
   match = pattern.search(block)
   if match is None:
     return None
   start = match.start()
 
-  # Walk forward line-by-line until we hit the next top-level key,
-  # an empty line followed by a top-level key, or end of block.
+  # Walk forward line-by-line: indented lines and list items continue the value; blank lines
+  # continue it only when more of the value follows them.
   cursor = block.find("\n", match.end())
   if cursor == -1:
     return (start, len(block))
   cursor += 1  # consume the newline of the header line
+  end = cursor
   while cursor < len(block):
     next_nl = block.find("\n", cursor)
     line_end = next_nl if next_nl != -1 else len(block)
-    line = block[cursor:line_end]
-    if _line_starts_top_level_key(line):
-      break
+    line = block[cursor:line_end].rstrip("\r")
     cursor = line_end + 1 if next_nl != -1 else line_end
-  return (start, cursor)
+    if _CONTINUATION_LINE_RE.match(line):
+      end = cursor
+      continue
+
+    # guard: anything but a blank line (a comment, the next key) ends the value
+    if line.strip():
+      break
+  return (start, end)
 
 
 # -------------------------------------------------------------------- parse
@@ -278,24 +346,27 @@ def set_field(text: str, key: str, value: object) -> str:
   span = _find_fences(text)
   if span is None:
     # Document has no frontmatter at all — synthesize one.
-    return f"---\n{rendered}\n---\n{text}"
+    bom = "\ufeff" if text.startswith("\ufeff") else ""
+    return f"{bom}---\n{rendered}\n---\n{text[len(bom):]}"
   open_end, close_start, _close_end = span
   block = text[open_end:close_start]
   existing = _key_block_span(block, key)
   if existing is None:
     # Append before the closing fence, preserving the block's
     # trailing newline if any.
+    newline = "\r\n" if "\r\n" in text[:close_start] else "\n"
     if block and not block.endswith("\n"):
-      new_block = block + "\n" + rendered + "\n"
+      new_block = block + newline + rendered + newline
     else:
-      new_block = block + rendered + "\n"
+      new_block = block + rendered + newline
     return text[:open_end] + new_block + text[close_start:]
 
   # Replace the whole existing entry (header + any continuation lines)
   # with a single-line scalar form. Preserve the entry's trailing
   # newline so the closing fence stays on its own line.
   start, end = existing
-  suffix = "\n" if end > 0 and block[end - 1] == "\n" else ""
+  entry = block[start:end]
+  suffix = "\r\n" if entry.endswith("\r\n") else "\n" if entry.endswith("\n") else ""
   new_block = block[:start] + rendered + suffix + block[end:]
   return text[:open_end] + new_block + text[close_start:]
 

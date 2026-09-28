@@ -47,6 +47,8 @@ import note_explainers  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import resolve_language  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import spec_frontmatter  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import spec_paths  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from spec_keys import (  # pylint: disable=import-error
@@ -138,6 +140,10 @@ class _K:
     ICON_PRIORITY: Matcher key holding the tie-break priority.
     ICON_NAME: Resolve key holding the icon name.
     ICON_COLOR: Resolve key holding the icon colour.
+    ICON_BORROW_MARK: Opening of a template token — an icon name carrying it borrows the note's
+      own icon rather than naming one.
+    ROLE_KEY: Frontmatter key carrying a note's role.
+    TAGS_KEY: Frontmatter list key carrying a note's tags.
     ICONIZE_ICON: Frontmatter key carrying a folder-note's icon.
     ICONIZE_COLOR: Frontmatter key carrying a folder-note's icon colour.
     SOURCE_NOTE_ICON: Default icon seeded on every source's repo-level folder-note.
@@ -181,6 +187,9 @@ class _K:
   ICON_PRIORITY = "priority"
   ICON_NAME = "iconName"
   ICON_COLOR = "iconColor"
+  ICON_BORROW_MARK = "{{"
+  ROLE_KEY = "spec_role"
+  TAGS_KEY = "tags"
   GIT = "git"
   GIT_DIR = ".git"
   BOT_NAME = "lazy-spec.upstream-tick"
@@ -324,6 +333,11 @@ class _SkipKey:
 
 # Text encoding used to hash the aggregate state signature.
 _ENCODING = "utf-8"
+
+# A NUL byte marks a file as binary; only a file without one has its line endings read as LF.
+_NUL = b"\x00"
+_CRLF_BYTES = b"\r\n"
+_LF_BYTES = b"\n"
 
 
 # ----------------------------------------------------------------------------------------
@@ -939,7 +953,11 @@ def _unit_dir(repo: Path, repo_key: str, mount: str, unit_path: str) -> Path:
 
 def _sha256_file(path: Path) -> str:
   """
-  Hash one file's bytes.
+  Hash one file's content, with a text file's line endings read as LF.
+
+  Guarantees:
+    - A CRLF copy of an LF text file hashes equal to the LF file; a binary file (one carrying a
+      NUL byte) is hashed byte for byte.
 
   Args:
     path: File to hash.
@@ -947,7 +965,16 @@ def _sha256_file(path: Path) -> str:
   Returns:
     Hex sha256 digest.
   """
-  return hashlib.sha256(path.read_bytes()).hexdigest()
+  data = path.read_bytes()
+
+  # Contract:
+  # A CRLF copy of an LF text file hashes equal to the LF file; a file carrying a NUL byte is binary
+  # and is hashed byte for byte.
+
+  # a text file is hashed as LF so a CRLF copy never reads as drift; binary bytes stay exact
+  if _NUL not in data:
+    data = data.replace(_CRLF_BYTES, _LF_BYTES)
+  return hashlib.sha256(data).hexdigest()
 
 
 def _tree_signature(base: Path) -> dict[str, str]:
@@ -1257,35 +1284,40 @@ def _resolve_upstream_icon(status: str) -> tuple[str, str]:
   """
   Resolve the icon and colour a unit note of one upstream status carries.
 
-  Reads the plugin's shipped iconize registry and picks the highest-priority matcher keyed
-  solely on the unit's own status frontmatter, so the rendered note is born fully painted and
-  no later repaint has to rewrite it inside the write-to-commit window.
+  Reads the plugin's shipped iconize registry and walks, highest priority first, the matchers a
+  unit note of that status satisfies, so the rendered note is born fully painted and no later
+  repaint has to rewrite it inside the write-to-commit window. A matcher that borrows the note's
+  own icon names none: it lends its colour, and the icon comes from the next matcher that names
+  one.
 
   Args:
     status: The unit's current `UpstreamStatus` value.
 
   Returns:
-    Two-tuple of icon name and colour; both empty when no matcher covers the status (the note
-    then simply carries no icon keys, exactly as an unregistered status always did).
+    Two-tuple of icon name and colour; either is empty when no satisfied matcher supplies it (the
+    note then carries no key for it, exactly as an unregistered status always did).
   """
   registry = Path(__file__).resolve().parent.parent / _K.REFERENCES_DIR / _K.ICON_REGISTRY_FILE
 
   # guard: a checkout without the shipped registry renders unpainted rather than failing the tick
   if not registry.is_file():
     return "", ""
-  status_key = f"frontmatter.{UpstreamKey.STATUS}"
-  best: tuple[int, str, str] = ( -1, "", "" )
+  note_fm = { f"frontmatter.{UpstreamKey.STATUS}": status, f"frontmatter.{_K.ROLE_KEY}": UpstreamRole.UNIT }
+  matchers = [
+      entry for entry in json.loads(registry.read_text()).get(_K.ICON_MATCHERS, [])
+      if all(note_fm.get(key) == value for key, value in entry.get(_K.ICON_WHEN, {}).items())
+  ]
+  icon = color = ""
 
-  # highest-priority matcher keyed solely on the unit status wins, same tie-break as the engine
-  for entry in json.loads(registry.read_text()).get(_K.ICON_MATCHERS, []):
-    # guard: only matchers keyed solely on the unit status are this note's own paint
-    if entry.get(_K.ICON_WHEN) != { status_key: status }:
-      continue
+  # highest priority first, as the engine walks: the first colour wins, and the first icon that
+  # is a real name — a borrow token names no icon, so the walk carries on past it
+  for entry in sorted(matchers, key = lambda entry: int(entry.get(_K.ICON_PRIORITY, 0)), reverse = True):
     resolve = entry.get(_K.ICON_RESOLVE, {})
-    priority = int(entry.get(_K.ICON_PRIORITY, 0))
-    if priority > best[0]:
-      best = ( priority, resolve.get(_K.ICON_NAME, ""), resolve.get(_K.ICON_COLOR, "") )
-  return best[1], best[2]
+    color = color or resolve.get(_K.ICON_COLOR, "")
+    name = resolve.get(_K.ICON_NAME, "")
+    if not icon and name and _K.ICON_BORROW_MARK not in name:
+      icon = name
+  return icon, color
 
 
 def _render_note(
@@ -1331,14 +1363,15 @@ def _render_note(
       if status == UpstreamStatus.POSTPONED and postponed_hash else ""
   )
   request_line = (
-      f"{UpstreamKey.REQUEST}: [[{request_wikilink}]]\n"
+      f"{UpstreamKey.REQUEST}: {spec_frontmatter.yaml_scalar(f'[[{request_wikilink}]]')}\n"
       if status == UpstreamStatus.IN_REVIEW and request_wikilink else ""
   )
 
   # the status paint is rendered in, not repainted after — the note leaves this function fully
   # final, so the commit step never has to rewrite it between write and stage
   icon, color = _resolve_upstream_icon(status)
-  icon_lines = f"{_K.ICONIZE_ICON}: {icon}\n{_K.ICONIZE_COLOR}: \"{color}\"\n" if icon else ""
+  icon_lines = (f"{_K.ICONIZE_ICON}: {icon}\n" if icon else "") + (
+      f"{_K.ICONIZE_COLOR}: \"{color}\"\n" if color else "")
 
   # assemble the fixed-order frontmatter block, with the two status-scoped lines spliced in
   frontmatter = (
@@ -1379,7 +1412,7 @@ def _read_note(path: Path) -> tuple[dict, str]:
   # guard: first-ever tick for this unit — nothing to read
   if not path.is_file():
     return {}, ""
-  text = path.read_text()
+  text = spec_paths.read_text(path)
   fm, end = flip_gate.parse_frontmatter(text)
   return fm, text[end:]
 
@@ -1577,11 +1610,12 @@ def _append_history_entry(history_body: str, entry: str) -> str:
   history_body = history_body or f"{_K.HISTORY_H1}\n{_K.NONE_MARKER}\n"
   heading, _sep, rest = history_body.partition("\n")
 
-  # a prior render's explainer line is presentation, not history — the next render re-adds it
+  # a prior render's explainer line — comment or legacy italic — is presentation, not history;
+  # the next render re-adds it
   lines = [
-      line for line in rest.splitlines()
+      line for line in spec_frontmatter.split_lines(rest)
       if line.strip() and line.strip() != _K.NONE_MARKER
-      and not (line.startswith("*") and line.rstrip().endswith("*"))
+      and not note_explainers.EXPLAINER_LINE_RE.match(line)
   ]
   lines.insert(0, entry)
   return heading + "\n" + "\n".join(lines) + "\n"
@@ -1854,8 +1888,8 @@ def _dispatch_request(
       skipped_processed = skipped_processed, history_body = _history_section(existing_body),
       request_wikilink = request_wikilink, lang = resolve_language.resolve_repo_language(repo),
   )
-  note_path.write_text(new_note_text)
-  request_path.write_text(_render_request_body(
+  spec_paths.write_text_atomic(note_path, new_note_text)
+  spec_paths.write_text_atomic(request_path, _render_request_body(
       unit_path = full_unit_path, note_wikilink = note_wikilink, reason = resume_status,
       revision = revision, added = added, modified = modified, removed = removed,
       skip_changed = skip_changed,
@@ -2079,7 +2113,7 @@ def _commit_paths(repo: Path, paths: list[Path], subject: str, *,
   # the held-back write lands here — one syscall away from staging, past the slow repaint step
   if deferred_write is not None:
     deferred_path, deferred_text = deferred_write
-    deferred_path.write_text(deferred_text)
+    spec_paths.write_text_atomic(deferred_path, deferred_text)
 
   # stage the fixed target set
   subprocess.run([_K.GIT, "add", "--", *rel_paths], cwd = str(repo), check = True, capture_output = True)
@@ -2417,7 +2451,7 @@ def _ensure_root_note(repo: Path) -> Path | None:
       resolve_language.resolve_repo_language(repo), _ROOT_NOTE_EXPLAINERS[_K.LANG_EN],
   )
   note_path.parent.mkdir(parents = True, exist_ok = True)
-  note_path.write_text(
+  spec_paths.write_text_atomic(note_path,
       "---\n"
       f"{_K.ICONIZE_ICON}: {_K.ROOT_NOTE_ICON}\n"
       f'{_K.ICONIZE_COLOR}: "{_K.INTAKE_COLOR}"\n'
@@ -2590,7 +2624,7 @@ def _update_source_note(
 
   # write-then-let-git-decide, same idiom as every other note this module writes
   note_path.parent.mkdir(parents = True, exist_ok = True)
-  note_path.write_text(_render_source_note(
+  spec_paths.write_text_atomic(note_path, _render_source_note(
       status = status, failures = failures, error = note_error, last_success = last_success,
       invalid = invalid, refused_mounts = refused_mounts, lang = resolve_language.resolve_repo_language(repo),
   ))
@@ -2805,36 +2839,21 @@ def _unknown_action_labels(body: str) -> list[str]:
 
 def _parse_tags(text: str) -> list[str]:
   """
-  Read a block-style `tags:` list back out of frontmatter text.
+  Read the `tags` list out of a note's frontmatter.
 
-  `flip_gate.parse_frontmatter` is a flat-scalar parser only — it skips every bullet line
-  (`stripped.startswith(("#", "-"))`), so a block list like `tags:\\n  - upstream/new` reads
-  back as an empty string there. Every value this module ever renders under `tags:` is exactly
-  this bullet-list shape (`_render_note`, `_render_source_note`), so a small dedicated reader
-  is cheaper and less surprising than growing the shared parser to handle general YAML lists it
-  otherwise never needs.
+  Looks only inside the leading frontmatter block when the text carries one, and across the
+  whole text otherwise. Accepts both the block and inline YAML list forms, returning members
+  unquoted.
 
   Args:
     text: A note's full text (frontmatter plus body) or just its frontmatter block.
 
   Returns:
-    Every bulleted value under the first `tags:` line found, in document order; empty when no
-    `tags:` header line is present or it introduces no bullets.
+    Every member of the `tags` list, in file order; empty when the key is an inline `[]`,
+    absent, or written with no members.
   """
-  # guard: no tags header at all
-  if not (match := re.search(r"^tags:\s*$", text, re.MULTILINE)):
-    return []
-  out: list[str] = []
-  for line in text[match.end():].splitlines():
-    if bullet := re.match(r"^\s*-\s*(.+?)\s*$", line):
-      out.append(bullet.group(1))
-      continue
-
-    # guard: a blank line before the first bullet is just the header's own line break; once a
-    # bullet has landed, the first non-bullet line (blank or not) ends the list
-    if out or line.strip():
-      break
-  return out
+  lines, fm_end = spec_frontmatter.block(text)
+  return spec_frontmatter.read_list(lines if fm_end else text, _K.TAGS_KEY)
 
 
 def _scan_unit(repo: Path, repo_key: str, unit_path: str, unit_dir: Path) -> list[dict]:

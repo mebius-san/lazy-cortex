@@ -20,7 +20,11 @@ import markers as _markers  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import mirror as _mirror  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import nodes as _nodes  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import scope as _scope  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from textfile import TextFile  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -43,9 +47,6 @@ _ENCODING = "utf-8"
 # Regions of one prose line that are not prose: an inline code span, a markdown link's target,
 # and a wikilink's target. Everything outside these on a non-fenced line is rewritable.
 _PROTECTED_SPAN_RE = re.compile(r"`[^`]*`|\]\([^)]*\)|\[\[[^\]]*\]\]")
-
-# A line opening or closing a fenced block, in either fence character.
-_FENCE_RE = re.compile(r"^\s{0,3}(?:```|~~~)")
 
 # A line opening an H1 section — the boundary the protected See-also block ends at.
 _H1_RE = re.compile(r"^# ")
@@ -153,15 +154,13 @@ def _split_frontmatter(text: str) -> tuple[str, str]:
     `(head, body)` — `head` is the frontmatter block including its closing fence and newline, or
     `""` when the document carries none; `body` is everything after it.
   """
-  # guard: no opening fence — the whole document is body
-  if not text.startswith("---\n"):
-    return "", text
-  end = text.find("\n---\n", len("---\n") - 1)
+  # waiver: sibling-module private fence finder reused so both modules read one frontmatter shape
+  span = _nodes._find_fences(text)  # pylint: disable=protected-access
 
-  # guard: no closing fence — malformed frontmatter is treated as body, never rewritten blindly
-  if end < 0:
+  # guard: no frontmatter, or no closing fence — malformed frontmatter is treated as body, never rewritten blindly
+  if span is None:
     return "", text
-  cut = end + len("\n---\n")
+  cut = span[2]
   return text[:cut], text[cut:]
 
 
@@ -213,7 +212,7 @@ def _rewrite_body(body: str, pattern: re.Pattern, replacement: str) -> tuple[str
   lines = body.split("\n")
   out: list[str] = []
   count = 0
-  in_fence = False
+  fence = _markers.CodeFence()
   in_see_also = False
 
   # Domain(wiki.terms):
@@ -227,20 +226,19 @@ def _rewrite_body(body: str, pattern: re.Pattern, replacement: str) -> tuple[str
 
   # walk every body line, tracking which protected region (if any) currently contains it
   for line in lines:
-    # a fence line toggles the block state and is itself never prose
-    if _FENCE_RE.match(line):
-      in_fence = not in_fence
+    # a fence line opens or closes a block by CommonMark rules and is itself never prose
+    if fence.step(line):
       out.append(line)
       continue
 
     # an H1 opens the protected See-also block or closes it again
-    if not in_fence and _H1_RE.match(line):
+    if not fence.inside and _H1_RE.match(line):
       in_see_also = line.strip() == _markers.Markers.SEE_ALSO_HEADING
       out.append(line)
       continue
 
     # guard: inside a fenced block or the section another plugin's contract protects
-    if in_fence or in_see_also:
+    if fence.inside or in_see_also:
       out.append(line)
       continue
     rewritten, hits = _replace_in_line(line, pattern, replacement)
@@ -328,7 +326,8 @@ def apply_term(repo: Path | str, path: Path | str, old_term: str, new_term: str)
 
   # the frontmatter is split off before anything reads it — it is both the review flag's home
   # and a region no replacement may reach
-  text = target.read_text(encoding = _ENCODING)
+  target_file = TextFile(path = target)
+  text = target_file.read()
   head, body = _split_frontmatter(text)
 
   # guard: the review loop owns the document until its round closes
@@ -341,5 +340,5 @@ def apply_term(repo: Path | str, path: Path | str, old_term: str, new_term: str)
   # guard: nothing to replace outside the protected regions — leave the file untouched
   if count == 0:
     return { _K_STATUS: STATUS_NOOP, _K_FILE: label, _K_REPLACEMENTS: 0 }
-  target.write_text(head + rewritten, encoding = _ENCODING)
+  target_file.write(head + rewritten)
   return { _K_STATUS: STATUS_APPLIED, _K_FILE: label, _K_REPLACEMENTS: count }

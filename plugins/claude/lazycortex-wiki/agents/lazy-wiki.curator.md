@@ -56,7 +56,7 @@ find $(echo "$LAZYCORTEX_PLUGIN_DIRS" | tr ':' ' ') -maxdepth 2 -path '*/bin/laz
 
 The printed path is `$WIKI_BIN`.
 
-If `$LAZYCORTEX_PLUGIN_DIRS` is unset, fall back to the plugin cache under `~/.claude/plugins/cache/`.
+The variable carries only `--plugin-dir` dev trees, never a cached install. When the command prints nothing, take the newest `~/.claude/plugins/cache/lazycortex/lazycortex-wiki/<version>/bin/lazycortex-wiki`.
 
 ### kind = `classify`
 

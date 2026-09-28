@@ -16,6 +16,8 @@ from pathlib import Path
 from constants import DaemonKey, GitConfigKey, SettingsFile, SettingsKey  # pylint: disable=import-error
 # waiver: flat sibling import inside the plugin's bin/ dir — resolved at runtime via PYTHONPATH, not by pylint
 from lazy_settings import load_tracked_section, save_section  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import runtime_state  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -31,6 +33,10 @@ def ensure_gitignore_lines(repo: Path | str, lines: list[str]) -> str:
   Accepts both the trailing-slash and no-slash form of an entry as already-present, so
   passing `.logs/` is a no-op when `.logs` is already listed. Missing entries are appended
   in the order given. Creates `.gitignore` when it is absent. Idempotent.
+
+  Guarantees:
+    - The file's existing line-ending style is preserved: a CRLF `.gitignore` is written back
+      CRLF throughout, an LF one LF, including any line this call appends.
 
   Args:
     repo: Path to the repository root.
@@ -53,8 +59,10 @@ def ensure_gitignore_lines(repo: Path | str, lines: list[str]) -> str:
   repo = Path(repo)
   # waiver: filesystem filename idiom, not a domain constant
   gi = repo / ".gitignore"
+  # read untranslated so a CRLF file is written back CRLF
   # waiver: stdlib encoding idiom
-  existing = gi.read_text(encoding = "utf-8") if gi.exists() else ""
+  existing = gi.read_bytes().decode("utf-8") if gi.exists() else ""
+  newline = "\r\n" if "\r\n" in existing else "\n"
   existing_set = { line.strip() for line in existing.splitlines() }
 
   # collect entries that are neither present as-is nor as their slash-variant
@@ -72,11 +80,14 @@ def ensure_gitignore_lines(repo: Path | str, lines: list[str]) -> str:
     # waiver: install-phase outcome token, not a reusable domain key
     return "already-present"
 
+  # Contract:
+  # The file's existing line-ending style is preserved: a CRLF `.gitignore` is written back
+  # CRLF throughout, an LF one LF, including any line this call appends.
+
   # append the missing entries, keeping the file newline-terminated on both sides of the seam
-  suffix = "" if existing.endswith("\n") or not existing else "\n"
-  appended = "".join(f"{ln}\n" for ln in to_append)
-  # waiver: stdlib encoding idiom
-  gi.write_text(f"{existing}{suffix}{appended}", encoding = "utf-8")
+  suffix = "" if existing.endswith("\n") or not existing else newline
+  appended = "".join(f"{ln}{newline}" for ln in to_append)
+  runtime_state.atomic_write_text(gi, f"{existing}{suffix}{appended}")
   # waiver: install-phase outcome token, not a reusable domain key
   return "updated"
 
@@ -88,6 +99,10 @@ def remove_gitignore_lines(repo: Path | str, lines: list[str]) -> str:
   Matches by exact stripped equality — the caller passes the exact form they want gone,
   with no slash-variant tolerance (unlike `ensure_gitignore_lines`). No-op when
   `.gitignore` is absent. Idempotent.
+
+  Guarantees:
+    - The file's existing line-ending style is preserved: a CRLF `.gitignore` is written back
+      CRLF throughout, an LF one LF.
 
   Args:
     repo: Path to the repository root.
@@ -108,8 +123,11 @@ def remove_gitignore_lines(repo: Path | str, lines: list[str]) -> str:
 
   # filter the file down to the lines the caller did not ask to remove
   targets = { ln.strip() for ln in lines }
+  # read untranslated so a CRLF file is written back CRLF
   # waiver: stdlib encoding idiom
-  src_lines = gi.read_text(encoding = "utf-8").splitlines()
+  source = gi.read_bytes().decode("utf-8")
+  newline = "\r\n" if "\r\n" in source else "\n"
+  src_lines = source.splitlines()
   kept = [ ln for ln in src_lines if ln.strip() not in targets ]
 
   # guard: every source line survived the filter — nothing matched
@@ -117,12 +135,119 @@ def remove_gitignore_lines(repo: Path | str, lines: list[str]) -> str:
     # waiver: install-phase outcome token, not a reusable domain key
     return "already-absent"
 
+  # Contract:
+  # The file's existing line-ending style is preserved: a CRLF `.gitignore` is written back
+  # CRLF throughout, an LF one LF.
+
   # write the survivors back, newline-terminated unless the filter emptied the file out
-  body = "\n".join(kept)
-  # waiver: stdlib encoding idiom
-  gi.write_text(body + ("\n" if body else ""), encoding = "utf-8")
+  body = newline.join(kept)
+  runtime_state.atomic_write_text(gi, body + (newline if body else ""))
   # waiver: install-phase outcome token, not a reusable domain key
   return "removed"
+
+
+# the attribute line that makes git store and check out every text file with LF
+_GITATTRIBUTES_LF_RULE = "* text=auto eol=lf"
+
+
+def ensure_gitattributes_lf(repo: Path | str) -> str:
+  """
+  Ensure the repository's `.gitattributes` carries `* text=auto eol=lf`, inserted as its first line (after any BOM).
+
+  Makes git on every machine — any OS, any `core.autocrlf` — store and check out text files with
+  LF, underneath every more specific rule the file already carries. Creates `.gitattributes`
+  when it is absent. A line already present anywhere in the file counts.
+
+  Guarantees:
+    - A leading UTF-8 byte-order mark stays the file's first bytes, and the rule line is
+      inserted immediately after it; every other operator byte already in the file follows
+      the inserted rule line unchanged, in order, and no existing line is ever removed or
+      reordered.
+    - A file that already carries the rule line, compared after stripping, is left
+      byte-identical; a re-run performs no write.
+    - The file's existing line-ending style is preserved: a CRLF file receives a
+      CRLF-terminated rule line, an LF file an LF-terminated one.
+
+  Args:
+    repo: Path to the repository root.
+
+  Returns:
+    `"created"` when the file was absent, `"updated"` when the line was inserted into an existing
+    file, `"already-present"` when the file already carried the line.
+
+  Raises:
+    FileNotFoundError: If `repo` is not an existing directory.
+    UnicodeDecodeError: If an existing `.gitattributes` is not valid UTF-8.
+  """
+
+  # Domain(install.reconciliation):
+  # # A repository-wide default goes underneath the operator's own rules
+  # In an attributes file a later matching rule overrides an earlier one, so a catch-all default
+  # placed first sets the baseline for every text file while each more specific rule the operator
+  # wrote after it still wins for the files it names. Seeding therefore inserts the default at the
+  # top and never touches, drops, or reorders what is already there.
+
+  repo = Path(repo)
+
+  # guard: never materialise a repository root the caller did not already have
+  if not repo.is_dir():
+    raise FileNotFoundError(f"repository root not found: {repo}")
+
+  # read untranslated so a CRLF file is written back CRLF
+  # waiver: filesystem filename idiom, not a domain constant
+  ga = repo / ".gitattributes"
+  existed = ga.exists()
+  # waiver: stdlib encoding idiom
+  existing = ga.read_bytes().decode("utf-8") if existed else ""
+
+  # Contract:
+  # A file that already carries the rule line, compared after stripping, is left
+  # byte-identical; a re-run performs no write.
+
+  # guard: the rule is already on record — the file stays byte-identical
+  if any(line.strip() == _GITATTRIBUTES_LF_RULE for line in existing.splitlines()):
+    # waiver: install-phase outcome token, not a reusable domain key
+    return "already-present"
+
+  # Contract:
+  # A leading UTF-8 byte-order mark stays the file's first bytes, and the rule line is
+  # inserted immediately after it. Every other operator byte already in the file follows
+  # the inserted rule line unchanged, in order; no existing line is ever removed or
+  # reordered.
+
+  # Contract:
+  # The file's existing line-ending style is preserved: a CRLF file receives a
+  # CRLF-terminated rule line, an LF file an LF-terminated one.
+
+  # prepend the rule in the file's own line-ending style, leaving every operator byte after it; a
+  # leading BOM stays first, or git would read it as part of the operator's first pattern
+  newline = "\r\n" if "\r\n" in existing else "\n"
+  bom = "﻿" if existing.startswith("﻿") else ""
+  runtime_state.atomic_write_text(ga, f"{bom}{_GITATTRIBUTES_LF_RULE}{newline}{existing[len(bom):]}")
+  # waiver: install-phase outcome tokens, not reusable domain keys
+  return "updated" if existed else "created"
+
+
+def index_has_crlf(repo: Path | str) -> bool:
+  """
+  Report whether git's index holds a text file with CRLF line endings.
+
+  Such content is not rewritten by an `eol=lf` attribute on its own; the operator renormalizes it
+  once with `git add --renormalize .`.
+
+  Args:
+    repo: Path to the repository root.
+
+  Returns:
+    True when `git ls-files --eol` reports at least one `i/crlf` entry; False otherwise, including
+    when `repo` is not a git repository.
+  """
+  # the first column of each row is the index-side line-ending verdict
+  # waiver: git's own `ls-files --eol` tokens, not domain keys
+  return any(
+    row.split()[:1] == [ "i/crlf" ]
+    for row in (_git_capture(Path(repo), [ "ls-files", "--eol" ]) or "").splitlines()
+  )
 
 
 def ensure_self_ignoring_dir(directory: Path | str) -> str:
@@ -293,8 +418,7 @@ def migrate_log_hooks(settings_path: Path | str) -> str:
   if changed:
     # waiver: external Claude Code settings field name, not an internal key
     settings["hooks"] = hooks
-    # waiver: stdlib encoding idiom
-    settings_path.write_text(json.dumps(settings, indent = 2) + "\n", encoding = "utf-8")
+    runtime_state.atomic_write_text(settings_path, json.dumps(settings, indent = 2) + "\n")
     # waiver: install-phase outcome token, not a reusable domain key
     return "migrated"
   # waiver: install-phase outcome token, not a reusable domain key

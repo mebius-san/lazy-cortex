@@ -4,6 +4,19 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 10.3.0 — 2026-09-28 UTC
+
+- Install now pins LF line endings in the repo's `.gitattributes` (`* text=auto eol=lf`, added once, after any leading BOM) and reports when the index needs a one-time renormalize; audit warns when the rule is missing.
+- The runtime daemon refuses to start in a Dropbox folder and records a `dropbox_denied` incident.
+- md-scan routines gain a `change_gate` key: set to `false`, the consumer runs on every tick instead of being skipped when its folder looks unchanged. The skip signature now also covers the resolved command, its plugin version and the routine config.
+- The daemon exports only the dev plugin directories to the processes it spawns, and cached plugins resolve to their newest version at the moment of use, so a long-running daemon no longer hands jobs a stale plugin version.
+- An operator-provided daemon token now wins on every tick, and provider-bound jobs no longer receive the token variable or its digest. The daemon re-reads its token and the git-hook allow-list on every tick.
+- Revocation is reliable: removing or emptying the `daemon` section, or deleting the settings file, stops the daemon again, while a file caught mid-save, a momentarily empty file or an empty local overlay no longer stops it by mistake.
+- Frontmatter parsing reads block scalars, nested maps and quoted values correctly.
+- History, gitignore, settings and scaffold writes are atomic, keep the file's mode, symlink and CRLF line endings, and close an unclosed code block before appending.
+- A writable file in a read-only folder is rewritten in place, and the original bytes are restored if that write fails; a write-only file that cannot be read back is refused instead of risking truncation.
+- The remote-mirror plan treats a CRLF copy of an unchanged source as unchanged instead of rewriting it.
+
 ### 10.2.1 — 2026-09-24 UTC
 
 - Fixed a bug where a routine raising an exception during dispatch (a stale template, a bad config) silently stalled every routine scheduled after it for the rest of that tick — including `lazy-expert.pump` — with no record of what happened. The failing routine now gets its own failed-tick result and its own error entry, and the daemon moves on to the rest of the queue; a config-related failure (e.g. a template referencing a missing field) now names the problem clearly and retries automatically once fixed.
@@ -716,6 +729,14 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 9.9.0 — 2026-09-28 UTC
+
+- Fixed the daemon continuing to run a stale cached version of the specs CLI/protocols after another plugin was updated — it now always resolves the newest installed version instead of the one frozen at daemon start.
+- Fixed numerous frontmatter and body-edit bugs that could corrupt spec notes: comments inside flow lists, quote-aware YAML values, BOM handling, CRLF preservation, fence-aware edits, column-0 lists and comments, trailing YAML comments, Unicode line separators, and a bug where dropping a key could eat the note's closing frontmatter fence. All spec writes now go through a shared frontmatter helper and atomic writes.
+- The gate-tick routine now defaults `change_gate: false` so finished jobs always land, with an automatic fallback for older cores that don't support the setting. Re-run install to pick it up.
+- Fixed spurious upstream drift warnings caused by line-ending differences in text files.
+- Fixed install's product-coverage probe wrongly marking products under review, deferred, or not yet approved as uncovered, which had caused their `tag_axes` check to be skipped.
+
 ### 9.8.0 — 2026-09-26 UTC
 
 - New optional product-level use-cases document, gated by its own level in the product ladder.
@@ -1061,6 +1082,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 6.0.2 — 2026-09-28 UTC
+
+- Iconize registry discovery now also includes the newest cached version of every plugin the dev directories do not cover, resolved at call time, instead of seeing no cached plugin at all whenever dev directories are set.
+- Frontmatter rewrites no longer corrupt notes with an empty, CRLF, or end-of-file frontmatter block, and icon values that broke YAML are now quoted; file mode, symlinks, and line endings are preserved on write.
+- Frontmatter writes are safer on read-only vault folders: a leading BOM no longer duplicates the block, temp files use unique names instead of a fixed name that could clobber a user file, and the in-place fallback now restores the original note if the write itself fails.
+- Vault capture now recognizes a shipped CSS snippet even when saved with CRLF line endings, instead of treating it as a vault-modified copy and pinning its contents.
+
 ### 6.0.1 — 2026-09-24 UTC
 
 - This plugin's skills and agent no longer write a run log on every invocation — logging is now opt-in per artifact, so a typical run costs fewer tool calls.
@@ -1387,6 +1415,14 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+### 6.9.2 — 2026-09-28 UTC
+
+- The review coordinator falls back to the newest cached plugin version when the runtime's plugin-directory list does not name the plugin it needs.
+- Frontmatter and body edits are now fence-aware: code fences — including ones nested inside HTML or Obsidian comments — are no longer mistaken for real document structure, so headings, sections, and frontmatter survive edits intact, and every write lands atomically.
+- CRLF documents are now preserved end-to-end across every edit verb (collect, start, stop, submit, finalize, set-key, paint-banner) instead of gaining a blank line each round, and comment markers are recognized only at the start of a line so they no longer misfire mid-text.
+- An unclosed or stray code fence in a payload, or left open before appending History, is now closed automatically instead of corrupting the resulting markdown.
+- Fixed a bug where clearing a key to an empty value could delete the following line; a BOM or extra-spaced opening fence no longer produces a duplicate frontmatter block.
+
 ### 6.9.1 — 2026-09-24 UTC
 
 - Skills, agents, and commands in this plugin no longer write per-run logs under `.logs/claude/lazy-review.*/` — run logging is off by default repo-wide now.
@@ -1581,6 +1617,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Unattended doc-review dispatcher — routes documents to specialist agents (shell or MCP) round-by-round; consumer plugins use the public API (rule + 4 verb skills).
 
 ## lazycortex-observe
+
+### 2.2.2 — 2026-09-28 UTC
+
+- Install now writes answer and token files atomically in a lossless TOML format, fixing cases where a saved answer could come back as a raw Python repr, lose a dashed key, or get corrupted by a newline in the value.
+- Install correctly reads answer files saved by an older version of the plugin whose quoted values contain control characters, so upgrading no longer breaks the install wizard.
+- Dashboard deploy no longer treats a file as changed based on line-ending differences alone, avoiding spurious redeploys.
 
 ### 2.2.1 — 2026-09-24 UTC
 
@@ -1896,6 +1938,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+### 4.7.4 — 2026-09-28 UTC
+
+- Fixed the review cache incorrectly treating files that differ only by CRLF vs LF line endings as changed content, which caused unnecessary re-reviews.
+
 ### 4.7.3 — 2026-09-26 UTC
 
 - `Contract:` blocks now state the principle of an interaction — what a caller may rely on — never how the code delivers it (no internal steps, data structures, algorithms, or call sequences), with a narrow exception for contracts whose substance is a specific mandated method or formula. Applies to both the comment guidelines and the `lazy-python.contract-writer` agent.
@@ -2105,6 +2151,15 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 3.3.3 — 2026-09-28 UTC
+
+- Scope resolution gains a globs-only mode (`--globs-only` on `resolve-scope`) that answers which scope covers a path without applying the scope's frontmatter filter, so a document under review or not yet approved still reports its covering scope.
+- The wiki curators and the domain-spec writer fall back to the newest cached plugin version when the runtime's plugin-directory list does not name the plugin they need.
+- Wiki writes no longer damage notes: the See-also block is found only on its real marker lines, operator tags in scalar or multi-line form survive, block and escaped summaries round-trip, values YAML would misread are quoted, a partial curation touches only its own fields, retag no longer hides operator edits, deleted nodes are always pruned, and every write is atomic and keeps the file's mode, symlink and line endings.
+- A note ending in an unclosed code block no longer gains a new See also section on every run; tag comments are no longer turned into tag values; line-break characters and BOMs are handled; CSS wiki blocks escape `*/`; a writable note in a read-only folder is still updated, and the original bytes are restored if that write fails.
+- See also markers handle CRLF and mixed line endings, so repeated linking stays idempotent with a single section.
+- Block-scalar summaries honour YAML chomping: `|+` keeps trailing blank lines, `|-` drops them.
 
 ### 3.3.2 — 2026-09-24 UTC
 

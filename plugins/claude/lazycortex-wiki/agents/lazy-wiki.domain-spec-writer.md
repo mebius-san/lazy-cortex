@@ -60,7 +60,7 @@ Read the mode first — it follows from how you were dispatched:
    <one bullet per contract: the guarantee text in prose, followed by its `path:symbol` anchor>
    ```
 
-   **The explainer line under the H1 is fetched, not authored.** Resolve the wiki CLI from `$LAZYCORTEX_PLUGIN_DIRS` (first `<dir>/bin/lazycortex-wiki` that exists) into `WIKI_BIN`, then ask for the line: `"${LAZYCORTEX_PYTHON:-python3}" "$WIKI_BIN" text domain-doc --lang <payload language> --repo <repo-root>`. Paste what it prints, byte for byte, asterisks included. Pass the code you were handed, never one you inferred from how the document looks; a code with no text of its own is answered in English. Never translate it yourself, never reword it, never omit it.
+   **The explainer line under the H1 is fetched, not authored.** Resolve the wiki CLI from `$LAZYCORTEX_PLUGIN_DIRS` (first `<dir>/bin/lazycortex-wiki` that exists; the variable carries only `--plugin-dir` dev trees, so when none has it take the newest `~/.claude/plugins/cache/lazycortex/lazycortex-wiki/<version>/bin/lazycortex-wiki`) into `WIKI_BIN`, then ask for the line: `"${LAZYCORTEX_PYTHON:-python3}" "$WIKI_BIN" text domain-doc --lang <payload language> --repo <repo-root>`. Paste what it prints, byte for byte, asterisks included. Pass the code you were handed, never one you inferred from how the document looks; a code with no text of its own is answered in English. Never translate it yourself, never reword it, never omit it.
 
    The four `##` headings are fixed verbatim (`Terms`, `Principles`, `Mechanics`, `Contracts`) — stable headings minimise the diff between regenerations. `domain_hash` MUST be exactly the `hash` from the payload — it is the detect anchor; a wrong value causes an immediate regeneration loop or a silently stale doc.
 
@@ -71,7 +71,7 @@ Read the mode first — it follows from how you were dispatched:
    **The Contracts section is omitted entirely (heading and all) when `contracts` is empty** — a group with no attributed guarantee has nothing to list; do not write a stub "no contracts" line. When `contracts` is non-empty, render one bullet per entry: the guarantee text from its comment lines, rendered in prose (drop the leading `# `), followed by its anchor as `` (`path:symbol`) `` — when `symbol` is `null`, the anchor is `` (`path`) `` with no colon. Never invent a guarantee the entry's `text` does not state.
 3. **Stop or tail** depending on mode:
    - **tail:false:** STOP after writing the doc. Do NOT touch the index, do NOT run git. The dispatching skill rebuilds the index and commits under the operator identity. State the outcome in your reply.
-   - **Daemon path:** resolve the wiki CLI from `$LAZYCORTEX_PLUGIN_DIRS` (first `<dir>/bin/lazycortex-wiki` that exists), then run the tail:
+   - **Daemon path:** resolve `WIKI_BIN` as in step 2 (dev trees in `$LAZYCORTEX_PLUGIN_DIRS`, then the newest cached version), then run the tail:
      1. `"${LAZYCORTEX_PYTHON:-python3}" "$WIKI_BIN" domain-apply-index --repo <repo-root>` — refresh `domains.md`.
      2. `git add <doc_path> <output>/domains.md && git commit -m "wiki(domains): <group>"` — do NOT pass `--author`; the pump exported `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL`.
      3. Write `result/response.json`: `{"outcome": "written", "doc": "<doc_path>"}`.

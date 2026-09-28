@@ -57,8 +57,6 @@ _BANNER_BLOCK_RE = re.compile(
     r"(?:\n)*"
 )
 
-_H1_RE = re.compile(r"^# (.+?)\s*$", re.MULTILINE)
-
 # Obsidian-style single-line hashtag: `#` followed by an alphanumeric
 # tag path (letters, digits, `_`, `-`, `/`). Excludes markdown ATX
 # heading markers (`## Heading`, `### Sub`) — those have a space
@@ -74,7 +72,7 @@ def _strip_banner(body: str) -> str:
   Returns:
     `body` with the leading banner block removed, or `body` unchanged when no banner is present.
   """
-  return _BANNER_BLOCK_RE.sub("", body, count=1)
+  return _parser.sub_outside_fences(_BANNER_BLOCK_RE, "", body, count = 1)
 
 
 def _enumerate_h1_spans(body: str) -> list[tuple[int, int, str, str]]:
@@ -83,16 +81,15 @@ def _enumerate_h1_spans(body: str) -> list[tuple[int, int, str, str]]:
 
   Returns:
     List of `(start, end, title, heading_line)` tuples where `end` is the start of the next H1
-    or `len(body)`.
+    or `len(body)`; a `# ` line inside a code fence is content, never a heading.
   """
-  matches = list(_H1_RE.finditer(body))
+  headings = _parser.h1_headings(body)
   spans: list[tuple[int, int, str, str]] = []
-  for i, m in enumerate(matches):
-    start = m.start()
-    line_end = body.find("\n", m.end())
+  for i, (start, match_end, title) in enumerate(headings):
+    line_end = body.find("\n", match_end)
     heading_line = body[start:line_end if line_end != -1 else len(body)]
-    end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
-    spans.append((start, end, m.group(1).strip(), heading_line))
+    end = headings[i + 1][0] if i + 1 < len(headings) else len(body)
+    spans.append((start, end, title, heading_line))
   return spans
 
 
@@ -302,7 +299,7 @@ def strip_for_main_writer(text: str) -> str:
   _meta, body = _fm.parse(text)
   frontmatter_text = text[: len(text) - len(body)]
   body = _strip_banner(body)
-  body = _APPROVE_LINE_RE.sub("", body)
+  body = _parser.sub_outside_fences(_APPROVE_LINE_RE, "", body)
   body = _drop_sections(body, drop_owned=True, drop_history=True)
   return frontmatter_text + body
 
@@ -321,7 +318,7 @@ def strip_for_section_writer(text: str, *, owner: tuple[str, str]) -> str:
   _meta, body = _fm.parse(text)
   frontmatter_text = text[: len(text) - len(body)]
   body = _strip_banner(body)
-  body = _APPROVE_LINE_RE.sub("", body)
+  body = _parser.sub_outside_fences(_APPROVE_LINE_RE, "", body)
   body = _drop_sections(
       body, drop_owned=True, drop_history=True, keep_owner=owner,
   )
@@ -605,7 +602,7 @@ def strip_status_callout(body: str) -> str:
     `body` with the leading `#status/<state>` callout block removed and any leading
     blank lines normalised.
   """
-  return _STATUS_CALLOUT_BLOCK_RE.sub("", body, count = 1).lstrip("\n")
+  return _parser.sub_outside_fences(_STATUS_CALLOUT_BLOCK_RE, "", body, count = 1).lstrip("\n")
 
 
 def upsert_status_callout(
@@ -643,7 +640,7 @@ def upsert_status_callout(
   # consumer recording its own disposition of the document writes into that same slot rather
   # than inventing a second one.
 
-  body_no_old = _STATUS_CALLOUT_BLOCK_RE.sub("", body, count=1).lstrip("\n")
+  body_no_old = _parser.sub_outside_fences(_STATUS_CALLOUT_BLOCK_RE, "", body, count = 1).lstrip("\n")
   head = f"> [!{marker}] {title} #status/{state}"
   extras = [f"> {line}" for line in body_lines]
   callout = "\n".join([head, *extras]) + "\n"
@@ -737,15 +734,15 @@ def strip_banner_callouts(body: str) -> str:
   Returns:
     `body` with banner-state callout blocks removed.
   """
-  return _BANNER_CALLOUT_BLOCK_RE.sub("", body)
+  return _parser.sub_outside_fences(_BANNER_CALLOUT_BLOCK_RE, "", body)
 
 
 # The two operator-answered callout kinds a writer round folds: a tagged question and a
 # decision-candidate (which carries no `#review/` tag by design — its type token is its identity).
 _ANSWERED_QUESTION_BLOCK_RE = re.compile(
-    r"(?ms)^>\s*(?:\[!question\][^\n]*#review/question|\[!decision-candidate\])[^\n]*\n"
+    r"(?ms)^>[ \t]*(?:\[!question\][^\n]*#review/question|\[!decision-candidate\])[^\n]*\n"
     r"(?:>[^\n]*\n)*?"
-    r">\s*-\s*\[[xX]\][^\n]*\n"
+    r">[ \t]*-[ \t]*\[[xX]\][^\n]*\n"
     r"(?:>[^\n]*\n)*"
     r"\n?"
 )
@@ -759,6 +756,8 @@ def strip_answered_questions(body: str) -> str:
   Guarantees:
     - A question or candidate callout carrying no ticked option survives untouched — it is
       still awaiting the operator.
+    - A callout inside a code fence, and any line outside the callout's own `>` lines, survives
+      untouched.
     - Only `[!question] #review/question` and `[!decision-candidate]` callouts are considered;
       a ticked option inside any other callout (`[!warning] #review/concerns-decision` above
       all) is left exactly as found.
@@ -776,7 +775,7 @@ def strip_answered_questions(body: str) -> str:
   # option MUST NOT survive this call, and a callout of any other kind — or one with no ticked
   # option — MUST survive byte-for-byte.
 
-  return _ANSWERED_QUESTION_BLOCK_RE.sub("", body)
+  return _parser.sub_outside_fences(_ANSWERED_QUESTION_BLOCK_RE, "", body)
 
 
 def strip_review_callouts(body: str) -> str:
@@ -789,7 +788,7 @@ def strip_review_callouts(body: str) -> str:
   Returns:
     `body` with all `#review/<x>`-tagged callout blocks removed.
   """
-  return _REVIEW_CALLOUT_BLOCK_RE.sub("", body)
+  return _parser.sub_outside_fences(_REVIEW_CALLOUT_BLOCK_RE, "", body)
 
 
 # Inert H1 placeholder that stands in for a lifted `#protected/...` section while the
@@ -917,7 +916,7 @@ def _strip_owned_meta_and_history(body: str) -> str:
     `body` stripped of banner, approve-checkbox lines, owned H1 sections, and `# History`.
   """
   body = _strip_banner(body)
-  body = _APPROVE_LINE_RE.sub("", body)
+  body = _parser.sub_outside_fences(_APPROVE_LINE_RE, "", body)
   return _drop_sections(body, drop_owned=True, drop_history=True)
 
 
@@ -1119,7 +1118,7 @@ def _document_title_heading(body: str) -> str | None:
   """Return the heading line of the document's title.
 
     The title is the first H1 that is neither the historian's `# History`
-    section nor an expert-owned section — that is, the document headline
+    section nor any tagged section — that is, the document headline
     the operator authored. Returns None when the body carries no such H1.
 
     Args:
@@ -1138,8 +1137,8 @@ def _document_title_heading(body: str) -> str | None:
     if _parser.is_historian_section(section_body_only):
       continue
 
-    # guard: expert-owned sections are not the title
-    if _owner_of_section(section_body_only) is not None:
+    # guard: tagged sections (expert-owned, protected, consumer overlays) are not the title
+    if _section_is_tagged(section_body_only):
       continue
     return heading_line.rstrip("\n")
   return None
@@ -1183,6 +1182,60 @@ def _carry_title_from_operator(operator_body: str, new_content: str) -> str:
   if _document_title_heading(new_content) is not None:
     return new_content
   return op_title + "\n\n" + new_content.lstrip("\n")
+
+
+def _extract_writer_section(
+    agent_body: str, owner: tuple[str, str], operator_body: str,
+) -> str | None:
+  """
+  Extract `owner`'s section from a section writer's reply, keeping the writer's own inner H1s.
+
+  Guarantees:
+    - Every untagged H1 section following the owned heading in the reply, up to the next tagged
+      section or a heading the operator's document already carries, belongs to the owned section,
+      its heading demoted to H2 so the section stays a single H1 section.
+
+  Args:
+    agent_body: The section writer's reply body.
+    owner: The `(flat_name, section_id)` pair of the writer's owned section.
+    operator_body: The operator's current body, whose headings mark echoed operator sections.
+
+  Returns:
+    The owned section text with the writer's inner headings demoted, or `None` when the reply
+    carries no section owned by `owner`.
+  """
+
+  # Contract:
+  # An untagged H1 section following the owned heading in the reply, up to the next tagged
+  # section or a heading the operator's document already carries, MUST stay inside the owned
+  # section, its heading demoted to H2.
+
+  # Domain(review.dispatch):
+  # # A section writer's headings belong to its section
+  # A section writer owns exactly one top-level section, so any top-level heading it writes
+  # below its own is a subdivision of that section, not a new section of the document. It is
+  # kept, one level lower, inside the owned section. A heading the operator's document already
+  # carries, or a heading carrying another owner's tag, marks where the writer's section ends:
+  # anything from there on is an echo of the rest of the document and stays discarded.
+
+  spans = _enumerate_h1_spans(agent_body)
+  op_headings = {heading for _start, _end, _title, heading in _enumerate_h1_spans(operator_body)}
+  for idx, (start, end, _title, _heading) in enumerate(spans):
+    heading_len = len(_heading_line_for(start, end, agent_body))
+
+    # guard: only the owned section starts the extraction
+    if _owner_of_section(agent_body[start + heading_len:end]) != owner:
+      continue
+    parts = [agent_body[start:end]]
+    for next_start, next_end, _next_title, next_heading in spans[idx + 1:]:
+      next_heading_len = len(_heading_line_for(next_start, next_end, agent_body))
+
+      # guard: a tagged section or an echoed operator heading ends the writer's section
+      if _section_is_tagged(agent_body[next_start + next_heading_len:next_end]) or next_heading in op_headings:
+        break
+      parts.append("#" + agent_body[next_start:next_end])
+    return "".join(parts)
+  return None
 
 
 def _reassemble_main(
@@ -1233,7 +1286,7 @@ def _reassemble_section(
   """
   # Body comes from operator — agent's body edits are IGNORED.
   # Pull only the agent's owned section.
-  agent_owned = _extract_section_by_owner(agent_body, owned_owner)
+  agent_owned = _extract_writer_section(agent_body, owned_owner, operator_body)
 
   # Operator body minus owned sections AND History — we re-add both
   # below in canonical order (owned first, History last). Bug 30.

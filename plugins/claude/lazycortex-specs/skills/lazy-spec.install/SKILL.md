@@ -221,7 +221,8 @@ Invoke `lazycortex-core:lazy-routine.register` via the `Skill` tool, passing a `
         "spec_released": {"in": [null, false], "not_in": []}
       }
     },
-    "command": ["lazycortex-specs", "gate-tick"]
+    "command": ["lazycortex-specs", "gate-tick"],
+    "change_gate": false
   }
 }
 ```
@@ -230,13 +231,17 @@ Invoke `lazycortex-core:lazy-routine.register` via the `Skill` tool, passing a `
 
 The mask spans the whole vault because the filter, not the glob, is what selects: every non-product subtree under the content root (`requests/`, the project-level system documents, an operator's own folders) carries a `spec_role` other than `status`, or no frontmatter at all, so the frontmatter predicate rejects all of it. The one tree that made width expensive rather than wrong was the mirrored `upstream/` content, which no longer lives under the vault at all — it sits at `<repo>/upstream/`, outside every glob this routine writes.
 
-**Managed keys — `type,paths,filter,command`.** Pass them as `--managed type,paths,filter,command` per § Routine registrations are reconciled, never skipped: the mask, the frontmatter predicate and the worker are this plugin's own knowledge, while `interval_sec` / `timeout_sec` are the operator's cadence and stay outside the list. Absent that reconciliation a repo registered under an older shape keeps it forever — either an over-wide `["**/*.md"]` that re-parses every markdown file in the repository each tick, or a narrowed products-subtree glob that matches nothing under a layout with no literal `products/` segment.
+**Managed keys — `type,paths,filter,command,change_gate`.** Pass them as `--managed type,paths,filter,command,change_gate` per § Routine registrations are reconciled, never skipped: the mask, the frontmatter predicate, the worker and the change gate are this plugin's own knowledge, while `interval_sec` / `timeout_sec` are the operator's cadence and stay outside the list. Absent that reconciliation a repo registered under an older shape keeps it forever — either an over-wide `["**/*.md"]` that re-parses every markdown file in the repository each tick, or a narrowed products-subtree glob that matches nothing under a layout with no literal `products/` segment.
 
 The composite `{in: [...], not_in: []}` predicate is the shape the md-scan filter expects (same form as the `review_active` / `review_result` clauses on Step 6a's own routine): `null` in `in` matches a missing key or explicit null, so an asset whose status note has not yet stamped `spec_cancelled` / `spec_released` still matches. The filter selects every live (un-cancelled, un-released) asset status folder-note across the vault content root.
 
 The daemon resolves `command[0]` (`lazycortex-specs`) to the plugin's bin script and runs it as `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" gate-tick <matched-file-path>` — it **appends the matched file's absolute path as the last argv** (the md-scan convention every command-based routine of this type relies on). `gate-tick <asset_note>` reads the appended status folder-note path, clears the runtime sidecar's `active_job` marker when its bundle has landed a terminal marker (raising a `job-done` wake and opening report review on `DONE`), and runs `note_check` — it dispatches no jobs of its own and carries no protocol (pure script, nothing here ever produces LLM markdown output).
 
-Outcome: `registered`, `refreshed`, or `unchanged`, whichever the registrar returned.
+**`change_gate: false` is required, not a tuning knob.** With the md-scan change gate on (core's default), the daemon skips a status note whose directory has not changed since its last clean run (`lazy-core.routine-types-schema.md`, `change_gate`). Everything this worker polls — the runtime sidecar's job markers, a job bundle's `DONE` / `DEAD` / `CANCELLED` file under `.experts/.jobs/` — lives outside the asset folder, so a gated routine would never re-run on a finished job and its result would never land. With the key off the worker is spawned for every matching status note on every tick. Because the key is managed, a repo whose routine predates it gains it on the next install run.
+
+**A core that predates `change_gate` rejects it — register without it.** The routine schema is closed-set strict, so a lazycortex-core too old to know the key aborts the registration with a schema error naming `change_gate` as an `unknown field`. The registrar's own validation is the support check; never compare version strings. On exactly that error, invoke `lazycortex-core:lazy-routine.register` once more with `change_gate` removed from both the `cfg` and the `--managed` list (`type,paths,filter,command`). Nothing is lost: a core that does not know the key has no change gate to skip notes with, so every status note is still scanned on every tick. Report the outcome `registered-without-change-gate` and tell the operator to update lazycortex-core and re-run install, so the key lands once the gate exists. Any other registrar error aborts this step verbatim, as before.
+
+Outcome: `registered`, `refreshed`, `unchanged`, or `registered-without-change-gate`, whichever the registrar returned.
 
 ## Step 5b: Register the coordinator-watch routine
 
@@ -314,7 +319,7 @@ When the printed value is anything other than `pull_push`, REPORT it plainly in 
 
 ## Step 5c: Register the collect routine
 
-A finished expert job leaves its terminal marker (`DONE` / `DEAD` / `CANCELLED`) inside `.experts/.jobs/<expert>/<job_id>/` — a path no md-scan signature covers, so `lazy-spec.gate-tick` (Step 5, an md-scan routine gated on the note's own directory changing) never wakes on it: the note's folder is untouched when a job finishes. This routine is the delivery channel — the specs-side analog of `lazy-review.collect`. Every tick it reads the job-marker sidecar (`.runtime/lazy-specs.jobs.json`), and for each note with a recorded marker runs the same per-note `gate-tick` in-process; gate-tick's own job-done commit is what then wakes `lazy-spec.coordinator-watch`.
+A finished expert job leaves its terminal marker (`DONE` / `DEAD` / `CANCELLED`) inside `.experts/.jobs/<expert>/<job_id>/` — a path no md-scan signature covers, and the note's folder is untouched when a job finishes. `lazy-spec.gate-tick` (Step 5) reaches it only because it runs with `change_gate: false`, on its own md-scan cadence over every live status note. This routine is the prompt delivery channel — the specs-side analog of `lazy-review.collect`. Every tick it reads the job-marker sidecar (`.runtime/lazy-specs.jobs.json`), and for each note with a recorded marker runs the same per-note `gate-tick` in-process; gate-tick's own job-done commit is what then wakes `lazy-spec.coordinator-watch`.
 
 Invoke `lazycortex-core:lazy-routine.register` via the `Skill` tool with:
 
@@ -900,10 +905,10 @@ A non-zero exit is non-fatal: surface its stderr first line in the report and co
 
 **Seed the spec-catalog scope defaults.** A spec catalog's wiki scope skips unfinished and working documents by default: a stage-bearing doc is curated only once `spec_stage` reaches `approved` (a doc with no `spec_stage` at all — a terms dictionary, a decisions registry — passes; markdown attachments mirror their owner's stage per `lazy-spec.file-roles-protocol.md` § Attachments, so they follow the owner), a doc whose own review rejected it stays out via `review_result`, a doc under review is already skipped by the `review_active` predicate the configure wizard seeds, and the request inbox (`<vault_root>/requests/**`, raw requests and their archive) plus plan/report working papers are excluded by name — the scope's own `topics_index` is skipped structurally and needs no entry. `/lazy-wiki.configure` asks no exclude question for a scope covering the catalog; this seed is the one source. The seed is idempotent and never overwrites an operator's own predicate for the same key, so a project that deliberately loosened the default keeps its loosening on every re-run.
 
-Resolve the scope covering each registered product: for every entry in `products` (skip the `_version` meta key), build the repo-relative probe path `<vault_root>/<spec_path>/design.md` — `<vault_root>` is the `spec.vault_root` setting (default `specs`); drop the `<vault_root>/` segment when it is `.`. `resolve-scope` matches the path against configured globs only — the file need not exist on disk yet:
+Resolve the scope covering each registered product: for every entry in `products` (skip the `_version` meta key), build the repo-relative probe path `<vault_root>/<spec_path>/design.md` — `<vault_root>` is the `spec.vault_root` setting (default `specs`); drop the `<vault_root>/` segment when it is `.`. `--globs-only` makes `resolve-scope` match the path against the configured globs alone: the file need not exist on disk yet, and a `design.md` the scope's frontmatter filter currently rejects (under review, deferred, not yet approved) still resolves to the scope that covers it:
 
 ```
-Bash(test -f "$WIKI_CLI" && "${LAZYCORTEX_PYTHON:-python3}" "$WIKI_CLI" resolve-scope <vault_root>/<spec_path>/design.md --repo <repo-root>)
+Bash(test -f "$WIKI_CLI" && "${LAZYCORTEX_PYTHON:-python3}" "$WIKI_CLI" resolve-scope <vault_root>/<spec_path>/design.md --globs-only --repo <repo-root>)
 ```
 
 `{"scope_id": null}` → no configured wiki scope covers this product yet; count it under `no-scope` and skip it. Two products resolving to the same scope must not double-trigger the seed — dedupe scope ids across the loop. For every distinct `<id>`:
