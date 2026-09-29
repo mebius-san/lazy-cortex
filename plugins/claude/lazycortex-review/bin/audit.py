@@ -19,6 +19,8 @@ Checks performed (one finding per check):
 - A product-scoped class (`<type>@<key>`) whose `paths` carry a glob
   without `**` fixes the asset depth and warns, naming the class and
   the repair.
+- Every class glob can only match documents under `review.watch_root`;
+  a class reaching past it fails, naming the class and the repair.
 
 Output is a JSON record with `level` (PASS/WARN/FAIL) and a list of
 `findings`. Exit code: 0 on PASS, 1 on WARN, 2 on FAIL.
@@ -195,6 +197,50 @@ def _check_section_writers_new_schema(settings: dict, findings: list[dict]) -> N
                f'expert "{name}" referenced in'
                f" {class_name}.experts.{umbrella}.{section_id}"
                f" is not registered in root experts catalog")
+
+
+def _check_watch_root(settings: dict, findings: list[dict]) -> None:
+  """
+  Fail every class whose globs can match documents outside `review.watch_root`.
+
+  The coordinator's git-watch sees only commits under the watch root, so a class reaching past
+  it never enters the loop and nothing reports why. An absent root means the whole repository.
+
+  Args:
+    settings: Parsed `lazy.settings.json` contents.
+    findings: Mutable findings list to append to.
+  """
+
+  # Domain(review.config):
+  # # Watch coverage
+  # The coordinator hears only about commits inside one watched folder. A class whose documents
+  # can live outside that folder never enters the review loop, so every class must sit under it.
+
+  # an absent or bare-slash root is the whole repository
+  review = settings.get(JobKey.REVIEW) or {}
+  watch_root = str(review.get(JobKey.WATCH_ROOT) or ".").rstrip("/") or "."
+
+  # guard: a whole-repo watch covers every class there is
+  if watch_root == ".":
+    return
+
+  # each class is judged on its own, so one finding names every glob of that class that escapes
+  for i, class_cfg in enumerate(review.get(JobKey.CLASSES) or []):
+    # guard: a malformed entry is the shape checks' finding, not this one's
+    if not isinstance(class_cfg, dict):
+      continue
+
+    # a glob escapes when its own root is not the watch root or a folder below it
+    outside = [
+        pat for pat in class_cfg.get(JobKey.PATHS) or []
+        if isinstance(pat, str)
+        and os.path.commonpath([ watch_root, _doc_class.glob_root(pat) ]) != watch_root
+    ]
+    if outside:
+      # waiver: one-off human-facing message
+      _add(findings, ReviewStatus.FAIL, "watch_root_coverage",
+           f"class {class_cfg.get(JobKey.CLASS) or f'#{i}'!r} globs {outside} reach outside"
+           f" review.watch_root {watch_root!r}; re-run /lazy-review.install to widen it")
 
 
 def _check_override_globs(settings: dict, findings: list[dict]) -> None:
@@ -445,6 +491,7 @@ def _check_all(settings: dict, findings: list[dict], *, repo_root: Path | None =
   # the section-writer schema has its own rules, checked as a separate pass
   _check_section_writers_new_schema(settings, findings)
   _check_override_globs(settings, findings)
+  _check_watch_root(settings, findings)
 
   # the callout-tag vocabulary check needs real files on disk; skipped when no repo_root was
   # given (a bare settings dict has no repository to resolve `review.classes[].paths` against)

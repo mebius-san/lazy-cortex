@@ -41,6 +41,47 @@ _SPEC_DOC_TYPE = "spec_doc_type"
 # The label separator scoping a class to one product: `<type>@<product>`.
 _SCOPE_SEP = "@"
 
+# The whole repository, as a directory root.
+_REPO_ROOT = "."
+
+# Glob metacharacters that end a pattern's wildcard-free directory prefix.
+_GLOB_CHARS = "*?["
+
+
+def glob_root(pattern: str) -> str:
+  """
+  Name the directory a class glob can match documents under.
+
+  A pattern without `**` matches at any depth, so its root is the whole repository. A pattern
+  carrying `**` is anchored at the repository root, so its root is its leading literal
+  directory prefix.
+
+  Args:
+    pattern: The glob from a class's `paths`.
+
+  Returns:
+    The repo-relative directory every match lies under, or `.` for the whole repository.
+  """
+
+  # Domain(review.config):
+  # # Class glob anchoring
+  # A class pattern without a recursive wildcard is anchored at its right end, so it matches a
+  # document at any depth in the repository. A pattern with one is anchored at the repository
+  # root, so its matches all lie under the literal folders it opens with.
+
+  # guard: a right-anchored pattern can match anywhere in the repository
+  if "**" not in pattern:
+    return _REPO_ROOT
+
+  # the literal prefix ends at the first segment that globs
+  parts: list[str] = []
+  for segment in pattern.split("/"):
+    # guard: the first globbing segment ends the literal prefix
+    if any(mark in segment for mark in _GLOB_CHARS):
+      break
+    parts.append(segment)
+  return "/".join(parts) or _REPO_ROOT
+
 
 def _rel_for(repo: Path, file_path: Path) -> PurePosixPath | None:
   """

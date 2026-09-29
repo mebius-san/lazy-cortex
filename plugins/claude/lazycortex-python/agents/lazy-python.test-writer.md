@@ -46,7 +46,7 @@ If a test correctly reflects documented behavior but fails against the current i
 
 1. **Do NOT fix the test** to match the (possibly buggy) implementation.
 2. **Do NOT delete the test.**
-3. Add a `# FAILS: <brief reason>` comment above the test method.
+3. Decorate the test method with `@pytest.mark.xfail(strict = True, reason = "<brief reason>")` — never a bare comment. While the defect stands the run reports the test as an expected failure; once the code is fixed the unexpected pass fails the run, and whoever fixed the code removes the marker in the same change.
 4. Report the failure to the user — the implementation likely has a bug or the docstring needs updating.
 
 # Test File Rules
@@ -165,7 +165,7 @@ Add a class docstring starting with `"Test unit for "` and method docstrings sta
 
 ## Step 6 — Handle implementation-vs-spec mismatches
 
-If any test correctly reflects documented behavior but fails against the current implementation: add a `# FAILS: <reason>` comment above the test method and report the divergence to the user. Outcome: `none` or `<N>-mismatches-flagged`.
+If any test correctly reflects documented behavior but fails against the current implementation: decorate the test method with `@pytest.mark.xfail(strict = True, reason = "<reason>")` and report the divergence to the user. Outcome: `none` or `<N>-mismatches-flagged`.
 
 ## Step 7 — Verify with toolchain
 

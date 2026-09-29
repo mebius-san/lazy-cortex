@@ -40,4 +40,5 @@ One line per task with its outcome word, followed by the summary line `audit: <L
 
 - **Phase 1 reports `settings_present FAIL`** — operator hasn't run `/lazy-review.install` → run install first, then re-run audit.
 - **Phase 1 reports `expert_<name>_missing FAIL`** — a class references an expert name that isn't in the top-level `experts` dict → run `/lazy-review.configure` to register the expert, or remove the class member.
+- **Phase 1 reports `watch_root_coverage FAIL`** — a class glob can match documents outside `review.watch_root`, so the coordinator's git-watch never sees their commits and review stalls silently → re-run `/lazy-review.install`, which widens the root to cover every class.
 - **Phase 1 reports `override_glob_depth WARN`** — a product-scoped `<type>@<key>` class carries a glob that fixes the asset depth, so an asset at the product root or nested deeper falls out of it and loses the product's own experts → re-run `/lazy-spec.product-config <key>` in edit mode to regenerate the class's globs.

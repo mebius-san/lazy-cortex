@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, causes, and fixes for lazycortex-python install, audit, style checks, the guideline-review gate, and writer agents.
-last_regen: 2026-09-28
+last_regen: 2026-09-29
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision-tree routing install/audit/check-style/review/writer failures: top-level branch on skill invoked (install vs audit vs check-style vs review vs docstring-writer vs test-writer); install branch splits on phase (source-not-found, rule-read-only, wrapper-template-missing, pyproject-absent, pch-no-inspect-sh, scaffold-sync-fails, env-source-multiple-candidates, wrapper-cannot-resolve-active-install); audit branch splits on check number (check-crash, check1 drift, check2 broken-pointer, check3 artifact-missing, check4 placeholder, check10 invalid-json, check11 venv-degraded, check12 domain-groups-dictionary-missing); check-style branch splits on step (step3-manual-vs-chk, step5-test-gate, step6-violations-persist); pcf branch splits on new-violations-after-upgrade: (a) D2/D5/D7/D9 firing on previously-passing docstrings because project-neutral defaults dropped a project's implicit Generation Rules / Value Ranges / _field_filters conventions, needing [tool.pcf] extra_docstring_sections / d2_exempt_marker_attrs / private_name_allowlist declared; (b) check_language flagging comments/docstrings written outside [tool.pcf] allowed_languages (default english-only), needing translation, allowed_languages, or a # waiver:; (c) project_package autodetection resolving to nothing on an ambiguous src/ + root layout, misclassifying first-party imports, needing [tool.pcf] project_package declared explicitly; review branch splits on: chk-py-all-no-longer-runs-review (review left chk-py all as of 4.0.0 and needs its own chk-py review dispatch, mandatory at the end of a planned-work cycle) vs chk-py-review-base-ref-unresolvable (typo'd or unfetched --base ref, fetch or use git merge-base) vs chk-py-review-render-still-fails-with-FAIL-finding (fix the code, re-run — new scope key re-manifests); docstring-writer branch (step6-chk-violations); test-writer branch (step6-fails-flag, step7-tst-py-fails); each leaf names the fix action"
@@ -19,8 +19,8 @@ source_skills:
   - lazy-python.knowledge-sweep
   - lazy-python.domain-writer
   - lazy-python.contract-writer
-source_sha: 1dd5a4a1afab6e68bea8a0aaab1531b235722f5f
-surface_sha: d274c45e42136cdf63a794dec796e3df4199875f343239900794ff83eee92723
+source_sha: 600d3366cc9008d09f999f58678103714c26392f
+surface_sha: dac2446c43063f5232b510dc7b8e745a68ba448433a0ce3f1710ee52d0aa1a7e
 ---
 # Troubleshooting
 
@@ -360,13 +360,13 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 
 ---
 
-## `lazy-python.test-writer` marks a test `# FAILS:` — what does that mean?
+## `lazy-python.test-writer` marks a test `xfail` — what does that mean?
 
-**Symptom**: After `lazy-python.test-writer` finishes, one or more test methods carry a `# FAILS: <reason>` comment above them. Running `tst-py <module> -q` confirms those tests fail.
+**Symptom**: After `lazy-python.test-writer` finishes, one or more test methods carry `@pytest.mark.xfail(strict = True, reason = "<reason>")`. Running `tst-py <module> -q` reports those tests as expected failures (`xfailed`).
 
-**Likely cause**: A test correctly reflects documented behaviour (what the class's docstring promises, or what a `Contract:` / `Domain(…):` / `opt:` marker states) but fails against the current implementation. The agent follows the Golden Rule: it does not alter the test to match a possibly buggy implementation, and it does not delete the test. The `# FAILS:` flag is intentional — it signals a divergence between the spec (docstring or knowledge marker) and the code.
+**Likely cause**: A test correctly reflects documented behaviour (what the class's docstring promises, or what a `Contract:` / `Domain(…):` / `opt:` marker states) but fails against the current implementation. The agent follows the Golden Rule: it does not alter the test to match a possibly buggy implementation, and it does not delete the test. The strict `xfail` marker is intentional — it signals a divergence between the spec (docstring or knowledge marker) and the code.
 
-**Fix**: The flagged test is a bug report, not a broken test. Investigate the production class: either the implementation has a defect (fix the code), or the docstring/marker overstates what the class actually does (update the docstring via `lazy-python.docstring-writer`, or the marker via `lazy-python.domain-writer` / `lazy-python.contract-writer`, to reflect the real contract, then revisit the test). Do not remove the `# FAILS:` comment or alter the assertion to make it pass without first resolving the underlying divergence.
+**Fix**: The flagged test is a bug report, not a broken test. Investigate the production class: either the implementation has a defect (fix the code), or the docstring/marker overstates what the class actually does (update the docstring via `lazy-python.docstring-writer`, or the marker via `lazy-python.domain-writer` / `lazy-python.contract-writer`, to reflect the real contract, then revisit the test). Once the code is fixed, the test passes, `strict = True` turns that unexpected pass (`XPASS(strict)`) into a failed run, and you remove the marker in the same change. Do not remove the marker or alter the assertion while the divergence still stands.
 
 ---
 

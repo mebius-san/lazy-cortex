@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, configuring, and running the lazycortex-review document-review loop.
-last_regen: 2026-09-24
+last_regen: 2026-09-29
 no_diagram: true
 source_skills:
   - lazy-review.install
@@ -12,8 +12,8 @@ source_skills:
   - lazy-review.stop
   - lazy-review.finalize
   - lazy-review.audit
-source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
-surface_sha: fdab8f9198b210fd9f935838b7d44273c61c1021616b787831b21504c1c75ba7
+source_sha: 99f16aadce5ea043be2b382078b78bfdac7dc517
+surface_sha: 9237e1dff95086d0e2530d34b6194e2b3a3c51b781249148aba27dc4f9952dd5
 ---
 # Frequently asked questions
 
@@ -125,6 +125,12 @@ A review class references an expert name that is not registered in the top-level
 ## `/lazy-review.audit` reports `settings_present FAIL`. What does that mean?
 
 The audit script could not find `.claude/lazy.settings.json`. Run `/lazy-review.install` first to create and seed it, then re-run the audit.
+
+---
+
+## `/lazy-review.audit` reports `watch_root_coverage FAIL`. What does that mean?
+
+A review class's `paths` glob can match documents that sit outside `review.watch_root`. The coordinator's git-watch routine only sees commits under that one root, so a commit to a document the class covers but the root doesn't reach never wakes the coordinator — the review stalls with no error, no banner change, nothing to point at. Re-run `/lazy-review.install`: every run widens `review.watch_root` to the common root covering the current `review.watch_root` value and every class's `paths` glob, then rewrites the watch routine's `path_filter` to match. Widening only ever grows the root, never narrows it, so re-running is safe even with classes already configured and in flight. `/lazy-review.configure` performs the same widening at the end of its own Phase 5, so adding a class through the wizard also keeps the watch current without a separate install run.
 
 ---
 

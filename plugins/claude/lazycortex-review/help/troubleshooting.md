@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-review skills — symptoms, likely causes, and fixes.
-last_regen: 2026-09-24
+last_regen: 2026-09-29
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree routing on observed symptom. Top-level branches: install/bootstrap failures (settings missing, permission error, malformed JSON), configure failures (audit FAIL after wizard, section-id loop), start/submit problems (file not opted in, no-op on re-run when unexpected), status reporting nothing useful, stop/resume confusion, finalize blocked or partial, audit FAIL findings. Each leaf names the troubleshooting entry that resolves it."
@@ -15,8 +15,8 @@ source_skills:
   - lazy-review.stop
   - lazy-review.finalize
   - lazy-review.audit
-source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
-surface_sha: fdab8f9198b210fd9f935838b7d44273c61c1021616b787831b21504c1c75ba7
+source_sha: 99f16aadce5ea043be2b382078b78bfdac7dc517
+surface_sha: 9237e1dff95086d0e2530d34b6194e2b3a3c51b781249148aba27dc4f9952dd5
 ---
 # Troubleshooting
 
@@ -40,13 +40,13 @@ surface_sha: fdab8f9198b210fd9f935838b7d44273c61c1021616b787831b21504c1c75ba7
 
 ---
 
-## `/lazy-review.install` reports `review.watch_root` as `.` after migrating an old routine
+## `/lazy-review.install` reports (or widens) `review.watch_root` to `.`
 
-**Symptom**: On a repo that used to run the retired file-scan routine, the install report shows `review.watch_root: "."` — the coordinator's git-watch is now scoped to the whole repo instead of the doc subtree it used to cover.
+**Symptom**: Running (or re-running) `/lazy-review.install` shows `review.watch_root: "."` in the report — the coordinator's git-watch is scoped to the whole repo instead of a narrower doc subtree, even on a repo where it used to be narrower.
 
-**Likely cause**: Install derives `review.watch_root` from the retired routine's `paths` globs by taking their common wildcard-free directory prefix. When those globs share no literal root (for example `specs/core/**/*.md` and `docs/**/*.md`), there is nothing to derive, so it falls back to `.`.
+**Likely cause**: `review.watch_root` has to cover every review class, and install recomputes it on every run rather than only when migrating an old routine. A class `paths` glob that does not contain `**` is right-anchored and matches at any depth — `requests/*.md` also matches `specs/requests/x.md` — so a glob like that reduces to root `.` regardless of where the matching files actually sit. The recorded root is then the common directory across the current value and every class's own root, and it only ever widens: one such glob (or several class roots sharing no common literal directory) is enough to pull the whole watch out to `.`.
 
-**Fix**: Set `review.watch_root` in `.claude/lazy.settings.json` by hand to the directory your review classes actually live under, then re-run `/lazy-review.install`. An operator-set value is never re-derived.
+**Fix**: This isn't necessarily broken — a broad `path_filter` stays cheap because the coordinator watch also filters on the `review_active` frontmatter key, so widening by itself costs little. If you want a narrower root, rewrite the offending class's `paths` glob to anchor with `**` at the subtree it should cover (for example `requests/**/*.md` instead of `requests/*.md`) via `/lazy-review.configure`, then set `review.watch_root` in `.claude/lazy.settings.json` by hand to that subtree — install and configure only ever widen the root, never narrow it. A hand-set narrower value holds only as long as every class still resolves inside it; install re-widens it the moment a class glob reaches outside again.
 
 ---
 
@@ -187,6 +187,16 @@ surface_sha: fdab8f9198b210fd9f935838b7d44273c61c1021616b787831b21504c1c75ba7
 **Likely cause**: A class was configured referencing an expert that was never registered in the experts registry, or the expert entry was deleted after the class was created.
 
 **Fix**: Run `/lazy-review.configure` to re-enter the wizard and supply the missing expert, or to remove the class member that references a non-existent expert. Audit will pass once every class reference has a corresponding `experts` entry.
+
+---
+
+## `/lazy-review.audit` reports `watch_root_coverage FAIL`
+
+**Symptom**: Audit returns FAIL with check `watch_root_coverage`, naming a class whose `paths` glob can match documents outside `review.watch_root`.
+
+**Likely cause**: A class was added, or its `paths` glob was widened by hand or through `/lazy-spec.product-config`, after `review.watch_root` was last computed — so the recorded root no longer covers everything the class matches. The coordinator's git-watch only scans commits under `review.watch_root`; a document the class reaches but the watch does not never wakes the coordinator, so review stalls on it silently, with no error at commit time.
+
+**Fix**: Re-run `/lazy-review.install` — every run recomputes `review.watch_root` as the common directory across every class's own glob root, and only ever widens the recorded value, so it will pull the root back out to cover the class that escaped it. Then re-run `/lazy-review.audit` to confirm the FAIL clears.
 
 ---
 

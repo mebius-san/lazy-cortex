@@ -729,6 +729,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 9.9.1 — 2026-09-29 UTC
+
+- Fixed incorrect install guidance for `review.classes[]` globs — they are right-anchored and match at any folder depth, not relative to `review.watch_root` as previously documented.
+
 ### 9.9.0 — 2026-09-28 UTC
 
 - Fixed the daemon continuing to run a stale cached version of the specs CLI/protocols after another plugin was updated — it now always resolves the newest installed version instead of the one frozen at daemon start.
@@ -1415,6 +1419,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+### 6.10.0 — 2026-09-29 UTC
+
+- Fixed the review coordinator silently missing commits under `specs/` in some setups — `review.watch_root` now automatically widens to cover every review class glob instead of narrowing to a single literal folder name.
+- `/lazy-review.install` now re-derives `review.watch_root` on every run and only ever widens it, so a root recorded by an earlier install is repaired by re-running install.
+- `/lazy-review.audit` reports `watch_root_coverage FAIL` when a review class can match documents outside `review.watch_root`, instead of letting review stall silently.
+
 ### 6.9.2 — 2026-09-28 UTC
 
 - The review coordinator falls back to the newest cached plugin version when the runtime's plugin-directory list does not name the plugin it needs.
@@ -1937,6 +1947,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 4.7.5 — 2026-09-29 UTC
+
+- The `test-writer` agent now flags spec-vs-code mismatches with a strict `xfail` marker instead of a plain comment, so the test suite reports the divergence as an expected failure until the code is fixed, and fails loudly if it silently starts passing.
 
 ### 4.7.4 — 2026-09-28 UTC
 

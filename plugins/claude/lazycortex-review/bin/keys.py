@@ -207,6 +207,7 @@ class JobKey:
     STATUS: A status field.
     EMAIL: A git-author email field.
     EDIT_MARKER_STYLE: The configured edit-marker style key.
+    WATCH_ROOT: The folder whose commits the coordinator's git-watch hears about.
     OPERATOR_COMMIT_SHA: The operator's commit-SHA field.
     OPERATOR_SHA_AT_DISPATCH: The snapshot of the operator SHA at dispatch.
     VERSION: A schema-version sentinel key.
@@ -308,6 +309,7 @@ class JobKey:
   STATUS = "status"
   EMAIL = "email"
   EDIT_MARKER_STYLE = "edit_marker_style"
+  WATCH_ROOT = "watch_root"
   OPERATOR_COMMIT_SHA = "operator_commit_sha"
   OPERATOR_SHA_AT_DISPATCH = "_operator_sha_at_dispatch"
   VERSION = "_version"

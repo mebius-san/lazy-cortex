@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, knowledge markers, tests, and the checker stack.
-last_regen: 2026-09-28
+last_regen: 2026-09-29
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -21,8 +21,8 @@ source_skills:
   - review.py
   - lazy-python.coding-guidelines
   - lazy-python.checking-guidelines
-source_sha: 1dd5a4a1afab6e68bea8a0aaab1531b235722f5f
-surface_sha: 8b47a869045eb0c402b1b5252e0897d700815915646667ba6f21f4357f07491a
+source_sha: 600d3366cc9008d09f999f58678103714c26392f
+surface_sha: f8e2702a2af2ac944ca03dea2031e1677f1438c5bdd495fe0495815d80670989
 ---
 # Frequently asked questions
 
@@ -286,7 +286,7 @@ Yes. `Test unit for X.` and `Test that Y.` docstrings are written in the multi-l
 
 ## A test written by the agent fails against the current implementation. Should I fix the test?
 
-No. Per the Golden Rule in `lazy-python.test-writer`: if a test correctly reflects documented behaviour but fails against the current implementation, the implementation is suspect. The agent will add a `# FAILS: <reason>` comment above the test method and report the divergence to you. Fix the production code (or update the docstring if the spec has changed), not the test. Modifying an existing test also requires your explicit approval naming the specific test file — the agent will ask before touching it.
+No. Per the Golden Rule in `lazy-python.test-writer`: if a test correctly reflects documented behaviour but fails against the current implementation, the implementation is suspect. The agent will decorate the test method with `@pytest.mark.xfail(strict = True, reason = "<reason>")` and report the divergence to you. Fix the production code (or update the docstring if the spec has changed), not the test. Once the fix lands, the strict marker fails the run on the unexpected pass, and the marker comes off in the same change. Modifying an existing test also requires your explicit approval naming the specific test file — the agent will ask before touching it.
 
 ---
 

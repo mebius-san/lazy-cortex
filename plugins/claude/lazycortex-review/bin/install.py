@@ -4,7 +4,8 @@ Writes (or leaves alone if present) the following pieces of state:
 
 - `<repo>/.claude/lazy.settings.json` — adds the `review` section and the
   `experts` entries for the plugin's own system experts if absent (existing
-  values are never overwritten), and reconciles the
+  values are never overwritten, except that `review.watch_root` is widened to
+  cover every review class), and reconciles the
   `routines["lazy-review.collect"]` / `routines["lazy-review.coordinator-watch"]` /
   `routines["lazy-review.sanitize"]` trio through the core CLI's
   `reconcile-routine` verb: the keys this plugin owns are corrected to the shipped
@@ -16,7 +17,8 @@ Writes (or leaves alone if present) the following pieces of state:
 On a repo installed before the coordinator migration the script also
 retires the `lazy-review.scan` routine, derives `review.watch_root` from
 the paths that routine used to scan, and drops the `history` expert link
-from every review class. `review._version` is left alone throughout —
+from every review class. Every run widens `review.watch_root` until each
+review class's globs fall under it. `review._version` is left alone throughout —
 `lazycortex-core` owns that ladder and stamps it from its own migrations.
 
 The CLI prints a summary of what changed.
@@ -42,6 +44,8 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import doc_class as _doc_class  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from keys import JobKey, Paths, ReviewKey  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
@@ -92,7 +96,7 @@ _REQUIRED_DIRS = (
 # Settings-section keys this script seeds or migrates. `review.watch_root` scopes the
 # coordinator watch's single git pathspec; `review.coordination_rules` is the vault-wide
 # operator rule layer the coordinator reads (empty string = no layer).
-_WATCH_ROOT = "watch_root"
+_WATCH_ROOT = JobKey.WATCH_ROOT
 _COORDINATION_RULES = "coordination_rules"
 _PROTOCOLS = "protocols"
 
@@ -131,9 +135,6 @@ _MANAGED_FIELDS = {
 # pathspec to `:(glob)**/*.md`, mirroring how `spec.vault_root: "."` is resolved.
 _REPO_ROOT_WATCH = "."
 
-# Glob metacharacters that end a pathspec's wildcard-free directory prefix.
-_GLOB_CHARS = "*?["
-
 # `branch` is required by the git-routine schema but vestigial for a `changed_files` watch —
 # the daemon always reads local HEAD. Used only when the consumer has no `daemon.git` block
 # and the checkout cannot be interrogated.
@@ -142,63 +143,52 @@ _GLOB_CHARS = "*?["
 _FALLBACK_BRANCH = "main"
 
 
-def _wildcard_free_prefix(pattern: str) -> str:
+def _common_root(roots: list[str]) -> str:
   """
-  Return the leading directory part of `pattern` that carries no glob metacharacter.
+  Name the deepest directory every one of `roots` sits under.
 
   Args:
-    pattern: A repo-relative path glob, e.g. `specs/core/**/*.md`.
+    roots: Repo-relative directories, `.` standing for the whole repository.
 
   Returns:
-    The wildcard-free prefix (`specs/core`), or an empty string when the first
-    component already globs.
+    Their common directory, or `.` when they share none or the list is empty.
   """
-  parts: list[str] = []
-  for part in pattern.split("/"):
-    # guard: the first globbing component ends the literal prefix
-    if any(ch in part for ch in _GLOB_CHARS):
-      break
-    parts.append(part)
-  return "/".join(parts)
-
-
-def _derive_watch_root(scan_paths: list[str]) -> str:
-  """
-  Derive the watch root shared by the retired scan routine's path globs.
-
-  Args:
-    scan_paths: The `lazy-review.scan` routine's `paths` list.
-
-  Returns:
-    The common wildcard-free directory the globs sit under, or `.` when they
-    share no such directory.
-  """
-  prefixes = [p for p in (_wildcard_free_prefix(g) for g in scan_paths) if p]
-
-  # guard: no literal prefix at all (or none survived) means the whole repo is in scope
-  if not prefixes or len(prefixes) != len(scan_paths):
+  # guard: nothing to intersect means the whole repo is in scope
+  if not roots:
     return _REPO_ROOT_WATCH
-  return os.path.commonpath(prefixes) or _REPO_ROOT_WATCH
+  return os.path.commonpath(roots) or _REPO_ROOT_WATCH
 
 
 def _resolve_watch_root(existing: dict) -> str:
   """
-  Resolve the watch root, preferring what the consumer already recorded.
+  Resolve the watch root, widened until it covers every review class.
 
   Args:
     existing: The parsed settings object, possibly empty.
 
   Returns:
-    An already-recorded `review.watch_root`, the root derived from the retired scan
-    routine's globs, or `.` on a greenfield install.
+    The common directory of the base root and every `review.classes[].paths` glob's own root.
+    The base root is an already-recorded `review.watch_root`, else the root of the retired
+    scan routine's globs, else `.` on a greenfield install. The result never lies below the
+    base root.
   """
-  recorded = existing.get(JobKey.REVIEW, {}).get(_WATCH_ROOT)
+  review = existing.get(JobKey.REVIEW, {})
+  recorded = review.get(_WATCH_ROOT)
 
-  # guard: the operator's own value wins over any derivation
+  # the recorded value is the base; without one, the retired scan routine's globs stand in for it
   if isinstance(recorded, str) and recorded:
-    return recorded.rstrip("/") or _REPO_ROOT_WATCH
-  scan = existing.get(_SettingsKey.ROUTINES, {}).get(_RETIRED_SCAN_ROUTINE, {})
-  return _derive_watch_root(scan.get(JobKey.PATHS) or [])
+    base = recorded.rstrip("/") or _REPO_ROOT_WATCH
+  else:
+    scan_paths = existing.get(_SettingsKey.ROUTINES, {}).get(_RETIRED_SCAN_ROUTINE, {}).get(JobKey.PATHS)
+    base = _common_root([ _doc_class.glob_root(g) for g in scan_paths or [] ])
+
+  # every class glob must fall under the watch, or its documents' commits never wake the coordinator
+  class_roots = [
+      _doc_class.glob_root(pattern)
+      for cls in review.get(JobKey.CLASSES) or [] if isinstance(cls, dict)
+      for pattern in cls.get(JobKey.PATHS) or [] if isinstance(pattern, str)
+  ]
+  return _common_root([ base, *class_roots ])
 
 
 def _resolve_branch(repo: Path, existing: dict) -> str:
@@ -461,7 +451,8 @@ def _ensure_settings(repo: Path) -> dict:
 
   Existing `review` and `experts` keys are left untouched at every depth; only missing keys
   are added, including sub-fields of an entry that already exists but was only partially
-  written by an earlier install. Retired registrations from an earlier schema are then
+  written by an earlier install. The one exception is `review.watch_root`, widened until
+  every review class sits under it and never narrowed. Retired registrations from an earlier schema are then
   removed, and this plugin's three routines are reconciled through the core CLI, which owns
   the write for those entries.
 
@@ -490,6 +481,17 @@ def _ensure_settings(repo: Path) -> dict:
   added: list[str] = []
   _merge_defaults(existing, defaults, added)
   migrated = _migrate(existing)
+
+  # a recorded watch root survives the merge untouched, so a widened one is written over it here;
+  # a trailing slash alone is no widening and leaves the recorded spelling as it stands
+  review = existing[JobKey.REVIEW]
+  recorded = str(review.get(_WATCH_ROOT) or "").rstrip("/") or _REPO_ROOT_WATCH
+  widened = defaults[JobKey.REVIEW][_WATCH_ROOT]
+  if recorded != widened:
+    migrated.append(f"{JobKey.REVIEW}.{_WATCH_ROOT} ({recorded!r} -> {widened!r})")
+    review[_WATCH_ROOT] = widened
+
+  # one write carries the merge, the migrations and the widening together
   settings_path.write_text(json.dumps(existing, indent=2) + "\n")
 
   # after the write, so the core CLI reconciles against the section this install just left
@@ -507,8 +509,10 @@ def install(repo: Path) -> dict:
 
   Guarantees:
     - Never overwrites a settings key the repository's settings file already has, at any
-      nesting depth; only a missing key is added. The one exception is a key this plugin
-      declares as its own in `_MANAGED_FIELDS`, on one of the three routines it registers.
+      nesting depth; only a missing key is added. Two exceptions: a key this plugin
+      owns on one of the three routines it registers is always set to the shipped value,
+      and `review.watch_root`, which is widened until every review class sits under it and
+      never narrowed.
 
   Args:
     repo: Path to the repository root to install into.
@@ -524,9 +528,10 @@ def install(repo: Path) -> dict:
 
   # Contract:
   # Any settings key already present in the repository's settings file, at any nesting
-  # depth, is left exactly as recorded; only a missing key is added. The sole exception is
-  # a key named in `_MANAGED_FIELDS` on one of this plugin's own three routines, which is
-  # ALWAYS set to the shipped value.
+  # depth, is left exactly as recorded; only a missing key is added. Two exceptions: a key
+  # this plugin owns on one of the three routines it registers is ALWAYS set to the
+  # shipped value, and `review.watch_root` is widened to the common directory of its recorded
+  # value and every review class glob's root — never narrowed.
 
   repo = repo.resolve()
   dirs = _ensure_dirs(repo)
