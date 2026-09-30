@@ -13,8 +13,8 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: 208e7e85e3998e8b741565a53874e37946b3f177
-surface_sha: d204bb0736c977f07f741edb9155a7a6b7b47e99388f5d5cbda4c90d57604092
+source_sha: f5ce537f2d45483caf793ec064e00d98b7e1febd
+surface_sha: b98b2e6ab298585cde97ca047d88be9f0c39df9f0983ebe4641abf66f8211a3d
 ---
 # Troubleshooting
 
@@ -116,7 +116,7 @@ surface_sha: d204bb0736c977f07f741edb9155a7a6b7b47e99388f5d5cbda4c90d57604092
 
 **Likely cause**: Phase 9 refreshes the `## Coverage` section of the installed `lazy-wiki.navigation` rule, which is what every session reads to decide whether a question must route through `/lazy-wiki.query`. `absent` means neither `<repo-root>/.claude/rules/lazy-wiki.navigation.md` nor `~/.claude/rules/lazy-wiki.navigation.md` exists — the rule itself was never installed, so sessions get no coverage trigger at all, regardless of how many scopes you've configured. The same refresh — and the same `absent` outcome when the rule is missing — also fires from `/lazy-wiki.configure mirror` (a mirror's `mirror_path` glob joins the scope's `paths`) and from `/lazy-wiki.configure terms` whenever it adds or drops a dictionary-protection entry in a wiki scope's `exclude_paths`.
 
-**Fix**: Run `/lazy-wiki.install`, which syncs the `lazy-wiki.navigation` rule into place, then re-run `/lazy-wiki.configure` so Phase 9 can fill in the Coverage section for your configured scopes.
+**Fix**: Run `/lazy-wiki.install`, which writes the `lazy-wiki.navigation` rule in one pass — the shipped text plus a Coverage section rendered from any scopes already configured (or the placeholder when there are none). Then re-run `/lazy-wiki.configure` so Phase 9 can fill in or refresh Coverage for new or edited scopes.
 
 ---
 

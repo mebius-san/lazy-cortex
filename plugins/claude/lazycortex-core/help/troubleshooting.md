@@ -40,8 +40,8 @@ source_skills:
   - lazy-runtime.preflight
   - lazy-runtime.recover
   - lazy-runtime.tick
-source_sha: ca61e3a58b9cab2c44523d46ab4783b0f814e25b
-surface_sha: 4c0ec0f00249b31a4c04ac325d298846935ec6f634416fa6fac84159edf65628
+source_sha: f5ce537f2d45483caf793ec064e00d98b7e1febd
+surface_sha: 911b9c948a0e86783eab342a8db4e91f89cbd9e7fbb6c7d5761693acebc60ffe
 ---
 # Troubleshooting
 
@@ -287,13 +287,13 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ---
 
-## `/lazy-core.install` Step 11.5 reports a provider as `failed`
+## `/lazy-core.providers add` aborts without writing a provider
 
-**Symptom**: `/lazy-core.install` completes, but its Step 11.5 report includes a line like "`<name>: failed — <reason>`" instead of "`<name>: seeded`", and the provider is unusable by any expert afterward. Installation continues regardless — a provider failure never aborts the run.
+**Symptom**: `/lazy-core.providers add <name>` stops with a validation error and the provider never appears in `/lazy-core.providers list`. `/lazy-core.install` does not ask about providers at all, so this wizard is the only place a provider gets added.
 
-**Likely cause**: When you opt into naming a provider, Step 11.5 dispatches `/lazy-core.providers add <name>` on your behalf, and that sub-skill's own validation aborted the write before anything reached disk. The `<reason>` names the actual defect — a blank `base_url` or `token_env`, a four-tier `models` map missing coverage for `fable`/`opus`/`sonnet`/`haiku`, a `claude-*` literal used as a tier value, the `openai` provider's tiers missing the required `rt-openai/` prefix, a `token_env` variable that resolves in neither the environment nor `~/.claude/.env`, or an endpoint that doesn't answer `/v1/models` with 200 for the given token.
+**Likely cause**: The skill's own validation aborted the write before anything reached disk. The reason names the actual defect: a blank `base_url` or `token_env`, a four-tier `models` map missing coverage for `fable`/`opus`/`sonnet`/`haiku`, a `claude-*` literal used as a tier value, the `openai` provider's tiers missing the required `rt-openai/` prefix, a `token_env` variable that resolves in neither the environment nor `~/.claude/.env`, or an endpoint that doesn't answer `/v1/models` with 200 for the given token.
 
-**Fix**: Run `/lazy-core.providers add <name>` directly and answer its wizard again, correcting the field the reason names. Providers are optional — every expert job still works against the Anthropic default with no entry at all, so there is no need to re-run `/lazy-core.install` just to retry one failed provider.
+**Fix**: Run `/lazy-core.providers add <name>` again and answer its wizard, correcting the field the reason names. Providers are optional: every expert job still works against the Anthropic default with no entry at all.
 
 ---
 
@@ -322,6 +322,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: This checkout has no `external_dirs.root` on record and you answered "Leave as is" when Step 12.5 asked — the wizard records `declined` in the checkout's local overlay and never re-asks.
 
 **Fix**: Delete `external_dirs.declined` from `.claude/lazy.settings.local.json`, then re-run `/lazy-core.install` to be asked once more.
+
+---
+
+## `/lazy-core.install` reports `in-place` and links nothing for the external directories
+
+**Symptom**: Step 12.5 of `/lazy-core.install` states `in-place`, asks nothing, and no symlinks are created for your declared external directories.
+
+**Likely cause**: This checkout already holds every declared directory as a real directory, so it is the source the other checkouts link from (typically the interactive copy of the project). Nothing needs linking here, so this is expected.
+
+**Fix**: No action needed. On the checkouts that should link to it, re-run `/lazy-core.install`.
 
 ---
 

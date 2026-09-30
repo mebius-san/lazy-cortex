@@ -28,7 +28,6 @@ This skill has 22 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 10.5 — Bootstrap .memory/ directory`
    - `Step 10.7 — Install lazy-claude wrapper`
    - `Step 11 — Register expert candidates`
-   - `Step 11.5 — Seed providers`
    - `Step 12 — Bootstrap built-in routines (expert pump, doctor tick, index guard, weekly autocheckup)`
    - `Step 12.5 — Restore externally-sourced working directories`
    - `Step 13 — Remove a stray supervisor unit`
@@ -206,7 +205,7 @@ The `scaffold-sync` report: per-template copy states plus the registry upsert st
 For each installed rule file:
 
 - Read it back and confirm its `---` frontmatter parses
-- Confirm the file is under 3 KB (per the `lazy-core.doctor` rule-size threshold)
+- Confirm its size against the `lazy-core.rule-writing` § 2 budget: a rule carrying `always_loaded:` must be under 3 KB; a `paths:`-scoped rule gets a WARN above 10 KB and a FAIL above 25 KB, and is never measured against the 3 KB line
 
 ## Step 6: Seed lazy.settings.json
 
@@ -539,40 +538,6 @@ The two names differ on purpose: the key is the § 3 `<domain>.<role>` form, the
 
 State one line per candidate: `<expert_key>: registered`.
 
-## Step 11.5: Seed providers
-
-If Step 9 resolved no repo (outcome `skipped-not-in-git-repo`), inherit that outcome and skip this step (there is no settings file to write).
-
-Providers are optional — every expert job works against the Anthropic default with no entry at all. Skip silently, no question, when a `providers` block already exists (tracked or local overlay):
-
-```bash
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" settings-get providers --cwd <repo-root>)
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" settings-get providers --scope local --cwd <repo-root>)
-```
-
-The two views come from two calls — the first prints the tracked section as JSON, the second the local overlay's. Any key besides `_version` in either view → state **already-configured**, skip to Step 12.
-
-Otherwise ask **once**:
-
-```
-Context (print before asking):
-- Where: /lazy-core.install · Step 11.5 — Seed providers; target <repo-root>/.claude/lazy.settings.local.json (`providers`)
-- Found: no `providers` key besides `_version` in the tracked `lazy.settings.json` or the local overlay (probe output: <json>)
-- Why asking: a provider entry lets an expert's `provider` field spawn against a non-Anthropic endpoint (base URL, token variable, four-tier model map) instead of the Anthropic default; which endpoints exist on this host is config nobody can derive
-- Answers: `Yes — name the provider(s)` — a follow-up collects the name(s), each is added now via `/lazy-core.providers add` into the gitignored local overlay, never tracked settings; `No` — nothing written, not persisted, asked again on the next run while the block stays empty (or run `/lazy-core.providers add` any time later)
-AskUserQuestion:
-  header: "Providers"
-  question: "Connect alternative LLM providers for expert jobs in <repo-root>? (entries go to the gitignored `.claude/lazy.settings.local.json` only)"
-  options:
-    - "Yes — name the provider(s)" — "Next question asks for the provider name(s); each entry lands in the local overlay."
-    - "No" — "Writes nothing; run `/lazy-core.providers add` any time later."
-```
-
-- **"No"** → state **skipped-per-operator-choice**, no write.
-- **"Yes"** → ask which provider name(s) to add (free-form, one or more). For each: if this machine already carries a configured entry for that name — known to this session from another repo's local overlay on the same host (a sibling checkout, an `additionalDirectories` path, or the operator naming the values directly) — dispatch `Skill(skill: "lazycortex-core:lazy-core.providers", args: "add <name>")` and answer its wizard with the known `base_url` / `token_env` / four-tier `models` verbatim, without re-deriving or re-confirming a value already on record elsewhere on this host. Otherwise dispatch the same skill and let its own wizard collect and validate the entry interactively.
-
-State one line per provider: `<name>: seeded` or `<name>: failed — <reason>` (the sub-skill's own validation aborted the write; installation continues regardless).
-
 ## Step 12: Bootstrap built-in routines (expert pump, doctor tick, index guard, weekly autocheckup)
 
 If Step 9 was skipped (outcome `skipped-not-in-git-repo`), inherit the same outcome and skip this step. A registered routine is not daemon-only config: `/lazy-runtime.tick` runs the same set, in the same priority order, on a checkout that never starts a daemon.
@@ -599,6 +564,7 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core"
 
 - Output `no-declaration` → state **no-declaration** and continue to Step 13. Do NOT ask. (Optionally, when the repo registers an `inbox` routine whose `inbox_dir` is absent from the tree, report it as an INFO line in Step 14 so the operator knows the option exists — still no question.)
 - Output `configured` → apply silently and report the per-path outcome. Do NOT ask.
+- Output `in-place` → state **in-place** and continue to Step 13. Do NOT ask, do NOT apply: every declared path already exists here as a real directory, so this checkout is the source the others link from (the interactive copy of the project, typically).
 - Output `declined` → state **declined-on-record** and continue to Step 13. Do NOT ask.
 - Output `unconfigured` → ask **once**:
 
@@ -671,7 +637,7 @@ State **ignores-updated** and report the `appended` lines from the verb's JSON i
 
 On **Leave .gitignore as is**, state **ignores-declined** and carry one WARN line into Step 14 naming each still-visible path and the consequence: the tree stays dirty and the daemon halts on its first tick.
 
-Outcome: `no-declaration` / `linked` / `unchanged` / `declined-on-record` / `ignores-ok` / `ignores-updated` / `ignores-declined`. The repair outcome and the ignore-coverage outcome are both stated — `linked, ignores-updated` is a normal pair.
+Outcome: `no-declaration` / `linked` / `unchanged` / `in-place` / `declined-on-record` / `ignores-ok` / `ignores-updated` / `ignores-declined`. The repair outcome and the ignore-coverage outcome are both stated — `linked, ignores-updated` is a normal pair.
 
 ## Step 13: Remove a stray supervisor unit
 

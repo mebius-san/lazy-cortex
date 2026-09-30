@@ -40,7 +40,7 @@ Two classes of file, two policies. Which applies follows from who owns the bytes
 
 **Install-managed mirrors** — every rule under `rules/`, copied verbatim out of the plugin cache. The plugin owns them end to end; a consumer who wants different content authors **their own** rule file rather than editing the mirror, so a target that differs from the shipped source is a stale copy by construction. Absent → copy (`installed`); byte-identical → nothing (`unchanged`); different → overwrite from the source (`refreshed`). No diff preview, no merge, no question. An orphan inside an owned namespace is left in place (`kept-orphan`) — this skill never deletes consumer files. The verdict comes from `file_sync.py`'s byte comparison and its post-write re-check, never from reading the two files and judging.
 
-The navigation rule's `## Coverage` section is the one region a mirror carries that the shipped source cannot: `/lazy-wiki.configure` derives it from the configured scopes. It is **derived**, not authored — Step 4 overwrites the rule and then re-renders Coverage from `lazy.settings.json`, so nothing is preserved and nothing is lost.
+The navigation rule's `## Coverage` section is the one region a mirror carries that the shipped source cannot: `/lazy-wiki.configure` derives it from the configured scopes. It is **derived**, not authored — Step 4 composes the rule from the shipped source plus the Coverage rendered from `lazy.settings.json` and writes it once, so the file on disk never holds the placeholder while scopes exist, and nothing is preserved or lost.
 
 **Consumer-owned config** — `lazy.settings.json` and anything else the consumer authors: add what is missing, leave what is there byte-for-byte. A direct contradiction (an existing value that opposes a required one) is the ONLY case that asks. The site that raises it fills the four context items from the run and prints them before the call (`lazy-core.skill-writing § 11`): where — `/lazy-wiki.install · Step <N>`, the settings file path and the key in conflict; found — the local value and the required value, both quoted, with a unified diff of the region; why asking — the two contradict and nothing says which should survive; answers — `merge-shipped` writes the required value over the local one now, `keep-local` leaves the file byte-for-byte and the step reports `kept-local`; neither answer is persisted, so a contradiction still present on the next run asks again. `AskUserQuestion`: header "Settings conflict", question naming the file and the key (`Replace <key> in <settings-path> — local <local value>, shipped <required value>?`), options `merge-shipped` / `keep-local` with those descriptions. "Conflict" means you cannot determine what should survive, not merely that the bytes differ.
 
@@ -101,8 +101,10 @@ Owned namespace: `lazy-wiki`.
 An enabled plugin installs its whole rule surface — the rules are install-managed mirrors, so the **File-sync policy** applies: absent → copy, identical → nothing, different → overwrite. No per-rule prompt of any kind, and nothing here is yours to judge — byte comparison decides, the script writes, and it verifies each write:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> file-sync --src <installPath>/rules --dst <rulesDir> --copy-diverged --owned-glob 'lazy-wiki.*.md')
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> file-sync --src <installPath>/rules --dst <rulesDir> --copy-diverged --owned-glob 'lazy-wiki.*.md' --exclude lazy-wiki.navigation.md)
 ```
+
+The navigation rule is excluded here and composed below, because its Coverage section is derived and the shipped copy carries only a placeholder.
 
 `<core-cli>` is `<coreInstallPath>/bin/lazycortex-core`, where `<coreInstallPath>` is the `installPath` of the highest-`version` record of `lazycortex-core@lazycortex` in `installed_plugins.json` (the registry keeps one record per project, and an older project's record names an older cache dir); it runs through the interpreter because the file carries no exec bit — `lazycortex-core` is a hard dependency of this plugin, so the CLI is always present.
 
@@ -110,15 +112,17 @@ The command creates the destination directory, copies absent targets (**installe
 
 Target files outside the `lazy-wiki` namespace (other plugins, user-authored rules) are never touched and never reported as orphans.
 
-### Re-render the navigation rule's `## Coverage`
+### Compose the navigation rule
 
-The shipped rule carries an empty `## Coverage` section, so a `refreshed` navigation rule has just lost the scope list the previous copy held. It is derived state — rebuild it rather than preserving it.
+The shipped `lazy-wiki.navigation.md` carries a placeholder `## Coverage` section; the installed copy must carry the scope list instead. Build the target text in memory before touching disk:
 
-Skip only when `lazy.settings.json[wiki.scopes]` is empty (nothing to render; `/lazy-wiki.configure` fills it in later), or when the section already reads exactly as the render below would produce it. Otherwise replace everything between the `## Coverage` heading and the next `##` with one bullet per scope, in id order, in exactly the shape `/lazy-wiki.configure` Phase 9 defines — that phase is the authority for the bullet format, and a second run must produce the same section rather than a longer one.
+1. `Read` the shipped `<installPath>/rules/lazy-wiki.navigation.md`.
+2. When `lazy.settings.json[wiki.scopes]` is non-empty, replace everything between the `## Coverage` heading and the next `##` with one bullet per scope, in id order, in exactly the shape `/lazy-wiki.configure` Phase 9 defines — that phase is the authority for the bullet format. When it is empty, the shipped text is the target as is (`/lazy-wiki.configure` renders Coverage later).
+3. `Read` `<rulesDir>/lazy-wiki.navigation.md` when it exists and compare it to the target byte for byte. Identical → **unchanged**, no write. Absent → `Write` the target, **installed**. Different → `Write` the target, **refreshed**.
 
-**Never key the skip on the mirror's `unchanged`.** `unchanged` means the consumer's copy is byte-identical to the shipped source, and the shipped source is the one that carries the placeholder — so that test skips the render in precisely the state that needs it, and a first install keeps the placeholder forever while its scopes exist. The section is derived from `wiki.scopes`; compare it against what those scopes render to, and against nothing else. The consequence of getting this backwards is silent: the always-loaded `lazy-wiki.navigation` rule states a MANDATORY "query before Grep" duty and then names no glob it applies to, so every session reads a rule that binds it to nothing.
+One `Write` of the finished text, never a copy followed by an edit: a run that dies between the two would leave the always-loaded rule stating a MANDATORY "query before Grep" duty with no glob it applies to. The comparison is against the composed target, never against the shipped source — the shipped source is the copy that carries the placeholder, so a mirror byte-identical to it is exactly the stale state this step exists to replace.
 
-Outcome (one line per rule): `<name>.md: <state>`, plus the receipt's `counts` line verbatim and `coverage: <rendered|unchanged|no-scopes>`.
+Outcome (one line per rule): `<name>.md: <state>`, plus the receipt's `counts` line verbatim for the synced rules and `coverage: <rendered|no-scopes>` for the composed one.
 
 ## Step 5: Seed wiki + structure + terms settings sections
 

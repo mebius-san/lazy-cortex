@@ -23,9 +23,7 @@ A repo that is (or will be) public must pass the guard scan before going public,
 
 ## Waivers
 
-Accepted exceptions live in `.guard-public.json` at the repo root — each entry records the check ID, scope glob, match pattern, reason, date added, and optional expiry.
-
-**`.guard-public.json` also marks the repo as (partially) public** — the `lazy-guard.check-public` hook runs only where this file exists. `lazy-repo.mark-public` creates it; even an empty `waivers` array enables public-surface scanning, deleting the file disables it. The `lazy-guard.secrets` hook ignores the marker — it runs everywhere.
+Accepted exceptions live in `.guard-public.json` at the repo root — each entry records the check ID, scope glob, match pattern, reason, date added, and optional expiry. The file also marks the repo as (partially) public: the `lazy-guard.check-public` hook runs only where it exists (`lazy-repo.mark-public` creates it; even an empty `waivers` array enables scanning, deleting the file disables it). The `lazy-guard.secrets` hook ignores the marker — it runs everywhere.
 
 ## Public scopes (subtree-public mode)
 
@@ -33,8 +31,4 @@ An optional top-level `public_scopes` array of repo-relative path globs narrows 
 
 ## Author metadata
 
-Author name/email in tracked manifests (`plugin.json`, `package.json`, `pyproject.toml`, `Cargo.toml`, `README`, `CITATION.cff`, etc.) is identity leakage.
-
-- **Never infer an author** from `git config`, past commits, or system accounts — the local identity is often the user's real name, not what they want published.
-- **Ask the user** for the correct public identity on first use, record it as `public_author` in `.guard-public.json`, and read that block on every subsequent write; re-ask if the block is absent.
-- **Enforcement**: `lazy-guard.check-public` B4 flags every author literal as WARN and auto-waives only matches of `public_author`.
+Author name/email in tracked manifests (`plugin.json`, `package.json`, `pyproject.toml`, `Cargo.toml`, `README`, `CITATION.cff`, etc.) is identity leakage. Never infer an author from `git config`, past commits, or system accounts — the local identity is often the user's real name. Ask the user for the public identity on first use, record it as `public_author` in `.guard-public.json`, and read that block on every later write; `lazy-guard.check-public` B4 flags every other author literal as WARN.

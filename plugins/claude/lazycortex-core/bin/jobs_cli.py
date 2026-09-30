@@ -109,8 +109,8 @@ def cmd_routines_bootstrap(argv: list[str]) -> int:
     argv: Argument vector after the subcommand name (`--cwd` only).
 
   Returns:
-    Process exit code: 0 on success (prints `bootstrapped`), 1 when the settings file cannot
-    be read or written.
+    Process exit code: 0 on success (prints `registered`, `refreshed` or `unchanged`), 1 when
+    the settings file cannot be read or written.
 
   Raises:
     SystemExit: On an argument error, with exit code 2, raised by the argument parser.
@@ -124,12 +124,11 @@ def cmd_routines_bootstrap(argv: list[str]) -> int:
 
   # an unreadable or unwritable settings file is reported as one line, never as a traceback
   try:
-    bootstrap_default_routines(resolve_repo_root(args.cwd))
+    outcome = bootstrap_default_routines(resolve_repo_root(args.cwd))
   except (OSError, json.JSONDecodeError) as error:
     print(f"error: {error}")
     return 1
 
   # the one-word outcome the install skill reads
-  # waiver: the one-word outcome the install skill reads, not a reusable domain key
-  print("bootstrapped")
+  print(outcome)
   return 0

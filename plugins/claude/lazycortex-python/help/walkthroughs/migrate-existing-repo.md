@@ -12,8 +12,8 @@ source_skills:
   - pcf.py
   - lazy-python.knowledge-sweep
   - lazy-python.contract-writer
-source_sha: 8c642c6f0911b2d8c00a32979298d23b5420a63a
-surface_sha: 1d36be9f45f62d4f2d3db19e1b6f282b2d71070720acd39a2191037b5e790cba
+source_sha: fa58aaf006252c324884b7aa09cdcb17a8cb7a97
+surface_sha: a878a9303026b43049bd00e1d965b2204fc92e722a93eb52687484036a551c96
 ---
 # Adopt the plugin in a repo with pre-existing Python that drifted from the canon
 

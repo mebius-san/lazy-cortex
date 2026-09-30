@@ -14,8 +14,8 @@ source_skills:
   - lazy-obsidian.audit
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: 1581fe03ce1f6ca1468bcf2fbb3c2a71e0e2ba9b
-surface_sha: 36cdd61773f0da26bc3a7ff50043d724b54b6eeb2e174982dde8ebc53e6013ed
+source_sha: f5ce537f2d45483caf793ec064e00d98b7e1febd
+surface_sha: 43b58119b66b22f28aa29ccc2fe6be66faaab76cbdb234ef77101cc54dac0b7b
 ---
 # Frequently asked questions
 

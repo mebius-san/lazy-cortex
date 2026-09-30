@@ -305,11 +305,13 @@ class CommandKind(StrEnum):
     CAPTURE: Snapshot the vault config into the manifest.
     DEPLOY: Rebuild the vault config from the manifest.
     DRIFT: Report how the live vault config differs from the manifest, writing nothing.
+    LOOKUP: Resolve one community plugin's GitHub repo from the catalog, touching no vault.
   """
 
   CAPTURE = "capture"
   DEPLOY = "deploy"
   DRIFT = "drift"
+  LOOKUP = "lookup"
   INVALID = "~inv~"
 
 

@@ -45,11 +45,10 @@ Determine vault:
 
 ### Registry mode (no `--bundled`)
 
-1. Fetch the Obsidian community registry once per session (hold in memory if multiple invocations happen in the same session — the file is ~3–4 MB): ``` curl -fsSL https://raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugins.json ```
-   - Fetch failed → **FAIL**: "Could not fetch Obsidian community registry. Check network and retry."
-2. Find the entry `{id == <id>}` and read `repo` (e.g. `blacksmithgu/obsidian-dataview`).
-   - Not found → **FAIL**: "`<id>` not in the Obsidian community registry. Check the id spelling or pass `--bundled` if it's a plugin shipped by this LazyCortex plugin."
-3. Fetch remote manifest: ``` source_version=$(curl -fsSL https://github.com/<repo>/releases/latest/download/manifest.json | "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/plugin_json.py" version -) ```
+1. Resolve the plugin's GitHub repo from the Obsidian community registry — never fetch or read the registry yourself, it is a ~4 MB file; the worker fetches it, caches it for a day, and answers from the cache: ``` "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/vault_manifest.py" lookup <id> ``` It prints `{"action": "lookup", "id": ..., "repo": "<owner/name>", "errors": []}` with exit 0; read `repo` (e.g. `blacksmithgu/obsidian-dataview`).
+   - Exit 1 with `community catalog unavailable` → **FAIL**: "Could not fetch Obsidian community registry. Check network and retry."
+   - Exit 1 with `not in the Obsidian community catalog` → **FAIL**: "`<id>` not in the Obsidian community registry. Check the id spelling or pass `--bundled` if it's a plugin shipped by this LazyCortex plugin."
+2. Fetch remote manifest: ``` source_version=$(curl -fsSL https://github.com/<repo>/releases/latest/download/manifest.json | "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/plugin_json.py" version -) ```
    - Fetch or parse failed → **FAIL**: "Could not fetch latest release manifest for `<id>` from `<repo>`. Retry."
 
 ### Bundled mode (`--bundled`)

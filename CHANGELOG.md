@@ -4,6 +4,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 10.4.1 — 2026-09-30 UTC
+
+- `lazy-core.install` no longer runs a providers step; provider setup now lives solely in `/lazy-core.providers`.
+- The external-dirs status check now reports correctly when run inside the source checkout itself.
+- The routines bootstrap now prints whether each routine was registered, refreshed or unchanged.
+- The shipped `lazy-core.git`, `lazy-core.hygiene` and `lazy-guard.security` rules are trimmed to under 3 KB each, which lightens the context they load at session start.
+
 ### 10.4.0 — 2026-09-30 UTC
 
 - New `lazy-core.shell` rule, mirrored into every repo by install, keeps commands in a shape that allow-list permission modes accept. Daemon expert jobs, which never see your global shell guidance, no longer get compound commit commands denied: no `cd` into the current directory, one plain command per call, pathspec commits, one plain retry after a denial.
@@ -1099,6 +1106,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 6.1.1 — 2026-09-30 UTC
+
+- `lazy-obsidian.update-plugin` no longer downloads and searches the ~4 MB Obsidian community registry by hand. A new `lookup` command in the vault-manifest script fetches the registry once a day, caches it, and prints the plugin's GitHub repo, so headless installs no longer stall on that step.
+
 ### 6.1.0 — 2026-09-30 UTC
 
 - Iconize settings now survive a manifest deploy. Capture keeps Iconize's settings block (settings, rules, recently used icons) and drops only the per-path icon entries. Deploy restores that block like any other plugin's settings.
@@ -1980,6 +1991,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+### 4.8.1 — 2026-09-30 UTC
+
+- Contract blocks are now limited to significant promises, meaning ones that calling code builds on and that a plausible future change could silently break. The style rule and `lazy-python.code-reviewer` report a hollow contract as WARN instead of flagging every unmarked guarantee. `lazy-python.contract-writer` declines to write a hollow block and names the sign that makes it hollow.
+
 ### 4.8.0 — 2026-09-30 UTC
 
 - Windows support: every shipped shell script now runs under bash, and `chk-py` / `tst-py` and the `cli/` wrapper templates use a bash shebang. The virtualenv lookup also finds `Scripts/*.exe`. The check-style hook no longer needs `jq`, and text I/O is explicitly UTF-8.
@@ -2204,6 +2219,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 3.3.5 — 2026-09-30 UTC
+
+- `/lazy-wiki.install` now writes the `lazy-wiki.navigation` rule in a single step with its Coverage already filled in from your configured scopes. Before, an install that was interrupted midway could leave the always-loaded rule with an empty Coverage list, so sessions were bound to no paths.
 
 ### 3.3.4 — 2026-09-30 UTC
 

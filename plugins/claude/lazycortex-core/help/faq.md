@@ -33,8 +33,8 @@ source_skills:
   - lazy-expert.cancel-job
   - lazy-expert.list-jobs
   - lazy-memory.write
-source_sha: ca61e3a58b9cab2c44523d46ab4783b0f814e25b
-surface_sha: 849dbebc744bfc819aaee2bc92db498c259715cc6060f85585fd483cc987d61c
+source_sha: f5ce537f2d45483caf793ec064e00d98b7e1febd
+surface_sha: 5d6376b642cd34ed29b45cfbd06559b708500ef65fc337aeb61e769cb689ad4b
 ---
 # FAQ
 
@@ -445,9 +445,7 @@ This field is seeded once, when the entry is first created — install never re-
 
 ## Does `/lazy-core.install` connect my experts to alternative LLM providers automatically?
 
-Only if you ask it to, and only once. If no `providers` block exists yet (tracked or in the gitignored local overlay), install asks a single yes/no question: connect one or more non-Anthropic endpoints for expert jobs now, or skip and add them later. Answering "No" writes nothing — every expert job keeps running against the Anthropic default with no provider entry at all, since providers are opt-in. Answering "Yes" walks you through naming provider(s) and dispatches `/lazy-core.providers add <name>` for each, which is the same wizard you'd run by hand. If a `providers` block already exists in either the tracked file or the local overlay, install skips the question silently and leaves your existing entries alone.
-
-Once install has asked (either answer), it never asks again — reach for `/lazy-core.providers add <name>` yourself any time later to connect a provider you skipped at install time.
+No. Install never asks about providers and never writes a `providers` entry. Every expert job keeps running against the Anthropic default until you connect something yourself, since providers are opt-in. Run `/lazy-core.providers add <name>` any time to register a non-Anthropic endpoint for expert jobs; that wizard is the only way a provider gets added, and a re-run of install leaves whatever entries you already have alone.
 
 ---
 

@@ -10,8 +10,8 @@ source_skills:
   - lazy-obsidian.install
   - lazy-obsidian.audit
   - lazy-obsidian.update-plugin
-source_sha: 1581fe03ce1f6ca1468bcf2fbb3c2a71e0e2ba9b
-surface_sha: 9123ef84b4a124b484fa8eb8af10c0c609326b472974ee4ec968eede8056cbb2
+source_sha: f5ce537f2d45483caf793ec064e00d98b7e1febd
+surface_sha: d704d3e994c3a72303e49772a41ffff041f2332c8dfb18fe2a25ed6bcaf6c494
 ---
 # Install and audit
 

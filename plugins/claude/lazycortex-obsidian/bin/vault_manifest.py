@@ -8,7 +8,8 @@ that manifest back onto a checkout that has no config directory at all. The conf
 travels as a single reviewed file instead of the hundred-odd files the mobile app rewrites
 behind git's back.
 
-Backs the `lazy-obsidian.capture` and `lazy-obsidian.deploy` skills.
+Backs the `lazy-obsidian.capture` and `lazy-obsidian.deploy` skills; the `lookup` verb also
+serves `lazy-obsidian.update-plugin`, which needs a plugin's repo out of the same catalog.
 """
 
 # Decision: a plain script rather than skill-driven steps — the deploy path has to run over ssh on
@@ -1359,6 +1360,37 @@ def _deploy_theme(vault: Path, theme: str | None, errors: list[str]) -> str | No
 
 
 # ----------------------------------------------------------------------------------------
+def lookup(pid: str) -> dict:  # waiver: report envelope of mixed shapes
+  """
+  Resolve one community plugin's GitHub repo from the catalog.
+
+  Args:
+    pid: Plugin id as the community catalog records it.
+
+  Returns:
+    A report carrying the id and its `owner/name` repo, or a null repo plus one error when the
+    id is unknown or the catalog could not be read at all.
+  """
+  catalog = fetch_community_catalog()
+  report: dict = { ReportKey.ACTION: CommandKind.LOOKUP, PluginKey.ID: pid,
+                   PluginKey.REPO: None, ReportKey.ERRORS: [] }
+
+  # guard: an empty catalog means upstream was unreachable and no cached copy exists
+  if not catalog:
+    # waiver: one-off error message the update-plugin skill matches, not a reusable key
+    report[ReportKey.ERRORS].append("community catalog unavailable: upstream unreachable and nothing cached")
+    return report
+
+  # an id the catalog does not carry is the caller's to spell right or to install bundled
+  entry = catalog.get(pid)
+  if entry is None:
+    # waiver: one-off error message the update-plugin skill matches, not a reusable key
+    report[ReportKey.ERRORS].append(f"{pid} not in the Obsidian community catalog")
+    return report
+  report[PluginKey.REPO] = entry.get(PluginKey.REPO)
+  return report
+
+
 def main(argv: list[str]) -> int:
   """
   Run one subcommand and print its JSON report.
@@ -1380,9 +1412,18 @@ def main(argv: list[str]) -> int:
     child = sub.add_parser(name, help = help_text)
     # waiver: argparse CLI signature
     child.add_argument("root", nargs = "?", default = ".", help = "vault repo root (default: cwd)")
+  # waiver: argparse CLI signature
+  sub.add_parser(CommandKind.LOOKUP, help = "print a community plugin's GitHub repo") \
+     .add_argument("id", help = "plugin id as the community catalog records it")
+
+  # `lookup` reads the catalog alone, so it never resolves a vault root
+  args = parser.parse_args(argv)
+  if args.command == CommandKind.LOOKUP:
+    report = lookup(args.id)
+    print(json.dumps(report, indent = 2, ensure_ascii = False))
+    return 1 if report[ReportKey.ERRORS] else 0
 
   # resolve the vault root before any subcommand touches disk
-  args = parser.parse_args(argv)
   root = Path(args.root).expanduser().resolve()
   handlers = { CommandKind.CAPTURE: capture, CommandKind.DEPLOY: deploy, CommandKind.DRIFT: drift }
   try:

@@ -1361,7 +1361,7 @@ _BUILTIN_MANAGED: tuple[str, ...] = ()
 _AUTOCHECKUP_MANAGED = ( "type", )
 
 
-def bootstrap_default_routines(repo: Path) -> None:
+def bootstrap_default_routines(repo: Path) -> str:
   """
   Register the built-in expert-pump, doctor-tick, index-guard, and autocheckup routines when absent.
 
@@ -1377,6 +1377,10 @@ def bootstrap_default_routines(repo: Path) -> None:
 
   Args:
     repo: Absolute path to the repository whose settings file is updated.
+
+  Returns:
+    The strongest per-routine outcome: `registered` when any built-in was absent, else
+    `refreshed` when any gained a key or had an owned key corrected, else `unchanged`.
   """
 
   # Contract:
@@ -1405,6 +1409,7 @@ def bootstrap_default_routines(repo: Path) -> None:
   # entry would copy the operator's private values into the shared file
   merged = load_section(settings, SettingsKey.ROUTINES)
   tracked = load_tracked_section(settings, SettingsKey.ROUTINES)
+  outcomes: list[str] = []
   for entry in (DEFAULT_EXPERT_PUMP, DEFAULT_DOCTOR_TICK, DEFAULT_INDEX_GUARD):
     # waiver: TypedDict access requires string-literal keys; constants break mypy literal-required
     name = str(entry["name"])
@@ -1417,12 +1422,20 @@ def bootstrap_default_routines(repo: Path) -> None:
     # the registry key lives outside the config body it keys, so it never reaches the entry
     # waiver: TypedDict iteration yields its own string-literal keys
     cfg = { key: value for key, value in entry.items() if key != "name" }
-    reconcile_routine(repo, name, cfg, _BUILTIN_MANAGED)
+    outcomes.append(reconcile_routine(repo, name, cfg, _BUILTIN_MANAGED))
 
   # the weekly autocheckup rides the same reconcile discipline as the loop above, in the typed
   # (`schedule` + `expert`) shape the legacy `_RoutineDefaults` block cannot carry
   # guard: configured only in the local overlay — writing the tracked layer would leave the
   # repository carrying the routine twice, so the operator's own copy is left to them
-  if DEFAULT_AUTOCHECKUP_NAME in merged and DEFAULT_AUTOCHECKUP_NAME not in tracked:
-    return
-  reconcile_routine(repo, DEFAULT_AUTOCHECKUP_NAME, dict(DEFAULT_AUTOCHECKUP_CFG), _AUTOCHECKUP_MANAGED)
+  if not (DEFAULT_AUTOCHECKUP_NAME in merged and DEFAULT_AUTOCHECKUP_NAME not in tracked):
+    outcomes.append(reconcile_routine(
+      repo, DEFAULT_AUTOCHECKUP_NAME, dict(DEFAULT_AUTOCHECKUP_CFG), _AUTOCHECKUP_MANAGED))
+
+  # the install skill reads one word for the whole set, so the strongest per-routine outcome wins
+  # waiver: reconcile_routine's own documented return vocabulary, not a reusable cross-module key
+  for word in ("registered", "refreshed"):
+    if word in outcomes:
+      return word
+  # waiver: reconcile_routine's own documented return vocabulary, not a reusable cross-module key
+  return "unchanged"

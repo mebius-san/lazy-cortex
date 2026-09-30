@@ -4,7 +4,8 @@ External-directory surface for the `lazycortex-core` CLI.
 This module backs the `external-dirs` subcommand family — `check`, `apply`, `status`,
 `fix-ignore`, and `set-root` — over the `external_dirs` module and the local-only settings
 overlay. Every verb prints JSON to stdout except `status`, whose single token is meant to be
-branched on directly. The repository root follows the convention every other subcommand
+branched on directly; `in-place` names the checkout that holds every declared path as a real
+directory and so is the source the other checkouts link from. The repository root follows the convention every other subcommand
 uses: the `LAZY_REPO_ROOT` env var, falling back to the process working directory,
 overridable per-call with `--cwd`.
 """
@@ -38,6 +39,7 @@ if TYPE_CHECKING:
 # waiver: closed-set status tokens printed by `external-dirs status`, consumed verbatim by the install skill
 _NO_DECLARATION = "no-declaration"
 _CONFIGURED = "configured"
+_IN_PLACE = "in-place"
 _DECLINED = "declined"
 _UNCONFIGURED = "unconfigured"
 # waiver: argparse verb tokens of the `external-dirs` subcommand family, not domain keys
@@ -60,20 +62,22 @@ def compute_status(repo: Path) -> str:
     repo: Repository root whose declaration and overlay are read.
 
   Returns:
-    One of `no-declaration`, `configured`, `declined`, or `unconfigured`, checked in that order.
+    One of `no-declaration`, `configured`, `in-place`, `declined`, or `unconfigured`, checked in
+    that order.
 
   Raises:
     json.JSONDecodeError: If the tracked `lazy.settings.json` or its local overlay is not valid JSON.
   """
 
   # Domain(install.reconciliation):
-  # # A checkout's external-directory state is one of four, checked in order
+  # # A checkout's external-directory state is one of five, checked in order
   # A checkout that declares no external directories is outside the feature entirely, whatever
   # its personal overlay records. Otherwise a recorded source root means the operator already
-  # configured the directories; failing that, a recorded refusal means the operator declined;
-  # and a checkout with a declaration but neither answer is still unconfigured. The order is fixed
-  # so that a recorded root always outranks a stale refusal, and the install skill branches on the
-  # single resulting word.
+  # configured the directories; failing that, a checkout that holds every declared path as a real
+  # directory is the source itself and needs no link; failing that, a recorded refusal means the
+  # operator declined; and a checkout with a declaration but none of these is still unconfigured.
+  # The order is fixed so that a recorded root always outranks a stale refusal, and the install
+  # skill branches on the single resulting word.
 
   # guard: nothing declared — the whole feature is inert for this repository
   if not declared_paths(repo):
@@ -82,6 +86,10 @@ def compute_status(repo: Path) -> str:
   # guard: a recorded source root means the operator already answered
   if source_root(repo) is not None:
     return _CONFIGURED
+
+  # guard: every declared path already sits here as a real directory — this checkout is the source
+  if all(os.path.isdir(repo / rel) and not os.path.islink(repo / rel) for rel in declared_paths(repo)):
+    return _IN_PLACE
 
   # a recorded refusal in the personal overlay is the only other answer the operator can have given
   return _DECLINED if load_local_only_section(

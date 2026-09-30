@@ -119,7 +119,13 @@ A block marker is **not a comment to the code** — it is a standalone block, se
 - `waiver:` — marks an intentional exception from a coding rule. The comment must explain **why** the exception is justified. Required whenever `typing.cast()` is used (see Type Casting rules) or any other banned pattern is unavoidable.
 
 ## Contract Comments
-- `# Contract:` comments mark **caller-visible guarantees** that must survive refactoring.
+- `# Contract:` comments mark **significant caller-visible promises** that must survive refactoring.
+- Significance — a contract is written only where calling code builds on the promise AND a plausible future change could silently break it. Both halves must hold: a promise nobody builds on is noise, and a promise no realistic edit can break needs no guard. Promises that meet the bar:
+  - the order of a result, or which elements it excludes;
+  - the precision of a result;
+  - an error raised under a named condition that the caller is obliged to handle;
+  - an invariant tying several members of one class together;
+  - data ownership ("returns a deep copy; mutating it never affects the original"), an override obligation, a lifecycle ordering ("must be called after X"), a coordinate or spatial invariant, a mandated algorithm.
 - They are the **source of truth** for docstring `Guarantees` sections — the `Guarantees` section must only contain items that trace back to a `Contract:` comment or the public protocol (see the Method Documentation rules in `lazy-python.documenting-guidelines.md`).
 - Scope — a contract is written only where a caller or a subclass relies on it:
   - public methods, properties, and classes;
@@ -152,17 +158,38 @@ A block marker is **not a comment to the code** — it is a standalone block, se
 
       raise NotImplementedError
   ```
-- When to use:
-  - Data ownership guarantees: "returns a deep copy", "modifying the returned value will NOT modify the original".
-  - Transaction requirements: "method must support DB transactions".
-  - Ordering / lifecycle constraints: "must be called after X", "resets only dynamic data".
-  - Override obligations: "subclasses must override X".
-  - Coordinate / spatial invariants: "coordinates MUST always be in local space".
-  - Algorithm invariants: "all effects must be correctly sorted before applying".
 - What the text states: the principle of the interaction — what a caller may rely on and what the code on the other side owes it — never how the code delivers it. A contract survives any rewrite of the body that keeps the promise, so it names no internal step, data structure, algorithm, or call sequence. The one exception is a contract whose substance IS a specific method or formula — a mandated algorithm, an exact computation callers depend on — and then the contract names that method or formula and nothing else of the implementation.
-- When **not** to use:
-  - Pure implementation details that are invisible to callers.
-  - Information that is already obvious from the method signature and type hints.
+- A **hollow contract** is a block that fails the significance test. Any one of five signs makes it hollow:
+  1. it restates the docstring's summary line, the signature, or a type hint — "returns a list of entries" on a method typed `-> list[Entry]`, "returns a copy" on a method named `copy`;
+  2. it describes how the code is built rather than what is promised — an internal step, a data structure, an algorithm, a call sequence;
+  3. any correct implementation satisfies it, so no plausible change can break it;
+  4. it copies the base class's or interface's contract verbatim (see placement by layer below);
+  5. it sits on a private helper.
+  A hollow block is not written, and an existing one is removed together with the `Guarantees` bullet it backs. The docstring's `Guarantees` section is not an input to sign 1: it is derived from the contracts, so it repeats them by design. A real fork with a reason behind it — "X is not done here because Y does it" — is a `Decision:` marker (see Marker Comments), never a contract.
+- Wrong — hollow by sign 2; it describes how the property is built, and no caller builds on the rebuild:
+  ```python
+  @property
+  def mode(self) -> Mode:
+      """Return the mode the current settings select."""
+
+      # Contract:
+      # The mode is rebuilt from the settings on every read
+      # and never cached.
+
+      return Mode.from_settings(self._settings)
+  ```
+- Wrong — a decision wearing a contract's marker; the why belongs on a `Decision:` line, and the caller-visible promise, if any, is the one the docstring already carries:
+  ```python
+  def copy_from(self, other: Self) -> None:
+      """Copy the turn data of ``other`` into this instance."""
+
+      # Contract:
+      # The index is not copied because a separate pass
+      # recomputes it.
+
+      ...
+  ```
+- Excluded independently of the significance test:
   - Presentation details: the exact wording or format of human-readable output — exception message text, log lines, pretty-print or repr formatting. These are presentation, not API; pinning them freezes wording that must stay free to change. A contract on such a string is justified only when a caller demonstrably parses it programmatically, and then it names the parsed structure, not the prose.
 - Format:
   - Place the comment **inside the method or class body**, on its own line, above the code it governs — separated from it (and from everything above) by a blank line, per the standalone-block rule in Marker Comments.

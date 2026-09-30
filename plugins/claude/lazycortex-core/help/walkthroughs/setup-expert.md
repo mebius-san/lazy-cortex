@@ -11,8 +11,8 @@ source_skills:
   - lazy-expert.dispatch-job
   - lazy-expert.list-jobs
   - lazy-expert.collect-job
-source_sha: ca61e3a58b9cab2c44523d46ab4783b0f814e25b
-surface_sha: f2058841fad03eeb95f398e5365b2ab80548222f4eb5b3ba23b2ee3c2975ef59
+source_sha: f5ce537f2d45483caf793ec064e00d98b7e1febd
+surface_sha: 60210dffb61b427c22ac5792c751ee85f9a97e2c0146f05636c69c941d3a270c
 ---
 # Add a named expert and dispatch your first async job
 
@@ -43,7 +43,6 @@ Run `/lazy-core.install` in the repo you want the async team to work in. Alongsi
 - Does **not** seed `daemon.token_env`. Whenever the daemon process actually runs — the supervisor or the manual shim, never `/lazy-runtime.tick` — it refuses to start under the machine's ambient login and instead requires an explicit token, named by this key. Setting it is on you; see the queue-draining bullet below.
 - Pins LF line endings for the whole checkout, unconditionally: writes `* text=auto eol=lf` as the first rule in `<repo>/.gitattributes`, so git checks out text files with LF on every machine regardless of OS or `core.autocrlf`. This matters most for the daemon checkout below — a checkout synced between machines by something other than git (Dropbox, for example) is exactly how CRLF or half-written files creep in.
 - Seeds the `git` section of the project's `lazy.settings.json` with the git-guard's `enabled`, `pathspec_enabled`, and `mutex_enabled` flags — defaults that match the guard's current behavior, written down so you (or the expert's dispatched work) can tune them later without reading the hook source.
-- Offers, once, to connect alternative LLM providers for expert jobs — every expert job works against the Anthropic default with no entry at all, so a plain `Yes`/`No` prompt appears only the first time, and only while no `providers` entry exists yet anywhere in `lazy.settings.json`. Answer `No` and nothing is written; answer `Yes` and name one or more providers to have the skill collect and validate each entry (base URL, token variable, a four-tier model map) into the gitignored `.claude/lazy.settings.local.json` on your behalf. Skip the prompt entirely, or add a provider later, by running `/lazy-core.providers add` any time — assigning a registered provider to a given expert is a separate step, covered next.
 
 Confirm two things are in place before dispatching:
 
@@ -69,7 +68,7 @@ Three additional fields can be set on a registered expert in `lazy.settings.json
 
 - `aspects[]` — adds behavior layers. The most commonly used aspect is `lazycortex-core:lazy-memory.persona-aspect` (long-term memory). Run `/lazy-memory.mark-persona <expert>` to opt in; the skill writes the aspects array for you — do not edit it by hand.
 - `arguments{}` — pinned named values rendered into every job's prompt for this expert. These are static values that should follow the expert across all dispatches (e.g. a preferred code style, a target language, a review rubric). For one-off overrides, pass extra fields in the job `payload` instead.
-- `provider` — points this expert's dispatched jobs at a non-Anthropic endpoint registered in the provider registry, instead of the Anthropic default. Register the provider first — via the one-time prompt in Step 1, or by running `/lazy-core.providers add` — then set this field to the provider's name.
+- `provider` — points this expert's dispatched jobs at a non-Anthropic endpoint registered in the provider registry, instead of the Anthropic default. Register the provider first by running `/lazy-core.providers add` (install does not ask about providers) — then set this field to the provider's name.
 
 ### Step 2 — Dispatch a job
 
