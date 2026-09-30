@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Add a named expert role and dispatch your first async job — keep working while the daemon runs it, then collect the result.
-last_regen: 2026-09-28
+last_regen: 2026-09-30
 diagram_spec:
   anchor: "How the pieces fit"
   request: "Sequence diagram showing a user dispatching a job via /lazy-expert.dispatch-job, the daemon picking it up from the .experts/.jobs/ queue, the expert agent writing response.json + DONE marker, and the user collecting the result via /lazy-expert.collect-job. Nodes: User, Claude session, .experts/.jobs/ queue, daemon (runner), expert agent."
@@ -11,8 +11,8 @@ source_skills:
   - lazy-expert.dispatch-job
   - lazy-expert.list-jobs
   - lazy-expert.collect-job
-source_sha: 1dfbbbfa9cc7fc1d270e280c4829e643a8bc9db9
-surface_sha: 2c4e91b6d313fa6a669271005a86a1d132a7434436e5ab524d41aa584e3168f0
+source_sha: ca61e3a58b9cab2c44523d46ab4783b0f814e25b
+surface_sha: f2058841fad03eeb95f398e5365b2ab80548222f4eb5b3ba23b2ee3c2975ef59
 ---
 # Add a named expert and dispatch your first async job
 
@@ -29,7 +29,7 @@ After this walkthrough you have:
 
 - `lazycortex-core` installed and restarted in Claude Code.
 - A git repo to run async jobs in (the runtime is always per-repo).
-- A way to drain the queue — either the background daemon (a supervisor unit, or the `.claude/bin/lazy.runtime.sh` shim started manually) or manual ticks via `/lazy-runtime.tick`. Neither is on by default; see Step 1 below. If you go the background-daemon route, the checkout the daemon runs from must be a plain git clone outside Dropbox — the daemon refuses to start otherwise (details in Step 1).
+- A way to drain the queue — either the background daemon (a supervisor unit, or the `.claude/bin/lazy.runtime.sh` shim started manually) or manual ticks via `/lazy-runtime.tick`. Neither is on by default; see Step 1 below. `/lazy-core.install` never sets up the daemon — that is `/lazy-core.daemon-setup`. If you go the background-daemon route, the checkout the daemon runs from must be a plain git clone outside Dropbox — the daemon refuses to start otherwise (details in Step 1).
 
 ## The journey
 
@@ -39,7 +39,7 @@ Run `/lazy-core.install` in the repo you want the async team to work in. Alongsi
 
 - Registers every expert candidate it finds — any installed plugin's agent carrying `expert_protocol:` frontmatter is registered automatically in `lazy.settings.json[experts]`, no per-candidate prompt. Registration happens whether or not a background daemon runs anywhere — experts are dispatch-routing config used by interactive flows too. The `.experts/` directory itself is not created by install — it materializes lazily the first time a job is actually dispatched (Step 2 below), along with its own self-ignoring `.gitignore`.
 - Registers the built-in routines, including the queue-draining `lazy-expert.pump`, in `lazy.settings.json[routines]` — again unconditionally. The daemon is never required for the queue itself to exist.
-- Seeds `lazy.settings.json[daemon]` with `enabled: false` as the default. A project only gets a background daemon **supervisor** once you explicitly set that flag to `true` in the tracked settings and re-run `/lazy-core.install` — at which point the skill asks the one remaining question, `daemon.run_here` (a per-machine "does this checkout drive the daemon" map), and installs the supervisor (launchd on macOS, systemd on Linux) once you confirm.
+- Seeds `lazy.settings.json[daemon]` with `enabled: false` as the default and never asks about it. Install does not touch the background daemon: it installs no supervisor unit and does not ask `daemon.run_here`. Both belong to `/lazy-core.daemon-setup`, which you run only if you decide the project should get a daemon (see below).
 - Does **not** seed `daemon.token_env`. Whenever the daemon process actually runs — the supervisor or the manual shim, never `/lazy-runtime.tick` — it refuses to start under the machine's ambient login and instead requires an explicit token, named by this key. Setting it is on you; see the queue-draining bullet below.
 - Pins LF line endings for the whole checkout, unconditionally: writes `* text=auto eol=lf` as the first rule in `<repo>/.gitattributes`, so git checks out text files with LF on every machine regardless of OS or `core.autocrlf`. This matters most for the daemon checkout below — a checkout synced between machines by something other than git (Dropbox, for example) is exactly how CRLF or half-written files creep in.
 - Seeds the `git` section of the project's `lazy.settings.json` with the git-guard's `enabled`, `pathspec_enabled`, and `mutex_enabled` flags — defaults that match the guard's current behavior, written down so you (or the expert's dispatched work) can tune them later without reading the hook source.
@@ -50,8 +50,8 @@ Confirm two things are in place before dispatching:
 - **At least one expert is registered.** Check `lazy.settings.json[experts]` for a key besides `_version`. If it's empty, no plugin you have installed ships an expert candidate yet — install one, or re-run `/lazy-core.install` after adding your own agent with `expert_protocol:` frontmatter.
 - **Decide how the queue gets drained.** With `daemon.enabled` left at its default `false`, nothing drains the queue automatically — run `/lazy-runtime.tick` by hand whenever you want queued jobs picked up; it runs the same routines, in the same priority order, as the daemon would, and needs no token of its own. If you'd rather have it run continuously, three things need to be true before the daemon process will actually start:
   - **`daemon.token_env` is set.** The daemon refuses to run under the machine's ambient login — it requires an explicit OAuth token, named by `daemon.token_env` (a string naming an environment variable, e.g. `"CLAUDE_TOKEN_MYPROJECT"`) in the tracked `lazy.settings.json[daemon]` section, resolved from either the real environment or a matching line in `~/.claude/.env`. `/lazy-core.install` does not seed this key — set it yourself before the daemon's first start. Left absent, blank, or naming a variable that resolves nowhere, the daemon process exits immediately with an explicit error naming what's missing.
-  - **`daemon.enabled: true` and `daemon.run_here` name this checkout.** Set `daemon.enabled: true` in the tracked `lazy.settings.json` and re-run `/lazy-core.install` to get the `run_here` prompt and a supervisor unit.
-  - **The checkout is a plain git clone outside Dropbox.** Dropbox syncs bytes outside git and can bring CRLF or half-written files in from another machine, so the daemon refuses to start in any checkout whose resolved path has a component equal to `Dropbox`, starting with `Dropbox` (`Dropbox (Personal)`, `~/Library/CloudStorage/Dropbox…`), or ending in ` Dropbox` (`Auriglaci Dropbox`). Instead of starting it prints a one-line refusal and records a `daemon_error` incident with cause `dropbox_denied`. Point `daemon.run_here` at a git-only clone outside Dropbox, e.g. `~/lazy-runtime/<repo>`, and re-run `/lazy-core.install` from that clone.
+  - **`daemon.enabled: true` and `daemon.run_here` name this checkout.** Run `/lazy-core.daemon-setup` — it sets `daemon.enabled`, asks the `run_here` question (which machine and checkout drive the daemon), and installs the supervisor unit (launchd on macOS, systemd on Linux) once you confirm.
+  - **The checkout is a plain git clone outside Dropbox.** Dropbox syncs bytes outside git and can bring CRLF or half-written files in from another machine, so the daemon refuses to start in any checkout whose resolved path has a component equal to `Dropbox`, starting with `Dropbox` (`Dropbox (Personal)`, `~/Library/CloudStorage/Dropbox…`), or ending in ` Dropbox` (`Auriglaci Dropbox`). Instead of starting it prints a one-line refusal and records a `daemon_error` incident with cause `dropbox_denied`. Point `daemon.run_here` at a git-only clone outside Dropbox, e.g. `~/lazy-runtime/<repo>`, and run `/lazy-core.daemon-setup` from that clone.
 
   Or, outside Claude Code, start the shim directly once all three are set:
 
@@ -171,7 +171,7 @@ If `/lazy-expert.list-jobs` shows the job as `dead` but `/lazy-expert.collect-jo
 - **Cancel a job you no longer need** — run `/lazy-expert.cancel-job expert_name=designer job_id=<job_id>` for any job that is still queued or in progress. Cancellation stops the running executor immediately and marks the bundle `CANCELLED`; nothing is deleted, so the job stays visible in `/lazy-expert.list-jobs` for forensics.
 - **Add memory to an expert** — run `/lazy-memory.mark-persona <expert>` to opt an expert into the long-term memory subsystem. After a few dispatches accumulate run logs, run `/lazy-memory.reflect <expert>` to have the expert write its first memory notes under `.memory/<expert>/`. See the *add-memory-to-expert* walkthrough for the full flow.
 - **Register plugin routines** — if a plugin also needs periodic background work, run `/lazy-routine.register` to add it to the daemon's rotation alongside `lazy-expert.pump`.
-- **No daemon running?** — that's the default; nothing is wrong. Run `/lazy-runtime.tick` by hand whenever you want the queue drained — same routines, same order as the daemon, no token required. To get continuous draining instead, set `lazy.settings.json[daemon].enabled: true`, set `daemon.token_env` to name an environment variable holding an OAuth token (seeded in `~/.claude/.env` or the real environment — the daemon refuses to start without it), make sure `daemon.run_here` names a plain git clone outside Dropbox, and re-run `/lazy-core.install`, or start the shim directly with `.claude/bin/lazy.runtime.sh`. If a daemon you did start halted on a dirty working tree, run `/lazy-runtime.recover` first. If it instead exits immediately saying it refuses to start inside a Dropbox folder, re-clone the project with git to a path outside Dropbox, point `daemon.run_here` at the clone, and re-run `/lazy-core.install` from there.
+- **No daemon running?** — that's the default; nothing is wrong. Run `/lazy-runtime.tick` by hand whenever you want the queue drained — same routines, same order as the daemon, no token required. To get continuous draining instead, set `lazy.settings.json[daemon].enabled: true`, set `daemon.token_env` to name an environment variable holding an OAuth token (seeded in `~/.claude/.env` or the real environment — the daemon refuses to start without it), and run `/lazy-core.daemon-setup` from a plain git clone outside Dropbox so `daemon.run_here` names it, or start the shim directly with `.claude/bin/lazy.runtime.sh`. If a daemon you did start halted on a dirty working tree, run `/lazy-runtime.recover` first. If it instead exits immediately saying it refuses to start inside a Dropbox folder, re-clone the project with git to a path outside Dropbox, point `daemon.run_here` at the clone, and re-run `/lazy-core.daemon-setup` from there.
 
 ## How the pieces fit
 

@@ -29,7 +29,7 @@ The `daemon` key is optional. When absent, no git ops are performed and `polling
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `enabled` | bool | `false` | Whether this checkout may run a **supervised** daemon. Seeded `false` by `/lazy-core.install`, whose Step 13 reads it as the one gate on installing the launchd / systemd unit (Gate 1, before the `run_here` pairing of `lazy-core.state-schema.md` § 15); flipping it is a deliberate edit followed by a re-run of install, never an install-time prompt. The daemon process itself never reads the flag — every routine still runs by hand through `/lazy-runtime.tick` on a checkout where it stays `false`. Its other reader is the inbox-collision guard (`inbox_guard.daemon_inbox_findings`), which treats a disabled checkout as contesting no shared inbox. |
+| `enabled` | bool | `false` | Whether this checkout may run a **supervised** daemon. Seeded `false` by `/lazy-core.install`, which never asks about it. `/lazy-core.daemon-setup` reads it as the one gate on installing the launchd / systemd unit (Gate 1, before the `run_here` pairing of `lazy-core.state-schema.md` § 15) and is the one place that offers to flip it. The daemon process itself never reads the flag — every routine still runs by hand through `/lazy-runtime.tick` on a checkout where it stays `false`. Its other reader is the inbox-collision guard (`inbox_guard.daemon_inbox_findings`), which treats a disabled checkout as contesting no shared inbox. |
 | `git` | `null` or object | `null` | Git integration block. `null` means no git ops. |
 | `rate_limit_guard` | object | every trigger on | Subscription-rate-limit guard, gating spawns against the host-local flag. See `daemon.rate_limit_guard` sub-fields below. |
 | `polling_interval_sec` | int | `5` | Maximum sleep between runtime iterations. |
@@ -160,7 +160,7 @@ The daemon reads two flat top-level sections — `daemon` and `routines`. Each c
 
 ### `daemon.supervisor` block fields
 
-The `supervisor` key (nested under the flat `daemon` section) is optional and records install-time choices about how the supervisor unit (launchd plist / systemd service) was rendered. The daemon process itself does not read this block — it is consumed by `/lazy-core.install` Step 13 when (re-)rendering the unit.
+The `supervisor` key (nested under the flat `daemon` section) is optional and records install-time choices about how the supervisor unit (launchd plist / systemd service) was rendered. The daemon process itself does not read this block — it is consumed by `/lazy-core.daemon-setup` when (re-)rendering the unit.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -168,9 +168,9 @@ The `supervisor` key (nested under the flat `daemon` section) is optional and re
 | `login_shell` | bool | `false` | When `true`, the rendered supervisor invokes `lazy.runtime.sh` with `--login-shell`. The shim re-execs itself through a login shell (`$SHELL -lc`, default `/bin/zsh`) so the daemon inherits the operator's login environment (`.zprofile` / `.zshrc` → `CLAUDE_CODE_OAUTH_TOKEN` + full PATH). See § Headless hosts below. |
 | `env_files` | `[string]` | `[]` | A list of env-file paths. Each is rendered as a `--env-file <path>` flag on the shim invocation; the shim sources each (`set -a; . <path>; set +a`) so its exported vars reach the runner → daemon → `claude`. A leading `~` is expanded by the shim. Surgical alternative to `login_shell` when only a token file is needed, not a full login PATH. |
 
-`LAZYCORTEX_PYTHON` — absolute interpreter derived by install step 13b and exported by the supervisor unit to the shim, which starts the runner through it. It lives nowhere but the unit file: an interactive session runs skills and hooks as `"${LAZYCORTEX_PYTHON:-python3}"` and resolves `python3` from its own `PATH`.
+`LAZYCORTEX_PYTHON` — absolute interpreter derived by `/lazy-core.daemon-setup` and exported by the supervisor unit to the shim, which starts the runner through it. It lives nowhere but the unit file: an interactive session runs skills and hooks as `"${LAZYCORTEX_PYTHON:-python3}"` and resolves `python3` from its own `PATH`.
 
-`dev_mode`, `login_shell`, and `env_files` are install-skill state, not runtime config — changing them in `lazy.settings.json` does NOT affect the running daemon. To apply a change, re-run `/lazy-core.install` so the supervisor unit is re-rendered, then reload the unit (`launchctl unload && launchctl load` on macOS, `systemctl --user daemon-reload && systemctl --user restart` on Linux).
+`dev_mode`, `login_shell`, and `env_files` are install-skill state, not runtime config — changing them in `lazy.settings.json` does NOT affect the running daemon. To apply a change, re-run `/lazy-core.daemon-setup` so the supervisor unit is re-rendered, then reload the unit (`launchctl unload && launchctl load` on macOS, `systemctl --user daemon-reload && systemctl --user restart` on Linux).
 
 ### Headless hosts: giving the daemon a login environment
 

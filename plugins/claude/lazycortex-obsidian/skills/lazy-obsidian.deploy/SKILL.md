@@ -62,7 +62,7 @@ Outcome: `fresh`, `overwrite-approved`, or `cancelled-by-operator`.
 
 The worker prints a JSON report. A non-zero exit means `errors` is non-empty; every error names one plugin, snippet, or theme that was skipped — the rest of the vault was still written.
 
-The worker never touches `workspace*`, caches, obsidian-git authentication, or Iconize's own database (rebuilt from note frontmatter by `iconize-reloader`).
+The worker never touches `workspace*`, caches, or obsidian-git authentication. Iconize's `data.json` is laid down like any other plugin's settings, but carries only its settings-like blocks (`settings`, `rules`, `recentlyUsedIcons`) — the per-path icon entries were never captured, and `iconize-reloader` rebuilds them from note frontmatter.
 
 Outcome: `deployed` or `deployed-with-errors: <N>`.
 
@@ -89,4 +89,4 @@ One line per task in the canonical list, with its outcome word, followed by the 
 - **A plugin reports `served from cache`** — GitHub was unreachable or the release lacked assets; the vendored copy under the user's cache was used instead. Re-run when the network is back to pull latest.
 - **A plugin reports `not in the community catalog`** — it has no public catalog entry. Add a `repo` key (`owner/name`) to that plugin's entry in the manifest, or ship it bundled under the plugin's own templates.
 - **A theme is named in `errors`** — neither its repository nor the cache could serve it; the message says which failed. Re-run with network access, since the first successful fetch caches the theme for later offline deploys. A theme absent from the community catalogue has no repository to read and must be copied into `.obsidian/themes/` by hand.
-- **Icons and folder colours are missing after deploy** — expected: they are rebuilt by `iconize-reloader` from note frontmatter, not by this skill. Open Obsidian, or run `/lazy-obsidian.iconize-sync reconcile`.
+- **Icons and folder colours are missing after deploy** — the per-path icon entries are expected to be absent: `iconize-reloader` rebuilds them from note frontmatter when Obsidian opens. Open Obsidian, or run `/lazy-obsidian.iconize-sync reconcile`. If they stay missing, check Iconize's `settings` block in `.obsidian/plugins/obsidian-icon-folder/data.json`: `iconInFrontmatterEnabled` must be `true` and the field names `iconize_icon` / `iconize_color`. A manifest captured before Iconize settings were recorded carries `data: null` for it — fix the live vault, then re-run `/lazy-obsidian.capture`. With Obsidian open, `iconize-reloader` also corrects those three keys on its own whenever Iconize rewrites the file.

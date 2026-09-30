@@ -998,7 +998,7 @@ def resolve_repo_label(repo_root: Path, override: str | None) -> str:
   try:
     rc = subprocess.run(
       ["git", "remote", "get-url", "origin"],
-      cwd = str(repo_root), capture_output = True, text = True, check = False,
+      cwd = str(repo_root), capture_output = True, text = True, check = False, encoding = "utf-8",
     )
     if rc.returncode == 0:
       url = rc.stdout.strip()

@@ -112,7 +112,7 @@ def run_git(repo: Path, *args: str) -> list[str]:
   # git may be missing or the directory may not be a repo — treat both as "no scope"
   try:
     out = subprocess.run(['git', '-C', str(repo), *args],
-                         capture_output = True, text = True, check = False)
+                         capture_output = True, text = True, check = False, encoding = "utf-8")
   except OSError:
     return []
 

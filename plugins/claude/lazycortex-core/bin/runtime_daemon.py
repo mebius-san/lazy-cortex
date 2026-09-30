@@ -249,7 +249,7 @@ def _git_common_dir(repo_root: Path) -> Path:
   # relative `core.hooksPath` is resolved by git against the hook's cwd, not the repository
   out = subprocess.check_output(
     [ "git", "rev-parse", "--path-format=absolute", "--git-common-dir" ],
-    cwd = repo_root, text = True,
+    cwd = repo_root, text = True, encoding = "utf-8",
   )
   return Path(out.strip())
 
@@ -275,7 +275,7 @@ def _operator_hooks_dir(repo_root: Path) -> Path:
   proc = subprocess.run(
     [ "git", "config", "--get", EnvVar.GIT_HOOKS_PATH ],
     cwd = repo_root, capture_output = True, text = True, check = False,
-    env = strip_hooks_path(dict(os.environ)),
+    env = strip_hooks_path(dict(os.environ)), encoding = "utf-8",
   )
   configured = proc.stdout.strip()
 
@@ -434,7 +434,7 @@ def _resolve_in_plugin_dir(plugin_dir: Path, plugin_name: str) -> Path | None:
   """
   manifest = plugin_dir / PluginFile.MANIFEST_DIR / PluginFile.MANIFEST
   try:
-    data = json.loads(manifest.read_text())
+    data = json.loads(manifest.read_text(encoding = "utf-8"))
   except (FileNotFoundError, json.JSONDecodeError):
     return None
 
@@ -467,7 +467,7 @@ def _read_plugin_version() -> str:
   here = Path(__file__).resolve().parent  # plugins/claude/lazycortex-core/bin
   plugin_json = here.parent / PluginFile.MANIFEST_DIR / PluginFile.MANIFEST
   try:
-    return json.loads(plugin_json.read_text())[PluginFile.VERSION]
+    return json.loads(plugin_json.read_text(encoding = "utf-8"))[PluginFile.VERSION]
   except (FileNotFoundError, KeyError, json.JSONDecodeError):
     # waiver: stdlib idiom, not a domain constant
     return "unknown"
@@ -735,7 +735,7 @@ def _loop_detect_check(
     )
     meta = subprocess.run(
       [ "git", "--no-optional-locks", "log", f"-{window}", "--no-merges", "--format=%H%x01%ae%x01%s" ],
-      cwd = str(repo_root), capture_output = True, text = True, check = False,
+      cwd = str(repo_root), capture_output = True, text = True, check = False, encoding = "utf-8",
     )
     ids = subprocess.run(
       [ "git", "patch-id", "--stable" ],
@@ -805,7 +805,7 @@ def _check_working_tree(repo_root: Path) -> list[str] | None:
     rc = subprocess.run(
       [ "git", "--no-optional-locks", "-c", "color.status=never",
         "-c", "core.quotePath=false", "status", "--porcelain" ],
-      cwd = str(repo_root), capture_output = True, text = True, check = False,
+      cwd = str(repo_root), capture_output = True, text = True, check = False, encoding = "utf-8",
     )
   except FileNotFoundError:
     return None
@@ -1991,7 +1991,7 @@ def _env_file_value(env_file: Path, var: str) -> str:
     The value with surrounding quotes stripped, or an empty string when not found.
   """
   try:
-    lines = env_file.read_text().splitlines()
+    lines = env_file.read_text(encoding = "utf-8").splitlines()
   except OSError:
     return ""
   for line in lines:
@@ -2814,7 +2814,7 @@ def _run_git_capture(repo_root: Path, args: list[str]) -> str:
     subprocess.CalledProcessError: When the git invocation exits non-zero.
   """
   proc = subprocess.run(
-    [ "git", *args ], cwd = repo_root, check = True, capture_output = True, text = True,
+    [ "git", *args ], cwd = repo_root, check = True, capture_output = True, text = True, encoding = "utf-8",
   )
   return proc.stdout.strip()
 
@@ -2855,7 +2855,7 @@ def _repair_lagging_index(repo_root: Path) -> None:
   paths = staged.splitlines()
   probe = subprocess.run(
     [ "git", "diff", "--quiet", "HEAD", "--", *paths ],
-    cwd = repo_root, check = False, capture_output = True, text = True,
+    cwd = repo_root, check = False, capture_output = True, text = True, encoding = "utf-8",
   )
 
   # guard: real worktree divergence — parked operator content, never reset it
@@ -3334,7 +3334,7 @@ def dispatch_subprocess(repo_root: Path, name: str, cfg: dict) -> dict:
     subprocess_env = { **os.environ, **routine_subprocess_env(cfg) }
     proc = subprocess.run(
       argv, cwd = repo_root, timeout = timeout,
-      capture_output = True, text = True, env = subprocess_env, check = False,
+      capture_output = True, text = True, env = subprocess_env, check = False, encoding = "utf-8",
     )
     return {
       TickResultKey.NAME: name, TickResultKey.EXIT: proc.returncode,
@@ -3554,7 +3554,7 @@ def _log_routine_result(repo_root: Path, result: dict) -> None:
   log_file = log_dir / f"{time.strftime('%Y-%m-%d', time.gmtime())}.jsonl"
   record = { "ts": time.time(), **result }
   # waiver: stdlib idiom, not a domain constant
-  with log_file.open("a") as f:
+  with log_file.open("a", encoding = "utf-8") as f:
     f.write(json.dumps(record) + "\n")
   _emit_tick_metrics_if_available(repo_root, result)
 

@@ -90,7 +90,7 @@ def append(text: str, line: str, today: str | None = None, *, repo: Path | None 
     payload[_Wire.DATE] = today
   proc = subprocess.run(
       _core_argv(repo, _Wire.STDIN_FLAG),
-      input = json.dumps(payload), capture_output = True, text = True, check = False,
+      input = json.dumps(payload), capture_output = True, text = True, check = False, encoding = "utf-8",
   )
 
   # guard: the verb refused (empty line, bad date, malformed request) — surface its own message
@@ -118,7 +118,9 @@ def append_to_file(note: Path, line: str, today: str | None = None, *, repo: Pat
   tail = [str(note), _Wire.LINE_FLAG, line]
   if today:
     tail += [_Wire.DATE_FLAG, today]
-  proc = subprocess.run(_core_argv(repo, *tail), capture_output = True, text = True, check = False)
+  proc = subprocess.run(
+    _core_argv(repo, *tail), capture_output = True, text = True, check = False, encoding = "utf-8",
+  )
 
   # guard: the verb refused — surface its own message rather than a bare exit code
   if proc.returncode != 0:

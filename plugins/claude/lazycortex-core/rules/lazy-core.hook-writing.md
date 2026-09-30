@@ -13,7 +13,7 @@ This file is the single source of truth for **how to write** hook scripts. Share
 
 ## 1. Script discipline
 
-- Shebang `#!/usr/bin/env python3` (or `#!/bin/sh` for shell shims). Never rely on the caller to pass an interpreter.
+- Shebang `#!/usr/bin/env python3` (or `#!/usr/bin/env bash` for shell shims). Never rely on the caller to pass an interpreter.
 - Stdin is JSON per the Claude Code hook protocol. Read with `json.load(sys.stdin)` and tolerate malformed input — return 0 silently if the payload cannot be parsed (a hook must never crash the trigger).
 - Exit 0 on every path that should not block the trigger. Exit 2 only if the hook is a `Pre*` hook intentionally vetoing the tool call.
 - Wrap every `subprocess.run` performing a git operation with `-c core.hooksPath=/dev/null` to avoid re-entry into the hook chain. Re-entry is not the only failure mode under automation — see § 9.

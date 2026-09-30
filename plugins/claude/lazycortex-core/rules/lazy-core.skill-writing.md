@@ -166,7 +166,7 @@ Marking a skill `research: true` without also documenting a query-mode contract 
 
 Every `AskUserQuestion` site in a skill or command is written as a **context block followed by the call**, and the executing agent prints the context block to the operator as prose immediately before the call. The block covers, in this order:
 
-1. **Where** — the skill and step (`/lazy-core.install · Step 13 — Metrics`) and the concrete target: repo path, file, scope.
+1. **Where** — the skill and step (`/lazy-core.daemon-setup · Step 6 — Provision metrics`) and the concrete target: repo path, file, scope.
 2. **Found** — the read-first result that led here: the value on record, the file present or absent, the conflicting region quoted.
 3. **Why asking** — the one reason the skill cannot decide alone: genuine project config nobody can derive, a contradiction between local and shipped, or a destructive action.
 4. **Answers** — what each option does on disk now, and later: where the answer is persisted, whether it is ever re-asked.
@@ -188,7 +188,7 @@ A policy paragraph that describes a class of question (the File-sync "genuine co
 
 ## 12. Interpreter, never the exec bit
 
-A skill, hook, or command never runs a plugin file as `argv[0]`. Python runs as `"${LAZYCORTEX_PYTHON:-python3}" ${CLAUDE_PLUGIN_ROOT}/bin/<file>` (the variable is the absolute interpreter the daemon's supervisor unit exports to everything it spawns; in an interactive session it is unset and `python3` resolves from PATH); a shell script runs as `sh "${CLAUDE_PLUGIN_ROOT}/hooks/<file>.sh"`. The exec bit is not part of any contract: a git client that cannot store modes strips it silently, and a skill that needs it fails on the first such checkout.
+A skill, hook, or command never runs a plugin file as `argv[0]`. Python runs as `"${LAZYCORTEX_PYTHON:-python3}" ${CLAUDE_PLUGIN_ROOT}/bin/<file>` (the variable is the absolute interpreter the daemon's supervisor unit exports to everything it spawns; in an interactive session it comes from `.claude/settings.local.json` `env`, where `/lazy-core.install` records it when the interpreter it resolved is not `python3`, and is otherwise unset so `python3` resolves from PATH); a shell script runs as `bash "${CLAUDE_PLUGIN_ROOT}/hooks/<file>.sh"`. The exec bit is not part of any contract: a git client that cannot store modes strips it silently, and a skill that needs it fails on the first such checkout.
 
 `<core-cli>` stands for the core plugin's `bin/lazycortex-core` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-core/<version>/`, or `plugins/claude/lazycortex-core/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 

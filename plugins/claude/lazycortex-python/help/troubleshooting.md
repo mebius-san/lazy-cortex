@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, causes, and fixes for lazycortex-python install, audit, style checks, the guideline-review gate, and writer agents.
-last_regen: 2026-09-29
+last_regen: 2026-09-30
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision-tree routing install/audit/check-style/review/writer failures: top-level branch on skill invoked (install vs audit vs check-style vs review vs docstring-writer vs test-writer); install branch splits on phase (source-not-found, rule-read-only, wrapper-template-missing, pyproject-absent, pch-no-inspect-sh, scaffold-sync-fails, env-source-multiple-candidates, wrapper-cannot-resolve-active-install); audit branch splits on check number (check-crash, check1 drift, check2 broken-pointer, check3 artifact-missing, check4 placeholder, check10 invalid-json, check11 venv-degraded, check12 domain-groups-dictionary-missing); check-style branch splits on step (step3-manual-vs-chk, step5-test-gate, step6-violations-persist); pcf branch splits on new-violations-after-upgrade: (a) D2/D5/D7/D9 firing on previously-passing docstrings because project-neutral defaults dropped a project's implicit Generation Rules / Value Ranges / _field_filters conventions, needing [tool.pcf] extra_docstring_sections / d2_exempt_marker_attrs / private_name_allowlist declared; (b) check_language flagging comments/docstrings written outside [tool.pcf] allowed_languages (default english-only), needing translation, allowed_languages, or a # waiver:; (c) project_package autodetection resolving to nothing on an ambiguous src/ + root layout, misclassifying first-party imports, needing [tool.pcf] project_package declared explicitly; review branch splits on: chk-py-all-no-longer-runs-review (review left chk-py all as of 4.0.0 and needs its own chk-py review dispatch, mandatory at the end of a planned-work cycle) vs chk-py-review-base-ref-unresolvable (typo'd or unfetched --base ref, fetch or use git merge-base) vs chk-py-review-render-still-fails-with-FAIL-finding (fix the code, re-run — new scope key re-manifests); docstring-writer branch (step6-chk-violations); test-writer branch (step6-fails-flag, step7-tst-py-fails); each leaf names the fix action"
@@ -19,8 +19,8 @@ source_skills:
   - lazy-python.knowledge-sweep
   - lazy-python.domain-writer
   - lazy-python.contract-writer
-source_sha: 600d3366cc9008d09f999f58678103714c26392f
-surface_sha: dac2446c43063f5232b510dc7b8e745a68ba448433a0ce3f1710ee52d0aa1a7e
+source_sha: 8c642c6f0911b2d8c00a32979298d23b5420a63a
+surface_sha: ba4e2f440929a9e519069616e0951b9dcf2f903a14cd9f7a054154f4fec1efaf
 ---
 # Troubleshooting
 
@@ -70,7 +70,7 @@ surface_sha: dac2446c43063f5232b510dc7b8e745a68ba448433a0ce3f1710ee52d0aa1a7e
 
 **Likely cause**: `/lazy-python.install` Step 2 deploys the wrapper without ever setting an executable bit on it — the exec bit is deliberately not part of the contract for any file tracked in the repo, because a mode-blind git client (Obsidian-git on Android is the motivating case) resets every tracked file to `100644` on commit, silently stripping any bit the install had set. The wrapper is designed to be launched through a shell rather than executed directly.
 
-**Fix**: Run it through `sh` instead of directly: `sh ./cli/chk-py` / `sh ./cli/tst-py`. For a bare `chk-py` / `tst-py` command that works the same way from any directory, use the human-facing copies `/lazy-python.install` Step 2b deploys to `~/.local/bin/chk-py` and `~/.local/bin/tst-py` — those two files are the only ones this plugin ever marks executable, since `~/.local/bin` lives outside any git-tracked vault and nothing can strip their bit. Re-run `/lazy-python.install` if they are not there yet.
+**Fix**: Run it through `bash` instead of directly: `bash ./cli/chk-py` / `bash ./cli/tst-py`. For a bare `chk-py` / `tst-py` command that works the same way from any directory, use the human-facing copies `/lazy-python.install` Step 2b deploys to `~/.local/bin/chk-py` and `~/.local/bin/tst-py` — those two files are the only ones this plugin ever marks executable, since `~/.local/bin` lives outside any git-tracked vault and nothing can strip their bit. Re-run `/lazy-python.install` if they are not there yet.
 
 ---
 
@@ -80,7 +80,7 @@ surface_sha: dac2446c43063f5232b510dc7b8e745a68ba448433a0ce3f1710ee52d0aa1a7e
 
 **Likely cause**: Step 2b deploys the human-facing wrappers to `~/.local/bin/chk-py` and `~/.local/bin/tst-py`, but it never edits shell rc files — it only writes the two files. If `~/.local/bin` is not already on `$PATH`, the shell has no way to find them. The install step itself checks for this: right after Step 2b it runs `command -v chk-py`, and reports `path-warning` in its own output when that check fails, without attempting a fix.
 
-**Fix**: Add `~/.local/bin` to `$PATH` in your shell profile (`~/.zshrc`, `~/.bashrc`, or equivalent) yourself — this is the one thing `/lazy-python.install` deliberately leaves to you. Open a new shell (or re-source the profile) and confirm with `command -v chk-py`. Until then, run `sh ./cli/chk-py` (or `tst-py`) from inside the repo directly.
+**Fix**: Add `~/.local/bin` to `$PATH` in your shell profile (`~/.zshrc`, `~/.bashrc`, or equivalent) yourself — this is the one thing `/lazy-python.install` deliberately leaves to you. Open a new shell (or re-source the profile) and confirm with `command -v chk-py`. Until then, run `bash ./cli/chk-py` (or `tst-py`) from inside the repo directly.
 
 ---
 
@@ -417,6 +417,16 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 **Likely cause**: The agent's hard rules exclude three categories from ever becoming a contract: pure implementation details invisible to callers, anything already obvious from the signature and type hints, and presentation details (exact message text, log lines, formatting) — the last is only ever contractable when a caller demonstrably parses the string programmatically, and even then the contract names the parsed structure, not the prose.
 
 **Fix**: This is expected behaviour, not a bug — writing a contract for one of these would violate the plugin's own documenting canon. If the guarantee is genuinely caller-visible (a return value's shape, a side effect, an invariant that must survive refactoring), re-describe it in those terms in the dispatch. If it's presentation-only, it belongs in a code comment or the docstring's ordinary prose instead of a `Contract:` block.
+
+---
+
+## `lazy-python.contract-writer` declines a contract on a private helper
+
+**Symptom**: Dispatching `lazy-python.contract-writer` against a leading-underscore method writes nothing, and the report lists the target as `declined-private` with a suggested destination.
+
+**Likely cause**: The canon limits contracts to the public surface. A private helper, used only inside its own class or module and never overridden, has one reader who reads its code anyway, so a contract there only turns an implementation choice into binding law.
+
+**Fix**: Put the guarantee where the report points. A rule callers rely on goes into the contract of the public method that exposes it, a domain rule into a `Domain(…):` block, and your own design choice into a `Decision:` marker. If subclasses actually override or call the method, it is a protected hook, and a re-dispatch after the override exists gets the contract written.
 
 ---
 

@@ -98,7 +98,7 @@ def _in_transactional_state(root: str) -> bool:
   """
   try:
     git_dir = subprocess.check_output(
-      [ "git", "rev-parse", "--git-dir" ], cwd = root, text = True
+      [ "git", "rev-parse", "--git-dir" ], cwd = root, text = True, encoding = "utf-8"
     ).strip()
   except subprocess.CalledProcessError:
     return False
@@ -189,7 +189,7 @@ def main() -> int:
   # § 1 — bail outside git repo / wrong workspace shape.
   try:
     root = subprocess.check_output(
-      [ "git", "rev-parse", "--show-toplevel" ], text = True
+      [ "git", "rev-parse", "--show-toplevel" ], text = True, encoding = "utf-8"
     ).strip()
   except (subprocess.CalledProcessError, FileNotFoundError):
     return 0

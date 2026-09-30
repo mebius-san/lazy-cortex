@@ -1,7 +1,7 @@
 ---
 name: lazy-obsidian.iconize-install
 description: "Run when the operator asks to set up folder and file icons in this Obsidian vault, or when `/lazy-obsidian.iconize-sync` refuses because the icon-map is missing, or the Iconize / folder-notes / iconize-reloader vault plugins aren't there. Scaffolds the vault-side pieces (icon-map, gitignore entry, schema migration, repaint routine) and installs those three plugins. Chained from `/lazy-obsidian.install`; idempotent, and must be run from the vault's git root."
-allowed-tools: Read, Write, Edit, Glob, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git ls-files*), Bash(git -C *), Bash(chmod *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(cp *), Bash(test *), Bash(date *), Bash(rm *), Bash(jq *), AskUserQuestion, Agent
+allowed-tools: Read, Write, Edit, Glob, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git ls-files*), Bash(git -C *), Bash(chmod *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(cp *), Bash(test *), Bash(date *), Bash(rm *), AskUserQuestion, Agent
 argument-hint: "[repo=<abs>] [--dry-run] — scaffolds into <repo-root>/.claude/ (repo= sets the target under headless dispatch)"
 ---
 # Install iconize-sync (Obsidian)
@@ -184,7 +184,7 @@ Cases 1–5 below operate on `<repo-root>/.claude/iconize/obsidian-icon-map.json
 
    | Step | Transform | Implementation |
    |---|---|---|
-   | 1 → 2 | Drop every `emit` key from every matcher; drop the legacy top-level `version` string (worker reads `schema_version` only); set `schema_version: 2`. | `jq 'del(.version) \| .schema_version = 2 \| .matchers = (.matchers \| map(del(.emit)))'` |
+   | 1 → 2 | Drop every `emit` key from every matcher; drop the legacy top-level `version` string (worker reads `schema_version` only); set `schema_version: 2`. | `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py" migrate-1-to-2 <icon-map path>` (rewrites the file in place atomically) |
 
    #### 3a. Older schema with no migration path
 

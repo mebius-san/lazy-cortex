@@ -74,7 +74,7 @@ def _resolve_asset_dir(doc_path: Path) -> Path | None:
   if not status_note.is_file():
     return None
   try:
-    meta, _body = _fm.parse(status_note.read_text())
+    meta, _body = _fm.parse(status_note.read_text(encoding = "utf-8"))
   except OSError:
     return None
   return asset_dir if meta.get(_SPEC_ROLE_KEY) == _STATUS_ROLE else None
@@ -123,7 +123,7 @@ def _owning_product_root(start_dir: Path) -> Path | None:
 
   # parse the settings JSON; a missing or malformed file resolves to no product
   try:
-    data = json.loads((settings_root / _SETTINGS_REL).read_text())
+    data = json.loads((settings_root / _SETTINGS_REL).read_text(encoding = "utf-8"))
   except (OSError, json.JSONDecodeError):
     return None
 
@@ -192,7 +192,7 @@ def collect(doc_path: Path) -> dict[str, str]:
     context: dict[str, str] = {}
     asset_decisions = asset_dir / _DECISIONS_FILENAME
     if asset_decisions.is_file():
-      context[ASSET_CONTEXT_KEY] = asset_decisions.read_text()
+      context[ASSET_CONTEXT_KEY] = asset_decisions.read_text(encoding = "utf-8")
 
     # the owning product's registry sits at the product root the settings register, however
     # deep the asset is nested below it; without a registered product the legacy
@@ -201,7 +201,7 @@ def collect(doc_path: Path) -> dict[str, str]:
     product_root = _owning_product_root(asset_dir) or asset_dir.parent.parent
     product_decisions = product_root / _DECISIONS_FILENAME
     if product_decisions.is_file():
-      context[PRODUCT_CONTEXT_KEY] = product_decisions.read_text()
+      context[PRODUCT_CONTEXT_KEY] = product_decisions.read_text(encoding = "utf-8")
     return context
 
   # no asset-level status note — doc_path may still be a product-level document sitting
@@ -214,4 +214,7 @@ def collect(doc_path: Path) -> dict[str, str]:
 
   # a product-root document has only the product half to resolve — no asset registry exists here
   product_decisions = product_dir / _DECISIONS_FILENAME
-  return { PRODUCT_CONTEXT_KEY: product_decisions.read_text() } if product_decisions.is_file() else {}
+  # guard: no product decisions file — nothing to resolve
+  if not product_decisions.is_file():
+    return {}
+  return { PRODUCT_CONTEXT_KEY: product_decisions.read_text(encoding = "utf-8") }

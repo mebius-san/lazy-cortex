@@ -60,7 +60,7 @@ class RepoWalk:
     blob = self._NUL.join(rels) + self._NUL
     proc = subprocess.run(
       cmd, cwd = str(self._repo),
-      input = blob, capture_output = True, text = True, check = False,
+      input = blob, capture_output = True, text = True, check = False, encoding = "utf-8",
     )
 
     # git check-ignore: rc 0 = some ignored, 1 = none ignored, >1 = real error
@@ -88,7 +88,7 @@ class RepoWalk:
     cmd += [ "ls-files", "-co", "--exclude-standard", "-z" ]
     proc = subprocess.run(
       cmd, cwd = str(self._repo),
-      capture_output = True, text = True, check = False,
+      capture_output = True, text = True, check = False, encoding = "utf-8",
     )
 
     # guard: not a git repo / git failure — signal the caller to fall back

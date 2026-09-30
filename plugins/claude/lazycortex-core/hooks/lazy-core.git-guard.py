@@ -205,7 +205,7 @@ def _repo_root() -> Path | None:
   try:
     out = subprocess.check_output(
       [ "git", "rev-parse", "--show-toplevel" ],
-      stderr = subprocess.DEVNULL, text = True,
+      stderr = subprocess.DEVNULL, text = True, encoding = "utf-8",
     ).strip()
   except (subprocess.CalledProcessError, FileNotFoundError):
     return None
@@ -661,7 +661,7 @@ def _git_at(cwd: Path, *args: str) -> subprocess.CompletedProcess:
       text = True,
       check = False,
       # waiver: inline numeric literal (subprocess timeout seconds), not a domain constant
-      timeout = 3,
+      timeout = 3, encoding = "utf-8",
     )
   except (OSError, subprocess.SubprocessError):
     # waiver: inline numeric literal (git generic-failure exit code), not a domain constant

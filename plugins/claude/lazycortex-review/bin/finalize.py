@@ -120,7 +120,7 @@ def document_edit_marker_style(file_path: Path) -> str:
   # configuration.
 
   try:
-    meta, _ = _fm.parse(file_path.read_text())
+    meta, _ = _fm.parse(file_path.read_text(encoding = "utf-8"))
   except OSError:
     return settings_edit_marker_style(file_path)
 
@@ -146,7 +146,7 @@ def settings_edit_marker_style(file_path: Path) -> str:
     candidate = cur / Paths.CLAUDE_DIR / Paths.SETTINGS_FILE
     if candidate.exists():
       try:
-        data = json.loads(candidate.read_text())
+        data = json.loads(candidate.read_text(encoding = "utf-8"))
         return (
             data.get(JobKey.REVIEW, {}).get(JobKey.EDIT_MARKER_STYLE, Style.SIMPLE)
         )
@@ -177,7 +177,7 @@ def _load_settings(repo: Path) -> dict:
   if not path.exists():
     return {}
   try:
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding = "utf-8"))
   except json.JSONDecodeError:
     return {}
 

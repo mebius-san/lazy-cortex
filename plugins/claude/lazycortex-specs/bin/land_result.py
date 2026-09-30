@@ -175,7 +175,7 @@ def _is_spec_document(path: Path) -> bool:
   if path.suffix.lower() != _MD_SUFFIX or not path.is_file():
     return False
   try:
-    values, _ = flip_gate.parse_frontmatter(path.read_text())
+    values, _ = flip_gate.parse_frontmatter(path.read_text(encoding = "utf-8"))
   # waiver: an unreadable neighbour is simply not a spec note — the landing is not this
   # helper's to refuse over an IO error it cannot attribute
   except (OSError, UnicodeDecodeError):
@@ -246,7 +246,7 @@ def _read_entries(job_dir: Path) -> list[object]:
     finish with an edit, or delivered nothing.
   """
   try:
-    response = json.loads((job_dir / _RESPONSE_FILE).read_text())
+    response = json.loads((job_dir / _RESPONSE_FILE).read_text(encoding = "utf-8"))
   except (OSError, json.JSONDecodeError):
     return []
 
@@ -294,7 +294,7 @@ def document_target(job_dir: Path, asset_dir: Path) -> Path | None:
   # where its document goes has nowhere to put it and stays undelivered.
 
   try:
-    request = json.loads((job_dir / _REQUEST_FILE).read_text())
+    request = json.loads((job_dir / _REQUEST_FILE).read_text(encoding = "utf-8"))
   except (OSError, json.JSONDecodeError) as exc:
     sys.stderr.write(f"land-result: {job_dir.name}: unreadable {_REQUEST_FILE}: {exc}\n")
     return None
@@ -385,7 +385,7 @@ def _commit(repo: Path, paths: list[str]) -> None:
   # does not: it is blind to a file the first landing has only just created
   status = subprocess.run(
       ["git", "status", "--porcelain", "--", *all_paths],
-      cwd = str(repo), check = True, capture_output = True, text = True,
+      cwd = str(repo), check = True, capture_output = True, text = True, encoding = "utf-8",
   )
   if not status.stdout.strip():
     return
@@ -530,7 +530,7 @@ def land_result(job_dir: Path, target_doc: Path) -> dict:
   # write and commit as one step: whatever the folder held comes back if the commit does not land
   try:
     # the document first, with its links pointed at the neighbours it will sit beside
-    body = (job_dir / _RESULT_DIR / names[0]).read_text()
+    body = (job_dir / _RESULT_DIR / names[0]).read_text(encoding = "utf-8")
     target_doc.parent.mkdir(parents = True, exist_ok = True)
     spec_paths.write_text_atomic(target_doc, _fix_links(body, names[1:], job_dir))
     landed.append(str(target_doc.resolve().relative_to(repo.resolve())))

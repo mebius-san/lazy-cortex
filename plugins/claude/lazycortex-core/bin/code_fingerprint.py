@@ -5,12 +5,12 @@ from __future__ import annotations
 
 import hashlib
 import sys
-from importlib.machinery import ModuleSpec, PathFinder
+from importlib.machinery import PathFinder
 from pathlib import Path
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  pass
+  from importlib.machinery import ModuleSpec
 
 
 # ----------------------------------------------------------------------------------------

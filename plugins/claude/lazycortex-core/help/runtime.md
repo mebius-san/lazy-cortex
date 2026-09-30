@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Register, unregister, tick, preflight, and recover routines in the per-repo serial daemon — six skills keep the async team running in order, decide when a new periodic job needs the daemon at all, and validate broken expert configs before they run live.
-last_regen: 2026-09-28
+last_regen: 2026-09-30
 diagram_spec:
   anchor: "Runtime lifecycle"
   request: "State diagram showing the daemon lifecycle: routines registered in lazy.settings.json feed the serial daemon loop; the daemon runs each routine in order per interval_sec or cron schedule; a dirty working tree triggers an uncommitted_changes halt; a failed remote sync retries with backoff and only escalates to a git_pull_diverged / git_push_failed / git_remote_unavailable halt once retries are exhausted; /lazy-runtime.recover (commit/stash/discard/abort for tree halts; manual-fix + resume for remote-sync halts) cleans the precondition and resumes; unregister removes a routine from the loop."
@@ -17,8 +17,8 @@ source_skills:
   - lazy-core.state-schema
   - lazy-core.expert-runtime-schema
   - lazy-core.metrics-schema
-source_sha: 1dfbbbfa9cc7fc1d270e280c4829e643a8bc9db9
-surface_sha: 29651ff9790a57a6a5b8f9fa456a8e424157a63260345f0a53b6be5522e2c6f6
+source_sha: 208e7e85e3998e8b741565a53874e37946b3f177
+surface_sha: 49e1a8c8781c821b28cefc195f577d8f6398d50a787a0069b7e47f89c0d2dd9d
 ---
 # Runtime daemon — routine management and recovery
 
@@ -93,7 +93,7 @@ Once the daemon is back on its feet and its next push actually advances `origin/
 
 If a routine's expert keeps timing out after a halt, or you suspect the underlying config rather than a one-off dirty tree, run `/lazy-runtime.preflight` on that expert to confirm the launch actually succeeds before you re-enable the routine.
 
-When the daemon itself is not running — a supervisor unit stopped, or a checkout that has never wired one up — `/lazy-runtime.tick` steps in as the exact same executor: one iteration, a full `--drain` to catch the queue up, or a single named routine fired on demand. It refuses instead of racing a live daemon, so running it against a checkout whose daemon is already up is always safe — the tick simply declines. Because every tick defers its push, running several ticks in a row before the daemon (or a manual `git push`) resumes is safe too; the commits queue up on the branch waiting for whichever push happens next.
+When the daemon itself is not running — a supervisor unit stopped, or a checkout that has never wired one up — `/lazy-runtime.tick` steps in as the exact same executor: one iteration, a full `--drain` to catch the queue up, or a single named routine fired on demand. It refuses instead of racing a live daemon, so running it against a checkout whose daemon is already up is always safe — the tick simply declines. `/lazy-core.install` never sets up the daemon itself: it seeds `daemon.enabled` as `false`, installs the routines, and leaves the supervisor unit, the `daemon.run_here` driver map, and the metrics endpoint to `/lazy-core.daemon-setup`, which you run only when the project should get a background daemon. Until then every routine runs through `/lazy-runtime.tick`. Because every tick defers its push, running several ticks in a row before the daemon (or a manual `git push`) resumes is safe too; the commits queue up on the branch waiting for whichever push happens next.
 
 Before any of the above matters, `/lazy-core.daemon-authoring` is the fork in the road for a periodic LLM-calling process that does not exist yet. A repository already running this daemon gets a routine, drafted through `/lazy-routine.register` exactly as described above; a repository that is not — or a process that must outlive this daemon's own lifecycle — gets a standalone daemon wired through the same rate-limit guard the daemon's own experts already respect, so two independent processes on one host never burn through the subscription window without either one knowing about the other.
 
@@ -122,6 +122,7 @@ Before any of the above matters, `/lazy-core.daemon-authoring` is the fork in th
 - **A daemon push or pull hits a brief network blip** — no action needed. The daemon retries the underlying fetch/pull/push automatically with increasing backoff (2s, 5s, 10s) before it would ever halt; a `git_remote_unavailable` halt only fires once that whole retry window is exhausted, so seeing the halt at all means the remote stayed unreachable throughout.
 - **Halt re-fires immediately after resume** — if a remote-sync halt returns on the very next daemon tick, the underlying condition was not fully resolved. Run `git fetch origin <branch>; git log --oneline HEAD origin/<branch>` and address the actual cause before re-running `/lazy-runtime.recover`.
 - **Run something after every daemon push** — set `daemon.git.post_push_hook` (and optionally `post_push_timeout_sec`) in the `daemon.git` block of `lazy.settings.json`. It only fires on a push that actually advances `origin/<base_branch>`; a failing or hanging hook is journaled and never affects the daemon's own tick, so it is safe to point at flaky external automation.
+- **Give the project a background daemon** — run `/lazy-core.daemon-setup`. It is the one place that offers to enable `daemon.enabled`, names the checkout that drives the daemon, installs the launchd / systemd supervisor unit, and sets up the metrics endpoint; re-run it after changing supervisor choices so the unit is re-rendered. `/lazy-core.install` does none of this, and only removes a stray supervisor unit on a checkout the project does not name.
 - **Tick the runtime by hand when the daemon isn't running** — run `/lazy-runtime.tick` for one iteration, `/lazy-runtime.tick --drain` to keep going until the queue is empty, or `/lazy-runtime.tick <name>` to fire just one routine regardless of its interval. It refuses outright against a live daemon — stop the supervisor unit first (`launchctl stop com.lazycortex.runtime.<repo>` / `systemctl --user stop lazy-core-runtime-<repo>`) if you need to tick that checkout anyway.
 - **Author a new periodic process that calls an LLM** — run `/lazy-core.daemon-authoring` before the first line of its launch command exists. In a repo already driven by this daemon it routes you to `/lazy-routine.register` instead of standing up a second daemon; outside one, it hands you a supervisor skeleton wired through `~/.local/bin/lazy-claude`.
 - **A standalone daemon's LLM calls exit 75 and nothing runs** — that is the rate-limit guard doing its job, not a bug: the subscription window is closed and the call was refused before spending tokens. Wait for the window, or inspect the records under `${XDG_CACHE_HOME:-$HOME/.cache}/lazycortex/rate-limit/` to see who raised the flag and until when.
@@ -172,7 +173,7 @@ stateDiagram-v2
 
 ## See also
 
-- [install-and-audit](install-and-audit.md) — Bootstrap the daemon via `/lazy-core.install`, which writes the `daemon` block and optionally sets up a launchd/systemd supervisor.
+- [install-and-audit](install-and-audit.md) — `/lazy-core.install` seeds the `daemon` block, routines, and expert runtime; the supervisor unit, `run_here` driver map, and metrics endpoint come from `/lazy-core.daemon-setup`.
 - [experts](experts.md) — The async expert team whose jobs are drained by the `lazy-expert.pump` routine this block manages.
 - [setup-runtime](walkthroughs/setup-runtime.md) — Bootstrap the per-repo serial daemon so the async expert team has an executor.
 - [setup-routine](walkthroughs/setup-routine.md) — Register a dot-namespaced periodic routine with the runtime daemon and remove it cleanly when it is no longer needed.

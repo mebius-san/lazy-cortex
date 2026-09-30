@@ -26,7 +26,7 @@ Before deciding anything, read:
 5. **The rule layers, closest-to-the-asset wins on conflict** (playbook § 3):
    1. The playbook set read in step 0 — common playbook plus type plus tools — baseline behaviour.
    2. The vault-wide operator doc at `spec.coordination_rules` (`lazy-spec.config-protocol.md`) — injected into every job's context.
-   3. Product guidelines, role `coordinator` (`products[<key>].guidelines.coordinator` plus the wildcard `"*"`).
+   3. Product guidelines, role `coordinator` (`products[<key>].guidelines.coordinator` plus the wildcard `"*"`), preceded by the catalog-wide `spec.guidelines` and the enclosing products' guidelines.
    4. The product folder-notes' `# Coordinator rules` sections — of every product enclosing the asset, outermost first, then the owning product's own.
    5. Container folder-notes' `# Coordinator rules` sections, top-down from the product root.
    6. The asset folder-note's `# Coordinator rules` section.

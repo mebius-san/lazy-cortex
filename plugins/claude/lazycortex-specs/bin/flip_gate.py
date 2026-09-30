@@ -357,7 +357,7 @@ def git_field(cwd: Path, args: list[str], fallback: str) -> str:
   """
   try:
     out = subprocess.run(
-        ["git", *args], cwd = cwd, check = True, capture_output = True, text = True,
+        ["git", *args], cwd = cwd, check = True, capture_output = True, text = True, encoding = "utf-8",
     )
   except (subprocess.CalledProcessError, FileNotFoundError):
     return fallback

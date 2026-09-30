@@ -51,6 +51,18 @@ EXIT_TARGET_MISSING = 4
 EXIT_VERSION_DRIFT = 5
 EXIT_COMMIT_FAILED = 6
 
+# The `sync` path argument that means "read the Claude Code hook payload from stdin", and the
+# suffix of the only files the hook repaints.
+_STDIN_PATH = "-"
+_NOTE_SUFFIX = ".md"
+# The PostToolUse payload fields naming the written file: the tool's response first, its input second.
+_HOOK_RESPONSE, _HOOK_RESPONSE_PATH = "tool_response", "filePath"
+_HOOK_INPUT, _HOOK_INPUT_PATH = "tool_input", "file_path"
+# The schema-1 keys the 1 → 2 migration drops: the legacy top-level version string and each matcher's `emit`.
+_LEGACY_VERSION_KEY, _LEGACY_EMIT_KEY = "version", "emit"
+# The icon-map's text encoding, and the suffix of the sibling a rewrite goes through before its rename.
+_MAP_ENCODING, _TMP_SUFFIX = "utf-8", ".tmp"
+
 # ----------------------------------------------------------------------------------------
 # Vault discovery
 # ----------------------------------------------------------------------------------------
@@ -147,7 +159,7 @@ def find_vault_git_root(start: Path) -> Path | None:
   try:
     proc = subprocess.run(
       ["git", "-C", os.path.abspath(start), "rev-parse", "--show-toplevel"],
-      check = False, capture_output = True, text = True,
+      check = False, capture_output = True, text = True, encoding = "utf-8"
     )
   except OSError:
     # guard: git binary unavailable — no repository can be resolved
@@ -387,12 +399,12 @@ def build_parser() -> argparse.ArgumentParser:
   sub = p.add_subparsers(dest = "cmd", parser_class = _Parser)
   # waiver: subcommand-name value (canonical home is the parser+dispatch map)
   for name in ("sync", "sync-paths", "reconcile", "reconcile-plugin", "reconcile-dirty",
-               "reconcile-commit", "check-versions"):
+               "reconcile-commit", "check-versions", "migrate-1-to-2"):
     sp = sub.add_parser(name)
     # waiver: subcommand-name value (canonical home is the parser+dispatch map)
     if name == "sync":
       # waiver: argparse CLI signature
-      sp.add_argument("path", help = "file path relative to vault root")
+      sp.add_argument("path", help = "file path relative to vault root; `-` reads a hook payload from stdin")
     # waiver: subcommand-name value (canonical home is the parser+dispatch map)
     if name == "sync-paths":
       # waiver: argparse CLI signature
@@ -405,6 +417,10 @@ def build_parser() -> argparse.ArgumentParser:
     if name == "reconcile":
       # waiver: argparse CLI signature
       sp.add_argument("--prefix", help = "only reconcile entries whose path starts with this prefix")
+    # waiver: subcommand-name value (canonical home is the parser+dispatch map)
+    if name == "migrate-1-to-2":
+      # waiver: argparse CLI signature
+      sp.add_argument("icon_map_path", help = "icon-map JSON rewritten in place from schema 1 to schema 2")
     # waiver: subcommand-name value (canonical home is the parser+dispatch map)
     if name == "reconcile-plugin":
       # waiver: argparse CLI signature
@@ -682,15 +698,43 @@ def _vault_relative_or_none(vault: Path, raw: str) -> str | None:
   Returns:
     Normalized vault-relative POSIX path, or None when the path lies outside the vault.
   """
-  if raw.startswith(("/", "~")):
+  if raw.startswith("~") or Path(raw).is_absolute():
     try:
       abs_path = Path(raw).expanduser().resolve()
       rel = abs_path.relative_to(vault.resolve())
     except (ValueError, OSError):
       # path is outside the vault — caller treats this as a silent no-op
       return None
-    return normalize_path(str(PurePosixPath(rel)))
+    return normalize_path(rel.as_posix())
   return normalize_path(raw)
+
+
+def _parse_hook_payload_path(payload: str) -> str:
+  """
+  Extract the written file path from a Claude Code PostToolUse hook payload.
+
+  Args:
+    payload: Raw PostToolUse JSON payload read from the hook's stdin.
+
+  Returns:
+    The tool response's `filePath` when present, otherwise the tool input's `file_path`,
+    or an empty string when the payload is not JSON, not an object, or names no string
+    path.
+  """
+  # guard: a payload that is not JSON names no file
+  try:
+    data = json.loads(payload)
+  except ValueError:
+    return ""
+
+  # guard: a payload that is not a JSON object names no file
+  if not isinstance(data, dict):
+    return ""
+
+  # the response carries the path the tool actually wrote; the input path is the request, used when no response names one
+  path = (data[_HOOK_RESPONSE].get(_HOOK_RESPONSE_PATH) if isinstance(data.get(_HOOK_RESPONSE), dict) else None) \
+      or (data[_HOOK_INPUT].get(_HOOK_INPUT_PATH) if isinstance(data.get(_HOOK_INPUT), dict) else None)
+  return path if isinstance(path, str) else ""
 
 
 def cmd_sync(args: argparse.Namespace) -> int:
@@ -699,9 +743,11 @@ def cmd_sync(args: argparse.Namespace) -> int:
 
   Reads the note's frontmatter, evaluates the icon-map matchers, and rewrites the
   `iconize_icon` / `iconize_color` frontmatter keys when they differ from the resolved
-  values; a note no matcher claims keeps whatever icon keys it already carries. Behaves
-  as a silent no-op when the icon-map is missing or incompatible, when the path falls
-  outside the vault, or when the target file does not exist.
+  values; a note no matcher claims keeps whatever icon keys it already carries. A `path`
+  of `-` reads a Claude Code PostToolUse hook payload from stdin instead, and is a silent
+  no-op unless the payload names a `.md` file. Behaves as a silent no-op when the icon-map
+  is missing or incompatible, when the path falls outside the vault, or when the target
+  file does not exist.
 
   Args:
     args: Parsed CLI arguments carrying the target `path`, optional `--vault`,
@@ -710,13 +756,23 @@ def cmd_sync(args: argparse.Namespace) -> int:
   Returns:
     Process exit code; always OK in the current implementation.
   """
+  path = args.path
+  # a `-` path is the PostToolUse payload on stdin, read here so the hook needs no JSON tool of its own
+  if path == _STDIN_PATH:
+    path = _parse_hook_payload_path(sys.stdin.read())
+
+    # guard: the hook repaints notes only — any other written file is a no-op
+    if not path.endswith(_NOTE_SUFFIX):
+      return EXIT_OK
+
+  # resolve the vault and its icon map
   vault = find_vault(args.vault)
   icon_map = _load_icon_map_or_inert(vault, args.icon_map)
 
   # guard: missing or incompatible icon-map → hook inert
   if icon_map is None or _preflight_incompatible(icon_map):
     return EXIT_OK
-  rel = _vault_relative_or_none(vault, args.path)
+  rel = _vault_relative_or_none(vault, path)
 
   # guard: path outside the vault → no-op
   if rel is None:
@@ -1290,7 +1346,7 @@ def _commit_notes(vault: Path, rels: list[str]) -> str | None:
   # `core.hooksPath=/dev/null` keeps the consumer's own git hooks from re-entering this worker
   added = subprocess.run(
     [ "git", "-C", str(vault), "-c", "core.hooksPath=/dev/null", "add", "--", *rels ],
-    capture_output = True, text = True, check = False)
+    capture_output = True, text = True, check = False, encoding = "utf-8")
 
   # guard: nothing reached the index — committing now would produce an empty or partial commit
   if added.returncode != 0:
@@ -1311,7 +1367,7 @@ def _commit_notes(vault: Path, rels: list[str]) -> str | None:
     [ "git", "-C", str(vault), "-c", "core.hooksPath=/dev/null",
       "-c", f"user.name={BOT_NAME}", "-c", f"user.email={BOT_EMAIL}",
       "commit", "-m", f"{ICON_COMMIT_SUBJECT}\n\n{ICON_COMMIT_TRAILER}", "--", *rels ],
-    capture_output = True, text = True, check = False)
+    capture_output = True, text = True, check = False, encoding = "utf-8")
 
   # guard: the repaint stayed uncommitted, which is exactly the dirty tree this run exists to avoid
   if committed.returncode != 0:
@@ -1334,7 +1390,7 @@ def _commit_range_paths(vault: Path, sha: str) -> list[str]:
   proc = subprocess.run(
     [ "git", "--no-optional-locks", "-C", str(vault),
       "diff-tree", "--no-commit-id", "--name-only", "-r", "-m", "--root", sha ],
-    capture_output = True, text = True, check = False)
+    capture_output = True, text = True, check = False, encoding = "utf-8")
 
   # guard: git failure — nothing to repaint from
   if proc.returncode != 0:
@@ -1356,7 +1412,7 @@ def _has_diverged_from_head(vault: Path, rel: str) -> bool:
   """
   proc = subprocess.run(
     [ "git", "--no-optional-locks", "-C", str(vault), "status", "--porcelain=v1", "--", rel ],
-    capture_output = True, text = True, check = False)
+    capture_output = True, text = True, check = False, encoding = "utf-8")
 
   # guard: git failure — treat as unchanged so a broken probe never commits blind
   if proc.returncode != 0:
@@ -1379,7 +1435,7 @@ def _has_non_icon_divergence(vault: Path, rel: str) -> bool:
   """
   status = subprocess.run(
     [ "git", "--no-optional-locks", "-C", str(vault), "status", "--porcelain=v1", "--", rel ],
-    capture_output = True, text = True, check = False)
+    capture_output = True, text = True, check = False, encoding = "utf-8")
 
   # guard: git failure, or an untracked note — someone else's in-flight file, never swept
   if status.returncode != 0 or status.stdout.startswith("??"):
@@ -1388,7 +1444,7 @@ def _has_non_icon_divergence(vault: Path, rel: str) -> bool:
   # the whole worktree-vs-HEAD diff (staged plus unstaged) is what the repaint commit would carry
   diff = subprocess.run(
     [ "git", "--no-optional-locks", "-C", str(vault), "diff", "HEAD", "--", rel ],
-    capture_output = True, text = True, check = False)
+    capture_output = True, text = True, check = False, encoding = "utf-8")
 
   # guard: git failure — assume foreign content so a broken probe never sweeps blind
   if diff.returncode != 0:
@@ -1681,6 +1737,66 @@ def cmd_check_versions(args: argparse.Namespace) -> int:
   return EXIT_VERSION_DRIFT if drift else EXIT_OK
 
 
+def cmd_migrate_1_to_2(args: argparse.Namespace) -> int:
+  """
+  Rewrite an icon-map file in place from schema 1 to schema 2.
+
+  Runs as the `lazy-obsidian.iconize-install` skill's schema 1 → 2 transform step, applied to a
+  pre-handshake icon-map that the worker's preflight would otherwise leave inert.
+
+  Guarantees:
+    - `schema_version` is set to 2, overwritten in place when already present or appended at the end
+      when absent.
+    - Every other key, except the dropped top-level `version` key and each matcher's `emit` key, keeps
+      its value and its position.
+    - The rewrite is atomic, so an interrupted run never leaves a half-written icon-map.
+
+  Args:
+    args: Parsed CLI arguments carrying the `icon_map_path` to rewrite.
+
+  Returns:
+    The OK exit code.
+
+  Raises:
+    IconizeError: If the icon-map document is not a JSON object, or if `matchers` is present but not
+      a list.
+    ValueError: If the file is not valid JSON or not valid UTF-8.
+    OSError: If the file cannot be read or the rewrite fails.
+  """
+  path = Path(args.icon_map_path)
+  data = json.loads(path.read_text(encoding = _MAP_ENCODING))
+
+  # guard: only a JSON object is an icon-map
+  if not isinstance(data, dict):
+    raise IconizeError(f"{path} is not a JSON object")
+
+  # guard: matchers, when present, must be a list the migration can walk
+  if not isinstance(data.get(MapKey.MATCHERS) or [], list):
+    raise IconizeError(f"{path}: `{MapKey.MATCHERS}` is not a list")
+
+  # Contract:
+  # `schema_version` is set to 2 — overwritten in place when the key is already present,
+  # appended at the end when it is absent. Every other key, except the dropped top-level
+  # `version` key and each matcher's `emit` key, keeps its value and its position in the
+  # document.
+
+  # schema 2 drops the legacy version string and every matcher's emit key; every other key keeps its place
+  data.pop(_LEGACY_VERSION_KEY, None)
+  data[MapKey.SCHEMA_VERSION] = 2
+  for matcher in data.get(MapKey.MATCHERS) or []:
+    if isinstance(matcher, dict):
+      matcher.pop(_LEGACY_EMIT_KEY, None)
+
+  # Contract:
+  # The rewrite is atomic: an interrupted run never leaves a half-written icon-map.
+
+  # write-then-rename, so an interrupted run never leaves a half-written icon-map
+  tmp = path.with_name(path.name + _TMP_SUFFIX)
+  tmp.write_text(json.dumps(data, indent = 2, ensure_ascii = False) + "\n", encoding = _MAP_ENCODING)
+  os.replace(tmp, path)
+  return EXIT_OK
+
+
 DISPATCH = {
   "sync": cmd_sync,
   "sync-paths": cmd_sync_paths,
@@ -1689,6 +1805,7 @@ DISPATCH = {
   "reconcile-dirty": cmd_reconcile_dirty,
   "reconcile-commit": cmd_reconcile_commit,
   "check-versions": cmd_check_versions,
+  "migrate-1-to-2": cmd_migrate_1_to_2,
 }
 
 
@@ -1740,7 +1857,7 @@ def main(argv: list[str] | None = None) -> int:
     # waiver: one-off human-facing message
     print(
       "usage: iconize_sync <sync|sync-paths|reconcile|reconcile-plugin|reconcile-dirty"
-      "|reconcile-commit|check-versions> ...",
+      "|reconcile-commit|check-versions|migrate-1-to-2> ...",
       file = sys.stderr)
     return EXIT_VALIDATION
   handler = DISPATCH.get(args.cmd)
@@ -1925,7 +2042,7 @@ def _plugin_root_name(root: Path) -> str:
   manifest = root / ".claude-plugin" / "plugin.json"
   try:
     # waiver: plugin-manifest key, Claude Code's own schema
-    name = json.loads(manifest.read_text()).get("name")
+    name = json.loads(manifest.read_text(encoding = "utf-8")).get("name")
   except (OSError, ValueError, AttributeError):
     return root.name
   return name if isinstance(name, str) and name else root.name
@@ -2397,7 +2514,7 @@ def _invoke_callback(callback_id: str, payload: dict) -> dict | None:
   try:
     # waiver: inline numeric literal
     r = subprocess.run(argv, input = json.dumps(payload), cwd = _CALLBACK_VAULT_CACHE,
-                       capture_output = True, text = True, timeout = 10, check = False)
+                       capture_output = True, text = True, timeout = 10, check = False, encoding = "utf-8")
   except subprocess.TimeoutExpired as e:
     out = "".join(
       # waiver: stdlib encoding-mode idiom

@@ -1,7 +1,7 @@
 ---
 name: lazy-python.contract-writer
 description: |
-  Use this agent when a caller-visible guarantee needs formalizing as a `Contract:` block — adding a new guarantee to a method, class, or attribute, updating an existing contract's wording, or lifting a guarantee out of prose into a formal contract. Writes the block and syncs the owning docstring's `Guarantees` / `Subclassing` section in the same pass. Examples:
+  Use this agent when a caller-visible guarantee needs formalizing as a `Contract:` block — adding a new guarantee to a public or protected method, class, or attribute (never a private helper), updating an existing contract's wording, or lifting a guarantee out of prose into a formal contract. Writes the block and syncs the owning docstring's `Guarantees` / `Subclassing` section in the same pass. Examples:
   <example>
   Context: A method returns a deep copy but nothing records the guarantee.
   user: "Formalize the deep-copy guarantee on create_clone"
@@ -43,6 +43,7 @@ A `# Contract:` block marks a **caller-visible guarantee** that must survive ref
 
 - Never remove or alter an existing `Contract:` block without the dispatching prompt explicitly approving that exact block.
 - Never write a contract for pure implementation details invisible to callers, or for what is already obvious from the signature and type hints.
+- Never write a contract on a private helper — a leading-underscore method or function used only inside its own class or module and never overridden. Decline the request for that target, and name where the guarantee belongs instead: the public method through which callers see it, or a `Domain(…):` block for a domain rule. Protected hooks that subclasses override or call, and abstract or interface declarations, keep their contracts.
 - A contract states the principle of the interaction — what a caller may rely on — never how the code delivers it: no internal steps, data structures, algorithms, or call sequences. The only exception is a contract whose substance IS a specific method or formula; then it names that method or formula and nothing else of the implementation.
 - Never write a contract pinning presentation details — exact human-readable message text, log lines, pretty-print or repr formatting. Such a block is justified only when a caller demonstrably parses the string programmatically, and then it names the parsed structure, not the prose.
 - Before writing a block, find whether the method is declared on an interface or abstract base. If it is, the block goes on that declaration only; the implementation gets a synced `Guarantees` section and no block. Never mirror a contract onto both layers.
@@ -65,6 +66,8 @@ Outcome: `guidelines-loaded`.
 ## Step 2 — Read target code
 
 Read the target file(s) named in the dispatch. Identify the guarantee and the exact placement per the canon's placement-by-scope table (method body after the docstring / class body / above the attribute).
+
+**Check the target's visibility first.** Grep the class, its subclasses, and the module for the target's name. A leading-underscore target that nothing overrides and nothing outside its own class or module calls is a private helper: write nothing for it, and record `declined-private: <name> — belongs on <public method | Domain(…)>` for the report. A declined target still counts as a completed step.
 
 **Judge the guarantee against the code alone.** What else is written near it — a line comment, a docstring's prose, a `Domain(...):` block — is not an input to this judgement at all. Do not look for it, do not weigh it, do not mention it. A reason for skipping that names any other documentation is invalid however it is phrased.
 
@@ -96,4 +99,4 @@ Re-read each block and its docstring section: bare marker line with nothing afte
 
 ## Report
 
-One line per task in the canonical list above, each with its outcome word. A missing line is a bug.
+One line per task in the canonical list above, each with its outcome word. A missing line is a bug. After the task lines, list every `declined-private` target from Step 2 with the place its guarantee belongs.

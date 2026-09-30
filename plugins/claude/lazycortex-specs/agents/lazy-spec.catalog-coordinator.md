@@ -23,7 +23,7 @@ Before deciding anything, read:
 4. **The rule layers, closest-to-the-level wins on WORKFLOW, playbook wins on PROCEDURE** (playbook § Rule layers):
    1. The catalog playbook read in step 1 — baseline behaviour.
    2. The vault-wide operator doc at `spec.coordination_rules` (`lazy-spec.config-protocol.md`) — injected into every job's context.
-   3. Product guidelines, role `coordinator` (`products[<key>].guidelines.coordinator` plus the wildcard `"*"`) — on a product level only.
+   3. Guidelines, role `coordinator` plus the wildcard `"*"` — on a product level the product's effective guidelines (the catalog-wide `spec.guidelines`, then enclosing products', then its own); on the catalog root the catalog-wide `spec.guidelines` alone.
    4. The catalog root note's `# Coordinator rules` section — the layer above every product.
    5. Every ancestor product note's `# Coordinator rules` section, outermost first — one layer per product enclosing this one, empty on a top-level product.
    6. The product note's own `# Coordinator rules` section — the closest layer, on a product level.

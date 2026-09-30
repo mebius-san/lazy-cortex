@@ -39,6 +39,13 @@ POLL_MAX_MS = 500
 
 LOCK_FILENAME = "lazy-git.lock"  # under <repo>/.git/
 
+# Win32 constants for the Windows process-liveness probe.
+_WINDOWS_OS_NAME = "nt"
+_KERNEL32 = "kernel32"
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_ERROR_ACCESS_DENIED = 5
+_STILL_ACTIVE = 259
+
 # --- Types --------------------------------------------------------------------
 
 @dataclass(frozen = True)
@@ -229,7 +236,7 @@ def _find_claude_ancestor_pid() -> int | None:
     try:
       argv0 = subprocess.check_output(
         [ "ps", "-p", str(pid), "-o", "command=" ],
-        text = True, stderr = subprocess.DEVNULL,
+        text = True, stderr = subprocess.DEVNULL, encoding = "utf-8",
       ).strip().split()
 
       # guard: ancestor argv[0] resolves to a Claude Code binary
@@ -237,7 +244,7 @@ def _find_claude_ancestor_pid() -> int | None:
         return pid
       parent = subprocess.check_output(
         [ "ps", "-p", str(pid), "-o", "ppid=" ],
-        text = True, stderr = subprocess.DEVNULL,
+        text = True, stderr = subprocess.DEVNULL, encoding = "utf-8",
       ).strip()
       pid = int(parent)
     except (subprocess.CalledProcessError, ValueError, FileNotFoundError):
@@ -259,7 +266,7 @@ def _read_lock(repo_root: Path) -> LockState | None:
   """
   path = _lock_path(repo_root)
   try:
-    raw = json.loads(path.read_text())
+    raw = json.loads(path.read_text(encoding = "utf-8"))
   except (FileNotFoundError, json.JSONDecodeError, ValueError):
     return None
   try:
@@ -310,7 +317,7 @@ def _write_lock(repo_root: Path, state: LockState) -> None:
   # noinspection PyBroadException
   try:
     # waiver: stdlib idiom, not a domain constant
-    with os.fdopen(fd, "w") as f:
+    with os.fdopen(fd, "w", encoding = "utf-8") as f:
       json.dump(payload, f, indent = 2, sort_keys = True)
       f.write("\n")
     os.replace(tmp, path)
@@ -374,7 +381,7 @@ def _current_branch(repo_root: Path) -> str:
   try:
     return subprocess.check_output(
       [ "git", "-C", str(repo_root), "rev-parse", "--abbrev-ref", "HEAD" ],
-      text = True, stderr = subprocess.DEVNULL,
+      text = True, stderr = subprocess.DEVNULL, encoding = "utf-8",
     ).strip()
   except subprocess.CalledProcessError:
     # waiver: git ref vocabulary, not a domain constant
@@ -422,8 +429,10 @@ def _pid_alive(pid: int) -> bool:
   """
   Report whether the given process id refers to a running process.
 
-  A `PermissionError` from the probe is treated as alive — the process exists but the
-  current user lacks permission to signal it.
+  On POSIX the probe signal-checks the pid and treats a permission refusal as alive, since
+  the process exists but the current user lacks permission to signal it. On Windows the
+  probe never sends a signal — it queries the process instead, and treats access denied or
+  an unreadable exit status as alive.
 
   Args:
     pid: Process id to probe.
@@ -431,6 +440,9 @@ def _pid_alive(pid: int) -> bool:
   Returns:
     True when the process is reachable, False otherwise.
   """
+  # guard: on Windows os.kill with a non-CTRL signal terminates the process instead of probing it
+  if os.name == _WINDOWS_OS_NAME:
+    return _pid_alive_windows(pid)
   try:
     os.kill(pid, 0)
   except ProcessLookupError:
@@ -441,6 +453,43 @@ def _pid_alive(pid: int) -> bool:
   except OSError:
     return False
   return True
+
+
+def _pid_alive_windows(pid: int) -> bool:
+  """
+  Report whether the given process id refers to a running process.
+
+  Access denied on the query handle counts as alive, and an unreadable exit status counts
+  as alive too.
+
+  Args:
+    pid: Process id to probe.
+
+  Returns:
+    True when the process is reachable, False otherwise.
+  """
+  # open a query-only handle; ctypes is imported here so the POSIX hot path never loads it
+  # waiver: deferred Windows-only import keeps ctypes off the per-git-command POSIX path
+  import ctypes  # pylint: disable=import-outside-toplevel
+  # waiver: type: ignore — typeshed declares WinDLL only for win32; this branch runs only there
+  kernel32 = ctypes.WinDLL(_KERNEL32, use_last_error = True)  # type: ignore[attr-defined]
+  handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+  # guard: no handle — access denied still means the process exists, any other error means it does not
+  if not handle:
+    # waiver: type: ignore — typeshed declares get_last_error only for win32; this branch runs only there
+    return ctypes.get_last_error() == _ERROR_ACCESS_DENIED  # type: ignore[attr-defined]
+
+  # read the exit code through the open handle, closing it whatever happens
+  try:
+    code = ctypes.c_ulong()
+    # guard: the exit code is unreadable — an open handle proves the process object exists
+    if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+      return True
+    # limit: a process that exited with code 259 reads as alive (the stale-and-idle rule still breaks its lock),
+    # probe with WaitForSingleObject(handle, 0) instead if that ever matters
+    return code.value == _STILL_ACTIVE
+  finally:
+    kernel32.CloseHandle(handle)
 
 
 def _is_breakable(
@@ -799,7 +848,7 @@ def load_config(repo_root: Path) -> StagingConfig:
     except Exception:
       # noinspection PyBroadException
       try:
-        section = json.loads(settings_path.read_text()).get(_SECTION, {})
+        section = json.loads(settings_path.read_text(encoding = "utf-8")).get(_SECTION, {})
       except Exception:
         section = {}
     finally:

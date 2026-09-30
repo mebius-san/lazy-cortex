@@ -26,7 +26,6 @@ from __future__ import annotations
 # pylint: disable=import-error,wrong-import-position
 
 import contextlib
-import fcntl
 import json
 import os
 import re
@@ -51,6 +50,13 @@ import error_ledger  # noqa: E402
 import hook_gate  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from constants import HookName, IncidentKey, IncidentKind, IncidentPhase  # noqa: E402
+
+# Pick the platform's file-lock module: fcntl does not exist on Windows, msvcrt exists only there.
+# waiver: platform literal; the lock attempt below branches on the same test
+if sys.platform == "win32":
+  import msvcrt
+else:
+  import fcntl
 
 
 # Freshness window for the failure-path HEAD check: a HEAD younger than this is treated as
@@ -85,7 +91,7 @@ def get_commit_info() -> dict | None:
     root = subprocess.check_output(
       [ "git", "rev-parse", "--show-toplevel" ],
       stderr = subprocess.DEVNULL,
-      text = True,
+      text = True, encoding = "utf-8",
     ).strip()
   except (subprocess.CalledProcessError, FileNotFoundError):
     return None
@@ -95,7 +101,7 @@ def get_commit_info() -> dict | None:
     raw = subprocess.check_output(
       [ "git", "log", "-1", "--pretty=format:%H%x00%cI%x00%an <%ae>%x00%s" ],
       stderr = subprocess.DEVNULL,
-      text = True,
+      text = True, encoding = "utf-8",
     )
     # waiver: inline numeric literal (maxsplit count), not a domain constant
     sha, date, author, subject = raw.split("\x00", 3)
@@ -107,7 +113,7 @@ def get_commit_info() -> dict | None:
     branch = subprocess.check_output(
       [ "git", "rev-parse", "--abbrev-ref", "HEAD" ],
       stderr = subprocess.DEVNULL,
-      text = True,
+      text = True, encoding = "utf-8",
     ).strip()
   except (subprocess.CalledProcessError, FileNotFoundError):
     branch = ""
@@ -117,7 +123,7 @@ def get_commit_info() -> dict | None:
     body = subprocess.check_output(
       [ "git", "log", "-1", "--pretty=format:%b" ],
       stderr = subprocess.DEVNULL,
-      text = True,
+      text = True, encoding = "utf-8",
     )
   except (subprocess.CalledProcessError, FileNotFoundError):
     body = ""
@@ -127,7 +133,7 @@ def get_commit_info() -> dict | None:
     numstat = subprocess.check_output(
       [ "git", "show", "--numstat", "--format=", "HEAD" ],
       stderr = subprocess.DEVNULL,
-      text = True,
+      text = True, encoding = "utf-8",
     ).strip()
   except (subprocess.CalledProcessError, FileNotFoundError):
     numstat = ""
@@ -175,7 +181,7 @@ def head_is_fresh() -> bool:
     raw = subprocess.check_output(
       [ "git", "log", "-1", "--pretty=format:%ct" ],
       stderr = subprocess.DEVNULL,
-      text = True,
+      text = True, encoding = "utf-8",
     ).strip()
     committed_at = int(raw)
   except (subprocess.CalledProcessError, FileNotFoundError, ValueError):
@@ -204,6 +210,42 @@ def record_failure(root: str, cause: str, detail: str) -> None:
   })
 
 
+def try_lock(lock: TextIO) -> None:
+  """
+  Make one non-blocking attempt to take an exclusive lock on the given file.
+
+  Args:
+    lock: An open, writable file object to lock.
+
+  Raises:
+    OSError: Another holder already has the lock, or the lock could not be taken.
+  """
+  # one non-blocking attempt; both platforms raise OSError while another holder has the lock
+  # waiver: platform literal matches the import branch above
+  if sys.platform == "win32":
+    msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+  else:
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def release_lock(lock: TextIO) -> None:
+  """
+  Release the exclusive lock this process holds on an open lock file.
+
+  Notes:
+    - No action is needed on POSIX, where closing the file releases the lock; on Windows the lock
+      is released explicitly by this call.
+
+  Args:
+    lock: An open, writable file object whose exclusive lock this process holds.
+  """
+  # Windows frees a byte-range lock on close only after an unspecified delay, so unlock it now;
+  # closing the file releases a POSIX flock immediately
+  # waiver: platform literal matches the import branch above
+  if sys.platform == "win32":
+    msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+
+
 def wait_for_lock(lock: TextIO) -> bool:
   """
   Take an exclusive lock on an open lock file, waiting up to the journal lock budget.
@@ -219,7 +261,7 @@ def wait_for_lock(lock: TextIO) -> bool:
   deadline = time.time() + JOURNAL_LOCK_TIMEOUT_SECONDS
   while True:
     try:
-      fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+      try_lock(lock)
       return True
     except OSError:
       # guard: budget spent — leave the lock unheld so the caller records a dropped entry
@@ -245,7 +287,13 @@ def journal_lock(path: str) -> Iterator[bool]:
   """
   # waiver: stdlib file-mode / encoding literals, not domain constants
   with open(path, "w", encoding = "utf-8") as lock:
-    yield wait_for_lock(lock)
+    locked = wait_for_lock(lock)
+    try:
+      yield locked
+    finally:
+      # release explicitly: closing the file frees a POSIX lock at once, a Windows one only eventually
+      if locked:
+        release_lock(lock)
 
 
 def should_run(payload: dict) -> bool:

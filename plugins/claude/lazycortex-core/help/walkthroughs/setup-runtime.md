@@ -1,20 +1,27 @@
 ---
 chapter_type: walkthrough
 summary: Bootstrap the per-repo runtime daemon and know how to recover it with /lazy-runtime.recover from any of its halt reasons — dirty tree, remote sync, a repeating bot commit, a shared inbox, bad routine config, or a closed rate-limit window.
-last_regen: 2026-09-28
+last_regen: 2026-09-30
 diagram_spec:
-  anchor: "How setup and recovery connect"
-  request: "Sequence diagram showing three phases: (1) User runs /lazy-core.install, answers yes to the runtime-daemon wizard, wizard writes .claude/bin/lazy.runtime.sh + lazy.settings.json[experts] + flat daemon and routines sections; (2) User runs .claude/bin/lazy.runtime.sh, daemon starts and polls .experts/.jobs/ on interval, user checks .runtime/state.json for a recent last_run; (3) Working tree goes dirty, daemon writes daemon_halted to .runtime/state.json, user runs /lazy-runtime.recover, skill shows halt context, user picks a cleanup mode (commit/stash/discard), skill clears daemon_halted, daemon resumes on next iteration."
-  kind_hint: sequence
+  - anchor: "Install and daemon setup"
+    request: "Sequence diagram: User runs /lazy-core.install, which writes .claude/bin/lazy.runtime.sh + lazy.settings.json[experts] + flat daemon and routines sections with daemon.enabled false and never touches the daemon; then runs /lazy-core.daemon-setup, answers yes to enabling the daemon and to driving it from this checkout, and the skill installs the supervisor unit."
+    kind_hint: sequence
+  - anchor: "Daemon start and polling"
+    request: "Sequence diagram: The daemon starts (supervisor unit or .claude/bin/lazy.runtime.sh) and polls .experts/.jobs/ on interval, user checks .runtime/state.json for a recent last_run."
+    kind_hint: sequence
+  - anchor: "Dirty-tree halt and recovery"
+    request: "Sequence diagram: Working tree goes dirty, daemon writes daemon_halted to .runtime/state.json, user runs /lazy-runtime.recover, skill shows halt context, user picks a cleanup mode (commit/stash/discard), skill clears daemon_halted, daemon resumes on next iteration."
+    kind_hint: sequence
 source_skills:
   - lazy-core.install
+  - lazy-core.daemon-setup
   - lazy-runtime.recover
-source_sha: 1dfbbbfa9cc7fc1d270e280c4829e643a8bc9db9
-surface_sha: 5f1c8d10b8174071ca53aa0ab2ea41762f26a809c27be394ee009a00230fe792
+source_sha: ca61e3a58b9cab2c44523d46ab4783b0f814e25b
+surface_sha: 34b400c03dfbc6e37a6a92dce75f327b0cdd5e6913b56658cee2a6b3cadbaf20
 ---
 # How do I bootstrap the runtime daemon and recover it if it halts?
 
-The expert runtime gives you a serial, per-repo daemon that drains a job queue and runs registered plugin routines. Getting from zero to a daemon that runs in the background is a short journey: install the runtime layer, confirm every registered expert is actually launchable, confirm the daemon is polling, then know how to unblock it if it halts — from a dirty working tree, a failed remote sync or local git failure, a repeating bot commit, two checkouts sharing one inbox, a routine config gone invalid, a settings value a routine's own CLI rejects, or a closed subscription rate-limit window.
+The expert runtime gives you a serial, per-repo daemon that drains a job queue and runs registered plugin routines. Getting from zero to a daemon that runs in the background is a short journey: install the runtime layer, enable the daemon and its supervisor, confirm every registered expert is actually launchable, confirm the daemon is polling, then know how to unblock it if it halts — from a dirty working tree, a failed remote sync or local git failure, a repeating bot commit, two checkouts sharing one inbox, a routine config gone invalid, a settings value a routine's own CLI rejects, or a closed subscription rate-limit window.
 
 ## Outcome
 
@@ -28,28 +35,30 @@ After completing this walkthrough you have a running runtime daemon that polls f
 
 ## The journey
 
-### Step 1 — Install the runtime layer, then decide whether you want a background daemon
+### Step 1 — Install the runtime layer
 
-Run `/lazy-core.install` inside the repo. Install seeds the whole runtime layer unconditionally, on every run — routines, `.experts/`, the expert registry, and the flat `daemon` and `routines` settings sections all land regardless of whether a background daemon ever runs; `daemon.enabled` is seeded `false` and nothing prompts you about it at this stage. The install's full sequence — what it writes to `lazy.settings.json`, the expert-discovery scan, the expert-spawn sandbox, the git-guard flags it seeds (`git.enabled`, `git.pathspec_enabled`, `git.mutex_enabled`), the `.gitattributes` LF line-ending pin it writes on every run, and the optional Prometheus metrics endpoint — is covered in the **Install, audit, and maintain lazycortex-core** block chapter; work through Steps there before continuing here. Come back once install has finished.
+Run `/lazy-core.install` inside the repo. Install seeds the whole runtime layer unconditionally, on every run — routines, `.experts/`, the expert registry, the spawn sandbox, and the flat `daemon` and `routines` settings sections all land whether or not a background daemon ever runs. Install never touches the daemon: it seeds `daemon.enabled` as `false`, asks no daemon question, and installs no supervisor unit. The one daemon-related thing it does on its own is remove a stray supervisor unit found on a checkout the project does not name as its driver. The install's full sequence — what it writes to `lazy.settings.json`, the expert-discovery scan, the expert-spawn sandbox, the git-guard flags it seeds (`git.enabled`, `git.pathspec_enabled`, `git.mutex_enabled`), and the `.gitattributes` LF line-ending pin it writes on every run — is covered in the **Install, audit, and maintain lazycortex-core** block chapter; work through the steps there before continuing here. Come back once install has finished.
 
-If this repo declares externally-sourced working directories (e.g. a shared inbox it does not carry in git) via `external_dirs.paths`, install resolves them before it touches anything daemon-related. On a fresh checkout it asks once where they live on this machine and remembers the answer for every future run. It also refuses to install a supervisor when two checkouts would end up driving the same physical inbox directory — but only for a checkout that would actually drive the daemon here; a checkout the `daemon.run_here` map does not name for this host skips the check silently, since the daemon already refuses to start there on its own. When the check does fire, it names the other checkout and tells you the two projects' `daemon.run_here` maps must not both name a checkout on this host.
+If this repo declares externally-sourced working directories (e.g. a shared inbox it does not carry in git) via `external_dirs.paths`, install resolves them as part of its run. On a fresh checkout it asks once where they live on this machine and remembers the answer for every future run.
 
 With the runtime layer in place, decide how you want it driven:
 
-- **By hand, no background process** — run `/lazy-runtime.tick` whenever you want the due routines and job queue processed once; it uses the same primitives and the same serial order a daemon would. Nothing further to install here — skip to Step 2.
-- **A background daemon that polls on its own** — set `daemon.enabled: true` in `<repo-root>/.claude/lazy.settings.json` and re-run `/lazy-core.install`. With the flag true, install asks which host and checkout should drive the project (`daemon.run_here`) — the only place a daemon question is ever asked — and installs the supervisor unit once you confirm. **The checkout you name there must be a git-only clone outside Dropbox** — the daemon refuses to start in any checkout whose resolved path has a component named `Dropbox`, starting with `Dropbox` (`Dropbox (Personal)`, `~/Library/CloudStorage/Dropbox…`), or ending in ` Dropbox` (`Auriglaci Dropbox`), printing a one-line refusal and recording a `dropbox_denied` incident instead of ever attempting to run — see **After you're done** below for the full picture and the fix if your working checkout already lives on Dropbox. Or skip the supervisor and start the daemon directly from the repo root:
+- **By hand, no background process** — run `/lazy-runtime.tick` whenever you want the due routines and job queue processed once; it uses the same primitives and the same serial order a daemon would. Nothing further to set up — skip to Step 3.
+- **A background daemon that polls on its own** — continue with Step 2.
 
-```
-bash .claude/bin/lazy.runtime.sh
-```
+### Step 2 — Enable the daemon and install its supervisor
 
-Run it through `bash` explicitly rather than executing the file directly — install no longer sets an executable bit on the shim (a cloud-sync client or a Windows checkout used to strip it anyway), and the shim itself execs its runner through the Python interpreter rather than relying on its own exec bit, so the file never needs one.
+Run `/lazy-core.daemon-setup`. This is the one skill that owns the daemon, and you run it rarely — once per project, or when you move the daemon to another machine or checkout. It stops with a pointer back to `/lazy-core.install` if the repo has no `daemon` section yet. It walks these gates, each answer recorded in the tracked `<repo-root>/.claude/lazy.settings.json` and never re-asked:
 
-Before the daemon will actually start, it needs its own OAuth token: set `daemon.token_env` in `<repo-root>/.claude/lazy.settings.json` to the name of an environment variable holding this daemon's token — the value itself lives in the environment or in `~/.claude/.env`, never in settings. The daemon resolves that variable at startup and exports it as `CLAUDE_CODE_OAUTH_TOKEN` to every job and routine it spawns; without it the daemon refuses to start rather than run silently on whatever account the machine happens to be logged into.
+- **Enable the daemon.** While `daemon.enabled` is `false` it asks whether a background daemon should supervise this project. Answer no and it stops there; routines keep running through `/lazy-runtime.tick`.
+- **Pick the driving checkout.** It asks whether this checkout on this machine drives the daemon and records the answer in `daemon.run_here`, a map from hostname to checkout path. A machine or checkout the map does not name gets no supervisor, and the daemon refuses to start there. **The checkout you name must be a git-only clone outside Dropbox** — the daemon refuses to start in any checkout whose resolved path has a component named `Dropbox`, starting with `Dropbox` (`Dropbox (Personal)`, `~/Library/CloudStorage/Dropbox…`), or ending in ` Dropbox` (`Auriglaci Dropbox`), printing a one-line refusal and recording a `dropbox_denied` incident instead of ever attempting to run — see **After you're done** below for the fix if your working checkout already lives on Dropbox.
+- **Inbox ownership guard.** Before any supervisor exists, it refuses to go on when two checkouts would end up driving the same physical inbox directory — the duplicate imports are not automatically reversible. It names the other checkout and tells you the two projects' `daemon.run_here` maps must not both name a checkout on this host. Which checkout drives a shared inbox is your decision; the skill never resolves it for you. A checkout the map does not name skips this check, since the daemon already refuses to start there on its own.
+- **Install the supervisor.** It derives everything else itself — a launchd unit on macOS, a systemd user unit on Linux, whether this repo ships plugin sources (dev-mode), and the interpreter the unit runs — and installs the unit, replacing an old basename-only unit for the same checkout. On a machine or checkout the map does not name, it instead removes this checkout's unit if one is loaded.
+- **Metrics.** Once a supervisor is installed it asks once whether to enable the Prometheus-compatible `/metrics` endpoint. On yes it picks a free loopback port automatically (recorded per machine, not in the tracked file) and refreshes the host's scrape-targets file. On no it records the decline and does not ask again.
 
-The daemon reads the flat `daemon` and `routines` sections of `lazy.settings.json`, runs the `lazy-expert.pump` routine on each polling iteration, drains any `READY` jobs it finds, and loops. One daemon per repo means no two routines ever contend over the working tree or git state.
+The skill ends with a report line per step. When it wrote the tracked `lazy.settings.json` — it carries the gates to every clone — commit that file.
 
-### Step 2 — Confirm every registered expert is actually launchable (verification gate)
+### Step 3 — Confirm every registered expert is actually launchable (verification gate)
 
 Before you trust the daemon with real routine dispatches, run:
 
@@ -61,11 +70,25 @@ The skill emulates a real launch for every routine-dispatched expert — resolvi
 
 If an expert fails, the skill walks you through one fix at a time — dropping a misbehaving MCP server, correcting a bad config path, or pinning a model tier — and only writes anything after you confirm. Re-run `/lazy-runtime.preflight` until every expert shows `ok` before moving on.
 
-### Step 3 — Verify the daemon is polling (verification gate)
+### Step 4 — Start the daemon
 
-After one polling interval, open `.runtime/state.json` and confirm the `last_run` timestamp is recent. If the timestamp is absent or stale, confirm you started the shim with `bash .claude/bin/lazy.runtime.sh` (not by executing the file directly — its own exec bit no longer matters, so a permission error there points elsewhere) and that Python 3.12+ resolves on your `$PATH`.
+If `/lazy-core.daemon-setup` installed a supervisor, it has already started the daemon — the launchd unit is bootstrapped and the systemd unit is enabled with `--now`. Otherwise (or to run it in the foreground), start it directly from the repo root:
 
-### Step 4 — Recover if the daemon halts
+```
+bash .claude/bin/lazy.runtime.sh
+```
+
+Run it through `bash` explicitly rather than executing the file directly — install no longer sets an executable bit on the shim (a cloud-sync client or a Windows checkout used to strip it anyway), and the shim itself execs its runner through the Python interpreter rather than relying on its own exec bit, so the file never needs one.
+
+Before the daemon will actually start, it needs its own OAuth token: set `daemon.token_env` in `<repo-root>/.claude/lazy.settings.json` to the name of an environment variable holding this daemon's token — the value itself lives in the environment or in `~/.claude/.env`, never in settings. The daemon resolves that variable at startup and exports it as `CLAUDE_CODE_OAUTH_TOKEN` to every job and routine it spawns; without it the daemon refuses to start rather than run silently on whatever account the machine happens to be logged into.
+
+The daemon reads the flat `daemon` and `routines` sections of `lazy.settings.json`, runs the `lazy-expert.pump` routine on each polling iteration, drains any `READY` jobs it finds, and loops. One daemon per repo means no two routines ever contend over the working tree or git state.
+
+### Step 5 — Verify the daemon is polling (verification gate)
+
+After one polling interval, open `.runtime/state.json` and confirm the `last_run` timestamp is recent. If the timestamp is absent or stale, confirm this checkout is the one `daemon.run_here` names for this machine (`/lazy-core.daemon-setup` reports it; a daemon started anywhere else refuses to run), confirm you started the shim with `bash .claude/bin/lazy.runtime.sh` (not by executing the file directly — its own exec bit no longer matters, so a permission error there points elsewhere) and that Python 3.12+ resolves on your `$PATH`.
+
+### Step 6 — Recover if the daemon halts
 
 The daemon halts on one of several named reasons and writes a `daemon_halted` block to `.runtime/state.json` in every case. If you notice jobs stop processing, run:
 
@@ -106,45 +129,102 @@ If the tree is still dirty after cleanup (e.g., a submodule left additional chan
 
 The daemon runs continuously, draining jobs and firing registered routines. The built-in `lazy-expert.pump` routine processes them serially per expert so there is never contention. An autonomous `lazy-runtime.doctor` routine runs hourly and handles DEAD expert jobs automatically — retrying recoverable failures and permanently failing jobs the daemon can no longer make progress on — without requiring operator action.
 
-Install also bootstraps a built-in `lazy-core.index-guard` routine alongside `lazy-expert.pump` and `lazy-runtime.doctor` — no separate opt-in, and it runs every 5 minutes independent of `daemon.enabled`, so `/lazy-runtime.tick` drives it on a checkout with no daemon exactly as it would with one. Cloud-sync clients (Dropbox, iCloud, OneDrive, and similar) occasionally race git's own write of `.git/index` and resolve the conflict by keeping a stale index under the real name while stashing the version git actually wrote last beside it as `index (…conflicted copy…)`; the routine (plus the same heal run as a pre-flight inside the `lazy-core.git-guard` hook) restores the newest copy — deciding by content against `HEAD`, not by file timestamp — and clears the litter automatically. The daemon and manual `/lazy-runtime.tick` also run git with `GIT_OPTIONAL_LOCKS=0` so a background `status` scan can no longer rewrite the shared index in the first place. Nothing to configure here — never hand-copy those conflicted-copy files yourself, and never diagnose staged content before the routine has had a chance to heal it.
+`/lazy-core.install` also bootstraps a built-in `lazy-core.index-guard` routine alongside `lazy-expert.pump` and `lazy-runtime.doctor` — no separate opt-in, and it runs every 5 minutes independent of `daemon.enabled`, so `/lazy-runtime.tick` drives it on a checkout with no daemon exactly as it would with one. Cloud-sync clients (Dropbox, iCloud, OneDrive, and similar) occasionally race git's own write of `.git/index` and resolve the conflict by keeping a stale index under the real name while stashing the version git actually wrote last beside it as `index (…conflicted copy…)`; the routine (plus the same heal run as a pre-flight inside the `lazy-core.git-guard` hook) restores the newest copy — deciding by content against `HEAD`, not by file timestamp — and clears the litter automatically. The daemon and manual `/lazy-runtime.tick` also run git with `GIT_OPTIONAL_LOCKS=0` so a background `status` scan can no longer rewrite the shared index in the first place. Nothing to configure here — never hand-copy those conflicted-copy files yourself, and never diagnose staged content before the routine has had a chance to heal it.
 
-A **Dropbox-synced checkout specifically cannot run the background daemon at all**, even though the routine above still protects its index. The supervisor refuses to start whenever the resolved checkout path has a component equal to `Dropbox`, starting with `Dropbox` (`Dropbox (Personal)`, `~/Library/CloudStorage/Dropbox…`), or ending in ` Dropbox` (`Auriglaci Dropbox`) — regardless of what `daemon.run_here` says. It prints a one-line refusal and records a `daemon_error` incident with cause `dropbox_denied` instead of writing a `daemon_halted` block, so `/lazy-runtime.recover` has nothing to clear in this case. If your working checkout already lives on Dropbox, drive the runtime with `/lazy-runtime.tick` there by hand and only ever point `daemon.run_here` at a git-only clone outside Dropbox — `~/lazy-runtime/<repo>` is the pattern install itself suggests — then re-run `/lazy-core.install` from inside that clone to install the supervisor there.
+A **Dropbox-synced checkout specifically cannot run the background daemon at all**, even though the routine above still protects its index. The supervisor refuses to start whenever the resolved checkout path has a component equal to `Dropbox`, starting with `Dropbox` (`Dropbox (Personal)`, `~/Library/CloudStorage/Dropbox…`), or ending in ` Dropbox` (`Auriglaci Dropbox`) — regardless of what `daemon.run_here` says. It prints a one-line refusal and records a `daemon_error` incident with cause `dropbox_denied` instead of writing a `daemon_halted` block, so `/lazy-runtime.recover` has nothing to clear in this case. If your working checkout already lives on Dropbox, drive the runtime with `/lazy-runtime.tick` there by hand and only ever point `daemon.run_here` at a git-only clone outside Dropbox — `~/lazy-runtime/<repo>` is the pattern the daemon setup suggests — then run `/lazy-core.daemon-setup` from inside that clone to install the supervisor there.
 
 Whenever you wire a new expert into a routine, or a routine's expert spawns start timing out, re-run `/lazy-runtime.preflight` before trusting the daemon with it again — catching a broken spawn config at preflight time is far cheaper than debugging a stuck queue entry after the fact.
 
 If your `daemon.git` block sets `remote_sync: "pull_push"` and you also want automation to fire the moment the daemon's work actually lands on `origin` — a deploy hook, a notification, waking a device to pull — set `daemon.git.post_push_hook` to a shell command. It runs after every push that advances the branch (fast-forward or post-rebase), with the push context available in `LAZY_PUSH_REPO`, `LAZY_PUSH_BRANCH`, `LAZY_PUSH_REMOTE`, `LAZY_PUSH_OLD_SHA`, and `LAZY_PUSH_NEW_SHA` environment variables. The hook is crash-isolated: a non-zero exit, a timeout past `post_push_timeout_sec` (30 seconds by default), or a spawn failure is journaled but never halts the daemon, retries the push, or fails the tick — it also never fires on a tick where nothing was actually pushed.
 
-If you opted into the metrics endpoint during install, the daemon exposes runtime health (routine ticks, errors, tokens, queue depth) on the allocated loopback port for a Prometheus-compatible scraper — nothing further to do here, it runs alongside job draining with no separate startup step. If another daemon on the same host already holds that port, this daemon does not crash-loop over it — it records a `metrics_port_conflict` incident naming the current holder and keeps draining jobs with metrics simply unavailable until the port frees up or you reinstall to pick a fresh one.
+If you enabled the metrics endpoint in `/lazy-core.daemon-setup`, the daemon exposes runtime health (routine ticks, errors, tokens, queue depth) on the allocated loopback port for a Prometheus-compatible scraper — nothing further to do here, it runs alongside job draining with no separate startup step. If another daemon on the same host already holds that port, this daemon does not crash-loop over it — it records a `metrics_port_conflict` incident naming the current holder and keeps draining jobs with metrics simply unavailable until the port frees up or you re-run `/lazy-core.daemon-setup` to pick a fresh one.
 
 Most halt reasons are expected operational events, not errors in the daemon itself — a rate-limit window closing is normal subscription throttling, and it clears itself. When `uncommitted_changes` fires often from a particular routine, that routine's output logic is leaving dirt behind — investigate there, not in the daemon.
 
 ## How setup and recovery connect
 
+### Install and daemon setup
+
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
 sequenceDiagram
   participant user as User
-  participant wizard as Install Wizard
-  participant daemon as Runtime Daemon
-  participant recover as Recovery Skill
+  participant coreInstall as /lazy-core.install
+  participant daemonSetup as /lazy-core.daemon-setup
+  participant supervisor as Supervisor unit
 
-  Note over user,wizard: Phase 1 - install and wizard setup
-  user->>wizard: run /lazy-core.install
-  wizard->>user: prompt runtime-daemon wizard
-  user->>wizard: answer yes
-  wizard-->>user: writes .claude/bin/lazy.runtime.sh, lazy.settings.json experts, daemon and routines sections
-
-  Note over user,daemon: Phase 2 - daemon polling
-  user->>daemon: run .claude/bin/lazy.runtime.sh
-  daemon-->>user: daemon started, polling .experts/.jobs on interval
-  user->>daemon: check .runtime/state.json
-  daemon-->>user: last_run is recent
-
-  Note over daemon: Phase 3 - halt and recovery
-  daemon->>daemon: working tree goes dirty, writes daemon_halted to .runtime/state.json
-  user->>recover: run /lazy-runtime.recover
-  recover-->>user: shows halt context
-  user->>recover: picks cleanup mode - commit, stash, or discard
-  recover-->>daemon: clears daemon_halted
-  daemon-->>user: resumes on next iteration
+  user->>coreInstall: run /lazy-core.install
+  coreInstall->>coreInstall: write .claude/bin/lazy.runtime.sh
+  coreInstall->>coreInstall: write lazy.settings.json experts section
+  coreInstall->>coreInstall: write flat daemon and routines sections
+  Note over coreInstall: daemon.enabled is false, install never touches the daemon
+  coreInstall-->>user: install done
+  user->>daemonSetup: run /lazy-core.daemon-setup
+  daemonSetup->>user: enable the daemon?
+  user-->>daemonSetup: yes
+  daemonSetup->>user: drive it from this checkout?
+  user-->>daemonSetup: yes
+  daemonSetup->>supervisor: install supervisor unit
+  supervisor-->>daemonSetup: unit installed
+  daemonSetup-->>user: daemon setup done
 ```
+
+This phase shows how `/lazy-core.install` lays down the runtime layer with the daemon disabled, and how `/lazy-core.daemon-setup` then enables the daemon and installs its supervisor.
+
+### Daemon start and polling
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
+sequenceDiagram
+  participant supervisorUnit as Supervisor unit
+  participant runtimeScript as .claude/bin/lazy.runtime.sh
+  participant daemon as Daemon
+  participant jobsDir as .experts/.jobs/
+  participant stateFile as .runtime/state.json
+  participant user as User
+
+  alt started by supervisor unit
+    supervisorUnit->>daemon: start daemon
+  else started by script
+    runtimeScript->>daemon: start daemon
+  end
+  loop on interval
+    daemon->>jobsDir: poll for jobs
+    jobsDir-->>daemon: current job entries
+    daemon->>stateFile: write last_run
+  end
+  user->>stateFile: check state.json
+  stateFile-->>user: last_run value
+  Note over user,stateFile: recent last_run means the daemon is polling
+```
+
+This phase shows the daemon starting and polling the job queue, and how you confirm it is running from `.runtime/state.json`.
+
+### Dirty-tree halt and recovery
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
+sequenceDiagram
+  participant workingTree as Working tree
+  participant daemon as Daemon
+  participant stateFile as .runtime/state.json
+  participant user as User
+  participant recoverSkill as /lazy-runtime.recover
+
+  workingTree->>daemon: goes dirty
+  daemon->>stateFile: write daemon_halted
+  Note over daemon,stateFile: daemon halted, waiting for recovery
+  user->>recoverSkill: run /lazy-runtime.recover
+  recoverSkill->>stateFile: read daemon_halted
+  stateFile-->>recoverSkill: halt context
+  recoverSkill-->>user: show halt context
+  user->>recoverSkill: pick cleanup mode (commit/stash/discard)
+  recoverSkill->>workingTree: apply cleanup mode
+  workingTree-->>recoverSkill: tree clean
+  recoverSkill->>stateFile: clear daemon_halted
+  daemon->>stateFile: check daemon_halted on next iteration
+  stateFile-->>daemon: cleared
+  Note over daemon: daemon resumes
+```
+
+This phase shows the daemon halting on a dirty working tree and `/lazy-runtime.recover` clearing the halt so the daemon resumes.

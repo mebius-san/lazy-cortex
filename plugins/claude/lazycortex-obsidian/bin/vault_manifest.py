@@ -58,9 +58,11 @@ CONFIG_DENYLIST = {
 # Per-device keys inside the appearance settings: window zoom belongs to the screen.
 APPEARANCE_DEVICE_KEYS = { AppearanceKey.ZOOM_FACTOR }
 
-# Plugins whose settings file is derived state restored by its own writer rather than by
-# deploy. Iconize's database is rebuilt by iconize-reloader from note frontmatter.
-PLUGIN_DATA_SKIP = { "obsidian-icon-folder" }
+# Plugins whose settings file mixes settings with derived state restored by its own writer:
+# only the listed top-level keys are captured, every other key is dropped. Iconize's per-path
+# icon entries are rebuilt by iconize-reloader from note frontmatter; its settings-like keys
+# match the reloader's own reserved-key list.
+PLUGIN_DATA_KEEP = { "obsidian-icon-folder": frozenset({ "settings", "rules", "recentlyUsedIcons" }) }
 
 # Key names whose string value is a credential by the name alone. A bare `token` is
 # deliberately absent: plugins use it for syntax-highlighting classes and other harmless
@@ -356,7 +358,7 @@ def resolve_github_token() -> str:
     # waiver: the `gh` CLI is the operator's own credential store, not an injected command
     result = subprocess.run(
       list(GH_TOKEN_COMMAND), capture_output = True, text = True,
-      timeout = GH_TOKEN_TIMEOUT_SEC, check = False)
+      timeout = GH_TOKEN_TIMEOUT_SEC, check = False, encoding = "utf-8")
     return result.stdout.strip()
   except (OSError, subprocess.SubprocessError):
     return ""
@@ -937,12 +939,16 @@ def _capture_plugins(vault: Path, omitted: list[str]) -> dict:  # waiver: plugin
   """
   Snapshot every installed community plugin.
 
+  Captures each plugin's settings whole, minus secret-looking values, except a plugin whose
+  settings file mixes settings with derived per-path entries — that one keeps only its
+  settings-like top-level keys.
+
   Args:
     vault: The vault's config directory.
     omitted: Accumulator for the dotted paths of secret-looking values.
 
   Returns:
-    A map of plugin id to its enablement, captured version, and whole settings payload.
+    A map of plugin id to its enablement, captured version, and captured settings.
   """
   enabled = set(load_json(vault / VaultPath.COMMUNITY_PLUGINS) or [])
   plugins_dir = vault / VaultPath.PLUGINS
@@ -956,15 +962,18 @@ def _capture_plugins(vault: Path, omitted: list[str]) -> dict:  # waiver: plugin
 
     # Domain(obsidian.vault-capture):
     # # Plugin settings owned by another writer
-    # A plugin's settings are worth capturing only when this tool is the sole writer able to put
-    # them back. A plugin that rebuilds its own settings from the vault's notes on every run owns
-    # that data itself; restoring a captured copy would only be overwritten on the next run, so
-    # capturing it in the first place would record a fact that is never true for more than a moment.
+    # A plugin's settings are captured whole, because this tool is the only writer able to put
+    # them back. Some plugins keep derived state in the same file — entries rebuilt from the
+    # vault's notes on every run. That part is owned by its own writer: restoring a captured copy
+    # would only be overwritten on the next run, so only the settings around it are captured,
+    # and the derived entries are left for their writer to rebuild after a deploy.
 
-    # skip capturing settings for a plugin that restores its own from elsewhere
-    data = (
-      None if pid in PLUGIN_DATA_SKIP
-      else strip_secrets(load_json(directory / VaultPath.PLUGIN_DATA), pid, omitted))
+    # capture settings whole, keeping only the settings part of a file that mixes in derived state
+    data = load_json(directory / VaultPath.PLUGIN_DATA)
+    keep = PLUGIN_DATA_KEEP.get(pid)
+    if keep is not None and isinstance(data, dict):
+      data = { key: value for key, value in data.items() if key in keep }
+    data = strip_secrets(data, pid, omitted)
     plugins[pid] = {
       PluginKey.ENABLED: pid in enabled,
       # Not a pin — deploy always installs latest. Kept so the audit can warn that the

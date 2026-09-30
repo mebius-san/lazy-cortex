@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-wiki skills — symptoms, likely causes, and fixes.
-last_regen: 2026-09-24
+last_regen: 2026-09-30
 no_diagram: true
 source_skills:
   - lazy-wiki.install
@@ -13,8 +13,8 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
-surface_sha: 0115d7c7e3bfb95f90e8088497ba62f558a7e8d661d8a546d71355ae1c52339e
+source_sha: 208e7e85e3998e8b741565a53874e37946b3f177
+surface_sha: d204bb0736c977f07f741edb9155a7a6b7b47e99388f5d5cbda4c90d57604092
 ---
 # Troubleshooting
 
@@ -56,7 +56,7 @@ surface_sha: 0115d7c7e3bfb95f90e8088497ba62f558a7e8d661d8a546d71355ae1c52339e
 
 **Likely cause**: Install registers five wiki routines unconditionally, exactly like the curator experts themselves: one that reacts to changed files, one that prunes links to deleted files, one that does a weekly full rescan, one that runs a daily deterministic sanitizer over the wiki CLI's fixable findings, and one that consolidates tag values weekly. What's actually missing is a daemon to fire them: a registered routine only ticks on its own once the project's background daemon is running and supervising this checkout.
 
-**Fix**: Tick the routines by hand right away with `/lazy-runtime.tick`, or make it durable by setting `daemon.enabled` and `daemon.run_here` in the tracked `lazy.settings.json` and re-running `/lazy-core.install` to install a supervisor. Until then, `/lazy-wiki.relink <scope-id>` still brings one scope fully up to date on demand.
+**Fix**: Tick the routines by hand right away with `/lazy-runtime.tick`, or make it durable by setting `daemon.enabled` and `daemon.run_here` by running `/lazy-core.daemon-setup`, which records them in the tracked `lazy.settings.json` and installs a supervisor. Until then, `/lazy-wiki.relink <scope-id>` still brings one scope fully up to date on demand.
 
 ---
 
@@ -397,4 +397,3 @@ surface_sha: 0115d7c7e3bfb95f90e8088497ba62f558a7e8d661d8a546d71355ae1c52339e
 **Likely cause**: An idempotent re-run produced no byte changes to any group doc or `domains.md`. This happens when the tree is already fully in sync with the code's `Domain(…)` blocks and the dictionary.
 
 **Fix**: No action needed. If you expected changes, confirm the code actually carries the `Domain(…)` blocks you expect, and that `/lazy-wiki.configure domains`'s code globs still reach the files you edited.
-</content>

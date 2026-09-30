@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: FAQ on products, nested products, assets, vision/design docs, gates, requests, decisions, coverage gaps, and spec lookups.
-last_regen: 2026-09-29
+last_regen: 2026-09-30
 no_diagram: true
 source_skills:
   - lazy-spec.install
@@ -31,8 +31,8 @@ source_skills:
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
   - lazy-spec.resolve-dependency
-source_sha: c7e7a48576c11be04b0a05c4b0198afd4fb3900f
-surface_sha: a0f6bb04d538609098983d17cd4b76ab14546f8d8476a4d3cf5865e778cb6760
+source_sha: fa5b0224e74389a27865661de6432f0a2e5514f1
+surface_sha: 910602ba511f27c2db1f6897b0f230b8807ca5ee8a8c41cf5310d646006be50b
 ---
 # Frequently asked questions
 
@@ -58,7 +58,7 @@ Yes. A product's `spec_path` may sit under another product's `spec_path` — a *
 
 Register one directly with `/lazy-spec.product-config`'s caller form — `create <key> at <spec_path> source <repo-key>:<path>` — or let `/lazy-spec.create-from-code` decide per semantic area while it documents a code-bound product: for each area it found, it asks whether the area becomes a **nested product** (its own registered product, its candidates landing at that product's root), a **group folder** (an ordinary container under this product, no registration), or **flat** (candidates land straight at this product's root like any other). Only the first of the three creates a new `products[<key>]` entry.
 
-A nested product doesn't have to declare everything itself. Whatever key it leaves unset — `language`, `mode`, `asset_types`, `guidelines` — is read through its ancestor chain: `asset_types` merges key-by-key from the outermost ancestor down to the product's own, `guidelines` is a per-role ordered union along the same chain, and `language` / `mode` take the nearest declaration. `source`, `dependencies`, `icon`, and `color` are never inherited — those describe this one product, not its lineage. `/lazy-spec.product-config`'s own wizard steps reflect this: any step whose key the nested product already carries through inheritance is skipped with outcome `inherited` rather than asked again, though edit mode still lets you declare a local override, which wins. The same innermost-wins rule governs review routing — a nested product's own review-class override outranks its ancestor's.
+A nested product doesn't have to declare everything itself. Whatever key it leaves unset — `language`, `mode`, `asset_types`, `guidelines` — is read through its ancestor chain: `asset_types` merges key-by-key from the outermost ancestor down to the product's own, `guidelines` is a per-role ordered union along the same chain — beginning with the catalog-wide `spec.guidelines` set that every product inherits, then the enclosing products', then its own — and `language` / `mode` take the nearest declaration. `source`, `dependencies`, `icon`, and `color` are never inherited — those describe this one product, not its lineage. `/lazy-spec.product-config`'s own wizard steps reflect this: any step whose key the nested product already carries through inheritance is skipped with outcome `inherited` rather than asked again, though edit mode still lets you declare a local override, which wins. The same innermost-wins rule governs review routing — a nested product's own review-class override outranks its ancestor's.
 
 This is a different thing from a **nested asset** — an ordinary feature/change/bug/etc. placed inside another asset's own folder via `--path`, still owned by the same product. A nested product is a whole extra product with its own gates; a nested asset is still just one asset, wherever it happens to sit.
 
@@ -124,7 +124,7 @@ Each window closes on its own schedule: `vision.md` itself closes the moment `sp
 
 ## Does every review class get an editor, and can I decline one?
 
-Yes, but only on eight prose classes: `vision`, `system-vision`, `use-cases`, `system-use-cases`, `design`, `system-design`, `research-design`, and `research-report`. On each of them the editor stands second in the class's `main` writers — after the author, before the document reaches you — bringing the author's drafted prose up to the project's writing canon (terminology, tone, phrasing) in every main round. `/lazy-spec.product-config` Step 8's `editor` role is the one you may answer `none`: doing so generates those eight classes with their author alone, never omitted. The remaining classes — journals, plans, `request`, `bug`, `system-tech`, `architecture`, and the two ui-design classes — never carry an editor at all; a journal is only appended to, and the rest are lists or structure where an editing pass buys little per dispatch.
+Yes, but only on nine prose classes: `vision`, `system-vision`, `use-cases`, `system-use-cases`, `design`, `system-design`, `content-design` (the design of a content asset), `research-design`, and `research-report`. On each of them the editor stands second in the class's `main` writers — after the author, before the document reaches you — bringing the author's drafted prose up to the project's writing canon (terminology, tone, phrasing) in every main round. `/lazy-spec.product-config` Step 8's `editor` role is the one you may answer `none`: doing so generates those nine classes with their author alone, never omitted. The remaining classes — journals, plans, `request`, `bug`, `system-tech`, `architecture`, and the two ui-design classes — never carry an editor at all; a journal is only appended to, and the rest are lists or structure where an editing pass buys little per dispatch.
 
 ---
 

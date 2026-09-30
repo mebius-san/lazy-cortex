@@ -1,4 +1,4 @@
-#!/usr/bin/env zsh
+#!/usr/bin/env bash
 # Shared venv resolver for chk / tst.
 #
 # Probe-then-fallback design — reuses existing venv if found, falls back to
@@ -22,6 +22,10 @@
 #   4. fallback: create / augment <project>/.venv
 #
 # Opt out of (4) via [tool.lazy-python] bootstrap-fallback = false.
+#
+# A venv keeps its executables in bin/ on macOS / Linux and in Scripts/ (with .exe names)
+# on Windows; every probe resolves whichever layout the venv carries. Sourced by bash (chk,
+# tst) and by zsh (the checker tests), so the syntax stays common to both.
 set -euo pipefail
 
 # Resolve the project root: CLAUDE_PROJECT_DIR when set (Claude Code points it at
@@ -33,17 +37,40 @@ if [ -z "${_project_dir}" ]; then
   _project_dir="$(git rev-parse --show-toplevel 2>/dev/null || printf '%s' "${PWD}")"
 fi
 
+# Print a venv's executables directory: bin/ (macOS / Linux) or Scripts/ (Windows).
+_venv_bin_dir() {
+  if [ -d "$1/bin" ]; then
+    printf '%s' "$1/bin"
+  else
+    printf '%s' "$1/Scripts"
+  fi
+}
+
+# Print the path of executable <name> in a venv's executables dir, with or without the
+# Windows .exe suffix; fail when neither exists.
+_venv_exe() {
+  local dir
+  dir="$(_venv_bin_dir "$1")"
+  if [ -x "${dir}/$2" ]; then
+    printf '%s' "${dir}/$2"
+  elif [ -x "${dir}/$2.exe" ]; then
+    printf '%s' "${dir}/$2.exe"
+  else
+    return 1
+  fi
+}
+
 # Check whether a candidate venv is complete: the four required bins (mypy, pylint,
 # pytest, ruff) AND the two pytest plugins (pytest-clarity, pytest-sugar) importable.
 _venv_has_tools() {
   local venv="$1"
-  local tool
+  local tool python
   for tool in mypy pylint pytest ruff; do
-    [ -x "${venv}/bin/${tool}" ] || return 1
+    _venv_exe "${venv}" "${tool}" >/dev/null || return 1
   done
   # guard: pytest plugins ship no bin — verify they import in the venv's interpreter
-  [ -x "${venv}/bin/python" ] || return 1
-  "${venv}/bin/python" -c "import pytest_clarity, pytest_sugar" >/dev/null 2>&1 || return 1
+  python="$(_venv_exe "${venv}" python)" || return 1
+  "${python}" -c "import pytest_clarity, pytest_sugar" >/dev/null 2>&1 || return 1
   return 0
 }
 
@@ -61,10 +88,10 @@ _read_pyproject_key() {
     || true
 }
 
-# Activate a venv: prepend its bin/ to PATH and return successfully.
+# Activate a venv: prepend its executables dir to PATH and return successfully.
 _activate() {
   local venv="$1"
-  export PATH="${venv}/bin:${PATH}"
+  export PATH="$(_venv_bin_dir "${venv}"):${PATH}"
 }
 
 # ---- Probe 1: $VIRTUAL_ENV ----------------------------------------------------
@@ -116,7 +143,7 @@ fi
 _venv_dir="${_project_dir}/.venv"
 
 # Create-if-missing — a pre-existing .venv (e.g. one carrying project deps) is left intact.
-if [ ! -x "${_venv_dir}/bin/python" ]; then
+if ! _venv_exe "${_venv_dir}" python >/dev/null; then
   echo "[lazy-python] creating project venv at ${_venv_dir}..." >&2
   uv venv --python 3.12 "${_venv_dir}" >&2
 fi
@@ -124,7 +151,7 @@ fi
 # Augment-not-wipe — add only the missing checker tools; uv leaves everything else in place.
 if ! _venv_has_tools "${_venv_dir}"; then
   echo "[lazy-python] installing checker tools into ${_venv_dir}..." >&2
-  uv pip install --quiet --python "${_venv_dir}/bin/python" mypy pylint pytest pytest-clarity pytest-sugar ruff >&2
+  uv pip install --quiet --python "$(_venv_exe "${_venv_dir}" python)" mypy pylint pytest pytest-clarity pytest-sugar ruff >&2
 fi
 
 _activate "${_venv_dir}"

@@ -227,7 +227,7 @@ def class_for_file(settings: dict, repo: Path, file_path: Path) -> dict | None:
 
   # the two inputs every branch below needs: the configured classes and the document's own type
   classes = settings.get(JobKey.REVIEW, {}).get(JobKey.CLASSES) or []
-  meta, _body = _fm.parse(file_path.read_text())
+  meta, _body = _fm.parse(file_path.read_text(encoding = "utf-8"))
   doc_type = meta.get(_SPEC_DOC_TYPE)
 
   # an untyped document keeps the historical first-match glob behaviour

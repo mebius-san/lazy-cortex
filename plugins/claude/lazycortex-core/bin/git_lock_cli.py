@@ -50,7 +50,7 @@ def _resolve_repo(cwd: str | None) -> Path:
   # git names the toplevel; a git binary that cannot be spawned leaves the starting directory in charge
   try:
     done = subprocess.run([ "git", "rev-parse", "--show-toplevel" ], cwd = start,
-                          capture_output = True, text = True, check = False)
+                          capture_output = True, text = True, check = False, encoding = "utf-8")
   except OSError:
     return start
 

@@ -304,7 +304,7 @@ def _declared_asset_type(asset_dir: Path) -> str | None:
   # guard: a not-yet-scaffolded asset has no note to declare anything
   if not note.is_file():
     return None
-  fm_values, _end = flip_gate.parse_frontmatter(note.read_text())
+  fm_values, _end = flip_gate.parse_frontmatter(note.read_text(encoding = "utf-8"))
   declared = fm_values.get(_K.ASSET_TYPE)
 
   # guard: an absent, empty or still-unjudged type pins no category
@@ -335,7 +335,7 @@ def _nearest_asset_dir(start: Path, product_root: Path) -> Path | None:
     # guard: no folder-note here — not an asset boundary
     if not note.is_file():
       continue
-    fm_values, _ = flip_gate.parse_frontmatter(note.read_text())
+    fm_values, _ = flip_gate.parse_frontmatter(note.read_text(encoding = "utf-8"))
     if fm_values.get(_K.SPEC_ROLE) == _K.ROLE_STATUS:
       return candidate
   return None
@@ -914,7 +914,9 @@ def supersede(decisions_path: Path, old_id: str, thesis: str, body: str, *,
     TimeoutError: The registry's exclusive lock could not be acquired in time.
   """
   old_number = _parse_id(old_id)
-  existing = _parse_records(_split(decisions_path.read_text())[1]) if decisions_path.is_file() else []
+  existing = (
+    _parse_records(_split(decisions_path.read_text(encoding = "utf-8"))[1]) if decisions_path.is_file() else []
+  )
 
   # guard: the record being superseded must already exist
   if not any(r[_K.NUMBER] == old_number for r in existing):
@@ -1192,7 +1194,7 @@ def promote(doc_path: Path, *, today: str | None = None) -> dict:
   if ctx.asset_dir is not None:
     status_note = ctx.asset_dir / f"{ctx.slug}.md"
     if status_note.is_file():
-      note_fm, _ = flip_gate.parse_frontmatter(status_note.read_text())
+      note_fm, _ = flip_gate.parse_frontmatter(status_note.read_text(encoding = "utf-8"))
       for flag in _HALT_FLAGS:
         # guard: the owning asset carries a terminal/halt flag — refuse the whole call
         if flip_gate.is_true(note_fm, flag):

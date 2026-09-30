@@ -125,7 +125,7 @@ An absent or empty section is the default and changes no behaviour. Four consequ
 
 - An `inbox` routine whose `inbox_dir` is declared and does not resolve fails its tick with `exit = -1` and the error tag `external_dir_broken: <path>`, which folds into the routine's own `routine:<name>` incident and carries the metric label `reason="external_dir_broken"`. An **undeclared** missing inbox stays a silent idle tick, unchanged.
 - `daemon.run_here` is where the second daemon is refused, and it must name both halves of the answer. See *The run-here gate* below.
-- Install refuses to put a supervisor on a checkout whose inbox another daemon on this host already drives, and skips the supervisor, sandbox, and metrics steps entirely rather than installing them and reporting afterwards.
+- `/lazy-core.daemon-setup` refuses to put a supervisor on a checkout whose inbox another daemon on this host already drives, and skips the supervisor and metrics steps entirely rather than installing them and reporting afterwards.
 
 **The inbox-ownership halt is not gated on this section.** Every daemon checks at startup whether another checkout on the host resolves an inbox routine to the same physical directory, including a repository that declares no external directories at all — the collision is reachable through any symlink, not only a declared one. Where it fires the condition is real: two daemons over one inbox import every document twice.
 

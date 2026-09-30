@@ -85,7 +85,7 @@ def account_identity() -> str:
   # ambient login: the account id recorded by the Claude CLI's own config
   try:
     # waiver: external Claude Code config path and field names, not internal keys
-    cfg = json.loads((Path.home() / ".claude.json").read_text())
+    cfg = json.loads((Path.home() / ".claude.json").read_text(encoding = "utf-8"))
     uuid = str((cfg.get("oauthAccount") or {}).get("accountUuid") or "")
   except (OSError, json.JSONDecodeError):
     uuid = ""
@@ -341,7 +341,7 @@ def record(info: dict, trigger: str, *, writer: str) -> Path:
   # noinspection PyBroadException
   try:
     # waiver: stdlib file-mode idiom
-    with os.fdopen(fd, "w") as fh:
+    with os.fdopen(fd, "w", encoding = "utf-8") as fh:
       json.dump(entry, fh, indent = 2)
     os.replace(tmp, target)
   except Exception:
@@ -414,7 +414,7 @@ def live() -> list[dict]:
     if not name.endswith(".json"):
       continue
     try:
-      entry = json.loads((base / name).read_text())
+      entry = json.loads((base / name).read_text(encoding = "utf-8"))
     except (OSError, json.JSONDecodeError) as e:
       sys.stderr.write(f"rate-limit flag: ignoring unreadable record {name}: {e}\n")
       continue

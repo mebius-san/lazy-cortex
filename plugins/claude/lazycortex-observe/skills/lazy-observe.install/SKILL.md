@@ -114,7 +114,7 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/install.py" smok
 
 One line per daemon, `<repo_label> <addr> <True|False>`, then `none-registered` or `done`.
 
-- **No metrics-enabled daemons registered** → no scrape set exists; tell the operator to enable metrics via `/lazy-core.install` (Step 13.6 there provisions the port and label) and abort with outcome `core-metrics-disabled`.
+- **No metrics-enabled daemons registered** → no scrape set exists; tell the operator to enable metrics via `/lazy-core.daemon-setup` (its Step 6 provisions the port and label) and abort with outcome `core-metrics-disabled`.
 - **Some endpoints down** → the daemons may simply be stopped; report each `repo_label → False` line and continue (the shipper config still covers them; scrapes succeed once the daemon starts).
 
 Outcome: `reachable-<N>-of-<M>` / `core-metrics-disabled`.

@@ -118,7 +118,7 @@ def _product_for_note(repo: Path, note_path: Path) -> tuple[str, dict]:
   """
   settings_path = repo / scaffold_asset.Keys.CLAUDE_DIR / scaffold_asset.Keys.SETTINGS_FILE
   try:
-    products = json.loads(settings_path.read_text()).get(scaffold_asset.Keys.PRODUCTS) or {}
+    products = json.loads(settings_path.read_text(encoding = "utf-8")).get(scaffold_asset.Keys.PRODUCTS) or {}
   except (OSError, json.JSONDecodeError):
     return "", {}
   content_root = spec_paths.spec_content_root(repo)
@@ -260,7 +260,7 @@ def main(argv: list[str]) -> int:
                          f"target doc already exists: {name}")
 
   # the note's own declarations drive the template chain, exactly as a scaffold's would
-  note_text = note_path.read_text()
+  note_text = note_path.read_text(encoding = "utf-8")
   note_fm, _fm_end = apply_request.parse_frontmatter(note_text)
   slug = note_path.stem
 
@@ -275,7 +275,7 @@ def main(argv: list[str]) -> int:
         repo, asset_type, product, name, alias_base = alias_base, expect_type = doc_type)
   else:
     product, tokens, tmpl_path = _root_seed_inputs(repo, note_path, note_fm, slug, name, doc_type)
-  doc_text = scaffold_asset.substitute(tmpl_path.read_text(), tokens)
+  doc_text = scaffold_asset.substitute(tmpl_path.read_text(encoding = "utf-8"), tokens)
   doc_text = scaffold_asset.ensure_doc_type(doc_text, doc_type)
 
   # the type's own paint: the icon names the kind of document, matchers own the colour later

@@ -177,7 +177,7 @@ def _load_settings(repo: Path) -> dict:
   if not path.exists():
     return {}
   try:
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding = "utf-8"))
   except json.JSONDecodeError as err:
     # a broken settings file must fail the tick loudly (the error-ledger contract): returning `{}`
     # here would empty the bot-identity set and reclassify every system commit as an operator wake
@@ -437,7 +437,7 @@ def _read_blob(repo: Path, sha: str, path: str) -> str | None:
     return None
   result = subprocess.run(
       ["git", "show", f"{sha}^:{path}"],
-      cwd = str(repo), capture_output = True, text = True, check = False,
+      cwd = str(repo), capture_output = True, text = True, check = False, encoding = "utf-8",
   )
   return result.stdout if result.returncode == 0 else None
 
@@ -610,7 +610,7 @@ def _core_dispatch_job(repo: Path, bundle: dict) -> dict:
   env[EnvVar.LAZY_REPO_ROOT] = str(repo)
   proc = subprocess.run(
       [sys.executable, str(cli), CoreCommand.DISPATCH_JOB],
-      input = json.dumps(bundle), capture_output = True, text = True, env = env, check = False,
+      input = json.dumps(bundle), capture_output = True, text = True, env = env, check = False, encoding = "utf-8",
   )
 
   # guard: the CLI call itself failed — surface stdout/stderr for diagnosis
@@ -698,7 +698,7 @@ def _resolve_and_dispatch(repo: Path, asset_note: Path, item: dict) -> dict:
     markers = _job_markers.update(repo, asset_note, { JobMarker.COORDINATOR_JOB: None })
 
   # resolve the trigger from the pre-commit blob vs. the current state, and who committed it
-  current_text = asset_note.read_text()
+  current_text = asset_note.read_text(encoding = "utf-8")
   # waiver: type: ignore — note_ops is a deferred/late-bound sibling import; mypy cannot resolve it
   current_report = _note_ops.build_report(current_text, markers)  # type: ignore[attr-defined]
 
@@ -914,7 +914,7 @@ def _rekey_path_item(repo: Path, item: dict, raw_path: str) -> dict:
   head = subprocess.run(
       [ "git", "log", "-1", "--format=%H%x00%an%x00%ae", *([ tip ] if isinstance(tip, str) and tip else []),
         "--", raw_path ],
-      cwd = str(repo), capture_output = True, text = True, check = False,
+      cwd = str(repo), capture_output = True, text = True, check = False, encoding = "utf-8",
   )
 
   # guard: no commit to key off — the range-level fields stay rather than losing the tick

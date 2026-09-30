@@ -66,7 +66,7 @@ def load(repo_root: Path) -> dict:
   if not path.exists():
     return _empty_state()
   try:
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding = "utf-8"))
   except json.JSONDecodeError:
     # corrupt or partial state file — fall back to fresh default
     return _empty_state()

@@ -55,7 +55,7 @@ def _git_common_dir(repo_root: Path) -> Path | None:
   """
   probe = subprocess.run(
     [ "git", "rev-parse", "--git-common-dir" ],
-    cwd = repo_root, check = False, capture_output = True, text = True,
+    cwd = repo_root, check = False, capture_output = True, text = True, encoding = "utf-8",
   )
 
   # guard: not a repository — nothing to heal

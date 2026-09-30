@@ -112,7 +112,7 @@ def _read_settings(vault: Path) -> dict:
   if not settings_path.is_file():
     return {}
   try:
-    data = json.loads(settings_path.read_text())
+    data = json.loads(settings_path.read_text(encoding = "utf-8"))
   except (OSError, json.JSONDecodeError):
     return {}
   return data if isinstance(data, dict) else {}
@@ -212,7 +212,7 @@ def resolve_spec_language(vault: Path, doc_path: str) -> str:
   # 1. Doc frontmatter wins.
   doc_file = vault / doc_path
   if doc_file.is_file():
-    fm = _parse_frontmatter(doc_file.read_text())
+    fm = _parse_frontmatter(doc_file.read_text(encoding = "utf-8"))
     doc_lang = fm.get(_DOC_LANGUAGE_KEY)
 
     # guard: a non-empty frontmatter language is authoritative

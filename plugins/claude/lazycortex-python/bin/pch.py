@@ -375,7 +375,7 @@ def run_inspection(
   env['PYCHARM_VM_OPTIONS'] = vm_opts_path
 
   # run to completion with output captured — it is surfaced selectively below, never streamed
-  result = subprocess.run(cmd, capture_output = True, text = True, check = False, env = env)
+  result = subprocess.run(cmd, capture_output = True, text = True, check = False, env = env, encoding = "utf-8")
 
   # check whether the output directory has any XML results
   has_results = any(f.endswith('.xml') for f in os.listdir(output_dir)) if os.path.isdir(output_dir) else False

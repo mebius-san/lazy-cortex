@@ -141,7 +141,7 @@ def _repo_root() -> Path | None:
   try:
     out = subprocess.check_output(
       [ "git", "rev-parse", "--show-toplevel" ],
-      stderr = subprocess.DEVNULL, text = True,
+      stderr = subprocess.DEVNULL, text = True, encoding = "utf-8",
     ).strip()
   except (subprocess.CalledProcessError, FileNotFoundError):
     return None

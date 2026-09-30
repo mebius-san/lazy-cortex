@@ -104,7 +104,7 @@ def is_raised() -> bool:
     if not name.endswith(".json"):
       continue
     try:
-      entry = json.loads((base / name).read_text())
+      entry = json.loads((base / name).read_text(encoding = "utf-8"))
     except (OSError, json.JSONDecodeError) as e:
       sys.stderr.write(f"lazy-claude: ignoring unreadable record {name}: {e}\n")
       continue
@@ -261,7 +261,7 @@ def record(info: dict, trigger: str) -> None:
     fd, tmp = tempfile.mkstemp(prefix = ".flag.", suffix = ".tmp", dir = str(target.parent))
     try:
       # waiver: stdlib file-mode idiom
-      with os.fdopen(fd, "w") as fh:
+      with os.fdopen(fd, "w", encoding = "utf-8") as fh:
         json.dump(entry, fh, indent = 2)
       os.replace(tmp, target)
     except OSError:
@@ -360,7 +360,7 @@ def run_streaming(real: str, argv: list[str]) -> int:
   # the frame inspection that runs after it.
 
   # stdin, stderr, and the exit code pass through untouched; only stdout is tapped
-  with subprocess.Popen([ real, *argv ], stdout = subprocess.PIPE, text = True) as proc:
+  with subprocess.Popen([ real, *argv ], stdout = subprocess.PIPE, text = True, encoding = "utf-8") as proc:
     # guard: PIPE above guarantees a stream; the check narrows the Optional for the reader loop
     if proc.stdout is not None:
       # forward each line as it arrives, feeding the flag from the same bytes

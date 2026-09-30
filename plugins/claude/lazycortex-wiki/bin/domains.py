@@ -385,7 +385,7 @@ class DomainScanner:
       cwd = str(self._repo),
       capture_output = True,
       text = True,
-      check = False,
+      check = False, encoding = "utf-8",
     )
 
     # guard: not a git repo — nothing to scan

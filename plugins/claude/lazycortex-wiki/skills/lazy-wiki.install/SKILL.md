@@ -31,7 +31,7 @@ This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reord
 This skill is **idempotent and quiet on re-run**. Every choice it makes is persisted, and on the next run the persisted value is read first and honoured silently — the user is asked again only when nothing is on record yet.
 
 - **Plugin enabled = full functionality.** An enabled plugin is installed whole. There is no per-rule "install this rule?" prompt and no per-artifact opt-in.
-- **No daemon gate.** Experts and routines alike are registered unconditionally. A registered routine fires under `/lazy-runtime.tick` on a checkout with no daemon, so `daemon.enabled` withholds nothing this skill writes; the flag reaches only `lazy-core.install`'s supervisor unit and metrics endpoint.
+- **No daemon gate.** Experts and routines alike are registered unconditionally. A registered routine fires under `/lazy-runtime.tick` on a checkout with no daemon, so `daemon.enabled` withholds nothing this skill writes; the flag reaches only the supervisor unit and metrics endpoint `/lazy-core.daemon-setup` installs.
 - **Everything derivable is derived, not asked:** install scope (from where the plugin is *enabled* — see Step 1), curator git identity (a deterministic bot id), the watched branch.
 
 ## File-sync policy (applies to every file this skill writes)
@@ -544,4 +544,4 @@ One line per task in the canonical list above, with its outcome word.
 - **`/lazy-wiki.install` aborts: "plugin not enabled"** — `lazycortex-wiki@lazycortex` absent or empty in `~/.claude/plugins/installed_plugins.json` → add `"lazycortex-wiki@lazycortex": true` to `enabledPlugins`, restart Claude Code, re-run.
 - **`/lazy-wiki.install` aborts: "lazycortex-core not installed"** — `default-tiers.json` not found → install `lazycortex-core` first, then re-run.
 - **`/lazy-wiki.install` aborts: "plugin cache is empty"** — rule glob returned zero files → run `/plugin update lazycortex-wiki@lazycortex`, then re-run.
-- **Curator never runs after install** — the routines are registered but nothing fires them: this checkout has no daemon supervising it → tick them by hand with `/lazy-runtime.tick`, or set `daemon.enabled` plus `daemon.run_here` in the tracked `lazy.settings.json` and re-run `/lazy-core.install` to install a supervisor.
+- **Curator never runs after install** — the routines are registered but nothing fires them: this checkout has no daemon supervising it → tick them by hand with `/lazy-runtime.tick`, or run `/lazy-core.daemon-setup` to enable the daemon and install a supervisor.

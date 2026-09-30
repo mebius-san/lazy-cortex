@@ -72,7 +72,7 @@ def _audit_file(path: Path) -> dict | None:
     A `{path, detail}` finding, or None when the protocol leaves the envelope alone.
   """
   try:
-    text = path.read_text()
+    text = path.read_text(encoding = "utf-8")
   except OSError:
     return None
 

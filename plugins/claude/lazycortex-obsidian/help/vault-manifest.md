@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Carry a vault's whole Obsidian configuration as one tracked, reviewable file that any checkout can rebuild from.
-last_regen: 2026-09-24
+last_regen: 2026-09-30
 diagram_spec:
   anchor: "How capture and deploy fit together"
   request: "Flow diagram: on the source machine, lazy-obsidian.capture snapshots .obsidian/ into .obsidian.manifest.json and commits it; that commit reaches a second checkout via git; on the second machine (fresh clone, .obsidian/ absent), lazy-obsidian.deploy reads the manifest and rebuilds .obsidian/ — fetching each plugin at its latest release from GitHub, falling back to a vendored cache, or using a bundled copy — then the operator opens Obsidian once so plugins run their own settings migrations."
@@ -9,8 +9,8 @@ diagram_spec:
 source_skills:
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
-surface_sha: 5607a8ab4ccd3ae41ff2e955618853881f82521367752a678eaf509759cd2b57
+source_sha: 1581fe03ce1f6ca1468bcf2fbb3c2a71e0e2ba9b
+surface_sha: 4b8dd2a3d4b1fafb8b336dc35db3fad437475ae080f7ac6cf98db7e4abb7a30b
 ---
 # Vault manifest — carry your Obsidian config as one tracked file
 
@@ -30,7 +30,7 @@ You run `/lazy-obsidian.capture` after changing anything under `.obsidian/` — 
 
 On any checkout that needs `.obsidian/` — a fresh clone, a machine that never opened this vault — you run `/lazy-obsidian.deploy`. It reads `.obsidian.manifest.json` and rebuilds the config directory: every plugin fetched at its latest GitHub release, the captured settings layered on top, snippets, and the top-level config files restored. The theme is fetched the way Obsidian fetches one: the manifest carries only the name, and deploy resolves that name through the community theme catalogue and reads the theme's two files off its repository's default branch. A copy already in the vault is replaced, on the same terms as the settings, snippets, and plugins around it. Each plugin lands from one of three sources, and deploy tells you which: `upstream` (fetched fresh from GitHub), `cache` (a vendored fallback used because GitHub was unreachable or the release lacked assets), or `bundled` (shipped inside this LazyCortex plugin, like `iconize-reloader`). Deploy never pins a plugin to the exact version it was captured under — a plugin migrates its own settings forward the first time Obsidian opens it, which is why deploy always ends with a reminder to open Obsidian once after it finishes. If `.obsidian/` already exists at the target — this checkout already has a configured vault — deploy asks before overwriting, since local changes made since the last capture would be lost.
 
-Neither skill touches `workspace*` files, caches, obsidian-git authentication, or Iconize's own runtime `data.json` — those are either genuinely local or, in Iconize's case, rebuilt by `iconize-reloader` from your notes' frontmatter rather than by this block.
+Neither skill touches `workspace*` files, caches, or obsidian-git authentication — those are genuinely local. Iconize's `data.json` is captured and deployed like any other plugin's settings, except that only its settings-like blocks (`settings`, `rules`, `recentlyUsedIcons`) travel: the per-path icon entries are rebuilt by `iconize-reloader` from your notes' frontmatter rather than by this block.
 
 ## Common adjustments
 
@@ -43,6 +43,8 @@ Neither skill touches `workspace*` files, caches, obsidian-git authentication, o
 **A plugin reports `served from cache` after deploy.** GitHub was unreachable, or the release lacked the expected assets. Re-run deploy later when the network is back to pull the real latest release instead of the vendored fallback.
 
 **A theme is named in the deploy errors.** Deploy could neither fetch it nor find it cached. The error says which: no catalogue entry, an HTTP failure, or no network. Re-run with network access — the first successful fetch caches the theme for later offline deploys.
+
+**Icons and folder colours are missing after deploy.** The per-path icon entries are expected to be absent right after a deploy — `iconize-reloader` rebuilds them from your notes' frontmatter once Obsidian opens, or you can run `/lazy-obsidian.iconize-sync reconcile` yourself. If they stay missing, check Iconize's settings in Obsidian: the option to read icons from frontmatter must be on, and the field names must be `iconize_icon` and `iconize_color`. A manifest captured before Iconize settings were recorded carries no Iconize data at all, so the deployed vault starts without them. Fix those settings in the live vault, then re-run `/lazy-obsidian.capture` so the manifest carries them from now on. While Obsidian is open, `iconize-reloader` also corrects those settings on its own whenever Iconize rewrites its file.
 
 **Deploying onto a checkout that already has `.obsidian/`.** Deploy asks before overwriting; default is to cancel. Say yes only when you're sure the manifest is more current than whatever local config is already there.
 

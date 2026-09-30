@@ -230,7 +230,7 @@ def _seed_text(repo: Path, role: str, product: str, record: dict) -> str:
   template = scaffold_asset.resolve_template(
       repo, _TEMPLATE_CONTEXT_PRODUCT if product else _TEMPLATE_CONTEXT_VAULT, product, _TEMPLATE_NAME,
       alias_base = "" if product else _TEMPLATE_CONTEXT_PRODUCT)
-  text = scaffold_asset.substitute(template.read_text(), { _ROLE_TOKEN: role })
+  text = scaffold_asset.substitute(template.read_text(encoding = "utf-8"), { _ROLE_TOKEN: role })
   icon, color = _paint(role, record)
   return scaffold_asset.inject_iconize(text, icon, color)
 

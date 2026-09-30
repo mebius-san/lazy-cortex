@@ -75,7 +75,7 @@ class WorktreeTaskManager:
     """
     return subprocess.run(
       [ "git", *args ], cwd = str(cwd or self._repo),
-      capture_output = True, text = True, check = False,
+      capture_output = True, text = True, check = False, encoding = "utf-8",
     )
 
   def create(self, job_id: str, branch: str) -> tuple[Path, bool]:
@@ -244,7 +244,7 @@ class WorktreeTaskManager:
     proc = subprocess.run(
       # waiver: shell invocation idiom shared with the post-push hook, not a domain constant
       [ "sh", "-c", cmd ], cwd = str(wt),
-      capture_output = True, text = True, check = False,
+      capture_output = True, text = True, check = False, encoding = "utf-8",
     )
 
     # guard: bootstrap failed — the caller fails the job rather than spawning into a broken env

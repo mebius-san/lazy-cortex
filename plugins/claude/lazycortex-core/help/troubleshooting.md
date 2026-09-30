@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-09-28
+last_regen: 2026-09-30
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, generic iteration loops, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys, seed data gaps), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models, plugin-path resolution, stale source paths at claim time), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources, worker import errors), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
@@ -11,6 +11,7 @@ source_skills:
   - lazy-core.agent-models-seed
   - lazy-core.audit
   - lazy-core.daemon-authoring
+  - lazy-core.daemon-setup
   - lazy-core.doctor
   - lazy-core.git-status
   - lazy-core.git-unlock
@@ -39,8 +40,8 @@ source_skills:
   - lazy-runtime.preflight
   - lazy-runtime.recover
   - lazy-runtime.tick
-source_sha: 1dfbbbfa9cc7fc1d270e280c4829e643a8bc9db9
-surface_sha: 098f79460c3f6adf07a14b94d75d1ef91c46f896faf1cc8e60892c5ac2e201f7
+source_sha: ca61e3a58b9cab2c44523d46ab4783b0f814e25b
+surface_sha: 4c0ec0f00249b31a4c04ac325d298846935ec6f634416fa6fac84159edf65628
 ---
 # Troubleshooting
 
@@ -60,7 +61,7 @@ surface_sha: 098f79460c3f6adf07a14b94d75d1ef91c46f896faf1cc8e60892c5ac2e201f7
 
 **Likely cause**: Every lazycortex skill and hook runs its Python helpers as `"${LAZYCORTEX_PYTHON:-python3}" <script>` instead of relying on the script's own executable bit — that bit means nothing once a git client that is blind to file modes (obsidian-git on Android, a mode-blind Windows checkout) strips it on clone or pull. In an interactive session the variable is normally unset and `python3` resolves from your `PATH`. A path that does not exist therefore comes from somewhere that sets the variable explicitly: an `env.LAZYCORTEX_PYTHON` entry left in `.claude/settings.local.json` by an older install (the step that wrote it is gone), or a shell profile exporting a value copied from another machine.
 
-**Fix**: Delete the `env.LAZYCORTEX_PYTHON` entry from this checkout's `.claude/settings.local.json` (and any export of it in your shell profile) and open a new session — skills and hooks then fall back to `python3` from `PATH`. The daemon's supervisor unit is the one place that legitimately carries the absolute path; if that one is stale, re-run `/lazy-core.install` so Step 13 re-derives it and re-renders the unit.
+**Fix**: Delete the `env.LAZYCORTEX_PYTHON` entry from this checkout's `.claude/settings.local.json` (and any export of it in your shell profile) and open a new session — skills and hooks then fall back to `python3` from `PATH`. The daemon's supervisor unit is the one place that legitimately carries the absolute path; if that one is stale, re-run `/lazy-core.daemon-setup` — it re-derives the interpreter and re-renders the unit.
 
 ---
 
@@ -122,23 +123,35 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ---
 
-## `/lazy-core.install` fails writing settings or installing the daemon supervisor
+## `/lazy-core.install` fails writing settings
 
-**Symptom**: `/lazy-core.install` fails at Step 9 with "settings file unwritable", or at Step 13 with a message about a missing plist/service template file, or `launchctl bootstrap` / `systemctl enable` returning a non-zero exit code.
+**Symptom**: `/lazy-core.install` fails at Step 9 with "settings file unwritable".
 
-**Likely cause (unwritable settings)**: `.claude/lazy.settings.json` or its parent directory has permissions that prevent writing.
+**Likely cause**: `.claude/lazy.settings.json` or its parent directory has permissions that prevent writing.
+
+**Fix**: Check permissions on `.claude/lazy.settings.json` and the `.claude/` directory. Ensure both are writable by your current user, then re-run `/lazy-core.install`.
+
+---
+
+## `/lazy-core.daemon-setup` fails installing the daemon supervisor
+
+`<repo-id>` below is the checkout's basename followed by a short hash of its absolute path — the unit name is unique per checkout, so two clones of one project never share a unit.
+
+**Symptom**: `/lazy-core.daemon-setup` stops with "run /lazy-core.install first", or fails at Step 5 with a message about a missing plist/service template file, or `launchctl bootstrap` / `systemctl --user enable --now` returns a non-zero exit code.
+
+**Likely cause (no daemon section)**: The repo has no `daemon` section in `.claude/lazy.settings.json`, so the runtime layer was never installed here.
 
 **Likely cause (supervisor template missing)**: The plugin cache does not contain `templates/runtime/com.lazycortex.runtime.plist` (macOS) or `templates/runtime/lazy-core-runtime.service` (Linux) because the cache was only partially downloaded.
 
-**Likely cause (launchctl/systemctl error)**: On macOS, the plist was written but `launchctl bootstrap` encountered a substitution error or permissions issue — install runs `launchctl bootout` first (harmless when nothing was loaded yet) so a re-render always reaches a clean `bootstrap`, instead of `launchctl load` silently keeping an already-loaded label's old definition in memory. On Linux, the systemd user instance is not running, or `daemon-reload` has not been called.
+**Likely cause (launchctl/systemctl error)**: On macOS, the plist was written but `launchctl bootstrap` hit a substitution error or a permissions issue — the skill runs `launchctl bootout` first (harmless when nothing was loaded yet) so a re-render always reaches a clean `bootstrap`, instead of `launchctl load` silently keeping an already-loaded label's old definition in memory. On Linux, the unit was written but the systemd user instance rejected it.
 
-**Fix (unwritable)**: Check permissions on `.claude/lazy.settings.json` and the `.claude/` directory. Ensure both are writable by your current user, then re-run `/lazy-core.install`.
+**Fix (no daemon section)**: Run `/lazy-core.install`, then re-run `/lazy-core.daemon-setup`.
 
-**Fix (template missing)**: Run `/plugin update lazycortex-core@lazycortex` to restore the full cache, then re-run `/lazy-core.install` and accept the daemon supervisor install offer again.
+**Fix (template missing)**: Run `/plugin update lazycortex-core@lazycortex` to restore the full cache, then re-run `/lazy-core.daemon-setup`.
 
-**Fix (macOS launchctl)**: Inspect the plist at `~/Library/LaunchAgents/com.lazycortex.runtime.<repo-name>.plist` for literal `{REPO_ROOT}` or `{REPO_NAME}` placeholders. If found, re-run `/lazy-core.install` to regenerate. Otherwise run `launchctl bootout gui/$UID/com.lazycortex.runtime.<repo-name> 2>/dev/null; launchctl bootstrap gui/$UID <path>` manually from your terminal — the `bootout` is harmless when nothing was loaded yet, and running it first guarantees `bootstrap` picks up the freshly written plist instead of an old definition still held in memory under the same label.
+**Fix (macOS launchctl)**: Inspect the plist at `~/Library/LaunchAgents/com.lazycortex.runtime.<repo-id>.plist` for literal `{REPO_ROOT}`, `{REPO_ID}` or `{PYTHON}` placeholders. If found, re-run `/lazy-core.daemon-setup` to regenerate. Otherwise run `launchctl bootout gui/$UID/com.lazycortex.runtime.<repo-id> 2>/dev/null; launchctl bootstrap gui/$UID <path>` manually from your terminal — the `bootout` is harmless when nothing was loaded yet, and running it first guarantees `bootstrap` picks up the freshly written plist.
 
-**Fix (Linux systemd)**: Run `systemctl --user daemon-reload` then `systemctl --user enable --now lazy-core-runtime-<repo-name>.service`, or re-run `/lazy-core.install` to reinstall the unit.
+**Fix (Linux systemd)**: Run `systemctl --user status lazy-core-runtime-<repo-id>.service` to read the error it names, correct that, then re-run `/lazy-core.daemon-setup` (or run `systemctl --user daemon-reload` and `systemctl --user enable --now lazy-core-runtime-<repo-id>.service` yourself).
 
 ---
 
@@ -154,11 +167,11 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ## The daemon never starts for this checkout after install
 
-**Symptom**: `/lazy-core.install` completed without errors, but no daemon supervisor is running for this checkout — no plist or systemd unit, and no complaint about it either. Or a re-run reports `not-this-host` or `not-this-checkout` without asking anything.
+**Symptom**: `/lazy-core.install` completed without errors, but no daemon supervisor is running for this checkout — no plist or systemd unit, and no complaint about it either. Or `/lazy-core.daemon-setup` reports `not-this-host` or `not-this-checkout` without asking anything.
 
-**Likely cause**: Two independent reasons produce the same symptom. First, `daemon.enabled` is seeded `false` by default and install never asks about it — a project only becomes daemon-supervised once something sets the flag to `true` in the tracked `lazy.settings.json`. This is not a bug: with the flag left `false`, every routine, the expert registry, and the runtime plumbing still install and work — they just run on demand via `/lazy-runtime.tick` instead of on a schedule via a background process. Second, once `daemon.enabled` is `true`, `daemon.run_here` in the same tracked file is a hostname-to-checkout-path map (`{"nexus": "~/lazy-runtime/Money"}`), and a machine or checkout the map does not name gets no supervisor — the daemon refuses to start there. `not-this-host` means this machine's hostname isn't a key in the map at all; `not-this-checkout` means this machine is in the map, but pointed at a different checkout's path than the one you're running from.
+**Likely cause**: `/lazy-core.install` never sets up the daemon. It seeds `daemon.enabled` as `false` and stops there — a project only becomes daemon-supervised once `/lazy-core.daemon-setup` has been run. This is not a bug: with the flag left `false`, every routine, the expert registry, and the runtime plumbing still install and work — they just run on demand via `/lazy-runtime.tick` instead of on a schedule via a background process. Once `daemon.enabled` is `true`, `daemon.run_here` in the same tracked file is a hostname-to-checkout-path map (`{"nexus": "~/lazy-runtime/Money"}`), and a machine or checkout the map does not name gets no supervisor — the daemon refuses to start there. `not-this-host` means this machine's hostname isn't a key in the map at all; `not-this-checkout` means this machine is in the map, but pointed at a different checkout's path than the one you're running from.
 
-**Fix**: If you want this project to run on a schedule rather than by hand, set `daemon.enabled: true` in the tracked `.claude/lazy.settings.json`, then re-run `/lazy-core.install` — the run_here question is asked at that point. If `daemon.enabled` is already `true` and the supervisor still isn't running, decide which machine and checkout should drive the project, then edit the map — add `{"<hostname -s>": "<absolute path to that checkout>"}` (or correct the path on an existing host key) in `.claude/lazy.settings.json[daemon][run_here]`, then re-run `/lazy-core.install` from that checkout. The skill reads the map fresh on entry and, finding this host/path pair now named, installs the supervisor. Until the daemon is set up, run due routines and expert jobs by hand with `/lazy-runtime.tick`.
+**Fix**: Run `/lazy-core.daemon-setup` from the checkout that should drive the project. It asks whether to enable the daemon and, once enabled, whether this checkout drives it, then installs the supervisor. If it reports `not-this-host` or `not-this-checkout` and does not ask, the map already names a different machine or checkout: decide which one should drive the project, point this host's entry at that checkout, then re-run `/lazy-core.daemon-setup` from it. Until the daemon is set up, run due routines and expert jobs by hand with `/lazy-runtime.tick`.
 
 ---
 
@@ -168,7 +181,7 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Likely cause**: The checkout `daemon.run_here` names sits under a Dropbox-synced path — a component of the resolved checkout path equals `Dropbox`, starts with `Dropbox` (`Dropbox (Personal)`, `~/Library/CloudStorage/Dropbox…`), or ends in ` Dropbox` (`Auriglaci Dropbox`). Dropbox syncs bytes outside git and can bring CRLF files or half-written files in from another machine mid-sync, which the daemon refuses to run against. The guard is unconditional — the daemon never starts inside such a path, no matter how `run_here` is configured.
 
-**Fix**: Clone the project with git to a path outside any Dropbox-synced folder — for example `~/lazy-runtime/<repo>` — then point this host's `daemon.run_here` entry at that clone and re-run `/lazy-core.install` from the clone. Until then, run due routines and expert jobs by hand with `/lazy-runtime.tick` from the Dropbox checkout instead.
+**Fix**: Clone the project with git to a path outside any Dropbox-synced folder — for example `~/lazy-runtime/<repo>` — then point this host's `daemon.run_here` entry at that clone and re-run `/lazy-core.daemon-setup` from the clone. Until then, run due routines and expert jobs by hand with `/lazy-runtime.tick` from the Dropbox checkout instead.
 
 ---
 
@@ -176,39 +189,39 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Symptom**: You want this project to run on a schedule via the background daemon, but `/lazy-core.install` never asks the question — not on a first run, not on a re-run.
 
-**Likely cause**: `daemon.enabled` is not an install-time question at all. It is seeded `false` silently the first time install writes the tracked `daemon` section, and the skill never prompts for it — a project opts in only when someone sets the flag to `true` directly in `.claude/lazy.settings.json`. Everything else the runtime layer needs — routines, `.experts/`, the expert registry, the spawn sandbox — installs and works regardless of this flag; it gates only the supervisor unit and the metrics endpoint.
+**Likely cause**: The daemon is not an install-time question at all. `/lazy-core.install` seeds `daemon.enabled` as `false` silently the first time it writes the tracked `daemon` section and never prompts for it. Everything else the runtime layer needs — routines, `.experts/`, the expert registry, the spawn sandbox — installs and works regardless of this flag; the flag gates only the supervisor unit and the metrics endpoint, both of which belong to `/lazy-core.daemon-setup`.
 
-**Fix**: Set `daemon.enabled: true` yourself in the tracked `.claude/lazy.settings.json`, then re-run `/lazy-core.install`. With the flag now `true`, the skill asks which machine and checkout should drive the project (`daemon.run_here`) if that map is still empty, and installs the supervisor once it is answered. To change which machine/checkout drives an already-enabled project, edit `daemon.run_here` directly — add or correct the `{"<hostname>": "<checkout path>"}` entry for the machine that should drive it, or remove an entry (or empty the map to `{}`) to stop a machine from driving it — then re-run `/lazy-core.install`; it reacts to the new map state without asking.
+**Fix**: Run `/lazy-core.daemon-setup`. It asks whether to enable the daemon, then which machine and checkout drive the project (`daemon.run_here`) if that map is still empty, and installs the supervisor once both are answered. To change which machine or checkout drives an already-enabled project, edit the `daemon.run_here` entry for that host and re-run `/lazy-core.daemon-setup` — it reacts to the new map state without asking, installing the supervisor where the map now points and removing this checkout's unit anywhere it no longer does.
 
 ---
 
 ## An old `daemon.run_here` value blocks the daemon after an upgrade
 
-**Symptom**: After upgrading `lazycortex-core`, `/lazy-core.install` reports **run-here-invalid** and asks the daemon question again, even though this checkout already answered it once — and the daemon refuses to start until you answer.
+**Symptom**: After upgrading `lazycortex-core`, `/lazy-core.daemon-setup` reports `invalid-shape` for `daemon.run_here` and asks the run-here question again, even though this checkout already answered it once — and the daemon refuses to start until you answer.
 
-**Likely cause**: `daemon.run_here` is recorded on disk as a plain boolean or a bare host list — the shape an older `lazy-core.install` wrote before the gate became a hostname-to-checkout-path map. Neither a boolean nor a bare hostname can say which checkout on a machine should drive the project (a machine commonly holds more than one clone of the same project), so the current install refuses to run the daemon against the old shape and asks again rather than guess.
+**Likely cause**: `daemon.run_here` is recorded on disk as a plain boolean or a bare host list — the shape an older install wrote before the gate became a hostname-to-checkout-path map. Neither a boolean nor a bare hostname can say which checkout on a machine should drive the project (a machine commonly holds more than one clone of the same project), so the daemon refuses to run against the old shape and asks again rather than guess.
 
-**Fix**: Answer the question `/lazy-core.install` asks — it writes the correct `{"<hostname>": "<checkout path>"}` map entry, preserving any other machine's entry already on record. Once the map carries this machine and checkout, re-runs proceed silently again.
+**Fix**: Answer the question `/lazy-core.daemon-setup` asks — it writes the correct `{"<hostname>": "<checkout path>"}` map entry, preserving any other machine's entry already on record. Once the map carries this machine and checkout, re-runs proceed silently again.
 
 ---
 
 ## The daemon refuses to start: `daemon.token_env is required`
 
-**Symptom**: The runtime daemon does not come up after `/lazy-core.install` or a supervisor restart -- the process exits immediately with a message like "daemon.token_env is required -- name the environment variable (seeded in `~/.claude/.env`) holding this daemon's OAuth token" or "`daemon.token_env` names `<var>` but it is set neither in the environment nor in `~/.claude/.env`". A checkout whose daemon worked fine before an upgrade now refuses to start at all.
+**Symptom**: The runtime daemon does not come up after `/lazy-core.daemon-setup` or a supervisor restart -- the process exits immediately with a message like "daemon.token_env is required -- name the environment variable (seeded in `~/.claude/.env`) holding this daemon's OAuth token" or "`daemon.token_env` names `<var>` but it is set neither in the environment nor in `~/.claude/.env`". A checkout whose daemon worked fine before an upgrade now refuses to start at all.
 
 **Likely cause**: The daemon now requires its own explicit OAuth token rather than running under whichever account the host happens to be logged into. `daemon.token_env`, in the tracked `.claude/lazy.settings.json[daemon]` block, names the environment variable that holds this daemon's token; without it, or with it pointing nowhere, the daemon refuses to start rather than silently spend under the machine's ambient login. This is a required field on every daemon-enabled checkout -- an existing daemon-enabled repo needs the field added once before its daemon can run again after upgrading.
 
-**Fix**: Add the token to `~/.claude/.env` (create the file if it doesn't exist yet) as `<YOUR_VAR_NAME>=<oauth-token>`, then set `daemon.token_env` to that variable's name in the tracked `.claude/lazy.settings.json[daemon]` block. Restart the supervisor to pick it up -- `launchctl kickstart -k gui/$UID/com.lazycortex.runtime.<repo-name>` on macOS, or `systemctl --user restart lazy-core-runtime-<repo-name>` on Linux. Each daemon-enabled checkout on a host can name a different variable, so multiple checkouts can spend under different accounts without contending over one shared login.
+**Fix**: Add the token to `~/.claude/.env` (create the file if it doesn't exist yet) as `<YOUR_VAR_NAME>=<oauth-token>`, then set `daemon.token_env` to that variable's name in the tracked `.claude/lazy.settings.json[daemon]` block. Restart the supervisor to pick it up -- `launchctl kickstart -k gui/$UID/com.lazycortex.runtime.<repo-id>` on macOS, or `systemctl --user restart lazy-core-runtime-<repo-id>` on Linux. Each daemon-enabled checkout on a host can name a different variable, so multiple checkouts can spend under different accounts without contending over one shared login.
 
 ---
 
 ## The daemon starts but the metrics endpoint never comes up
 
-**Symptom**: You enabled Prometheus metrics during `/lazy-core.install`, but nothing answers on the recorded port, and the daemon otherwise looks healthy.
+**Symptom**: You enabled Prometheus metrics through `/lazy-core.daemon-setup`, but nothing answers on the recorded port, and the daemon otherwise looks healthy.
 
 **Likely cause**: Another process — often another lazycortex daemon on the same host — is already bound to the port this checkout recorded. The daemon detects the conflict at startup, records an incident naming the holder (pid, command, and the owning repo if it is another registered daemon), and keeps running with metrics disabled rather than retry-looping.
 
-**Fix**: Re-run `/lazy-core.install` and go through the metrics step again — ports are allocated sequentially from 9464, skipping ports already recorded by other checkouts on the same host, so a re-run typically lands on a free one. Restart the daemon afterward to pick up the new port. To pick a port by hand instead, edit `metrics.port` in this checkout's gitignored `.claude/lazy.settings.local.json`, then restart the daemon.
+**Fix**: Re-run `/lazy-core.daemon-setup` — its metrics step reuses the recorded port unless a second registered daemon records the same one, and otherwise allocates a free one. Ports are allocated sequentially from 9464, skipping ports already recorded by other checkouts on the same host. Restart the daemon afterward to pick up the new port. To pick a port by hand instead, edit `metrics.port` in this checkout's gitignored `.claude/lazy.settings.local.json`, then restart the daemon.
 
 ---
 
@@ -332,13 +345,23 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ---
 
-## `/lazy-core.install` Step 12.5 reports `inbox-conflict` and no supervisor is installed
+## `/lazy-core.daemon-setup` Step 4 reports `inbox-conflict` and no supervisor is installed
 
-**Symptom**: `/lazy-core.install` reaches Step 12.5, reports `inbox-conflict`, and does not install the daemon supervisor for this checkout.
+**Symptom**: `/lazy-core.daemon-setup` reaches its inbox ownership guard (Step 4), reports `inbox-conflict`, and does not install the daemon supervisor or provision metrics for this checkout.
 
-**Likely cause**: Another checkout already registered on this host runs an inbox routine that resolves to the same physical directory as one you're about to register here. Installing a second supervisor would mean two daemons dispatching every file in that inbox twice.
+**Likely cause**: Another checkout already registered on this host runs an inbox routine that resolves to the same physical directory as one you're about to register here. Installing a second supervisor would mean two daemons dispatching every file in that inbox twice. The skill treats this as a refusal, never a warning, and never picks the winner for you.
 
-**Fix**: Decide which checkout should actually drive that inbox. In the tracked `.claude/lazy.settings.json[daemon][run_here]` of the project that should not, remove this host's entry (or empty the map to `{}`), then re-run `/lazy-core.install`. The install reads the map fresh, sees this host/checkout no longer named, and tears down any supervisor unit it already installed there instead of starting one.
+**Fix**: Decide which checkout should actually drive that inbox. In the tracked `.claude/lazy.settings.json[daemon][run_here]` of the project that should not, remove this host's entry (or empty the map to `{}`), then re-run `/lazy-core.daemon-setup`. The skill reads the map fresh, sees this host/checkout no longer named, and tears down any supervisor unit it already installed there instead of starting one.
+
+---
+
+## `/lazy-core.install` removed a supervisor unit, or a second machine started its own daemon
+
+**Symptom**: `/lazy-core.install` reports `stray-unit-removed` for the supervisor unit of a checkout, or — the mirror image — a second machine or checkout has started its own daemon for the same project.
+
+**Likely cause**: `/lazy-core.install` never installs a unit, but it does remove one without asking when `daemon.enabled` is `true` and the tracked `daemon.run_here` map names another host or another checkout instead of this one. A unit for a checkout the project does not name is a leak from a synced overlay or a stale install, and leaving it loaded keeps a duplicate daemon alive. A second daemon on another machine typically means `daemon.run_here` is still a boolean or a bare host list left by an older install, which cannot say which checkout drives the project.
+
+**Fix**: If the removal was wrong, point this host's `daemon.run_here` entry at this checkout and re-run `/lazy-core.daemon-setup` to install the unit again. If a second daemon is running, replace the map with a hostname-to-path map naming the one driving checkout (`/lazy-core.daemon-setup` asks and writes it), then re-run it on the others — each removes its own stray unit and never touches a unit that belongs to a different checkout.
 
 ---
 
@@ -515,9 +538,9 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Symptom**: `/lazy-core.audit`'s daemon liveness check (Agent D) reports WARN on the very first run after `/lazy-core.install`, even though nothing appears broken.
 
-**Likely cause**: This is expected — the daemon supervisor was just installed and has not been started yet, so there is no live process or recent log line for the check to confirm against.
+**Likely cause**: This is expected — the daemon supervisor was just installed by `/lazy-core.daemon-setup` and has not been started yet, so there is no live process or recent log line for the check to confirm against.
 
-**Fix**: Start the daemon via the supervisor mechanism `/lazy-core.install` offered — `launchctl bootstrap` on macOS or `systemctl --user start` on Linux — then re-run `/lazy-core.audit` once the daemon has had a chance to write its first log line.
+**Fix**: Start the daemon via the supervisor `/lazy-core.daemon-setup` installed — `launchctl bootstrap` on macOS or `systemctl --user start` on Linux — then re-run `/lazy-core.audit` once the daemon has had a chance to write its first log line.
 
 ---
 
@@ -565,9 +588,9 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Symptom**: `/lazy-core.doctor` offers to restart the daemon via `systemctl --user restart`, but the fix fails with "Unit not found".
 
-**Likely cause**: The systemd user unit was never installed for this checkout — this happens on a first-time daemon setup where the unit-install step of `/lazy-core.install` was skipped or interrupted.
+**Likely cause**: The systemd user unit was never installed for this checkout — this happens when `/lazy-core.daemon-setup` was never run for this checkout, or was interrupted before its supervisor step.
 
-**Fix**: Run `/lazy-core.install` to install the unit file and register it (`systemctl --user daemon-reload`), then re-run `/lazy-core.doctor` to confirm the daemon restarts cleanly.
+**Fix**: Run `/lazy-core.daemon-setup` to install the unit file and register it, then re-run `/lazy-core.doctor` to confirm the daemon restarts cleanly.
 
 ---
 
@@ -1119,13 +1142,13 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ## The runtime daemon appears stale after install
 
-**Symptom**: `/lazy-core.doctor` reports "runtime daemon appears stale" even after running `/lazy-core.install` and setting up the supervisor. Re-running the doctor immediately after install still shows the same warning.
+**Symptom**: `/lazy-core.doctor` reports "runtime daemon appears stale" even after running `/lazy-core.daemon-setup` and installing the supervisor. Re-running the doctor immediately after install still shows the same warning.
 
-**Likely cause 1**: On macOS, the launchd plist was written to `~/Library/LaunchAgents/` but has not been loaded yet. A `launchctl bootstrap` step is required before `launchctl kickstart` can start the daemon — `/lazy-core.install` now runs `launchctl bootout` (harmless when nothing was loaded yet) immediately before `bootstrap`, so a re-render always takes effect instead of `launchctl load` silently keeping an already-loaded label's old plist in memory.
+**Likely cause 1**: On macOS, the launchd plist was written to `~/Library/LaunchAgents/` but has not been loaded yet. A `launchctl bootstrap` step is required before `launchctl kickstart` can start the daemon — `/lazy-core.daemon-setup` runs `launchctl bootout` (harmless when nothing was loaded yet) immediately before `bootstrap`, so a re-render always takes effect instead of `launchctl load` silently keeping an already-loaded label's old plist in memory.
 
 **Likely cause 2**: The daemon started successfully but has not yet written a JSONL log line — this takes up to one polling interval (`polling_interval_sec`, default 5 seconds). The liveness check uses log recency as one of its signals.
 
-**Fix for cause 1**: Run `/lazy-core.doctor`. When it reports the daemon as stalled, accept the "Restart via supervisor" fix offer (Fix L1). If `launchctl kickstart` fails with "No such process", the plist is not loaded — run `launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.lazycortex.runtime.<repo-name>.plist` manually, or just re-run `/lazy-core.install` (it does the equivalent `bootout`-then-`bootstrap` pair for you), then confirm the supervisor is registered.
+**Fix for cause 1**: Run `/lazy-core.doctor`. When it reports the daemon as stalled, accept the "Restart via supervisor" fix offer (Fix L1). If `launchctl kickstart` fails with "No such process", the plist is not loaded — run `launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.lazycortex.runtime.<repo-name>.plist` manually, or just re-run `/lazy-core.daemon-setup` (it does the equivalent `bootout`-then-`bootstrap` pair for you), then confirm the supervisor is registered.
 
 **Fix for cause 2**: Wait one polling cycle (5 seconds by default), then re-run `/lazy-core.doctor` to confirm the daemon is now live.
 

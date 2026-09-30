@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, likely causes, and fixes for lazycortex-obsidian — install, iconize, diagram render, plugin updates, tag pages, and vault manifest capture/deploy.
-last_regen: 2026-09-28
+last_regen: 2026-09-30
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree branching first on which skill aborted or misbehaved (install / iconize-install / iconize-config / iconize-sync / diagram-install / update-plugin / gen-tag-pages); each branch then splits on the specific symptom; each leaf names the troubleshooting entry that resolves it"
@@ -16,8 +16,8 @@ source_skills:
   - lazy-obsidian.audit
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: e6f72e6c9fd925c00e50fcee5fc5b447600cce7a
-surface_sha: d96a67f539ba8e65ff07b93edf07c77842c9bc93ef42c886668c5d444971e159
+source_sha: 1581fe03ce1f6ca1468bcf2fbb3c2a71e0e2ba9b
+surface_sha: 36cdd61773f0da26bc3a7ff50043d724b54b6eeb2e174982dde8ebc53e6013ed
 ---
 # Troubleshooting
 
@@ -295,9 +295,9 @@ surface_sha: d96a67f539ba8e65ff07b93edf07c77842c9bc93ef42c886668c5d444971e159
 
 **Symptom**: `.obsidian/` rebuilds successfully, but files and folders show no icons immediately afterward.
 
-**Likely cause**: Expected — icons are painted live by Iconize and the bundled `iconize-reloader` from note frontmatter, not written by the deploy skill itself.
+**Likely cause**: Usually expected — deploy restores Iconize's settings, but the per-path icon entries are painted live by Iconize and the bundled `iconize-reloader` from note frontmatter. If icons stay missing after Obsidian opens, Iconize's frontmatter settings are wrong: the manifest was captured before Iconize settings were recorded, so it carries none for Iconize.
 
-**Fix**: Open Obsidian (it repaints on load), or run `/lazy-obsidian.iconize-sync reconcile` to force the frontmatter reconciliation immediately.
+**Fix**: Open Obsidian (it repaints on load), or run `/lazy-obsidian.iconize-sync reconcile` to force the frontmatter reconciliation immediately. If icons still do not appear, check that `.obsidian/plugins/obsidian-icon-folder/data.json` has `iconInFrontmatterEnabled: true` and the field names `iconize_icon` / `iconize_color` under `settings` — `iconize-reloader` corrects them on load and whenever Iconize rewrites the file — then re-run `/lazy-obsidian.capture` so the manifest records them.
 
 ---
 

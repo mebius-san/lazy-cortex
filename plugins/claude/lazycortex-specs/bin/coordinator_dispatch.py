@@ -126,6 +126,7 @@ _CATALOG_EXPERT = "spec.catalog-coordinator"
 # The guideline role folded into context via `gate_dispatch.collect_guideline_paths`, per
 # `lazy-spec.coordination-playbook.md` § 2 layer 3 (`products[<key>].guidelines.coordinator` + `"*"`).
 _COORDINATOR_ROLE = "coordinator"
+_GUIDELINES_KEY = "guidelines"
 
 # Bot identity for this worker's own commit (frontmatter stamps, warning lines) — the `@bot.`
 # substring is what the coordinator's own self-suppression check (playbook § 1) relies on to
@@ -448,7 +449,7 @@ def _has_operator_authored_recently(repo_root: Path, item: dict, cursor: str | N
     ranged = subprocess.run(
         ["git", "log", "--format=%ae", "-n", str(_AUTHOR_LOOKBACK_COMMITS),
          f"{cursor}..{sha}", "--", path],
-        cwd = str(repo_root), capture_output = True, text = True, check = False,
+        cwd = str(repo_root), capture_output = True, text = True, check = False, encoding = "utf-8",
     )
     if ranged.returncode == 0:
       return any(_BOT_MARK not in email for email in ranged.stdout.splitlines())
@@ -460,7 +461,7 @@ def _has_operator_authored_recently(repo_root: Path, item: dict, cursor: str | N
   # takes over the moment the first dispatch stamps it
   out = subprocess.run(
       ["git", "log", "--format=%ae", "-n", str(_AUTHOR_LOOKBACK_COMMITS), sha, "--", path],
-      cwd = str(repo_root), capture_output = True, text = True, check = False,
+      cwd = str(repo_root), capture_output = True, text = True, check = False, encoding = "utf-8",
   ).stdout
   for email in out.splitlines():
     if _BOT_MARK not in email:
@@ -503,7 +504,7 @@ def _is_ancestor(repo_root: Path, ancestor: str, descendant: str) -> bool:
   """
   return subprocess.run(
       [ "git", "merge-base", "--is-ancestor", ancestor, descendant ],
-      cwd = str(repo_root), capture_output = True, text = True, check = False,
+      cwd = str(repo_root), capture_output = True, text = True, check = False, encoding = "utf-8",
   ).returncode == 0
 
 
@@ -522,7 +523,7 @@ def _read_dispatch_cursor(repo_root: Path, asset_note: Path) -> str | None:
   """
   # an absent or unreadable store is the "nothing recorded yet" answer, never a failure
   try:
-    data = json.loads(_cursor_store_path(repo_root).read_text())
+    data = json.loads(_cursor_store_path(repo_root).read_text(encoding = "utf-8"))
   except (OSError, json.JSONDecodeError):
     return None
 
@@ -552,7 +553,7 @@ def _stamp_dispatch_cursor(repo_root: Path, asset_note: Path, sha: object) -> No
   # an absent or unreadable store starts empty — it is runtime scratch and re-derives itself
   path = _cursor_store_path(repo_root)
   try:
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding = "utf-8"))
   except (OSError, json.JSONDecodeError):
     data = {}
 
@@ -564,7 +565,7 @@ def _stamp_dispatch_cursor(repo_root: Path, asset_note: Path, sha: object) -> No
   data[spec_job_markers.note_key(repo_root, asset_note)] = sha
   path.parent.mkdir(parents = True, exist_ok = True)
   tmp = path.with_suffix(path.suffix + _CURSOR_TMP_SUFFIX)
-  tmp.write_text(json.dumps(data, indent = 2, sort_keys = True) + "\n")
+  tmp.write_text(json.dumps(data, indent = 2, sort_keys = True) + "\n", encoding = "utf-8")
   os.replace(tmp, path)
 
 
@@ -673,7 +674,7 @@ def _resolve_doc_transition(sibling_doc: Path, frontmatter: dict) -> tuple[str, 
     sibling is parked, has never carried a result, or matches the marker.
   """
   basename = sibling_doc.name
-  sibling_fm, _ = flip_gate.parse_frontmatter(sibling_doc.read_text())
+  sibling_fm, _ = flip_gate.parse_frontmatter(sibling_doc.read_text(encoding = "utf-8"))
 
   # guard: a parked document's verdict transitions nothing until it returns to `draft`
   if str(sibling_fm.get(StageKey.STAGE, "")).strip() == Stage.DEFERRED:
@@ -715,7 +716,7 @@ def _is_member_signal_eligible(member: Path) -> bool:
   # guard: a member gone between scan and dispatch carries no signal
   if not member.is_file():
     return False
-  frontmatter, _ = flip_gate.parse_frontmatter(member.read_text())
+  frontmatter, _ = flip_gate.parse_frontmatter(member.read_text(encoding = "utf-8"))
   return not flip_gate.is_true(frontmatter, SpecKey.REVIEW_ACTIVE)
 
 
@@ -1182,7 +1183,7 @@ def _owner_status_note(start: Path, top: Path) -> Path | None:
   for candidate in (start, *start.parents):
     note = candidate / f"{candidate.name}.md"
     if note.is_file():
-      frontmatter, _ = flip_gate.parse_frontmatter(note.read_text())
+      frontmatter, _ = flip_gate.parse_frontmatter(note.read_text(encoding = "utf-8"))
       if frontmatter.get(SpecKey.ROLE) == _SPEC_ROLE_STATUS:
         return note
 
@@ -1232,9 +1233,9 @@ def scan_dependents(asset_dir: Path) -> list[Path]:
   names `asset_dir` (C2's reverse edge — nothing else ever wakes a dependent asset when the
   dependency it is waiting on becomes ready).
 
-  One hop only, and resolved through `gate_tick.target_asset_dir` — the same primitive
-  `_build_bundle`'s own `spec_depends_on` fold-in uses — rather than a bare string compare, so
-  any token spelling that fold-in already accepts also wakes the dependent here. The walk
+  One hop only, and resolved through `gate_tick.target_asset_dir` — the same resolution rule
+  applied everywhere else `spec_depends_on` tokens are read — rather than a bare string compare,
+  so any token spelling accepted elsewhere also wakes the dependent here. The walk
   covers the whole product tree, so a dependent nested inside another asset, or sitting straight
   at the product root, is found like any other; the product root comes from the settings (the
   longest matching `spec_path`, so a nested product scans its own tree only), falling back to the
@@ -1480,8 +1481,11 @@ def _build_level_bundle(
   documents a `child-reapproved` wake needs already ride in that child layer. A level note
   declares no asset type, no tools, no targets and no dependencies, so none of those is read;
   the playbook is resolved off the type registry by the note's role and rides the bundle as a
-  protocol reference rather than as a copied file. The product's `coordinator` + `"*"` guidelines
-  ride in the payload as paths the expert reads in place, exactly as they do for an asset.
+  protocol reference rather than as a copied file. Guidelines ride in the payload as paths the
+  expert reads in place, exactly as they do for an asset: a product's own note carries its
+  `coordinator` + `"*"` guidelines, while the catalog root's own note carries the catalog-wide
+  `spec.guidelines` for the `coordinator` role plus `"*"` instead; a declared guideline path that
+  does not resolve is reported among the bundle's warnings.
 
   Args:
     repo_root: The repository root the CLI resolves settings and its own binary against.
@@ -1550,6 +1554,13 @@ def _build_level_bundle(
       product_note = _resolve_product_note_path(repo_root, record)
       if product_note is not None and product_note.is_file():
         context.append(_to_rel_path(repo_root, product_note))
+
+    # the catalog root stands above every product, so only the catalog-wide guidelines reach it
+    guideline_paths, guideline_warnings = gate_dispatch.collect_guideline_paths(
+        repo_root, { _GUIDELINES_KEY: resolve_product.load_catalog_guidelines(repo_root) },
+        _COORDINATOR_ROLE,
+    )
+    warnings.extend(guideline_warnings)
 
   # the released asset's own folder, resolved under this level's product root the way a
   # `spec_targets` token is — the folder rather than the note alone, so the coordinator reads
@@ -2040,7 +2051,7 @@ def coordinator_dispatch(  # pylint: disable=too-many-branches
   if item.get(_ITEM_PATH) and (not item.get(_ITEM_SHA) or not item.get(_ITEM_AUTHOR_EMAIL)):
     head = subprocess.run(
         ["git", "log", "-1", "--format=%H%x00%ae", "--", str(item[_ITEM_PATH])],
-        cwd = str(repo_root), capture_output = True, text = True, check = False,
+        cwd = str(repo_root), capture_output = True, text = True, check = False, encoding = "utf-8",
     )
     if head.returncode == 0 and head.stdout.strip():
       sha, _, email = head.stdout.strip().partition("\x00")
@@ -2622,7 +2633,7 @@ def _rekey_to_own_commit(repo_root: Path, item: dict, rel_path: str) -> dict:
   head = subprocess.run(
       [ "git", "log", "-1", "--format=%H%x00%an%x00%ae", *([ sha ] if isinstance(sha, str) and sha else []),
         "--", rel_path ],
-      cwd = str(repo_root), capture_output = True, text = True, check = False,
+      cwd = str(repo_root), capture_output = True, text = True, check = False, encoding = "utf-8",
   )
 
   # guard: no commit to key off — the range-level fields stay
@@ -2667,7 +2678,7 @@ def _dispatch_single_path(changed: Path, item: dict, today: str | None) -> dict:
 
   # the owner's own role picks the ladder: an asset's status note runs the asset one, a product's
   # or the catalog root's level note the level one, and a note carrying neither is nobody's object
-  frontmatter, _ = flip_gate.parse_frontmatter(owner.read_text())
+  frontmatter, _ = flip_gate.parse_frontmatter(owner.read_text(encoding = "utf-8"))
   role = frontmatter.get(SpecKey.ROLE)
 
   # guard: a note carrying no coordination role is nobody's object

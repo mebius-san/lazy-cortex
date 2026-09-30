@@ -459,7 +459,7 @@ class CoreDispatch:
       capture_output = True,
       text = True,
       env = env,
-      check = False,
+      check = False, encoding = "utf-8",
     )
 
     # guard: non-zero exit from core — surface stdout+stderr for diagnosis

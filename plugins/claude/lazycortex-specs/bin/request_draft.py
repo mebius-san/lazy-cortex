@@ -344,7 +344,7 @@ def main(argv: list[str]) -> int:
 
   # the body reaches the verb as text, so a caller holding it in memory needs no temporary file
   print(json.dumps(draft(
-      repo, source = source, title = args.title, body = args.body.read_text(),
+      repo, source = source, title = args.title, body = args.body.read_text(encoding = "utf-8"),
       author_name = args.author_name, author_email = args.author_email,
   )))
   return 0

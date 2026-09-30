@@ -267,7 +267,7 @@ def render(template_name: str, vars: dict[str, object]) -> str:
   # rather than shipping a config that looks plausible but is subtly wrong.
 
   # read the raw template text and hand it to the mini template engine for substitution
-  return _Template((TEMPLATE_DIR / template_name).read_text(), vars).render()
+  return _Template((TEMPLATE_DIR / template_name).read_text(encoding = "utf-8"), vars).render()
 
 
 # waiver: `vars` is the public substitution-dict param name; shadowing builtin vars() is harmless,
@@ -629,7 +629,7 @@ def load_service_macos(plist_path: Path) -> tuple[bool, str]:
   try:
     proc = subprocess.run(
       [ "launchctl", "bootstrap", f"gui/{os.getuid()}", str(plist_path) ],
-      capture_output = True, text = True, check = False,
+      capture_output = True, text = True, check = False, encoding = "utf-8",
     )
   except OSError:
     # waiver: one-off human-facing message
@@ -679,7 +679,7 @@ def unload_service_macos(plist_path: Path) -> tuple[bool, str]:
   try:
     proc = subprocess.run(
       [ "launchctl", "bootout", f"gui/{os.getuid()}", str(plist_path) ],
-      capture_output = True, text = True, check = False,
+      capture_output = True, text = True, check = False, encoding = "utf-8",
     )
   except OSError:
     # waiver: one-off human-facing message
@@ -719,7 +719,7 @@ def load_service_linux(*, unit_name: str = _SYSTEMD_UNIT) -> tuple[bool, str]:
   try:
     proc = subprocess.run(
       [ "systemctl", "--user", "enable", "--now", unit_name ],
-      capture_output = True, text = True, check = False,
+      capture_output = True, text = True, check = False, encoding = "utf-8",
     )
   except OSError:
     # waiver: one-off human-facing message
@@ -759,7 +759,7 @@ def unload_service_linux(unit_name: str = _SYSTEMD_UNIT) -> tuple[bool, str]:
   try:
     proc = subprocess.run(
       [ "systemctl", "--user", "disable", "--now", unit_name ],
-      capture_output = True, text = True, check = False,
+      capture_output = True, text = True, check = False, encoding = "utf-8",
     )
   except OSError:
     # waiver: one-off human-facing message
@@ -958,7 +958,7 @@ def read_local_scrape_targets() -> list[dict[str, object]]:
   # waiver: external core-CLI subcommand and flag, not internal keys
   proc = subprocess.run(
     [ sys.executable, str(resolve_core_cli()), "daemon-list", "--json" ],
-    capture_output = True, text = True, check = False, timeout = _CORE_CLI_TIMEOUT_SEC,
+    capture_output = True, text = True, check = False, timeout = _CORE_CLI_TIMEOUT_SEC, encoding = "utf-8",
   )
 
   # guard: a failing registry call must abort loudly, not render an empty shipper config
@@ -1094,7 +1094,9 @@ def detect_existing_coverage(*, targets: list[dict[str, object]] | None = None) 
 
   # a host without its service manager has no supervisor that could hold the unit
   try:
-    unit_present = subprocess.run(unit_probe_argv, capture_output = True, text = True, check = False).returncode == 0
+    unit_present = subprocess.run(
+      unit_probe_argv, capture_output = True, text = True, check = False, encoding = "utf-8",
+    ).returncode == 0
   except OSError:
     unit_present = False
 
@@ -1110,7 +1112,9 @@ def detect_existing_coverage(*, targets: list[dict[str, object]] | None = None) 
     # guard: no pgrep on this host — no process evidence to weigh
     # waiver: external pgrep invocation, not internal keys
     try:
-      probe = subprocess.run([ "pgrep", "-f", name ], capture_output = True, text = True, check = False)
+      probe = subprocess.run(
+        [ "pgrep", "-f", name ], capture_output = True, text = True, check = False, encoding = "utf-8",
+      )
     except OSError:
       continue
 
@@ -1136,7 +1140,7 @@ def detect_existing_coverage(*, targets: list[dict[str, object]] | None = None) 
     try:
       probe = subprocess.run(
         [ "lsof", "-nP", f"-iTCP:{port}", "-sTCP:ESTABLISHED" ],
-        capture_output = True, text = True, check = False,
+        capture_output = True, text = True, check = False, encoding = "utf-8",
       )
     except OSError:
       continue
@@ -1180,7 +1184,9 @@ def write_scrape_file_via_core(*, out: Path | None = None) -> dict[str, object]:
   # hand the write to the core CLI, forwarding the output override when one was given
   # waiver: external core-CLI subcommand and flag, not internal keys
   argv = [ sys.executable, str(resolve_core_cli()), "metrics-scrape-file" ] + ([ "--out", str(out) ] if out else [])
-  proc = subprocess.run(argv, capture_output = True, text = True, check = False, timeout = _CORE_CLI_TIMEOUT_SEC)
+  proc = subprocess.run(
+    argv, capture_output = True, text = True, check = False, timeout = _CORE_CLI_TIMEOUT_SEC, encoding = "utf-8",
+  )
 
   # guard: a failing scrape-file write must surface, not pass silently
   if proc.returncode != 0:
@@ -1214,6 +1220,7 @@ def _read_grafana_process_config() -> tuple[Path | None, Path | None]:
     # waiver: external ps flags, not internal keys
     proc = subprocess.run(
       [ "ps", "-Ao", "args=" ], capture_output = True, text = True, check = False, timeout = _PS_TIMEOUT_SEC,
+      encoding = "utf-8",
     )
   except (OSError, subprocess.SubprocessError):
     return None, None

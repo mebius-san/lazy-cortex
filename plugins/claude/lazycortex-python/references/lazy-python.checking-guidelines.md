@@ -24,23 +24,23 @@ After making code changes, **always** verify in this exact order. Every step goe
 
 1. **Lint + type-check each changed file**:
    ```bash
-   sh ./cli/chk-py all <file>.py -q
+   bash ./cli/chk-py all <file>.py -q
    ```
-   If more than three files in the same module changed, target the module directory instead of one-by-one — `sh ./cli/chk-py all <module-dir>/ -q`.
+   If more than three files in the same module changed, target the module directory instead of one-by-one — `bash ./cli/chk-py all <module-dir>/ -q`.
 2. **Full-project lint + type-check** before declaring done:
    ```bash
-   sh ./cli/chk-py all -q
+   bash ./cli/chk-py all -q
    ```
 3. **Tests**: run the relevant selection only **after** all checks pass, by bare module name — never a path, never a `.py` file:
    ```bash
-   sh ./cli/tst-py <module> -q
+   bash ./cli/tst-py <module> -q
    ```
 
 Do not run tests before lint and type-check are clean — typing errors mask test failures and create wasted iteration.
 
 4. **Guideline review**: run the reviewer phase once the tests pass — it covers what no checker can (comment density, block structure, naming semantics, guideline conformance):
    ```bash
-   sh ./cli/chk-py review
+   bash ./cli/chk-py review
    ```
    Unlike steps 1-3, this one does not belong in the edit loop: it runs at the end of a logical piece of work, and is mandatory at the end of a full cycle of planned work. See `## Guideline review phase` below.
 

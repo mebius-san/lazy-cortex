@@ -10,7 +10,7 @@ This file is the law of the wake on which `spec.coordinator` works an asset whos
 
 `spec_asset_type: content` — the asset describes **one** game entity: a race, a skill, an item, an enemy class, a faction. Not a set, not a subsystem, not a mechanic — a single unit of content that is then entered into the project's data files against its schemas.
 
-- **Start document** — `design.md`, `spec_doc_type: design`, and it is the document of definition; its sections are the template's. An opt-in `vision.md` may precede it through `Write vision`, and nothing else is authored on this type: a unit of content has no separate "how it is built" layer — the build is dictated by the project's schemas, not by the asset.
+- **Start document** — `design.md`, `spec_doc_type: content-design`, and it is the document of definition; its sections are the template's. It defines the entity by decisions, not by values: what the entity is, why it is shaped this way, and, group of fields by group, what its data must express, stated in words. The values themselves live only in the data files, and the design never copies a value, a number, or a generated text out of them — a design that mirrors its data is a second source of truth that the first edit of the data splits off. An opt-in `vision.md` may precede it through `Write vision`, and nothing else is authored on this type: a unit of content has no separate "how it is built" layer — the build is dictated by the project's schemas, not by the asset.
 - **`cancelled` is refused on `design.md`** — the asset is abandoned as a whole through `spec_cancelled`.
 - **Location is not a fact of the type.** The declaration's `default_path` places new content assets at the product root by default, but the asset is legal anywhere: inside the folder of a feature that introduces a family of entities, or next to its siblings. Type resolution reads `spec_asset_type`, never a path; the asset boundary stays the folder whose folder-note carries `spec_role: status`.
 - **Tools are known from creation.** The type declaration names `default_tools: ["data"]`, and the scaffold writes that list into `spec_tools` when the asset is created. The tool determination that happens after design approval on other types has already happened here: a unit of content is made by entering data. The `test` tool is added by the same rules as any other — a coordinator decision, when the entity warrants an executed check, never automatically.
@@ -35,7 +35,7 @@ The gates are a strict ladder — each requires the one before it. The `lazy-spe
 
 | Checkbox | Appears when | On tick |
 |---|---|---|
-| `Write design` | asset exists AND `design.md` doesn't exist | seed `design.md:design`, then the seed-then-start flow below |
+| `Write design` | asset exists AND `design.md` doesn't exist | seed `design.md:content-design`, then the seed-then-start flow below |
 | `Write vision` | asset exists AND `design.md` is not `approved` AND `vision.md` doesn't exist | seed `vision.md:vision`, then the seed-then-start flow below |
 | `Publish` | `spec_released` true AND `spec_draft` still true | no job — the tick clears `spec_draft` through `note-set-key` and the coordinator removes the checkbox |
 
@@ -57,10 +57,10 @@ The implementation checkbox (`Start implementation (data)`) and the testing one 
 
 ## Data conformance to the design
 
-The approved design is the source of truth for the data, and a divergence between them is always resolved in one direction: **by work, never by rewriting the design after the fact**.
+The approved design is the source of truth for what the data must express; the data is the only place its values live. The data conforms when it expresses every decision the design states — the concrete values are the data writer's choice. A divergence between them is always resolved in one direction: **by work, never by rewriting the design after the fact**.
 
-- The data diverged from the approved design (wrong number, wrong link, a missing field) — that is a defect in the work: the tool's report goes back for rework through a comment in the acceptance cycle, same job, same expert.
-- The data writer disagrees with the design itself (the number breaks balance, the link is impossible under the schema) — that is an objection to the design, and it travels back into the design through review: the expert records the disagreement in its report, the coordinator returns `design.md` to review rather than settling the argument itself. Data written "the way it should be" against an approved design is the same finding even when the writer is substantively right.
+- The data fails a decision of the approved design (a value that does not express it, a wrong link, a missing field) — that is a defect in the work: the tool's report goes back for rework through a comment in the acceptance cycle, same job, same expert.
+- The data writer disagrees with a decision of the design itself (no value expressing it keeps the balance, the link is impossible under the schema) — that is an objection to the design, and it travels back into the design through review: the expert records the disagreement in its report, the coordinator returns `design.md` to review rather than settling the argument itself. Data written "the way it should be" against an approved design is the same finding even when the writer is substantively right.
 - An approved design that turns out to be unimplementable is not grounds for a `[!question]` asking whether a deviation is allowed: the question goes into the design's review, where the document has its history and its reviewers.
 
 This is a standing judgment, not a one-off: every "data versus design" conflict is walked through this fork before the coordinator writes a line into `# Status brief`.

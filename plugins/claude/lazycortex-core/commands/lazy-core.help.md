@@ -13,6 +13,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 - `lazy-core.agent-models` — interactively assign model tiers (haiku/sonnet/opus/inherit) to every dispatchable subagent missing from `lazy.settings.json`; routes each entry to its structurally-correct scope.
 - `lazy-core.agent-models-seed` — dispatched by each plugin's install skill to seed that plugin's tiers from core's `default-tiers.json`; never overwrites a value you chose. Not for direct use.
 - `lazy-core.audit` — read-only report of what gets loaded into context at startup, by category and size.
+- `lazy-core.daemon-setup` — enable the background daemon for this project, name the one checkout that drives it, install or remove its launchd / systemd unit, and provision its metrics endpoint. Run rarely; install never touches the daemon.
 - `lazy-core.daemon-authoring` — author a new LLM-calling daemon or periodic process born with the rate-limit guard: routine-vs-standalone decision, `lazy-claude` wiring, launchd skeleton.
 - `lazy-core.doctor` — health check across rules, agents, skills, commands, settings, memory, hooks, CLAUDE.md. Delegates to sibling audits.
 - `lazy-core.git-status` — read-only: who currently holds the per-repo git staging lock, and whether the guard hook's heuristics will break it on their own.
@@ -80,7 +81,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 - [setup-routine](https://github.com/mebius-san/lazy-cortex/blob/main/plugins/claude/lazycortex-core/help/walkthroughs/setup-routine.md) — Register a dot-namespaced periodic routine with the runtime daemon and remove it cleanly when it is no longer needed.
 - [setup-runtime](https://github.com/mebius-san/lazy-cortex/blob/main/plugins/claude/lazycortex-core/help/walkthroughs/setup-runtime.md) — Bootstrap the per-repo runtime daemon and know how to recover it with /lazy-runtime.recover from any of its halt reasons — dirty tree, remote sync, a repeating bot commit, a shared inbox, bad routine config, or a closed rate-limit window.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/plugins/claude/lazycortex-core/help/troubleshooting.md) — Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/plugins/claude/lazycortex-core/help/faq.md) — Non-obvious answers on install, LLM providers, the runtime daemon and experts, routines, scaffolding, git staging, and MCP permissions.
+- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/plugins/claude/lazycortex-core/help/faq.md) — Non-obvious answers on install, daemon setup, LLM providers, the runtime daemon and experts, routines, scaffolding, git staging, and MCP permissions.
 
 Offline copy at `~/.claude/plugins/cache/.../plugins/claude/lazycortex-core/help/`.
 <!-- help-block:end -->

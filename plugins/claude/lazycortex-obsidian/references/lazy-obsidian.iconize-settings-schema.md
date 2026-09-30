@@ -40,6 +40,12 @@ The template at `plugins/claude/lazycortex-obsidian/templates/obsidian/plugin-se
 
 `/lazy-obsidian.update-plugin obsidian-icon-folder` is the applier — it deep-merges that override block onto the vault's `obsidian-icon-folder/data.json` after every binary sync. The plugin maintainer's own audit tooling re-verifies those three keys against this reference file, to catch drift if a future Iconize release renames them; `/lazy-obsidian.audit` does not — it is scoped to vault-manifest drift alone.
 
+## Vault manifest and the reloader safeguard
+
+`/lazy-obsidian.capture` records Iconize's `data.json` like any other plugin's settings, minus secrets, but keeps only the settings-like top-level keys — `settings`, `rules`, `recentlyUsedIcons` (the reloader's `RESERVED_KEYS`). Every other top-level key is a per-path icon entry that `iconize-reloader` rebuilds from note frontmatter, so it is dropped. `/lazy-obsidian.deploy` writes the captured payload back as Iconize's `data.json`, and `/lazy-obsidian.audit` compares it against the live file's settings-like keys.
+
+`iconize-reloader` corrects the three keys above whenever Iconize's `data.json` exists and disagrees with the reloader's configured field names: on load, and on desktop whenever the file is rewritten. It also updates Iconize's in-memory settings so Iconize's next save does not bring the old values back. It never creates the file when Iconize has not written one yet.
+
 ## Icon-map key: `paint_roots`
 
 The three keys above configure Iconize itself. The worker's own configuration lives in a separate file, the icon-map at `.claude/iconize/obsidian-icon-map.json`, whose resolver semantics are documented in `lazy-obsidian.iconize-protocol.md`. One of its top-level keys governs which part of the vault is configured at all, so it is recorded here beside the settings it interacts with.

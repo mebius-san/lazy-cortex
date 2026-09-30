@@ -159,7 +159,7 @@ def _read_note_frontmatter(path: Path) -> dict | None:
     `---` frontmatter marker, or lacks a closing `---` line.
   """
   try:
-    text = path.read_text()
+    text = path.read_text(encoding = "utf-8")
   except OSError:
     return None
 
@@ -302,7 +302,7 @@ def regen_local_tag_file(expert_dir: Path, topic: str) -> None:
     return
   tags_dir.mkdir(parents = True, exist_ok = True)
   lines = [ f"- `../{name}` — {t} — {summary}" for (name, t, summary) in matching ]
-  tag_file.write_text("\n".join(lines) + "\n")
+  tag_file.write_text("\n".join(lines) + "\n", encoding = "utf-8")
 
 
 def regen_global_tag_file(memory_root: Path, topic: str) -> None:
@@ -348,7 +348,7 @@ def regen_global_tag_file(memory_root: Path, topic: str) -> None:
       global_tag_file.unlink()
     return
   global_tag_file.parent.mkdir(parents = True, exist_ok = True)
-  global_tag_file.write_text("\n".join(holders) + "\n")
+  global_tag_file.write_text("\n".join(holders) + "\n", encoding = "utf-8")
 
 
 def regen_touched_tags(memory_root: Path, expert: str, topics: Iterable[str]) -> None:

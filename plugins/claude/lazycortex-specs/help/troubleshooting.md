@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-09-29
+last_regen: 2026-09-30
 no_diagram: true
 source_skills:
   - lazy-spec.add-asset-type
@@ -25,8 +25,8 @@ source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
   - lazy-spec.audit
-source_sha: c7e7a48576c11be04b0a05c4b0198afd4fb3900f
-surface_sha: cd8bfa75ba7c5a6c7dc1e87c087fbcd1e28eef9fd67d7d0f182c8e1895a26cb5
+source_sha: fa5b0224e74389a27865661de6432f0a2e5514f1
+surface_sha: a990fc0831051b7d6248f12e74406dbdd4b22e25c2a2a2efc2bcaf0d2873d4aa
 ---
 # Troubleshooting
 
@@ -229,6 +229,26 @@ surface_sha: cd8bfa75ba7c5a6c7dc1e87c087fbcd1e28eef9fd67d7d0f182c8e1895a26cb5
 **Likely cause**: The writer round never folded the operator's verdict on the candidate before the document shipped as approved, so the approval carried a live questionnaire forward into the approved text. This check is scoped to living docs — a `[!decision-candidate]` in a tool's report document (`code-report` / `test-report`, or any other declared report type) is a standing to-do, never a finding.
 
 **Fix**: Reopen the document's review at the writer round (`/lazy-review.start`) so the callout is folded into the approved text, then re-run `/lazy-spec.audit` to confirm it clears. Never delete the callout by hand — that hides the debt without resolving it.
+
+---
+
+## `/lazy-spec.audit` FAILs a start document's type
+
+**Symptom**: The report includes a FAIL under "Start document type" naming an asset's `design.md`, most often on a content asset (`spec_asset_type: content`) created before the `content-design` document type existed.
+
+**Likely cause**: The document an asset's type names as its start document must carry that type. A content asset's `design.md` still carries `spec_doc_type: design` from before content assets got their own `content-design` type, so the review loop treats it as an ordinary feature design: the feature-design class reviews it, with the architect as its validator, instead of the content-design class, whose validator is the data writer.
+
+**Fix**: The audit only reports; it names the document and the repair is a hand edit. Set that one frontmatter value, `spec_doc_type`, to `content-design`, then re-run `/lazy-spec.audit` to confirm the FAIL clears.
+
+---
+
+## A content asset's design is never picked up by the `content-design` review class
+
+**Symptom**: A content asset's `design.md` is reviewed by the wrong experts, or a fresh install or product wizard run leaves no review class for content designs.
+
+**Likely cause**: Either the document still carries the old `design` type (see the previous entry), or the `content-design` class was never written to `review.classes` because `/lazy-spec.install` and `/lazy-spec.product-config` have not been re-run since the type shipped. The class needs a designer and an editor, and its validator is the data writer, so a missing persona also leaves it unassigned.
+
+**Fix**: Re-run `/lazy-spec.install`, which appends the `content-design` class when no existing entry carries it, then re-run `/lazy-spec.product-config` and answer the expert-assignment questions for the designer, data-writer, and editor roles. Fix any stale `spec_doc_type` the audit reports.
 
 ---
 

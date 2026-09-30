@@ -247,7 +247,7 @@ class RemoteMirror:
       ]
       for cmd in steps:
         proc = subprocess.run(
-          cmd, cwd = str(self._cache_dir), capture_output = True, text = True, check = False,
+          cmd, cwd = str(self._cache_dir), capture_output = True, text = True, check = False, encoding = "utf-8",
         )
 
         # Contract:
@@ -266,7 +266,7 @@ class RemoteMirror:
       "git", "clone", "--depth", "1", *( [ "--branch", self._branch ] if self._branch else [] ),
       self._url, str(self._cache_dir),
     ]
-    proc = subprocess.run(cmd, capture_output = True, text = True, check = False)
+    proc = subprocess.run(cmd, capture_output = True, text = True, check = False, encoding = "utf-8")
 
     # Contract:
     # A failed clone never touches the destination tree.
@@ -285,7 +285,7 @@ class RemoteMirror:
     """
     proc = subprocess.run(
       [ "git", "rev-parse", "HEAD" ], cwd = str(self._cache_dir),
-      capture_output = True, text = True, check = True,
+      capture_output = True, text = True, check = True, encoding = "utf-8",
     )
     return proc.stdout.strip()
 
@@ -400,7 +400,7 @@ class RemoteMirror:
     """
     proc = subprocess.run(
       [ "git", "ls-files" ], cwd = str(self._cache_dir),
-      capture_output = True, text = True, check = True,
+      capture_output = True, text = True, check = True, encoding = "utf-8",
     )
     result: list[str] = []
     for rel in proc.stdout.splitlines():

@@ -121,6 +121,37 @@ A block marker is **not a comment to the code** — it is a standalone block, se
 ## Contract Comments
 - `# Contract:` comments mark **caller-visible guarantees** that must survive refactoring.
 - They are the **source of truth** for docstring `Guarantees` sections — the `Guarantees` section must only contain items that trace back to a `Contract:` comment or the public protocol (see the Method Documentation rules in `lazy-python.documenting-guidelines.md`).
+- Scope — a contract is written only where a caller or a subclass relies on it:
+  - public methods, properties, and classes;
+  - protected methods (single leading underscore) that subclasses override or call, and abstract or interface declarations;
+  - module-level public functions.
+- A private helper carries no `Contract:` block and no `Guarantees` section. A private helper is a leading-underscore method or function used only inside its own class or module and never overridden. Its docstring summary states what it does, and a domain rule it implements goes in a `Domain(…):` block. A rule that a caller relies on is stated in the contract of the public method through which it becomes visible. A private helper has one reader, the maintainer of the same class, who reads its code anyway.
+- Correct — a private helper gets no contract; the promise lives on the public method that exposes it:
+  ```python
+  def create_clone(self) -> Self:
+      """Return an independent copy of the entity."""
+
+      # Contract:
+      # The returned clone is a fully independent deep copy;
+      # mutating it never affects the original.
+
+      return self._copy_state()
+
+  def _copy_state(self) -> Self:
+      """Copy every stored field into a new instance."""
+      ...
+  ```
+- Correct — a protected hook that subclasses override keeps its contract, on the declaration:
+  ```python
+  def _on_turn_end(self) -> None:
+      """Hook run once after every turn resolves."""
+
+      # Contract:
+      # Called exactly once per turn, after all effects are applied;
+      # an override may read turn state but never mutates the effect queue.
+
+      raise NotImplementedError
+  ```
 - When to use:
   - Data ownership guarantees: "returns a deep copy", "modifying the returned value will NOT modify the original".
   - Transaction requirements: "method must support DB transactions".
@@ -142,7 +173,7 @@ A block marker is **not a comment to the code** — it is a standalone block, se
     # The returned clone is a fully independent deep copy;
     # mutating it never affects the original.
     ```
-  - Placement by layer. A guarantee that an interface declares for every implementation is written once, on the abstract declaration in the interface: the block sits inside the abstract method's body, above its `raise NotImplementedError`, and states what every implementation MUST honour. An implementation of that method in a subclass never repeats the block; its docstring `Guarantees` section carries the promise and traces it to the interface's contract. A method with no interface declaration — a private helper, a concrete-only method — keeps its contract at the load-bearing spot in its own body, as before.
+  - Placement by layer. A guarantee that an interface declares for every implementation is written once, on the abstract declaration in the interface: the block sits inside the abstract method's body, above its `raise NotImplementedError`, and states what every implementation MUST honour. An implementation of that method in a subclass never repeats the block; its docstring `Guarantees` section carries the promise and traces it to the interface's contract. A public or protected method with no interface declaration keeps its contract at the load-bearing spot in its own body.
   - A contract that only one implementation adds on top of the interface's promise, and that callers of that concrete class rely on, goes in that implementation and is not lifted to the interface.
 - Treatment rules:
   - Never remove or alter `# Contract:` comments without explicit user approval.

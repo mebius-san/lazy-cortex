@@ -138,7 +138,7 @@ def load_settings(repo: Path) -> dict:
 
   # a malformed file is treated the same as an absent one — every caller already has a fallback
   try:
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding = "utf-8"))
   except json.JSONDecodeError:
     return {}
 
@@ -351,7 +351,7 @@ def core_dispatch_job(repo: Path, bundle: dict) -> dict:
       capture_output = True,
       text = True,
       env = env,
-      check = False,
+      check = False, encoding = "utf-8",
   )
   if proc.returncode != 0:
     raise RuntimeError(
@@ -409,7 +409,7 @@ def consume_stale_job(repo: Path, expert: str, job_id: str) -> None:
         text = True,
         env = env,
         timeout = PlanReview.START_TIMEOUT_S,
-        check = False,
+        check = False, encoding = "utf-8",
     )
   # waiver: fire-and-forget best-effort retirement per the error-ledger contract — any subprocess
   # failure (crash, timeout) degrades to a silent no-op, never raises

@@ -132,7 +132,7 @@ class Check2ReferencesResolve:
       # guard: only the plugin's own mirrored rules cite reference paths
       if not fnmatch.fnmatch(entry, "lazy-python.*.md"):
         continue
-      cited.update(self.PATTERN.findall((rules_dir / entry).read_text()))
+      cited.update(self.PATTERN.findall((rules_dir / entry).read_text(encoding = "utf-8")))
     missing = [ref for ref in cited if not (PLUGIN_ROOT / "references" / ref).exists()]
     if missing:
       return {"severity": "FAIL", "message": f"unresolved reference paths: {missing}"}
@@ -235,7 +235,7 @@ class Check4Wrappers:
       if not wrapper.read_text(encoding = "utf-8").startswith("#!"):
         missing.append(f"{name} (no shebang)")
         continue
-      if self.PLACEHOLDER.search(wrapper.read_text()):
+      if self.PLACEHOLDER.search(wrapper.read_text(encoding = "utf-8")):
         broken.append(name)
     if broken:
       return {"severity": "FAIL", "message": f"wrappers contain unsubstituted placeholders: {broken}"}
@@ -272,7 +272,7 @@ class Check5Pyproject:
     if not pyproject.exists():
       return {"severity": "FAIL", "message": "pyproject.toml not found in consumer root"}
     try:
-      data = tomllib.loads(pyproject.read_text())
+      data = tomllib.loads(pyproject.read_text(encoding = "utf-8"))
     except tomllib.TOMLDecodeError as exc:
       return {"severity": "FAIL", "message": f"pyproject.toml is not valid TOML: {exc}"}
     tool_table = data.get("tool", {})
@@ -346,7 +346,7 @@ class Check7Overlay:
         bad.append(f"{topic} (missing)")
         continue
       first_line = ""
-      for line in overlay_file.read_text().splitlines():
+      for line in overlay_file.read_text(encoding = "utf-8").splitlines():
         if line.strip():
           first_line = line
           break
@@ -391,7 +391,7 @@ class Check8Scaffold:
         "severity": "WARN",
         "message": f"{self.RULE_REL} not found — consumer has not run /lazy-python.install",
       }
-    body = rule.read_text()
+    body = rule.read_text(encoding = "utf-8")
     if self.MARKER not in body:
       return {
         "severity": "WARN",
@@ -467,7 +467,7 @@ class Check9ClaudeMd:
     if claude_md is None:
       return {"severity": "INFO", "message": "no CLAUDE.md (root or .claude/) — optional; install adds none"}
     rel = claude_md.relative_to(self.consumer_dir).as_posix()
-    body = claude_md.read_text()
+    body = claude_md.read_text(encoding = "utf-8")
     if self.POINTER not in body:
       return {
         "severity": "INFO",
@@ -506,7 +506,7 @@ class Check10Hook:
     if not manifest.exists():
       return {"severity": "WARN", "message": f"{self.MANIFEST_REL} not found in plugin tree"}
     try:
-      data = json.loads(manifest.read_text())
+      data = json.loads(manifest.read_text(encoding = "utf-8"))
     except json.JSONDecodeError as exc:
       return {"severity": "FAIL", "message": f"{self.MANIFEST_REL} is not valid JSON: {exc}"}
     post_tool_use = data.get("hooks", {}).get("PostToolUse", [])
@@ -570,7 +570,7 @@ class Check11Venv:
     if not pyproject.exists():
       return ""
     try:
-      data = tomllib.loads(pyproject.read_text())
+      data = tomllib.loads(pyproject.read_text(encoding = "utf-8"))
     except tomllib.TOMLDecodeError:
       return ""
     value = data.get("tool", {}).get("lazy-python", {}).get(key)
@@ -669,7 +669,7 @@ class Check12DomainDictionary:
     data: dict = {}
     if settings.exists():
       try:
-        data = json.loads(settings.read_text())
+        data = json.loads(settings.read_text(encoding = "utf-8"))
       # unreadable or malformed settings configure nothing, so the conventional path stays the answer
       except (json.JSONDecodeError, OSError):
         data = {}
@@ -699,7 +699,7 @@ class Check12DomainDictionary:
           continue
         source = Path(root) / name
         try:
-          text = source.read_text(errors = "replace")
+          text = source.read_text(errors = "replace", encoding = "utf-8")
         # a source that cannot be read yields no marker; the audit reports on what it could read
         except OSError:
           continue

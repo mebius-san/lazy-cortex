@@ -10,6 +10,10 @@ The tool is declared in the product's config as `products[<key>].tool_types.data
 
 The deliverable of `data` is **entity data files written to the project's schemas**. A race, a skill, an item, a table, a preset: a file in the format and the place the project's schema defines for that entity. The `data-report` document is the journal of what was written and against which decisions, never the deliverable itself.
 
+The design states decisions, never values. The tool chooses every concrete value itself so that the data expresses those decisions, and the reason for a value lives in the data — in the schema's own comment field where it has one — never back in the design.
+
+**Where the data's schema comes from is the project's business.** It may be a document, a schema file, or the output of a project utility; the product declares how to reach it in `products[<key>].guidelines["data-writer"]`. A product that declares none leaves the tool without a schema to write against, and the job stops and says so rather than inferring the format from existing data.
+
 `data` is a non-test tool: its contribution counts toward `spec_develop_done`, never toward `spec_tests_passing`.
 
 ## The plan
@@ -24,7 +28,7 @@ The label is `Start implementation (data)`. The bare label `Start implementation
 
 **When it appears.** The checkbox hangs as soon as `spec_plan_done` is closed — this tool waits on no plan of its own. The shared dependency rule still applies: every dependency named in `spec_depends_on` must have closed its own `spec_develop_done`. A halted asset never gets the checkbox at all. The tool's contribution must not be counted toward the gate — an accepted report hangs no checkbox until the source-staleness rule turns the gate back off.
 
-**What a tick dispatches.** The role is the data writer; the expert is resolved mechanically as the main writer of the review class named after the tool's `report_doc` — the `data-report` class. The job's source is the **asset's design document**: it IS the specification of the entity being written. Context is the product's guidelines for the role and its wildcard guidelines, plus the decision registries (product-level and asset-level) so the data does not drift from a choice already on record; a declared path that does not resolve to a file becomes a warning line in the asset's history, never a silent drop. Result is a document of type `data-report`.
+**What a tick dispatches.** The role is the data writer; the expert is resolved mechanically as the main writer of the review class named after the tool's `report_doc` — the `data-report` class. The job's source is the **asset's design document**: it IS the specification of the entity being written. Context is the product's guidelines for the role — the data-writer's name the data's schema — and its wildcard guidelines, plus the decision registries (product-level and asset-level) so the data does not drift from a choice already on record; a declared path that does not resolve to a file becomes a warning line in the asset's history, never a silent drop. Result is a document of type `data-report`.
 
 **The project's validators are part of the job's work.** Schemas, linters, and data loaders are run through the **product repository's own runner** before the job reports: a red validator is unfinished work, not a finding for review. What goes into the report is the fact of the run and its outcome.
 
@@ -45,7 +49,7 @@ The source of this tool's report is `design.md`. When the design is re-approved 
 Review of a `data-report` is acceptance of the **data work**, not copy-editing of the report's text.
 
 - A reviewer's comment means "redo what was written": go back into the data files, fix the values, re-run the validators, extend the report.
-- One case is typical enough to name: data diverging from the approved design. The divergence is fixed by **work** — the data is brought to the design. Disagreement with the design itself goes back into the design through the design's own review, never silently into the data.
+- One case is typical enough to name: data failing a decision of the approved design. The failure is fixed by **work** — the data is brought to express the design. Disagreement with the design itself goes back into the design through the design's own review, never silently into the data.
 - A redo runs as a **continuation to the same expert** — same job expert, same `branch`.
 - The report is append-only: iterations are appended, earlier ones are never rewritten.
 - Until the report is accepted the tool's contribution is not counted, however many files already sit in the repository.

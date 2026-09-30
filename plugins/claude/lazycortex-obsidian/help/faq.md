@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about vault setup, Iconize, diagram render glue, the vault manifest, plugin updates, and tag pages for lazycortex-obsidian.
-last_regen: 2026-09-28
+last_regen: 2026-09-30
 no_diagram: true
 source_skills:
   - lazy-obsidian.install
@@ -14,8 +14,8 @@ source_skills:
   - lazy-obsidian.audit
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: e6f72e6c9fd925c00e50fcee5fc5b447600cce7a
-surface_sha: d96a67f539ba8e65ff07b93edf07c77842c9bc93ef42c886668c5d444971e159
+source_sha: 1581fe03ce1f6ca1468bcf2fbb3c2a71e0e2ba9b
+surface_sha: 36cdd61773f0da26bc3a7ff50043d724b54b6eeb2e174982dde8ebc53e6013ed
 ---
 # Frequently asked questions
 

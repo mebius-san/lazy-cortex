@@ -90,7 +90,7 @@ def ensure_permission_allow(settings_path: Path, pattern: str) -> str:
   # reordered; `pattern` is appended at most once, only when not already a member.
 
   # load the settings file, defaulting to an empty object when it doesn't yet exist
-  data: dict = json.loads(settings_path.read_text()) if settings_path.exists() else {}
+  data: dict = json.loads(settings_path.read_text(encoding = "utf-8")) if settings_path.exists() else {}
   perms = data.setdefault(_SettingsKey.PERMISSIONS, {})
   allow = perms.setdefault(_SettingsKey.ALLOW, [])
   if pattern in allow:

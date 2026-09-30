@@ -108,7 +108,7 @@ def _vault_root() -> Path:
   try:
     proc = subprocess.run(
       ["git", "rev-parse", "--show-toplevel"],
-      capture_output = True, text = True, check = True,
+      capture_output = True, text = True, check = True, encoding = "utf-8",
     )
     return Path(proc.stdout.strip())
   except (OSError, subprocess.CalledProcessError):

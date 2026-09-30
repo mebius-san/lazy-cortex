@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Adopt lazycortex-python in a repo with pre-existing Python, run chk-py all to surface every drift violation (including pcf's language and project-package checks), then backfill Domain/Contract markers with knowledge-sweep.
-last_regen: 2026-09-24
+last_regen: 2026-09-30
 diagram_spec:
   anchor: "Migration flow"
   request: "Sequence diagram: user invokes /lazy-python.install in a repo with pre-existing Python → install runs its ordered steps fully automatically (mirror rules, deploy chk-py/tst-py wrappers, detect PyCharm, bootstrap pyproject.toml, scaffold overlay, sync scaffold template, record python.env_source with a one-time disambiguation prompt only when multiple bootstrap-script candidates exist, seed agent-model tiers, register the code-reviewer expert, log) → user runs chk-py all -q → the six-step gate (pcf, toi, cmp, mypy, ruff, pylint) surfaces existing violations, including pcf's language and project-package findings → user fixes violations in chunks and commits iteratively until chk-py all exits clean → user dispatches lazy-python.knowledge-sweep to grow the domain-groups dictionary from any parked Domain(unfiled) blocks the fixes surfaced and file them under real groups"
@@ -11,8 +11,9 @@ source_skills:
   - chk
   - pcf.py
   - lazy-python.knowledge-sweep
-source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
-surface_sha: d9686233e936f65a9b42051db18f8bde45afc7bd35e10ec0c90feb679341f3b7
+  - lazy-python.contract-writer
+source_sha: 8c642c6f0911b2d8c00a32979298d23b5420a63a
+surface_sha: 1d36be9f45f62d4f2d3db19e1b6f282b2d71070720acd39a2191037b5e790cba
 ---
 # Adopt the plugin in a repo with pre-existing Python that drifted from the canon
 
@@ -22,7 +23,7 @@ This walkthrough is for anyone bringing `lazycortex-python` into a repo that alr
 
 After this walkthrough you have:
 
-- The full plugin wired: rule mirrors, `cli/chk-py` / `cli/tst-py` wrappers (no exec bit needed — they launch through `sh`), matching human-facing `~/.local/bin/chk-py` / `tst-py` copies, `pyproject.toml` checker sections, overlay stubs, scaffold template, and PostToolUse hook live.
+- The full plugin wired: rule mirrors, `cli/chk-py` / `cli/tst-py` wrappers (no exec bit needed — they launch through `bash`), matching human-facing `~/.local/bin/chk-py` / `tst-py` copies, `pyproject.toml` checker sections, overlay stubs, scaffold template, and PostToolUse hook live.
 - A baseline `chk-py all` run with every pre-existing violation captured in its output — nothing hidden, nothing auto-fixed.
 - A `[tool.pcf]` section in `pyproject.toml` that actually matches this repo — `allowed_languages` declared if the existing comments/docstrings aren't English, `project_package` pinned if autodetection picked the wrong first-party package.
 - Each violation batch committed as a separate, passing checkpoint so `git log` reflects coherent units of remediation work.
@@ -56,6 +57,8 @@ One step matters specifically for a migration: the install scaffolds `docs/guide
 
 Every step is idempotent — safe to re-run if interrupted.
 
+If you run a wrapper by absolute path and the repo root contains a space (a synced-folder path such as `Auriglaci Dropbox/...` is a common case), quote the path — `bash "<repo root>/cli/chk-py" all -q`. The relative `bash ./cli/chk-py` form used below needs no quoting.
+
 **Migrating from a pre-2.0 install.** If this repo adopted `lazycortex-python` before the 2.0.0 release, its docstrings may depend on things `pcf` used to ship built-in: `Generation Rules` / `Value Ranges` docstring sections and a hardcoded `_field_filters` private-name escape hatch. As of 2.0, none of that is baked in — every project declares its own via `[tool.pcf]` in `pyproject.toml`. The install only appends checker sections that are missing; it never touches a `[tool.pcf]` block you already have, so re-running `/lazy-python.install` on an existing repo is safe. If your repo relied on the old built-ins, open `pyproject.toml` and find the commented-out `extra_docstring_sections`, `d2_exempt_marker_attrs`, and `private_name_allowlist` examples under `[tool.pcf]` — uncomment and adapt them to your project's actual section names and field names before Step 2's inventory run, or `chk-py` will flag every class that used the old built-in sections as missing them.
 
 **Migrating past the 3.0 marker rename.** Release 3.0 renamed three marker comments to fit a name-register scheme (the register a marker's name uses now encodes its category): `REF:` became `ref:` (lowercase, one-line annotation), `# DOC(...):` became `# Domain(...):` (Capitalized, opens a standalone knowledge block), and `# Contract!` became `# Contract:` (also Capitalized, also standalone — no text after the colon on the marker line itself). `pcf` also enforces a blank-line boundary around every Capitalized block marker (`Domain(...):`, `Contract:`, `Decision:`) — a marker glued to a statement, or a block whose last line touches the code that follows, is a violation in its own right, independent of the rename. If this repo's Python predates 3.0, expect leftover `REF:` / `DOC(...):` / `Contract!` occurrences and un-separated `Domain(...):` / `Contract:` / `Decision:` blocks to surface as `pcf` findings in Step 2's inventory — rename the markers and insert the separating blank lines as part of remediation.
@@ -67,10 +70,10 @@ Every step is idempotent — safe to re-run if interrupted.
 Run the checker stack against the entire tree:
 
 ```bash
-sh ./cli/chk-py all -q
+bash ./cli/chk-py all -q
 ```
 
-The wrapper launches through `sh` rather than relying on an execute bit; once `~/.local/bin` is on your `$PATH` (Step 1 put it there), the same run is just `chk-py all -q` typed from anywhere under the repo. On first run the venv resolver creates `.venv/` at the repo root and installs `mypy`, `pylint`, `pytest`, `ruff`, `pytest-clarity`, and `pytest-sugar` — this takes 30–60 seconds. Subsequent runs are fast.
+The wrapper launches through `bash` rather than relying on an execute bit; once `~/.local/bin` is on your `$PATH` (Step 1 put it there), the same run is just `chk-py all -q` typed from anywhere under the repo. On first run the venv resolver creates `.venv/` at the repo root and installs `mypy`, `pylint`, `pytest`, `ruff`, `pytest-clarity`, and `pytest-sugar` — this takes 30–60 seconds. Subsequent runs are fast.
 
 `chk-py all` runs the six-step gate in order: `pcf` (style critical-fail) → `toi` (type-only imports) → `cmp` (py_compile syntax check) → `mypy` → `ruff` → `pylint`. The `-q` flag suppresses per-file progress and shows only violations and the final summary.
 
@@ -88,7 +91,7 @@ If Step 1's pre-2.0 migration note applies to your repo and you skipped uncommen
 Also run the existing test suite once, before any remediation, so you know its starting state:
 
 ```bash
-sh ./cli/tst-py -q
+bash ./cli/tst-py -q
 ```
 
 Called without a module argument, `tst-py` runs every module's tests (or bare `tst-py -q` once `~/.local/bin` is on your `$PATH`). Note any pre-existing failures now — those are not something this walkthrough introduces, and you don't want to chase them down mid-remediation thinking you caused them.
@@ -106,8 +109,8 @@ Work through the violation queue in logical batches rather than one enormous com
 After each batch:
 
 ```bash
-sh ./cli/chk-py all -q
-sh ./cli/tst-py -q
+bash ./cli/chk-py all -q
+bash ./cli/tst-py -q
 ```
 
 Confirm the batch clears the targeted checker without introducing new violations elsewhere, and that `tst-py` still reports the same (or better) pass/fail state as your Step 2 baseline — a batch that turns `chk-py` green while breaking a previously-passing test is not done. Then commit:
@@ -130,7 +133,7 @@ A drifted repo's remediation pass in Step 3 routinely surfaces (or writes) `Doma
 
 The sweep resolves the dictionary path (`.claude/lazy.settings.json[wiki.domains.dictionary]` when set, else `docs/guidelines/domain-groups.md`), then always runs its dictionary-growth step: it collects every parked `Domain(unfiled):` block plus the sources' recurring subject-area vocabulary, clusters them into candidate groups. The sweep is non-interactive — it does not stop to ask. It settles the finest cut the clusters justify itself (one group per subject a reader would open separately, nothing merged just to keep the count down) and writes the accepted groups straight into the dictionary, reporting the full cut back so you can overrule a name or a boundary afterward, against a finished result rather than a hypothetical. It also catches groups that are misspelled or simply invented at the keyboard (present in a `Domain(<group>):` block but not listed in the dictionary) — these too it resolves itself, adding a sound name to the dictionary or renaming into the listed group it duplicates, and reports every add and rename it made.
 
-Once the dictionary reflects this repo's real subject areas, the sweep enumerates its scope (explicit paths, `wiki.domains.code` globs when configured, or every tracked `.py` file), and dispatches the `lazy-python.domain-writer` and `lazy-python.contract-writer` agents across it — `refile=true` is set automatically so blocks already parked under `unfiled` get re-picked against the grown dictionary, not just newly-written ones. Two corpus-level consolidation passes follow, each settled by the sweep itself and reported for you to overrule rather than asked up front: one over the dictionary (collapsing synonym group names, splitting a group that turned out to cover two unrelated subjects, folding thin single-block groups into a neighbour, re-checking every surviving name against the naming law), and one over the `Contract:` blocks the writers just wrote — dropping guarantees the canon excludes (presentation details such as exact message text, signature-obvious facts), converging one guarantee stated across sibling classes onto a single phrasing, and folding a redundant block only when its audience already reads the block it duplicates. A block on a hook any subclass overrides, or on a surface with its own distinct readers, keeps its own copy even on a word-for-word text match — only a private helper with no overrides and a single caller gets folded. It then re-runs `chk-py all -q` over the touched files to catch cross-file fallout, and commits everything it touched (marker edits plus the dictionary) under an explicit pathspec.
+Once the dictionary reflects this repo's real subject areas, the sweep enumerates its scope (explicit paths, `wiki.domains.code` globs when configured, or every tracked `.py` file), and dispatches the `lazy-python.domain-writer` and `lazy-python.contract-writer` agents across it — `refile=true` is set automatically so blocks already parked under `unfiled` get re-picked against the grown dictionary, not just newly-written ones. Two corpus-level consolidation passes follow, each settled by the sweep itself and reported for you to overrule rather than asked up front: one over the dictionary (collapsing synonym group names, splitting a group that turned out to cover two unrelated subjects, folding thin single-block groups into a neighbour, re-checking every surviving name against the naming law), and one over the `Contract:` blocks the writers just wrote — dropping guarantees the canon excludes (presentation details such as exact message text, signature-obvious facts), converging one guarantee stated across sibling classes onto a single phrasing, and folding a redundant block only when its audience already reads the block it duplicates. A block on a hook any subclass overrides, or on a surface with its own distinct readers, keeps its own copy even on a word-for-word text match — a fold happens only when the copy's readers already read the surviving block. Contract blocks live only on the public and protected surface: the writer declines a private helper (a leading-underscore method or function nothing overrides and nothing outside its class or module calls) and reports where the guarantee belongs instead — the public method through which callers see it, or a `Domain(...):` block for a domain rule. It then re-runs `chk-py all -q` over the touched files to catch cross-file fallout, and commits everything it touched (marker edits plus the dictionary) under an explicit pathspec.
 
 **A repo with nothing parked and no recognisable domain vocabulary yet** is a legitimate outcome — the sweep proposes no candidates and leaves the dictionary untouched. That's not a failure; it means this repo's Python doesn't (yet) carry domain-marker discipline, and the sweep has nothing to cluster from until some markers exist.
 
@@ -145,8 +148,8 @@ You do not configure the hook. It auto-registers from the plugin's `hooks/hooks.
 Once all violation batches are committed and the knowledge sweep has run:
 
 ```bash
-sh ./cli/chk-py all -q
-sh ./cli/tst-py -q
+bash ./cli/chk-py all -q
+bash ./cli/tst-py -q
 ```
 
 Confirm all six checker steps report clean and `tst-py` shows every test passing (no new failures relative to your Step 2 baseline).
@@ -155,7 +158,7 @@ Confirm all six checker steps report clean and `tst-py` shows every test passing
 
 The install is idempotent — re-running `/lazy-python.install` after any future plugin update overwrites only what changed (rule mirrors, wrapper scripts, any missing `pyproject.toml` sections) and leaves your consumer sections and overlay stubs untouched. Re-running is the recommended upgrade path, not a manual diff.
 
-`sh ./cli/chk-py all` (or bare `chk-py all` once `~/.local/bin` is on your `$PATH`), paired with `sh ./cli/tst-py` (or bare `tst-py`) for the test layer, is the routine pre-commit gate going forward. The PostToolUse hook covers the inner loop — every `.py` edit surfaces `pcf.py` violations (style, imports, language, project-package boundary) inline so drift is caught at the moment it is introduced rather than at commit time.
+`bash ./cli/chk-py all` (or bare `chk-py all` once `~/.local/bin` is on your `$PATH`), paired with `bash ./cli/tst-py` (or bare `tst-py`) for the test layer, is the routine pre-commit gate going forward. The PostToolUse hook covers the inner loop — every `.py` edit surfaces `pcf.py` violations (style, imports, language, project-package boundary) inline so drift is caught at the moment it is introduced rather than at commit time.
 
 `lazy-python.knowledge-sweep` isn't a one-time migration step — run it again whenever parked `Domain(unfiled):` findings pile up, or when the dictionary needs new groups for a subject area the codebase has grown into.
 

@@ -175,7 +175,7 @@ def _job_dirs_for_file(repo: Path, file_path: Path) -> list[Path]:
       if not req.is_file():
         continue
       try:
-        data = json.loads(req.read_text())
+        data = json.loads(req.read_text(encoding = "utf-8"))
       except (OSError, json.JSONDecodeError):
         continue
       resolved = _job_target(repo, jdir, data)
@@ -242,7 +242,7 @@ def _is_spec_document(path: Path) -> bool:
   if path.suffix.lower() != ".md" or not path.is_file():
     return False
   try:
-    meta, _body = _fm.parse(path.read_text())
+    meta, _body = _fm.parse(path.read_text(encoding = "utf-8"))
   # waiver: an unreadable neighbour is simply not a spec note — the landing is not this
   # helper's to refuse over an IO error it cannot attribute
   except (OSError, UnicodeDecodeError):
@@ -586,7 +586,7 @@ def _consume_job(repo: Path, jdir: Path) -> None:
       proc = subprocess.run(
           [sys.executable, str(cli), CoreCommand.CONSUME_JOB],
           input = json.dumps({JobKey.EXPERT: jdir.parent.name, JobKey.JOB_ID: jdir.name}),
-          capture_output = True, text = True, env = env, check = False,
+          capture_output = True, text = True, env = env, check = False, encoding = "utf-8",
       )
 
       # guard: the core CLI consumed the job — the local fallback marker is not needed
@@ -659,8 +659,8 @@ def collect_for_file(repo: Path, file_path: Path, *, commit: bool = True) -> dic
   # apply each parseable bundle: `edited` lands its payload, `empty` is drained content-free
   for jdir in candidates:
     try:
-      request = json.loads((jdir / JobFile.REQUEST).read_text())
-      response = json.loads((jdir / JobFile.RESPONSE).read_text())
+      request = json.loads((jdir / JobFile.REQUEST).read_text(encoding = "utf-8"))
+      response = json.loads((jdir / JobFile.RESPONSE).read_text(encoding = "utf-8"))
     except (OSError, json.JSONDecodeError):
       continue
 
@@ -792,7 +792,7 @@ def collect_tick(repo: Path) -> dict:
       if not jdir.is_dir() or _job_status(jdir) != JobStatus.DONE:
         continue
       try:
-        data = json.loads((jdir / JobFile.REQUEST).read_text())
+        data = json.loads((jdir / JobFile.REQUEST).read_text(encoding = "utf-8"))
       except (OSError, json.JSONDecodeError) as exc:
         sys.stderr.write(f"collect-tick: {jdir}: {exc}\n")
         broken.append(str(jdir))
@@ -815,7 +815,7 @@ def collect_tick(repo: Path) -> dict:
       # guard: only an outcome `collect-job` consumes is deliverable — everything else stays
       # for the pump's retry ladder or the daily sanitizer to judge
       try:
-        outcome = json.loads((jdir / JobFile.RESPONSE).read_text()).get(JobKey.OUTCOME)
+        outcome = json.loads((jdir / JobFile.RESPONSE).read_text(encoding = "utf-8")).get(JobKey.OUTCOME)
       except (OSError, json.JSONDecodeError):
         continue
 

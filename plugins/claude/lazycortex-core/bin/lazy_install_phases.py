@@ -528,6 +528,73 @@ _INSTALLED_PLUGINS_REL = ".claude/plugins/installed_plugins.json"
 _SETTINGS_JSON_REL = ".claude/settings.json"
 # waiver: external Claude Code filesystem location, not a reusable domain key
 _SETTINGS_LOCAL_JSON_REL = ".claude/settings.local.json"
+# waiver: the interpreter command every plugin call site falls back to when the override is unset
+_DEFAULT_PYTHON_COMMAND = "python3"
+# waiver: external env-var name every plugin call site expands, not an internal key
+_PYTHON_ENV_VAR = "LAZYCORTEX_PYTHON"
+
+
+def record_python_env(repo: Path | str, command: str, executable: str) -> str:
+  """
+  Record the interpreter command an install probe resolved, for call sites to reuse later.
+
+  Skips recording when the resolved command is the default `python3`, since every call site
+  already falls back to it. Otherwise persists `LAZYCORTEX_PYTHON` into the repository's
+  `.claude/settings.local.json` `env` block, preserving any other content already there.
+
+  Guarantees:
+    - An existing `LAZYCORTEX_PYTHON` value is never overwritten.
+    - Other settings already in `.claude/settings.local.json` are never discarded.
+
+  Args:
+    repo: Path to the repository root.
+    command: Interpreter command the probe resolved (`python3`, `python`, or `py -3`).
+    executable: Absolute path to the interpreter, recorded when `command` has more than one word.
+
+  Returns:
+    `"not-needed"` when `command` is the default `python3` and nothing was written,
+    `"recorded"` when the value was newly written, `"unchanged"` when the same value was
+    already on record, `"kept-local"` when a different value was already on record and the
+    file was left untouched.
+
+  Raises:
+    json.JSONDecodeError: If the local settings file exists but is not valid JSON.
+  """
+
+  # Contract:
+  # An interpreter override the operator already has on record is never overwritten;
+  # the operator's own value always wins over the one the probe resolved.
+
+  # Contract:
+  # Recording never discards other settings already in the local settings file;
+  # the interpreter override is the only thing added.
+
+  # guard: the fallback every call site already uses needs no record
+  if command == _DEFAULT_PYTHON_COMMAND:
+    # waiver: install-phase outcome token, not a reusable domain key
+    return "not-needed"
+
+  # call sites expand the variable quoted, as one word — a multi-word command (`py -3`) is replaced by its interpreter's path
+  value = command if len(command.split()) == 1 else Path(executable).as_posix()
+
+  # merge into the local settings' env block, creating the file when absent
+  path = Path(repo) / _SETTINGS_LOCAL_JSON_REL
+  # waiver: stdlib encoding idiom
+  settings = json.loads(path.read_text(encoding = "utf-8")) if path.exists() else {}
+  # waiver: external Claude Code settings field name, not an internal key
+  env = settings.setdefault("env", {})
+
+  # guard: a value already on record is the operator's and is never overwritten
+  if _PYTHON_ENV_VAR in env:
+    # waiver: install-phase outcome tokens, not reusable domain keys
+    return "unchanged" if env[_PYTHON_ENV_VAR] == value else "kept-local"
+
+  # absent — record the resolved command and write the merged settings back
+  env[_PYTHON_ENV_VAR] = value
+  path.parent.mkdir(parents = True, exist_ok = True)
+  runtime_state.atomic_write_text(path, json.dumps(settings, indent = 2) + "\n")
+  # waiver: install-phase outcome token, not a reusable domain key
+  return "recorded"
 
 
 def _installed_entries(installed_plugins: Path, plugin_key: str) -> list:
@@ -735,7 +802,9 @@ def _git_capture(repo: Path, args: list[str]) -> str | None:
     The command's stripped stdout, or `None` when git is absent or exited non-zero.
   """
   try:
-    done = subprocess.run([ "git", *args ], cwd = repo, capture_output = True, text = True, check = False)
+    done = subprocess.run(
+      [ "git", *args ], cwd = repo, capture_output = True, text = True, check = False, encoding = "utf-8",
+    )
   except OSError:
     return None
 

@@ -51,6 +51,7 @@ if TYPE_CHECKING:
 _SETTINGS_REL = Path(".claude") / "lazy.settings.json"
 _VERSION_KEY = "_version"
 _PRODUCTS_SECTION = "products"
+_SPEC_SECTION = "spec"
 _SPEC_PATH_KEY = "spec_path"
 _MODE_BY_KEY = "by-key"
 _MODE_BY_PATH = "by-path"
@@ -62,7 +63,7 @@ def load_products(vault: Path) -> dict:
   """
   Read the `products` section from the vault's `lazy.settings.json`.
 
-  The `_version` schema marker is stripped so the result maps product keys to
+  Excludes the section's own schema-version entry, so the result maps product keys to
   records only.
 
   Args:
@@ -77,13 +78,38 @@ def load_products(vault: Path) -> dict:
   # guard: missing settings file means no products configured
   if not settings_path.is_file():
     return {}
-  data = json.loads(settings_path.read_text())
+  data = json.loads(settings_path.read_text(encoding = "utf-8"))
   products = data.get(_PRODUCTS_SECTION)
 
   # guard: missing or malformed products section means no products
   if not isinstance(products, dict):
     return {}
   return { k: v for k, v in products.items() if k != _VERSION_KEY }
+
+
+def load_catalog_guidelines(vault: Path) -> dict[str, list[str]]:
+  """
+  Read the catalog-wide guidelines every product inherits, from `spec.guidelines`.
+
+  Args:
+    vault: Vault root directory holding `.claude/lazy.settings.json`.
+
+  Returns:
+    A dict of role to its ordered guideline paths; empty when the settings file, the `spec`
+    section or its `guidelines` key is absent. A role whose value is not a list is left out.
+  """
+  settings_path = vault / _SETTINGS_REL
+
+  # guard: missing settings file means no catalog guidelines
+  if not settings_path.is_file():
+    return {}
+  spec = json.loads(settings_path.read_text(encoding = "utf-8")).get(_SPEC_SECTION)
+  declared = spec.get(_GUIDELINES_KEY) if isinstance(spec, dict) else None
+
+  # guard: missing or malformed guidelines key means none are declared
+  if not isinstance(declared, dict):
+    return {}
+  return { role: list(paths) for role, paths in declared.items() if isinstance(paths, list) }
 
 
 def _registry(vault: Path, products: dict | None) -> dict:
@@ -299,13 +325,17 @@ def effective_record(vault: Path, key: str, *, products: dict | None = None) -> 
   Args:
     vault: Vault root directory holding `.claude/lazy.settings.json`.
     key: The product's compound-key.
-    products: An already-loaded products registry; None reads it from the settings file.
+    products: An already-loaded products registry covering only the products; None reads one
+      from the settings file. Either way, the catalog-wide `spec.guidelines` are always read
+      from the settings file.
 
   Returns:
     The merged record — `asset_types` merged key-by-key outermost first, `guidelines` as the
-    ordered per-role union outermost first, every other inheritable scalar from the nearest
-    declaring product, `source` / `dependencies` / `icon` / `color` / `spec_path` the product's
-    own only. `{}` for an unknown key.
+    ordered per-role union starting from the catalog-wide `spec.guidelines` as the outermost
+    layer, ahead of every enclosing product's own and this product's own, so a top-level product
+    with no guidelines declared of its own still carries a `guidelines` key when the catalog
+    declares any, every other inheritable scalar from the nearest declaring product, `source` /
+    `dependencies` / `icon` / `color` / `spec_path` the product's own only. `{}` for an unknown key.
   """
   registry = _registry(vault, products)
   own = registry.get(key)
@@ -315,7 +345,16 @@ def effective_record(vault: Path, key: str, *, products: dict | None = None) -> 
     return {}
   merged: dict = {}
   asset_types: dict = {}
-  guidelines: dict[str, list[str]] = {}
+
+  # Domain(spec.config):
+  # # Catalog-wide guidelines
+  # Guidelines the catalog declares for the whole vault are the outermost layer every product
+  # inherits, ahead of its enclosing products and its own. Products standing side by side at the
+  # top of the catalog share no ancestor, so this is the one place a guideline reaches them all.
+
+  # the catalog's own guidelines seed the per-role union
+  guidelines: dict[str, list[str]] = load_catalog_guidelines(vault)
+
   # the registry is resolved once above and handed down, so the whole chain costs no extra read
   for link in (*ancestor_chain(vault, key, products = registry), key):
     record = registry.get(link) or {}
@@ -359,7 +398,9 @@ def effective_record_by_path(vault: Path, rel_path: str, *,
   Args:
     vault: Vault root directory holding `.claude/lazy.settings.json`.
     rel_path: Vault-relative doc path to attribute.
-    products: An already-loaded products registry; None reads it from the settings file.
+    products: An already-loaded products registry covering only the products; None reads one
+      from the settings file. Either way, the catalog-wide `spec.guidelines` are always read
+      from the settings file.
 
   Returns:
     A `(key, record)` pair as `resolve_product_by_path` returns it, the record replaced by
@@ -372,7 +413,8 @@ def effective_record_by_path(vault: Path, rel_path: str, *,
   if key is None:
     return None, None
 
-  # the registry is resolved once above and handed down, so the inheritance costs no extra read
+  # the products registry is resolved once above and handed down; only the catalog-wide
+  # guidelines are read from the settings file again
   return key, effective_record(vault, key, products = registry)
 
 

@@ -1,18 +1,25 @@
 ---
 chapter_type: walkthrough
 summary: From a clean checkout to your first dashboard panel — install the runtime daemon with metrics enabled, produce traffic, install the shipper, verify the pipeline.
-last_regen: 2026-09-24
+last_regen: 2026-09-30
 diagram_spec:
-  anchor: "How it flows"
-  request: "Sequence diagram: operator → lazy-core.install installs the runtime daemon and auto-registers any expert candidates found; near the end of the same run the install wizard asks whether to enable the Prometheus metrics endpoint for this checkout, operator says yes, the skill allocates a free port sequentially from 9464, writes enabled+repo_label into the tracked lazy.settings.json and the allocated port into this checkout's gitignored local overlay, then the operator restarts the daemon supervisor so the one-shot metrics.init() picks up the new setting and the daemon now exposes /metrics on the allocated loopback port; operator dispatches an expert job via /lazy-expert.dispatch-job; daemon picks up the job, runs the expert, records a tick → metrics counter increments; operator runs /lazy-observe.install which pre-flight-checks for an already-covered host, finds none, walks the agent-kind/URL/auth wizard, renders agent config + service unit covering every metrics-enabled daemon on the host, loads the supervised service; agent scrapes /metrics and remote_writes to operator's Prometheus; operator runs /lazy-observe.audit; the audit verifies service active + local /metrics reachable for every daemon + agent self-metrics show successful remote_write + observer URL reachable + WAL bounded; final state: charts populated in operator's Grafana."
-  kind_hint: sequence
+  - anchor: "Install and enable metrics"
+    request: "Sequence diagram: operator → lazy-core.install installs the runtime layer (.experts/, expert registry, routines), auto-registers any expert candidates found and seeds daemon.enabled=false silently, asking nothing about the daemon; operator then runs lazy-core.daemon-setup, which asks whether to enable the daemon (yes, writes daemon.enabled=true), asks whether this checkout drives it (yes, maps this host to this checkout in run_here), checks the inbox ownership guard, installs the launchd or systemd supervisor, then asks whether to enable the Prometheus metrics endpoint for this checkout, operator says yes, the skill allocates a free port sequentially from 9464, writes enabled+repo_label into the tracked lazy.settings.json and the allocated port into this checkout's gitignored local overlay, and regenerates the scrape-targets file."
+    kind_hint: sequence
+  - anchor: "Produce a metrics tick"
+    request: "Sequence diagram: operator restarts the daemon supervisor so the one-shot metrics.init() picks up the new setting and the daemon now exposes /metrics on the allocated loopback port; operator dispatches an expert job via /lazy-expert.dispatch-job; daemon picks up the job, runs the expert, records a tick → metrics counter increments."
+    kind_hint: sequence
+  - anchor: "Ship and verify metrics"
+    request: "Sequence diagram: operator runs /lazy-observe.install which pre-flight-checks for an already-covered host, finds none, walks the agent-kind/URL/auth wizard, renders agent config + service unit covering every metrics-enabled daemon on the host, loads the supervised service; agent scrapes /metrics and remote_writes to operator's Prometheus; operator runs /lazy-observe.audit; the audit verifies service active + local /metrics reachable for every daemon + agent self-metrics show successful remote_write + observer URL reachable + WAL bounded; final state: charts populated in operator's Grafana."
+    kind_hint: sequence
 source_skills:
   - lazy-core.install
+  - lazy-core.daemon-setup
   - lazy-expert.dispatch-job
   - lazy-observe.install
   - lazy-observe.audit
-source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
-surface_sha: a3856919176e1b94d782034858d2df6e38cb634dc1da6e30a39e0dd5b2081697
+source_sha: 208e7e85e3998e8b741565a53874e37946b3f177
+surface_sha: c2daa2cacea0d05af2ea9ec6095b073269c4d94bc6852b1d9cb922a07e9bcd57
 ---
 # Ship your first runtime metric to a self-hosted Prometheus stack
 
@@ -28,17 +35,23 @@ You have a fresh checkout. You want runtime metrics from this repo flowing into 
 
 ## The journey
 
-### Step 1 — Install lazycortex-core with metrics enabled
+### Step 1 — Install lazycortex-core, then enable the daemon and metrics
 
-Run `/lazy-core.install`. On a repo with no runtime config yet, the background daemon defaults to disabled — `daemon.enabled` is seeded `false` silently, and the install wizard never asks about it as a question. This first run still installs the runtime layer whole: `.experts/`, the expert registry, every built-in routine. Expert registration itself asks no questions either: the skill silently registers every candidate it finds carrying `expert_protocol:` frontmatter, plus one built-in candidate it always adds regardless of scan results — `lazy-runtime.doctor`, the runtime doctor expert (dispatched only by its own hourly health-check tick, not something you invoke manually for traffic).
+Run `/lazy-core.install` first. It installs the runtime layer whole — `.experts/`, the expert registry, every built-in routine — and asks nothing about a daemon: on a repo with no runtime config yet it seeds `daemon.enabled` as `false` silently. Expert registration asks no questions either: the skill silently registers every candidate it finds carrying `expert_protocol:` frontmatter, plus one built-in candidate it always adds regardless of scan results — `lazy-runtime.doctor`, the runtime doctor expert (dispatched only by its own hourly health-check tick, not something you invoke manually for traffic).
 
-A background daemon — and the metrics endpoint it serves in-process — only come from a deliberate opt-in. Edit `.claude/lazy.settings.json` and set `"daemon": {"enabled": true}` (merge it into whatever the first run already wrote there), then re-run `/lazy-core.install`. With `daemon.enabled` now `true` and no `daemon.run_here` yet on record, the wizard asks its one remaining question: *"Drive this project from THIS checkout on this machine?"* Answer yes — that records `daemon.run_here` as a hostname-to-checkout map pointing at this machine and this path, and installs the platform supervisor (launchd on macOS, systemd on Linux).
+A background daemon — and the metrics endpoint it serves in-process — only come from a deliberate opt-in, and that is a separate skill. Run `/lazy-core.daemon-setup`. It stops with a pointer back to `/lazy-core.install` if the runtime layer is missing, otherwise it walks its steps in order:
 
-Because this run resolved to "this checkout drives it", the same pass continues straight into the metrics step. The wizard asks one more question: *"Enable the Prometheus `/metrics` endpoint for this checkout's daemon?"* Answer yes. The skill allocates a free port sequentially from `9464` (reusing this checkout's already-recorded port on any later re-run), writes `enabled` and a human-readable `repo_label` (default: the folder name) into the tracked `lazy.settings.json`, and stores the actual allocated port only in this checkout's gitignored local overlay — a port free on one machine can be taken on another, so it never travels through git. The install report's final line for this step reads `metrics-enabled port=<port> label=<label> scrape-targets=<count>` — note the port, you need it next.
+1. **Daemon enabled gate.** With `daemon.enabled` at `false` it asks *"Enable a background daemon for this repo?"* Answer yes — the skill flips the flag itself.
+2. **Run-here gate.** It asks *"Drive the daemon from THIS checkout on this machine?"* Answer yes — that records `daemon.run_here` as a hostname-to-checkout map pointing at this machine and this path. The named checkout must be a git-only clone outside Dropbox (for example `~/lazy-runtime/<repo>`); the daemon refuses to start under a Dropbox folder.
+3. **Inbox ownership guard.** A read-only check that no other project on this host drives the same inbox directory. A collision stops the skill before any supervisor is installed; resolve it by pointing the other project's `daemon.run_here` elsewhere, then re-run.
+4. **Supervisor install.** It installs the platform supervisor unit (launchd on macOS, systemd on Linux) for this checkout and starts it.
+5. **Provision metrics.** Because a supervisor now runs here, the skill asks one more question: *"Enable the Prometheus `/metrics` endpoint for this checkout's daemon?"* Answer yes. It allocates a free port sequentially from `9464` (reusing this checkout's already-recorded port on any later re-run), writes `enabled` and a human-readable `repo_label` (default: the folder name) into the tracked `lazy.settings.json`, and stores the actual allocated port only in this checkout's gitignored local overlay — a port free on one machine can be taken on another, so it never travels through git. It also regenerates the host scrape-targets file. The report line for this step reads `metrics-enabled port=<port> label=<label> scrape-targets=<count>` — note the port, you need it next.
 
-The daemon supervisor was loaded earlier in this same run, before the metrics question was answered, and `metrics.init()` only runs once at process start — so restart the supervisor now to pick up the setting: `launchctl kickstart -k gui/$UID <label from the plist path the report named>` on macOS, or `systemctl --user restart <unit name from the report>` on Linux.
+Every answer is remembered in the tracked `lazy.settings.json`, so re-running the skill never re-asks a recorded question. The skill ends by reminding you to commit that file — it carries the daemon gates to every clone.
 
-Verify locally: `curl -fsS http://127.0.0.1:<port>/metrics | head` should show lines starting with `lazycortex_runtime_`. If you see nothing, re-check the install report for the metrics step's outcome and the supervisor logs.
+The supervisor was loaded in step 4, before the metrics question was answered, and `metrics.init()` only runs once at process start — so restart the supervisor now to pick up the setting: `launchctl kickstart -k gui/$UID <label from the plist path the report named>` on macOS, or `systemctl --user restart <unit name from the report>` on Linux.
+
+Verify locally: `curl -fsS http://127.0.0.1:<port>/metrics | head` should show lines starting with `lazycortex_runtime_`. If you see nothing, re-check the daemon-setup report for the metrics step's outcome and the supervisor logs.
 
 ### Step 2 — Produce some traffic
 
@@ -85,33 +98,98 @@ To tear down: `/lazy-observe.uninstall` unloads the service and removes the rend
 
 ## How it flows
 
+### Install and enable metrics
+
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
 sequenceDiagram
   participant operator as Operator
-  participant installer as lazy-core.install
-  participant daemon as Runtime Daemon
-  participant observeInstall as lazy-observe.install
-  participant metricsAgent as Metrics Agent
-  participant prometheus as Prometheus
+  participant coreInstall as lazy-core.install
+  participant daemonSetup as lazy-core.daemon-setup
+  participant settings as lazy.settings.json (tracked)
+  participant overlay as Local overlay (gitignored)
+  participant scrapeTargets as Scrape-targets file
 
-  operator->>installer: install runtime daemon
-  installer-->>operator: auto-registered expert candidates
-  installer->>operator: enable Prometheus metrics endpoint?
-  operator-->>installer: yes
-  Note over installer: allocate free port sequentially from 9464, write enabled and repo_label into tracked lazy.settings.json, write allocated port into gitignored local overlay
-  operator->>daemon: restart daemon supervisor
-  Note over daemon: one-shot metrics.init() picks up new setting, exposes /metrics on allocated loopback port
-  operator->>daemon: dispatch expert job via lazy-expert.dispatch-job
-  daemon-->>operator: tick recorded, metrics counter increments
-  operator->>observeInstall: install lazy-observe agent
-  observeInstall->>daemon: pre-flight check for covered host
-  daemon-->>observeInstall: no existing coverage found
-  Note over observeInstall: walk agent-kind, URL, and auth wizard, render agent config and service unit for every metrics-enabled daemon on host
-  observeInstall->>metricsAgent: load supervised service
-  metricsAgent->>daemon: scrape /metrics
-  metricsAgent->>prometheus: remote_write metrics
-  operator->>observeInstall: run lazy-observe.audit
-  observeInstall-->>operator: service active, /metrics reachable, self-metrics show successful remote_write, WAL bounded
-  Note over prometheus: Grafana charts populated
+  operator->>coreInstall: run install
+  coreInstall->>settings: install runtime layer (.experts/, expert registry, routines)
+  Note over coreInstall,settings: Auto-registers any expert candidates found and seeds daemon.enabled=false silently
+  coreInstall-->>operator: installed, no daemon question asked
+
+  operator->>daemonSetup: run daemon-setup
+  daemonSetup->>operator: enable the daemon?
+  operator-->>daemonSetup: yes
+  daemonSetup->>settings: write daemon.enabled=true
+  daemonSetup->>operator: does this checkout drive the daemon?
+  operator-->>daemonSetup: yes
+  daemonSetup->>settings: map this host to this checkout in run_here
+  Note over daemonSetup: Checks the inbox ownership guard
+  Note over daemonSetup: Installs the launchd or systemd supervisor
+  daemonSetup->>operator: enable the Prometheus metrics endpoint for this checkout?
+  operator-->>daemonSetup: yes
+  Note over daemonSetup: Allocates a free port sequentially from 9464
+  daemonSetup->>settings: write enabled and repo_label
+  daemonSetup->>overlay: write the allocated port
+  daemonSetup->>scrapeTargets: regenerate scrape-targets file
 ```
+
+This phase shows how the two core skills install the runtime layer, enable the daemon, and turn on its metrics endpoint on an allocated port.
+
+### Produce a metrics tick
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
+sequenceDiagram
+  participant operator as Operator
+  participant supervisor as Daemon supervisor
+  participant daemon as Daemon
+  participant expert as Expert
+  participant metrics as Metrics
+
+  operator->>supervisor: restart
+  supervisor->>daemon: start new process
+  daemon->>metrics: metrics.init() with new setting
+  Note over daemon,metrics: init is one-shot, so a restart is required
+  metrics-->>daemon: /metrics exposed on allocated loopback port
+  operator->>daemon: /lazy-expert.dispatch-job
+  daemon->>daemon: pick up the job
+  daemon->>expert: run the expert
+  expert-->>daemon: job result
+  daemon->>metrics: record a tick
+  metrics-->>metrics: counter increments
+```
+
+This phase shows how restarting the supervisor exposes `/metrics` and how one dispatched expert job increments the metrics counter.
+
+### Ship and verify metrics
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
+sequenceDiagram
+  participant operator as Operator
+  participant observeInstall as /lazy-observe.install
+  participant metricsAgent as Metrics agent + service
+  participant prometheus as Operator's Prometheus
+  participant observeAudit as /lazy-observe.audit
+  participant grafana as Operator's Grafana
+
+  operator->>observeInstall: run install
+  observeInstall->>observeInstall: pre-flight check for already-covered host
+  Note over observeInstall: none found, continue
+  observeInstall->>operator: wizard asks agent-kind, URL, auth
+  operator-->>observeInstall: answers
+  observeInstall->>metricsAgent: render agent config + service unit for every metrics-enabled daemon
+  observeInstall->>metricsAgent: load supervised service
+  loop each scrape interval
+    metricsAgent->>metricsAgent: scrape /metrics
+    metricsAgent->>prometheus: remote_write samples
+  end
+  operator->>observeAudit: run audit
+  observeAudit->>metricsAgent: verify service active + local /metrics reachable for every daemon
+  observeAudit->>metricsAgent: read self-metrics for successful remote_write and bounded WAL
+  observeAudit->>prometheus: check observer URL reachable
+  observeAudit-->>operator: audit report
+  grafana->>prometheus: query metrics
+  Note over grafana,prometheus: charts populated in operator's Grafana
+```
+
+This phase shows how the shipper is installed, forwards the scraped metrics to your Prometheus, and is verified by the audit until your Grafana charts fill in.

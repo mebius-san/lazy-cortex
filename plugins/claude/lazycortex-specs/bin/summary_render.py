@@ -229,7 +229,7 @@ def _is_requests_inbox(container_dir: Path) -> bool:
     # guard: skip the folder-note itself
     if entry.name == f"{dir_name}.md":
       continue
-    if _read_request_status(entry.read_text()) is not None:
+    if _read_request_status(entry.read_text(encoding = "utf-8")) is not None:
       has_request_file = True
 
   # a 'requests'-named container with no asset subfolders is an inbox even when empty
@@ -263,7 +263,7 @@ def _render_requests_stats(container_dir: Path) -> str:
     # guard: skip the folder-note itself
     if entry.name == f"{dir_name}.md":
       continue
-    status = _read_request_status(entry.read_text())
+    status = _read_request_status(entry.read_text(encoding = "utf-8"))
     if status in counts:
       counts[status] += 1
   segs = [f"{status} {count}" for status, count in counts.items() if count]
@@ -283,7 +283,7 @@ def is_shelf_note(note: Path) -> bool:
   Returns:
     True when the note declares neither the asset status role nor a level role.
   """
-  return classify(note.read_text()) == _BUCKET_SHELF
+  return classify(note.read_text(encoding = "utf-8")) == _BUCKET_SHELF
 
 
 def _tally_children(container_dir: Path, buckets: dict[str, int], *,
@@ -328,7 +328,7 @@ def _tally_children(container_dir: Path, buckets: dict[str, int], *,
     if resolved in seen:
       continue
     seen.add(resolved)
-    bucket = classify(note.read_text())
+    bucket = classify(note.read_text(encoding = "utf-8"))
 
     # guard: a group folder is transparent — it is never counted, and the tally reads through it
     if bucket == _BUCKET_SHELF:
@@ -464,7 +464,7 @@ def _is_catalog_root(note: Path) -> bool:
   Returns:
     True when the note declares the catalog role; False otherwise, a product root included.
   """
-  return _has_role(_frontmatter(note.read_text()), SpecValue.ROLE_CATALOG)
+  return _has_role(_frontmatter(note.read_text(encoding = "utf-8")), SpecValue.ROLE_CATALOG)
 
 
 def main(argv: list[str]) -> int:

@@ -1182,7 +1182,7 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
     for entry in candidates:
       try:
         # waiver: stdlib idiom, not a domain constant
-        text = entry.read_text(errors = "replace")
+        text = entry.read_text(errors = "replace", encoding = "utf-8")
       except OSError:
         text = ""
 
@@ -1224,7 +1224,7 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
           capture_output = True,
           text = True,
           env = subprocess_env,
-          check = False,
+          check = False, encoding = "utf-8"
         )
         dispatched += 1
       except Exception as e:
@@ -1556,7 +1556,7 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
   try:
     head_sha = subprocess.check_output(
       [ "git", "rev-parse", "HEAD" ],
-      cwd = str(work_dir), text = True,
+      cwd = str(work_dir), text = True, encoding = "utf-8",
     ).strip()
   except subprocess.CalledProcessError as e:
     # waiver: one-off routine-outcome note/reason token, not an internal key
@@ -1656,7 +1656,7 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
           continue
         try:
           # waiver: stdlib idiom, not a domain constant
-          text = (work_dir / rel).read_text(errors = "replace")
+          text = (work_dir / rel).read_text(errors = "replace", encoding = "utf-8")
         except OSError:
           text = ""
 
@@ -1718,7 +1718,7 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
           capture_output = True,
           text = True,
           env = subprocess_env,
-          check = False,
+          check = False, encoding = "utf-8",
         )
       except Exception as e:
         # the spawn itself faulted (e.g. TimeoutExpired) rather than the worker reporting a
@@ -1957,7 +1957,7 @@ def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str, watch: str
       [ "git", "log",
         "--format=%H%x09%h%x09%s%x09%an%x09%ae%x09%ct",
         rng, *pathspec ],
-      cwd = str(work_dir), text = True,
+      cwd = str(work_dir), text = True, encoding = "utf-8",
     ).strip()
     items: list[dict[str, object]] = []
     if out:
@@ -1981,7 +1981,7 @@ def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str, watch: str
     # use diff --name-status for added/modified/deleted classification
     out = subprocess.check_output(
       [ "git", "diff", "--name-status", rng, *pathspec ],
-      cwd = str(work_dir), text = True,
+      cwd = str(work_dir), text = True, encoding = "utf-8",
     ).strip()
     wanted = {
       "new_files": { "A" },
@@ -2021,7 +2021,7 @@ def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str, watch: str
   if watch == "renamed_files":
     out = subprocess.check_output(
       [ "git", "diff", "--name-status", "--find-renames", rng, *pathspec ],
-      cwd = str(work_dir), text = True,
+      cwd = str(work_dir), text = True, encoding = "utf-8",
     ).strip()
     items = []
     if out:
@@ -2259,7 +2259,7 @@ def _group_git_items(work_dir: Path, items: list[dict], mode: str | list, rng: s
     try:
       line = subprocess.check_output(
         [ "git", "log", "-1", "--format=%H%x09%an%x09%ae", rng, *pathspec ],
-        cwd = str(work_dir), text = True,
+        cwd = str(work_dir), text = True, encoding = "utf-8",
       ).strip()
     except subprocess.CalledProcessError:
       line = ""
@@ -2395,7 +2395,7 @@ def _query_skipped_shas(work_dir: Path, rng: str) -> set[str]:
   try:
     out = subprocess.check_output(
       [ "git", "log", f"--format=%H%x09%(trailers:key={SKIP_TRAILER_KEY},valueonly,separator=%x2C)", rng ],
-      cwd = str(work_dir), text = True,
+      cwd = str(work_dir), text = True, encoding = "utf-8",
     )
   except subprocess.CalledProcessError:
     # guard: an unreadable range hides nothing — the items stay as computed
@@ -2484,7 +2484,7 @@ def _drop_skipped_commits(work_dir: Path, items: list[dict], rng: str) -> list[d
     try:
       log = subprocess.check_output(
         [ "git", "log", "--format=%H%x09%an%x09%ae", f"--diff-filter={flag}", rng, "--", str(path) ],
-        cwd = str(work_dir), text = True,
+        cwd = str(work_dir), text = True, encoding = "utf-8",
       )
     except subprocess.CalledProcessError:
       # guard: an unreadable log never drops work silently — the item stands as computed
@@ -2527,7 +2527,7 @@ def _last_change_sha(work_dir: Path, path: str, rng: str, status: str) -> str:
     out = subprocess.check_output(
       [ "git", "log", f"--diff-filter={flag}",
         "--format=%H", "-1", rng, "--", path ],
-      cwd = str(work_dir), text = True,
+      cwd = str(work_dir), text = True, encoding = "utf-8",
     ).strip()
     return out or "unknown"
   except subprocess.CalledProcessError:
@@ -2560,7 +2560,7 @@ def _last_change_author(work_dir: Path, path: str, rng: str, status: str) -> tup
     out = subprocess.check_output(
       [ "git", "log", f"--diff-filter={flag}",
         "--format=%an%x09%ae", "-1", rng, "--", path ],
-      cwd = str(work_dir), text = True,
+      cwd = str(work_dir), text = True, encoding = "utf-8",
     ).strip()
   except subprocess.CalledProcessError:
     # guard: git log failed for this range/path — best-effort, empty strings not a raise
@@ -2780,7 +2780,7 @@ def _load_scan_state(repo: Path, name: str) -> dict:
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   import json
   try:
-    loaded = json.loads(_scan_state_path(repo, name).read_text())
+    loaded = json.loads(_scan_state_path(repo, name).read_text(encoding = "utf-8"))
   except (OSError, ValueError):
     return {}
   return loaded if isinstance(loaded, dict) else {}
@@ -2800,7 +2800,7 @@ def _save_scan_state(repo: Path, name: str, state: dict) -> None:
   path = _scan_state_path(repo, name)
   try:
     path.parent.mkdir(parents = True, exist_ok = True)
-    path.write_text(json.dumps(state, indent = 1, sort_keys = True))
+    path.write_text(json.dumps(state, indent = 1, sort_keys = True), encoding = "utf-8")
   except OSError:
     # guard: state persistence is an optimization — never fail the tick over it
     pass
@@ -2992,7 +2992,7 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
   for f in candidates:
     try:
       # waiver: stdlib idiom, not a domain constant
-      text = f.read_text(errors = "replace")
+      text = f.read_text(errors = "replace", encoding = "utf-8")
     except OSError:
       continue
     fm = parse_frontmatter(text)
@@ -3023,7 +3023,7 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
           capture_output = True,
           text = True,
           env = subprocess_env,
-          check = False,
+          check = False, encoding = "utf-8"
         )
         if proc.returncode != 0:
           tail = (proc.stderr or "")[-500:].strip()

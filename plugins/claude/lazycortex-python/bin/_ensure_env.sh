@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 # _ensure_env.sh — optional project-environment bootstrap for chk / tst.
 #
 # Sources a repo-declared shell script named by `python.env_source` in
@@ -18,17 +18,18 @@
 # are resolved relative to the current working directory — the same cwd that
 # scopes tests/<module>/ for pytest — NOT the venv resolver's project root.
 #
-# Sourced (not executed) by chk / tst AFTER _ensure_venv.sh, so `python3`
-# resolves to the just-activated venv interpreter and the exports land in the
-# shell that execs pytest / the checker.
+# Sourced (not executed) by chk / tst AFTER _ensure_venv.sh, so `python` resolves
+# to the just-activated venv interpreter and the exports land in the shell that
+# execs pytest / the checker. `python`, not `python3`: a Windows venv's Scripts/
+# carries only python.exe.
 
 # Read `python.env_source` from <cwd>/.claude/lazy.settings.json with a stdlib
 # one-liner. No dependency on lazycortex-core: chk / tst run standalone from a
 # bare terminal where $LAZYCORTEX_PLUGIN_DIRS is unset, so the core settings
 # helper is unavailable here — a raw JSON read is the only portable option.
 _env_source=""
-if command -v python3 >/dev/null 2>&1; then
-  _env_source="$(python3 - <<'PY' 2>/dev/null || true
+if command -v python >/dev/null 2>&1; then
+  _env_source="$(python - <<'PY' 2>/dev/null || true
 import json, os, sys
 path = os.path.join(".claude", "lazy.settings.json")
 try:

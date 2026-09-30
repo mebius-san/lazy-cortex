@@ -476,7 +476,7 @@ def _load_upstream_config(repo: Path) -> dict:
   # a malformed settings file is treated the same as an absent one — every caller already
   # falls back to an empty section
   try:
-    spec = json.loads(path.read_text()).get(_K.SPEC_SECTION)
+    spec = json.loads(path.read_text(encoding = "utf-8")).get(_K.SPEC_SECTION)
   except json.JSONDecodeError:
     return {}
   if not isinstance(spec, dict):
@@ -549,7 +549,7 @@ def _call_remote_mirror(repo: Path, payload: dict) -> dict:
   env[_K.REPO_ROOT_ENV] = str(repo)
   proc = subprocess.run(
       [sys.executable, str(cli), _K.REMOTE_MIRROR_VERB],
-      input = json.dumps(payload), capture_output = True, text = True, env = env, check = False,
+      input = json.dumps(payload), capture_output = True, text = True, env = env, check = False, encoding = "utf-8",
   )
 
   # guard: the CLI's own contract is "0 on success, 1 on any failure — always valid JSON on
@@ -582,7 +582,7 @@ def _source_content_changed(repo: Path, source_dir: Path) -> bool:
   status = subprocess.run(
       # waiver: git CLI vocabulary, not a domain constant
       [_K.GIT, "-C", str(repo), "status", "--porcelain", "--", str(source_dir)],
-      check = False, capture_output = True, text = True,
+      check = False, capture_output = True, text = True, encoding = "utf-8",
   )
   return bool(status.stdout.strip())
 
@@ -621,7 +621,7 @@ def _clone_origin_mismatch(clone_dir: Path, url: str) -> bool:
     return False
   proc = subprocess.run(
       [_K.GIT, "remote", "get-url", "origin"], cwd = str(clone_dir),
-      capture_output = True, text = True, check = False,
+      capture_output = True, text = True, check = False, encoding = "utf-8",
   )
   return proc.returncode == 0 and proc.stdout.strip() != url
 
@@ -1018,7 +1018,7 @@ def _git_ignored(repo: Path, rel_paths: list[str]) -> set[str]:
     return set()
   proc = subprocess.run(
       [_K.GIT, "check-ignore", "--stdin"], cwd = str(repo),
-      input = "\n".join(rel_paths), capture_output = True, text = True, check = False,
+      input = "\n".join(rel_paths), capture_output = True, text = True, check = False, encoding = "utf-8",
   )
   return set(proc.stdout.splitlines())
 
@@ -1304,7 +1304,7 @@ def _resolve_upstream_icon(status: str) -> tuple[str, str]:
     return "", ""
   note_fm = { f"frontmatter.{UpstreamKey.STATUS}": status, f"frontmatter.{_K.ROLE_KEY}": UpstreamRole.UNIT }
   matchers = [
-      entry for entry in json.loads(registry.read_text()).get(_K.ICON_MATCHERS, [])
+      entry for entry in json.loads(registry.read_text(encoding = "utf-8")).get(_K.ICON_MATCHERS, [])
       if all(note_fm.get(key) == value for key, value in entry.get(_K.ICON_WHEN, {}).items())
   ]
   icon = color = ""
@@ -1438,7 +1438,7 @@ def _is_draft_gated(source_dir: Path, unit_title: str) -> bool:
   # guard: no root note mirrored for this unit — ungated
   if not canon.is_file():
     return False
-  fm, _end = flip_gate.parse_frontmatter(canon.read_text())
+  fm, _end = flip_gate.parse_frontmatter(canon.read_text(encoding = "utf-8"))
   return flip_gate.is_true(fm, DraftKey.DRAFT)
 
 
@@ -1654,7 +1654,7 @@ def _read_request_frontmatter(repo: Path, wikilink: str) -> dict | None:
   # guard: the request was deleted by hand — nothing to read
   if not path.is_file():
     return None
-  fm, _end = flip_gate.parse_frontmatter(path.read_text())
+  fm, _end = flip_gate.parse_frontmatter(path.read_text(encoding = "utf-8"))
   return fm
 
 
@@ -2390,7 +2390,7 @@ def _load_cursor(repo: Path) -> int:
   if not path.is_file():
     return 0
   try:
-    return int(json.loads(path.read_text()).get(_CURSOR_KEY, 0))
+    return int(json.loads(path.read_text(encoding = "utf-8")).get(_CURSOR_KEY, 0))
   except (json.JSONDecodeError, TypeError, ValueError, AttributeError):
     return 0
 
@@ -2405,7 +2405,7 @@ def _save_cursor(repo: Path, cursor: int) -> None:
   """
   path = repo / _K.CURSOR_FILE
   path.parent.mkdir(parents = True, exist_ok = True)
-  path.write_text(json.dumps({ _CURSOR_KEY: cursor }))
+  path.write_text(json.dumps({ _CURSOR_KEY: cursor }), encoding = "utf-8")
 
 
 def _source_note_path(repo: Path, repo_key: str) -> Path:
@@ -2888,7 +2888,7 @@ def _scan_unit(repo: Path, repo_key: str, unit_path: str, unit_dir: Path) -> lis
 
   # status <-> tags mirror (a hand-edit could desync the two independently) — tags is a block
   # list, unreadable through the flat-scalar fm dict (see _parse_tags)
-  if status and f"upstream/{status}" not in _parse_tags(note_path.read_text()):
+  if status and f"upstream/{status}" not in _parse_tags(note_path.read_text(encoding = "utf-8")):
     findings.append(_finding(
         DoctorFinding.TAG_STATUS_MISMATCH, repo_key,
         f"note reads `spec_upstream_status: {status}` but `tags:` lacks `upstream/{status}`",

@@ -1,12 +1,12 @@
 ---
 name: lazy-obsidian.update-plugin
 description: "Dispatched by `/lazy-obsidian.install` (for `dataview`) and `/lazy-obsidian.iconize-install` (for `obsidian-icon-folder`, `folder-notes`, `iconize-reloader`) to put one community plugin into the vault. Also run it directly when the operator asks to install, refresh, or update a single Obsidian plugin by id in this repo's vault, or when a vault plugin is reported as out of date. Version-aware — no-ops when the vault is already current; `--bundled` installs from the plugin's own bundled source instead of GitHub."
-allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(mv *), Bash(test *), Bash(date *), Bash(jq *), Bash(curl *), AskUserQuestion, Agent
+allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(mv *), Bash(test *), Bash(date *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(curl *), AskUserQuestion, Agent
 argument-hint: "<plugin-id> [--bundled]"
 ---
 # Install or update one Obsidian vault plugin
 
-Primitive skill. Installs or updates a single Obsidian community plugin into the current repo's vault at `<repo-root>/.obsidian/`. Version-aware — no-ops when the vault is already at the latest version. Always re-applies the opinionated override block from `plugin-settings.json` on top of the vault plugin's `data.json`, so re-running is cheap and idempotent.
+Primitive skill. Every JSON read and write below goes through the plugin's `bin/plugin_json.py`, run under the interpreter — no `jq`, which Git Bash on Windows lacks. Installs or updates a single Obsidian community plugin into the current repo's vault at `<repo-root>/.obsidian/`. Version-aware — no-ops when the vault is already at the latest version. Always re-applies the opinionated override block from `plugin-settings.json` on top of the vault plugin's `data.json`, so re-running is cheap and idempotent.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -49,24 +49,20 @@ Determine vault:
    - Fetch failed → **FAIL**: "Could not fetch Obsidian community registry. Check network and retry."
 2. Find the entry `{id == <id>}` and read `repo` (e.g. `blacksmithgu/obsidian-dataview`).
    - Not found → **FAIL**: "`<id>` not in the Obsidian community registry. Check the id spelling or pass `--bundled` if it's a plugin shipped by this LazyCortex plugin."
-3. Fetch remote manifest: ``` source_version=$(curl -fsSL https://github.com/<repo>/releases/latest/download/manifest.json | jq -r '.version') ```
+3. Fetch remote manifest: ``` source_version=$(curl -fsSL https://github.com/<repo>/releases/latest/download/manifest.json | "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/plugin_json.py" version -) ```
    - Fetch or parse failed → **FAIL**: "Could not fetch latest release manifest for `<id>` from `<repo>`. Retry."
 
 ### Bundled mode (`--bundled`)
 
 - Source dir: `<installPath>/templates/obsidian/plugins/<id>/`.
 - Abort with **FAIL** if the dir doesn't exist: "`<id>` is not bundled in `templates/obsidian/plugins/`. Remove `--bundled` to resolve from the community registry instead."
-- `source_version=$(jq -r '.version' <installPath>/templates/obsidian/plugins/<id>/manifest.json)`.
+- `source_version=$("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/plugin_json.py" version <installPath>/templates/obsidian/plugins/<id>/manifest.json)`.
 
 ## Step 3 — Determine vault version
 
-```
-test -f <vault>/plugins/<id>/manifest.json \
-  && vault_version=$(jq -r '.version // ""' <vault>/plugins/<id>/manifest.json) \
-  || vault_version=""
-```
+When `<vault>/plugins/<id>/manifest.json` exists, `vault_version=$("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/plugin_json.py" version <vault>/plugins/<id>/manifest.json)`; otherwise `vault_version` is empty.
 
-Empty string = plugin absent from vault.
+Empty string = plugin absent from vault (a manifest without a `version` also reads empty).
 
 ## Step 4 — Compare and decide
 
@@ -106,21 +102,13 @@ If `<vault>/plugins/<id>/manifest.json` exists, `mv` it aside to `manifest.json.
 
 ## Step 6 — Apply opinionated overrides
 
-Read the override block for `<id>` from `<installPath>/templates/obsidian/plugin-settings.json`:
+Run the credential-scan guard below first, then merge the override block for `<id>` from `<installPath>/templates/obsidian/plugin-settings.json` onto the vault's `data.json`:
 
 ```
-override=$(jq '.["<id>"] // {}' <installPath>/templates/obsidian/plugin-settings.json)
+"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/plugin_json.py" merge-overrides <installPath>/templates/obsidian/plugin-settings.json <id> <vault>/plugins/<id>/data.json
 ```
 
-If the block is missing or empty (`{}`) → skip. Report state: `no-overrides`.
-
-Otherwise, deep-merge onto the vault's `data.json`:
-
-1. Ensure `<vault>/plugins/<id>/data.json` exists; if absent, create it with `{}`.
-2. Atomic write: ``` jq -s '.[0] * .[1]' \ <vault>/plugins/<id>/data.json \ <(jq '.["<id>"]' <installPath>/templates/obsidian/plugin-settings.json) \ > <vault>/plugins/<id>/data.json.tmp mv <vault>/plugins/<id>/data.json.tmp <vault>/plugins/<id>/data.json ```
-3. Compare pre-merge and post-merge content:
-   - Same bytes → `overrides-current`.
-   - Different → `overrides-applied`.
+It prints the report state on one line: `no-overrides` (the block is missing or empty; nothing written), `overrides-current` (the vault already carries every override value; nothing written), or `overrides-applied` (merged and written atomically; `data.json` is created when absent). A non-zero exit means one of the files does not parse as a JSON object — **FAIL** with its one-line message.
 
 ### Merge semantics
 
@@ -170,7 +158,7 @@ Return verbatim so chaining skills can key off the state tuple without re-parsin
 
 ## Dry run
 
-If the user passes `--dry-run` alongside the id, run Steps 1–4 (reads only) plus the Step 6 merge in-memory (no write). Print the state tuple that *would* be reported and exit without mutation.
+If the user passes `--dry-run` alongside the id, run Steps 1–4 (reads only) plus the Step 6 merge with `--dry-run` appended (no write). Print the state tuple that *would* be reported and exit without mutation.
 
 ## Callers
 

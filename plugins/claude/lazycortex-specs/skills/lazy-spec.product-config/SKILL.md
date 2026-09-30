@@ -358,7 +358,7 @@ The built-in review classes generated in Step 12 are driven by the roles `use-ca
 "${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get review
 ```
 
-The keys of the first printed object are the registered expert names. In the second, the **shared set** is the classes whose `class` labels are the bare doc-kinds `use-cases`, `system-use-cases`, `design`, `system-design`, `system-tech`, `ui-design`, `system-ui-design`, `code-plan`, `test-plan`, `bug`, `code-report`, `test-report`, `data-report`, `docs-report`, `research-design`, `research-report` (no `@<key>` suffix). Determine the path:
+The keys of the first printed object are the registered expert names. In the second, the **shared set** is the classes whose `class` labels are the bare doc-kinds `use-cases`, `system-use-cases`, `design`, `system-design`, `system-tech`, `ui-design`, `system-ui-design`, `code-plan`, `test-plan`, `bug`, `code-report`, `test-report`, `data-report`, `docs-report`, `content-design`, `research-design`, `research-report` (no `@<key>` suffix). Determine the path:
 
 - **Shared set absent** (no bare-label class of any of those kinds — the usual first-product case) → ask the role questions below; the answers seed the shared set in Step 12. Outcome `assigned`.
 - **Shared set present** → ask whether this product rides the shared experts or defines a product-specific override:
@@ -378,16 +378,16 @@ The keys of the first printed object are the registered expert names. In the sec
 Role questions (asked only on the `assigned` and `override` paths — skipped on `shared-set`): for EACH role in order (`use-case-writer`, then `designer`, then `system-designer`, then `architect`, then `ui-designer`, then `planner`, then `developer`, then `tester`, then `data-writer`, then `researcher`, then `editor`), issue a SEPARATE `AskUserQuestion` (one per role) offering the registered expert names as options. Where each role lands in the built-in classes (Step 12), for the question's `<landing>`:
 
 - `use-case-writer` — main writer of the `use-cases` and `system-use-cases` classes (an asset's use cases, and the product's above them), defaulting to `<domain>.use-case-writer` when `lazycortex-experts` seeded one.
-- `designer` — main writer of the asset-level `design`, `vision` and `research-design` classes and a section validator on `use-cases` and `system-use-cases`.
+- `designer` — main writer of the asset-level `design`, `vision`, `content-design` and `research-design` classes and a section validator on `use-cases` and `system-use-cases`.
 - `system-designer` — main writer of the `system-design` and `system-vision` classes (the product-root and project-root `design.md` / `vision.md`); never validates.
 - `architect` — main writer of the `system-tech` and `architecture` classes and the standing validator of everything design-shaped (a section validator on `design`, `system-design`, `ui-design`, `system-ui-design`, and `code-plan`).
 - `ui-designer` — main writer of the `ui-design` and `system-ui-design` classes (an asset's screens, and the product's shared look above them), defaulting to `<domain>.ui-designer` when `lazycortex-experts` seeded one.
 - `planner` — main writer of the `code-plan` class and a section validator on `architecture`.
 - `developer` — main writer of the `code-report` class and a section validator on the `test-plan` and `bug` classes.
 - `tester` — main writer of `bug`, `test-plan`, and `test-report`, and a section validator on the `code-plan` class.
-- `data-writer` — main writer of the `data-report` class, defaulting to `<domain>.data-writer` when `lazycortex-experts` seeded one.
+- `data-writer` — main writer of the `data-report` class and a section validator on `content-design`, defaulting to `<domain>.data-writer` when `lazycortex-experts` seeded one.
 - `researcher` — main writer of the `research-report` class (a research asset's `research.md`) and a section validator on `research-design`, defaulting to `<domain>.researcher` when `lazycortex-experts` seeded one.
-- `editor` — second main writer, after the author, of the eight prose classes `vision`, `system-vision`, `use-cases`, `system-use-cases`, `design`, `system-design`, `research-design`, `research-report`: it brings the author's prose to the writing canon in every main round before the operator reads, defaulting to `<domain>.editor` when `lazycortex-experts` seeded one. It is the one role that may be answered `none`: the classes are then generated with their author alone, never omitted.
+- `editor` — second main writer, after the author, of the nine prose classes `vision`, `system-vision`, `use-cases`, `system-use-cases`, `design`, `system-design`, `content-design`, `research-design`, `research-report`: it brings the author's prose to the writing canon in every main round before the operator reads, defaulting to `<domain>.editor` when `lazycortex-experts` seeded one. It is the one role that may be answered `none`: the classes are then generated with their author alone, never omitted.
 
 The `docs-report` class has no default writer — offer only the "other" path for it, pointing the operator at `lazycortex-experts` to compose one, and omit the class when they have none. Do NOT invent an expert name — only names present in `settings-get experts` are valid.
 
@@ -519,7 +519,7 @@ In the parsed object, write the classes below into `review.classes` (create the 
 
 A class's label IS the name of a document type (`spec_doc_type`), and that is the class's only identity. `paths` stay in the schema, but their role has narrowed: they discriminate a product override `<type>@<key>` from the bare-type class, and they catch documents carrying no type at all. A typed document is routed by its frontmatter, never by where it sits or what it is called.
 
-Generate **one class per declared type carrying `review: true`** — the shipped types plus whatever the product declares under `products[<key>].doc_types`. The **shared set** — bare-type labels with right-anchored wildcard globs — serves every product whose role-experts match; a product with divergent experts (Step 8 outcome `override`) gets the same types re-emitted as product-scoped `<type>@<key>` classes inserted BEFORE the shared set. Globs span the product root and every group folder (built-in AND operator-defined) — so `lazy-spec.add-asset-type` never touches `review.classes`, a new group folder needs no new class, and a new product needs no new class when it rides the shared experts. Reusable validation dicts plus a no-validation case. **`system-designer` is never a validation writer in any class** — it appears only as a `main` writer; `designer` appears as a validation writer only on `use-cases` and `system-use-cases`, never elsewhere; the `architect` is the standing validator of everything design-shaped (`design`, `system-design`, `ui-design`, `system-ui-design`, `code-plan`); no class is validated by its own main writer; the report classes carry no validation bucket, same as `system-tech`. Each checkbox in the launch ladder (`lazy-spec.lifecycle-protocol.md` Part 3) resolves its dispatched expert from the review class matching its own result document — `planner` writes `code-plan.md`, `developer` writes `code-report.md`, `tester` writes both `test-plan.md` and `test-report.md`, `data-writer` writes `data-report.md` — mirroring `lazy-spec.install` § 6e's seed template:
+Generate **one class per declared type carrying `review: true`** — the shipped types plus whatever the product declares under `products[<key>].doc_types`. The **shared set** — bare-type labels with right-anchored wildcard globs — serves every product whose role-experts match; a product with divergent experts (Step 8 outcome `override`) gets the same types re-emitted as product-scoped `<type>@<key>` classes inserted BEFORE the shared set. Globs span the product root and every group folder (built-in AND operator-defined) — so `lazy-spec.add-asset-type` never touches `review.classes`, a new group folder needs no new class, and a new product needs no new class when it rides the shared experts. Reusable validation dicts plus a no-validation case. **`system-designer` is never a validation writer in any class** — it appears only as a `main` writer; `designer` appears as a validation writer only on `use-cases` and `system-use-cases`, never elsewhere; the `architect` is the standing validator of everything design-shaped (`design`, `system-design`, `ui-design`, `system-ui-design`, `code-plan`) except a content asset's `content-design`, which the `data-writer` validates — an entity's design has no code structure to judge, only data to be expressed; no class is validated by its own main writer; the report classes carry no validation bucket, same as `system-tech`. Each checkbox in the launch ladder (`lazy-spec.lifecycle-protocol.md` Part 3) resolves its dispatched expert from the review class matching its own result document — `planner` writes `code-plan.md`, `developer` writes `code-report.md`, `tester` writes both `test-plan.md` and `test-report.md`, `data-writer` writes `data-report.md` — mirroring `lazy-spec.install` § 6e's seed template:
 
 - **A = architect review** — `{ "architect_review": { "name": "<architect>", "section": "Architect review", "position": "bottom" } }`.
 - **D = designer review** — `{ "designer_review": { "name": "<designer>", "section": "Designer review", "position": "bottom" } }`.
@@ -527,6 +527,7 @@ Generate **one class per declared type carrying `review: true`** — the shipped
 - **DV = developer review** — `{ "developer_review": { "name": "<developer>", "section": "Developer review", "position": "bottom" } }`.
 - **P = planner review** — `{ "planner_review": { "name": "<planner>", "section": "Planner review", "position": "bottom" } }`.
 - **R = researcher review** — `{ "researcher_review": { "name": "<researcher>", "section": "Researcher review", "position": "bottom" } }`.
+- **DW = data-writer review** — `{ "data-writer_review": { "name": "<data-writer>", "section": "Data writer review", "position": "bottom" } }`.
 - **NONE** — omit the `experts.validation` key entirely (no validation writers this iteration).
 
 **Enumerate the types first.** The set of classes is derived, not written down here:
@@ -538,18 +539,18 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs
 
 Take every name `doc-type list` returns, keep those whose declaration carries `review: true`, and emit one class per surviving type with `class` = the type's own name. A type declared `review: false` (the shipped `decisions`, and any project type declaring the same) gets no class and never enters the review loop.
 
-**Expert bindings** (bare-type labels; substituting `<use-case-writer>`, `<designer>`, `<system-designer>`, `<architect>`, `<ui-designer>`, `<planner>`, `<developer>`, `<tester>`, `<data-writer>`, `<docs-writer>`, `<researcher>`) — the defaults for the shipped types. For a project-declared type the experts are not derivable: ask the operator, exactly one question per such type, naming the type and offering the same A / D / TA / DV / P / R / NONE validation shapes:
+**Expert bindings** (bare-type labels; substituting `<use-case-writer>`, `<designer>`, `<system-designer>`, `<architect>`, `<ui-designer>`, `<planner>`, `<developer>`, `<tester>`, `<data-writer>`, `<docs-writer>`, `<researcher>`) — the defaults for the shipped types. For a project-declared type the experts are not derivable: ask the operator, exactly one question per such type, naming the type and offering the same A / D / TA / DV / P / R / DW / NONE validation shapes:
 
 ```
 Context (print before asking, one block per project-declared type):
 - Where: Step 12 — Review classes; target the `<type>` class about to be written into `review.classes`
 - Found: `doc-type resolve <type> --product <key>` → `review: true`, declared under `products[<key>].doc_types`, no shipped binding
 - Why asking: the validation shape of a project-declared type is not derivable
-- Answers: `A` / `D` / `TA` / `DV` / `P` / `R` / `NONE` — the validation dict listed above, filled with this product's role experts and persisted on the `<type>` class; asked again only when the type's class is regenerated
-AskUserQuestion: header "<type> class", question "Validation shape for product `<key>`'s project-declared type `<type>` — who validates its documents after the main writer?", options `A` / `D` / `TA` / `DV` / `P` / `R` / `NONE` with the descriptions above.
+- Answers: `A` / `D` / `TA` / `DV` / `P` / `R` / `DW` / `NONE` — the validation dict listed above, filled with this product's role experts and persisted on the `<type>` class; asked again only when the type's class is regenerated
+AskUserQuestion: header "<type> class", question "Validation shape for product `<key>`'s project-declared type `<type>` — who validates its documents after the main writer?", options `A` / `D` / `TA` / `DV` / `P` / `R` / `DW` / `NONE` with the descriptions above.
 ```
 
-`design`, `bug`, `use-cases`, `system-use-cases`, and `research-design` additionally carry `context_from_frontmatter: [spec_source_requests]` — at main-job dispatch the dispatcher resolves that frontmatter key's wikilink/path values on the document under review to repo files and folds them into the job's `context/`, so the writer's job bundle includes the originating request(s). Attribution reaches a doc two ways: `lazy-spec.request-apply`'s `ensure_source_request` writer stamps `spec_source_requests` onto an attach target's primary doc, and `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" seed-doc` copies the status folder-note's union (stamped there at apply) onto every checkbox-seeded doc:
+`design`, `bug`, `use-cases`, `system-use-cases`, `content-design`, and `research-design` additionally carry `context_from_frontmatter: [spec_source_requests]` — at main-job dispatch the dispatcher resolves that frontmatter key's wikilink/path values on the document under review to repo files and folds them into the job's `context/`, so the writer's job bundle includes the originating request(s). Attribution reaches a doc two ways: `lazy-spec.request-apply`'s `ensure_source_request` writer stamps `spec_source_requests` onto an attach target's primary doc, and `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" seed-doc` copies the status folder-note's union (stamped there at apply) onto every checkbox-seeded doc:
 
 | `class` label | `paths` | `experts.main` | `experts.validation` | extra |
 |---|---|---|---|---|
@@ -570,6 +571,7 @@ AskUserQuestion: header "<type> class", question "Validation shape for product `
 | `test-report` | `["*/test-report.md"]` | `[{ "name": "<tester>" }]` | NONE | — |
 | `data-report` | `["*/data-report.md"]` | `[{ "name": "<data-writer>" }]` | NONE | — |
 | `docs-report` | `["*/docs-report.md"]` | `[{ "name": "<docs-writer>" }]` | NONE | — |
+| `content-design` | `["*/*/design.md"]` | `[{ "name": "<designer>" }, { "name": "<editor>" }]` | DW | `context_from_frontmatter: [spec_source_requests]` |
 | `research-design` | `["*/*/design.md"]` | `[{ "name": "<designer>" }, { "name": "<editor>" }]` | R | `context_from_frontmatter: [spec_source_requests]` |
 | `research-report` | `["*/research.md"]` | `[{ "name": "<researcher>" }, { "name": "<editor>" }]` | NONE | — |
 
@@ -596,6 +598,7 @@ The `system-vision` / `system-design` / `system-tech` classes serve the **level 
 | `test-report@<key>` | `["<spec_path>/*/**/test-report.md"]` | `[{ "name": "<tester>" }]` | NONE |
 | `data-report@<key>` | `["<spec_path>/*/**/data-report.md"]` | `[{ "name": "<data-writer>" }]` | NONE |
 | `docs-report@<key>` | `["<spec_path>/*/**/docs-report.md"]` | `[{ "name": "<docs-writer>" }]` | NONE |
+| `content-design@<key>` | `["<spec_path>/*/**/design.md"]` | `[{ "name": "<designer>" }, { "name": "<editor>" }]` | DW |
 | `research-design@<key>` | `["<spec_path>/*/**/design.md"]` | `[{ "name": "<designer>" }, { "name": "<editor>" }]` | R |
 | `research-report@<key>` | `["<spec_path>/*/**/research.md"]` | `[{ "name": "<researcher>" }, { "name": "<editor>" }]` | NONE |
 

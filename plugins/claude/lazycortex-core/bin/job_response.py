@@ -148,7 +148,7 @@ def read_response(jdir: Path) -> dict:
   if not resp_path.exists():
     return {}
   try:
-    parsed = json.loads(resp_path.read_text())
+    parsed = json.loads(resp_path.read_text(encoding = "utf-8"))
   except (OSError, json.JSONDecodeError):
     return {}
   return parsed if isinstance(parsed, dict) else {}

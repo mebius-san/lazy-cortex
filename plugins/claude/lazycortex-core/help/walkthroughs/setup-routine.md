@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a dot-namespaced periodic routine with the runtime daemon and remove it cleanly when it is no longer needed.
-last_regen: 2026-09-24
+last_regen: 2026-09-30
 diagram_spec:
   anchor: "How registration and pickup flow"
   request: "Sequence diagram showing the user running /lazy-routine.register, the skill writing lazy.settings.json, the daemon picking up the new routine on its next cycle without restart, and the user later running /lazy-routine.unregister to remove it. Include the built-in protection check for lazy-expert.pump."
@@ -21,7 +21,7 @@ After this walkthrough you know how to register any of the five routine types, v
 
 ## What you need
 
-- `lazycortex-core` installed in the project with the expert runtime enabled (`/lazy-core.install` with daemon opt-in complete, `run.sh` present).
+- `lazycortex-core` installed in the project with the expert runtime enabled (`/lazy-core.install` complete, then `/lazy-core.daemon-setup` so a background daemon drives this checkout).
 - `.claude/lazy.settings.json` already bootstrapped and writable — re-run `/lazy-core.install` if it is absent.
 - A dot-namespaced routine name in `<plugin>.<verb>` form (e.g. `lazy-review.tick`, `acme-lint.sweep`). A third `.<scope>` segment is allowed for a routine registered once per scope (e.g. `lazy-wiki.mirror-sync.<scope-id>`).
 - For `inbox`-type routines: the inbox directory should be gitignored — the wizard checks and offers to add it if not.

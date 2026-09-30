@@ -223,7 +223,7 @@ def _read_store(repo: Path) -> dict[str, dict]:
   """
   path = sidecar_path(repo)
   try:
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding = "utf-8"))
   except (OSError, json.JSONDecodeError):
     return {}
   return data if isinstance(data, dict) else {}
@@ -242,7 +242,7 @@ def _write_store(repo: Path, store: Mapping[str, dict]) -> None:
 
   # write beside the target and rename over it, so a reader never observes a half-written store
   tmp = path.with_suffix(path.suffix + _TMP_SUFFIX)
-  tmp.write_text(json.dumps(store, indent = 2, sort_keys = True) + "\n")
+  tmp.write_text(json.dumps(store, indent = 2, sort_keys = True) + "\n", encoding = "utf-8")
   os.replace(tmp, path)
 
 

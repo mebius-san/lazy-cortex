@@ -199,7 +199,7 @@ def _mark_dead(repo: Path, expert: str, jdir: Path, blob: dict) -> int:
   """
   # the record lands before the marker so nothing can observe a death without its forensics
   (jdir / JobMarker.DEAD_CANDIDATE).unlink(missing_ok = True)
-  (jdir / JobArtifact.DEAD_JSON).write_text(json.dumps(blob, indent = 2))
+  (jdir / JobArtifact.DEAD_JSON).write_text(json.dumps(blob, indent = 2), encoding = "utf-8")
   (jdir / JobMarker.DEAD).touch()
   _append_jobs_log(repo, expert, jdir.name, JobLogOutcome.DEAD)
 
@@ -238,14 +238,14 @@ def _build_dead_json(jdir: Path, expert: str, job_id: str, marked_at: float) -> 
 
   # the claimant PID as recorded at claim time; -1 when the marker is gone or garbled
   try:
-    original_pid = int((jdir / JobMarker.PID).read_text().strip())
+    original_pid = int((jdir / JobMarker.PID).read_text(encoding = "utf-8").strip())
   except (OSError, ValueError):
     original_pid = -1
 
   # carry the dedup key forward so a re-dispatch can be matched against this death
   dedup_key = None
   try:
-    request = json.loads((jdir / JobFile.REQUEST).read_text())
+    request = json.loads((jdir / JobFile.REQUEST).read_text(encoding = "utf-8"))
     dedup_key = request.get(JobRequestKey.DEDUP_KEY)
   except (OSError, json.JSONDecodeError, KeyError):
     pass
@@ -401,7 +401,7 @@ def _detect_dead_jobs(repo: Path, *, grace_sec: float = 0.0) -> int:
 
       # an unreadable or garbled PID marker reads the same as a claimant that is gone
       try:
-        pid_text = (jdir / JobMarker.PID).read_text().strip()
+        pid_text = (jdir / JobMarker.PID).read_text(encoding = "utf-8").strip()
         pid = int(pid_text)
         alive = _pid_alive(pid)
       except (OSError, ValueError):
@@ -527,7 +527,7 @@ def _agent_is_read_only(agent_path: Path) -> bool:
   # tools are entirely within that set is classified read-only.
 
   try:
-    text = agent_path.read_text()
+    text = agent_path.read_text(encoding = "utf-8")
   except OSError:
     return False
 
@@ -581,7 +581,7 @@ def _is_job_halt_exempt(jdir: Path) -> bool:
   # is a job that never runs.
 
   try:
-    cfg = json.loads((jdir / JobFile.CONFIG).read_text())
+    cfg = json.loads((jdir / JobFile.CONFIG).read_text(encoding = "utf-8"))
   except (OSError, json.JSONDecodeError):
     return False
   return bool(cfg.get(JobConfigKey.HALT_EXEMPT, False))
@@ -699,6 +699,7 @@ def _worktree_head(wt: Path) -> str | None:
   head = subprocess.run(
     # waiver: git CLI vocabulary, not a domain constant
     [ "git", "rev-parse", "HEAD" ], cwd = str(wt), capture_output = True, text = True, check = False,
+    encoding = "utf-8",
   )
 
   # guard: an unresolvable HEAD carries no comparable tip
@@ -738,7 +739,7 @@ def _record_claim_head(jdir: Path, work_root: Path) -> str | None:
     return None
 
   # the marker beside PID: one hash, read back by whoever dispatched the job
-  (jdir / JobArtifact.CLAIM_HEAD).write_text(f"{head}\n")
+  (jdir / JobArtifact.CLAIM_HEAD).write_text(f"{head}\n", encoding = "utf-8")
   return head
 
 
@@ -772,6 +773,7 @@ def _isolated_job_failure(wt: Path, pre_spawn_tip: str | None) -> str | None:
   status = subprocess.run(
     # waiver: git CLI vocabulary, not a domain constant
     [ "git", "status", "--porcelain" ], cwd = str(wt), capture_output = True, text = True, check = False,
+    encoding = "utf-8",
   )
 
   # guard: the expert left uncommitted changes in its worktree — the commit obligation was broken
@@ -1062,7 +1064,7 @@ def _read_rejection(jdir: Path) -> str | None:
   if not record_path.exists():
     return None
   try:
-    record = json.loads(record_path.read_text())
+    record = json.loads(record_path.read_text(encoding = "utf-8"))
   except (OSError, json.JSONDecodeError):
     return None
   # waiver: per-attempt rejection record field, written by _reject_response
@@ -1187,14 +1189,14 @@ def _compose_user_prompt(jdir: Path, *, protocols: list, aspects: list, argument
   rejection = _read_rejection(jdir)
   if rejection is not None:
     prompt_lines.extend([ "", rejection ])
-  cfg = json.loads((jdir / JobFile.CONFIG).read_text())
+  cfg = json.loads((jdir / JobFile.CONFIG).read_text(encoding = "utf-8"))
   if not cfg.get(JobConfigKey.CAN_COMMIT_IN_REPO, False):
     clause = (
       # waiver: filesystem path idiom, not a domain constant
       Path(__file__).parent.parent / "templates" / "expert-prompts" / "no-commit-clause.md"
     )
     if clause.exists():
-      prompt_lines.extend([ "", clause.read_text().strip() ])
+      prompt_lines.extend([ "", clause.read_text(encoding = "utf-8").strip() ])
   return "\n".join(prompt_lines)
 
 
@@ -1211,7 +1213,7 @@ def _spawn_settings_argv(repo: Path) -> list[str]:
   """
   settings_file = repo / RuntimeFile.SANDBOX_SETTINGS
 
-  # guard: sandbox settings file absent (daemon not installed here) — spawn unsandboxed
+  # guard: sandbox settings file absent (`/lazy-core.install` never ran its sandbox step here) — spawn unsandboxed
   if not settings_file.is_file():
     return []
   return [ "--settings", str(settings_file) ]
@@ -1424,7 +1426,7 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     _write_error(jdir, JobErrorCategory.LOGICAL, f"config.json missing in {jdir}")
     return
   try:
-    cfg = json.loads(config_path.read_text())
+    cfg = json.loads(config_path.read_text(encoding = "utf-8"))
   except (OSError, json.JSONDecodeError) as e:
     _write_error(jdir, JobErrorCategory.LOGICAL, f"unreadable config.json: {e}")
     return
@@ -1484,7 +1486,7 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
   # best-effort — dispatch_job always writes valid JSON, so an unreadable request.json is
   # not this branch-capability check's problem to diagnose; it just reads as "no branch"
   try:
-    job_branch = json.loads((jdir / JobFile.REQUEST).read_text()).get(JobRequestKey.BRANCH)
+    job_branch = json.loads((jdir / JobFile.REQUEST).read_text(encoding = "utf-8")).get(JobRequestKey.BRANCH)
   except (OSError, json.JSONDecodeError):
     job_branch = None
 
@@ -1635,7 +1637,7 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     # Mark this job as ours: write PID before invoking the expert.
     # The dead-job detector reads this to distinguish queued (no PID)
     # from active (PID file present, alive) from stuck (PID dead).
-    (jdir / JobMarker.PID).write_text(f"{os.getpid()}\n")
+    (jdir / JobMarker.PID).write_text(f"{os.getpid()}\n", encoding = "utf-8")
 
     # the commit the buckets above were copied from — the one fact that lets a consumer tell
     # a change this job already read from one that landed after it started
@@ -1645,10 +1647,10 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     # Recovery routine reads this to decide retry vs. permanent-fail.
     attempts_file = jdir / JobArtifact.ATTEMPTS
     try:
-      n = int(attempts_file.read_text().strip())
+      n = int(attempts_file.read_text(encoding = "utf-8").strip())
     except (OSError, ValueError):
       n = 0
-    attempts_file.write_text(f"{n + 1}\n")
+    attempts_file.write_text(f"{n + 1}\n", encoding = "utf-8")
 
     # The spawn command line — permission mode, hermetic `--strict-mcp-config` +
     # any per-expert `--mcp-config`, hermetic `--setting-sources`, plugin dirs,
@@ -1735,7 +1737,7 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
 
     # Persist the transcript — best-effort, never block DONE on a write failure.
     try:
-      (jdir / JobArtifact.TRANSCRIPT).write_text(stdout or "")
+      (jdir / JobArtifact.TRANSCRIPT).write_text(stdout or "", encoding = "utf-8")
     except Exception as e:  # pragma: no cover — defensive
       sys.stderr.write(f"transcript write failed: {e}\n")
 
@@ -1754,7 +1756,7 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
       if not outcome_tokens(read_response(jdir)):
         recovered = _extract_response_from_stdout(stdout or "")
         if recovered is not None:
-          response_path.write_text(json.dumps(recovered, indent = 2))
+          response_path.write_text(json.dumps(recovered, indent = 2), encoding = "utf-8")
 
       # guard: no outcome survived the salvage — the envelope is violated, and a
       # missing discriminator must never be read as completed work
@@ -1882,7 +1884,7 @@ def _spawn_with_idle_watchdog(
   proc = subprocess.Popen(  # pylint: disable=consider-using-with
     argv, env = env, cwd = str(cwd),
     stdout = subprocess.PIPE, stderr = subprocess.PIPE,
-    text = True, start_new_session = True,
+    text = True, start_new_session = True, encoding = "utf-8",
   )
   line_q: queue.Queue = queue.Queue()
 
@@ -2144,7 +2146,7 @@ def _append_tokens_log(repo: Path, expert_name: str, usage: dict) -> None:
     **usage,
   }
   # waiver: stdlib idiom, not a domain constant
-  with log_path.open("a") as f:
+  with log_path.open("a", encoding = "utf-8") as f:
     f.write(json.dumps(record) + "\n")
 
 
@@ -2173,7 +2175,7 @@ def _append_stream_stall_log(repo: Path, expert_name: str, jdir: Path, attempt: 
     "idle_sec": idle_sec,
   }
   # waiver: stdlib idiom, not a domain constant
-  with log_path.open("a") as f:
+  with log_path.open("a", encoding = "utf-8") as f:
     f.write(json.dumps(record) + "\n")
 
 
@@ -2230,7 +2232,7 @@ def _append_jobs_log(
     log_dir.mkdir(parents = True, exist_ok = True)
     # waiver: filesystem path idiom, not a domain constant
     # waiver: stdlib idiom, not a domain constant
-    with (log_dir / "jobs.jsonl").open("a") as f:
+    with (log_dir / "jobs.jsonl").open("a", encoding = "utf-8") as f:
       f.write(json.dumps(record) + "\n")
   except Exception as e:  # pragma: no cover — defensive
     sys.stderr.write(f"job log append failed: {e}\n")
@@ -2305,7 +2307,7 @@ def _reject_response(jdir: Path, message: str) -> None:
 
   # the counter was bumped before this attempt started, so it counts attempts so far
   try:
-    attempts = int((jdir / JobArtifact.ATTEMPTS).read_text().strip())
+    attempts = int((jdir / JobArtifact.ATTEMPTS).read_text(encoding = "utf-8").strip())
   except (OSError, ValueError):
     attempts = 0
 
@@ -2319,7 +2321,7 @@ def _reject_response(jdir: Path, message: str) -> None:
     JobResponseKey.CATEGORY: JobErrorCategory.LOGICAL,
     JobResponseKey.MESSAGE: message,
     "attempt": attempts,
-  }, indent = 2))
+  }, indent = 2), encoding = "utf-8")
 
   # drop the unusable payload and release the claim: READY survives without DONE,
   # so the next pump tick re-picks this same bundle
@@ -2355,11 +2357,11 @@ def _spend_transient_budget(jdir: Path) -> bool:
   # which errs toward retrying — the cap exists to stop storms, not to lose work
   counter = jdir / JobArtifact.TRANSIENT_ERRORS
   try:
-    count = int(counter.read_text().strip())
+    count = int(counter.read_text(encoding = "utf-8").strip())
   except (OSError, ValueError):
     count = 0
   count += 1
-  counter.write_text(f"{count}\n")
+  counter.write_text(f"{count}\n", encoding = "utf-8")
 
   # the repo root is fixed by the queue layout: <repo>/.experts/.jobs/<expert>/<job>
   # waiver: inline numeric literal — the shipped default budget (5), overridable in settings
@@ -2389,7 +2391,7 @@ def _write_error(jdir: Path, category: str, message: str) -> None:
   (jdir / JobFile.RESPONSE).write_text(json.dumps({
     JobResponseKey.OUTCOME: JobOutcome.ERROR,
     JobResponseKey.ERROR: { JobResponseKey.CATEGORY: category, JobResponseKey.MESSAGE: message },
-  }, indent = 2))
+  }, indent = 2), encoding = "utf-8")
 
   # a transient failure with budget left stays claimable — READY+ERROR, no DONE;
   # everything else (logical, uncommitted, exhausted budget) closes the job

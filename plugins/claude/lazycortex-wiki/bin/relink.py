@@ -353,7 +353,7 @@ class RelinkPlanner:
       List of `(status_letter, repo-relative-posix-path)` tuples.
     """
     cmd = [ "git", "-C", str(self._repo), "diff", "--name-status", f"{sha}..HEAD" ]
-    proc = subprocess.run(cmd, capture_output = True, text = True, check = False)
+    proc = subprocess.run(cmd, capture_output = True, text = True, check = False, encoding = "utf-8")
 
     # guard: git failed — yield no delta rather than crashing the plan
     if proc.returncode != 0:
@@ -425,7 +425,7 @@ class RelinkPlanner:
     """
     cmd = [ "git", "-C", str(self._repo), *args ]
     try:
-      proc = subprocess.run(cmd, capture_output = True, text = True, check = False)
+      proc = subprocess.run(cmd, capture_output = True, text = True, check = False, encoding = "utf-8")
     except OSError:
       # guard: git binary not found / not executable
       return False

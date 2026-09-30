@@ -349,7 +349,7 @@ def dirty_paths(repo: Path) -> list[str]:
   # NUL-separated porcelain: `XY path` per entry, a rename carrying the old name as a second field
   out = subprocess.run(
       [ "git", "-C", str(repo), "status", "--porcelain", "-z", "--untracked-files=all" ],
-      check = True, capture_output = True, text = True,
+      check = True, capture_output = True, text = True, encoding = "utf-8",
   ).stdout
   fields = out.split("\0")
   paths: list[str] = []
@@ -466,7 +466,7 @@ def verify(repo: Path, snapshot: Path) -> dict:
   touched = [ p for p in after if p not in recorded and p != snapshot_rel ]
   tracked = set(subprocess.run(
       [ "git", "-C", str(repo), "ls-files", "-z", "--", *touched ],
-      check = True, capture_output = True, text = True,
+      check = True, capture_output = True, text = True, encoding = "utf-8",
   ).stdout.split("\0")) if touched else set()
   new = [ p for p in touched if p not in tracked ]
   violations = [ p for p in recorded if _fingerprint(repo, p) != fingerprints.get(p) ]

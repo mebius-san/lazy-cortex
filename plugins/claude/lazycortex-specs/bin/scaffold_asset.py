@@ -267,7 +267,7 @@ def resolve_product(repo: Path, product: str) -> dict:
   if not settings_path.exists():
     fail(Keys.CAT_LOGICAL, f".claude/lazy.settings.json absent at {settings_path}")
   try:
-    data = json.loads(settings_path.read_text())
+    data = json.loads(settings_path.read_text(encoding = "utf-8"))
   except json.JSONDecodeError as error:
     fail(Keys.CAT_LOGICAL, f".claude/lazy.settings.json malformed: {error}")
   products_section = data.get(Keys.PRODUCTS) or {}
@@ -780,7 +780,7 @@ def main(argv: list[str]) -> int:
   # the asset's own status folder-note, seeded from the type's template chain
   note_template = resolve_template(repo, args.asset_type, args.product, Keys.FOLDER_NOTE_TMPL,
                                     alias_base = alias_base)
-  note_text = substitute(note_template.read_text(), tokens)
+  note_text = substitute(note_template.read_text(encoding = "utf-8"), tokens)
   note_text = inject_iconize(note_text, icon, color)
   note_text = _inject_note_keys(note_text, args.asset_type, tools)
   note_path = target_folder / f"{args.slug}.md"
@@ -791,7 +791,7 @@ def main(argv: list[str]) -> int:
   for doc, doc_type in layout:
     tmpl_path = resolve_template(repo, args.asset_type, args.product, doc,
                                   alias_base = alias_base, expect_type = doc_type)
-    doc_text = substitute(tmpl_path.read_text(), tokens)
+    doc_text = substitute(tmpl_path.read_text(encoding = "utf-8"), tokens)
     doc_text = ensure_doc_type(doc_text, doc_type)
 
     # the type's own paint: the icon names the kind of document, the registry's matchers own
@@ -839,7 +839,7 @@ def main(argv: list[str]) -> int:
   if not group_note.exists() and group_dir != content_root / spec_path:
     group_template = resolve_template(repo, args.asset_type, args.product, Keys.GROUP_NOTE_TMPL,
                                        alias_base = alias_base)
-    group_text = substitute(group_template.read_text(), tokens)
+    group_text = substitute(group_template.read_text(encoding = "utf-8"), tokens)
     # waiver: sibling-module declaration walk -- the one merged-declaration view every specs primitive shares
     owner = next((name for name in asset_types.declared(record)
                   if asset_types.default_path(name, record) == folder), "")

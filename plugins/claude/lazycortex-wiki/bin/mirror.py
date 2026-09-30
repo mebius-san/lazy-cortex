@@ -222,7 +222,7 @@ def _run_remote_mirror(payload: dict) -> dict:
   # the CLI always prints a JSON body — {"error": ...} on failure, the response shape otherwise
   return json.loads(subprocess.run(
     [ sys.executable, str(_resolve_core_cli()), "remote-mirror" ], input = json.dumps(payload),
-    capture_output = True, text = True, check = False,
+    capture_output = True, text = True, check = False, encoding = "utf-8",
   ).stdout)
 
 
@@ -567,7 +567,7 @@ class MirrorSync:
       return []
     proc = subprocess.run(
       [ "git", "ls-files" ],
-      cwd = str(self.clone_dir), capture_output = True, text = True, check = False,
+      cwd = str(self.clone_dir), capture_output = True, text = True, check = False, encoding = "utf-8",
     )
 
     # guard: listing failed — treat as an empty source

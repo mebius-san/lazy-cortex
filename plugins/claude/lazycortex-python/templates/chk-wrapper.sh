@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 # Self-resolving wrapper for the lazycortex-python `chk` aggregator.
 # Managed by /lazy-python.install (Phase 2) — edit the template, not this copy.
 #
@@ -46,7 +46,7 @@ if [ -n "${LAZYCORTEX_PLUGIN_DIRS:-}" ]; then
 fi
 
 # 3. Consumer install: read Claude Code's plugin manifest for the active install path.
-_resolved=$(python3 - "$_bin" <<'PY'
+_resolved=$("${LAZYCORTEX_PYTHON:-python3}" - "$_bin" <<'PY'
 import json, os, sys
 
 bin_rel = sys.argv[1]

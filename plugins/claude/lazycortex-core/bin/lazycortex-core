@@ -439,14 +439,14 @@ def _daemon_alive(repo: Path) -> bool:
         if shutil.which("launchctl") is None:
             return False
         probe = subprocess.run(["launchctl", "list", f"com.lazycortex.runtime.{repo.name}"],
-                               capture_output=True, text=True, check=False)
+                               capture_output=True, text=True, check=False, encoding = "utf-8")
         return probe.returncode == 0 and '"PID"' in probe.stdout
     # same reasoning for a non-systemd host
     if shutil.which("systemctl") is None:
         return False
     probe = subprocess.run(
         ["systemctl", "--user", "is-active", f"lazy-core-runtime-{repo.name}.service"],
-        capture_output=True, text=True, check=False,
+        capture_output=True, text=True, check=False, encoding = "utf-8",
     )
     return probe.returncode == 0 and probe.stdout.strip() == "active"
 
@@ -632,7 +632,7 @@ def _cmd_detect_scope(argv: list[str]) -> int:
     p.add_argument("plugin_key", help="e.g. lazycortex-diagram@lazycortex")
     a = p.parse_args(argv)
     toplevel = subprocess.run(["git", "rev-parse", "--show-toplevel"],
-                              capture_output=True, text=True).stdout.strip()
+                              capture_output=True, text=True, encoding = "utf-8").stdout.strip()
     print(detect_install_scope(a.plugin_key, project_root=toplevel or os.getcwd()))
     return 0
 
@@ -654,7 +654,7 @@ def _cmd_plugin_root(argv: list[str]) -> int:
     p.add_argument("plugin", help="e.g. lazycortex-experts or lazycortex-experts@lazycortex")
     a = p.parse_args(argv)
     toplevel = subprocess.run(["git", "rev-parse", "--show-toplevel"],
-                              capture_output=True, text=True).stdout.strip()
+                              capture_output=True, text=True, encoding = "utf-8").stdout.strip()
     report = plugin_root(a.plugin, Path(toplevel or os.getcwd()), Path.home())
     if report is None:
         print(f"error: {a.plugin} not installed: no authored, exported, or cached sources", file=sys.stderr)
@@ -677,7 +677,7 @@ def _cmd_daemon_pause(argv: list[str]) -> int:
     p = argparse.ArgumentParser(prog="lazycortex-core daemon-pause")
     p.parse_args(argv)
     toplevel = subprocess.run(["git", "rev-parse", "--show-toplevel"],
-                              capture_output=True, text=True).stdout.strip()
+                              capture_output=True, text=True, encoding = "utf-8").stdout.strip()
     semaphore = Path(toplevel or os.getcwd()) / RuntimeFile.PAUSE
     semaphore.parent.mkdir(parents=True, exist_ok=True)
     semaphore.touch(exist_ok=True)
@@ -697,7 +697,7 @@ def _cmd_daemon_resume(argv: list[str]) -> int:
     p = argparse.ArgumentParser(prog="lazycortex-core daemon-resume")
     p.parse_args(argv)
     toplevel = subprocess.run(["git", "rev-parse", "--show-toplevel"],
-                              capture_output=True, text=True).stdout.strip()
+                              capture_output=True, text=True, encoding = "utf-8").stdout.strip()
     semaphore = Path(toplevel or os.getcwd()) / RuntimeFile.PAUSE
     semaphore.unlink(missing_ok=True)
     print(json.dumps({"paused": False, "semaphore": str(semaphore)}))
@@ -828,14 +828,14 @@ def main() -> int:
             resets = result.get("resets_at")
             announced = None
             try:
-                announced = json.loads(marker.read_text()).get("resets_at")
+                announced = json.loads(marker.read_text(encoding = "utf-8")).get("resets_at")
             except (OSError, ValueError):
                 pass
             if announced != resets:
                 line += f" deferred=rate_limit resets_at={resets}"
                 try:
                     marker.parent.mkdir(parents=True, exist_ok=True)
-                    marker.write_text(json.dumps({"resets_at": resets}))
+                    marker.write_text(json.dumps({"resets_at": resets}), encoding = "utf-8")
                 except OSError:
                     pass
         else:

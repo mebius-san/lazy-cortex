@@ -785,7 +785,7 @@ On confirmation, resolve the backend via the Phase 2.7a priority ladder using th
 
 ## Failure modes
 
-- **Fix L1 "launchctl kickstart" fails with "No such process"** — the service plist hasn't been loaded yet (first-time use after install). The user must first run `launchctl load ~/Library/LaunchAgents/com.lazycortex.runtime.<repo-name>.plist` before kickstart can restart it → direct the user to run `/lazy-core.install` to (re-)register the supervisor plist.
+- **Fix L1 "launchctl kickstart" fails with "No such process"** — the service plist hasn't been loaded yet (first-time use after install). The user must first run `launchctl load ~/Library/LaunchAgents/com.lazycortex.runtime.<repo-name>.plist` before kickstart can restart it → direct the user to run `/lazy-core.daemon-setup` to (re-)register the supervisor plist.
 - **Fix L1 "systemctl --user restart" fails with "Unit not found"** — the systemd user unit hasn't been installed yet → direct the user to run `/lazy-core.install` to install the unit file and `systemctl --user daemon-reload`.
 - **Fix L1 liveness probe still stale after restart** — the daemon started but hasn't written a JSONL log line yet (can take up to one polling interval). Wait `polling_interval_sec` seconds, then re-run `/lazy-core.doctor` to confirm.
 - **Fix L2 fails with "Permission denied" on rmtree** — the job directory has restricted permissions (e.g. created by a different user or process). Doctor surfaces the error; the user must remove the directory manually.

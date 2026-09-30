@@ -28,7 +28,7 @@
       "icon": "LiShapes",
       "color": "#64748b",
       "default_path": ".",
-      "start_doc": "design.md:design",
+      "start_doc": "design.md:content-design",
       "default_tools": [
         "data"
       ],

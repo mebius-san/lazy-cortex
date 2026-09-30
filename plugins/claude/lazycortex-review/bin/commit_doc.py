@@ -87,7 +87,7 @@ def _append_history(repo: Path, file_path: Path, lines: tuple[str, ...]) -> None
   for line in lines:
     proc = subprocess.run(
         [sys.executable, str(cli), _HistoryWire.VERB, str(file_path), _HistoryWire.LINE_FLAG, line],
-        cwd = str(repo), capture_output = True, text = True, check = False,
+        cwd = str(repo), capture_output = True, text = True, check = False, encoding = "utf-8",
     )
 
     # guard: the verb refused (empty line, no section it could create) — surface its own message
@@ -109,7 +109,7 @@ def _coordinator_author(repo: Path) -> dict:
   """
   path = repo / Paths.CLAUDE_DIR / Paths.SETTINGS_FILE
   try:
-    settings = json.loads(path.read_text())
+    settings = json.loads(path.read_text(encoding = "utf-8"))
   except (OSError, json.JSONDecodeError):
     settings = {}
   # waiver: 'experts'/'git_author' are lazy.settings.json's own wire-shape keys, not keys.py-promoted constants
@@ -154,7 +154,7 @@ def commit_doc(
   status = subprocess.run(
       # waiver: git CLI vocabulary
       ["git", "-C", str(repo), "status", "--porcelain", "--", rel, *extra_paths],
-      capture_output = True, text = True, check = False,
+      capture_output = True, text = True, check = False, encoding = "utf-8",
   ).stdout.strip()
   extras = _git_ops.repaint_inline(repo, [rel])
 

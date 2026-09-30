@@ -116,7 +116,7 @@ def _done_outcome(jdir: Path) -> str:
     unreadable, or malformed — a shape the postman will never collect either.
   """
   try:
-    outcome = json.loads((jdir / JobFile.RESPONSE).read_text()).get(JobKey.OUTCOME)
+    outcome = json.loads((jdir / JobFile.RESPONSE).read_text(encoding = "utf-8")).get(JobKey.OUTCOME)
   except (OSError, json.JSONDecodeError):
     return ""
   return outcome if isinstance(outcome, str) else ""
@@ -220,7 +220,7 @@ def _is_orphaned(repo: Path, doc: Path) -> bool:
   if isinstance(coordinator_job, str) and coordinator_job \
       and _coordinator_dispatch._is_job_live(repo, coordinator_job):  # type: ignore[attr-defined]
     return False
-  _meta, body = _fm.parse(doc.read_text())
+  _meta, body = _fm.parse(doc.read_text(encoding = "utf-8"))
 
   # an operator-waiting banner makes the silence legitimate: the turn is the operator's
   return _banner.extract(body) not in _OPERATOR_WAITING_STATES
@@ -239,7 +239,7 @@ def _review_active_docs(repo: Path) -> list[Path]:
   """
   proc = subprocess.run(
       ["git", "ls-files", "--", "*.md"],
-      cwd = str(repo), capture_output = True, text = True, check = False,
+      cwd = str(repo), capture_output = True, text = True, check = False, encoding = "utf-8",
   )
 
   # guard: not a git repository — nothing to enumerate
@@ -253,7 +253,7 @@ def _review_active_docs(repo: Path) -> list[Path]:
     if not path.is_file():
       continue
     try:
-      meta, _body = _fm.parse(path.read_text())
+      meta, _body = _fm.parse(path.read_text(encoding = "utf-8"))
     except OSError:
       continue
     if meta.get(ReviewKey.ACTIVE, "").strip().lower() == _BOOL_TRUE:

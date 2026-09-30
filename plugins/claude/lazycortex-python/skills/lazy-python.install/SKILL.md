@@ -67,7 +67,7 @@ Outcome per rule: `installed` (absent → copied) / `unchanged` (byte-identical)
 
 Copy `${CLAUDE_PLUGIN_ROOT}/templates/chk-wrapper.sh` and `tst-wrapper.sh` verbatim to `<consumer>/cli/chk-py` and `<consumer>/cli/tst-py`. **Substitute nothing.** The templates are path-agnostic by design: they resolve the active plugin install at exec time, so the wrapper keeps working after the next `/plugin update`. Baking an absolute path — which necessarily carries a plugin version — into the consumer's tracked `cli/` pins them to a directory that the next update deletes. Then ensure the consumer's `.gitignore` contains a `.venv/` line — the fallback venv (`_ensure_venv.sh` probe 4) is created in the repo root at `<consumer>/.venv`, so it must be ignored. The phase reads `<consumer>/.gitignore` (creating it if absent) and appends `.venv/` only when no `.venv` / `.venv/` line is already present — idempotent.
 
-After this step `sh ./cli/chk-py` and `sh ./cli/tst-py` work from the repo root; the wrappers carry no exec bit on purpose (see `lazy-core.skill-writing § 12`).
+After this step `bash ./cli/chk-py` and `bash ./cli/tst-py` work from the repo root; the wrappers carry no exec bit on purpose (see `lazy-core.skill-writing § 12`).
 
 Run:
 
@@ -81,7 +81,7 @@ Outcome: `wrappers-deployed-2 + gitignore-ensured` when `.venv/` was added to th
 
 ## Step 2b: Install `~/.local/bin/chk-py` and `tst-py`
 
-Deploys the human-facing wrappers — the only files this plugin ever marks executable, since they live outside every vault and no mode-blind git client can strip the bit on them. Each walks up from the caller's `$PWD` to the nearest `<repo>/cli/chk-py` (or `tst-py`) and runs it through `sh`, so typing `chk-py` / `tst-py` works from anywhere under a repo that has run Step 2, once `~/.local/bin` is on `$PATH`.
+Deploys the human-facing wrappers — the only files this plugin ever marks executable, since they live outside every vault and no mode-blind git client can strip the bit on them. Each walks up from the caller's `$PWD` to the nearest `<repo>/cli/chk-py` (or `tst-py`) and runs it through `bash`, so typing `chk-py` / `tst-py` works from anywhere under a repo that has run Step 2, once `~/.local/bin` is on `$PATH`.
 
 Run:
 

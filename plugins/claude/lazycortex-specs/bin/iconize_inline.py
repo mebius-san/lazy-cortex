@@ -141,7 +141,7 @@ def repaint_paths(repo: Path, paths: list[str]) -> list[str]:
     proc = subprocess.run(
         # waiver: the obsidian CLI's subcommand vocabulary, owned by lazycortex-obsidian
         [sys.executable, str(cli), "sync-paths", *paths],
-        cwd = repo, capture_output = True, text = True, check = False,
+        cwd = repo, capture_output = True, text = True, check = False, encoding = "utf-8",
     )
 
     # guard: a failing worker must never block the caller's commit

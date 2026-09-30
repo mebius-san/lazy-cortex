@@ -1,14 +1,14 @@
 ---
 chapter_type: faq
 summary: Common operator questions about installing, running, and maintaining the lazycortex-observe metrics shipper.
-last_regen: 2026-09-24
+last_regen: 2026-09-30
 no_diagram: true
 source_skills:
   - lazy-observe.install
   - lazy-observe.uninstall
   - lazy-observe.audit
-source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
-surface_sha: b44e80b78775e3afbb0087f470516c8dfbcac68db876e12d93af3ada958e252a
+source_sha: 208e7e85e3998e8b741565a53874e37946b3f177
+surface_sha: 1c726df7bef06f6af0d156826cc3e996f3f895a71ae0a3c9f99d9d2fb236f889
 ---
 # Frequently asked questions
 

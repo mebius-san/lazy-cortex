@@ -252,7 +252,7 @@ def dispatch_job(
         if not req_file.exists():
           continue
         try:
-          existing = json.loads(req_file.read_text())
+          existing = json.loads(req_file.read_text(encoding = "utf-8"))
         except (OSError, json.JSONDecodeError):
           continue
         if existing.get(JobRequestKey.DEDUP_KEY) == dedup_key:
@@ -316,11 +316,11 @@ def dispatch_job(
   if source_inline:
     (d / JobIODir.SOURCE).mkdir(exist_ok = True)
     for fname, text in source_inline.items():
-      (d / JobIODir.SOURCE / fname).write_text(text)
+      (d / JobIODir.SOURCE / fname).write_text(text, encoding = "utf-8")
   if context_inline:
     (d / JobIODir.CONTEXT).mkdir(exist_ok = True)
     for fname, text in context_inline.items():
-      (d / JobIODir.CONTEXT / fname).write_text(text)
+      (d / JobIODir.CONTEXT / fname).write_text(text, encoding = "utf-8")
   if result:
     (d / JobIODir.RESULT).mkdir(exist_ok = True)
     for fname in result:
@@ -380,7 +380,7 @@ def dispatch_job(
   # key is written only when claimed, so an ordinary bundle stays exactly as it was.
   if halt_exempt:
     cfg_blob[JobConfigKey.HALT_EXEMPT] = True
-  (d / JobFile.CONFIG).write_text(json.dumps(cfg_blob, indent = 2))
+  (d / JobFile.CONFIG).write_text(json.dumps(cfg_blob, indent = 2), encoding = "utf-8")
 
   # request.json is the caller payload plus the dedup key, so a later dispatch can match against it
   out_payload = dict(payload)
@@ -393,7 +393,7 @@ def dispatch_job(
     out_payload[JobRequestKey.DEDUP_FINGERPRINT] = dedup_fingerprint
 
   # the payload is complete only once both reserved keys have had their say
-  (d / JobFile.REQUEST).write_text(json.dumps(out_payload, indent = 2))
+  (d / JobFile.REQUEST).write_text(json.dumps(out_payload, indent = 2), encoding = "utf-8")
 
   # READY touched LAST — atomic activation marker; pump treats READY presence
   # as "every other file in this bundle is valid and you can spawn now"
@@ -701,7 +701,7 @@ def cancel_job(repo: Path, expert: str, job_id: str) -> None:
   pid_file = d / JobMarker.PID
   if pid_file.exists():
     try:
-      pid = int(pid_file.read_text().strip())
+      pid = int(pid_file.read_text(encoding = "utf-8").strip())
     except (OSError, ValueError):
       pid = None
     if pid is not None:
@@ -737,7 +737,7 @@ def _stop_claimant(pid: int) -> None:
   try:
     out = subprocess.run(
       [ "pgrep", "-P", str(pid) ], capture_output = True, text = True,
-      timeout = _PGREP_TIMEOUT_SEC, check = False,
+      timeout = _PGREP_TIMEOUT_SEC, check = False, encoding = "utf-8",
     ).stdout
     child_pids = [ int(line) for line in out.split() if line.strip().isdigit() ]
   except (OSError, subprocess.TimeoutExpired):
@@ -1008,7 +1008,7 @@ def retire_completed_jobs(
     if not req_file.exists():
       continue
     try:
-      existing = json.loads(req_file.read_text())
+      existing = json.loads(req_file.read_text(encoding = "utf-8"))
     except (OSError, json.JSONDecodeError):
       continue
     if existing.get(JobRequestKey.DEDUP_KEY) == dedup_key:
@@ -1077,7 +1077,7 @@ def completed_dedup_jobs(repo: Path, expert: str) -> list[dict]:
     if not req_file.exists():
       continue
     try:
-      req = json.loads(req_file.read_text())
+      req = json.loads(req_file.read_text(encoding = "utf-8"))
     except (OSError, json.JSONDecodeError):
       continue
     dedup_key = req.get(JobRequestKey.DEDUP_KEY)

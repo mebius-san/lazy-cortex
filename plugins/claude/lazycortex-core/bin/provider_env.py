@@ -209,7 +209,7 @@ def resolve_token(token_env: str, *, env_file: Path | None = None) -> str | None
 
   # parse the env file, favoring the last assignment of the variable
   # waiver: export prefix and quote chars are file-format literals
-  for line in reversed(path.read_text().splitlines()):
+  for line in reversed(path.read_text(encoding = "utf-8").splitlines()):
     stripped = line.strip().removeprefix("export ").strip()
     if stripped.startswith(f"{token_env}="):
       return (

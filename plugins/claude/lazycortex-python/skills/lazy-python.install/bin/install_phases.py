@@ -201,9 +201,9 @@ class Phase2Wrappers:
       # Templates are path-agnostic: deployed verbatim, they resolve the active
       # plugin install at exec time. No path is substituted here — that is the
       # whole point (a baked path goes stale on the next plugin update).
-      content = (PLUGIN_ROOT / "templates" / template_name).read_text()
+      content = (PLUGIN_ROOT / "templates" / template_name).read_text(encoding = "utf-8")
       target = self.target_dir / target_name
-      target.write_text(content)
+      target.write_text(content, encoding = "utf-8")
     self._ensure_venv_gitignored()
     return 0
 
@@ -221,7 +221,7 @@ class Phase2Wrappers:
     # guaranteed on any prior content, never inserted elsewhere and never used to justify
     # rewriting a line the consumer already wrote.
 
-    existing = self.gitignore.read_text() if self.gitignore.exists() else ""
+    existing = self.gitignore.read_text(encoding = "utf-8") if self.gitignore.exists() else ""
     present = any(line.strip() in (".venv", ".venv/") for line in existing.splitlines())
 
     # Contract:
@@ -233,7 +233,7 @@ class Phase2Wrappers:
       print("gitignore-already-present")
       return
     prefix = existing if existing == "" or existing.endswith("\n") else existing + "\n"
-    self.gitignore.write_text(prefix + ".venv/\n")
+    self.gitignore.write_text(prefix + ".venv/\n", encoding = "utf-8")
     print("gitignore-ensured")
 
 
@@ -351,11 +351,11 @@ class Phase3Pyproject:
     Returns:
       0 on success.
     """
-    template_text = self.template.read_text()
+    template_text = self.template.read_text(encoding = "utf-8")
 
     # a repo with no pyproject yet gets a minimal [project] stanza to merge onto
     if self.target.exists():
-      existing_text = self.target.read_text()
+      existing_text = self.target.read_text(encoding = "utf-8")
     else:
       existing_text = '[project]\nname = "consumer"\nversion = "0.1.0"\n'
     original_text = existing_text
@@ -404,7 +404,7 @@ class Phase3Pyproject:
       # guard: nothing changed and the file already exists — leave it byte-identical
       if existing_text == original_text and self.target.exists():
         return 0
-      self.target.write_text(existing_text)
+      self.target.write_text(existing_text, encoding = "utf-8")
       return 0
 
     # Extract each missing section's raw text block from the template (preserves comments + formatting).
@@ -416,7 +416,7 @@ class Phase3Pyproject:
 
     # append rather than rewrite, so the consumer's own content stays byte-identical
     new_content = existing_text.rstrip() + "\n\n" + "\n\n".join(appended_blocks) + "\n"
-    self.target.write_text(new_content)
+    self.target.write_text(new_content, encoding = "utf-8")
     return 0
 
   @classmethod
@@ -563,7 +563,7 @@ class Phase5Overlay:
       # guard: never clobber a consumer-authored overlay
       if target.exists():
         continue
-      target.write_text(self._stub_content(topic))
+      target.write_text(self._stub_content(topic), encoding = "utf-8")
     return 0
 
   @classmethod

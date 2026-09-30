@@ -476,7 +476,7 @@ def resolve_language(file_path: Path) -> str:
     candidate = cand / _SETTINGS_REL
     if candidate.is_file():
       try:
-        settings = json.loads(candidate.read_text())
+        settings = json.loads(candidate.read_text(encoding = "utf-8"))
       except (OSError, json.JSONDecodeError):
         settings = None
       break
@@ -595,7 +595,11 @@ def main(argv: list[str]) -> int:
   if not file_path.is_file():
     sys.stderr.write(f"file not found: {file_path}\n")
     return 2
-  print(json.dumps(build_report(file_path.read_text(), _job_markers.read(repo, file_path)), indent = 2))
+
+  # build the structural report and print it as JSON
+  print(json.dumps(
+      build_report(file_path.read_text(encoding = "utf-8"), _job_markers.read(repo, file_path)), indent = 2
+  ))
   return 0
 
 

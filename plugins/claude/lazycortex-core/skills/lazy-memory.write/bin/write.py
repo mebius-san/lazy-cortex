@@ -185,7 +185,7 @@ def _load_expert_git_author(repo: Path, expert: str) -> dict:
   if not settings_path.exists():
     return {}
   try:
-    data = json.loads(settings_path.read_text())
+    data = json.loads(settings_path.read_text(encoding = "utf-8"))
   except (OSError, json.JSONDecodeError):
     return {}
   # waiver: external settings field name, not an internal key
@@ -443,7 +443,7 @@ def write_note(repo: Path, expert: str, body: str,
       old_tags = list(prev)
 
   # Write the note body, ensuring a trailing newline
-  note_path.write_text(body if body.endswith("\n") else body + "\n")
+  note_path.write_text(body if body.endswith("\n") else body + "\n", encoding = "utf-8")
 
   # Regenerate every tag touched by this write — union of old and new tags.
   touched_topics = set()

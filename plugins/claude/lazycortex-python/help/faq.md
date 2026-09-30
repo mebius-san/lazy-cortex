@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, knowledge markers, tests, and the checker stack.
-last_regen: 2026-09-29
+last_regen: 2026-09-30
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -21,8 +21,8 @@ source_skills:
   - review.py
   - lazy-python.coding-guidelines
   - lazy-python.checking-guidelines
-source_sha: 600d3366cc9008d09f999f58678103714c26392f
-surface_sha: f8e2702a2af2ac944ca03dea2031e1677f1438c5bdd495fe0495815d80670989
+source_sha: 8c642c6f0911b2d8c00a32979298d23b5420a63a
+surface_sha: abaa81ead9f69d1d29c68c9c54874b6c6644e5aa9af186a77e12938ddcfc01a9
 ---
 # Frequently asked questions
 
@@ -66,11 +66,11 @@ Every `chk-py` and `tst-py` invocation resolves the venv chain first, in order: 
 
 ---
 
-## How do I actually run `chk-py` and `tst-py` — bare, or through `sh`?
+## How do I actually run `chk-py` and `tst-py` — bare, or through `bash`?
 
 Two ways, and both are wired up by `/lazy-python.install`. Step 2b deploys `chk-py` and `tst-py` into `~/.local/bin` — the only two files this plugin ever marks executable, since they live outside every repo and no mode-blind git sync can strip the bit off them. Each one walks up from your current directory to the nearest `<repo>/cli/chk-py` (or `tst-py`) and runs it, so once `~/.local/bin` is on your `$PATH`, the bare `chk-py all -q` / `tst-py <module> -q` commands work from anywhere under a repo that has also run Step 2.
 
-If `~/.local/bin` isn't on your `$PATH` yet, use the repo-local copy directly with an explicit interpreter: `sh ./cli/chk-py all -q` / `sh ./cli/tst-py <module> -q` from the repo root. The repo-local `cli/chk-py` / `cli/tst-py` wrappers Step 2 deploys deliberately carry no executable bit — they used to, but a mode-blind git client (obsidian-git on Android, some Windows checkouts) silently strips the bit on pull, which broke the wrapper outright. Running it through `sh` sidesteps that failure mode for good, at the cost of typing `sh` in front of the command when the home wrapper isn't reachable.
+If `~/.local/bin` isn't on your `$PATH` yet, use the repo-local copy directly with an explicit interpreter: `bash ./cli/chk-py all -q` / `bash ./cli/tst-py <module> -q` from the repo root. The repo-local `cli/chk-py` / `cli/tst-py` wrappers Step 2 deploys deliberately carry no executable bit — they used to, but a mode-blind git client (obsidian-git on Android, some Windows checkouts) silently strips the bit on pull, which broke the wrapper outright. Running it through `bash` sidesteps that failure mode for good, at the cost of typing `bash` in front of the command when the home wrapper isn't reachable.
 
 ---
 
@@ -252,6 +252,12 @@ Contracts pin caller-visible guarantees that must survive refactoring, and exact
 
 ---
 
+## Why doesn't a private helper get a `Contract:` block?
+
+A contract exists for readers who rely on a promise without reading the code: callers of a public method and subclasses that override or call a protected hook. A private helper has one reader, the maintainer of the same class, who reads its code anyway. Contracts on such helpers mostly record choices the implementer made alone, and later reviews then treat those choices as binding. So the helper's docstring summary says what it does, a domain rule goes in a `Domain(…):` block, and a promise callers depend on is stated on the public method that exposes it. `lazy-python.code-reviewer` reports a contract on a private helper as a `WARN` to move or delete.
+
+---
+
 ## Why does `lazy-python.contract-writer` put a `Contract:` block on an interface method but not on the class that implements it?
 
 A guarantee that is part of an interface's protocol belongs on the interface (or abstract base) declaration, not on every implementation that satisfies it. Before writing a block, the agent checks whether the method is declared on an interface or abstract base; if it is, the block goes there only, and each implementation gets its docstring's `Guarantees` section synced to the same wording with no `Contract:` block of its own. An implementation that adds a guarantee the interface does not make still gets its own block — that is not a mirror.
@@ -322,9 +328,9 @@ Check that each overlay file still opens with its canonical `# Project additions
 
 ## The `chk-py` wrapper is missing after install, or the bare `chk-py` command isn't found.
 
-Re-run `/lazy-python.install`. Step 2 deploys `cli/chk-py` and `cli/tst-py` into your project root — deliberately with no executable bit, since a mode-blind git client (obsidian-git on Android, some Windows checkouts) can strip the bit on pull and used to break the wrapper outright. Run it explicitly instead: `sh ./cli/chk-py all -q`. If the phase reports `wrappers-deployed-2` but the files are still absent, check that `cli/` exists in your project root; the phase creates it if missing.
+Re-run `/lazy-python.install`. Step 2 deploys `cli/chk-py` and `cli/tst-py` into your project root — deliberately with no executable bit, since a mode-blind git client (obsidian-git on Android, some Windows checkouts) can strip the bit on pull and used to break the wrapper outright. Run it explicitly instead: `bash ./cli/chk-py all -q`. If the phase reports `wrappers-deployed-2` but the files are still absent, check that `cli/` exists in your project root; the phase creates it if missing.
 
-Step 2b is the separate step that gives you the bare `chk-py` / `tst-py` command from any directory: it deploys `~/.local/bin/chk-py` and `~/.local/bin/tst-py`, the only files this plugin ever marks executable, since they live outside every repo and no mode-blind client can reach them. Each walks up from your current directory to the nearest `<repo>/cli/chk-py` (or `tst-py`) and runs it through `sh`. If `command -v chk-py` fails after Step 2b runs, `~/.local/bin` is not on your `$PATH` — the install reports this as `path-warning` and never edits your shell rc files itself; add the directory to your `$PATH` by hand, or keep using `sh ./cli/chk-py`.
+Step 2b is the separate step that gives you the bare `chk-py` / `tst-py` command from any directory: it deploys `~/.local/bin/chk-py` and `~/.local/bin/tst-py`, the only files this plugin ever marks executable, since they live outside every repo and no mode-blind client can reach them. Each walks up from your current directory to the nearest `<repo>/cli/chk-py` (or `tst-py`) and runs it through `bash`. If `command -v chk-py` fails after Step 2b runs, `~/.local/bin` is not on your `$PATH` — the install reports this as `path-warning` and never edits your shell rc files itself; add the directory to your `$PATH` by hand, or keep using `bash ./cli/chk-py`.
 
 If the problem persists, run `/lazy-python.audit` (Check 4) to see whether the deployed wrappers open with a leading shebang and whether unsubstituted `{{CHK_BIN_PATH}}` placeholders remain, either of which would indicate an interrupted or partial install.
 

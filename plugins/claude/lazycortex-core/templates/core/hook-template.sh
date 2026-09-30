@@ -1,14 +1,15 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # <Pre|Post>ToolUse hook (shell variant): <one-line purpose>.
 #
 # Use this template only for hooks that genuinely benefit from being a shell
 # shim (no JSON parsing, simple command dispatch, calls another binary).
 # For anything that reads stdin JSON, parses tool_input fields, or branches
-# on multiple matchers, use hook-template.py instead — Python's `json` and
-# `re` modules make those hooks far less brittle than `jq`/`grep` chains.
+# on multiple matchers, use hook-template.py instead. A shell hook reads no
+# payload field: `jq` is absent from Git Bash on Windows, and inline interpreter
+# code is banned, so the payload is Python's to parse.
 #
 # Fires on:
-# - <MatcherName> tool calls — <gate condition>.
+# - <MatcherName> tool calls — the registered matcher is the whole gate.
 # (Add more matchers if registered in settings.json.)
 #
 # Behavior:
@@ -26,40 +27,13 @@
 
 set -eu
 
-# § 1 — defensive JSON-stdin parsing. Tolerate malformed input. Without
-# `jq` available we just skip non-JSON paths.
-PAYLOAD="$(cat)"
-if [ -z "$PAYLOAD" ]; then
-    exit 0
-fi
+# § 1 — the JSON payload arrives on stdin. A shell hook parses none of it;
+# drain it so the writer never blocks on a full pipe.
+cat >/dev/null
 
-# Tool name extraction (requires jq — declare it as a dep or fall back to
-# grep-based extraction if jq is unavailable).
-if ! command -v jq >/dev/null 2>&1; then
-    # jq absent: shell hook can't reliably parse the payload. Bail safely.
-    exit 0
-fi
-
-TOOL_NAME="$(printf '%s' "$PAYLOAD" | jq -r '.tool_name // ""')"
-
-# § 2 — TRIGGER GATING — broad matchers MUST be narrowed in-script.
-case "$TOOL_NAME" in
-    Bash)
-        COMMAND="$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.command // ""')"
-        case "$COMMAND" in
-            # match the precise command shape this hook handles
-            *<command-prefix>*) ;;
-            *) exit 0 ;;
-        esac
-        ;;
-    <other-matcher>)
-        # narrow this branch (e.g. .tool_input.subagent_type for Agent).
-        :
-        ;;
-    *)
-        exit 0
-        ;;
-esac
+# § 2 — TRIGGER GATING — register a narrow matcher (one tool, e.g. `Write`); the
+# matcher is this hook's gate. A broad matcher (`Bash`, `Agent`) must be narrowed
+# on tool_input in-script, which only hook-template.py can read.
 
 # § 1 — bail outside git repo / wrong workspace shape.
 if ! ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
@@ -123,8 +97,8 @@ exit 0
 # ============================================================================
 #
 # When to use shell vs Python:
-#   shell — thin shim, simple command dispatch, calls another binary, no JSON
-#           parsing beyond tool_name. Requires `jq` available on PATH.
+#   shell — thin shim, simple command dispatch, calls another binary, a narrow
+#           matcher as its only gate, no JSON parsing at all.
 #   python — anything that reads multiple tool_input fields, branches on
 #            patterns, manipulates index, parses output of git commands. Use
 #            hook-template.py.
@@ -132,7 +106,7 @@ exit 0
 # Naming
 #   File: <dot-namespace>.hook.sh (e.g., my-thing.hook.sh).
 #   Register in settings.json: hooks.{Pre,Post}ToolUse[].matcher = "<MatcherName>"
-#   with hooks[].command = sh "${CLAUDE_PLUGIN_ROOT}/hooks/<file>".
+#   with hooks[].command = bash "${CLAUDE_PLUGIN_ROOT}/hooks/<file>".
 #
 # Contract (lazy-core.hook-writing §§ 1–8) — same as Python variant.
 #

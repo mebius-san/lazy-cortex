@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Dispatch lazy-python.test-writer against a new class and get a test file that covers all nine Paranoid-Testing categories, verified by tst-py.
-last_regen: 2026-09-29
+last_regen: 2026-09-30
 diagram_spec:
   anchor: "How test-writer walks a class"
   request: "Sequence diagram showing: user invokes lazy-python.test-writer for a target class; agent reads plugin canon (testing-guidelines + checking-guidelines) then project overlay (testing_guidelines.md, checking_guidelines.md, CLAUDE.md ## Testing section); agent identifies test targets (init paths, public methods, properties, documented guarantees, exceptions, operator overloads, Contract: blocks, Domain(...): blocks, opt: clauses); agent writes test file covering all 9 Paranoid-Testing categories; agent runs chk-py per file then chk-py all then tst-py on the module. Show the guideline read order (canon first, overlay second, CLAUDE.md ## Testing third) and the three-step toolchain verification."
@@ -9,8 +9,8 @@ source_skills:
   - lazy-python.test-writer
   - lazy-python.testing-guidelines
   - tst
-source_sha: 600d3366cc9008d09f999f58678103714c26392f
-surface_sha: 07b54ea76e25c639a5960e3d27a98b806d719edab475bc380e3c16ccd2a7253f
+source_sha: 8630b2f660529eec9417e1f0b841caf21be615b1
+surface_sha: 48272faa3e6fc5619b89bf3f23cb89f25b3c0bbff014c7f9c40b5c4ee12e70e8
 ---
 # Generate tests that cover all nine Paranoid-Testing categories for a new class
 
@@ -27,7 +27,7 @@ After completing this walkthrough you have:
 
 ## What you need
 
-- `lazycortex-python` installed in your repo (`/lazy-python.install` completed). This deploys `chk-py` and `tst-py` into `cli/` — the tracked copies carry no executable bit on purpose, since a mode-blind git client (obsidian-git on Android, some Windows checkouts) can strip it silently on pull, so run them through the interpreter: `sh ./cli/chk-py` and `sh ./cli/tst-py` from the repo root. Install's Step 2b additionally deploys `~/.local/bin/chk-py` and `~/.local/bin/tst-py` — the only files this plugin ever marks executable, since they live outside any git-tracked tree and no mode-blind sync can touch their mode bit. Each one walks up from your current directory to the nearest `cli/chk-py` / `cli/tst-py` and runs it through `sh`, so once `~/.local/bin` is on your `$PATH`, the bare `chk-py` / `tst-py` commands used throughout this walkthrough work from anywhere under the repo.
+- `lazycortex-python` installed in your repo (`/lazy-python.install` completed). This deploys `chk-py` and `tst-py` into `cli/` — the tracked copies carry no executable bit on purpose, since a mode-blind git client (obsidian-git on Android, some Windows checkouts) can strip it silently on pull, so run them through the interpreter: `bash ./cli/chk-py` and `bash ./cli/tst-py` from the repo root. Install's Step 2b additionally deploys `~/.local/bin/chk-py` and `~/.local/bin/tst-py` — the only files this plugin ever marks executable, since they live outside any git-tracked tree and no mode-blind sync can touch their mode bit. Each one walks up from your current directory to the nearest `cli/chk-py` / `cli/tst-py` and runs it through `bash`, so once `~/.local/bin` is on your `$PATH`, the bare `chk-py` / `tst-py` commands used throughout this walkthrough work from anywhere under the repo.
 - A Python class whose public API has docstrings, and — where applicable — knowledge markers in its method bodies. The agent derives every testable claim from docstrings (Summary, Guarantees, Args, Returns, Raises) and from `Contract:` blocks, `Domain(…):` blocks, and `opt:` clauses wherever they appear. A class without docstrings produces shallow tests; a class with a cache or a documented formula but no marker on it simply skips the categories those markers drive — that's not a failure, just nothing to anchor to. If the class has no docstrings yet, dispatch `lazy-python.docstring-writer` first.
 - Your source tree following the standard mirrored layout (`src/<module>/<file>.py` → `tests/<module>/<file>.py`). The agent uses this convention to place the generated test file. If your project uses a different layout, declare it in `docs/guidelines/testing_guidelines.md`.
 - `docs/guidelines/testing_guidelines.md` present (created by `/lazy-python.install` Step 5). If it does not exist, re-run `/lazy-python.install` — Step 5 is idempotent and creates the stub without touching other installation artifacts.

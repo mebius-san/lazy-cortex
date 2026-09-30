@@ -374,7 +374,7 @@ def find_repo_root(cwd: str | None = None) -> str | None:
       [ "git", "rev-parse", "--show-toplevel" ],
       stderr = subprocess.DEVNULL,
       text = True,
-      cwd = cwd,
+      cwd = cwd, encoding = "utf-8",
     ).strip()
   except (subprocess.CalledProcessError, FileNotFoundError, NotADirectoryError, OSError):
     return None
@@ -400,7 +400,7 @@ def collect_staged_added_lines(root: str) -> list[tuple[str, str]]:
       [ "git", "diff", "--cached", "--diff-filter=ACMR", "-U0" ],
       stderr = subprocess.DEVNULL,
       text = True,
-      cwd = root,
+      cwd = root, encoding = "utf-8",
     )
   except (subprocess.CalledProcessError, FileNotFoundError):
     return []

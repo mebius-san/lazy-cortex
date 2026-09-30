@@ -1,4 +1,4 @@
-#!/usr/bin/env zsh
+#!/usr/bin/env bash
 # chk — Python style/type aggregator for the lazycortex-python plugin.
 #
 # Dispatches subcommands that run the shipped style/type checkers against
@@ -114,27 +114,27 @@ if [ "$cmd" = "all" ]; then
   export CHK_BATCH_MODE=1
 
   echo ">>> [1/6] pcf - Python code format check"
-  zsh "$script_dir/chk" pcf "${mods[@]}"
+  bash "$script_dir/chk" pcf "${mods[@]}"
   echo
 
   echo ">>> [2/6] toi - type-only imports check"
-  zsh "$script_dir/chk" toi "${mods[@]}"
+  bash "$script_dir/chk" toi "${mods[@]}"
   echo
 
   echo ">>> [3/6] cmp - py_compile check"
-  zsh "$script_dir/chk" cmp "${mods[@]}"
+  bash "$script_dir/chk" cmp "${mods[@]}"
   echo
 
   echo ">>> [4/6] mypy - mypy type check"
-  zsh "$script_dir/chk" mypy "${mods[@]}"
+  bash "$script_dir/chk" mypy "${mods[@]}"
   echo
 
   echo ">>> [5/6] rf - ruff check"
-  zsh "$script_dir/chk" rf "${mods[@]}"
+  bash "$script_dir/chk" rf "${mods[@]}"
   echo
 
   echo ">>> [6/6] pylint - pylint check"
-  zsh "$script_dir/chk" pylint "${mods[@]}"
+  bash "$script_dir/chk" pylint "${mods[@]}"
   echo
 
 # mypy type checks (excludes read from pyproject.toml)
@@ -170,14 +170,14 @@ elif [ "$cmd" = "rf" ]; then
 elif [ "$cmd" = "pcf" ]; then
   ensure_venv
   for mod in "${mods[@]}"; do
-    python3 "$script_dir/pcf.py" "$mod"
+    python "$script_dir/pcf.py" "$mod"
   done
 
 # type-only imports check
 elif [ "$cmd" = "toi" ]; then
   ensure_venv
   for mod in "${mods[@]}"; do
-    python3 "$script_dir/toi.py" "$mod"
+    python "$script_dir/toi.py" "$mod"
   done
 
 # guideline review — builds the manifest and prints the agent dispatch directive.
@@ -187,7 +187,7 @@ elif [ "$cmd" = "toi" ]; then
 # never by ignoring it. Deliberately NOT part of `all`: one dispatch carries the
 # whole guideline canon, so the phase runs once per unit of work, not per edit.
 elif [ "$cmd" = "review" ]; then
-  python3 "$script_dir/review.py" "${mods[@]}"
+  "${LAZYCORTEX_PYTHON:-python3}" "$script_dir/review.py" "${mods[@]}"
 
 # PyCharm offline code inspections — opt-in per repo via a `[tool.pch]` section
 # in pyproject.toml. pch spins up a headless IDE (minutes) and needs PyCharm
@@ -200,7 +200,7 @@ elif [ "$cmd" = "pch" ]; then
   else
     ensure_venv
     for mod in "${mods[@]}"; do
-      python3 "$script_dir/pch.py" "$mod"
+      python "$script_dir/pch.py" "$mod"
     done
   fi
 
@@ -223,7 +223,7 @@ elif [ "$cmd" = "cmp" ]; then
   else
     err=0
     for pyf in "${files[@]}"; do
-      python3 -m py_compile "$pyf" || { echo "compile failed: $pyf"; err=1; }
+      python -m py_compile "$pyf" || { echo "compile failed: $pyf"; err=1; }
     done
 
     if [ $err -ne 0 ]; then

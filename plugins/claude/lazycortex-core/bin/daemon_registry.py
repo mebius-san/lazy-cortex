@@ -248,7 +248,7 @@ def enumerate_local_daemons(platform: str | None = None) -> list[dict]:
   rows: list[dict] = []
   for name in _unit_names(platform):
     try:
-      text = (base / name).read_text()
+      text = (base / name).read_text(encoding = "utf-8")
     except OSError as e:
       sys.stderr.write(f"daemon_registry: skipping unreadable unit {name}: {e}\n")
       continue
@@ -318,7 +318,7 @@ def identify_holder(port: int, registry: list[dict] | None = None) -> dict | Non
     proc = subprocess.run(
       # waiver: external lsof CLI flags, not domain constants
       ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-Fpc"],
-      capture_output = True, text = True, check = False, timeout = _LSOF_TIMEOUT_SEC,
+      capture_output = True, text = True, check = False, timeout = _LSOF_TIMEOUT_SEC, encoding = "utf-8",
     )
   except (FileNotFoundError, subprocess.TimeoutExpired):
     # lsof missing or wedged — holder identification is best-effort only
@@ -407,7 +407,7 @@ def write_scrape_targets_file(out: Path | None = None, registry: list[dict] | No
   path = out or scrape_targets_path()
   path.parent.mkdir(parents = True, exist_ok = True)
   tmp = path.with_suffix(path.suffix + _TMP_SUFFIX)
-  tmp.write_text(json.dumps(targets, indent = 2) + "\n")
+  tmp.write_text(json.dumps(targets, indent = 2) + "\n", encoding = "utf-8")
   os.replace(tmp, path)
   # waiver: external JSON contract field names of the metrics-scrape-file CLI, not internal keys
   return { "path": str(path), "count": len(targets), "targets": targets }

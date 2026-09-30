@@ -26,7 +26,7 @@ All subcommands accept `--vault <root>`, `--dry-run`, and `--icon-map <path>` as
 
 Resolve one file. Reads its frontmatter, matches against the icon-map, then upserts `iconize_icon` / `iconize_color` in that file's frontmatter where the resolution differs. A note no matcher claims keeps whatever icon keys it already carries — no subcommand ever strips them, so another manager's keys survive a run.
 
-Invoked by: the PostToolUse hook, or manually.
+Invoked by: the PostToolUse hook, or manually. The hook passes `-` as the path: the worker then reads the hook's JSON payload from stdin, takes `tool_response.filePath` (else `tool_input.file_path`), and is a no-op unless that file is a `.md` note.
 
 ### `sync-paths <vault-relative-path>...`
 

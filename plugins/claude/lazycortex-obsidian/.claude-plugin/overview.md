@@ -39,8 +39,7 @@ Obsidian vaults accumulate configuration over time — plugins, icons, themes, h
 - **Claude Code** with plugin support.
 - **Obsidian** (the app) — for the config to take effect. The skills run without Obsidian running.
 - **git** — `lazy-obsidian.update-plugin` resolves the vault target via `git rev-parse --show-toplevel`.
-- **Python 3** — the iconize-sync worker (`bin/iconize_sync.py`) and the vault-manifest worker (`bin/vault_manifest.py`) are Python-stdlib only. The manifest worker reaches GitHub directly, so `curl` and `jq` are not needed for capture or deploy.
-- **`jq`** — used by `lazy-obsidian.update-plugin` for deep-merging the opinionated override block onto plugin `data.json`.
+- **Python 3** — the iconize-sync worker (`bin/iconize_sync.py`) and the vault-manifest worker (`bin/vault_manifest.py`) are Python-stdlib only. The manifest worker reaches GitHub directly, so `curl` is not needed for capture or deploy; `bin/plugin_json.py` does the JSON work of `lazy-obsidian.update-plugin`.
 - **`curl`** — used by `lazy-obsidian.update-plugin` to resolve the Obsidian community registry and fetch plugin binaries from GitHub releases.
 - **`lazycortex-core` (required)** — dependency declared in `plugin.json`; `lazy-obsidian.install` reuses the install pattern.
 

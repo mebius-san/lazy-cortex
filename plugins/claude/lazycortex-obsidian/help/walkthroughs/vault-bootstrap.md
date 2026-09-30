@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Go from a bare repo to a fully-wired Obsidian vault — tag pages, Iconize sync, diagram glue, click-to-zoom — one chained install.
-last_regen: 2026-09-28
+last_regen: 2026-09-30
 diagram_spec:
   anchor: "Journey at a glance"
   request: "Sequence diagram showing the vault bootstrap journey: user runs /lazy-obsidian.install, which installs Dataview, chains into /lazy-obsidian.iconize-install (installs folder-notes, obsidian-icon-folder, iconize-reloader, scaffolds icon-map and repaint routine), then itself syncs and enables its CSS snippets (mermaid-fit.css, ascii-fit.css, callouts.css) in appearance.json, and finally chains into /lazy-obsidian.diagram-install (installs mermaid-popup for click-to-zoom), ending with the user reloading Obsidian and verifying."
@@ -10,8 +10,8 @@ source_skills:
   - lazy-obsidian.iconize-install
   - lazy-obsidian.diagram-install
   - lazy-obsidian.gen-tag-pages
-source_sha: e6f72e6c9fd925c00e50fcee5fc5b447600cce7a
-surface_sha: 350147a81ad5bb74b425b30a8d6566dcd4cafb22a341533098173f62f2be2d55
+source_sha: 1581fe03ce1f6ca1468bcf2fbb3c2a71e0e2ba9b
+surface_sha: ab66d033b7c03769265e2f9b1b9bb2bc70b67a3e370d8a59a9f669c132b56e86
 ---
 # How do I wire up a fresh vault from scratch?
 
@@ -56,7 +56,7 @@ After this walkthrough your vault has:
   and `.mcp.json` are per-repo).
 - An Obsidian vault already initialized in the repo root — meaning `.obsidian/`
   exists. Open the folder in Obsidian once to create it if it doesn't exist yet.
-- `git`, `python3`, `jq`, and `curl` on `$PATH` (used by the sub-skills).
+- `git`, `python3`, and `curl` on `$PATH` (used by the sub-skills).
 - Network access for the initial run so the community-registry lookups can
   resolve `folder-notes`, `obsidian-icon-folder`, and `mermaid-popup`.
 - `lazycortex-core` enabled (declared as a dependency in `plugin.json`; the

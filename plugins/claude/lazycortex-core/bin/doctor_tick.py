@@ -173,7 +173,7 @@ def _clear_probe_recoverable_halt(repo: Path) -> bool:
     probe = subprocess.run(
       [ "git", "ls-remote", "--heads", REMOTE_NAME ],
       cwd = str(repo), capture_output = True, text = True,
-      timeout = REMOTE_PROBE_TIMEOUT_SEC, check = False,
+      timeout = REMOTE_PROBE_TIMEOUT_SEC, check = False, encoding = "utf-8",
     )
   except (subprocess.TimeoutExpired, OSError):
     return False
@@ -230,7 +230,7 @@ def _read_tail(path: Path, lines: int = 50) -> str:
     the file is missing or cannot be decoded.
   """
   try:
-    text = path.read_text()
+    text = path.read_text(encoding = "utf-8")
   except (OSError, UnicodeDecodeError):
     return ""
   parts = text.splitlines()
@@ -301,7 +301,7 @@ def _read_frontmatter(path: Path) -> dict | None:
     The parsed frontmatter mapping, or `None` when the file is unreadable or carries none.
   """
   try:
-    parsed = parse_frontmatter(path.read_text())
+    parsed = parse_frontmatter(path.read_text(encoding = "utf-8"))
   except OSError:
     return None
   return parsed or None
@@ -340,12 +340,12 @@ def _build_context(repo: Path, halt: dict | None, dead_jobs: list[dict]) -> dict
       ( "error_json", JobArtifact.ERROR_JSON ),
     ):
       try:
-        e[key] = json.loads((jdir / fname).read_text())
+        e[key] = json.loads((jdir / fname).read_text(encoding = "utf-8"))
       except (OSError, json.JSONDecodeError):
         e[key] = None
     try:
       # waiver: one-off doctor-context-schema field name, not a reusable domain key
-      e["attempts"] = int((jdir / JobArtifact.ATTEMPTS).read_text().strip())
+      e["attempts"] = int((jdir / JobArtifact.ATTEMPTS).read_text(encoding = "utf-8").strip())
     except (OSError, ValueError):
       # waiver: one-off doctor-context-schema field name, not a reusable domain key
       e["attempts"] = 0
@@ -361,7 +361,7 @@ def _build_context(repo: Path, halt: dict | None, dead_jobs: list[dict]) -> dict
     # waiver: one-off doctor-context-schema field name, not a reusable domain key
     context["git_log_recent"] = subprocess.run(
       [ "git", "log", "--oneline", "-20" ],
-      cwd = str(repo), capture_output = True, text = True, check = True,
+      cwd = str(repo), capture_output = True, text = True, check = True, encoding = "utf-8",
     ).stdout
   except subprocess.CalledProcessError:
     pass
@@ -371,7 +371,7 @@ def _build_context(repo: Path, halt: dict | None, dead_jobs: list[dict]) -> dict
     # waiver: one-off doctor-context-schema field name, not a reusable domain key
     context["git_status"] = subprocess.run(
       [ "git", "--no-optional-locks", "status", "--porcelain" ],
-      cwd = str(repo), capture_output = True, text = True, check = True,
+      cwd = str(repo), capture_output = True, text = True, check = True, encoding = "utf-8",
     ).stdout
   except subprocess.CalledProcessError:
     pass

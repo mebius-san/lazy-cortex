@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-observe install, uninstall, and audit — symptoms, likely causes, and fixes.
-last_regen: 2026-09-24
+last_regen: 2026-09-30
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree rooted at the operator's situation: top-level branch on whether the shipper is installed at all (answer file present?); if not-installed, branch further on whether the Step 0 pre-flight found an already-covered host (routes to --integrate-only or --force-standalone guidance) versus a genuinely clear host (routes to plain install); if installed, branch on whether the host runs in integrate mode (scrape-targets file present and current vs missing/stale) or standalone mode — standalone then branches on whether the service is active, whether local /metrics is reachable, whether agent self-metrics show successful remote_write (token vs observer-reachability vs WAL-recovery sub-branches), and whether WAL is oversized. Separate top-level branch for uninstall failures (launchctl error 5 vs systemctl unit-not-found). Each leaf cites the troubleshooting entry that resolves it."
@@ -10,8 +10,8 @@ source_skills:
   - lazy-observe.install
   - lazy-observe.uninstall
   - lazy-observe.audit
-source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
-surface_sha: b44e80b78775e3afbb0087f470516c8dfbcac68db876e12d93af3ada958e252a
+source_sha: 208e7e85e3998e8b741565a53874e37946b3f177
+surface_sha: 1c726df7bef06f6af0d156826cc3e996f3f895a71ae0a3c9f99d9d2fb236f889
 ---
 # Troubleshooting
 
@@ -91,7 +91,7 @@ surface_sha: b44e80b78775e3afbb0087f470516c8dfbcac68db876e12d93af3ada958e252a
 
 **Likely cause**: The lazycortex-core daemon for that checkout is not running, or runtime metrics are disabled for it. On a host running several lazycortex-core daemons, each gets its own port allocated sequentially from 9464 — check which `repo_label` the audit report flags before restarting the wrong daemon.
 
-**Fix**: Run `/lazy-core.install` for the affected checkout and answer "Yes" at its metrics prompt if you haven't already (see `references/lazy-core.metrics-schema.md` for what the setting controls) — then restart that checkout's daemon supervisor. On macOS: `launchctl kickstart -k gui/$UID com.lazycortex.runtime`. On Linux: `systemctl --user restart lazycortex-runtime.service`.
+**Fix**: Run `/lazy-core.daemon-setup` for the affected checkout and answer "Yes" at its metrics prompt if you haven't already (see `references/lazy-core.metrics-schema.md` for what the setting controls). `/lazy-core.install` never touches the daemon, so it cannot enable this. Then restart that checkout's daemon supervisor. On macOS: `launchctl kickstart -k gui/$UID com.lazycortex.runtime`. On Linux: `systemctl --user restart lazycortex-runtime.service`.
 
 ---
 
@@ -171,7 +171,7 @@ surface_sha: b44e80b78775e3afbb0087f470516c8dfbcac68db876e12d93af3ada958e252a
 
 **Likely cause**: No lazycortex-core daemon on this host has runtime metrics turned on yet, or one was turned on but its daemon hasn't been restarted since.
 
-**Fix**: Run `/lazy-core.install` for the checkout you want scraped and answer "Yes" at its metrics prompt — it enables the endpoint and provisions a port automatically. If you already answered "Yes" previously, restart that checkout's daemon supervisor to pick up the change: `launchctl kickstart -k gui/$UID com.lazycortex.runtime` (macOS) or `systemctl --user restart lazycortex-runtime.service` (Linux). Then re-run `/lazy-observe.install`.
+**Fix**: Run `/lazy-core.daemon-setup` for the checkout you want scraped. It enables the daemon for that checkout, installs its supervisor unit, and — when you answer "Yes" at its metrics prompt — enables the endpoint and provisions a port automatically. `/lazy-core.install` never touches the daemon, and the metrics prompt is only reached once the supervisor is installed for that checkout. If you already answered "Yes" previously, restart that checkout's daemon supervisor to pick up the change: `launchctl kickstart -k gui/$UID com.lazycortex.runtime` (macOS) or `systemctl --user restart lazycortex-runtime.service` (Linux). Then re-run `/lazy-observe.install`.
 
 ---
 

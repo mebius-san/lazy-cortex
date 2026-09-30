@@ -1,4 +1,4 @@
-#!/usr/bin/env zsh
+#!/usr/bin/env bash
 # tst — Python test runner for the lazycortex-python plugin.
 #
 # Sources the shared venv (mypy/pylint/pytest), then the optional project-env

@@ -349,7 +349,7 @@ def _check_callout_tags(repo_root: Path, settings: dict, findings: list[dict]) -
       # waiver: type: ignore[attr-defined] — the basename collision with
       # plugins/claude/lazycortex-specs/bin/note_ops.py (see the import comment above) makes mypy check
       # this attribute access against the wrong module's shape
-      report = _note_ops.build_report(file_path.read_text())  # type: ignore[attr-defined]
+      report = _note_ops.build_report(file_path.read_text(encoding = "utf-8"))  # type: ignore[attr-defined]
 
       # Domain(review.config):
       # # Closed vocabulary for review callout tags
@@ -522,7 +522,7 @@ def run(settings_or_path: Path | dict) -> dict:
          f"missing {settings_path} — run /lazy-review.install first")
     return _bundle(findings)
   try:
-    settings = json.loads(settings_path.read_text())
+    settings = json.loads(settings_path.read_text(encoding = "utf-8"))
   except json.JSONDecodeError as exc:
     # waiver: one-off human-facing message
     _add(findings, ReviewStatus.FAIL,"settings_parse", f"invalid JSON: {exc}")

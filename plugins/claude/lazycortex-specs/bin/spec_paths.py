@@ -71,7 +71,7 @@ def _vault_root_value(settings_root: Path) -> str:
   # guard: no settings file — use the default root
   if not path.is_file():
     return DEFAULT_VAULT_ROOT
-  data = json.loads(path.read_text())
+  data = json.loads(path.read_text(encoding = "utf-8"))
   spec = data.get(_SPEC_SECTION)
 
   # guard: missing/malformed spec section — default

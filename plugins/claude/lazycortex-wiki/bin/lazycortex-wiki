@@ -1824,15 +1824,15 @@ class Cli:
     try:
       status = subprocess.check_output(
         [ "git", "status", "--porcelain", "--", *paths ],
-        cwd = str(repo), text = True,
+        cwd = str(repo), text = True, encoding = "utf-8",
       ).strip()
       # guard: no changes among the touched paths — clean no-op
       if not status:
         return 0
-      subprocess.check_output([ "git", "add", "--", *paths ], cwd = str(repo), text = True)
+      subprocess.check_output([ "git", "add", "--", *paths ], cwd = str(repo), text = True, encoding = "utf-8")
       subprocess.check_output(
         [ "git", "commit", "-m", message, "--", *paths ],
-        cwd = str(repo), text = True,
+        cwd = str(repo), text = True, encoding = "utf-8",
       )
     except subprocess.CalledProcessError as e:
       print(f"git commit failed: {e}", file = sys.stderr)
@@ -2437,7 +2437,7 @@ class Cli:
       cwd = str(repo),
       capture_output = True,
       text = True,
-      check = False,
+      check = False, encoding = "utf-8",
     )
     # guard: lookup failed — treat every path as untracked
     if proc.returncode != 0:

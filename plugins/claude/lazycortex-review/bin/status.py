@@ -47,7 +47,7 @@ def status_record(file_path: Path) -> dict:
     Dict with keys `file`, `review_active`, `review_round`, `review_approved`, `banner`,
     and `owners`.
   """
-  text = file_path.read_text()
+  text = file_path.read_text(encoding = "utf-8")
   meta, body = _fm.parse(text)
   doc = _parser.parse(text)
   current = _banner.extract(body)

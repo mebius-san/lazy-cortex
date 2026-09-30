@@ -87,7 +87,7 @@ def _resolve_in_dev_dir(plugin_dir: Path, plugin_name: str, dir_name: str, name:
   """
   manifest = plugin_dir / PluginFile.MANIFEST_DIR / PluginFile.MANIFEST
   try:
-    data = json.loads(manifest.read_text())
+    data = json.loads(manifest.read_text(encoding = "utf-8"))
   except (FileNotFoundError, json.JSONDecodeError):
     return None
 

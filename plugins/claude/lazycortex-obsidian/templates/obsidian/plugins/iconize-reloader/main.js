@@ -1,6 +1,6 @@
 'use strict';
 
-const RELOADER_VERSION = '2.4.1';
+const RELOADER_VERSION = '2.4.2';
 
 const { Plugin, PluginSettingTab, Setting, Platform } = require('obsidian');
 
@@ -655,7 +655,17 @@ class IconizeReloaderPlugin extends Plugin {
           return;
         }
         if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => { debounceTimer = null; refreshTree(); }, DEBOUNCE_MS);
+        debounceTimer = setTimeout(async () => {
+          debounceTimer = null;
+          // An external write (Iconize saving its defaults, a deploy, a sync)
+          // can reset the frontmatter settings — correct them before repainting.
+          // limit: desktop only; on mobile the correction runs on load alone.
+          if (this.settings.enforceIconizeSettings) {
+            try { await this._enforceIconizeSettings(); }
+            catch (e) { console.error('[iconize-reloader] enforce on data.json change failed', e); }
+          }
+          refreshTree();
+        }, DEBOUNCE_MS);
       };
 
       // Watch the parent dir and filter — survives atomic rename
@@ -804,7 +814,10 @@ class IconizeReloaderPlugin extends Plugin {
   // block, plus enable Iconize's frontmatter-driven file-side painting. Returns
   // true when a write happened. Callable from onload (early, after the
   // self-write-mtime closure is wired) and from the settings tab's onChange
-  // handlers. No-op on mobile when Iconize's data.json is missing.
+  // handlers, and from the desktop data.json watcher whenever Iconize (or
+  // anyone else) rewrites that file. Never creates Iconize's data.json: no-op
+  // when it is missing, so Iconize writes its own defaults first and the next
+  // watcher event corrects them.
   async _enforceIconizeSettings() {
     const adapter = this.app.vault.adapter;
     const data = await readIconizeData(adapter);
@@ -826,6 +839,15 @@ class IconizeReloaderPlugin extends Plugin {
     if (changed) {
       await writeIconizeData(adapter, data);
       if (this._bumpSelfWriteMtime) this._bumpSelfWriteMtime();
+      // Mirror into Iconize's in-memory settings — otherwise its next saveData()
+      // serializes the stale field names back over our correction.
+      const iconize = this.app.plugins.plugins[TARGET_PLUGIN_ID];
+      if (iconize && iconize.data && typeof iconize.data === 'object') {
+        const live = iconize.data.settings || (iconize.data.settings = {});
+        live.iconInFrontmatterEnabled = true;
+        live.iconInFrontmatterFieldName = this.settings.iconFieldName;
+        live.iconColorInFrontmatterFieldName = this.settings.colorFieldName;
+      }
       console.log('[iconize-reloader] re-asserted Iconize frontmatter settings →',
         this.settings.iconFieldName, '/', this.settings.colorFieldName);
     }
@@ -914,7 +936,7 @@ class IconizeReloaderSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Re-assert plugin settings on load')
-      .setDesc('On every reloader load, push iconInFrontmatterEnabled=true plus the field names above into Iconize\'s settings, and useFrontmatterMetadata=true with the same field names into Notebook Navigator\'s settings (when present). Survives manual toggling-off in either plugin\'s own settings UI.')
+      .setDesc('On every reloader load (and, on desktop, whenever Iconize rewrites its data.json), push iconInFrontmatterEnabled=true plus the field names above into Iconize\'s settings, and useFrontmatterMetadata=true with the same field names into Notebook Navigator\'s settings (when present). Survives manual toggling-off in either plugin\'s own settings UI.')
       .addToggle((t) => t
         .setValue(this.plugin.settings.enforceIconizeSettings)
         .onChange(async (v) => {

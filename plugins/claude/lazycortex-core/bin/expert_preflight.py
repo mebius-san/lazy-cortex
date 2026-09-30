@@ -1081,7 +1081,7 @@ def _run_probe(repo: Path, entry: dict) -> dict:
   try:
     proc = subprocess.run(
       argv, cwd = repo, env = env,
-      capture_output = True, text = True, timeout = _PROBE_TIMEOUT_SEC, check = False,
+      capture_output = True, text = True, timeout = _PROBE_TIMEOUT_SEC, check = False, encoding = "utf-8",
     )
     exit_code = proc.returncode
     stdout = proc.stdout or ""

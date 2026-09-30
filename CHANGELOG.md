@@ -4,6 +4,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 10.4.0 — 2026-09-30 UTC
+
+- New `lazy-core.shell` rule, mirrored into every repo by install, keeps commands in a shape that allow-list permission modes accept. Daemon expert jobs, which never see your global shell guidance, no longer get compound commit commands denied: no `cd` into the current directory, one plain command per call, pathspec commits, one plain retry after a denial.
+- Windows support: install probes `python3` / `python` / `py -3` and records a non-`python3` interpreter as `LAZYCORTEX_PYTHON` in `.claude/settings.local.json`. Locks and process checks now work on Windows, and all text file and subprocess I/O is explicitly UTF-8. The `hook-template.sh` template runs under bash and no longer needs `jq`.
+- **Breaking:** daemon setup moved out of `lazy-core.install` into the new `/lazy-core.daemon-setup` skill. Run it separately to wire the daemon.
+- `lazy-core.install` removes a stray daemon supervisor unit again, without asking.
+
 ### 10.3.0 — 2026-09-28 UTC
 
 - Install now pins LF line endings in the repo's `.gitattributes` (`* text=auto eol=lf`, added once, after any leading BOM) and reports when the index needs a one-time renormalize; audit warns when the rule is missing.
@@ -729,6 +736,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 9.10.0 — 2026-09-30 UTC
+
+- New catalog-wide `spec.guidelines` setting declares role-keyed guideline paths once for the whole catalog. Every product inherits it, in the order catalog, enclosing products, then its own. The catalog-root coordinator reads its coordinator guidelines from it, and audit warns when a declared catalog path is missing.
+- Content assets (characters, scenes and similar) get their own `content-design` document type and review class. The designer and editor write it and the data writer validates it. The data implementer takes the data schema from product guidelines and chooses the values itself. Audit flags content designs still typed `design`. Also fixes a product override that replaced the editor with the designer.
+- Fixed spec tooling decoding markdown, settings and JSON through the Windows code page. All text reads, writes and subprocess output now use explicit UTF-8.
+
 ### 9.9.1 — 2026-09-29 UTC
 
 - Fixed incorrect install guidance for `review.classes[]` globs — they are right-anchored and match at any folder depth, not relative to `review.watch_root` as previously documented.
@@ -1086,6 +1099,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 6.1.0 — 2026-09-30 UTC
+
+- Iconize settings now survive a manifest deploy. Capture keeps Iconize's settings block (settings, rules, recently used icons) and drops only the per-path icon entries. Deploy restores that block like any other plugin's settings.
+- The bundled `iconize-reloader` (2.4.2) re-asserts the frontmatter field names whenever Iconize rewrites its `data.json`, and never creates that file itself.
+- Iconize sync and plugin update no longer need `jq`, and text I/O is explicitly UTF-8, which helps on Windows.
+
 ### 6.0.2 — 2026-09-28 UTC
 
 - Iconize registry discovery now also includes the newest cached version of every plugin the dev directories do not cover, resolved at call time, instead of seeing no cached plugin at all whenever dev directories are set.
@@ -1419,6 +1438,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+### 6.10.1 — 2026-09-30 UTC
+
+- Fixed review on Windows: all markdown, settings and JSON reads and writes, and the git subprocess output, now use explicit UTF-8 instead of the system code page, so non-ASCII text in documents is no longer garbled or rejected.
+
 ### 6.10.0 — 2026-09-29 UTC
 
 - Fixed the review coordinator silently missing commits under `specs/` in some setups — `review.watch_root` now automatically widens to cover every review class glob instead of narrowing to a single literal folder name.
@@ -1628,6 +1651,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-observe
 
+### 2.2.3 — 2026-09-30 UTC
+
+- Installer and setup text now read and write as UTF-8 explicitly, so markdown, settings and JSON no longer get mangled by the Windows code page.
+- When no metrics-enabled daemon is registered, `lazy-observe.install` now points you to `/lazy-core.daemon-setup` (instead of `/lazy-core.install`) to enable metrics.
+
 ### 2.2.2 — 2026-09-28 UTC
 
 - Install now writes answer and token files atomically in a lossless TOML format, fixing cases where a saved answer could come back as a raw Python repr, lose a dashed key, or get corrupted by a newline in the value.
@@ -1772,6 +1800,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.
 
 ## lazycortex-experts
+
+### 1.9.3 — 2026-09-30 UTC
+
+- The data-implementer expert now reads the data schema named in the product guidelines instead of inferring the format from existing files. It chooses concrete values itself from an approved content design. Where the design leaves a group of fields undecided, it reports a decision candidate and leaves those fields out. When it validates a content design, it checks that every decision fits the schema and that no data values are copied in.
 
 ### 1.9.2 — 2026-09-24 UTC
 
@@ -1947,6 +1979,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 4.8.0 — 2026-09-30 UTC
+
+- Windows support: every shipped shell script now runs under bash, and `chk-py` / `tst-py` and the `cli/` wrapper templates use a bash shebang. The virtualenv lookup also finds `Scripts/*.exe`. The check-style hook no longer needs `jq`, and text I/O is explicitly UTF-8.
+- Contract blocks now cover only the public and protected surface. A private helper no longer carries a Contract block or a Guarantees section, and its rule is promised on the public method that exposes it. A contract may not introduce a rule that no spec, operator decision or public interface fixes; an implementer's choice is recorded as a Decision marker instead. `contract-writer` declines private targets, `code-reviewer` flags them as WARN, and the docstring and test writers and `knowledge-sweep` follow the same scope.
+- Private helpers can be tested directly: the restriction on testing them is gone from the testing guidelines and the `test-writer` agent.
+- Methods that only report a characteristic of their object (`distance_to`, `area`) may take a noun name without a verb prefix. The name must be unambiguous, the method must have no side effects, and it must build no new structure. The coding guidelines and the guideline reviewer were updated to match.
 
 ### 4.7.5 — 2026-09-29 UTC
 
@@ -2165,6 +2204,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 3.3.4 — 2026-09-30 UTC
+
+- Fixed garbled or failing reads and writes of markdown, settings and JSON on Windows: the wiki CLI now uses UTF-8 explicitly instead of the system code page.
+- The install skill's "curator never runs after install" guidance now points to `/lazy-core.daemon-setup` for enabling the daemon and installing a supervisor, replacing the old advice to re-run `/lazy-core.install`.
 
 ### 3.3.3 — 2026-09-28 UTC
 

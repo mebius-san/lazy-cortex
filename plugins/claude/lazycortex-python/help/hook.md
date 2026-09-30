@@ -1,14 +1,14 @@
 ---
 chapter_type: block
 summary: The PostToolUse hook that runs `pcf.py` on every `.py` edit and surfaces style violations inline in the next turn — zero install steps, zero config writes.
-last_regen: 2026-09-21
+last_regen: 2026-09-30
 no_diagram: true
 source_skills:
   - lazy-python.check-style.sh
   - hooks.json
   - pcf.py
-source_sha: f3f458fd3763b21b44ad1860d8fef3f0c2465707
-surface_sha: 30ccbcdbfd74af4f7a9a28ac597203d1d778ea23a65a7c9a865e97423f4f6dfb
+source_sha: c7c72225ad0abdc938b9717334138fdd4e4295d6
+surface_sha: d0ad3fe15e89936ea6602415aedd7cef7897aa702fcbadba590f4d8768743573
 ---
 # Inline style feedback on every Python edit
 
@@ -22,9 +22,9 @@ Every time you save a `.py` file — via `Edit` or `Write` — the plugin's Post
 
 ## How it fits together
 
-**`hooks.json`** is the plugin manifest that tells Claude Code's hook engine to fire `lazy-python.check-style.sh` on every `Edit` or `Write` call. It declares a single `PostToolUse` entry with `matcher: "Edit|Write"`, a 15-second timeout, and a command that runs the script explicitly through `sh` rather than relying on the script's own executable bit — so the hook keeps firing even after a sync path that resets file permissions (a mobile git client, a fresh clone that lands the file as non-executable). When the plugin is enabled, Claude Code reads this manifest and wires the hook automatically — nothing in your project's `settings.json` is touched.
+**`hooks.json`** is the plugin manifest that tells Claude Code's hook engine to fire `lazy-python.check-style.sh` on every `Edit` or `Write` call. It declares a single `PostToolUse` entry with `matcher: "Edit|Write"`, a 15-second timeout, and a command that runs the script explicitly through `bash` rather than relying on the script's own executable bit — so the hook keeps firing even after a sync path that resets file permissions (a mobile git client, a fresh clone that lands the file as non-executable). When the plugin is enabled, Claude Code reads this manifest and wires the hook automatically — nothing in your project's `settings.json` is touched.
 
-**`lazy-python.check-style.sh`** is the script the hook engine invokes after each `Edit` or `Write`. It reads the tool call's JSON payload from stdin and exits immediately if `jq` is unavailable or the tool name isn't `Edit`/`Write`, then pulls out the file path and exits if the file is not a `.py` file — so the hook is truly silent on every non-Python edit. For `.py` files it resolves both the project directory and the edited file to their real (symlink-resolved) absolute paths, then runs `python3 -m py_compile` on the just-written file: if the file is syntactically incomplete (an in-progress multi-step edit), it exits cleanly rather than reporting spurious violations. When the file parses, it calls `pcf.py --honor-excludes` — located via the `$CLAUDE_PLUGIN_ROOT` environment variable the plugin engine exports, so no path configuration is needed — and captures the output. If `pcf.py` emits any `: note:` lines it writes a `hookSpecificOutput` JSON payload to stdout with an `additionalContext` block containing the violation list; if the file is clean (or excluded by `pcf.py`'s own exclude logic) it exits without producing any output.
+**`lazy-python.check-style.sh`** is the script the hook engine invokes after each `Edit` or `Write`. It is a thin shim that hands the tool call's JSON payload on stdin to `bin/check_style_hook.py`, run under the plugin's Python interpreter, so the hook needs no separate JSON tool such as `jq`. That script exits immediately if the payload doesn't parse or the tool name isn't `Edit`/`Write`, then pulls out the file path and exits if the file is not a `.py` file — so the hook is truly silent on every non-Python edit. For `.py` files it resolves both the project directory and the edited file to their real (symlink-resolved) absolute paths, then compiles the just-written file: if the file is syntactically incomplete (an in-progress multi-step edit), it exits cleanly rather than reporting spurious violations. When the file parses, it calls `pcf.py --honor-excludes` — located via the `$CLAUDE_PLUGIN_ROOT` environment variable the plugin engine exports, so no path configuration is needed — and captures the output. If `pcf.py` emits any `: note:` lines it writes a `hookSpecificOutput` JSON payload to stdout with an `additionalContext` block containing the violation list; if the file is clean (or excluded by `pcf.py`'s own exclude logic) it exits without producing any output.
 
 **`pcf.py`** owns both the exclude decision and everything it reports through the hook. The hook passes the symlink-resolved absolute path of the edited file to `pcf.py` with the `--honor-excludes` flag, which is what makes `pcf.py` honor `[tool.pcf] exclude` for a single explicitly-named file — a bare `chk-py pcf <file>` call, or any other invocation without that flag, always checks the exact file it's given regardless of the exclude list, so a manual run and a hook-triggered run can disagree on an excluded path by design. Under `--honor-excludes`, if the path matches an entry in `[tool.pcf] exclude` in `pyproject.toml`, `pcf.py` exits cleanly and the hook produces no output. This means adding a directory to the `exclude` list in `pyproject.toml` is the only thing you need to do to silence the hook for that directory — there is no separate hook configuration. `pcf.py` runs a broad catalog of checks by default — import order, docstring shape, line length, code format, purpose comments, magic literals, assert placement, and the language a comment or docstring is written in — and every finding from any of them, not just formatting, surfaces through the same `additionalContext` path the moment you save the file. Two of those checks step aside for a test file (a `test_*.py` file under a `tests/` directory): magic-literal and bare-assert findings never fire there, since a pytest assertion and its expected-value literal are the check doing its job, not production code that needs softening.
 
@@ -43,8 +43,6 @@ The violation format the hook surfaces is the same `file:line: note: message` fo
 **Per-directory relaxed rules.** Add entries to `[tool.pcf.overrides]` for subdirectories that need different limits, for example `"tools" = { check_magic_literal = false }`. The last matching path prefix wins.
 
 **Allowing comments or docstrings in another language.** `check_language` (on by default) reports any letter in a comment or docstring that belongs to a script none of `[tool.pcf] allowed_languages` admits — the default is `["english"]`. Add the language you write in (e.g. `"russian"`, `"chinese"`, `"japanese"`) to that list in `pyproject.toml` and the hook stops flagging it; a single quoted foreign word inside a string literal is never scanned, and `# waiver: <reason>` exempts one specific line without widening the project-wide setting.
-
-**Checking whether jq is available.** The hook depends on `jq` to parse the Claude Code payload. If `jq` is absent it exits silently rather than erroring. Install `jq` via your system package manager if you want the hook to function.
 
 ## See also
 

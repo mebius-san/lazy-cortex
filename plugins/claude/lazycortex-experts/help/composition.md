@@ -1,12 +1,12 @@
 ---
 chapter_type: block
 summary: Assemble a named specialist by pairing one generic agent with aspects in lazy.settings.json[experts], following the technical/fiction class map.
-last_regen: 2026-09-24
+last_regen: 2026-09-30
 no_diagram: true
 source_skills:
   - lazy-experts.install
-source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
-surface_sha: 4349601d2ec08e62db02a302a8c06b2f435b4b55246a91a57c1d724c4632e4bd
+source_sha: 208e7e85e3998e8b741565a53874e37946b3f177
+surface_sha: 346c4b4892e684480e306f13fb1ce00a734d11784776f369e79549f4db439732
 ---
 # Assembling a specialist from agents and aspects
 

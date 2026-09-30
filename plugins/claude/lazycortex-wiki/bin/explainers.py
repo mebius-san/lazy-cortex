@@ -130,7 +130,7 @@ def resolve_language(repo: Path) -> str:
   if not settings_path.is_file():
     return LANG_EN
   try:
-    settings = json.loads(settings_path.read_text())
+    settings = json.loads(settings_path.read_text(encoding = "utf-8"))
   except (OSError, json.JSONDecodeError):
     return LANG_EN
 

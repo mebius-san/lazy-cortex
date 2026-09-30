@@ -189,7 +189,7 @@ def target_asset_dir(asset_dir: Path, raw_target: str) -> Path | None:
   attributes `asset_dir` to by the longest matching `spec_path`, so a nested product resolves to
   the inner one — with any number of segments: `bugs/crash`, a nested asset's full path, or a
   bare slug at the product root. `coordinator_dispatch.py`'s own `spec_targets` /
-  `spec_depends_on` context fold-in (`_build_bundle`) and its reverse-edge scan resolve every
+  `spec_depends_on` context fold-in and its reverse-edge scan resolve every
   token through this same primitive.
 
   Args:
@@ -254,7 +254,9 @@ def read_job_claim_head(repo_root: Path, expert: str, job_id: str) -> str | None
     not yet claimed, a bundle that is gone, or a pump older than the marker.
   """
   try:
-    value = (repo_root / _JOBS_BASE / expert / job_id / _JOB_ARTIFACT_CLAIM_HEAD).read_text().strip()
+    value = (
+        repo_root / _JOBS_BASE / expert / job_id / _JOB_ARTIFACT_CLAIM_HEAD
+    ).read_text(encoding = "utf-8").strip()
   except OSError:
     return None
   return value or None
@@ -437,7 +439,7 @@ def _run_note_check(asset_note: Path) -> list[dict]:
   try:
     proc = subprocess.run(
         [sys.executable, str(cli), _NOTE_CHECK_SUBVERB, str(asset_note)],
-        capture_output = True, text = True, check = False,
+        capture_output = True, text = True, check = False, encoding = "utf-8",
     )
   # waiver: best-effort follow-up — a broken subprocess must degrade to "nothing to report",
   # never abort the tick that already handled the active-job polling pass above

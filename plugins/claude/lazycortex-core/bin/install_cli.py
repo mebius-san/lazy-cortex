@@ -5,10 +5,11 @@ This module backs the `install-phase` and `daemon-run-here` subcommands the
 `lazy-core.install` and `lazy-core.doctor` skills call instead of embedding Python.
 `install-phase <name>` runs one idempotent bootstrap phase from `lazy_install_phases` (or a
 one-line derivation such as the repo id or the interpreter path) and prints the phase's
-outcome word; `daemon-run-here` reads or writes the `daemon.run_here` host-to-checkout gate
-for the current host. The repository root follows the dispatcher convention: the
-`LAZY_REPO_ROOT` env var, falling back to the process working directory, overridable
-per-call with `--cwd`.
+outcome word; the `python-env` phase additionally requires `--command` naming the
+interpreter command an install probe resolved. `daemon-run-here` reads or writes the
+`daemon.run_here` host-to-checkout gate for the current host. The repository root follows
+the dispatcher convention: the `LAZY_REPO_ROOT` env var, falling back to the process
+working directory, overridable per-call with `--cwd`.
 """
 from __future__ import annotations
 
@@ -34,6 +35,7 @@ from lazy_install_phases import (  # pylint: disable=import-error
   ensure_gitattributes_lf,
   index_has_crlf,
   migrate_log_hooks,
+  record_python_env,
 )
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from lazy_settings import load_section, load_tracked_section, save_section  # pylint: disable=import-error
@@ -162,7 +164,7 @@ def _run_phase_daemon_defaults(root: Path) -> None:
   print("git: " + bootstrap_daemon_git(root))
 
   # the routines section is seeded empty so the daemon's reader finds a section, not a stub
-  if SettingsKey.ROUTINES not in (json.loads(settings.read_text()) if settings.exists() else {}):
+  if SettingsKey.ROUTINES not in (json.loads(settings.read_text(encoding = "utf-8")) if settings.exists() else {}):
     save_section(settings, SettingsKey.ROUTINES, {})
     # waiver: outcome-line label and token read by the install skill, not reusable domain keys
     print("routines: bootstrapped")
@@ -200,6 +202,9 @@ _PHASES: dict[str, Callable[[Path, Path], None]] = {
   "interpreter": lambda _root, _template: print(sys.executable),
 }
 
+# waiver: phase name is the install-phase verb's own vocabulary; kept out of `_PHASES` because it takes `--command`
+_PYTHON_ENV_PHASE = "python-env"
+
 
 def cmd_install_phase(argv: list[str]) -> int:
   """
@@ -219,12 +224,24 @@ def cmd_install_phase(argv: list[str]) -> int:
   # waiver: argparse CLI signature and help strings, not domain keys
   parser = argparse.ArgumentParser(prog = "lazycortex-core install-phase")
   # waiver: argparse CLI signature — phase names are this verb's own vocabulary
-  parser.add_argument("phase", choices = list(_PHASES))
+  parser.add_argument("phase", choices = [ *_PHASES, _PYTHON_ENV_PHASE ])
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--template", default = None, help = "Path to the .lazyignore template (logs phase)")
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--cwd", default = None, help = "Repository root (default: $LAZY_REPO_ROOT or cwd)")
+  # waiver: argparse CLI signature, not a domain key
+  parser.add_argument("--command", default = None, help = "Interpreter command the probe resolved (python-env)")
   args = parser.parse_args(argv)
+
+  # python-env records the command this process was launched with, so it runs under that interpreter
+  if args.phase == _PYTHON_ENV_PHASE:
+    # guard: the phase cannot record a command it was not given
+    if args.command is None:
+      # waiver: argparse-style usage error wording, not a domain key
+      parser.error("python-env requires --command")
+    # waiver: outcome-line label read by the install skill, not a reusable domain key
+    print("python-env:", record_python_env(resolve_repo_root(args.cwd), args.command, sys.executable))
+    return 0
 
   # each phase prints exactly what its former inline snippet printed, so the skill's readers keep working
   _PHASES[args.phase](resolve_repo_root(args.cwd), Path(args.template) if args.template else _LAZYIGNORE_TEMPLATE)

@@ -35,7 +35,7 @@ conventions.
 
 ### Knowledge Marker Rules
 - **Mark knowledge as you write it.** Knowledge markers are written by the author at writing time, not backfilled by a later sweep:
-  - Code that implements a **caller-visible guarantee** — behavior callers may rely on that must survive refactoring — gets a `Contract:` block at the load-bearing spot — the interface declaration when the guarantee is part of an interface's protocol, the implementation body otherwise; the owning docstring's **Guarantees** section is synced in the same pass.
+  - Code that implements a **caller-visible guarantee** — behavior callers may rely on that must survive refactoring — gets a `Contract:` block at the load-bearing spot — the interface declaration when the guarantee is part of an interface's protocol, the implementation body otherwise; the owning docstring's **Guarantees** section is synced in the same pass. Only public and protected members carry one: a private helper gets none, and a rule it implements is promised on the public method that exposes it.
   - Code that implements **domain knowledge** — a mechanic, formula, or rule of the modeled subject area — gets a `Domain(<group>):` block. The group comes from the project's domain-groups dictionary; when no listed group fits, park the block under `Domain(unfiled):` — never invent a permanent group.
   - Block shapes and boundaries: the comment canon's Contract Comments / Domain Comments / Marker Comments sections (`lazy-python.comment-guidelines.md`). Whether an unmarked guarantee or mechanic slipped through is a review-phase finding.
 
@@ -535,6 +535,11 @@ if TYPE_CHECKING:
 - Mutation: basic state change — `update_`, apply configuration or loadout — `apply_`, sparse delta — `patch_`.
 - Cache and lifecycle: `reset_`, `clear_`, `invalidate_`, `refresh_`.
 - Pure computations: `compute_`, `evaluate_`, `score_`, `rank_`.
+- Characteristics: a noun name is allowed when the method only reports a characteristic or measure of its object — even one computed on the fly and taking arguments — provided all three hold:
+  - the name reads unambiguously on its own;
+  - the method has no side effects;
+  - the method does not construct and return a new domain object or structure.
+  Allowed: `distance_to(point)`, `distance_to_contact(other, direction)`, `area()`, `overlap_depth(other)`. A verb prefix stays mandatory when the method builds something new (`compute_border` returns a new outline polygon, `build_route` assembles a route), changes state, performs I/O, or falls in any category above — lookup and search (`find_`, `search_`), conversion (`to_`), and the rest.
 - AI policy steps: `decide_`, `select_`, `plan_`.
 - Learning and calibration: `train_`, `calibrate_`, `fit_`.
 - Simulation and stochastic flows: `simulate_`, `sample_`, `rollout_`.
@@ -566,6 +571,7 @@ if TYPE_CHECKING:
 - If multiple prefixes apply, choose by priority: event or hook → lifecycle → execution (`run_`) → I/O (`read_` or `load_` or `fetch_` or `query_`) → mutation (`update_` or `apply_` or `patch_` or `mutate_`) → computation (`compute_` or `score_`, etc.) → construction (`build_`) → lookup (`find_` or `search_`) → registration (`register_`) → representation (`to_` or `as_` or `render_` or `format_`).
 - Do not mix different effects under one verb. Use `fetch_` for network calls rather than `load_`.
 - Avoid boolean flags that drastically change behavior. Split into separate methods, for example `save_state` and `save_state_async`.
+- A characteristic method (see Prefixes by Semantics) needs no prefix; once it constructs something new, `compute_` applies instead.
 
 ### Auto-Checks for Generation.
 - If a function contains `yield`, the name must start with `list_`.

@@ -210,7 +210,7 @@ def _resolve_branch(repo: Path, existing: dict) -> str:
     return recorded
   proc = subprocess.run(
       ["git", "-C", str(repo), "rev-parse", "--abbrev-ref", "HEAD"],
-      capture_output = True, text = True, check = False,
+      capture_output = True, text = True, check = False, encoding = "utf-8",
   )
   return proc.stdout.strip() if proc.returncode == 0 and proc.stdout.strip() else _FALLBACK_BRANCH
 
@@ -361,7 +361,7 @@ def _reconcile_routines(repo: Path, cfgs: dict) -> dict:
             _CoreCommand.MANAGED_FLAG, ",".join(_MANAGED_FIELDS[name]),
             _CoreCommand.CWD_FLAG, str(repo),
         ],
-        capture_output = True, text = True, check = False,
+        capture_output = True, text = True, check = False, encoding = "utf-8",
     )
 
     # guard: the verb refused — a rejected config must not pass for a reconciled routine
@@ -464,7 +464,7 @@ def _ensure_settings(repo: Path) -> dict:
   settings_dir.mkdir(parents=True, exist_ok=True)
   settings_path = settings_dir / Paths.SETTINGS_FILE
   if settings_path.exists():
-    existing = json.loads(settings_path.read_text())
+    existing = json.loads(settings_path.read_text(encoding = "utf-8"))
   else:
     existing = {}
 
@@ -492,7 +492,7 @@ def _ensure_settings(repo: Path) -> dict:
     review[_WATCH_ROOT] = widened
 
   # one write carries the merge, the migrations and the widening together
-  settings_path.write_text(json.dumps(existing, indent=2) + "\n")
+  settings_path.write_text(json.dumps(existing, indent=2) + "\n", encoding = "utf-8")
 
   # after the write, so the core CLI reconciles against the section this install just left
   # on disk rather than racing it

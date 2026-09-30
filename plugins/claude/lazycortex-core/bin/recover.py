@@ -103,7 +103,7 @@ def is_clean(repo: Path) -> bool:
   try:
     rc = subprocess.run(
       [ "git", "--no-optional-locks", "-c", "color.status=never", "status", "--porcelain" ],
-      cwd = str(repo), capture_output = True, text = True, check = False,
+      cwd = str(repo), capture_output = True, text = True, check = False, encoding = "utf-8",
     )
   except FileNotFoundError:
     return True
@@ -353,7 +353,7 @@ def resume(repo: Path) -> None:
     # re-query porcelain status so the error message names the offending paths
     rc = subprocess.run(
       [ "git", "--no-optional-locks", "-c", "color.status=never", "status", "--porcelain" ],
-      cwd = str(repo), capture_output = True, text = True, check = False,
+      cwd = str(repo), capture_output = True, text = True, check = False, encoding = "utf-8",
     )
     raise RecoverError(
       "working tree still dirty; refusing to resume:\n"
@@ -483,7 +483,7 @@ def permanent_fail(jdir: Path, diagnosis: dict) -> None:
   """
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   import json
-  (jdir / JobArtifact.DIAGNOSIS_JSON).write_text(json.dumps(diagnosis, indent = 2))
+  (jdir / JobArtifact.DIAGNOSIS_JSON).write_text(json.dumps(diagnosis, indent = 2), encoding = "utf-8")
 
   # job dirs always live at <repo>/.experts/.jobs/<expert>/<job> — derive the repo root
   # waiver: inline numeric literal (parents-index depth), not a domain constant

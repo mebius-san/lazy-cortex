@@ -31,7 +31,7 @@ This skill is **idempotent and quiet on re-run**. It asks exactly one thing, and
 - **Install scope** is derived from where the plugin is *enabled* (see Step 1); a project-scope enablement wins even when the install record's `scope` is `user`.
 - **Expert git identity** is a deterministic bot id (`{name: <title-cased expert>, email: <expert-key>@bot.invalid}`), never the operator's `git config`.
 - **Existing entries are never overwritten**, including hand-customized composed experts. A missing mandatory cross-cutting aspect is appended to `aspects[]` and nothing else is touched — completing a mandatory list is not overwriting a choice (Step 5).
-- **No daemon gate.** Experts and `agent_models` tiers are dispatch-routing config used outside the daemon too (interactive `Agent` dispatch, spec / review writers), so this skill seeds them regardless of `daemon.enabled`. Nothing this plugin family installs is daemon-gated — the flag reaches only `lazy-core.install`'s supervisor unit and metrics endpoint.
+- **No daemon gate.** Experts and `agent_models` tiers are dispatch-routing config used outside the daemon too (interactive `Agent` dispatch, spec / review writers), so this skill seeds them regardless of `daemon.enabled`. Nothing this plugin family installs is daemon-gated — the flag reaches only the supervisor unit and metrics endpoint `/lazy-core.daemon-setup` installs.
 
 ## Step 1: Detect install scope
 

@@ -6,7 +6,7 @@ user-invocable: true
 ---
 # Python knowledge sweep — backfill domain and contract markers
 
-Sweeps the repo's Python sources with the `lazy-python.domain-writer` and `lazy-python.contract-writer` agents so existing code catches up with the canon's knowledge-marker discipline: domain mechanics get `Domain(<group>):` blocks, caller-visible guarantees get `Contract:` blocks with synced docstring `Guarantees` sections. Builds the domain-groups dictionary first when the repo has none. The canon requires markers at writing time; this sweep pays down the debt of code written before the discipline (or before the current dictionary).
+Sweeps the repo's Python sources with the `lazy-python.domain-writer` and `lazy-python.contract-writer` agents so existing code catches up with the canon's knowledge-marker discipline: domain mechanics get `Domain(<group>):` blocks, caller-visible guarantees on public and protected members get `Contract:` blocks with synced docstring `Guarantees` sections. Private helpers never get one. Builds the domain-groups dictionary first when the repo has none. The canon requires markers at writing time; this sweep pays down the debt of code written before the discipline (or before the current dictionary).
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -65,7 +65,7 @@ Outcome: `<N>-files-enumerated-<explicit|domains-globs|all-python>`.
 
 ## Step 4 — Dispatch writers
 
-For each file, dispatch the two writer agents from this plugin — `lazy-python.domain-writer` (domain mechanics, validates groups against the dictionary, parks unmatched knowledge under `Domain(unfiled):`; refiles existing `unfiled` blocks when the dictionary now has a fitting group) and `lazy-python.contract-writer` (caller-visible guarantees plus the docstring `Guarantees` sync). Batch dispatches — up to 4 parallel agents, domain-writer and contract-writer for the same file never concurrently (both edit it).
+For each file, dispatch the two writer agents from this plugin — `lazy-python.domain-writer` (domain mechanics, validates groups against the dictionary, parks unmatched knowledge under `Domain(unfiled):`; refiles existing `unfiled` blocks when the dictionary now has a fitting group) and `lazy-python.contract-writer` (caller-visible guarantees plus the docstring `Guarantees` sync, on public and protected members only — never propose a contract for a private helper, and never pass one to the writer as a target). Batch dispatches — up to 4 parallel agents, domain-writer and contract-writer for the same file never concurrently (both edit it).
 
 Both agents read the canon and the dictionary themselves on every dispatch, so the prompt carries only what they cannot resolve alone:
 
@@ -107,7 +107,7 @@ Then put the corpus through three checks, in order:
 
 1. **Canon exclusions** — a block the canon's "when not to use" list rejects (presentation details such as exact message text or output formatting, signature-obvious facts, implementation details) is removed together with the `Guarantees` bullet it backs. Independent writers drift toward formalism precisely on these; the corpus view is where the pattern shows.
 2. **Sibling parity** — one guarantee stated across sibling classes converges to one phrasing, and moves to the base class when the base is what enforces it.
-3. **Redundancy** — two blocks carrying one guarantee are folded ONLY when they address the same consumer. Audiences differ by surface: a public method speaks to external callers, a protected hook to the subclasses that override or call it, a base class to every subclasser, a private helper to the maintainer already reading its caller. Before folding anything, grep for overrides and callers of the candidate copy's owner: a block on a hook that any subclass overrides, or on a surface with its own readers, stays even when its text matches another block word for word. Fold only a copy whose readers already read the surviving block — a private helper with no overrides and a single caller that carries the same text is the canonical case.
+3. **Redundancy** — two blocks carrying one guarantee are folded ONLY when they address the same consumer. Audiences differ by surface: a public method speaks to external callers, a protected hook to the subclasses that override or call it, a base class to every subclasser, and a private helper carries no block at all. Before folding anything, grep for overrides and callers of the candidate copy's owner: a block on a hook that any subclass overrides, or on a surface with its own readers, stays even when its text matches another block word for word. Fold only a copy whose readers already read the surviving block.
 
 Do not ask. Settle the cut yourself and apply it, then report it in full — every removed and reworded block with its file and symbol — so the operator can overrule against a finished result. Removal or rewording of a block is a contract edit: dispatch `lazy-python.contract-writer` per affected file with the explicit list of blocks to remove or rewrite — the settled cut is the approval the canon's treatment rules require. A pure wording alignment that changes no guarantee may be applied directly in one pass.
 
