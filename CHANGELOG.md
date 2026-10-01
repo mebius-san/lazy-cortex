@@ -4,6 +4,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 10.4.2 — 2026-10-01 UTC
+
+- `lazy-core.install` finds expert candidates through the plugin registry instead of scanning every cached plugin version, so stale old versions no longer show up. It also removes stray daemon units with a simpler, more reliable check and compares the `lazy-claude` wrapper before syncing it.
+- The core CLI gains `--cwd` on `detect-scope` and `plugin-root`, `--check` on `permission-allow` and `--dry-run` on `reconcile-routine`. Re-running install no longer rewrites the scrape-targets file or the observe answer file when their content already matches.
+
 ### 10.4.1 — 2026-09-30 UTC
 
 - `lazy-core.install` no longer runs a providers step; provider setup now lives solely in `/lazy-core.providers`.
@@ -743,6 +748,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 9.10.1 — 2026-10-01 UTC
+
+- `lazy-spec.install` is now safe to re-run: it targets the right repo when detecting install scope, skips the first-product question when products are already registered, and checks the CLI permission before writing, so an existing setup sees no settings write.
+
 ### 9.10.0 — 2026-09-30 UTC
 
 - New catalog-wide `spec.guidelines` setting declares role-keyed guideline paths once for the whole catalog. Every product inherits it, in the order catalog, enclosing products, then its own. The catalog-root coordinator reads its coordinator guidelines from it, and audit warns when a declared catalog path is missing.
@@ -1449,6 +1458,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+### 6.10.2 — 2026-10-01 UTC
+
+- `/lazy-review.install` re-runs no longer touch files that are already correct. It checks whether the Bash allow-pattern is already in `settings.local.json` before writing, and it no longer copies the review-callouts CSS snippet over a byte-identical one.
+
 ### 6.10.1 — 2026-09-30 UTC
 
 - Fixed review on Windows: all markdown, settings and JSON reads and writes, and the git subprocess output, now use explicit UTF-8 instead of the system code page, so non-ASCII text in documents is no longer garbled or rejected.
@@ -1661,6 +1674,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Unattended doc-review dispatcher — routes documents to specialist agents (shell or MCP) round-by-round; consumer plugins use the public API (rule + 4 verb skills).
 
 ## lazycortex-observe
+
+### 2.2.4 — 2026-10-01 UTC
+
+- `/lazy-observe.install` no longer rewrites the host-wide answer file `~/.config/lazycortex/observe.toml` when its content is unchanged, so re-running it across many repos leaves the file untouched.
 
 ### 2.2.3 — 2026-09-30 UTC
 
@@ -2219,6 +2236,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 3.3.6 — 2026-10-01 UTC
+
+- `lazy-wiki.install` is now quiet on re-run. It checks the curator routine config and the Bash allow-pattern first, and writes settings only when something actually changed.
 
 ### 3.3.5 — 2026-09-30 UTC
 

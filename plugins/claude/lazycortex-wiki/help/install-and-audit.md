@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Bootstrap and maintain lazycortex-wiki — install, configure scopes plus vault-wide axes/domains/mirror/terms/structure, and audit everything for integrity.
-last_regen: 2026-09-30
+last_regen: 2026-10-01
 diagram_spec:
   - anchor: "Install"
     request: "Flow diagram of what lazy-wiki.install seeds. It writes the wiki, structure and terms settings sections (wiki carries a repository-wide tag_axes vocabulary seeded empty and an exclude list seeded with docs/structure.md; structure carries its own, separate exclude list seeded with two mandatory entries, docs/structure.md and .memory/**, so neither the map's own commit nor an expert's memory-note commit ever re-wakes the structure-scan routines) and unions the doc-kind axis into that repository-wide vocabulary; composes the wiki.curator, wiki.terms-curator, wiki.structure-curator and wiki.tag-curator experts unconditionally; registers lazy-wiki.scan, lazy-wiki.scan-deletes, lazy-wiki.relink-weekly, lazy-wiki.doctor-apply and lazy-wiki.tag-normalize unconditionally too — no daemon gate withholds any of it; adds the wiki.domain-writer expert and its two domain routines only when wiki.domains is configured, and one lazy-wiki.mirror-sync.<scope-id> routine per scope carrying a mirror block; overwrites every diverged rule mirror from the shipped source without prompting; then hands over to lazy-wiki.configure."
@@ -14,8 +14,8 @@ source_skills:
   - lazy-wiki.configure
   - lazy-wiki.audit
   - lazy-wiki.help
-source_sha: f5ce537f2d45483caf793ec064e00d98b7e1febd
-surface_sha: a8a47bc419d98ad6bc4d6b6041435b2f0991ac71306702dcfe519b2be0f58ce3
+source_sha: e829c83e14a7beed8906bf9e568c16dbc9b258a4
+surface_sha: 8bc8a2f9faafac6547d88af5fdbfef13c5f4d4e7b8e2eee2c09c906403daa659
 ---
 # Bootstrap and maintain lazycortex-wiki
 

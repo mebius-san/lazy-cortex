@@ -1,7 +1,7 @@
 ---
 name: lazy-core.install
 description: "Run when the operator asks to set up lazycortex-core in a repo (or globally), or when core artifacts are missing — the plugin's rules are not in `.claude/rules/`, `lazy.settings.json` has no runtime section, `.experts/` is not initialised. Installs this plugin only; `/lazy-core.setup` is the one that runs every plugin's install. Never sets up the background daemon — that is `/lazy-core.daemon-setup`. Idempotent and quiet on re-run — decisions are persisted and never re-asked."
-allowed-tools: Read, Write, Edit, AskUserQuestion, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git init*), Bash(cp *), Bash(rm *), Bash(test *), Bash(ls *), Bash(find *), Bash(date *), Bash(diff *), Bash(chmod *), Bash(launchctl *), Bash(systemctl *), Bash(python3 *), Bash(python *), Bash(py *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
+allowed-tools: Read, Write, Edit, AskUserQuestion, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git init*), Bash(cp *), Bash(rm *), Bash(test *), Bash(ls *), Bash(find *), Bash(date *), Bash(diff *), Bash(cmp *), Bash(jq *), Bash(chmod *), Bash(launchctl *), Bash(systemctl *), Bash(python3 *), Bash(python *), Bash(py *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
 ---
 # Install lazycortex-core
 
@@ -450,13 +450,19 @@ Outcome: `bootstrapped` (dir created and/or legacy line stripped) or `already-pr
 
 Host-scoped and unconditional — runs at every install scope, with or without a git repo, with or without the daemon: the wrapper serves third-party daemons in other repositories, not this checkout. It gives them the subscription rate-limit guard: a headless `claude -p` call under a raised host-local rate-limit flag exits `75` without spawning, and a stream-json call feeds the frames it sees back into the shared flag. A daemon opts in by replacing the word `claude` in its launch command with the absolute wrapper path.
 
-The wrapper is install-managed (never locally edited) — sync it with the same deterministic triage script as the runtime shim, which copies on absence, refreshes on any byte difference, sets the executable bit, and reports the state:
+The wrapper is install-managed (never locally edited). Compare first, so a host already carrying the shipped bytes sees no sync call at all:
+
+```
+Bash(cmp -s "${CLAUDE_PLUGIN_ROOT}/bin/lazy_claude.py" $HOME/.local/bin/lazy-claude)
+```
+
+Exit 0 → state **unchanged** and continue to Step 11. Otherwise sync it with the same deterministic triage script as the runtime shim, which copies on absence, refreshes on any byte difference, sets the executable bit, and reports the state:
 
 ```
 Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/file_sync.py" --src ${CLAUDE_PLUGIN_ROOT}/bin/lazy_claude.py --dst $HOME/.local/bin/lazy-claude --copy-diverged --chmod-x)
 ```
 
-State = the receipt's state verbatim: **installed** (was absent), **refreshed** (differed, overwritten), or **unchanged**. Re-copying on drift is safe — the wrapper is self-contained (stdlib only, no plugin imports) and its interface is the `claude` CLI's own.
+State = the receipt's state verbatim: **installed** (was absent) or **refreshed** (differed, overwritten). Re-copying on drift is safe — the wrapper is self-contained (stdlib only, no plugin imports) and its interface is the `claude` CLI's own.
 
 ## Step 11: Register expert candidates
 
@@ -466,15 +472,15 @@ Register every expert candidate the enabled plugins ship — there is no per-can
 
 ### 1. Discover candidates
 
-List agent files that may carry `expert_protocol:` frontmatter at three scopes, one `Bash(ls …)` per pattern below — never `find` or a walk. For the plugin cache, resolve the latest version per plugin via numeric version sort on the version directory (`sort -V`, so `10.0.0` outranks `9.1.1`):
+List agent files that may carry `expert_protocol:` frontmatter at three scopes, one `Bash(ls …)` per pattern below — never `find`, a walk, or a glob over the plugin cache (`~/.claude/plugins/cache/*/*/*/` lists every version ever installed, and the stale ones sort first). Installed plugins come from the plugin registry, each resolved to the one directory its sources are read from:
 
-- `Bash(ls -d ~/.claude/plugins/cache/*/*/*/)` — every plugin's version directories; per plugin take the highest by numeric version sort as latest version, then `Bash(ls <latest-version>/agents/*.md)`
+- `Bash(jq -r '.plugins | keys[]' ~/.claude/plugins/installed_plugins.json)` — every installed `<plugin>@<marketplace>` key; for each, `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" plugin-root <plugin> --cwd <repo-root>)` prints the authored sources in a checkout that ships the plugin, else the newest cached version; then `Bash(ls <printed root>/agents/*.md)`. A non-zero exit means the plugin ships no resolvable sources — skip it.
 - `~/.claude/agents/*.md`
 - `<repo-root>/.claude/agents/*.md`
 
 For each candidate file, `Read` its frontmatter. If `expert_protocol:` is present, record:
-- `source_scope`: `plugin-cache`, `user`, or `project`
-- `plugin` (from the cache directory structure, or `user`/`project` for the latter two scopes)
+- `source_scope`: `plugin`, `user`, or `project`
+- `plugin` (the registry key's plugin name, or `user`/`project` for the latter two scopes)
 - `agent_name`: the basename of the file without `.md`
 - `expert_protocol_ref`: the value of `expert_protocol:` (a protocol reference string)
 
@@ -667,14 +673,16 @@ Compute `<REPO_ID>`, the per-checkout unit id:
 Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" install-phase --cwd <repo-root> repo-id)
 ```
 
+The id is derived from this checkout's absolute path, so it is taken from that output and from nothing else — never from the list of loaded units, never from a sibling checkout of the same repository (a Dropbox checkout and the runtime clone carry different ids by construction). The existence checks below are a plain `ls` of the one path; a non-zero exit is the only evidence that the unit is absent, and no other probe substitutes for it.
+
 macOS (`darwin`):
-1. `~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_ID>.plist` absent → state **no-stray-unit** and stop.
+1. `Bash(ls ~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_ID>.plist)` — non-zero exit → state **no-stray-unit** and stop.
 2. `Bash(launchctl bootout gui/$UID/com.lazycortex.runtime.<REPO_ID>)` — a non-zero exit means it was not loaded.
 3. `Bash(rm -f ~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_ID>.plist)`
 4. State **stray-unit-removed**.
 
 Linux:
-1. `~/.config/systemd/user/lazy-core-runtime-<REPO_ID>.service` absent → state **no-stray-unit** and stop.
+1. `Bash(ls ~/.config/systemd/user/lazy-core-runtime-<REPO_ID>.service)` — non-zero exit → state **no-stray-unit** and stop.
 2. `Bash(systemctl --user disable --now lazy-core-runtime-<REPO_ID>.service)` — a non-zero exit means it was not enabled.
 3. `Bash(rm -f ~/.config/systemd/user/lazy-core-runtime-<REPO_ID>.service)`
 4. State **stray-unit-removed**.

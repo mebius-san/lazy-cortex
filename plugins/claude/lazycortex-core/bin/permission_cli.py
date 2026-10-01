@@ -36,6 +36,8 @@ class _Outcome:
 
   ADDED = "added"
   ALREADY_PRESENT = "already-present"
+  PRESENT = "present"
+  ABSENT = "absent"
 
 
 class _SettingsKey:
@@ -57,6 +59,8 @@ class _CliMeta:
   ARG_PATTERN = "pattern"
   HELP_PATH = "Target settings file (e.g. .claude/settings.local.json)"
   HELP_PATTERN = "Bash allow-pattern, e.g. Bash(lazycortex-specs *)"
+  ARG_CHECK = "--check"
+  HELP_CHECK = "Only report whether the pattern is present (present / absent); never write"
 
 
 def ensure_permission_allow(settings_path: Path, pattern: str) -> str:
@@ -100,12 +104,38 @@ def ensure_permission_allow(settings_path: Path, pattern: str) -> str:
   return _Outcome.ADDED
 
 
+def has_permission_allow(settings_path: Path, pattern: str) -> bool:
+  """
+  Report whether a Bash allow-pattern is already in a settings file's permissions.allow list.
+
+  A missing file, or one without a `permissions.allow` list, holds no pattern. Nothing is
+  written or created.
+
+  Args:
+    settings_path: Path to the settings file.
+    pattern: Allow-pattern string to look for.
+
+  Returns:
+    True when `pattern` is a member of `permissions.allow`, False otherwise.
+
+  Raises:
+    json.JSONDecodeError: If the settings file exists but is not valid JSON.
+  """
+  # guard: an absent file carries no permissions at all
+  if not settings_path.exists():
+    return False
+  data = json.loads(settings_path.read_text(encoding = "utf-8"))
+  return pattern in data.get(_SettingsKey.PERMISSIONS, {}).get(_SettingsKey.ALLOW, [])
+
+
 def cmd_permission_allow(argv: list[str]) -> int:
   """
   Run the `permission-allow` subcommand: register one Bash allow-pattern in a settings file.
 
   Parses `<settings-path>` and `<pattern>` positional args, applies the idempotent ensure,
-  prints the outcome word (`added` / `already-present`) to stdout, exits 0 on success.
+  prints the outcome word (`added` / `already-present`) to stdout, exits 0 on success. With
+  `--check` it only probes: prints `present` / `absent` and touches nothing, so an install
+  skill can skip the writing call when the pattern is already registered.
 
   Args:
     argv: Subcommand argv tail (positional `<settings-path>` then `<pattern>`).
@@ -116,7 +146,15 @@ def cmd_permission_allow(argv: list[str]) -> int:
   parser = argparse.ArgumentParser(prog=_CliMeta.PROG)
   parser.add_argument(_CliMeta.ARG_PATH, help=_CliMeta.HELP_PATH)
   parser.add_argument(_CliMeta.ARG_PATTERN, help=_CliMeta.HELP_PATTERN)
+  # waiver: argparse CLI signature, not a domain key
+  parser.add_argument(_CliMeta.ARG_CHECK, action="store_true", help=_CliMeta.HELP_CHECK)
   args = parser.parse_args(argv)
-  outcome = ensure_permission_allow(Path(getattr(args, _CliMeta.ARG_PATH)), getattr(args, _CliMeta.ARG_PATTERN))
-  print(outcome)
+  settings_path = Path(getattr(args, _CliMeta.ARG_PATH))
+  pattern = getattr(args, _CliMeta.ARG_PATTERN)
+
+  # guard: the probe answers without writing and leaves the file untouched
+  if args.check:
+    print(_Outcome.PRESENT if has_permission_allow(settings_path, pattern) else _Outcome.ABSENT)
+    return 0
+  print(ensure_permission_allow(settings_path, pattern))
   return 0

@@ -1177,7 +1177,9 @@ def register_routine(repo: Path, name: str, cfg: dict | None = None, *,
 PROTECTED_ROUTINES = { "lazy-expert.pump", "lazy-runtime.doctor" }
 
 
-def reconcile_routine(repo: Path, name: str, cfg: dict, managed_fields: Sequence[str]) -> str:
+def reconcile_routine(
+    repo: Path, name: str, cfg: dict, managed_fields: Sequence[str], *, dry_run: bool = False
+) -> str:
   """
   Register a routine, or bring an already registered one back to the shipped shape.
 
@@ -1186,6 +1188,7 @@ def reconcile_routine(repo: Path, name: str, cfg: dict, managed_fields: Sequence
     name: Routine name, as it appears in the `routines` section.
     cfg: The shipped reference config the plugin would register today.
     managed_fields: The config keys this plugin owns, corrected on every call.
+    dry_run: When True, report the status the call would return and write nothing.
 
   Returns:
     `registered` when the entry was absent, `refreshed` when an owned key or a missing key
@@ -1219,7 +1222,8 @@ def reconcile_routine(repo: Path, name: str, cfg: dict, managed_fields: Sequence
 
   # guard: nothing on record — the shipped entry is written whole
   if not isinstance(existing, dict):
-    register_routine(repo, name, dict(cfg))
+    if not dry_run:
+      register_routine(repo, name, dict(cfg))
     # waiver: this function's own documented return vocabulary, not a reusable cross-module key
     return "registered"
 
@@ -1234,7 +1238,8 @@ def reconcile_routine(repo: Path, name: str, cfg: dict, managed_fields: Sequence
   if merged == existing:
     # waiver: this function's own documented return vocabulary, not a reusable cross-module key
     return "unchanged"
-  register_routine(repo, name, merged)
+  if not dry_run:
+    register_routine(repo, name, merged)
   # waiver: this function's own documented return vocabulary, not a reusable cross-module key
   return "refreshed"
 

@@ -406,8 +406,15 @@ def write_scrape_targets_file(out: Path | None = None, registry: list[dict] | No
     })
   path = out or scrape_targets_path()
   path.parent.mkdir(parents = True, exist_ok = True)
+  body = json.dumps(targets, indent = 2) + "\n"
+
+  # guard: a file already carrying this content is left alone, so every repo's install run
+  # regenerating the host-wide file never churns it when nothing changed
+  if path.is_file() and path.read_text(encoding = "utf-8") == body:
+    # waiver: external JSON contract field names of the metrics-scrape-file CLI, not internal keys
+    return { "path": str(path), "count": len(targets), "targets": targets }
   tmp = path.with_suffix(path.suffix + _TMP_SUFFIX)
-  tmp.write_text(json.dumps(targets, indent = 2) + "\n", encoding = "utf-8")
+  tmp.write_text(body, encoding = "utf-8")
   os.replace(tmp, path)
   # waiver: external JSON contract field names of the metrics-scrape-file CLI, not internal keys
   return { "path": str(path), "count": len(targets), "targets": targets }

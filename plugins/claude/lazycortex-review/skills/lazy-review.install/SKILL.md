@@ -1,7 +1,7 @@
 ---
 name: lazy-review.install
 description: "Run when the operator asks to set up document review in this repo, after a lazycortex-review update, or when review skills fail because `lazy.settings.json` has no `review` section, the `.experts/.jobs/` queue is missing, or the coordinator routines were never registered. Per-repo bootstrap only — wiring the first document class is `/lazy-review.configure`. Idempotent and quiet on re-run."
-allowed-tools: Read, Write, AskUserQuestion, Skill, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Bash(cp *), Bash(test *), Bash(diff *), Bash(git rev-parse*), Agent
+allowed-tools: Read, Write, AskUserQuestion, Skill, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Bash(cp *), Bash(test *), Bash(diff *), Bash(cmp *), Bash(git rev-parse*), Agent
 ---
 # lazy-review.install
 
@@ -99,13 +99,19 @@ The plugin ships `bin/lazycortex-review` which is invoked from other skills via 
 
 Per `lazy-core.hygiene` § Settings split, per-tool permissions live in `settings.local.json` (gitignored), never tracked `settings.json`. Target file: `<repo-root>/.claude/settings.local.json` (lazy-review is a per-repo plugin, so user-scope is not a target).
 
-Apply via the `lazycortex-core` CLI (idempotent — already-present patterns are no-ops):
+Probe first — the probe reads the file and writes nothing, so a repo that already carries the pattern never sees a settings write:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> permission-allow <repo-root>/.claude/settings.local.json 'Bash("${LAZYCORTEX_PYTHON:-python3}" *)' --check)
+```
+
+`present` → outcome **cli-allow-already-present**; do not issue the writing call. `absent` → apply via the same verb without the flag:
 
 ```
 Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> permission-allow <repo-root>/.claude/settings.local.json 'Bash("${LAZYCORTEX_PYTHON:-python3}" *)')
 ```
 
-Outcome: `cli-allow-added` or `cli-allow-already-present`.
+Outcome: **cli-allow-added**.
 
 ## Step 5.5 — Seed agent-model tiers
 
@@ -131,7 +137,7 @@ The review loop's own callouts — the banner `[!note] #review/<state-tag>`, the
 | `review-callouts.css` snippet | `<vault>/.obsidian/snippets/review-callouts.css` | `${CLAUDE_PLUGIN_ROOT}/templates/obsidian/snippets/review-callouts.css` |
 
 1. **Locate the vault.** Repo root is `git rev-parse --show-toplevel` (fall back to cwd); vault is `<repo-root>/.obsidian`. If it does not exist, this repo is not an Obsidian vault — state **no-vault** and continue to Step 6. Otherwise `mkdir -p <vault>/snippets`.
-2. **Sync the snippet** per the File-sync policy above: absent or byte-identical → `cp` silently (**installed** / **unchanged**); locally changed with the shipped delta applying to disjoint regions → merge silently (**merged**); same region changed incompatibly on both sides → the only case that asks (**merged** / **kept-local**):
+2. **Sync the snippet** per the File-sync policy above. Compare first with `Bash(cmp -s <shipped> <target>)`: exit 0 means byte-identical → nothing is copied (**unchanged**); a missing target → `cp` silently (**installed**); locally changed with the shipped delta applying to disjoint regions → merge silently (**merged**); same region changed incompatibly on both sides → the only case that asks (**merged** / **kept-local**):
 
    ```
    Context (print before asking):

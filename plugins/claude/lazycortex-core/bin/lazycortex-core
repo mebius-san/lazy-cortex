@@ -392,7 +392,8 @@ def _cmd_reconcile_routine(argv: list[str]) -> int:
 
     Flags: the routine name, `--cfg-json` with the shipped config object,
     `--managed` with a comma-separated owned-key list (empty = own nothing),
-    and an optional `--cwd` repository root.
+    and an optional `--cwd` repository root. `--dry-run` reports the status the
+    call would return and writes nothing.
 
     Returns:
       Process exit code — 0 with `{"status": "registered|refreshed|unchanged"}` on
@@ -406,6 +407,7 @@ def _cmd_reconcile_routine(argv: list[str]) -> int:
     parser.add_argument("--cfg-json", required=True, help="JSON object: the shipped routine config")
     parser.add_argument("--managed", default="", help="Comma-separated keys the caller's plugin owns")
     parser.add_argument("--cwd", default=None, help="Repository root (default: $LAZY_REPO_ROOT or cwd)")
+    parser.add_argument("--dry-run", action="store_true", help="Report the status the call would return; write nothing")
     a = parser.parse_args(argv)
     try:
         cfg = json.loads(a.cfg_json)
@@ -422,7 +424,7 @@ def _cmd_reconcile_routine(argv: list[str]) -> int:
     from expert_runtime import reconcile_routine
     from routine_types import RoutineConfigError
     try:
-        status = reconcile_routine(repo, a.name, cfg, managed)
+        status = reconcile_routine(repo, a.name, cfg, managed, dry_run=a.dry_run)
     except RoutineConfigError as e:
         print(json.dumps({"status": "error", "reason": str(e)}))
         return 1
@@ -630,7 +632,12 @@ def _cmd_detect_scope(argv: list[str]) -> int:
     from lazy_install_phases import detect_install_scope
     p = argparse.ArgumentParser(prog="lazycortex-core detect-scope")
     p.add_argument("plugin_key", help="e.g. lazycortex-diagram@lazycortex")
+    p.add_argument("--cwd", default=None, help="Project root (default: the git toplevel of the cwd, else the cwd)")
     a = p.parse_args(argv)
+    # guard: an explicit root is used as given, the git probe is for the cwd-driven default only
+    if a.cwd is not None:
+        print(detect_install_scope(a.plugin_key, project_root=a.cwd))
+        return 0
     toplevel = subprocess.run(["git", "rev-parse", "--show-toplevel"],
                               capture_output=True, text=True, encoding = "utf-8").stdout.strip()
     print(detect_install_scope(a.plugin_key, project_root=toplevel or os.getcwd()))
@@ -652,10 +659,15 @@ def _cmd_plugin_root(argv: list[str]) -> int:
     from lazy_setup import plugin_root
     p = argparse.ArgumentParser(prog="lazycortex-core plugin-root")
     p.add_argument("plugin", help="e.g. lazycortex-experts or lazycortex-experts@lazycortex")
+    p.add_argument("--cwd", default=None, help="Checkout root (default: the git toplevel of the cwd, else the cwd)")
     a = p.parse_args(argv)
-    toplevel = subprocess.run(["git", "rev-parse", "--show-toplevel"],
-                              capture_output=True, text=True, encoding = "utf-8").stdout.strip()
-    report = plugin_root(a.plugin, Path(toplevel or os.getcwd()), Path.home())
+    if a.cwd is not None:
+        root = Path(a.cwd)
+    else:
+        toplevel = subprocess.run(["git", "rev-parse", "--show-toplevel"],
+                                  capture_output=True, text=True, encoding = "utf-8").stdout.strip()
+        root = Path(toplevel or os.getcwd())
+    report = plugin_root(a.plugin, root, Path.home())
     if report is None:
         print(f"error: {a.plugin} not installed: no authored, exported, or cached sources", file=sys.stderr)
         return 1

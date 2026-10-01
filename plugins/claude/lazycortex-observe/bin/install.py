@@ -504,8 +504,11 @@ def write_answer_file(answers: dict[str, object]) -> Path:
     # a value with no TOML form refuses the whole write here, before the file is touched
     lines.append(f"{_toml_key(key)} = {_toml_value(value)}")
 
-  # every key passed the secret check, so the whole file is published in one atomic step
-  _write_atomic(ANSWER_FILE, "\n".join(lines) + "\n")
+  # every key passed the secret check; a body already on disk is left alone so a re-run across
+  # many repos never churns the host-wide file, otherwise it is published in one atomic step
+  body = "\n".join(lines) + "\n"
+  if not (ANSWER_FILE.is_file() and ANSWER_FILE.read_text(encoding = "utf-8") == body):
+    _write_atomic(ANSWER_FILE, body)
   return ANSWER_FILE
 
 

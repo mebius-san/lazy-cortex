@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Bootstrap and verify lazycortex-core — the shared scaffolding layer every other plugin depends on.
-last_regen: 2026-09-30
+last_regen: 2026-10-01
 diagram_spec:
   anchor: "Bootstrap order"
   request: "Flowchart of the single-plugin vs multi-plugin bootstrap path — install/setup, optional restart, audit, and the optional optimize+doctor branch — ending at bootstrap complete."
@@ -14,8 +14,8 @@ source_skills:
   - lazy-core.autosetup
   - lazy-core.autocheckup
   - lazy-core.daemon-setup
-source_sha: f5ce537f2d45483caf793ec064e00d98b7e1febd
-surface_sha: 70f77420dfafd4a3cf48362096812ce25ac65b963abd538a5c1754b46ee32d45
+source_sha: e829c83e14a7beed8906bf9e568c16dbc9b258a4
+surface_sha: 939a0eccbe3488d7a418cf97998f29cdede37beb4072d518439d0c64d1ea665b
 ---
 # Install, audit, and maintain lazycortex-core
 

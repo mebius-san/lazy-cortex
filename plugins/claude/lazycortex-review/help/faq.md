@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, configuring, and running the lazycortex-review document-review loop.
-last_regen: 2026-09-29
+last_regen: 2026-10-01
 no_diagram: true
 source_skills:
   - lazy-review.install
@@ -12,8 +12,8 @@ source_skills:
   - lazy-review.stop
   - lazy-review.finalize
   - lazy-review.audit
-source_sha: 99f16aadce5ea043be2b382078b78bfdac7dc517
-surface_sha: 9237e1dff95086d0e2530d34b6194e2b3a3c51b781249148aba27dc4f9952dd5
+source_sha: e829c83e14a7beed8906bf9e568c16dbc9b258a4
+surface_sha: a2d3fbabda8673fcf7de2f918d64f8c84ca854158e27fa8ac9d86db009c99efd
 ---
 # Frequently asked questions
 

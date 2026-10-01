@@ -473,7 +473,13 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> routine-show <name> --cwd <targe
 Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" structure-watch-config --repo <target-root>)
 ```
 
-The command prints one JSON object carrying `path_filter` and nothing else. Pass it through verbatim as the shipped config, owning that one key:
+The command prints one JSON object carrying `path_filter` and nothing else. Pass it through verbatim as the shipped config, owning that one key. Probe first — the dry run reports the status the write would return and touches nothing:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> reconcile-routine <name> --cfg-json '<printed object>' --managed path_filter --cwd <target-root> --dry-run)
+```
+
+`unchanged` → report the routine as `unchanged` and issue no write. `refreshed` → apply with the same arguments minus `--dry-run`:
 
 ```
 Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> reconcile-routine <name> --cfg-json '<printed object>' --managed path_filter --cwd <target-root>)
@@ -513,13 +519,19 @@ Per `lazy-core.hygiene` § Settings split, per-tool permissions live in `setting
 - project install → `<repo-root>/.claude/settings.local.json`
 - user install → `~/.claude/settings.local.json`
 
-Apply via the `lazycortex-core` CLI (idempotent — already-present patterns are no-ops):
+Probe first — the probe reads the file and writes nothing, so a repo that already carries the pattern never sees a settings write:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> permission-allow <settings-local> 'Bash("${LAZYCORTEX_PYTHON:-python3}" *)' --check)
+```
+
+`present` → outcome **cli-allow-already-present**; do not issue the writing call. `absent` → apply via the same verb without the flag:
 
 ```
 Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> permission-allow <settings-local> 'Bash("${LAZYCORTEX_PYTHON:-python3}" *)')
 ```
 
-Outcome: `cli-allow-added` or `cli-allow-already-present`.
+Outcome: **cli-allow-added**.
 
 ## Step 10: Verify / Report
 

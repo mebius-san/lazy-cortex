@@ -80,7 +80,7 @@ Resolve it via the core CLI, which reads `enabledPlugins` from the project setti
 **Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file: when this repo authors the plugin itself (`plugins/claude/lazycortex-core/.claude-plugin/plugin.json` exists) that is `<repo-root>/plugins/claude/lazycortex-core/bin/lazycortex-core`; otherwise `Read` `$HOME/.claude/plugins/installed_plugins.json` and take `<installPath>/bin/lazycortex-core` from the last `lazycortex-core@lazycortex` record. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> detect-scope lazycortex-specs@lazycortex)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> detect-scope lazycortex-specs@lazycortex --cwd <repo-root>)
 ```
 
 The command prints exactly one word:
@@ -887,6 +887,8 @@ Step outcome folds all three: `<vision seeded|already-present>` + `root-note-<cr
 
 The vault spec from Step 6.9 now exists, so registration can follow it — products are a consequence of the repo-wide spec.
 
+Read `products` from `<settings-dir>/lazy.settings.json` first. Any product key besides `_version` on record → the first product is already registered: state **already-registered** and continue to Step 7b without asking. Only an empty or absent `products` reaches the question below.
+
 ```
 Context (print before asking):
 - Where: /lazy-spec.install · Step 7 — Offer first product registration; target `products` and `repos` in <settings-dir>/lazy.settings.json
@@ -996,13 +998,19 @@ Per `lazy-core.hygiene` § Settings split, per-tool permissions live in `setting
 - project install → `<repo-root>/.claude/settings.local.json`
 - user install → `~/.claude/settings.local.json`
 
-Apply via the `lazycortex-core` CLI (idempotent — already-present patterns are no-ops):
+Probe first — the probe reads the file and writes nothing, so a repo that already carries the pattern never sees a settings write:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> permission-allow <settings-local> 'Bash("${LAZYCORTEX_PYTHON:-python3}" *)' --check)
+```
+
+`present` → outcome **cli-allow-already-present**; do not issue the writing call. `absent` → apply via the same verb without the flag:
 
 ```
 Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> permission-allow <settings-local> 'Bash("${LAZYCORTEX_PYTHON:-python3}" *)')
 ```
 
-Outcome: `cli-allow-added` or `cli-allow-already-present`.
+Outcome: **cli-allow-added**.
 
 ## Step 9: Verify
 
