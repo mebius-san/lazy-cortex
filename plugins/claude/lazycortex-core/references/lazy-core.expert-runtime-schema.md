@@ -113,7 +113,7 @@ experts:
 
 **The git guard stands down inside a linked worktree.** `lazy-core.git-guard` skips both the pathspec discipline and the staging-window mutex when the invocation's `--git-dir` differs from `--git-common-dir` — a linked worktree has its own index, so the shared-index premise both rows rest on does not hold there.
 
-### Filesystem sandbox — resolved paths only
+### Sandbox — resolved paths, declared settings
 
 Every expert spawn is confined by `.runtime/sandbox.settings.json` (daemon-owned, gitignored, passed as `--settings`; absent file = unconfined spawn). The confinement is checked against the path the OS **resolves**, not the path the allowlist spells: an entry naming a directory reached through a symlink permits nothing where the data actually lives, and every write there fails with `Operation not permitted` while the recorded config still reads as correct.
 
@@ -125,7 +125,24 @@ So the file is written by CLI, never by hand:
 "${LAZYCORTEX_PYTHON:-python3}" <core-cli> sandbox-sync --repo-root <repo> [--allow-read <path>]... [--allow-write <path>]...
 ```
 
-The repo root is granted read+write implicitly; whatever is writable is also readable. Each entry — recorded, passed, or the root — contributes the location it resolves to, plus the targets of the symlinks directly inside it (the `external_dirs` slots of `lazy-core.state-schema.md` § 15). Recorded entries are never dropped or reordered and a recorded `enabled` or `allowUnsandboxedCommands` is never overwritten, so the call is idempotent; `enabled: false` comes back in the result for the caller to act on. An unrecorded `allowUnsandboxedCommands` is written `false` — Claude Code's default of `true` retries a command the sandbox blocked with the sandbox disabled, subject only to the permission check a bare `Bash` allow passes, which would let a confined spawn write outside its scope on the second try. `/lazy-runtime.preflight` reports the switch as `fail` whenever it is not recorded `false`. `sandbox-audit --repo-root <repo>` is the read-only companion: it reports `missing_read` / `missing_write` — locations the recorded entries resolve to but do not grant. `/lazy-runtime.preflight` folds that audit into its checkout-level findings (`fail` on write, `warn` on read), so a symlink that moves after install surfaces as a finding instead of as a run of jobs failing on every write.
+The repo root is granted read+write implicitly; whatever is writable is also readable. Each entry — recorded, passed, or the root — contributes the location it resolves to, plus the targets of the symlinks directly inside it (the `external_dirs` slots of `lazy-core.state-schema.md` § 15). Recorded entries are never dropped or reordered and a recorded `enabled` or `allowUnsandboxedCommands` is never overwritten, so the call is idempotent; `enabled: false` comes back in the result for the caller to act on. An unrecorded `allowUnsandboxedCommands` is written `false` — Claude Code's default of `true` retries a command the sandbox blocked with the sandbox disabled, subject only to the permission check a bare `Bash` allow passes, which would let a confined spawn write outside its scope on the second try. `/lazy-runtime.preflight` reports the switch as `fail` whenever it is not recorded `false`. `sandbox-audit --repo-root <repo>` is the read-only companion: it reports `missing_read` / `missing_write` — locations the recorded entries resolve to but do not grant — and `drift`, the keys on which the file and the declaration below disagree. `/lazy-runtime.preflight` folds that audit into its checkout-level findings (`fail` on write, `warn` on read; `fail` on a declaration with no file, `warn` on a drifted key), so a symlink that moves after install surfaces as a finding instead of as a run of jobs failing on every write.
+
+**Everything else the file carries, the operator declares.** The `sandbox` section of `lazy.settings.json` — tracked, the `lazy.settings.local.json` overlay merged in, no `_version` (like `providers`) — is Claude Code's own `sandbox` object, and the sync derives the file from it: the file's `sandbox` block is the declaration, and only the four install-managed keys — the confinement switch, the retry switch and the two path allowlists — survive undeclared, so a key removed from the settings leaves the file on the next sync and a hand edit of the file does not outlive the next spawn. The network allowlist is why the section exists. A confined spawn's Bash subprocess reaches no host the sandbox does not list, and under `dontAsk` the prompt for an unlisted one is auto-denied, so a job that fetches over `curl` runs network-blind with nothing in its config looking wrong. `WebFetch` and `WebSearch` run in-process and are the permission file's business (`/lazy-core.install` Step 13.5), not this section's.
+
+```json
+{
+  "sandbox": {
+    "network": {
+      "allowedDomains": ["api.example.com", "*.example.org"],
+      "strictAllowlist": true
+    }
+  }
+}
+```
+
+The two path allowlists are the one exception to "declared replaces": a declared `filesystem.allowRead` / `allowWrite` entry joins the recorded list, since install derives entries nobody declared (resolved symlink targets, the plugin cache) and a declaration must not erase them. A declared `enabled` or `allowUnsandboxedCommands` does replace the recorded switch — it is the operator's decision, written where decisions live. `network.strictAllowlist` takes effect only from the CLI `--settings` layer, which this file is, so declaring it here is the one way an unlisted host fails fast instead of being retried.
+
+The expert pump re-derives an existing file from the declaration before every spawn, so a domain added or removed in the settings reaches the next job without an install or a daemon restart; an absent file the pump never creates — that is install's step. `.claude/settings.local.json` is never the place for a `sandbox` block: that file is loaded by the operator's interactive sessions too, and install removes a `sandbox` key found there.
 
 ### Providers — Anthropic by default
 

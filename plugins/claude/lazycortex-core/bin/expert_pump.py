@@ -49,6 +49,8 @@ from provider_env import ProviderKey, build_spawn_env, resolve_token  # pylint: 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import rate_limit_flag  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import sandbox_scope  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from constants import (  # pylint: disable=import-error
   DaemonKey, EnvVar, GitConfigKey, HaltKey, HaltReason, IncidentActor, IncidentKey, IncidentKind, IncidentPhase,
   IncidentState, JobArtifact, JobConfigKey, JobErrorCategory, JobFile, JobIODir, JobLogOutcome, JobMarker,
@@ -1200,6 +1202,29 @@ def _compose_user_prompt(jdir: Path, *, protocols: list, aspects: list, argument
   return "\n".join(prompt_lines)
 
 
+def _refresh_sandbox_file(repo: Path) -> None:
+  """
+  Bring an existing sandbox settings file current with the repository's declared sandbox settings.
+
+  Notes:
+    - An absent file is never created here: that is install's step, and a checkout without one
+      spawns unconfined on purpose.
+
+  Args:
+    repo: Repository root whose sandbox file and tracked settings are read.
+
+  Raises:
+    json.JSONDecodeError: If the tracked `lazy.settings.json` or its local overlay is not valid JSON.
+    OSError: If the sandbox file cannot be rewritten.
+  """
+  # guard: no sandbox file — nothing carries the declaration to a spawn, and the pump does not start one
+  if not (repo / RuntimeFile.SANDBOX_SETTINGS).is_file():
+    return
+
+  # the declaration reaches the spawn through this file alone; a pass that changes nothing leaves it untouched
+  sandbox_scope.sync(repo)
+
+
 def _spawn_settings_argv(repo: Path) -> list[str]:
   """
   Build the `--settings` argv fragment for an expert spawn.
@@ -1651,6 +1676,10 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     except (OSError, ValueError):
       n = 0
     attempts_file.write_text(f"{n + 1}\n", encoding = "utf-8")
+
+    # the sandbox file is re-derived from the declared settings before the command line names it,
+    # so a domain declared since the last install reaches this very job
+    _refresh_sandbox_file(repo)
 
     # The spawn command line — permission mode, hermetic `--strict-mcp-config` +
     # any per-expert `--mcp-config`, hermetic `--setting-sources`, plugin dirs,

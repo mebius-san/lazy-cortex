@@ -1759,10 +1759,11 @@ def _build_bundle(
   context.extend(rules_context)
   warnings.extend(rules_warnings)
 
-  # coordinator-role + wildcard guidelines, same lookup `gate_dispatch` uses for checkbox jobs —
-  # named in the payload rather than staged into the bucket, since the expert reads the real files
+  # coordinator-role, asset-type and wildcard guidelines, same lookup `gate_dispatch` uses for
+  # checkbox jobs — named in the payload rather than staged into the bucket, since the expert
+  # reads the real files
   guideline_paths, guideline_warnings = gate_dispatch.collect_guideline_paths(
-      repo_root, product_record, _COORDINATOR_ROLE,
+      repo_root, product_record, _COORDINATOR_ROLE, asset_type = asset_types.type_of(asset_note),
   )
   warnings.extend(guideline_warnings)
 

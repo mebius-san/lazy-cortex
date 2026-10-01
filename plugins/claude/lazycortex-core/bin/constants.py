@@ -396,6 +396,7 @@ class SettingsKey:
     LEGACY_VERSION: The pre-split root-level version key migrations fold away.
     PROVIDERS: The provider configuration section name.
     EXTERNAL_DIRS: The externally-sourced working-directory declaration section name.
+    SANDBOX: The expert-spawn sandbox declaration section name, in Claude Code's own `sandbox` shape.
   """
 
   VERSION = "_version"
@@ -407,6 +408,7 @@ class SettingsKey:
   LEGACY_VERSION = "version"
   PROVIDERS = "providers"
   EXTERNAL_DIRS = "external_dirs"
+  SANDBOX = "sandbox"
 
 
 # ----------------------------------------------------------------------------------------
@@ -803,6 +805,8 @@ class SandboxSyncKey:
     REMOVED_READ: Read-allowlist entries the sync pruned as dead plugin-cache versions.
     MISSING_READ: Resolved read targets no recorded entry covers.
     MISSING_WRITE: Resolved write targets no recorded entry covers.
+    DRIFT: Dotted sandbox keys on which the settings' declaration and the file disagree; an undeclared
+      switch and a recorded path allowlist entry are never drift.
     CHANGED: Whether the sync rewrote the file.
   """
 
@@ -815,6 +819,7 @@ class SandboxSyncKey:
   REMOVED_READ = "removed_read"
   MISSING_READ = "missing_read"
   MISSING_WRITE = "missing_write"
+  DRIFT = "drift"
   CHANGED = "changed"
 
 

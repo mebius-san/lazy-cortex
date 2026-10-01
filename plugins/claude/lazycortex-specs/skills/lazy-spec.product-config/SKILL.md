@@ -310,7 +310,7 @@ Outcome: `iconed` or `default-icon`.
 
 **Nested product:** when the effective record already carries this step's key from an ancestor, outcome `inherited`, no question; edit mode still lets the operator declare an own value, which wins.
 
-Optional per-role guideline paths folded into this product's launch-checkbox job dispatch (`spec.coordinator`, per `products[<key>].guidelines` in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md`). `guidelines` is a dict keyed by the dispatched role token (`planner`, `tester`, `developer`, `architect`) plus the wildcard `"*"`, each value a list of repo-relative file paths.
+Optional per-role guideline paths folded into every expert job on this product's documents — the launch-checkbox jobs `spec.coordinator` dispatches and the review rounds `lazycortex-review`'s coordinator dispatches (per `products[<key>].guidelines` in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md`). `guidelines` is a dict keyed by the dispatched role token (`planner`, `tester`, `developer`, `architect`, `designer`, `data-writer`, …) plus the wildcard `"*"`, each value a list of repo-relative file paths. A path every role on one asset type needs — a content type's record schema — belongs on the type instead, under `asset_types.<type>.guidelines`.
 
 ```
 Context (print before asking):

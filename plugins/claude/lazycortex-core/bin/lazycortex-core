@@ -783,6 +783,10 @@ def _cmd_sandbox_sync(argv: list[str]) -> int:
     or the root itself — also contributes the location it resolves to through
     symlinks, plus the targets of the symlinks directly inside it: macOS checks
     the resolved path, so an unresolved entry grants nothing where the data lives.
+    The ``sandbox`` section of the repo's ``lazy.settings.json`` (Claude Code's own
+    ``sandbox`` shape — ``network.allowedDomains`` above all) becomes the file's
+    ``sandbox`` block; only ``enabled``, ``allowUnsandboxedCommands`` and the two path
+    allowlists survive undeclared, and declared path entries fold into the recorded lists.
 
     Output JSON: ``{"path", "present", "enabled", "added_read", "added_write",
     "removed_read", "changed"}``. A recorded ``enabled`` is never overwritten —
@@ -803,11 +807,12 @@ def _cmd_sandbox_sync(argv: list[str]) -> int:
 def _cmd_sandbox_audit(argv: list[str]) -> int:
     """Report which resolved locations the recorded sandbox scope fails to grant.
 
-    Read-only companion to ``sandbox-sync``: prints
-    ``{"path", "present", "enabled", "allow_unsandboxed", "missing_read", "missing_write"}``. A
-    non-empty ``missing_write`` means confined spawns will fail every write
-    through that symlink with ``Operation not permitted``. Exits 0 either way —
-    the verdict travels in the JSON.
+    Read-only companion to ``sandbox-sync``: prints ``{"path", "present", "enabled",
+    "allow_unsandboxed", "missing_read", "missing_write", "drift"}``. A non-empty
+    ``missing_write`` means confined spawns will fail every write through that
+    symlink with ``Operation not permitted``; ``drift`` lists the dotted keys on which
+    the settings' ``sandbox`` section and the file disagree. Exits 0 either way — the
+    verdict travels in the JSON.
     """
     import argparse, json
     from sandbox_scope import audit

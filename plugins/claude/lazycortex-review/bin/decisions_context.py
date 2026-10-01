@@ -55,7 +55,7 @@ ASSET_CONTEXT_KEY = "decisions-asset.md"
 PRODUCT_CONTEXT_KEY = "decisions-product.md"
 
 
-def _resolve_asset_dir(doc_path: Path) -> Path | None:
+def resolve_asset_dir(doc_path: Path) -> Path | None:
   """
   Resolve `doc_path`'s owning spec-asset folder, when it has one.
 
@@ -80,7 +80,7 @@ def _resolve_asset_dir(doc_path: Path) -> Path | None:
   return asset_dir if meta.get(_SPEC_ROLE_KEY) == _STATUS_ROLE else None
 
 
-def _find_settings_root(start: Path) -> Path | None:
+def find_settings_root(start: Path) -> Path | None:
   """
   Walk up from `start` to the nearest dir holding `.claude/lazy.settings.json`.
 
@@ -112,7 +112,7 @@ def _owning_product_root(start_dir: Path) -> Path | None:
     registered product covers `start_dir` (including when no `.claude/lazy.settings.json`,
     `spec` section, or `products` map is found).
   """
-  settings_root = _find_settings_root(start_dir)
+  settings_root = find_settings_root(start_dir)
 
   # guard: no settings file above start_dir — nothing to resolve a product against
   if settings_root is None:
@@ -185,7 +185,7 @@ def collect(doc_path: Path) -> dict[str, str]:
   # root, with no enclosing asset, receives only the product's registry. A registry that has
   # not yet had a decision recorded into it is absent by design, never an error condition.
 
-  asset_dir = _resolve_asset_dir(doc_path)
+  asset_dir = resolve_asset_dir(doc_path)
 
   # an asset-level document: its own registry plus its owning product's
   if asset_dir is not None:

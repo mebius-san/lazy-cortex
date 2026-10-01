@@ -487,11 +487,16 @@ def _repo_checks(repo: Path) -> list[dict]:
     repo: Repository root whose inbox ownership and sandbox scope are read.
 
   Returns:
-    One `fail` finding per contested inbox, one `fail` when the sandbox's unsandboxed-retry
-    switch is not recorded closed, one `fail` per uncovered sandbox write location, plus one
-    `warn` per uncovered sandbox read location; empty when the checkout owns every inbox it
-    scans and its sandbox scope covers everything it grants with the retry closed (or records
-    no scope, or confinement off).
+    One `fail` finding per contested inbox, one `fail` when sandbox keys are declared with no
+    sandbox file to carry them, one `warn` per sandbox key on which the file and the declaration
+    disagree, one `fail` when the sandbox's unsandboxed-retry switch is not recorded closed,
+    one `fail` per uncovered sandbox write location, plus one `warn` per uncovered sandbox read
+    location; empty when the checkout owns every inbox it scans and its sandbox scope matches
+    its declaration and covers everything it grants with the retry closed (or records no scope
+    and declares none, or confinement off).
+
+  Raises:
+    json.JSONDecodeError: If the tracked `lazy.settings.json` or its local overlay is not valid JSON.
   """
   # a contested inbox is a hard finding on its own; the sandbox audit adds its own rows after it
   return [
@@ -502,39 +507,57 @@ def _repo_checks(repo: Path) -> list[dict]:
 
 def _sandbox_checks(repo: Path) -> list[dict]:
   """
-  Validate that the sandbox scope of a checkout grants what its allowlist entries reach.
+  Validate that the sandbox scope of a checkout grants what its allowlist entries reach and
+  records what its settings declare.
 
   A confined spawn is checked against the location the operating system resolves, so an
   entry reached through a symlink permits nothing where the data actually lives: every
   write lands as `Operation not permitted` and every job dispatched into that directory
   fails, one after another, with nothing in the config looking wrong. A checkout with no
-  sandbox file spawns unconfined and has nothing to report.
+  sandbox file spawns unconfined and has nothing to report — unless its settings declare
+  sandbox keys, which then reach no spawn at all.
 
   Args:
-    repo: Repository root whose recorded sandbox scope is read.
+    repo: Repository root whose recorded sandbox scope and declared sandbox settings are read.
 
   Returns:
-    One `fail` finding when the unsandboxed-retry switch is not recorded closed, one `fail` per
-    uncovered write location and one `warn` per uncovered read location; empty when the recorded
-    scope reaches everything with the retry closed, when confinement is recorded as off, or when
-    no scope is recorded.
+    One `fail` finding when sandbox keys are declared but no file records them, one `warn` per
+    sandbox key on which the file and the declaration disagree, one `fail` when the unsandboxed-retry switch is
+    not recorded closed, one `fail` per uncovered write location and one `warn` per uncovered
+    read location; empty when the recorded scope reaches everything with the retry closed and
+    nothing drifts, when confinement is recorded as off, or when nothing is recorded or declared.
+
+  Raises:
+    json.JSONDecodeError: If the tracked `lazy.settings.json` or its local overlay is not valid JSON.
   """
   result = audit(repo)
 
-  # guard: no sandbox file — spawns run unconfined, so no allowlist can be short
+  # every finding ends with the same remedy — recording the scope again
+  remedy = f"run `lazycortex-core sandbox-sync --repo-root {repo}` to record it"
+
+  # guard: no sandbox file — spawns run unconfined, so no allowlist can be short; a declaration
+  # with no file to carry it is the one thing left to report
   if not result[SandboxSyncKey.PRESENT]:
-    return []
+    return [] if not result[SandboxSyncKey.DRIFT] else [
+      _build_finding(Level.FAIL, f"sandbox settings are declared ({', '.join(result[SandboxSyncKey.DRIFT])}) "
+                                 f"but no sandbox file records them, so no spawn is confined by them; {remedy}")
+    ]
 
   # guard: confinement recorded as off — the allowlist grants nothing and denies nothing
   if result[SandboxSyncKey.ENABLED] is False:
     return []
 
-  # every finding ends with the same remedy — recording the scope again
-  remedy = f"run `lazycortex-core sandbox-sync --repo-root {repo}` to record it"
+  # a key the file and the declaration disagree on reaches the next spawn only once re-derived; the
+  # pump does that on its own, so the finding is a warning rather than a failure
+  drift = [
+    _build_finding(Level.WARN, f"sandbox `{key}` differs between the settings' sandbox section and the sandbox "
+                               f"file — the next spawn re-derives the file; {remedy}")
+    for key in result[SandboxSyncKey.DRIFT]
+  ]
 
   # the retry hatch is a finding whenever it is not recorded closed — Claude Code defaults it to open;
   # then one finding per uncovered write location and one per uncovered read location
-  return ([] if result[SandboxSyncKey.ALLOW_UNSANDBOXED] is False else [
+  return drift + ([] if result[SandboxSyncKey.ALLOW_UNSANDBOXED] is False else [
     _build_finding(Level.FAIL, f"sandbox {SandboxKey.ALLOW_UNSANDBOXED} is not recorded as false — a command the "
                                f"sandbox blocks is retried unsandboxed and only meets the permission check, so a "
                                f"confined spawn can still write outside its scope on the second try; {remedy}")

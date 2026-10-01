@@ -101,6 +101,7 @@ Each key is a type name — the value an asset status folder-note's `spec_asset_
 | `default_path` | no | Folder name under `<spec_path>/` where assets of this type land unless the caller names another location |
 | `start_doc` | yes | `"<file>:<doc_type>"` token naming the one document a fresh asset of the type is seeded with (e.g. `design.md:design`, `bug.md:bug`). A type with no `start_doc` cannot be scaffolded at all |
 | `default_tools` | no | Tool-type names an asset of this type is realised and checked with; written into the status folder-note's `spec_tools` at scaffold time |
+| `guidelines` | no | Repo-relative file paths every expert job on an asset of this type carries, whatever role it dispatches — folded after the role's own `products[<key>].guidelines[<role>]` paths and before the wildcard `"*"` ones. This is where a content type declares the schema its records are written against: the designer writing a content design, the data writer validating it and later writing the data all read the same files. Merges like every other field — the nearest declaration wins whole |
 
 **Merge rule: key-by-key over the shipped declaration, never whole-record replacement.** `{"bug": {"icon": "LiSkull"}}` repaints the shipped `bug` type and leaves its `default_path`, `start_doc`, and `playbook` exactly as shipped.
 
@@ -120,9 +121,9 @@ The shipped set is `code` (`code-plan` / `code-report`), `data` (`data-report`),
 
 Per-product doc-template overrides are NOT declared in the record. The override signal is **folder presence** under `.claude/templates/` — a per-product override folder `spec.<type>/<compound-key>/`, and the consumer's own type baseline `spec.<type>/`. Resolution is per-file across a six-layer chain plus one override layer per ancestor product, so a type needs no template folder of its own to be scaffoldable, and an override folder may contain only the files that differ. See [layout](./lazy-spec.layout-protocol.md) Part 1 § Template storage for the full layer order.
 
-### `products[<key>].guidelines` — launch-checkbox context paths
+### `products[<key>].guidelines` — expert-job context paths
 
-A product record MAY carry a `guidelines` dict supplying extra context to the jobs `spec.coordinator` dispatches when an operator ticks a launch checkbox (`Write architecture` / `Write code-plan` / `Write test-plan` / `Start implementation` / `Start testing`) in an asset's `# Gates` section:
+A product record MAY carry a `guidelines` dict supplying extra context to every expert job dispatched on the product's documents — the jobs `spec.coordinator` dispatches when an operator ticks a launch checkbox (`Write architecture` / `Write code-plan` / `Write test-plan` / `Start implementation` / `Start testing`) in an asset's `# Gates` section, and the writer and validator rounds `lazycortex-review`'s coordinator dispatches on a document under review (every `Write <doc>` row ends in such a round, so a design's author reads the product's guidelines for its role the same way an implementer does):
 
 ```json
 "guidelines": {
@@ -142,9 +143,10 @@ A product record MAY carry a `guidelines` dict supplying extra context to the jo
 | `tester` | Guideline paths folded into both the `Write test-plan` and `Start testing` checkboxes' jobs — both dispatch under the `tester` role. |
 | `developer` | Guideline paths folded into the `Start implementation` checkbox's job. |
 | `coordinator` | Guideline paths folded into every `spec.coordinator` job dispatched for this product's assets — the third of the six rule layers the coordinator reads before deciding (see `lazy-spec.coordination-playbook.md` § 3). Distinct from a product, container, or asset folder-note's `# Coordinator rules` section: this key names files, the folder-note sections carry operator-authored prose directly. |
-| `*` | Guideline paths folded into every launch-checkbox job for this product, regardless of role. |
+| `designer`, `data-writer`, … | Guideline paths folded into every review round a `<domain>.<role>` expert of that role writes on the product's documents — the role token is the expert key's part after the first dot. Any role token a registered expert carries is valid here. |
+| `*` | Guideline paths folded into every expert job for this product, regardless of role. |
 
-Values are lists of repo-relative file paths, read literally — no glob expansion. Each path that resolves to a file has its contents folded into the dispatched job's context bundle, keyed by basename; a declared path that does not resolve to a file is never silently skipped — it is recorded as a warning in the dispatch result and journaled in the asset's `# History` as a job that failed to start. The key is entirely optional: a product record with no `guidelines` key dispatches launch-checkbox jobs with the catalog-wide `spec.guidelines` and its ancestors' guidelines alone, or with no extra context when neither is declared. The effective list for a role is the ordered union catalog first, then enclosing products outermost first, then the product's own, with a path already listed never repeated.
+Values are lists of repo-relative file paths, read literally — no glob expansion. Each path that resolves to a file is named in the dispatched job's context so the expert reads it in the working tree; a declared path that does not resolve to a file is never silently skipped — it is recorded as a warning in the dispatch result and journaled in the asset's `# History` as a job that failed to start. The key is entirely optional: a product record with no `guidelines` key dispatches jobs with the catalog-wide `spec.guidelines` and its ancestors' guidelines alone, or with no extra context when neither is declared. The effective list for a role is the ordered union catalog first, then enclosing products outermost first, then the product's own, with a path already listed never repeated; the paths a job carries are the role's own first, then the dispatched asset's `asset_types[<type>].guidelines`, then the wildcard set.
 
 ### `products[<key>].doc_types` — project-declared document types
 

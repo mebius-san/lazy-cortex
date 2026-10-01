@@ -7,7 +7,9 @@ directory it names is permitted while the location the data actually lives in is
 This module derives the resolved locations behind a set of allowlist entries, records
 the missing ones in the daemon-owned sandbox settings file, and reports the ones a
 checkout is still missing so a drifted symlink surfaces as a finding instead of as a
-run of jobs that fail on every write.
+run of jobs that fail on every write. Everything else the file carries — the network
+allowlist above all — the operator declares once in the `sandbox` section of the
+repository's settings, and the same sync lays that declaration over the file.
 """
 from __future__ import annotations
 
@@ -16,7 +18,15 @@ import os
 from pathlib import Path
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from constants import RuntimeFile, SandboxKey, SandboxSyncKey  # pylint: disable=import-error
+from constants import (  # pylint: disable=import-error
+  RuntimeFile,
+  SandboxKey,
+  SandboxSyncKey,
+  SettingsFile,
+  SettingsKey,
+)
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from lazy_settings import load_section  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -28,6 +38,8 @@ if TYPE_CHECKING:
 # whole dependency graph for one path constant.
 _PLUGIN_CACHE_REL = ".claude/plugins/cache"
 _PLUGIN_CACHE_REGISTRY = "lazycortex"
+# marks a key one side of a drift comparison does not hold at all, as distinct from holding `None`
+_ABSENT = object()
 
 
 def _expand(path: str | Path) -> str:
@@ -80,7 +92,7 @@ def _link_targets(base: str) -> list[str]:
   except OSError:
     return []
 
-  # ponytail: immediate children only — a deeper symlink needs its parent declared as its own entry
+  # limit: immediate children only, a symlink deeper in the tree stays unresolved; walk the tree when a slot nests one
   return [ os.path.realpath(os.path.join(base, name)) for name in names
            if os.path.islink(os.path.join(base, name)) ]
 
@@ -113,8 +125,8 @@ def _dead_cache_entries(entries: list[str]) -> list[str]:
   # a reason this mechanism has no way to see.
 
   cache_root = _expand(Path.home() / _PLUGIN_CACHE_REL / _PLUGIN_CACHE_REGISTRY)
-  return [ e for e in entries
-           if _is_covered_by(_expand(e), cache_root) and not os.path.isdir(_expand(e)) ]
+  return [ entry for entry in entries
+           if _is_covered_by(_expand(entry), cache_root) and not os.path.isdir(_expand(entry)) ]
 
 
 def resolve_scope(entries: list[str]) -> list[str]:
@@ -146,7 +158,7 @@ def resolve_scope(entries: list[str]) -> list[str]:
   # already reaches needs no separate one.
 
   # the entries themselves, in the literal form the confinement compares against
-  expanded = [ _expand(e) for e in entries if str(e).strip() ]
+  expanded = [ _expand(entry) for entry in entries if str(entry).strip() ]
 
   # every location those entries are meant to reach, before removing the ones already covered
   reached: list[str] = []
@@ -177,8 +189,8 @@ def missing_paths(entries: list[str]) -> list[str]:
     The resolved locations no recorded entry covers, order-stable; empty when the
     recorded entries already reach everything they resolve to.
   """
-  expanded = [ _expand(e) for e in entries if str(e).strip() ]
-  return [ p for p in resolve_scope(entries) if p not in expanded ]
+  expanded = [ _expand(entry) for entry in entries if str(entry).strip() ]
+  return [ location for location in resolve_scope(entries) if location not in expanded ]
 
 
 def settings_path(repo: Path | str) -> Path:
@@ -220,7 +232,20 @@ def _read(path: Path) -> dict:
   return parsed if isinstance(parsed, dict) else {}
 
 
-def _recorded(doc: dict, key: str) -> list[str]:
+def _parse_entries(raw: object) -> list[str]:
+  """
+  Return one allowlist value as the non-blank strings it holds.
+
+  Args:
+    raw: The allowlist value as read from a document, of any type.
+
+  Returns:
+    The entries as strings, in list order; empty when the value is not a list.
+  """
+  return [ str(entry) for entry in raw if str(entry).strip() ] if isinstance(raw, list) else []
+
+
+def _get_recorded(doc: dict, key: str) -> list[str]:
   """
   Return one allowlist as recorded in a sandbox settings document.
 
@@ -233,8 +258,132 @@ def _recorded(doc: dict, key: str) -> list[str]:
   """
   sandbox = doc.get(SandboxKey.SANDBOX)
   filesystem = sandbox.get(SandboxKey.FILESYSTEM) if isinstance(sandbox, dict) else None
-  raw = filesystem.get(key) if isinstance(filesystem, dict) else None
-  return [ str(e) for e in raw if str(e).strip() ] if isinstance(raw, list) else []
+  return _parse_entries(filesystem.get(key) if isinstance(filesystem, dict) else None)
+
+
+def load_declared(repo: Path | str) -> dict:
+  """
+  Read the sandbox block the repository's settings declare for its expert spawns.
+
+  Notes:
+    - Reads the `sandbox` section of `lazy.settings.json` with its local overlay applied, in
+      Claude Code's own `sandbox` shape; the section's version sentinel is not part of it.
+
+  Args:
+    repo: Repository root whose tracked settings are read.
+
+  Returns:
+    The declared block, empty when the settings declare nothing for the sandbox.
+
+  Raises:
+    json.JSONDecodeError: If the tracked settings file or its local overlay is not valid JSON.
+  """
+  return { key: value for key, value in load_section(Path(repo) / SettingsFile.REL, SettingsKey.SANDBOX).items()
+           if key != SettingsKey.VERSION }
+
+
+def _split_paths(block: dict) -> tuple[dict, list[str], list[str]]:
+  """
+  Separate the declared path allowlists from the rest of a declared sandbox block.
+
+  Args:
+    block: Declared sandbox block in Claude Code's shape.
+
+  Returns:
+    The block without the two path allowlists, then the declared read entries and the declared
+    write entries; the lists fold into the recorded scope while everything else replaces it.
+  """
+  filesystem = block.get(SandboxKey.FILESYSTEM)
+  filesystem = dict(filesystem) if isinstance(filesystem, dict) else {}
+  read = _parse_entries(filesystem.pop(SandboxKey.ALLOW_READ, None))
+  write = _parse_entries(filesystem.pop(SandboxKey.ALLOW_WRITE, None))
+  rest = { key: value for key, value in block.items() if key != SandboxKey.FILESYSTEM }
+
+  # a filesystem block that held only the two allowlists has nothing left to lay over the file
+  if filesystem:
+    rest[SandboxKey.FILESYSTEM] = filesystem
+  return rest, read, write
+
+
+def _strip_managed(recorded: dict, rest: dict) -> dict:
+  """
+  Drop from a recorded sandbox block the keys install manages on its own.
+
+  Args:
+    recorded: The `sandbox` block as the file records it.
+    rest: The declared block without its path allowlists.
+
+  Returns:
+    A copy without the two path allowlists and without a switch the declaration does not name;
+    a declared switch stays, since the declaration is then what it is compared against.
+  """
+  stripped = { key: value for key, value in recorded.items()
+               if key in rest or key not in (SandboxKey.ENABLED, SandboxKey.ALLOW_UNSANDBOXED) }
+  filesystem = stripped.get(SandboxKey.FILESYSTEM)
+  filesystem = { key: value for key, value in (filesystem.items() if isinstance(filesystem, dict) else ())
+                 if key not in (SandboxKey.ALLOW_READ, SandboxKey.ALLOW_WRITE) }
+
+  # a filesystem block left with nothing but the managed lists is no declaration at all
+  if filesystem:
+    stripped[SandboxKey.FILESYSTEM] = filesystem
+  else:
+    stripped.pop(SandboxKey.FILESYSTEM, None)
+  return stripped
+
+
+def _diff_blocks(block: dict, recorded: dict, prefix: str = "") -> list[str]:
+  """
+  List the leaf keys on which a declared block and a recorded block disagree.
+
+  Args:
+    block: The declared block.
+    recorded: The recorded block, already stripped of the keys install manages.
+    prefix: Dotted path of the enclosing keys, empty at the top.
+
+  Returns:
+    Dotted key paths, declared keys first in declaration order, then recorded keys the declaration
+    no longer names; a dict is walked rather than compared whole, so an empty one has no leaf to
+    report.
+  """
+  keys: list[str] = []
+  for key in dict.fromkeys([ *block, *recorded ]):
+    value = block.get(key, _ABSENT)
+    current = recorded.get(key, _ABSENT)
+
+    # a nested block is compared key by key so the finding names the leaf that differs; a block
+    # only one side holds is walked against an empty one, so each of its leaves is named too
+    if isinstance(value, dict) or isinstance(current, dict):
+      keys += _diff_blocks(value if isinstance(value, dict) else {}, current if isinstance(current, dict) else {},
+                          prefix + key + ".")
+    elif current != value:
+      keys.append(prefix + key)
+  return keys
+
+
+def _collect_drift(block: dict, doc: dict) -> list[str]:
+  """
+  List every sandbox key on which the declaration and the recorded document disagree.
+
+  Args:
+    block: The declared sandbox block.
+    doc: The parsed sandbox settings document, empty when no file is recorded.
+
+  Returns:
+    Dotted key paths under `sandbox`: a declared key the file records differently or not at all, a
+    recorded key the declaration no longer names, and a path allowlist one of whose declared
+    entries is not recorded. The two switches are compared only when declared, and a recorded
+    path allowlist entry is never drift.
+  """
+  rest, read, write = _split_paths(block)
+  recorded_sandbox = doc.get(SandboxKey.SANDBOX)
+  keys = _diff_blocks(rest, _strip_managed(recorded_sandbox if isinstance(recorded_sandbox, dict) else {}, rest))
+
+  # a declared path entry is folded into the recorded list, so only an absent one is drift
+  for key, entries in ((SandboxKey.ALLOW_READ, read), (SandboxKey.ALLOW_WRITE, write)):
+    recorded = [ _expand(entry) for entry in _get_recorded(doc, key) ]
+    if any(_expand(entry) not in recorded for entry in entries):
+      keys.append(f"{SandboxKey.FILESYSTEM}.{key}")
+  return keys
 
 
 def audit(repo: Path | str) -> dict:
@@ -244,19 +393,33 @@ def audit(repo: Path | str) -> dict:
   Guarantees:
     - A checkout with no sandbox settings file is reported as absent rather than as a
       set of findings; it runs its spawns unconfined and has nothing to be missing.
+    - Every key the settings declare for the sandbox that the file does not record as
+      declared, and every recorded key the declaration no longer names, is reported as
+      drift, the two switches excepted when undeclared and the path allowlists' recorded
+      entries always; with no file, every declared key is.
 
   Args:
-    repo: Repository root whose sandbox settings are read.
+    repo: Repository root whose sandbox settings and tracked settings are read.
 
   Returns:
     A result dict carrying `SandboxSyncKey` fields: the file location, whether it exists,
-    the recorded confinement switch, and the uncovered read and write locations.
+    the recorded confinement switch, the uncovered read and write locations, and the
+    keys on which the file and the declaration disagree.
+
+  Raises:
+    json.JSONDecodeError: If the tracked `lazy.settings.json` or its local overlay is not valid JSON.
   """
 
   # Contract:
   # A checkout with no sandbox settings file is reported as absent rather than as a set
   # of findings; a caller must not read an empty missing-read/missing-write list from an
   # absent file as proof of full coverage.
+
+  # Contract:
+  # Every key the settings declare for the sandbox that the file does not record as
+  # declared, and every recorded key the declaration no longer names, is reported as
+  # drift, the two switches excepted when undeclared and the path allowlists' recorded
+  # entries always; with no file, every declared key is.
 
   # what the checkout records today, and whether it records a confinement switch at all
   path = settings_path(repo)
@@ -271,34 +434,45 @@ def audit(repo: Path | str) -> dict:
     SandboxSyncKey.PRESENT: path.exists(),
     SandboxSyncKey.ENABLED: enabled if isinstance(enabled, bool) else None,
     SandboxSyncKey.ALLOW_UNSANDBOXED: unsandboxed if isinstance(unsandboxed, bool) else None,
-    SandboxSyncKey.MISSING_READ: missing_paths(_recorded(doc, SandboxKey.ALLOW_READ)),
-    SandboxSyncKey.MISSING_WRITE: missing_paths(_recorded(doc, SandboxKey.ALLOW_WRITE)),
+    SandboxSyncKey.MISSING_READ: missing_paths(_get_recorded(doc, SandboxKey.ALLOW_READ)),
+    SandboxSyncKey.MISSING_WRITE: missing_paths(_get_recorded(doc, SandboxKey.ALLOW_WRITE)),
+    SandboxSyncKey.DRIFT: _collect_drift(load_declared(repo), doc),
   }
 
 
 def sync(repo: Path | str, *, read: list[str] | None = None, write: list[str] | None = None) -> dict:
   """
-  Record the full sandbox scope of a repository, adding every location its entries reach.
+  Record the full sandbox scope of a repository, adding every location its entries reach,
+  and lay the declared sandbox settings over the file.
 
   Guarantees:
     - The repository root is always in scope, readable and writable.
     - Whatever is writable is also readable.
+    - Every key the settings declare under `sandbox` is recorded as declared, and no key
+      but the confinement switch, the retry switch and the two path allowlists survives
+      undeclared; a declared path allowlist entry joins the recorded list instead of
+      replacing it.
     - A recorded allowlist entry is never dropped or reordered, except a recorded read
       entry naming a LazyCortex plugin-cache location that no longer exists on disk.
-    - A recorded confinement switch or unsandboxed-retry switch is never overwritten;
-      only a switch absent from the file is given its default value.
+    - A recorded confinement switch or unsandboxed-retry switch is overwritten only by a
+      declared value; a switch neither recorded nor declared is given its default.
     - The file is rewritten only when the document to record differs from what is
       already on disk; a pass that changes nothing leaves the file untouched.
 
   Args:
-    repo: Repository root whose sandbox settings are recorded.
+    repo: Repository root whose sandbox settings are recorded and whose settings are read.
     read: Additional paths a confined spawn must be able to read, such as plugin sources.
     write: Additional paths a confined spawn must be able to write.
 
   Returns:
     A result dict carrying `SandboxSyncKey` fields: the file location, whether it existed,
-    the confinement switch after the call, the entries appended to each allowlist, the read
-    entries pruned as dead plugin-cache versions, and whether the file was rewritten.
+    the confinement switch and the retry switch after the call, the entries appended to each
+    allowlist, the read entries pruned as dead plugin-cache versions, and whether the file was
+    rewritten.
+
+  Raises:
+    json.JSONDecodeError: If the tracked `lazy.settings.json` or its local overlay is not valid JSON.
+    OSError: If the runtime directory or the settings file cannot be written.
   """
 
   # Contract:
@@ -311,12 +485,18 @@ def sync(repo: Path | str, *, read: list[str] | None = None, write: list[str] | 
   # allowlist.
 
   # Contract:
+  # Every key the settings declare under `sandbox` is recorded as declared, and no key
+  # but the confinement switch, the retry switch and the two path allowlists survives
+  # undeclared; a declared path allowlist entry joins the recorded list instead of
+  # replacing it.
+
+  # Contract:
   # A recorded allowlist entry is never dropped or reordered, except a recorded read
   # entry naming a LazyCortex plugin-cache location that no longer exists on disk.
 
   # Contract:
-  # A recorded confinement switch or unsandboxed-retry switch is never overwritten;
-  # only a switch absent from the file is given its default value.
+  # A recorded confinement switch or unsandboxed-retry switch is overwritten only by a
+  # declared value; a switch neither recorded nor declared is given its default.
 
   # Contract:
   # The settings file is rewritten only when the document to record differs from what
@@ -329,35 +509,49 @@ def sync(repo: Path | str, *, read: list[str] | None = None, write: list[str] | 
   doc = _read(path)
   root = str(Path(repo).absolute())
 
-  # the full scope each allowlist must grant: what is recorded, what the caller asked for,
-  # the checkout itself, and every location those reach through a symlink
-  recorded_write = _recorded(doc, SandboxKey.ALLOW_WRITE)
-  wanted_write = resolve_scope([ *recorded_write, root, *(write or []) ])
-  recorded_read = _recorded(doc, SandboxKey.ALLOW_READ)
-  wanted_read = resolve_scope([ *recorded_read, root, *(read or []), *wanted_write ])
+  # Decision: the file is derived from the declaration, never merged with it — a key removed from
+  # the settings leaves the file on the next sync, so the operator edits one place and a hand edit
+  # of the file does not outlive the next spawn. The four install-managed keys are the exception:
+  # the two switches are recorded decisions a declaration may override but not erase, and the path
+  # allowlists hold entries nobody declared (resolved symlink targets, plugin-cache versions).
+
+  # what the settings declare: the path allowlists fold into the scope, the rest is the file
+  rest, declared_read, declared_write = _split_paths(load_declared(repo))
+  recorded_sandbox = doc.get(SandboxKey.SANDBOX)
+  recorded_sandbox = recorded_sandbox if isinstance(recorded_sandbox, dict) else {}
+
+  # the full scope each allowlist must grant: what is recorded, what the caller asked for, what is
+  # declared, the checkout itself, and every location those reach through a symlink
+  recorded_write = _get_recorded(doc, SandboxKey.ALLOW_WRITE)
+  wanted_write = resolve_scope([ *recorded_write, root, *(write or []), *declared_write ])
+  recorded_read = _get_recorded(doc, SandboxKey.ALLOW_READ)
+  wanted_read = resolve_scope([ *recorded_read, root, *(read or []), *declared_read, *wanted_write ])
 
   # only entries that are genuinely new are appended, so the recorded order is preserved
-  added_write = [ p for p in wanted_write if p not in [ _expand(e) for e in recorded_write ] ]
-  added_read = [ p for p in wanted_read if p not in [ _expand(e) for e in recorded_read ] ]
+  added_write = [ location for location in wanted_write
+                  if location not in [ _expand(entry) for entry in recorded_write ] ]
+  added_read = [ location for location in wanted_read
+                 if location not in [ _expand(entry) for entry in recorded_read ] ]
 
-  # rebuild the sandbox block around what the file already carries, replacing nothing but the lists
-  sandbox = doc.get(SandboxKey.SANDBOX)
-  sandbox = dict(sandbox) if isinstance(sandbox, dict) else {}
+  # the sandbox block is the declaration; the four managed keys are filled in from the file below
+  sandbox = dict(rest)
   filesystem = sandbox.get(SandboxKey.FILESYSTEM)
   filesystem = dict(filesystem) if isinstance(filesystem, dict) else {}
 
-  # a recorded switch is the checkout's decision; only an unrecorded one is turned on here
-  enabled = sandbox.get(SandboxKey.ENABLED)
+  # a declared switch wins, a recorded one is the checkout's decision, an absent one is turned on here
+  enabled = rest.get(SandboxKey.ENABLED, recorded_sandbox.get(SandboxKey.ENABLED))
   sandbox[SandboxKey.ENABLED] = enabled if isinstance(enabled, bool) else True
 
   # Decision: the unsandboxed retry is closed here, not left to Claude Code's default of open —
   # a command the sandbox blocks is otherwise retried with `dangerouslyDisableSandbox` and passes
   # the permission check a checkout that allows bare `Bash` grants, so `rm -rf` outside the write
   # scope fails once and succeeds on the second try; `dontAsk` has nothing to deny there. Same
-  # treatment as `enabled`: only an unrecorded value is written.
+  # treatment as `enabled`: a declared value wins, a recorded one stays, only an absent one is
+  # written here.
 
-  # the retry switch follows the confinement switch: a recorded value stays, an absent one closes
-  unsandboxed = sandbox.get(SandboxKey.ALLOW_UNSANDBOXED)
+  # the retry switch follows the confinement switch: a declared or recorded value stays, an absent
+  # one closes
+  unsandboxed = rest.get(SandboxKey.ALLOW_UNSANDBOXED, recorded_sandbox.get(SandboxKey.ALLOW_UNSANDBOXED))
   sandbox[SandboxKey.ALLOW_UNSANDBOXED] = unsandboxed if isinstance(unsandboxed, bool) else False
 
   # the allowlists are the only fields rebuilt wholesale, from what was recorded plus what is new;
@@ -365,7 +559,7 @@ def sync(repo: Path | str, *, read: list[str] | None = None, write: list[str] | 
   # and a pin still granted through write stays out of read despite the write-implies-read fold-in
   read_list = recorded_read + added_read
   removed_read = _dead_cache_entries(read_list)
-  filesystem[SandboxKey.ALLOW_READ] = [ e for e in read_list if e not in removed_read ]
+  filesystem[SandboxKey.ALLOW_READ] = [ entry for entry in read_list if entry not in removed_read ]
   filesystem[SandboxKey.ALLOW_WRITE] = recorded_write + added_write
   sandbox[SandboxKey.FILESYSTEM] = filesystem
   doc[SandboxKey.SANDBOX] = sandbox

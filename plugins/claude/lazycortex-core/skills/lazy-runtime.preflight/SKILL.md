@@ -33,7 +33,7 @@ Bash(LAZY_REPO_ROOT="$PWD" "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT
 Parse the JSON on stdout. Its shape:
 
 - `experts[]` — one entry per validated expert: `name`, `static[]` (`{level, message}`), `dynamic` (or `null` when the probe was skipped), `verdict` (`ok` / `fail`), `fixes[]`.
-- `repo[]` — checkout-level findings (`{level, message}`) that apply to every expert here: an inbox another daemon on this host already drives (`fail`), and a sandbox allowlist that does not cover a location its own entries resolve to (`fail` for write, `warn` for read).
+- `repo[]` — checkout-level findings (`{level, message}`) that apply to every expert here: an inbox another daemon on this host already drives (`fail`), a sandbox allowlist that does not cover a location its own entries resolve to (`fail` for write, `warn` for read), a `sandbox` section declared in `lazy.settings.json` with no sandbox file to carry it (`fail`), and a declared sandbox key the file records differently (`warn`).
 - `summary` — one-line count.
 
 The dynamic block, when present, carries `exit`, `duration_s`, `timed_out`, `spawn_error` (a message naming the binary when the `claude` spawn could not start at all — most often because it is not on PATH — else `null`), `agent_resolved`, `servers[]` (`{name, status, detail}` where status ∈ `connected` / `timed-out` / `auth-required` / `spawn-failed` / `pending-approval` / `unknown`), and `best_effort_plugin_dirs`. One other shape exists: `{"skipped": "rate_limit"}` — the host's subscription rate-limit flag was raised, so the probe (a real `claude` spawn) was deliberately not run; the expert's verdict is unaffected by it. Render it as "probe skipped — rate limit", never as a failure.
@@ -50,6 +50,8 @@ Render `repo[]` first, above the table — it is not per-expert, and a `fail` th
 - `fail` on sandbox `allowWrite` — a confined spawn is checked against the resolved path, so an entry reached through a symlink permits nothing where the data lives and every write there fails with `Operation not permitted`. The finding carries the repair: `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" sandbox-sync --repo-root <repo>`. Offer it as a Step 3 fix; it adds the resolved locations and never drops a recorded entry.
 - `fail` on sandbox `allowUnsandboxedCommands` not recorded `false` — Claude Code's default lets a command the sandbox blocked be retried unsandboxed, subject only to the permission check a bare `Bash` allow passes, so a confined spawn could still write outside its scope on the second try. The same `sandbox-sync` call records the switch closed when it is absent; a recorded `true` is the checkout's decision and the finding stays until the operator flips it.
 - `warn` on sandbox `allowRead` — same cause on the read side; same repair.
+- `fail` on sandbox settings declared with no file — the `sandbox` section of `lazy.settings.json` (the network allowlist above all) reaches a spawn only through the sandbox file, and none exists, so every spawn runs without it. Same repair: `sandbox-sync` creates the file with the declaration laid over it.
+- `warn` on a declared sandbox key recorded differently — the expert pump re-derives the file from the declaration before the next spawn, so this is drift between an edit and the next job; the same `sandbox-sync` records it now.
 
 When `repo[]` is empty, print nothing for it.
 
@@ -153,7 +155,7 @@ Not an entry in any expert's `fixes[]` — it comes from `repo[]` and is offered
 ```
 Context (print before asking):
 - Where: /lazy-runtime.preflight · Step 3 — Confirm + apply fixes; target .runtime/sandbox.settings.json (gitignored daemon state)
-- Found: repo-level `<fail | warn>` — sandbox `<allowWrite | allowRead>` does not cover `<path>`, which its own entries resolve to through a symlink
+- Found: repo-level `<fail | warn>` — sandbox `<allowWrite | allowRead>` does not cover `<path>`, which its own entries resolve to through a symlink; or sandbox `<key>` is declared in `lazy.settings.json` and the sandbox file does not record it as declared
 - Why asking: the sync widens a confinement allowlist — what spawns may touch is the operator's call
 - Answers: `record` — `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" sandbox-sync --repo-root "$PWD"` runs now, appends only what is missing, drops nothing, never re-asked once covered; `leave` — no change, every job writing through that symlink keeps failing with `Operation not permitted`
 AskUserQuestion: header "Sandbox allowlist", question "Record the resolved location `<path>` in the expert-spawn sandbox allowlist of <repo-root>?", options with descriptions.

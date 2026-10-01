@@ -446,11 +446,12 @@ Run:
 Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" sandbox-audit --repo-root "$PWD")
 ```
 
-The verb prints `{path, present, enabled, allow_unsandboxed, missing_read, missing_write}`. `present: false` → emit nothing (no sandbox file, so expert spawns run unconfined). `enabled: false` → emit nothing (confinement is off; the allowlist neither grants nor denies). Otherwise:
+The verb prints `{path, present, enabled, allow_unsandboxed, missing_read, missing_write, drift}`. `present: false` → emit nothing (no sandbox file, so expert spawns run unconfined) unless `drift` is non-empty: then `[FAIL]` `sandbox settings are declared (<comma-joined drift>) but no sandbox file records them | .claude/lazy.settings.json`; `fix: run "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" sandbox-sync --repo-root "$PWD"`. `enabled: false` → emit nothing (confinement is off; the allowlist neither grants nor denies). Otherwise:
 
 - `[FAIL]` `allow_unsandboxed` is not `false` — `sandbox allowUnsandboxedCommands is not recorded false, so a command the sandbox blocks is retried unsandboxed | .runtime/sandbox.settings.json`; `fix: run "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" sandbox-sync --repo-root "$PWD"` when the key is absent (a recorded `true` is the operator's decision — report it, never flip it).
 - `[FAIL]` each entry of `missing_write` — `sandbox allowWrite does not cover <path>, which its own entries resolve to | .runtime/sandbox.settings.json`; `fix: run "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" sandbox-sync --repo-root "$PWD"`.
 - `[WARN]` each entry of `missing_read` — `sandbox allowRead does not cover <path> | .runtime/sandbox.settings.json`; same fix.
+- `[WARN]` each entry of `drift` — `sandbox <key> is declared in lazy.settings.json but the sandbox file records it differently | .runtime/sandbox.settings.json`; same fix (the expert pump re-derives the file before the next spawn on its own).
 
 The confinement is checked against the resolved path, so an allowlist entry naming a directory reached through a symlink grants nothing where the data lives: every write there fails with `Operation not permitted` while the recorded config still reads as correct. The sync appends only what is missing and drops nothing.
 

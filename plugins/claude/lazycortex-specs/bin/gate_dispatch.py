@@ -31,6 +31,8 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import asset_types  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from spec_keys import PlanReview  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -143,49 +145,64 @@ def load_settings(repo: Path) -> dict:
     return {}
 
 
-def collect_guideline_paths(repo: Path, product_record: dict, role: str) -> tuple[list[str], list[str]]:
+def collect_guideline_paths(
+    repo: Path, product_record: dict, role: str, *, asset_type: str = "") -> tuple[list[str], list[str]]:
   """
-  Resolve the product's role guidelines plus the wildcard `"*"` guidelines to repo-relative paths.
+  Resolve the product's role, asset-type and wildcard `"*"` guidelines to repo-relative paths.
 
-  Per `products[<key>].guidelines` (`lazy-spec.product-config` schema), a missing declared path is
-  never a silent skip — it is surfaced as a warning string for the caller to log.
+  Per `products[<key>].guidelines` and `products[<key>].asset_types[<type>].guidelines`
+  (`lazy-spec.config-protocol`), a missing declared path is never a silent skip — it is surfaced
+  as a warning string for the caller to log.
 
   Guarantees:
     - A declared guideline path that does not resolve to a file is always reported in
       `warnings`, never silently dropped.
+    - Paths come back role-specific first, then the asset type's, then the wildcard set, with
+      a path already listed never repeated.
 
   Args:
     repo: The repository root the declared guideline paths are relative to.
     product_record: The owning product's settings record, or `{}` when none was resolved.
     role: The dispatched job's role token — selects `guidelines[role]` in the config.
+    asset_type: The dispatched asset's `spec_asset_type`, selecting the type's own guidelines;
+      empty when the job is not about one asset.
 
   Returns:
     A `(paths, warnings)` pair: `paths` holds the repo-relative path of every declared guideline
-    that resolves to a file, role-specific ones first; `warnings` names every declared path that
-    does not.
+    that resolves to a file, in the order the guarantee states; `warnings` names every declared
+    path that does not.
   """
 
   # Contract:
   # A declared guideline path that does not resolve to a file is never silently dropped; it is
   # always reported back in `warnings` for the caller to log.
 
+  # Contract:
+  # Paths MUST come back role-specific first, then the asset type's own, then the wildcard set,
+  # with a path already listed never repeated.
+
   # Domain(spec.dispatch):
   # # Guideline priority for a dispatched job
   # A job dispatched to work on a spec asset follows guidelines chosen for the specific role it
-  # is playing, extended with the guidelines that apply to every role no matter what it is
-  # doing — the role's own voice always comes first, the universal rules are added after. A
-  # guideline a product declares but that turns out not to exist on disk is never silently
-  # skipped; it is reported as a gap, so a missing file gets noticed instead of quietly leaving
-  # the job less informed than the product intended.
+  # is playing, then the guidelines that belong to the kind of asset it works on whatever the
+  # role — a content record's schema reaches its designer and its data writer alike — and
+  # finally the guidelines that apply to every role no matter what it is doing: the role's own
+  # voice always comes first, the universal rules are added last. A guideline a product
+  # declares but that turns out not to exist on disk is never silently skipped; it is reported
+  # as a gap, so a missing file gets noticed instead of quietly leaving the job less informed
+  # than the product intended.
 
-  # role-specific guidelines first, then the wildcard set that applies to every role
+  # role-specific guidelines first, then the asset type's, then the wildcard set for every role
   guidelines_cfg = (product_record or {}).get(_SettingsKey.GUIDELINES) or {}
-  declared = list(guidelines_cfg.get(role) or []) + list(guidelines_cfg.get(_SettingsKey.WILDCARD_ROLE) or [])
+  declared = list(guidelines_cfg.get(role) or [])
+  if asset_type:
+    declared += asset_types.guidelines(asset_type, product_record or {})
+  declared += list(guidelines_cfg.get(_SettingsKey.WILDCARD_ROLE) or [])
 
   # a path that doesn't resolve is a warning, never a silent drop
   paths: list[str] = []
   warnings: list[str] = []
-  for rel in declared:
+  for rel in dict.fromkeys(declared):
     path = repo / rel
     if path.is_file():
       paths.append(rel)

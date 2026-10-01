@@ -30,6 +30,9 @@ Subcommands:
 - `decisions-context` — delegate to :mod:`decisions_context` (print the `{filename: text}`
                  map of whichever decisions-registry file(s) resolve for one document; the
                  coordinator folds this into a main or barrier writer dispatch's `context`).
+- `guidelines-context` — delegate to :mod:`guidelines_context` (print the `{paths, warnings}`
+                 map of the product guidelines one expert carries on one document; the
+                 coordinator names the paths in a main or barrier writer dispatch's `context`).
 """
 from __future__ import annotations
 
@@ -470,6 +473,27 @@ def cmd_decisions_context(args: argparse.Namespace) -> int:
   return 0
 
 
+def cmd_guidelines_context(args: argparse.Namespace) -> int:
+  """
+  Print the product guideline paths one expert carries on one review document.
+
+  Args:
+    args: Parsed namespace with `file` and `expert` attributes.
+
+  Returns:
+    Exit code: always 0. Prints the JSON `{paths, warnings}` map to stdout on every call; the
+    target document need not exist on disk.
+  """
+  # waiver: deferred local import — the verb's module is loaded only when the verb runs, like its sibling verbs
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
+  import guidelines_context  # type: ignore  # pylint: disable=import-error
+
+  # the verb's whole contract is this one JSON line, piped straight into the coordinator's dispatch build
+  # waiver: type: ignore — guidelines_context is a deferred/late-bound sibling import; mypy cannot resolve it
+  print(json.dumps(guidelines_context.collect(Path(args.file).resolve(), args.expert)))  # type: ignore[attr-defined]
+  return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
   """
   Build and return the top-level argument parser for the lazy-review CLI.
@@ -641,6 +665,17 @@ def build_parser() -> argparse.ArgumentParser:
   # waiver: argparse CLI signature, not a domain key
   p_decisions.add_argument("file")
   p_decisions.set_defaults(func=cmd_decisions_context)
+
+  # `guidelines-context` — product guideline paths for a main / barrier writer dispatch
+  # waiver: argparse CLI signature, not a domain key
+  p_guidelines = sub.add_parser(
+      "guidelines-context", help="print the product guideline paths one expert carries on one file",
+  )
+  # waiver: argparse CLI signature, not a domain key
+  p_guidelines.add_argument("file")
+  # waiver: argparse CLI signature, not a domain key
+  p_guidelines.add_argument("expert")
+  p_guidelines.set_defaults(func=cmd_guidelines_context)
 
   # every subcommand carries its handler in `func`, so the caller dispatches on the parse
   # result alone and never has to match subcommand names a second time

@@ -63,12 +63,13 @@ A **versioned** section is a flat top-level key whose dict carries an `_version:
 
 Sections are **owned by individual plugins** and migrate independently. There is no global settings version — the root `version` field is legacy (written by pre-A1 code). On first `load_section` call, any root `version` present is migrated to per-section `_version` on all existing sections, then the root key is removed. This migration is automatic and transparent.
 
-**Which sections are versioned.** Only the keys listed in `CURRENT_VERSIONS` (`bin/lazy_settings.py`) — `migrate_all` iterates that constant and nothing else, so a key absent from it is never stamped with an `_version` on disk and can never acquire a migration ladder. `load_section` itself is indifferent: it reads and merges any top-level key it is handed, versioned or not. Two live sections are read that way without appearing in the constant:
+**Which sections are versioned.** Only the keys listed in `CURRENT_VERSIONS` (`bin/lazy_settings.py`) — `migrate_all` iterates that constant and nothing else, so a key absent from it is never stamped with an `_version` on disk and can never acquire a migration ladder. `load_section` itself is indifferent: it reads and merges any top-level key it is handed, versioned or not. Three live sections are read that way without appearing in the constant:
 
 | Key | Read by | Shape |
 |---|---|---|
 | `providers` | `provider_env.resolve_provider` | `{<name>: {base_url, token_env, models}}` — see `lazy-core.expert-runtime-schema` § Providers |
 | `hooks` | `hook_gate` | `{disabled: [<hook short name>, ...]}` — see `lazy-core.expert-runtime-schema` § Lazycortex hooks |
+| `sandbox` | `sandbox_scope.load_declared` | Claude Code's own `sandbox` object (`network.allowedDomains` above all), laid over the expert-spawn sandbox file — see `lazy-core.expert-runtime-schema` § Sandbox |
 
 A third root key is not a section at all: `language` is a bare string (`"language": "ru"`), read straight off the parsed JSON document by consumer plugins and never through `load_section`. The `_version` invariant does not reach it.
 

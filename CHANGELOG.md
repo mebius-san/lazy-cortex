@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 10.5.0 — 2026-10-01 UTC
+
+- A `sandbox` section in `lazy.settings.json`, in Claude Code's own shape, now configures the sandbox of every expert spawn, so a network allowlist survives and confined jobs can fetch. The runtime re-derives the sandbox file before each spawn; preflight, audit, doctor and autocheckup report and repair drift.
+
 ### 10.4.2 — 2026-10-01 UTC
 
 - `lazy-core.install` finds expert candidates through the plugin registry instead of scanning every cached plugin version, so stale old versions no longer show up. It also removes stray daemon units with a simpler, more reliable check and compares the `lazy-claude` wrapper before syncing it.
@@ -748,6 +752,15 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 9.11.1 — 2026-10-01 UTC
+
+- Content design template now asks for one bullet per decision, each naming the schema fields it settles, instead of one line per group of fields in schema order. The content playbook describes the document the same way.
+
+### 9.11.0 — 2026-10-01 UTC
+
+- Asset types can declare their own `guidelines`, and every job on an asset of that type receives them whatever its role, whether launched from a checkbox or dispatched by the coordinator.
+- The content playbook now declares the record schema once through those guidelines, so the content design template no longer asks where the data lives.
+
 ### 9.10.1 — 2026-10-01 UTC
 
 - `lazy-spec.install` is now safe to re-run: it targets the right repo when detecting install scope, skips the first-product question when products are already registered, and checks the CLI permission before writing, so an existing setup sees no settings write.
@@ -1458,6 +1471,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+### 6.11.0 — 2026-10-01 UTC
+
+- Documents written inside the review loop now see the product's guidelines. A new `guidelines-context` verb resolves the guideline paths for the expert's role, the asset type and the wildcard set. The coordinator names them in every main and barrier writer dispatch, so authors and validators can follow schemas such as a content design's record format.
+
 ### 6.10.2 — 2026-10-01 UTC
 
 - `/lazy-review.install` re-runs no longer touch files that are already correct. It checks whether the Bash allow-pattern is already in `settings.local.json` before writing, and it no longer copies the review-callouts CSS snippet over a byte-identical one.
@@ -1828,6 +1845,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.
 
 ## lazycortex-experts
+
+### 1.9.4 — 2026-10-01 UTC
+
+- The data implementer now reads an approved content design as one decision per bullet, each naming the schema fields it settles. It raises a decision-candidate for any field the design leaves undecided, rather than for a whole group of fields.
 
 ### 1.9.3 — 2026-09-30 UTC
 

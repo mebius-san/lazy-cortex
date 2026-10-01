@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a product bound to existing code, generate vision/design/tech docs from source, then gap-scan for anything missed.
-last_regen: 2026-09-30
+last_regen: 2026-10-01
 diagram_spec:
   anchor: "How the skills hand off"
   request: "Sequence diagram showing the three-skill journey: operator runs lazy-spec.product-config to register the product and write settings, then runs lazy-spec.create-from-code to scan source and produce vision + design + tech docs (and scaffold any candidate features), then runs lazy-spec.coverage to gap-scan the code against the spec tree and materialize anything missed; show the operator, each skill, and the spec vault as actors, with the key handoff points between them."
@@ -10,8 +10,8 @@ source_skills:
   - lazy-spec.create-from-code
   - lazy-spec.create-feature
   - lazy-spec.coverage
-source_sha: a171aea770f62017290692da4f433e88fe939912
-surface_sha: 88b60b4210bf4afc92a32f1357d00a95ca6d1ed9691db93a7757ac9067d4e497
+source_sha: de6f0fae7f7a3cf91f8b068e482c0d28d5f418a1
+surface_sha: c8ee20624e50be3cfc92009657cb0d4e8559b74fb4c62c56d51b928b7c471db3
 ---
 # How do I get specs for a codebase that already exists?
 
@@ -70,7 +70,7 @@ The key decisions you will make:
 - **Source paths** — the subdirectories within the repo that this product covers. A single path like `src/api` is fine; you can add more paths if the product spans multiple subdirectories. The skill validates that each path exists on disk.
 - **Dependencies** — the skill dispatches a read-only scan of your source paths and presents each detected dependency (internal products, cross-repo, or external packages) for you to accept or skip, one at a time.
 - **Icon** — every product gets one: pick a concrete suggestion or type your own, or decline and the product still gets the default `LiPackage` — a product never ends up icon-less in the file explorer. The product root is also the only ordinary container the wizard paints a colour on (a neutral, state-independent shade); the group folders that appear under it as you add assets carry no colour of their own.
-- **Guidelines** (optional) — per-role file paths whose contents are folded into an expert's job context whenever an operator later ticks a launch checkbox on this product's assets.
+- **Guidelines** (optional) — per-role file paths whose contents are folded into an expert's job context whenever an operator later ticks a launch checkbox on this product's assets, and into the expert jobs of the review rounds that run on this product's documents.
 - **Review experts** — eleven roles review this product's docs: **use-case-writer** (asset-level `use-cases.md`, plus the product-root `use-cases.md` — typed `system-use-cases`, the actors and cross-feature scenarios spanning the product's assets), **designer** (asset-level `design.md` — including a content asset's `design.md`, typed `content-design`, which is validated by the data-writer rather than the architect — plus a validation pass on both the asset-level `use-cases.md` and the product-root, `system-use-cases`-typed `use-cases.md`), **system-designer** (the product's own `vision.md` / `design.md`, and the project-wide `vision.md` / `design.md`), **architect** (the product's `tech.md` plus any `architecture.md`, and a standing validator on every design-shaped doc including `ui-design.md`), **ui-designer** (asset-level `ui-design.md`, plus the product-root `ui-design.md` — the shared look each asset's own `ui-design.md` refines), **planner** (`code-plan.md`), **developer** (`code-report.md`), **tester** (`bug.md`, `test-plan.md`, `test-report.md`), **data-writer** (`data-report.md`, plus a validation pass on a content asset's `content-design` document; only relevant if your product produces data-report or content-design docs), **researcher** (a research asset's `research.md`, plus a validation pass on `research-design.md`, only relevant if your product uses the research asset type), and **editor** (a second main writer, after the author, on every vision, design, and use-cases document — asset-level and product/project-wide — plus a research asset's own `design.md` and `research.md`; brings the prose to the writing canon before you review a round, and is the one role you can leave unassigned, in which case those documents are written by their author alone). If the vault already carries a shared expert set from an earlier product, you can ride it as-is or define a product-specific override; otherwise your answers here seed the vault's shared set. A vault whose shared set predates the use-case-writer, ui-designer, or researcher roles is asked for those separately, even when it rides the shared set for everything else.
 - **Asset types** — optional; declare any beyond the shipped feature/change/bug set now, or later via `/lazy-spec.add-asset-type`.
 - **Workflow mode** — `full` (design through implementation and testing, the default) or `spec-only` (stops after `design.md` approves, released only by an explicit operator word). Most code-bound products want `full`.

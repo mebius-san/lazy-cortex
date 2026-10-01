@@ -57,6 +57,8 @@ class AssetTypeField:
     DEFAULT_PATH: Folder name a new asset of the type lands in when the caller names none.
     START_DOC: The type's starting document as a `<file>:<doc_type>` token.
     DEFAULT_TOOLS: Tools the type implies before anyone has judged the asset.
+    GUIDELINES: Repo-relative guideline paths every job on an asset of the type carries,
+      whatever role it dispatches — a content type's record schema lives here.
   """
 
   ICON = "icon"
@@ -66,6 +68,7 @@ class AssetTypeField:
   DEFAULT_PATH = "default_path"
   START_DOC = "start_doc"
   DEFAULT_TOOLS = "default_tools"
+  GUIDELINES = "guidelines"
 
 
 # ----------------------------------------------------------------------------------------
@@ -343,6 +346,20 @@ def default_tools(asset_type: str, record: dict) -> list[str]:
     The declared tool names, empty when the type implies none.
   """
   return list((resolve(asset_type, record) or {}).get(AssetTypeField.DEFAULT_TOOLS) or [])
+
+
+def guidelines(asset_type: str, record: dict) -> list[str]:
+  """
+  Resolve the guideline paths every job on an asset of this type carries, whatever its role.
+
+  Args:
+    asset_type: The type of the asset being dispatched on.
+    record: The product's settings record, or `{}` to consult only the shipped set.
+
+  Returns:
+    The declared repo-relative paths, empty when the type declares none.
+  """
+  return list((resolve(asset_type, record) or {}).get(AssetTypeField.GUIDELINES) or [])
 
 
 def type_of(note: Path) -> str:
