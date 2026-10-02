@@ -1128,6 +1128,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 6.1.2 — 2026-10-02 UTC
+
+- Fixed Iconize file icons reverting to their old colour on mobile: `iconize-reloader` no longer re-reads `data.json` after its own folder writes, so Iconize's pending in-memory icons are kept. External changes and the manual reload command still re-read.
+
 ### 6.1.1 — 2026-09-30 UTC
 
 - `lazy-obsidian.update-plugin` no longer downloads and searches the ~4 MB Obsidian community registry by hand. A new `lookup` command in the vault-manifest script fetches the registry once a day, caches it, and prints the plugin's GitHub repo, so headless installs no longer stall on that step.

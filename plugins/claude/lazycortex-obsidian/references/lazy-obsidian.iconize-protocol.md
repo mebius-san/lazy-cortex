@@ -2,7 +2,7 @@
 name: lazy-obsidian.iconize-protocol
 version: 2
 description: Vault-local Iconize protocol — how the Python worker, the bundled `iconize-reloader` Obsidian plugin, and Iconize itself cooperate to compute file/folder icons from frontmatter and apply them at the live `data.json`.
-protocol_version: 2.3.1
+protocol_version: 2.3.2
 hook_version: 4.0.0
 # `version` mirrors the icon-map schema generation (iconize_sync.py SCHEMA_VERSION), not this
 # document's own revision — protocol_version / hook_version above track the protocol itself.
@@ -14,7 +14,7 @@ Single source of truth for how file and folder icons are computed and where they
 
 - **Python worker** (`${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py`) — reads frontmatter + the local `obsidian-icon-map.json`, resolves each note's icon/color, writes the result back into that note's frontmatter as `iconize_icon` / `iconize_color`. Never touches `data.json`.
 - **iconize-reloader plugin** (vault-shipped, at `<vault>/plugins/iconize-reloader/`) — watches folder-note frontmatter and writes folder-keyed entries into `.obsidian/plugins/obsidian-icon-folder/data.json`. Also repaints the file explorer when `data.json` changes on disk.
-- **Iconize** (community plugin `obsidian-icon-folder`) — reads frontmatter via its native frontmatter-icon feature and paints file icons; reads folder-keyed entries out of `data.json` and paints folder icons.
+- **Iconize** (community plugin `obsidian-icon-folder`) — reads frontmatter via its native frontmatter-icon feature and paints file icons, persisting each one as a file-keyed `data.json` entry of its own; reads folder-keyed entries out of `data.json` and paints folder icons.
 
 This file describes MECHANICS (resolver inputs/outputs, frontmatter shape, folder-note routing, version policy). The declarative resolver rules live in `.claude/iconize/obsidian-icon-map.json` — edit that to change what icons are produced or to add your own registries.
 
@@ -44,7 +44,7 @@ iconize_color: "#fde68a"
 **`data.json` writers — exhaustive:**
 
 - **iconize-reloader plugin** — writes folder-keyed entries derived from folder-note frontmatter (see "Folder Notes routing" below). This is the only automated writer in the iconize-sync system.
-- **Iconize itself** — writes file-keyed entries when the user picks an icon from its right-click menu, and rewrites its own `settings` / `rules` / `recentlyUsedIcons` blocks on UI interaction.
+- **Iconize itself** — writes file-keyed entries from frontmatter: with `iconInFrontmatterEnabled` on, its `metadataCache` `resolve` handler reads the two configured field names on every re-index of a note and stores the result under the note's path (`addFolderIcon` / `addIconColor`, then `saveIconFolderData`), so every note carrying `iconize_icon` gets a file-keyed entry. The "Refresh icons from frontmatter" button does the same for the whole vault. It also writes file-keyed entries when the user picks an icon from its right-click menu, and rewrites its own `settings` / `rules` / `recentlyUsedIcons` blocks on UI interaction. These file-keyed entries are Iconize's cache of the frontmatter, never a source: `lazy-obsidian.capture` drops them, the reloader never touches them, and a stale one is repaired by re-indexing the note or by that button.
 - **Worker** — never writes `data.json`. Frontmatter-only.
 
 Folder-keyed entry shape: `"<vault-relative-folder-path>": {"iconName": "...", "iconColor"?: "..."}`.

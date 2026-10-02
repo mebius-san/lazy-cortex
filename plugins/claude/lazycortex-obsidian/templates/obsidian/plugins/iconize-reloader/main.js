@@ -1,6 +1,6 @@
 'use strict';
 
-const RELOADER_VERSION = '2.4.2';
+const RELOADER_VERSION = '2.4.3';
 
 const { Plugin, PluginSettingTab, Setting, Platform } = require('obsidian');
 
@@ -398,19 +398,25 @@ class IconizeReloaderPlugin extends Plugin {
     let running = false;
 
     // Schedule a refreshTree after one of our own writes. Needed because the
-    // fs.watch-based onChange suppresses self-writes (to avoid loops), but
-    // Iconize's in-memory `data` is now stale relative to the file we just
-    // wrote. Without a direct call, the file-explorer shows no new icon until
-    // something else (user click, external edit, app reload) triggers a
-    // refresh.
+    // fs.watch-based onChange suppresses self-writes (to avoid loops), so
+    // nothing else repaints the file-explorer until a user click, an external
+    // edit or an app reload. Our own writes are already mirrored into
+    // Iconize's in-memory `data` (mirrorFolderEntryToMemory), so this path
+    // does NOT re-read data.json: on mobile the adapter gives no ordering
+    // between Iconize's pending saveData() and our read, and a stale read
+    // would replace the file-keyed entries Iconize's frontmatter handler just
+    // updated in memory — the next Iconize save then writes the old colour
+    // back to disk (reloader 2.4.3).
     const scheduleSelfRefresh = () => {
       if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => { debounceTimer = null; refreshTree(); }, DEBOUNCE_MS);
+      debounceTimer = setTimeout(() => { debounceTimer = null; refreshTree({ reload: false }); }, DEBOUNCE_MS);
     };
 
     // Refresh iconize WITHOUT disabling it. Sequence:
-    //   1. Pull fresh data.json into iconize's in-memory `data` via its own
-    //      Plugin.loadData() — same shape iconize itself uses.
+    //   1. (reload: true — external changes and the manual command only) pull
+    //      fresh data.json into iconize's in-memory `data` via its own
+    //      Plugin.loadData() — same shape iconize itself uses. Skipped after
+    //      our own writes, see scheduleSelfRefresh.
     //   2. Strip existing `.iconize-icon` DOM nodes from every file-explorer
     //      tree-item. Required because addAll's `children.length === 2 || === 1`
     //      check fails for folders that already have an icon (folder baseline
@@ -423,12 +429,12 @@ class IconizeReloaderPlugin extends Plugin {
     //   4. Trigger workspace `layout-change` — re-paints file-explorer, tabs,
     //      and title icons from the now-fresh `data`. No window reload, no
     //      plugin toggle, no race with iconize's onunload writeback.
-    const refreshTree = async () => {
+    const refreshTree = async ({ reload = true } = {}) => {
       if (running) return;
       running = true;
       try {
         const iconize = this.app.plugins.plugins[TARGET_PLUGIN_ID];
-        if (iconize && typeof iconize.loadData === 'function') {
+        if (reload && iconize && typeof iconize.loadData === 'function') {
           const fresh = await iconize.loadData();
           if (fresh && typeof iconize.data === 'object' && iconize.data !== null) {
             for (const k of Object.keys(iconize.data)) delete iconize.data[k];
@@ -795,7 +801,7 @@ class IconizeReloaderPlugin extends Plugin {
     this.addCommand({
       id: 'reload-iconize',
       name: 'Reload Iconize now',
-      callback: refreshTree,
+      callback: () => refreshTree(),
     });
 
     this.addSettingTab(new IconizeReloaderSettingTab(this.app, this));
