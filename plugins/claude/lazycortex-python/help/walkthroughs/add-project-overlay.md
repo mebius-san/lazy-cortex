@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a documentation-guideline clause in the project overlay, then confirm lazy-python.docstring-writer honors it in the generated docstring.
-last_regen: 2026-09-30
+last_regen: 2026-10-02
 diagram_spec:
   anchor: "How the overlay and pyproject.toml layers combine"
   request: "Sequence diagram of one flow: the user registers an extra_docstring_sections entry (name/style/anchor/ref_exempt) plus optional d2_exempt_marker_attrs / private_name_allowlist in pyproject.toml [tool.pcf], writes the section's content rules in docs/guidelines/documenting_guidelines.md, and dispatches lazy-python.docstring-writer. The agent reads the plugin's documenting-guidelines canon, then the project overlay (override-on-conflict), then CLAUDE.md's Documenting section if present, applies the merged ruleset plus the pyproject.toml registrations to the target file, then runs chk-py against the changed file to verify. Show the overlay directory and pyproject.toml [tool.pcf] block as the two inputs feeding one agent and one verification command."
@@ -9,8 +9,8 @@ source_skills:
   - lazy-python.install
   - lazy-python.docstring-writer
   - lazy-python.coding-guidelines
-source_sha: 8c642c6f0911b2d8c00a32979298d23b5420a63a
-surface_sha: 381d4c2c895fb03c613ab48ad77f4d4f5ebe5e88c885a98c61adc567935bc6a0
+source_sha: 10f5eb690e6b686f0d39cdf13ae8497d4ff7cb84
+surface_sha: 57c4eb83406e3fc0a5e38a93f2ebedc22312d155cabd340b1d745d86be1236ce
 ---
 # Add a project-specific documentation-guideline clause and confirm the docstring writer honors it
 
@@ -44,6 +44,8 @@ If it's missing, re-run:
 ```
 
 The install is idempotent and quiet: Step 5 creates only the missing stub files and never touches an overlay you've already started editing — safe to re-run mid-project without losing prior work.
+
+The same run also refreshes the plugin's always-loaded rules in `.claude/rules/` (Step 1) — `lazy-python.style`, `lazy-python.docstrings`, `lazy-python.tests`, and `lazy-python.failing-tests`, the rule for how a failing test is judged before anything is fixed. Those mirrors are plugin-owned and overwritten on every install; your overlay files are the project-owned layer, so put project rules there rather than in the mirrors.
 
 ### Step 2 — Understand what lazy-python.docstring-writer reads
 

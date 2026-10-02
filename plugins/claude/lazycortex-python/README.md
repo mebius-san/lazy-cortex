@@ -85,6 +85,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 | Rule | Description |
 |---|---|
 | `lazy-python.docstrings.md` | Python docstring discipline — use the lazy-python.docstring-writer agent. Triggers on **/*.py. |
+| `lazy-python.failing-tests.md` | What to do when a test fails — judge which side is wrong before touching either, never bend correct code to an outdated test, never edit what a test asserts or exclude it from the run without the user's explicit yes. |
 | `lazy-python.style.md` | Python style critical reminders + Verification Order. Triggers on **/*.py. |
 | `lazy-python.tests.md` | Python test placement, naming, and writing discipline — use the lazy-python.test-writer agent. Triggers on tests/**/*.py. |
 

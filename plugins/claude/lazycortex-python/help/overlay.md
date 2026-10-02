@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Project-specific guideline files in docs/guidelines/ plus [tool.pcf] declarations in pyproject.toml let you extend the project-neutral canon per repo.
-last_regen: 2026-09-30
+last_regen: 2026-10-02
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -10,8 +10,8 @@ source_skills:
   - lazy-python.comment-guidelines
   - lazy-python.testing-guidelines
   - lazy-python.guidelines-index
-source_sha: fa58aaf006252c324884b7aa09cdcb17a8cb7a97
-surface_sha: 9ab1bbcc02abe8f4d3911bacb7f97d2fc6a0e80376780093750eeddb2742e301
+source_sha: 269a2339e2c6d77923f19082eeca9da97721c57c
+surface_sha: 356444c8b78d8846c8cb19ce886c9b31a8fa51e5b2abac34b5c8ad540180a36b
 ---
 # Per-repo overlay guidelines
 
@@ -29,7 +29,7 @@ When `/lazy-python.install` runs its Step 5, it scaffolds four stub files under 
 
 **`lazy-python.comment-guidelines`** is the sibling canon documenting-guidelines was split from for size — purpose comments and guard clauses, the marker-comment register (`TODO:`, `TMP:`, `DBG:`, `ref:`, `opt:`, `limit:`, `Decision:`, `guard:`, `waiver:`), `# Contract:` blocks, and `Domain(…):` blocks. It has no `[tool.pcf]` overlay hook of its own and no dedicated `docs/guidelines/*.md` stub — the one project-specific pointer it defers to is the domain-groups dictionary path (`docs/guidelines/domain-groups.md`), covered under "How they work together" below, where `Domain(…):` group names come from.
 
-**`lazy-python.testing-guidelines`** is the canon that `testing_guidelines.md` extends: the `<YourBaseTest>` placeholder every generated test class inherits from, the seven Paranoid-Testing categories tests are expected to cover, and the log-level suppression pattern (`with_log_level(...)`) tests use around expected warnings or errors. Your overlay is the only place that names the real base class, any aggregate test file pattern, and the log-suppression helper your project actually ships.
+**`lazy-python.testing-guidelines`** is the canon that `testing_guidelines.md` extends: the `<YourBaseTest>` placeholder every generated test class inherits from, the seven Paranoid-Testing categories tests are expected to cover, and the log-level suppression pattern (`with_log_level(...)`) tests use around expected warnings or errors. Your overlay is the only place that names the real base class, any aggregate test file pattern, and the log-suppression helper your project actually ships. What to do when a test fails is not an overlay matter: the always-loaded `lazy-python.failing-tests` rule owns it, and the canon points at it.
 
 **`lazy-python.guidelines-index`** is the entry point tying the canon files together, and its own "Portability notes" section is effectively a pointer at what belongs in your overlay: CLI tool names (`chk`/`tst`/`imp`), the copyright header owner/license text, and the base test class are all called out there as placeholders a project ships in its own overlay rather than in the plugin.
 
@@ -47,6 +47,8 @@ The overlay lives in four files, one per stub topic:
 `docs/guidelines/` also holds a fifth file that is not one of the four stubs: `domain-groups.md`, the language-neutral domain-groups dictionary that `Domain(<group>):` knowledge markers draw their group names from (per `lazy-python.comment-guidelines.md`'s Domain Comments section and the `docs/guidelines/domain-groups.md` path it names). `/lazy-python.install` Step 5 does not scaffold it — the dictionary is owned by the wiki plugin's domain tooling and built by `/lazy-python.knowledge-sweep` when a repo adopts markers without that tooling. Don't mistake it for a fifth overlay stub; it shares the directory, not the mechanism.
 
 The practical workflow: fill in the overlay stub for the topic you care about, add any matching `[tool.pcf]` declaration to `pyproject.toml` if the rule is mechanical, then dispatch the relevant writer or reviewer agent (see the agents block article for their full dispatch discipline). The agent picks up your additions immediately — no flag, no re-install, no changes to the prompt. If you later tighten or extend a rule, re-run the agent against the affected files; it re-reads the overlay on every dispatch and its output will reflect the updated spec.
+
+**Overlay cannot loosen the failing-test policy.** `/lazy-python.install` mirrors the plugin's rules, including `lazy-python.failing-tests`, into `.claude/rules/`. It says that a failing test is judged before it is fixed (code wrong, or test outdated), that what a test asserts changes only with your explicit yes naming the test, and that no test is taken out of the run (deselecting, ignoring, narrowing collection, new skip or xfail markers) without that yes. It is plugin-owned and refreshed on every install; your `docs/guidelines/` files add project conventions around it and do not replace it.
 
 Neither writer agent requires the overlay to be present. When `docs/guidelines/` does not exist or a topic file is missing, the writer proceeds with the project-neutral canon alone. The reviewer agent behaves the same way — an empty or missing `docs/guidelines/` tree just means its `overlay` guideline layer is empty, and it reviews against canon only. The stubs created by `/lazy-python.install` Step 5 are intentionally minimal — add only what differs from the canon.
 

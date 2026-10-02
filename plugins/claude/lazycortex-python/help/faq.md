@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, knowledge markers, tests, and the checker stack.
-last_regen: 2026-09-30
+last_regen: 2026-10-02
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -21,8 +21,8 @@ source_skills:
   - review.py
   - lazy-python.coding-guidelines
   - lazy-python.checking-guidelines
-source_sha: fa58aaf006252c324884b7aa09cdcb17a8cb7a97
-surface_sha: ba5f5b63cc3a771afc5f9d7e6288247429dc4cc1bc72a787e5ae26fac3444598
+source_sha: 8439297f2cd29c9edeab371cf23ceaf3fa88e2d3
+surface_sha: f94202694a9c73d86f5774f36e4cb1569e53fc5c9c94d3c65f335ce490c0ac82
 ---
 # Frequently asked questions
 
@@ -296,9 +296,17 @@ No. Per the Golden Rule in `lazy-python.test-writer`: if a test correctly reflec
 
 ---
 
+## Why won't Claude exclude or skip a failing test to get the run green?
+
+The `lazy-python.failing-tests` rule, which `/lazy-python.install` mirrors into `.claude/rules/` and loads with any Python source, forbids taking a test out of the run without your explicit yes naming that test. That covers `--deselect`, `-k "not ..."`, `--ignore` and `--ignore-glob` (on the command line or in `addopts`), `collect_ignore` and collection-dropping hooks, narrowing `testpaths` or `python_files`, new `skip` / `skipif` / `xfail` markers, and reporting a subset run as green. Being sure the test is wrong is a reason to ask, not to exclude. When a test fails, Claude first decides which side is wrong: a code bug gets fixed in the code; an outdated test gets shown to you with the proposed diff, and you decide. A job with no operator leaves the test failing and finishes as blocked rather than done.
+
+---
+
 ## `/lazy-python.check-style` wants to fix an issue by editing a test file. Why is it stopping to ask?
 
 Step 5's test-edit guard fires whenever the minimal fix for a Step 3 or Step 4 finding would touch a file under `tests/**`. The skill names the exact test file and the finding it's tied to, then asks you to choose between letting it edit that test just for this run or leaving the test untouched and fixing the code instead — it never doctors a test on its own judgement, because a test edit can just as easily paper over a real regression as fix a stale expectation. Choosing to keep the test means any remaining issue attached to it stays open in Step 6's report rather than being silently cleared.
+
+The always-loaded `lazy-python.failing-tests` rule backs this guard: a failing test is judged before anything is fixed, and bending correct code to an outdated test is as forbidden as quietly editing what the test asserts.
 
 ---
 

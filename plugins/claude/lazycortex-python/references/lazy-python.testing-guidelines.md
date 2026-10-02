@@ -15,7 +15,7 @@ for Python projects that adopt these conventions.
 
 ## Editing Existing Tests (test-edit policy)
 - **Mechanical adaptation to a user-approved contract change is allowed without asking**: signature / parameter updates, tuple-to-dataclass unpack changes, constructor-argument updates, renames following a production rename. Assertions must stay semantically identical; the reviewer verifies the edit is genuinely mechanical.
-- **Changing what a test asserts, weakening an assertion, or deleting a test requires explicit, contemporaneous user approval naming the test.** A failing assertion means production drifted from the contract: fix the code, not the test — unless the user approved the contract change and the test edit follows from it.
+- **Changing what a test asserts, weakening an assertion, or deleting a test requires explicit, contemporaneous user approval naming the test.** A failing assertion means one side drifted — decide which first. Code that broke a contract still in force is fixed; a test that encodes a contract the code changed on purpose is shown to the user with the proposed diff and the reason, and the code is never bent back to satisfy it. Unsure which side is wrong — ask, never settle it by editing either side.
 - Adding new test files is always allowed.
 
 

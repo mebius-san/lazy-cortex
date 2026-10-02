@@ -1,11 +1,14 @@
 ---
 chapter_type: block
-summary: Three always-loaded rules shape every Python edit; six reference guidelines back the writer agents and chk-py/tst-py with the full canon.
-last_regen: 2026-09-30
+summary: Four always-loaded rules shape every Python edit and every failing test; six reference guidelines back the writer agents and chk-py/tst-py.
+last_regen: 2026-10-02
 diagram_spec:
-  anchor: "How rules and guidelines connect"
-  request: "Architecture diagram showing three path-scoped rules (lazy-python.style on **/*.py, lazy-python.docstrings on **/*.py, lazy-python.tests on tests/**/*.py) feeding into Claude's edit loop, and six reference guidelines (coding, documenting, comment, testing, checking, guidelines-index) being read by the docstring-writer agent, test-writer agent, and the chk-py/tst-py checker scripts"
-  kind_hint: architecture
+  - anchor: "Rules and the edit loop"
+    request: "Architecture diagram showing four path-scoped rules (lazy-python.style on **/*.py, lazy-python.docstrings on **/*.py, lazy-python.failing-tests on **/*.py plus pytest config files, lazy-python.tests on tests/**/*.py) feeding into Claude's edit loop"
+    kind_hint: architecture
+  - anchor: "Guidelines and their readers"
+    request: "Architecture diagram showing six reference guidelines (coding, documenting, comment, testing, checking, guidelines-index) being read by the docstring-writer agent, the test-writer agent, and the chk-py/tst-py checker scripts"
+    kind_hint: architecture
 source_skills:
   - lazy-python.style
   - lazy-python.docstrings
@@ -16,12 +19,13 @@ source_skills:
   - lazy-python.testing-guidelines
   - lazy-python.checking-guidelines
   - lazy-python.guidelines-index
-source_sha: fa58aaf006252c324884b7aa09cdcb17a8cb7a97
-surface_sha: 490cfb88b7016b049e10c1419b533669ff47d10cea1cb5b6231cf3987e3c1304
+  - lazy-python.failing-tests
+source_sha: 8439297f2cd29c9edeab371cf23ceaf3fa88e2d3
+surface_sha: fdc922d300455896bd45560a9301cc50503d95f6ffbdf9011297c354d392cbe9
 ---
 # Python coding discipline — rules and guidelines
 
-The discipline block is the layer that makes every Python edit in your project consistent. It ships three rules that Claude Code loads automatically whenever it opens a `.py` file, and six reference guidelines that the `lazy-python.docstring-writer` agent, the `lazy-python.test-writer` agent, and the `chk-py` / `tst-py` checker scripts consult before doing their work. You do not invoke any of these members directly — they operate silently in the background, shaping what Claude writes and what the checkers accept.
+The discipline block is the layer that makes every Python edit in your project consistent. It ships four rules that Claude Code loads automatically — three whenever it opens a `.py` file (style, docstrings, and the failing-tests policy, which also loads on pytest config files) and one for the test tree — and six reference guidelines that the `lazy-python.docstring-writer` agent, the `lazy-python.test-writer` agent, and the `chk-py` / `tst-py` checker scripts consult before doing their work. You do not invoke any of these members directly — they operate silently in the background, shaping what Claude writes and what the checkers accept.
 
 The split between rules and guidelines is deliberate. Rules are short and always in context: they remind Claude of the highest-consequence style violations, direct it to the checker pipeline, and enforce the "use the agent, don't hand-write" discipline. Guidelines are long and loaded on demand: they carry the full canon with rationale, examples, and edge cases that would be too heavy to keep in context on every single edit.
 
@@ -44,7 +48,9 @@ The split between rules and guidelines is deliberate. Rules are short and always
 
 **`lazy-python.docstrings`** also loads on `**/*.py` and enforces a single hard constraint: never write docstrings manually — dispatch the `lazy-python.docstring-writer` agent instead. The rule explains why: the agent reads the full documenting canon plus the project overlay on every dispatch, and hand-writing from session memory reliably violates at least one of the eight Self-Check clauses. The rule also covers the most-forgotten inline conventions: opening and closing `"""` each on their own line, single backticks for inline code, no descriptions of internal algorithms, and preservation of `TODO:`, `TMP:`, `DBG:`, `ref:`, `opt:`, `guard:`, `limit:`, `Decision:`, and `Domain(…)` markers. `limit:`-marked code is documented as complete as written — never as incomplete or awaiting the named upgrade; `Decision:`-marked code is documented as settled as written — never carrying the recorded rationale into the docstring; `opt:`-marked code is documented as what it does — never carrying the underlying assumption into the docstring. Formulas stay plain text everywhere in Python source — docstrings and comments alike — turning them into Obsidian-compatible LaTeX is the job of the markdown-assembly tooling, not of the source. The full canon lives in `lazy-python.documenting-guidelines.md`; the comment-side rules the preservation clause leans on — the `Domain(…)`, `Contract:`, and marker-comment shapes — now live in the sibling `lazy-python.comment-guidelines.md`, split out of the docstring canon so each reference stays focused on what its own consumer needs.
 
-**`lazy-python.tests`** loads only on `tests/**/*.py` — narrower scope because test discipline is only relevant when Claude is actually working inside the test tree. Its core mandate mirrors the docstrings rule: never write tests manually — dispatch the `lazy-python.test-writer` agent. It also carries the placement rules (test tree mirrors source tree), naming rules (`test_init`, `test_prop__<name>`, `test_feature__<variation>`, max 35 characters), and the ban on `setUp` / `tearDown` (pytest fixtures only). The base test class is intentionally not hardcoded in the plugin canon — the correct base class for each test type lives in your project's `docs/guidelines/testing_guidelines.md` overlay, and the `lazy-python.test-writer` agent reads that overlay on every dispatch. The rule also hard-prohibits modifying an existing test to fix a failing assertion — a failing assertion means production drifted from the contract the test encodes; changing what a test asserts, weakening it, or deleting it requires explicit, contemporaneous user approval naming the test. The full canon lives in `lazy-python.testing-guidelines.md`.
+**`lazy-python.tests`** loads only on `tests/**/*.py` — narrower scope because test discipline is only relevant when Claude is actually working inside the test tree. Its core mandate mirrors the docstrings rule: never write tests manually — dispatch the `lazy-python.test-writer` agent. It also carries the placement rules (test tree mirrors source tree), naming rules (`test_init`, `test_prop__<name>`, `test_feature__<variation>`, max 35 characters), and the ban on `setUp` / `tearDown` (pytest fixtures only). The base test class is intentionally not hardcoded in the plugin canon — the correct base class for each test type lives in your project's `docs/guidelines/testing_guidelines.md` overlay, and the `lazy-python.test-writer` agent reads that overlay on every dispatch. It also requires a regression test to be written and seen failing before the bug is fixed, and hands the policy on existing tests to the `lazy-python.failing-tests` rule (next paragraph). The full canon lives in `lazy-python.testing-guidelines.md`.
+
+**`lazy-python.failing-tests`** loads on any `**/*.py` file and on pytest configuration (`pyproject.toml`, `pytest.ini`, `setup.cfg`, `tox.ini`) — not only on test files — because a test failure is just as often met while editing production code or the run configuration. It treats a failing test as a question, not an instruction. First, decide which side is wrong: if the code breaks a contract that still holds, fix the code; if the code changed on purpose and the test still encodes the old contract, stop, show the test, the intended change it contradicts and the proposed test diff, and ask you; if Claude cannot tell which, it asks. Bending correct code to turn a test green is forbidden in every form — reverting an intended change, keeping a removed parameter or code path alive only for a test, adding a branch for the test's input, hardcoding the expected value. Second, changing what a test asserts needs your explicit "yes" naming the test: editing, weakening or deleting an assertion, its expected value or tolerance, changing a fixture so a different scenario runs, deleting a test or test file, or regenerating tests after a refactor. Comments, docstrings, assert messages, names, formatting, renaming or moving test files with every assertion intact, and repeating a production rename in the tests that call it stay free; so does adding new test files. Third, a test never leaves the run without your "yes": no `--deselect`, `-k "not ..."`, `--ignore` or `--ignore-glob` (on the command line or in `addopts`), no `collect_ignore` or collection-dropping hook, no narrowing `testpaths` or `python_files`, no new `skip` / `skipif` / `xfail` markers, and no reporting a subset run as a green suite. Being sure a test is wrong is a reason to ask, never to exclude it. A job with no operator to ask (an expert job, a non-interactive subagent) leaves the test in the run and failing, raises the question through its normal escalation channel, and finishes as blocked, never as done.
 
 **`lazy-python.coding-guidelines`** is the main reference, covering code formatting, blank-line rules, function signature wrapping, import ordering (including where a new name gets appended inside an existing import block, without reordering what's already there), naming conventions (classes, methods, variables, enums, TypeVars, TypeAliases), type annotations, class design, method and parameter design, error handling, magic literals, the Knowledge Marker Rules for `Contract:` / `Domain(…)` blocks (mirrored in the `lazy-python.style` reminder above, with the block shapes themselves defined in `lazy-python.comment-guidelines.md`), and the waiver comment system. Its General Principles now declare **Source Language**: every source file — comments, docstrings, `Domain(…)` / `Contract:` blocks, log and error strings, identifiers — is written in English regardless of what language the project's own documents, specs, and operator conversations use, or what its settings' `language` key declares; a quoted foreign-language literal the code genuinely handles (a user-facing string, a test fixture, a term being matched) is data, not prose, and stays as it is. A project's language governs only what gets generated from the source — the domain-spec writer translates a group's `Domain(…)` blocks into it, so the translation lives in the generated doc, never the source. The magic-literals auto-exempt sets (trivial numbers `-1`/`0`/`0.25`/`0.5`/`1`/`2`/`4`, trivial strings) extend rather than replace via `[tool.pcf] allowed_magic_numbers` / `allowed_magic_strings` in your `pyproject.toml` — declare domain constants such as angle values (`45`/`90`/`180`/`270`/`360`) once instead of wrapping them in an Enum every time. Its General Principles also include **No Test-Driven Production Surface**: production code must never grow a parameter, dual-path accessor, "test mode" flag, or extra indirection whose only consumer is a test — production design decides itself, and tests adapt to it (feeding data through the same loading path production uses, using fixtures and monkeypatch for test-only needs) rather than the other way around. Its Module Structure section makes the module docstring required in `__init__.py`, and permitted in any other module — it states what the file as a whole is for and must not duplicate the contract prose of the classes inside, since each already carries its own docstring. Claude reads this before making non-trivial code changes; `chk-py` enforces many of the same rules mechanically, and the `chk-py review` phase covers the parts a checker can't (purpose-comment meaningfulness, block separation, naming semantics).
 
@@ -52,7 +58,7 @@ The split between rules and guidelines is deliberate. Rules are short and always
 
 **`lazy-python.comment-guidelines`** is the comment half of the same canon, split out so the `lazy-python.contract-writer` and `lazy-python.domain-writer` agents read only what they need rather than the whole docstring gallery: Domain comments, Contract comments, and Marker comments (including a precise, exit-only definition of `guard:` — the `if` body (or an equivalent `try`/`except` validation whose `except` block exits the same way) must return, continue, break, raise, or exit; calls that always raise (`pytest.skip`, `sys.exit`) count as exits; a branch or accumulation `if` gets a plain comment instead, never a `guard:` label that invents a skip the code doesn't perform). A `Contract:` block is reserved for significant caller-visible promises that must survive refactoring, and only where both halves of the significance test hold: calling code builds on the promise, and a plausible future change could silently break it. A block is hollow — not written, and removed together with its `Guarantees` bullet if it exists — when it restates the summary line, signature, or a type hint, describes how the code is built rather than what is promised, is satisfied by any correct implementation, copies the interface's contract verbatim, or sits on a private helper. Promises that meet the bar include data ownership, transaction requirements, ordering/lifecycle constraints, override obligations, and similar invariants a caller can rely on. It explicitly excludes presentation details: the exact wording or format of human-readable output such as exception message text, log lines, or pretty-print/repr formatting is not contract-worthy, because pinning it freezes wording that must stay free to change. A contract on such a string is justified only when a caller demonstrably parses it programmatically, and then the contract names the parsed structure, not the prose. Placement follows the interface layer: a guarantee an interface declares for every implementation is written once, on the abstract declaration — the block sits inside the abstract method's body, above its `raise NotImplementedError` — and every implementation's docstring `Guarantees` section traces the promise back to the interface instead of repeating the block; a contract only one implementation adds on top of the interface's promise stays in that implementation. A `Contract:` block duplicated on both the interface declaration and an implementation is a finding — keep the interface's copy, drop the implementation's, and point its `Guarantees` section at the interface. Every `Contract:` block, including one a class inherits from an interface declaration, becomes at least one test of the implementation, and every `Domain(…):` block stating a formula or rule becomes the source of a test's hand-worked expected values — never read off the implementation (`lazy-python.testing-guidelines.md`'s Knowledge-derived tests). A marker's register tells you its category: CAPS markers (`TODO:`, `TMP:`, `DBG:`) are temporary and die before the work is done; Capitalized markers (`Domain(…):`, `Contract:`, `Decision:`) open standalone knowledge blocks — separated by a blank line from the surrounding code and from any other comments, never glued to a statement in place of the block's own purpose comment; lowercase markers (`opt:`, `guard:`, `limit:`, `waiver:`, `ref:`) are one-line annotations. No LaTeX anywhere in Python source — formulas are plain prose in docstrings and every comment alike: `Domain(…)` blocks, `Contract:` blocks, `Decision:` markers, and plain `#` comments, and the markdown-assembly tooling renders them for Obsidian at build time. The purpose-comment rule on regular code (not docstrings) is split the same way as everywhere else in the canon: `pcf`'s `check_block_comments` check proves a comment is present at the start of every block; whether it states a real purpose is the review phase's call.
 
-**`lazy-python.testing-guidelines`** covers test directory structure, class inheritance (base class selected from the project overlay), test-class and test-method naming, the Paranoid Testing Strategy (now 9-category coverage — the last three derived from `Contract:`, `Domain(…):`, and `opt:` markers in method bodies, per its *Knowledge-derived tests* section), assert conventions, fixture patterns, logging suppression in tests, and the test-edit policy: changing an assertion, weakening it, or deleting a test needs explicit, contemporaneous user approval naming that test by name — except a mechanical adaptation to a contract change you already approved (a signature update, a tuple-to-dataclass unpack change, a constructor-argument update, a rename following a production rename), where assertions stay semantically identical and no separate approval is needed. The `lazy-python.test-writer` agent reads this on every dispatch.
+**`lazy-python.testing-guidelines`** covers test directory structure, class inheritance (base class selected from the project overlay), test-class and test-method naming, the Paranoid Testing Strategy (now 9-category coverage — the last three derived from `Contract:`, `Domain(…):`, and `opt:` markers in method bodies, per its *Knowledge-derived tests* section), assert conventions, fixture patterns, logging suppression in tests, and the test-edit policy (the same one the `lazy-python.failing-tests` rule keeps in context): changing an assertion, weakening it, or deleting a test needs explicit, contemporaneous user approval naming that test by name, and code is never bent back to satisfy a test that encodes an outdated contract — except a mechanical adaptation to a contract change you already approved (a signature update, a tuple-to-dataclass unpack change, a constructor-argument update, a rename following a production rename), where assertions stay semantically identical and no separate approval is needed. The `lazy-python.test-writer` agent reads this on every dispatch.
 
 **`lazy-python.checking-guidelines`** documents the tool chain — `ruff`, `mypy`, `pylint`, `pytest`, `py_compile`, and `toi` (type-only-import detection, which now honours the same `# waiver: <reason>` convention as `pcf` to silence false positives for names a runtime library resolves from annotations, e.g. `inspect.signature(eval_str = True)`, pydantic, or FastMCP/FastAPI schemas) — the four-step verification order (the first three run after every batch of edits; the fourth, guideline review, keeps its own cadence), and the guideline-review phase itself. Every one of those tools runs only inside `chk-py` / `tst-py`, in pipeline order with shared config — the canon documents them as wrapper-driven steps run through the shell interpreter rather than relying on an executable bit (`bash ./cli/chk-py all <file>.py -q`, `bash ./cli/chk-py all -q`, `bash ./cli/tst-py <module> -q`), never as commands you type by hand. `chk-py review` is the LLM-side counterpart to the deterministic checkers: it resolves a scope (current diff plus untracked files, explicit paths given as arguments, or `--base <ref>` to review a whole unit of work with intermediate commits instead of just its tail), collects every applicable guideline layer, and names the `lazy-python.code-reviewer` agent to run against it — the command itself never calls an LLM, and it exits `2` while the review is pending, so a manifested-but-undecided review fails any pre-commit hook or CI job that runs it. The phase is deliberately not part of `chk-py all` — one dispatch carries the whole guideline canon regardless of how many files it judges, so its cost is fixed per run rather than per file, and it belongs at the end of a unit of work (recommended after a logical piece of work, mandatory at the end of a full cycle of planned work) rather than inside the edit loop. The purpose-comment rule is split across `pcf` and the review phase: `pcf`'s `check_block_comments` check (on by default, `[tool.pcf] check_block_comments = false` to disable) proves every block inside a function body opens with a comment — a `# waiver:` / `# noqa` / `# type:` / `# pylint:` / `# fmt:` / `# noinspection` line does not count; the review phase then judges whether that comment states a real purpose or just restates the code below it. The cache-marker rule is split the same way: `pcf` flags a `functools`-cached function or property (`cache`, `lru_cache`, `cached_property`) whose comment block above the decorator carries no `opt:` clause; a `# waiver: <reason>` on the first decorator line exempts it, and whether the clause names the real assumption stays the review phase's call. The source-language rule is checked the same way: `pcf`'s `check_language` check (on by default) reads `[tool.pcf] allowed_languages` (a list of language names, default `["english"]`) and flags any comment or docstring letter belonging to no listed language, admitting by unicode script so one entry covers every language written in it (`russian`, `chinese`, `japanese`, and their siblings are available by name); string literals are never scanned — a quoted foreign word is data the code handles — and a `# waiver: <reason>` above the line exempts a deliberate exception. What the checker can't see — prose that is grammatically English but reads as a transliteration — stays the review phase's call. You (or the agent dispatching on your behalf) run the reviewer it names, then render the findings with `chk-py review --render <findings.json>`, which exits non-zero on a `FAIL` finding exactly like a `pcf` FAIL would — that render is what clears the gate. A caller with no way to act on a pending review in its current context asks the operator via `AskUserQuestion` what to do with the scope rather than opting out of the phase. An unchanged scope reuses its previous verdict instead of re-dispatching. `chk-py` and `tst-py` implement the full order; the rule in `lazy-python.style` surfaces a condensed version so Claude respects the sequence even before running a checker, including the project-runner precedence clause.
 
@@ -82,6 +88,8 @@ The split between rules and guidelines is deliberate. Rules are short and always
 
 **Preferring a class over module-level functions.** The canon's default is a class — reach for one when the functions share state, a namespace, or a lifecycle. This is a recommendation, not a ban: a standalone script or worker with none of those needs is legitimate as a flat module of functions. What's still disallowed is a class whose only purpose is to hold unrelated functions with no shared state.
 
+**A test fails and you are tempted to edit it, skip it, or drop it from the run.** Don't, and don't let Claude: the `lazy-python.failing-tests` rule makes it judge which side is wrong first. Code that broke a live contract is fixed; a test that encodes an outdated contract is shown to you with a proposed diff and waits for your "yes" naming it. Excluding a test (`--deselect`, `-k "not ..."`, `--ignore`, `collect_ignore`, narrowed `testpaths`, a new `skip` / `xfail`) needs the same "yes" — a test you are sure is wrong stays in the run until you say otherwise.
+
 **Adding a parameter or branch "so tests can reach it".** That's the No Test-Driven Production Surface principle firing. Name the production caller that needs the new surface; if there isn't one, the change belongs in the test file (a fixture, a monkeypatch, test-local setup) instead of the class under test.
 
 **Gluing a `Domain(…):` / `Contract:` / `Decision:` block to the code around it.** These three Capitalized markers each open a standalone knowledge block, not a comment on the line below — `pcf` requires a blank line above the marker and a blank line after the last `#` line of its body. A `Domain(…):` block still needs a group name listed in the project's domain-groups dictionary (`docs/guidelines/domain-groups.md`; new groups need explicit user approval, and the reserved `unfiled` group parks a block whose real group isn't in the dictionary yet, until it's refiled), a bare `# Contract:` marker carries no text itself and states its guarantee on the following `#` lines, and `# Decision: <chose X, not Y> — <why>` records a real fork rather than an empty clause. All three survive edits verbatim; rewording or relocating one needs explicit, contemporaneous user approval.
@@ -104,61 +112,97 @@ The split between rules and guidelines is deliberate. Rules are short and always
 
 ## How rules and guidelines connect
 
+### Rules and the edit loop
+
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  subgraph rules [Path-scoped rules]
-    styleRule[lazy-python.style on **/*.py]
-    docstringsRule[lazy-python.docstrings on **/*.py]
-    testsRule[lazy-python.tests on tests/**/*.py]
+  subgraph scopes ["Path scopes"]
+    pyFiles[("**/*.py")]
+    pytestConfig[("pytest config files")]
+    testFiles[("tests/**/*.py")]
   end
 
-  subgraph editLoop [Claude's edit loop]
-    docstringWriter[docstring-writer agent]
-    testWriter[test-writer agent]
-    chkPy[chk-py checker script]
-    tstPy[tst-py checker script]
+  subgraph rules ["Path-scoped rules"]
+    styleRule["lazy-python.style"]
+    docstringsRule["lazy-python.docstrings"]
+    failingTestsRule["lazy-python.failing-tests"]
+    testsRule["lazy-python.tests"]
   end
 
-  subgraph guidelines [Reference guidelines]
-    codingGuide[(coding)]
-    documentingGuide[(documenting)]
-    testingGuide[(testing)]
-    checkingGuide[(checking)]
-    indexGuide[(guidelines-index)]
+  subgraph claude ["Claude"]
+    editLoop["Claude's edit loop"]
   end
 
-  styleRule -->|triggers on edit| editLoop
-  docstringsRule -->|triggers on edit| editLoop
-  testsRule -->|triggers on edit| editLoop
-
-  docstringWriter -->|reads| codingGuide
-  docstringWriter -->|reads| documentingGuide
-  docstringWriter -->|reads| indexGuide
-  testWriter -->|reads| codingGuide
-  testWriter -->|reads| testingGuide
-  testWriter -->|reads| indexGuide
-  chkPy -->|reads| checkingGuide
-  chkPy -->|reads| indexGuide
-  tstPy -->|reads| checkingGuide
-  tstPy -->|reads| indexGuide
+  pyFiles -->|scopes| styleRule
+  pyFiles -->|scopes| docstringsRule
+  pyFiles -->|scopes| failingTestsRule
+  pytestConfig -->|scopes| failingTestsRule
+  testFiles -->|scopes| testsRule
+  styleRule -->|feeds guidance| editLoop
+  docstringsRule -->|feeds guidance| editLoop
+  failingTestsRule -->|feeds guidance| editLoop
+  testsRule -->|feeds guidance| editLoop
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef store fill:#5f3a1e,stroke:#e2904a,color:#fff
+  class pyFiles store
+  class pytestConfig store
+  class testFiles store
+  class styleRule action
+  class docstringsRule action
+  class failingTestsRule action
+  class testsRule action
+  class editLoop entry
+```
 
-  class styleRule entry
-  class docstringsRule entry
-  class testsRule entry
+### Guidelines and their readers
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
+flowchart LR
+  subgraph references ["Reference guidelines"]
+    codingGuideline["coding"]
+    documentingGuideline["documenting"]
+    commentGuideline["comment"]
+    testingGuideline["testing"]
+    checkingGuideline["checking"]
+    guidelinesIndex["guidelines-index"]
+  end
+
+  subgraph agents ["Agents"]
+    docstringWriter["docstring-writer agent"]
+    testWriter["test-writer agent"]
+  end
+
+  subgraph scripts ["Checker scripts"]
+    checkerScripts["chk-py / tst-py"]
+  end
+
+  docstringWriter -->|reads documenting rules| documentingGuideline
+  docstringWriter -->|reads comment rules| commentGuideline
+  docstringWriter -->|reads coding rules| codingGuideline
+  docstringWriter -->|reads canon map| guidelinesIndex
+  testWriter -->|reads testing rules| testingGuideline
+  testWriter -->|reads checking rules| checkingGuideline
+  testWriter -->|reads canon map| guidelinesIndex
+  checkerScripts -->|reads checking rules| checkingGuideline
+  checkerScripts -->|reads canon map| guidelinesIndex
+
+  classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
+  classDef service fill:#1e4a5f,stroke:#4abce2,color:#fff
+  classDef store fill:#5f3a1e,stroke:#e2904a,color:#fff
+
   class docstringWriter action
   class testWriter action
-  class chkPy action
-  class tstPy action
-  class codingGuide store
-  class documentingGuide store
-  class testingGuide store
-  class checkingGuide store
-  class indexGuide store
+  class checkerScripts service
+  class codingGuideline store
+  class documentingGuideline store
+  class commentGuideline store
+  class testingGuideline store
+  class checkingGuideline store
+  class guidelinesIndex store
 ```
 
 ## See also

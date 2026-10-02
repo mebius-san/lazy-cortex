@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Dispatch lazy-python.test-writer against a new class and get a test file that covers all nine Paranoid-Testing categories, verified by tst-py.
-last_regen: 2026-09-30
+last_regen: 2026-10-02
 diagram_spec:
   anchor: "How test-writer walks a class"
   request: "Sequence diagram showing: user invokes lazy-python.test-writer for a target class; agent reads plugin canon (testing-guidelines + checking-guidelines) then project overlay (testing_guidelines.md, checking_guidelines.md, CLAUDE.md ## Testing section); agent identifies test targets (init paths, public methods, properties, documented guarantees, exceptions, operator overloads, Contract: blocks, Domain(...): blocks, opt: clauses); agent writes test file covering all 9 Paranoid-Testing categories; agent runs chk-py per file then chk-py all then tst-py on the module. Show the guideline read order (canon first, overlay second, CLAUDE.md ## Testing third) and the three-step toolchain verification."
@@ -9,8 +9,8 @@ source_skills:
   - lazy-python.test-writer
   - lazy-python.testing-guidelines
   - tst
-source_sha: 8630b2f660529eec9417e1f0b841caf21be615b1
-surface_sha: 48272faa3e6fc5619b89bf3f23cb89f25b3c0bbff014c7f9c40b5c4ee12e70e8
+source_sha: 269a2339e2c6d77923f19082eeca9da97721c57c
+surface_sha: ea322e4e9e045b0cb545cb77f4f7f56c61defdf129f0cd9df5d68925a7611d64
 ---
 # Generate tests that cover all nine Paranoid-Testing categories for a new class
 
@@ -121,7 +121,7 @@ After the agent completes, open the test file at the mirrored path. Check:
 
 - **Naming**: test class is `Test<ProductionClassName>`, test methods are under 35 characters, no production class name repeated in method names.
 - **Coverage**: scan the nine categories above. Each category should have at least the minimums the guidelines require, where the source has markers or docstring sections to drive it.
-- **Strict `xfail` markers**: any test the agent marked as failing against the current implementation. These are not errors in the test file — they are signals that the production code does not yet satisfy its own documented contract. Decide whether to fix the implementation or update the docstring; once the fix lands, the unexpected pass fails the run and the marker comes off in the same change.
+- **Strict `xfail` markers**: any test the agent marked as failing against the current implementation. These are not errors in the test file — they are signals that the production code does not yet satisfy its own documented contract. Decide whether to fix the implementation or update the docstring; once the fix lands, the unexpected pass fails the run and the marker comes off in the same change. The always-loaded `lazy-python.failing-tests` rule governs how you settle it: judge which side is wrong before touching either, never bend correct code to satisfy an outdated test, and treat an edit to what a test asserts, or any new `skip` / `skipif` / `xfail` marker beyond the ones the agent flagged for you to review, as something that needs your explicit yes.
 - **Assertion messages**: every `assert` statement should carry an f-string message showing both expected and actual values.
 
 ### Step 6 — Run the suite yourself
@@ -161,6 +161,8 @@ The agent re-reads the guidelines on every dispatch. It will add new test method
 ## After you're done
 
 The test file lives at the mirrored path and is a stable contract. The `lazy-python.tests.md` rule (auto-loaded on any `tests/**/*.py` edit) reminds Claude to use `lazy-python.test-writer` whenever future edits to the test file are needed — Claude does not hand-edit test files when the agent is available.
+
+When a test in that file later fails, the `lazy-python.failing-tests` rule (loaded with any Python source) applies: Claude decides whether the code or the test is wrong, asks you before changing what a test asserts, and never takes a failing test out of the run with `--deselect`, `-k "not ..."`, `--ignore`, a narrowed `testpaths`, or a new `skip` marker without your yes. A test that fails stays in the run until you say otherwise.
 
 Run `/lazy-python.audit` at any time to confirm the full installation is intact. Check 7 (`Overlay scaffolding headers`) tells you whether `testing_guidelines.md` and its three sibling overlay files still open with the canonical header; the audit does not validate overlay content beyond that.
 

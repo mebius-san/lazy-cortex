@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, causes, and fixes for lazycortex-python install, audit, style checks, the guideline-review gate, and writer agents.
-last_regen: 2026-09-30
+last_regen: 2026-10-02
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision-tree routing install/audit/check-style/review/writer failures: top-level branch on skill invoked (install vs audit vs check-style vs review vs docstring-writer vs test-writer); install branch splits on phase (source-not-found, rule-read-only, wrapper-template-missing, pyproject-absent, pch-no-inspect-sh, scaffold-sync-fails, env-source-multiple-candidates, wrapper-cannot-resolve-active-install); audit branch splits on check number (check-crash, check1 drift, check2 broken-pointer, check3 artifact-missing, check4 placeholder, check10 invalid-json, check11 venv-degraded, check12 domain-groups-dictionary-missing); check-style branch splits on step (step3-manual-vs-chk, step5-test-gate, step6-violations-persist); pcf branch splits on new-violations-after-upgrade: (a) D2/D5/D7/D9 firing on previously-passing docstrings because project-neutral defaults dropped a project's implicit Generation Rules / Value Ranges / _field_filters conventions, needing [tool.pcf] extra_docstring_sections / d2_exempt_marker_attrs / private_name_allowlist declared; (b) check_language flagging comments/docstrings written outside [tool.pcf] allowed_languages (default english-only), needing translation, allowed_languages, or a # waiver:; (c) project_package autodetection resolving to nothing on an ambiguous src/ + root layout, misclassifying first-party imports, needing [tool.pcf] project_package declared explicitly; review branch splits on: chk-py-all-no-longer-runs-review (review left chk-py all as of 4.0.0 and needs its own chk-py review dispatch, mandatory at the end of a planned-work cycle) vs chk-py-review-base-ref-unresolvable (typo'd or unfetched --base ref, fetch or use git merge-base) vs chk-py-review-render-still-fails-with-FAIL-finding (fix the code, re-run — new scope key re-manifests); docstring-writer branch (step6-chk-violations); test-writer branch (step6-fails-flag, step7-tst-py-fails); each leaf names the fix action"
@@ -19,8 +19,8 @@ source_skills:
   - lazy-python.knowledge-sweep
   - lazy-python.domain-writer
   - lazy-python.contract-writer
-source_sha: fa58aaf006252c324884b7aa09cdcb17a8cb7a97
-surface_sha: 665af86059b3cf00d1cea06048a0c52821ce3c1dd9e73128227069b5e706104a
+source_sha: 8439297f2cd29c9edeab371cf23ceaf3fa88e2d3
+surface_sha: 1b17cc482810a721e4106b6d716a232df1d33be0802d9010b52a30dd0f2f8a8f
 ---
 # Troubleshooting
 
@@ -36,7 +36,7 @@ surface_sha: 665af86059b3cf00d1cea06048a0c52821ce3c1dd9e73128227069b5e706104a
 
 ## `/lazy-python.install` Step 1 fails: rule file is read-only
 
-**Symptom**: Phase 1 of the install exits with a permission error when trying to write one of the three mirrored rule files under `.claude/rules/`.
+**Symptom**: Phase 1 of the install exits with a permission error when trying to write one of the four mirrored rule files under `.claude/rules/`.
 
 **Likely cause**: A previous session or version-control operation left a `lazy-python.*.md` rule file with no write permission. The mirror step always overwrites, so a locked file blocks it.
 
@@ -254,7 +254,7 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 
 **Symptom**: Audit check 1 shows `FAIL` with a message that one or more `.claude/rules/lazy-python.*.md` files differ from the plugin canon.
 
-**Likely cause**: A rule file under `.claude/rules/` was hand-edited after install. The mirror is plugin-managed; consumer edits are not supported and will be clobbered on the next install run.
+**Likely cause**: A rule file under `.claude/rules/` (`lazy-python.style.md`, `lazy-python.docstrings.md`, `lazy-python.tests.md`, or `lazy-python.failing-tests.md`) was hand-edited after install, or a rule the plugin gained since your last install is not mirrored yet. The mirror is plugin-managed; consumer edits are not supported and will be clobbered on the next install run.
 
 **Fix**: Re-run `/lazy-python.install`. Phase 1 intentionally overwrites the mirror with the current plugin canon. If you need project-specific overrides, add them to the overlay files under `docs/guidelines/` — writer agents read those after the canon and overlay rules win on conflict.
 
@@ -272,7 +272,7 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 
 ## `/lazy-python.audit` `check3` reports `FAIL` — plugin tree incomplete
 
-**Symptom**: Check 3 exits `FAIL` listing one or more artifact paths (rules, references, binaries, hook script, `hooks.json`, skill files, agent files, templates) that are absent from `${CLAUDE_PLUGIN_ROOT}`.
+**Symptom**: Check 3 exits `FAIL` listing one or more artifact paths (rules including the failing-tests rule, references, binaries, hook script, `hooks.json`, skill files, agent files, templates) that are absent from `${CLAUDE_PLUGIN_ROOT}`.
 
 **Likely cause**: The plugin was only partially synced to the local cache, or a file was deleted from the plugin directory after install.
 
@@ -334,9 +334,9 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 
 **Symptom**: During the fix pass, the skill pauses and asks via `AskUserQuestion` whether it may edit a file under `tests/**`, naming the specific file.
 
-**Likely cause**: A violation found in Step 3 or Step 4 is inside a test file. The skill enforces a hard gate: test files may not be silently modified to keep the suite green.
+**Likely cause**: A violation found in Step 3 or Step 4 is inside a test file. The skill enforces a hard gate, backed by the always-loaded `lazy-python.failing-tests` rule: test files may not be silently modified to keep the suite green, and correct code may not be bent to satisfy an outdated test.
 
-**Fix**: This is correct behaviour, not a bug. If the test file genuinely has a style violation unrelated to the test's contract (e.g. a line-length issue), approve the edit. If the violation is in an assertion, the underlying production code likely has a regression — fix the production code, not the test.
+**Fix**: This is correct behaviour, not a bug. If the test file genuinely has a style violation unrelated to the test's contract (e.g. a line-length issue), approve the edit. If the violation is in an assertion, the underlying production code may have a regression — fix the code if it broke a contract still in force. If the test encodes a contract the code changed on purpose, the test is outdated: the decision is yours, shown with the proposed diff, and the code is never bent back to match it.
 
 ---
 

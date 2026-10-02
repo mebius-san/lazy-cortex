@@ -92,14 +92,14 @@ Outcome: `<N>-violations-from-chk` or `chk-clean`.
 
 For each issue identified in Step 3 or Step 4, apply a minimal targeted fix via `Edit`. One fix per violation; do not bundle unrelated changes (e.g. do not reorganise the file's imports while fixing a docstring line-length issue — the next checker pass will surface the import change as noise).
 
-**Test-edit guard**: if a proposed fix would modify any file under `tests/**`, STOP and ask the user via `AskUserQuestion` before editing. Naming the specific test file in the question is mandatory — silently doctoring a test to keep things green hides the regression the test was meant to catch. See `.claude/CLAUDE.md` § "Test edits require explicit user permission". One question per test file:
+**Test-edit guard**: if a proposed fix would modify any file under `tests/**`, STOP and ask the user via `AskUserQuestion` before editing. Naming the specific test file in the question is mandatory — silently doctoring a test to keep things green hides the regression the test was meant to catch. See the `lazy-python.failing-tests` rule. One question per test file:
 
 ```
 Context (print before asking):
 - Where: /lazy-python.check-style · Step 5 — Fix remaining issues; target <test file path>
 - Found: <issue from Step 3 or 4, with file:line>; the proposed fix would change <the assertion / fixture / expected value it touches>
-- Why asking: a test edit can turn a real regression green; the CLAUDE.md test-edit rule reserves that call for the user
-- Answers: `edit-test` — the fix is applied to <test file path> now, this run only, never persisted; `keep-test` — the test stays untouched, any fix goes to the code, the issue stays in the Step 6 remaining list if none does
+- Why asking: a test edit can turn a real regression green, and bending the code to an outdated test hides a change made on purpose; the `lazy-python.failing-tests` rule reserves that call for the user
+- Answers: `edit-test` — the fix is applied to <test file path> now, this run only, never persisted; `keep-test` — the test stays untouched, the code is fixed only where it broke a contract still in force, the issue stays in the Step 6 remaining list otherwise
 AskUserQuestion: header "Test edit", question "The fix for <issue> would modify <test file path>. Edit the test, or keep it and fix the code instead?", options `edit-test` / `keep-test` with those descriptions.
 ```
 
@@ -126,5 +126,5 @@ One line per task in the canonical list above, each with its outcome word. A mis
 ## Failure modes
 
 - **Step 3 manual review finds issues but Step 4 `chk-py` reports clean** — the checkers do not enforce every canon rule (semantic docstring quality, contract consistency, comment preservation are out of their scope). The manual pass is mandatory; do not interpret a clean `chk-py` as evidence the file is review-complete.
-- **Step 5 fix would modify a file under `tests/**`** — STOP and ask the user via `AskUserQuestion` naming the specific test file. Never silently retune a test to keep the suite green; the failing test is signalling a regression in the code, not in itself.
+- **Step 5 fix would modify a file under `tests/**`** — STOP and ask the user via `AskUserQuestion` naming the specific test file. Never silently retune a test to keep the suite green, and never bend correct code to satisfy a test that encodes an outdated contract; which side is wrong is the user's call.
 - **Step 6 re-verify still reports violations after Step 5 fixes landed** — escalate to the user with the remaining issue list rather than looping silently. A persistent violation after a targeted fix usually means the issue spans more than one file or the canon rule was misread; surfacing it is correct behaviour.

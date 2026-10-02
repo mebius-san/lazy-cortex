@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Install lazycortex-python, then run chk-py all -q directly to build the project venv and prove the six-step checker gate is clean.
-last_regen: 2026-09-30
+last_regen: 2026-10-02
 diagram_spec:
   anchor: "Install-and-first-check flow"
   request: "Sequence diagram: user runs /lazy-python.install (quiet install wizard, detail out of scope here) → user runs cli/chk-py all -q from a terminal → the shared venv resolver probes $VIRTUAL_ENV, then <project>/.venv, then a configured path, finds none, creates a project-local .venv and installs mypy/pylint/pytest/ruff plus the pytest-clarity/pytest-sugar plugins → the six-step gate runs in order: pcf, toi, cmp, mypy, ruff, pylint, each reporting clean on the still-untouched repo (the guideline-review phase is deliberately NOT part of this run — it has its own cadence) → user runs cli/tst-py -q to confirm the same venv's pytest works → pytest completes with no failures."
@@ -11,8 +11,8 @@ source_skills:
   - chk
   - tst
   - pcf.py
-source_sha: c7c72225ad0abdc938b9717334138fdd4e4295d6
-surface_sha: b79198302fdd53cd357aa60cb9d9cb161fbb831870945f3e9dc44a9aaf3d976f
+source_sha: 10f5eb690e6b686f0d39cdf13ae8497d4ff7cb84
+surface_sha: 06e28992d4350703842a699d40afcbb40a1f1bcc4240399cb9f4fee6785e6338
 ---
 # Bootstrap the plugin in a clean repo and confirm the checker stack is wired up
 
@@ -22,7 +22,7 @@ This walkthrough is for anyone enabling `lazycortex-python` in a repo for the fi
 
 After this walkthrough you have:
 
-- The plugin installed — rule mirrors, `cli/chk-py` / `cli/tst-py` wrappers (no exec bit required — they launch through `bash`), matching human-facing `~/.local/bin/chk-py` / `tst-py` copies, bootstrapped `pyproject.toml` sections, and overlay stubs all in place (see the **install-and-audit** block article for the full wizard).
+- The plugin installed — the four rule mirrors in `.claude/rules/` (style, docstrings, tests, and failing-tests, which tells Claude to judge a failing test before touching either side and never to edit or exclude a test without your explicit yes), `cli/chk-py` / `cli/tst-py` wrappers (no exec bit required — they launch through `bash`), matching human-facing `~/.local/bin/chk-py` / `tst-py` copies, bootstrapped `pyproject.toml` sections, and overlay stubs all in place (see the **install-and-audit** block article for the full wizard).
 - A project-local `.venv` at the repo root with `mypy`, `pylint`, `pytest`, `ruff`, `pytest-clarity`, and `pytest-sugar` installed, built automatically the first time you invoke either wrapper.
 - A completed `chk-py all -q` run reporting all six deterministic steps clean — `pcf`, `toi`, `cmp`, `mypy`, `ruff`, `pylint` — and a completed `tst-py -q` run confirming the same venv's pytest works.
 - Confidence that the venv resolver and the six-step gate are correctly wired before you start relying on them for real edits.
@@ -68,7 +68,7 @@ bash ./cli/tst-py -q
 
 `tst-py` sources the same venv the previous step built or reused — it never creates its own — then runs `pytest -q` across everything under `tests/`. Because Step 2 already installed `pytest` (plus the `pytest-clarity` and `pytest-sugar` plugins) into `<repo>/.venv`, this step should activate instantly with no new installs. Same as Step 2, a bare `tst-py -q` works instead once `~/.local/bin` is on your `$PATH`.
 
-**Verification gate**: on a repo with no `tests/` directory yet, `pytest` reports no tests collected — that's expected and not a failure. On a repo with existing tests, confirm the run completes with `0 failed` (whatever the passed/skipped counts happen to be). Either outcome confirms the venv resolver and the pytest wiring both work; a hard error here (e.g. `pytest: command not found`) means the venv from Step 2 didn't build correctly and is worth re-running `bash ./cli/chk-py all -q` to diagnose before moving on.
+**Verification gate**: on a repo with no `tests/` directory yet, `pytest` reports no tests collected — that's expected and not a failure. On a repo with existing tests, confirm the run completes with `0 failed` (whatever the passed/skipped counts happen to be). Either outcome confirms the venv resolver and the pytest wiring both work. If a test does fail on a repo with existing tests, the failing-tests rule installed in Step 1 applies: the failure is judged first, and no test is edited or excluded from the run without your explicit yes. A hard error here (e.g. `pytest: command not found`) means the venv from Step 2 didn't build correctly and is worth re-running `bash ./cli/chk-py all -q` to diagnose before moving on.
 
 ## After you're done
 

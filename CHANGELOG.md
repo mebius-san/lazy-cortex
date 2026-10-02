@@ -2029,6 +2029,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+### 4.9.0 — 2026-10-02 UTC
+
+- New always-loaded `lazy-python.failing-tests` rule: when a test fails, judge whether the code or the test is wrong before touching either, and never bend correct code to satisfy an outdated test.
+- The same rule forbids changing what a test asserts, or removing it from the run (`--deselect`, `-k "not ..."`, `--ignore`, `collect_ignore`, narrowed `testpaths`, new `skip`/`xfail` markers), without the user's explicit yes. Jobs with no operator leave the test failing and finish as blocked. `lazy-python.install` and `lazy-python.audit` now install and verify this rule, and `lazy-python.check-style` follows it.
+
 ### 4.8.1 — 2026-09-30 UTC
 
 - Contract blocks are now limited to significant promises, meaning ones that calling code builds on and that a plausible future change could silently break. The style rule and `lazy-python.code-reviewer` report a hollow contract as WARN instead of flagging every unmarked guarantee. `lazy-python.contract-writer` declines to write a hollow block and names the sign that makes it hollow.

@@ -73,7 +73,9 @@ class Check1RulesMirror:
     consumer_dir: Absolute path to the consumer repository root.
   """
 
-  RULES = ("lazy-python.style.md", "lazy-python.docstrings.md", "lazy-python.tests.md")
+  RULES = (
+    "lazy-python.style.md", "lazy-python.docstrings.md", "lazy-python.tests.md", "lazy-python.failing-tests.md",
+  )
 
   def __init__(self, *, consumer_dir: Path) -> None:
     self.consumer_dir: Path = consumer_dir
@@ -156,6 +158,7 @@ class Check3ArtifactsPresent:
     ("rules/lazy-python.style.md", "style rule"),
     ("rules/lazy-python.docstrings.md", "docstrings rule"),
     ("rules/lazy-python.tests.md", "tests rule"),
+    ("rules/lazy-python.failing-tests.md", "failing-tests rule"),
     ("references/lazy-python.coding-guidelines.md", "coding canon"),
     ("references/lazy-python.documenting-guidelines.md", "documenting canon"),
     ("references/lazy-python.comment-guidelines.md", "comment canon"),

@@ -35,7 +35,7 @@ This skill has 12 ordered steps (12 checks plus the log write). The executing ag
 
 ## Check 1: Rules mirror integrity
 
-Verify the three plugin rule files (`lazy-python.style.md`, `lazy-python.docstrings.md`, `lazy-python.tests.md`) are present and byte-identical in `<consumer>/.claude/rules/` versus `${CLAUDE_PLUGIN_ROOT}/rules/`. Drift means either a manual edit (forbidden — mirrors are plugin-managed) or an interrupted install; both lift with a re-run of `/lazy-python.install`.
+Verify the four plugin rule files (`lazy-python.style.md`, `lazy-python.docstrings.md`, `lazy-python.tests.md`, `lazy-python.failing-tests.md`) are present and byte-identical in `<consumer>/.claude/rules/` versus `${CLAUDE_PLUGIN_ROOT}/rules/`. Drift means either a manual edit (forbidden — mirrors are plugin-managed) or an interrupted install; both lift with a re-run of `/lazy-python.install`.
 
 Run:
 
@@ -59,7 +59,7 @@ Outcome: `PASS` / `WARN` (no mirrored rules under `<consumer>/.claude/rules/` to
 
 ## Check 3: Artifacts present
 
-Verify the plugin tree at `${CLAUDE_PLUGIN_ROOT}` carries every required artifact — manifest + overview, 3 rules, 5 references, 6 binaries, the PostToolUse hook script + its `hooks.json` manifest, the check-style skill, every agent under `agents/`, and the 6 templates. Missing artifact means the plugin install is incomplete on this machine.
+Verify the plugin tree at `${CLAUDE_PLUGIN_ROOT}` carries every required artifact — manifest + overview, 4 rules, 5 references, 6 binaries, the PostToolUse hook script + its `hooks.json` manifest, the check-style skill, every agent under `agents/`, and the 6 templates. Missing artifact means the plugin install is incomplete on this machine.
 
 Run:
 
