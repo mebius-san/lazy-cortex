@@ -12,7 +12,7 @@ Authors product / feature / change / bug (and operator-defined) specs as Markdow
 
 ## Bootstrap
 
-- `lazy-spec.install` — Ensure consumer spec dirs exist, register the `lazy-spec.gate-tick` routine, optionally chain into `lazy-spec.product-config`. Idempotent.
+- `lazy-spec.install` — Ensure consumer spec dirs exist, register the `lazy-spec.gate-tick` routine, report whether a product is registered (registration is `lazy-spec.product-config`). Idempotent.
 - `lazy-spec.product-config` — Wizard to create or edit a product record in `lazy.settings.json[products]`; scaffolds folder-notes with icons and built-in review classes; auto-detects deps.
 - `lazy-spec.add-asset-type` — Declare a new asset type on a product (icon, start document, default tools and path) and settle its playbook; review coverage is inherited from the shared behavior-keyed classes.
 - `lazy-spec.create-from-code` — Generate product- or feature-level spec from an existing codebase via parallel Explore agents (code-bound products only).

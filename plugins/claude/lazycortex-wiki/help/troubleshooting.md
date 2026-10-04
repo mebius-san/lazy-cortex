@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-wiki skills — symptoms, likely causes, and fixes.
-last_regen: 2026-10-01
+last_regen: 2026-10-04
 no_diagram: true
 source_skills:
   - lazy-wiki.install
@@ -13,8 +13,8 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: e829c83e14a7beed8906bf9e568c16dbc9b258a4
-surface_sha: f8743fc5968443df236d6c93ba20111af673c0ee90133ba957d4ea856af5df06
+source_sha: c307df884e3f0cdbba5aa2025b45e36bf1a93468
+surface_sha: 6243b8e207019fefc8e6cb9af7f9a563bc55e5e9824192469886fdff6fa5c4f0
 ---
 # Troubleshooting
 
@@ -387,6 +387,16 @@ surface_sha: f8743fc5968443df236d6c93ba20111af673c0ee90133ba957d4ea856af5df06
 **Likely cause**: The domain-spec writer hit an unreadable source file or malformed dispatch data for that group.
 
 **Fix**: The remaining groups in the run are unaffected. The skipped group is re-detected and retried on the next `/lazy-wiki.domain-sync` run — no manual intervention is needed unless the same group keeps failing, in which case check that the source files its `Domain(…)` blocks live in are readable.
+
+---
+
+## `/lazy-wiki.domain-sync` refuses a returned doc and writes nothing for that group
+
+**Symptom**: During `/lazy-wiki.domain-sync`, a group is reported as refused with a reason on stderr, and no doc is written for it this run.
+
+**Likely cause**: The landing step rejected what the writer returned: either the writer left the output path empty, or the planned doc path is not a group doc inside the configured output tree.
+
+**Fix**: The remaining groups in the run are unaffected. Note the reason the run printed, then re-run `/lazy-wiki.domain-sync` to regenerate the group. If the refusal repeats, check that the output tree set through `/lazy-wiki.configure domains` is the one you expect.
 
 ---
 

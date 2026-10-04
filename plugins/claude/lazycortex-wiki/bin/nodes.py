@@ -52,6 +52,11 @@ _KEY_PINNED_LINKS      = "wiki_pinned_links"
 _KEY_UNRELATED_LINKS   = "wiki_unrelated_links"
 _KEY_SRC_HASH          = "wiki_src_hash"
 
+# Namespace prefix the curator prepends to every topic tag.  Markdown nodes store
+# it verbatim in `tags:`; a code `<wiki>` block stores BARE `<axis>/<value>`
+# topics (build-index re-adds the prefix for code nodes).
+_WIKI_TAG_PREFIX = "wiki/"
+
 # File encoding used for every read/write in this module.
 _ENCODING = "utf-8"
 
@@ -1056,7 +1061,7 @@ def _strip_managed_md(text: str) -> str:
   out = _drop_key(out, _KEY_CONNECTORS)
 
   # Keep only the non-wiki/* subset of tags (drop the key when none remain).
-  non_wiki = [ t for t in _get_array_field(out, _KEY_TAGS) if not t.startswith(MarkdownNode._WIKI_TAG_PREFIX) ]
+  non_wiki = [ t for t in _get_array_field(out, _KEY_TAGS) if not t.startswith(_WIKI_TAG_PREFIX) ]
   out = _set_tags_field(out, non_wiki)
 
   # Collapse a now-empty frontmatter block so curation of a frontmatter-free
@@ -1214,9 +1219,6 @@ class MarkdownNode:
   # File encoding for read/write.
   _ENCODING = "utf-8"
 
-  # Prefix that identifies wiki-owned topic tags.
-  _WIKI_TAG_PREFIX = "wiki/"
-
   def __init__(self, *, path: Path) -> None:
     """
     Load the markdown file at `path` into memory.
@@ -1257,7 +1259,7 @@ class MarkdownNode:
     """
     Only the `wiki/*`-prefixed subset of the `tags:` field.
     """
-    return [ t for t in self.tags if t.startswith(self._WIKI_TAG_PREFIX) ]
+    return [ t for t in self.tags if t.startswith(_WIKI_TAG_PREFIX) ]
 
   @property
   def connectors(self) -> list[str]:
@@ -1475,7 +1477,7 @@ class MarkdownNode:
     # Step 2 — tags: merge wiki/* subset, preserve non-wiki/* tags in order; a None leaves them
     if topics is not None:
       current_tags = _get_array_field(text, _KEY_TAGS)
-      non_wiki = [ t for t in current_tags if not t.startswith(self._WIKI_TAG_PREFIX) ]
+      non_wiki = [ t for t in current_tags if not t.startswith(_WIKI_TAG_PREFIX) ]
       text = _set_tags_field(text, non_wiki + topics)
 
     # Step 3 — wiki_connectors (managed block, excluded from source_hash)
@@ -1613,11 +1615,6 @@ _BLOCK_COMMENT_SENTINEL = "/*"
 # Markers that delimit the wiki block inside comments.
 _WIKI_OPEN_TAG  = "<wiki>"
 _WIKI_CLOSE_TAG = "</wiki>"
-
-# Namespace prefix the curator prepends to every topic tag.  Markdown nodes store
-# it verbatim in `tags:`; a code `<wiki>` block stores BARE `<axis>/<value>`
-# topics (build-index re-adds the prefix for code nodes).
-_WIKI_TAG_PREFIX = "wiki/"
 
 # Regex to detect a shebang line.
 _SHEBANG_RE = re.compile(r"^#!")

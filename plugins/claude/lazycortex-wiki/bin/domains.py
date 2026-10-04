@@ -4,8 +4,9 @@ Domain-spec engine for lazycortex-wiki.
 Materialises `Domain(…)` comment blocks found in code into the domain-spec
 tree under the configured output directory. Provides the deterministic half
 of the pipeline: configuration loading, dictionary parsing, block extraction,
-per-group content hashing, changed/orphaned/unknown detection, and the
-`domains.md` index render. The LLM writer that composes each group document
+per-group content hashing, changed/orphaned/unknown detection, the
+`domains.md` index render, and the landing that places a writer's returned
+document in the tree. The LLM writer that composes each group document
 is dispatched by the CLI consumer, never from here.
 
 Cross-plugin Python import is forbidden (per the inter-plugin boundary
@@ -825,6 +826,95 @@ class DomainIndex:
 
 
 # ────────────────────────────────────────────────────────────────────────────
+class DomainLandingError(Exception):
+  """
+  A returned domain document the landing refuses to write.
+  """
+
+
+# ────────────────────────────────────────────────────────────────────────────
+class DomainLanding:
+  """
+  The one route a domain-spec writer's document takes into the repository.
+
+  The writer returns the document as a file outside the tree; this places it at the
+  doc path its dispatch named. It never refreshes the index and never commits — the
+  caller owns both.
+
+  Guarantees:
+    - Writes only a group doc path inside the configured output tree, never the index,
+      and never an empty document; a refused landing writes nothing.
+  """
+
+  # Decision: deterministic code lands and commits the writer's document, not the writer agent
+  # itself — an agent that skips its final step leaves an uncommitted file, and the runtime's
+  # dirty-tree check then halts every queued job until an operator steps in.
+
+  # Contract:
+  # A landing writes ONLY a group doc path inside the configured output tree — never the
+  # index, never a path a parent hop carries outside the tree, never an empty document. A
+  # refused landing writes nothing at all.
+
+  def __init__(self, *, cfg: DomainConfig) -> None:
+    """
+    Initialise the landing for one configuration.
+
+    Args:
+      cfg: The repo's domain configuration.
+    """
+    # the config carries the repo root and the output tree every landing is bounded by
+    self._cfg = cfg
+    self._layout = DomainLayout(output = cfg.output)
+
+  def save_doc(self, doc_rel: str, body: str) -> str:
+    """
+    Write one returned document at its doc path.
+
+    Args:
+      doc_rel: Repo-relative doc path the dispatch named.
+      body: The document text the writer returned.
+
+    Returns:
+      The normalised repo-relative POSIX doc path written.
+
+    Raises:
+      DomainLandingError: When the path, once normalised, is not a group doc inside the output
+        tree, or the document is empty.
+    """
+
+    # Domain(wiki.domains):
+    # # Where a returned domain document may land
+    # A generated document is returned by its writer, never placed by it, and the landing decides
+    # whether it may be placed at all. It lands only on a group's own document inside the generated
+    # tree: the index is the engine's, and any path reaching outside the tree — directly or through a
+    # parent hop — names something the generated tree does not own. An empty return is no document,
+    # so nothing is landed and the group stays stale until its next generation.
+
+    # the resolved target with every `.` segment, parent hop, or absolute form collapsed, and its
+    # normalised repo-relative spelling — the one every check below judges
+    target = (self._cfg.repo / doc_rel).resolve()
+    rel = target.relative_to(self._cfg.repo).as_posix() if target.is_relative_to(self._cfg.repo) else None
+
+    # guard: refuse a path resolving outside the repo or the generated tree, the index file under any
+    # spelling, and any path that is not a markdown group doc
+    if (
+      rel is None
+      or not target.is_relative_to((self._cfg.repo / self._cfg.output).resolve())
+      or self._layout.group_for(rel) is None
+    ):
+      raise DomainLandingError(f"doc_path {doc_rel!r} is not a group doc under {self._cfg.output}/")
+
+    # guard: an empty return is no document
+    if not body.strip():
+      raise DomainLandingError(f"returned document for {doc_rel!r} is empty")
+
+    # the whole document replaces whatever the previous generation left
+    target.parent.mkdir(parents = True, exist_ok = True)
+    TextFile(path = target).write(body)
+    return rel
+
+
+# ────────────────────────────────────────────────────────────────────────────
 class DomainPlanner:
   """
   Full-detect planner over the repo's `Domain(…)` blocks and generated docs.
@@ -1002,7 +1092,7 @@ class DomainPlanner:
       doc_rel = layout.doc_rel(group)
 
       # a current doc needs no rewrite unless one of its anchors moved somewhere unrecoverable
-      if self._stored_hash(self.cfg.repo / doc_rel) == digest:
+      if self.stored_hash(self.cfg.repo / doc_rel) == digest:
         group_fixes = self._anchor_fixes(doc_rel, contracts)
 
         # every anchor resolves: the doc is current and needs at most a mechanical repair
@@ -1018,7 +1108,7 @@ class DomainPlanner:
         GROUP_BLOCKS:           blocks,
         GROUP_CONTRACTS:        contracts,
         PAYLOAD_TAG_AXES:       tag_axes,
-        PAYLOAD_EXISTING_TAGS:  self._stored_tags(self.cfg.repo / doc_rel),
+        PAYLOAD_EXISTING_TAGS:  self.stored_tags(self.cfg.repo / doc_rel),
         PAYLOAD_TAG_DICTIONARY: tag_dictionary,
       })
 
@@ -1353,7 +1443,7 @@ class DomainPlanner:
     return removals
 
   @staticmethod
-  def _stored_hash(doc_abs: Path) -> str | None:
+  def stored_hash(doc_abs: Path) -> str | None:
     """
     Read the `domain_hash` frontmatter value of a generated doc.
 
@@ -1372,7 +1462,7 @@ class DomainPlanner:
     return str(value) if value else None
 
   @staticmethod
-  def _stored_tags(doc_abs: Path) -> list[str]:
+  def stored_tags(doc_abs: Path) -> list[str]:
     """
     Read the `tags` frontmatter list of a generated doc.
 

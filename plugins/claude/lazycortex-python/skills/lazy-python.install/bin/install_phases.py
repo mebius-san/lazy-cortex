@@ -6,7 +6,7 @@ against the consumer repo. Phases are idempotent; safe to re-run.
 
 Phases:
   phase1 — mirror plugin rules into <consumer>/.claude/rules/
-  phase2 — deploy chk-py and tst-py wrappers into <consumer>/cli/
+  phase2 — deploy chk-py, tst-py and cli/mypy/protected_access.py into <consumer>/cli/
   phase2b — deploy chk-py and tst-py human wrappers into $HOME/.local/bin
   phase3 — bootstrap consumer pyproject.toml with checker sections
   phase4 — probe for PyCharm inspect.sh CLI (pch prereq)
@@ -34,11 +34,12 @@ import shutil
 import stat
 import sys
 import tomllib
+from functools import partial
 from pathlib import Path
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  pass
+  from collections.abc import Callable
 
 
 # location of the plugin tree (this file lives at .../skills/lazy-python.install/bin/install_phases.py)
@@ -172,8 +173,9 @@ class Phase1MirrorRules:
 # ----------------------------------------------------------------------------------------
 class Phase2Wrappers:
   """
-  Install phase that writes `chk-py` and `tst-py` wrapper scripts into the consumer's `cli/`
-  directory and ensures `.venv/` is listed in the consumer's `.gitignore`.
+  Install phase that writes byte-for-byte copies of the `chk-py` and `tst-py` wrapper scripts and
+  the `mypy/protected_access.py` plugin shim into the consumer's `cli/` directory and ensures
+  `.venv/` is listed in the consumer's `.gitignore`.
 
   Guarantees:
     - Leaves a `.gitignore` that already ignores `.venv` byte-for-byte untouched.
@@ -182,6 +184,7 @@ class Phase2Wrappers:
   WRAPPERS = (
     ("chk-wrapper.sh", "chk-py"),
     ("tst-wrapper.sh", "tst-py"),
+    ("mypy-protected-access-shim.py", "mypy/protected_access.py"),
   )
 
   def __init__(self, *, consumer_dir: Path) -> None:
@@ -191,7 +194,8 @@ class Phase2Wrappers:
 
   def run(self) -> int:
     """
-    Write executable wrapper scripts to the consumer's `cli/` directory and update `.gitignore`.
+    Write the `chk-py` and `tst-py` wrappers and the `mypy/protected_access.py` shim to the
+    consumer's `cli/` directory and update `.gitignore`.
 
     Returns:
       0 on success.
@@ -200,10 +204,11 @@ class Phase2Wrappers:
     for template_name, target_name in self.WRAPPERS:
       # Templates are path-agnostic: deployed verbatim, they resolve the active
       # plugin install at exec time. No path is substituted here — that is the
-      # whole point (a baked path goes stale on the next plugin update).
-      content = (PLUGIN_ROOT / "templates" / template_name).read_text(encoding = "utf-8")
+      # whole point (a baked path goes stale on the next plugin update). Bytes, not text, so no
+      # host turns LF into CRLF: bash rejects a CRLF script and the audit compares the shim bytewise.
       target = self.target_dir / target_name
-      target.write_text(content, encoding = "utf-8")
+      target.parent.mkdir(parents = True, exist_ok = True)
+      target.write_bytes((PLUGIN_ROOT / "templates" / template_name).read_bytes())
     self._ensure_venv_gitignored()
     return 0
 
@@ -306,12 +311,23 @@ class Phase3Pyproject:
   Adds the `[tool.pcf]`, `[tool.pcf.overrides]`, `[tool.toi]`, `[tool.pch]`,
   `[tool.pytest.ini_options]`, `[tool.mypy]`, `[tool.pylint]`, and `[tool.ruff]` sections
   (and any nested sub-tables, e.g. `[tool.ruff.lint]`) that the consumer's file is missing,
-  and completes the missing sub-keys of any of those sections the consumer already has.
+  and completes the missing sub-keys of any of those sections the consumer already has. A
+  `[tool.mypy]` `plugins` list the consumer already has gains the template's plugin entries
+  it lacks, after the consumer's own.
 
   Guarantees:
-    - Never overwrites a sub-key the consumer has already set.
-    - Idempotent: re-running is a no-op once every checker section carries every
-      template sub-key.
+    - Never overwrites a sub-key the consumer has already set; a `plugins` list keeps every
+      consumer entry, in order.
+    - Never writes a file that does not parse as TOML.
+    - Idempotent: re-running leaves the file byte-identical once every checker section
+      carries every template sub-key and the `plugins` value lists every template entry or
+      cannot be edited in place.
+
+  Notes:
+    - An edit that cannot be made safely — the section has no header line of its own, the
+      `plugins` value is not a list, or the edited file would not parse to the intended
+      result — is skipped, and a line starting with `manual-edit:` names the edit to make by
+      hand.
 
   Attributes:
     consumer_dir: Root directory of the consumer repository being installed into.
@@ -319,20 +335,15 @@ class Phase3Pyproject:
     template: Path to the plugin's template file supplying the checker-stack sections.
   """
 
-  # Domain(install.reconciliation):
-  # # Checker-configuration section completion
-  # A checker-stack section the consumer's project file already declares is never replaced
-  # outright; only the sub-keys it is still missing are inserted into it, leaving every
-  # sub-key value the consumer already set exactly as configured. A section that is entirely
-  # absent is instead appended as a whole verbatim block, preserving the shipped defaults'
-  # own comments and formatting. Both paths converge on the same rule: whatever the consumer
-  # has explicitly written, at any granularity, always outranks the shipped default.
-
   # Always-deployed checker sections. pch is added only when PyCharm is present —
   # it spins up a headless PyCharm and is meaningless without it, so it is deployed
   # only when the install skill sets the matching env flag (see OPTIONAL_SECTIONS + run()).
   CHECKER_SECTIONS = ("pcf", "toi", "pytest", "mypy", "pylint", "ruff")
   OPTIONAL_SECTIONS = {"pch": "LAZY_PYTHON_ENABLE_PCH"}
+
+  # the checker section and key whose list install extends instead of leaving alone
+  PLUGINS_SECTION = "mypy"
+  PLUGINS_KEY = "plugins"
 
   # Matches a top-level `key = ...` line (no leading indent) starting a new key's block;
   # an indented continuation line (array/table element) is not a new key.
@@ -351,6 +362,22 @@ class Phase3Pyproject:
     Returns:
       0 on success.
     """
+
+    # Domain(install.reconciliation):
+    # # Checker-configuration section completion
+    # A checker-stack section the consumer's project file already declares is never replaced
+    # outright; only the sub-keys it is still missing are inserted into it, leaving every
+    # sub-key value the consumer already set exactly as configured. A section that is entirely
+    # absent is instead appended as a whole verbatim block, preserving the shipped defaults'
+    # own comments and formatting. Both paths converge on the same rule: whatever the consumer
+    # has explicitly written, at any granularity, always outranks the shipped default. The one
+    # value install extends rather than leaves alone is the list of type-checker plugins: a
+    # plugin the product needs must load even beside the consumer's own, so the shipped entry
+    # joins the end of that list and every consumer entry keeps its place. Where an edit cannot
+    # be made without guessing at the consumer's layout, nothing is written and the operator is
+    # told which edit to make by hand.
+
+    # the shipped defaults every merge below draws from
     template_text = self.template.read_text(encoding = "utf-8")
 
     # a repo with no pyproject yet gets a minimal [project] stanza to merge onto
@@ -364,6 +391,11 @@ class Phase3Pyproject:
     existing_data = tomllib.loads(existing_text)
     existing_tool = existing_data.get("tool", {})
 
+    # guard: a `tool` key that is not a table leaves nowhere to merge checker sections into
+    if not isinstance(existing_tool, dict):
+      print("manual-edit: `tool` in pyproject.toml is not a table — merge the checker sections by hand")
+      return 0
+
     # Always-on sections, plus any opt-in section whose env flag is set by the skill.
     wanted = list(self.CHECKER_SECTIONS)
     wanted += [s for s, env in self.OPTIONAL_SECTIONS.items() if os.environ.get(env)]
@@ -374,6 +406,8 @@ class Phase3Pyproject:
     # Contract:
     # A checker section already present in the consumer's file keeps every sub-key value
     # the consumer has already set; only sub-keys still missing from that section are added.
+    # The one value extended rather than kept is the `[tool.mypy]` `plugins` list, under the
+    # contract that follows.
 
     # A section already present may still be a partial write from an older install — complete
     # its own missing sub-keys (never touching a sub-key the consumer already set), in place.
@@ -393,31 +427,335 @@ class Phase3Pyproject:
       if not missing_keys:
         continue
       injected = "\n".join(template_keys[k] for k in missing_keys)
-      existing_text = self._insert_after_header(existing_text, section_name, injected)
+      existing_text = self._try_edit(
+        existing_text, self._insert_after_header(existing_text, section_name, injected),
+        partial(self._check_section_keys, section_name, missing_keys),
+        f"[tool.{section_name}] — add the missing keys {', '.join(missing_keys)} by hand",
+      )
 
     # Contract:
-    # Re-running this phase once every checker section already carries every template
-    # sub-key leaves `pyproject.toml` byte-identical to its prior state.
+    # A `plugins` list the consumer already set keeps every entry in its order; the template's
+    # missing entries are appended after them, never replacing or reordering one.
 
-    # Idempotent no-op when every checker section is present and none needed a sub-key completed.
-    if not missing:
-      # guard: nothing changed and the file already exists — leave it byte-identical
-      if existing_text == original_text and self.target.exists():
-        return 0
-      self.target.write_text(existing_text, encoding = "utf-8")
-      return 0
+    # a consumer `plugins` list gains the shipped plugin it does not list yet
+    existing_text = self._extend_plugins(existing_text, template_text)
 
-    # Extract each missing section's raw text block from the template (preserves comments + formatting).
-    appended_blocks: list[str] = []
+    # append each missing section's raw template block (comments + formatting preserved), so
+    # the consumer's own content stays byte-identical
     for section_name in missing:
       block = self._extract_section_block(template_text, section_name)
       if block:
-        appended_blocks.append(block)
+        existing_text = self._try_edit(
+          existing_text, existing_text.rstrip() + "\n\n" + block + "\n",
+          partial(self._check_section_keys, section_name, []),
+          f"[tool.{section_name}] — copy the section from the plugin's pyproject-defaults.toml by hand",
+        )
 
-    # append rather than rewrite, so the consumer's own content stays byte-identical
-    new_content = existing_text.rstrip() + "\n\n" + "\n\n".join(appended_blocks) + "\n"
-    self.target.write_text(new_content, encoding = "utf-8")
+    # Contract:
+    # Re-running this phase leaves `pyproject.toml` byte-identical to its prior state once every
+    # checker section carries every template sub-key and the `[tool.mypy]` `plugins` value already
+    # lists every template entry, or cannot be edited in place — then the `manual-edit:` line is
+    # printed and nothing is written.
+
+    # guard: nothing changed and the file already exists — leave it byte-identical
+    if existing_text == original_text and self.target.exists():
+      return 0
+
+    # Contract:
+    # The `pyproject.toml` written here always parses as TOML.
+
+    # write the merged document
+    self.target.write_text(existing_text, encoding = "utf-8")
     return 0
+
+  def _extend_plugins(self, toml_text: str, template_text: str) -> str:
+    """
+    Append the template's `[tool.mypy]` plugin entries to the consumer's existing `plugins` list.
+
+    Notes:
+      - A section without a `plugins` key is left to sub-key completion.
+      - A `plugins` value that is not a list, or a list that cannot be extended in place, is
+        left as written and a `manual-edit:` line names the entries to add by hand.
+
+    Args:
+      toml_text: Consumer document to extend.
+      template_text: Template document supplying the plugin entries.
+
+    Returns:
+      `toml_text` with the missing entries appended, or unchanged when none is missing or the
+      list cannot be extended safely.
+    """
+    section = tomllib.loads(toml_text).get("tool", {}).get(self.PLUGINS_SECTION)
+
+    # guard: without a `plugins` key, sub-key completion adds the whole template value
+    if not isinstance(section, dict) or self.PLUGINS_KEY not in section:
+      return toml_text
+
+    # the consumer's value as written; mypy also reads it as one comma-separated string whose entries count as listed
+    current = section[self.PLUGINS_KEY]
+    listed = [entry.strip() for entry in current.split(",")] if isinstance(current, str) else current
+
+    # the shipped entries the consumer does not list yet
+    absent = [
+      entry for entry in tomllib.loads(template_text)["tool"][self.PLUGINS_SECTION][self.PLUGINS_KEY]
+      if not isinstance(listed, list) or entry not in listed
+    ]
+
+    # guard: every shipped entry is already listed
+    if not absent:
+      return toml_text
+
+    # the hand edit to name whenever the list cannot be extended in place
+    manual = f"[tool.{self.PLUGINS_SECTION}] {self.PLUGINS_KEY} — add {', '.join(map(json.dumps, absent))} by hand"
+
+    # guard: only a list is extended in place; a string or any other value is the operator's to edit
+    if not isinstance(current, list):
+      print(f"manual-edit: {manual}")
+      return toml_text
+
+    # the edit must change nothing but the list, which must read as the old entries plus the new
+    expected = tomllib.loads(toml_text)
+    expected["tool"][self.PLUGINS_SECTION][self.PLUGINS_KEY] = current + absent
+    return self._try_edit(
+      toml_text, self._append_to_array(toml_text, self.PLUGINS_SECTION, self.PLUGINS_KEY, absent),
+      expected.__eq__, manual,
+    )
+
+  @staticmethod
+  def _try_edit(before: str, after: str, check: Callable[[dict], bool], manual: str) -> str:
+    """
+    Keep an edit only when it changed the document and the result parses to what was intended.
+
+    Notes:
+      - A rejected edit prints `manual-edit: <manual>` to stdout.
+
+    Args:
+      before: Document before the edit.
+      after: Document after the edit.
+      check: Predicate the parsed edited document must satisfy.
+      manual: Description of the edit for the operator to make by hand.
+
+    Returns:
+      `after` when the edit is accepted, otherwise `before`.
+    """
+    try:
+      accepted = after != before and check(tomllib.loads(after))
+    # a parse error or a missing key both mean the edit did not land as intended
+    except (tomllib.TOMLDecodeError, KeyError, TypeError):
+      accepted = False
+
+    # a rejected edit is never written; the operator is told what to do instead
+    if not accepted:
+      print(f"manual-edit: {manual}")
+      return before
+    return after
+
+  @staticmethod
+  def _check_section_keys(top_name: str, keys: list[str], data: dict) -> bool:
+    """
+    Tell whether a parsed document has a `[tool.<top_name>]` table carrying the given keys.
+
+    Args:
+      top_name: Name of the top-level tool section.
+      keys: Keys the section must carry.
+      data: Parsed TOML document.
+
+    Returns:
+      True when the section is a table holding every key.
+
+    Raises:
+      KeyError: The document has no `tool` table or no `[tool.<top_name>]` entry.
+      TypeError: `tool` is not a table.
+    """
+    section = data["tool"][top_name]
+    return isinstance(section, dict) and all(key in section for key in keys)
+
+  @classmethod
+  def _append_to_array(cls, toml_text: str, top_name: str, key: str, values: list[str]) -> str:
+    """
+    Append string values to an array a key holds directly under `[tool.<top_name>]`, keeping
+    the array's existing entries, comments and layout.
+
+    Notes:
+      - A multi-line array whose closing bracket stands on its own line gains one new line per
+        call, indented like its first entry; any other array gains the values inline after its
+        last entry.
+
+    Args:
+      toml_text: Full TOML document to edit.
+      top_name: Name of the top-level tool section holding the key.
+      key: Bare key whose array value is extended.
+      values: String values to append, in order.
+
+    Returns:
+      The edited document, or `toml_text` unchanged when the key's array cannot be located.
+    """
+    opening = cls._find_array_start(toml_text, top_name, key)
+
+    # guard: no `key = [` line directly under the section's own header
+    if opening is None:
+      return toml_text
+
+    # where the array closes, where its last entry ends, and whether a comma already follows that entry
+    close, last_end, has_comma = cls._scan_array(toml_text, opening)
+
+    # guard: an array that never closes cannot be extended
+    if close is None:
+      return toml_text
+
+    # the new entries as TOML strings, and the start of the line holding the closing bracket
+    quoted = ", ".join(json.dumps(value) for value in values)
+    line_start = toml_text.rfind("\n", 0, close) + 1
+
+    # a closing bracket alone on its line marks a one-entry-per-line array: the last entry gets its missing comma and
+    # the new entries go on a line of their own, indented like the first entry
+    if "\n" in toml_text[opening:close] and not toml_text[line_start:close].strip():
+      indent = re.search(r"\n([ \t]*)\S", toml_text[opening:close])
+
+      # an empty array keeps the text before the closing line as is
+      before_close = toml_text[:line_start]
+
+      # an existing last entry gets its missing comma before the new line is added
+      if last_end is not None:
+        before_close = toml_text[:last_end] + ("" if has_comma else ",") + toml_text[last_end:line_start]
+      return before_close + (indent.group(1) if indent else "  ") + quoted + ",\n" + toml_text[line_start:]
+
+    # an empty inline array takes the values as its only entries
+    if last_end is None:
+      return toml_text[:opening] + quoted + toml_text[opening:]
+    return toml_text[:last_end] + ", " + quoted + toml_text[last_end:]
+
+  @classmethod
+  def _find_array_start(cls, toml_text: str, top_name: str, key: str) -> int | None:
+    """
+    Locate the opening bracket of an array a bare key holds directly under `[tool.<top_name>]`.
+
+    Args:
+      toml_text: Full TOML document to scan.
+      top_name: Name of the top-level tool section holding the key.
+      key: Bare key whose array value is located.
+
+    Returns:
+      The offset just past the opening `[`, or `None` when the section header or a
+      `key = [` line under it is missing.
+    """
+    header = f"[tool.{top_name}]"
+    key_line = re.compile(rf"^[ \t]*{re.escape(key)}[ \t]*=[ \t]*\[")
+    offset = 0
+    in_section = False
+    for line in toml_text.splitlines(keepends = True):
+      stripped = line.strip()
+
+      # the section's own header switches scanning on
+      if stripped == header:
+        in_section = True
+      # a nested sub-table or the next section ends the section's own keys
+      elif in_section and stripped.startswith("["):
+        return None
+      # the key's `key = [` line inside the section yields the offset just past its opening bracket
+      elif in_section and (match := key_line.match(line)):
+        return offset + match.end()
+
+      # track the offset of the next line for the match arithmetic above
+      offset += len(line)
+    return None
+
+  @classmethod
+  def _scan_array(cls, toml_text: str, opening: int) -> tuple[int | None, int | None, bool]:
+    """
+    Walk a TOML array from just past its opening bracket to its closing one.
+
+    Args:
+      toml_text: Full TOML document.
+      opening: Offset just past the array's opening `[`.
+
+    Returns:
+      The offset of the closing `]` (or `None` when the array never closes), the offset just
+      past the last entry (or `None` for an empty array), and whether a comma follows that entry.
+    """
+    depth = 1
+    last_end: int | None = None
+    has_comma = False
+    pos = opening
+    while pos < len(toml_text):
+      char = toml_text[pos]
+
+      # a comment runs to the end of its line and holds no entry
+      if char == "#":
+        pos = toml_text.find("\n", pos)
+        # guard: a comment that runs to the end of the document leaves the array unterminated
+        if pos == -1:
+          return None, None, False
+
+        # resume scanning on the line that follows the comment
+        continue
+
+      # a string is skipped whole, so brackets and commas inside it are not structure
+      if char in "\"'":
+        end = cls._find_string_end(toml_text, pos)
+        # guard: a string that never closes leaves the array unterminated
+        if end is None:
+          return None, None, False
+
+        # a string directly in the array is an entry: it becomes the last one and no comma follows it yet
+        if depth == 1:
+          last_end, has_comma = end, False
+
+        # resume scanning just past the closing quote
+        pos = end
+        continue
+
+      # brackets nest; the bracket that returns to depth 0 closes the array
+      if char == "[":
+        depth += 1
+      elif char == "]":
+        depth -= 1
+        if depth == 0:
+          return pos, last_end, has_comma
+        # a nested array closing back to depth 1 is itself an entry, so it becomes the last one
+        if depth == 1:
+          last_end, has_comma = pos + 1, False
+      # a depth-1 comma separates entries: the entry before it already has its comma
+      elif char == "," and depth == 1:
+        has_comma = True
+      # any other depth-1 token (a number, a bare word) is an entry, so it becomes the last one
+      elif not char.isspace() and depth == 1:
+        last_end, has_comma = pos + 1, False
+      pos += 1
+    return None, None, False
+
+  @staticmethod
+  def _find_string_end(toml_text: str, start: int) -> int | None:
+    """
+    Find where a TOML string starting at `start` ends.
+
+    Args:
+      toml_text: Full TOML document.
+      start: Offset of the string's opening quote.
+
+    Returns:
+      The offset just past the closing quote, or `None` when the string never closes.
+    """
+    quote = toml_text[start]
+
+    # a multi-line string ends at the next triple quote
+    if toml_text.startswith(quote * 3, start):
+      end = toml_text.find(quote * 3, start + 3)
+      return None if end == -1 else end + 3
+
+    # a single-line string ends at its quote; a basic string skips escaped characters
+    pos = start + 1
+    while pos < len(toml_text) and toml_text[pos] != "\n":
+      # an escape hides the next character, so an escaped quote does not end the string
+      if quote == '"' and toml_text[pos] == "\\":
+        pos += 2
+        continue
+
+      # an unescaped quote of the opening kind closes the string
+      if toml_text[pos] == quote:
+        return pos + 1
+      pos += 1
+    return None
 
   @classmethod
   def _extract_section_block(cls, toml_text: str, top_name: str) -> str:

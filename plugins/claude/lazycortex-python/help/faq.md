@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, knowledge markers, tests, and the checker stack.
-last_regen: 2026-10-02
+last_regen: 2026-10-04
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -21,8 +21,8 @@ source_skills:
   - review.py
   - lazy-python.coding-guidelines
   - lazy-python.checking-guidelines
-source_sha: 8439297f2cd29c9edeab371cf23ceaf3fa88e2d3
-surface_sha: f94202694a9c73d86f5774f36e4cb1569e53fc5c9c94d3c65f335ce490c0ac82
+source_sha: df5e95eef3ef82fb9435967af2456c8d4e659063
+surface_sha: 499c72581e3c17f8971dadade756775133a8702e015b8f5595b1a35332e6ced1
 ---
 # Frequently asked questions
 

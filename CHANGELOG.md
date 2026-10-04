@@ -752,6 +752,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 9.11.2 — 2026-10-04 UTC
+
+- `/lazy-spec.install` no longer asks whether to register a first product. It only reports whether one exists, and registration is done through `/lazy-spec.product-config`. The install skill description, help text and FAQ are updated to match.
+
 ### 9.11.1 — 2026-10-01 UTC
 
 - Content design template now asks for one bullet per decision, each naming the schema fields it settles, instead of one line per group of fields in schema order. The content playbook describes the document the same way.
@@ -2033,6 +2037,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+### 4.10.0 — 2026-10-04 UTC
+
+- New mypy plugin reports access to protected members (`_name`) from outside the owning class hierarchy. It exempts namedtuple API, test files (by path and conventional names), and resolves class-object access to the declaring class.
+- `lazy-python.install` deploys a `cli/mypy/` shim so bare `mypy` finds the plugin, and the pyproject defaults wire the plugin in and exempt tests. On an existing config it drops the tests override and appends the plugin to the existing mypy `plugins` list. Wrappers are copied bytewise, and the mypy cache is keyed on the plugin file hash.
+- `lazy-python.audit` has a new check that verifies the protected-access plugin wiring. It reads string-form plugin entries and tolerates non-table config.
+
 ### 4.9.0 — 2026-10-02 UTC
 
 - New always-loaded `lazy-python.failing-tests` rule: when a test fails, judge whether the code or the test is wrong before touching either, and never bend correct code to satisfy an outdated test.
@@ -2266,6 +2276,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 3.4.0 — 2026-10-04 UTC
+
+- Domain-spec docs are now landed by deterministic code instead of by the writer agent. The agent returns the composed doc, then the plugin places it at the doc path, refreshes the index and commits. This applies to both the daemon routines and `/lazy-wiki.domain-sync`, and the `lazy-wiki.domain-spec-writer` and `lazy-wiki.domain-sync` descriptions were reworded to match.
+- Index writes through unnormalised doc paths are now refused, so a domain doc can no longer land under a non-canonical path.
 
 ### 3.3.6 — 2026-10-01 UTC
 

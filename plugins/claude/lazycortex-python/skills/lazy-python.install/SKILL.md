@@ -6,7 +6,7 @@ user-invocable: true
 ---
 # Install lazycortex-python
 
-Idempotent and quiet install (plus a log write). Mirrors the four plugin rules into `.claude/rules/`, deploys the `chk-py` / `tst-py` wrappers into `cli/`, bootstraps the checker sections of `pyproject.toml` (including `[tool.pch]` when PyCharm is present), scaffolds project-overlay guideline stubs, syncs the scaffold template, and records `python.env_source` when the repo ships an env-bootstrap script. Every file it writes follows the File-sync policy below — plugin-owned mirrors are refreshed from the shipped source without asking; consumer-owned config gains what it lacks and asks only on a direct contradiction. It asks the user almost nothing: install scope and `pch` enablement are derived, and it never touches `CLAUDE.md`; the sole extra prompt is disambiguating multiple `env_source` candidates in Step 7. The Python ≥ 3.12 floor is owned by `/lazy-core.install` and not re-probed here. Safe to re-run after every plugin update.
+Idempotent and quiet install (plus a log write). Mirrors the four plugin rules into `.claude/rules/`, deploys the `chk-py` / `tst-py` wrappers and the mypy plugin shim (`cli/mypy/`) into `cli/`, bootstraps the checker sections of `pyproject.toml` (including `[tool.pch]` when PyCharm is present), scaffolds project-overlay guideline stubs, syncs the scaffold template, and records `python.env_source` when the repo ships an env-bootstrap script. Every file it writes follows the File-sync policy below — plugin-owned mirrors are refreshed from the shipped source without asking; consumer-owned config gains what it lacks and asks only on a direct contradiction. It asks the user almost nothing: install scope and `pch` enablement are derived, and it never touches `CLAUDE.md`; the sole extra prompt is disambiguating multiple `env_source` candidates in Step 7. The Python ≥ 3.12 floor is owned by `/lazy-core.install` and not re-probed here. Safe to re-run after every plugin update.
 
 The PostToolUse check-style hook auto-registers from the plugin's `hooks/hooks.json` when the plugin is enabled — no install step writes to the consumer's settings.json.
 
@@ -16,7 +16,7 @@ This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Mirror plugin rules into .claude/rules/`
-   - `Step 2 — Deploy chk-py and tst-py wrappers into cli/ and ensure .venv/ gitignored`
+   - `Step 2 — Deploy chk-py, tst-py and the mypy shim into cli/ and ensure .venv/ gitignored`
    - `Step 2b — Install ~/.local/bin/chk-py and tst-py`
    - `Step 3 — Detect PyCharm inspect.sh prerequisite`
    - `Step 4 — Bootstrap pyproject.toml checker sections (pch gated on PyCharm presence)`
@@ -25,7 +25,7 @@ This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 7 — Record python.env_source when a project env script is present`
    - `Step 7.5 — Seed agent-model tiers`
    - `Step 7.6 — Register the code-reviewer expert`
-2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". No-ops count only if they emit an explicit outcome (`installed`, `unchanged`, `merged`, `wrappers-deployed-2`, `already-present`, …).
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". No-ops count only if they emit an explicit outcome (`installed`, `unchanged`, `merged`, `wrappers-deployed-3`, `already-present`, …).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
@@ -63,9 +63,9 @@ It prints a JSON receipt mapping each rule to its state and exits non-zero when 
 
 Outcome per rule: `installed` (absent → copied) / `unchanged` (byte-identical) / `refreshed` (stale → overwritten) / `failed` (write did not verify).
 
-## Step 2: Deploy chk-py and tst-py wrappers into `cli/` and ensure `.venv/` gitignored
+## Step 2: Deploy chk-py, tst-py and the mypy shim into `cli/` and ensure `.venv/` gitignored
 
-Copy `${CLAUDE_PLUGIN_ROOT}/templates/chk-wrapper.sh` and `tst-wrapper.sh` verbatim to `<consumer>/cli/chk-py` and `<consumer>/cli/tst-py`. **Substitute nothing.** The templates are path-agnostic by design: they resolve the active plugin install at exec time, so the wrapper keeps working after the next `/plugin update`. Baking an absolute path — which necessarily carries a plugin version — into the consumer's tracked `cli/` pins them to a directory that the next update deletes. Then ensure the consumer's `.gitignore` contains a `.venv/` line — the fallback venv (`_ensure_venv.sh` probe 4) is created in the repo root at `<consumer>/.venv`, so it must be ignored. The phase reads `<consumer>/.gitignore` (creating it if absent) and appends `.venv/` only when no `.venv` / `.venv/` line is already present — idempotent.
+Copy `${CLAUDE_PLUGIN_ROOT}/templates/chk-wrapper.sh` and `tst-wrapper.sh` verbatim to `<consumer>/cli/chk-py` and `<consumer>/cli/tst-py`, and `${CLAUDE_PLUGIN_ROOT}/templates/mypy-protected-access-shim.py` verbatim to `<consumer>/cli/mypy/protected_access.py` — an install-managed mirror that the consumer's `pyproject.toml` references by that relative path. **Substitute nothing.** The templates are path-agnostic by design: they resolve the active plugin install at exec time, so the wrapper keeps working after the next `/plugin update`. Baking an absolute path — which necessarily carries a plugin version — into the consumer's tracked `cli/` pins them to a directory that the next update deletes. Then ensure the consumer's `.gitignore` contains a `.venv/` line — the fallback venv (`_ensure_venv.sh` probe 4) is created in the repo root at `<consumer>/.venv`, so it must be ignored. The phase reads `<consumer>/.gitignore` (creating it if absent) and appends `.venv/` only when no `.venv` / `.venv/` line is already present — idempotent.
 
 After this step `bash ./cli/chk-py` and `bash ./cli/tst-py` work from the repo root; the wrappers carry no exec bit on purpose (see `lazy-core.skill-writing § 12`).
 
@@ -77,7 +77,7 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.i
 
 The wrappers are rendered plugin artifacts (substituted absolute paths, not consumer-authored). They are install-managed mirrors — `phase2` writes the current render unconditionally, so a re-run with an unchanged render is a no-op rewrite and a stale wrapper is replaced. The `.gitignore` append is consumer-owned config and idempotent: the `.venv/` line is added only when absent.
 
-Outcome: `wrappers-deployed-2 + gitignore-ensured` when `.venv/` was added to the consumer's `.gitignore`; `wrappers-deployed-2 + gitignore-already-present` when the `.venv/` line was already there (idempotent re-run).
+Outcome: `wrappers-deployed-3 + gitignore-ensured` when `.venv/` was added to the consumer's `.gitignore`; `wrappers-deployed-3 + gitignore-already-present` when the `.venv/` line was already there (idempotent re-run).
 
 ## Step 2b: Install `~/.local/bin/chk-py` and `tst-py`
 
@@ -125,7 +125,9 @@ Bash(LAZY_PYTHON_ENABLE_PCH=1 "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_R
 Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase3 ${CLAUDE_PROJECT_DIR})
 ```
 
-Outcome: `pyproject-bootstrapped` when at least one missing section was appended; `pyproject-already-complete` when every required section was already present — suffixed `+pch-enabled` (PyCharm present) / `+pch-skipped-no-pycharm` (no PyCharm here).
+A `[tool.mypy]` `plugins` list the consumer already has gains `cli/mypy/protected_access.py` after the consumer's own entries. phase3 writes no edit it cannot make safely — a section without a header line of its own, a `plugins` value that is not a list, or an edit that would not parse back to the intended TOML — and prints one `manual-edit: <what to change by hand>` line per skipped edit instead. Relay every such line to the operator verbatim in the Report; never apply it yourself.
+
+Outcome: `pyproject-bootstrapped` when at least one missing section was appended; `pyproject-already-complete` when every required section was already present — suffixed `+pch-enabled` (PyCharm present) / `+pch-skipped-no-pycharm` (no PyCharm here), and `+manual-edit` when phase3 printed any `manual-edit:` line.
 
 ## Step 5: Scaffold project overlay guidelines under `docs/guidelines/`
 

@@ -35,6 +35,7 @@ log_level = "CRITICAL"
 
 [tool.mypy]
 cache_dir = "~/.cache/mypy"
+plugins = ["cli/mypy/protected_access.py"]  # the protected-access plugin; /lazy-python.install deploys this wrapper
 python_version = "3.12"
 exclude = [
   "~archive",

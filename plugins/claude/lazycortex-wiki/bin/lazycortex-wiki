@@ -85,6 +85,9 @@ _SUBCOMMANDS = {
   "domain-apply-index": "Rebuild the domains.md index from the dictionary and the docs on disk.",
   "domain-tick":    "Consume one git item: drop orphaned domain docs, repair moved contract anchors, dispatch "
                     "writer jobs for changed groups (--restamp: re-stamp every doc's domain_hash, no dispatch).",
+  "domain-land":    "Land one returned domain doc at its doc_path (no index refresh, no commit).",
+  "domain-collect": "Land every finished domain-writer job: write its doc, refresh the index, commit both, "
+                    "consume the job.",
   "terms-apply":    "Apply a decided term replacement to one document's prose (the operator picks the direction).",
   "mirror-plan":    "Fetch a mirror scope's source and print the sync plan as JSON (dry-run, mirror untouched).",
   "mirror-sync":    "Fetch a mirror scope's source, sync the mirror tree, and commit the touched files.",
@@ -138,6 +141,8 @@ class Cli:
   _CMD_DOMAIN_PLAN    = "domain-plan"
   _CMD_DOMAIN_APPLY_INDEX = "domain-apply-index"
   _CMD_DOMAIN_TICK    = "domain-tick"
+  _CMD_DOMAIN_LAND    = "domain-land"
+  _CMD_DOMAIN_COLLECT = "domain-collect"
   _CMD_TERMS_APPLY    = "terms-apply"
   _CMD_MIRROR_PLAN    = "mirror-plan"
   _CMD_MIRROR_SYNC    = "mirror-sync"
@@ -295,6 +300,28 @@ class Cli:
   _MSG_DOMAINS_UNCONFIGURED_PLAN  = "domain-plan: wiki.domains not configured (run /wiki.configure domains)"
   _MSG_DOMAINS_UNCONFIGURED_INDEX = "domain-apply-index: wiki.domains not configured (run /wiki.configure domains)"
   _MSG_DOMAIN_TICK_SKIP           = "domain-tick: skip (wiki.domains not configured)"
+  _MSG_DOMAIN_COLLECT_SKIP        = "domain-collect: skip (wiki.domains not configured)"
+  _MSG_DOMAINS_UNCONFIGURED_LAND  = "domain-land: wiki.domains not configured (run /wiki.configure domains)"
+
+  # argparse strings for domain-land.
+  _ARG_DOMAIN_LAND_PATH_HELP = "Repo-relative doc path the returned document lands at."
+  _ARG_DOMAIN_LAND_FROM_HELP = "File holding the document the writer returned."
+
+  # Job-bundle layout and response envelope a finished domain-writer job is read through, mirrored
+  # file-wise from lazycortex-core's runtime rather than imported across the plugin boundary.
+  _JOB_PATH      = "path"
+  _JOB_ID        = "job_id"
+  _JOB_STATUS    = "status"
+  _JOB_RESPONSE  = "response"
+  _JOB_CONSUMED  = "CONSUMED"
+  _JOB_REQUEST   = "request.json"
+  _JOB_OUTCOME   = "outcome"
+  _JOB_ERROR     = "error"
+  _JOB_RESULT    = "result"
+  _RESULT_PREFIX = "result/"
+  # the two finished states a collect pass owns; `deferred` is postponed work, left for later
+  _STATUS_DONE   = "done"
+  _COLLECTABLE   = ( "done", "failed" )
 
   # Commit-subject fragments of the tick's deterministic commit.
   _SUBJECT_DOMAINS_PREFIX = "wiki(domains): "
@@ -381,6 +408,10 @@ class Cli:
       return self._cmd_domain_apply_index(args)
     if cmd == self._CMD_DOMAIN_TICK:
       return self._cmd_domain_tick(args)
+    if cmd == self._CMD_DOMAIN_LAND:
+      return self._cmd_domain_land(args)
+    if cmd == self._CMD_DOMAIN_COLLECT:
+      return self._cmd_domain_collect(args)
     if cmd == self._CMD_TERMS_APPLY:
       return self._cmd_terms_apply(args)
     if cmd == self._CMD_MIRROR_PLAN:
@@ -562,7 +593,18 @@ class Cli:
           help = self._ARG_ALIAS_HELP,
         )
         p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
-      elif name in (self._CMD_TAG_TICK, self._CMD_DOMAIN_PLAN, self._CMD_DOMAIN_APPLY_INDEX):
+      elif name in (
+        self._CMD_TAG_TICK, self._CMD_DOMAIN_PLAN, self._CMD_DOMAIN_APPLY_INDEX, self._CMD_DOMAIN_COLLECT,
+      ):
+        p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+      elif name == self._CMD_DOMAIN_LAND:
+        p.add_argument(self._ARG_PATH, help = self._ARG_DOMAIN_LAND_PATH_HELP)
+        p.add_argument(
+          self._ARG_FROM,
+          dest = self._ARG_FROM_DEST,
+          required = True,
+          help = self._ARG_DOMAIN_LAND_FROM_HELP,
+        )
         p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
       elif name == self._CMD_DOMAIN_TICK:
         # a restamp has no trigger — the path and the flag exclude each other
@@ -2250,6 +2292,229 @@ class Cli:
       "index":            "updated" if (orphans or index_stale) else "unchanged",
     }))
     return 0
+
+  def _cmd_domain_land(self, args: argparse.Namespace) -> int:
+    """
+    Land one document a domain-spec writer returned at its doc path.
+
+    The session route into the tree: `/lazy-wiki.domain-sync` lands each writer's return
+    through this verb, then rebuilds the index and commits once. Prints `{"doc": <path>}`.
+
+    Guarantees:
+      - Never refreshes the index and never commits; a refused landing writes nothing and
+        exits 1 with the reason on stderr.
+
+    Args:
+      args: Parsed argument namespace; must carry `.path`, `.from_file`, and `.repo`.
+
+    Returns:
+      Integer exit code (0 when landed, 1 when unconfigured, unreadable, or refused).
+    """
+    repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
+    planner = _domains.DomainPlanner(repo = Path(repo_raw).resolve())
+    # guard: wiki.domains not configured — there is no tree to land into
+    if not planner.configured:
+      print(self._MSG_DOMAINS_UNCONFIGURED_LAND, file = sys.stderr)
+      return 1
+
+    # the returned file is read whole and landed through the shared primitive
+    try:
+      body = Path(args.from_file).read_text(encoding = self._ENCODING)
+      doc = _domains.DomainLanding(cfg = planner.cfg).save_doc(args.path, body)
+    except (OSError, _domains.DomainLandingError) as exc:
+      print(f"{self._CMD_DOMAIN_LAND}: {exc}", file = sys.stderr)
+      return 1
+    print(json.dumps({ "doc": doc }))
+    return 0
+
+  def _cmd_domain_collect(self, args: argparse.Namespace) -> int:
+    """
+    Land every finished domain-spec writer job and retire it.
+
+    For each finished, unconsumed `wiki.domain-writer` job: the returned document is landed
+    at the doc path its request named, the index is refreshed, exactly those two paths are
+    committed under the running identity (the routine's bot author), and the job is consumed.
+    Prints one JSON summary line, `{"landed": <n>, "failed": [<job ids>]}`.
+
+    Guarantees:
+      - A job that cannot be landed — a writer error, a missing or empty result, a doc path
+        outside the generated tree — writes nothing, is named on stderr, and is consumed so
+        its group is dispatched afresh; the pass exits 1.
+      - A landing whose commit fails is rolled back and left unconsumed, so the next pass
+        retries it; the pass exits 1.
+      - A job already consumed is never landed again.
+
+    Args:
+      args: Parsed argument namespace; must carry `.repo`.
+
+    Returns:
+      Integer exit code (0 when every finished job landed or there were none, 1 otherwise).
+    """
+
+    # Contract:
+    # A finished job that cannot be landed MUST fail the pass — exit 1, the job named on stderr —
+    # and MUST leave the working tree exactly as it was; nothing is ever swallowed into exit 0.
+
+    # Domain(wiki.domains):
+    # # Who places a generated domain document
+    # A writer only ever returns its document; placing it, refreshing the index, and recording both
+    # belong to deterministic code that cannot skip a step. A finished job is placed whole or not at
+    # all. One that cannot be placed — the writer reported an error, returned nothing, or named a
+    # place outside the generated tree — is retired so its group is written afresh on the next pass,
+    # and the pass reports the failure. A placement whose record cannot be made is undone and kept
+    # for the next pass to try again.
+
+    repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
+    repo = Path(repo_raw).resolve()
+    planner = _domains.DomainPlanner(repo = repo)
+    # guard: wiki.domains not configured — the routine fired in an unconfigured repo
+    if not planner.configured:
+      print(self._MSG_DOMAIN_COLLECT_SKIP)
+      return 0
+
+    # one pass over the writer's finished, unconsumed jobs
+    dispatcher = _dispatch.CoreDispatch()
+    expert = _dispatch.CoreDispatch.EXPERT_DOMAIN_WRITER
+    landed = 0
+    failed: list[str] = []
+    for job in dispatcher.query_jobs(repo = repo, expert = expert):
+      job_dir = Path(str(job.get(self._JOB_PATH, "")))
+      job_id = str(job.get(self._JOB_ID, ""))
+      # guard: in flight, deferred, dead, cancelled, or already consumed — not this pass's
+      if job.get(self._JOB_STATUS) not in self._COLLECTABLE or (job_dir / self._JOB_CONSUMED).exists():
+        continue
+      try:
+        committed = self._land_domain_job(repo, planner.cfg, dispatcher, expert, job_dir, job_id)
+      except _domains.DomainLandingError as exc:
+        # a refused job is retired all the same: its group is still stale, so it is dispatched afresh
+        print(f"{self._CMD_DOMAIN_COLLECT}: {expert}/{job_id}: {exc}", file = sys.stderr)
+        failed.append(job_id)
+        dispatcher.consume_job(repo = repo, expert = expert, job_id = job_id)
+        continue
+
+      # guard: the commit failed and was rolled back — keep the job for the next pass
+      if not committed:
+        print(f"{self._CMD_DOMAIN_COLLECT}: {expert}/{job_id}: commit failed, retried next pass", file = sys.stderr)
+        failed.append(job_id)
+        continue
+
+      # landed and recorded — retire the job, releasing its dedup key
+      dispatcher.consume_job(repo = repo, expert = expert, job_id = job_id)
+      landed += 1
+
+    # the summary is the routine's last stdout line; any failure fails the pass
+    print(json.dumps({ "landed": landed, "failed": failed }))
+    return 1 if failed else 0
+
+  def _land_domain_job(
+    self,
+    repo: Path,
+    cfg: _domains.DomainConfig,
+    dispatcher: _dispatch.CoreDispatch,
+    expert: str,
+    job_dir: Path,
+    job_id: str,
+  ) -> bool:
+    """
+    Land one finished job's document with the index and commit both.
+
+    Args:
+      repo: Absolute repository root.
+      cfg: The repo's domain configuration.
+      dispatcher: The core bridge the job's response is read through.
+      expert: Expert name the job was dispatched to.
+      job_dir: The job's bundle directory.
+      job_id: The job's identifier.
+
+    Returns:
+      True when the landing is committed (or changed nothing), False when the commit failed
+      and every touched path was restored.
+
+    Raises:
+      DomainLandingError: When the job reported an error, returned no document, or names a
+        doc path the landing refuses; nothing is written.
+    """
+    collected = dispatcher.query_job(repo = repo, expert = expert, job_id = job_id)
+    response = collected.get(self._JOB_RESPONSE)
+    response = response if isinstance(response, dict) else {}
+
+    # guard: the writer finished with an error, or a response that violates the envelope
+    if collected.get(self._JOB_STATUS) != self._STATUS_DONE:
+      raise _domains.DomainLandingError(
+        f"writer outcome {response.get(self._JOB_OUTCOME)!r}: {response.get(self._JOB_ERROR)!r}"
+      )
+    body = self._returned_doc(job_dir, response)
+
+    # the request names where the document belongs and which group it is
+    try:
+      request = json.loads((job_dir / self._JOB_REQUEST).read_text(encoding = self._ENCODING))
+    except (OSError, json.JSONDecodeError) as exc:
+      raise _domains.DomainLandingError(f"unreadable {self._JOB_REQUEST}: {exc}") from exc
+    doc_rel = str(request.get(_domains.GROUP_DOC, ""))
+    group = str(request.get(_domains.GROUP_KEY, ""))
+
+    # what the two paths hold now, so a failed commit can put them back
+    index = _domains.DomainIndex(cfg = cfg)
+    before = {
+      rel: (repo / rel).read_bytes() if (repo / rel).is_file() else None
+      for rel in ( doc_rel, index.index_rel() )
+    }
+
+    # land, refresh the index, and record exactly those two paths — under the doc's normalised
+    # spelling the landing returns — in one commit
+    paths = [ _domains.DomainLanding(cfg = cfg).save_doc(doc_rel, body), index.index_rel() ]
+    index.apply()
+    exit_code = self._commit_paths(repo = repo, paths = paths, message = self._SUBJECT_DOMAINS_PREFIX + group)
+
+    # guard: the commit landed — nothing to undo
+    if exit_code == 0:
+      return True
+
+    # undo the landing: unstage what the commit attempt staged, then restore the bytes
+    subprocess.run([ "git", "reset", "-q", "--", *paths ], cwd = str(repo), check = False, capture_output = True)
+    for rel, data in before.items():
+      if data is None:
+        (repo / rel).unlink(missing_ok = True)
+      else:
+        (repo / rel).write_bytes(data)
+    return False
+
+  def _returned_doc(self, job_dir: Path, response: dict) -> str:
+    """
+    Read the document a finished job returned in its `result/` directory.
+
+    Args:
+      job_dir: The job's bundle directory.
+      response: The job's parsed `response.json`.
+
+    Returns:
+      The returned document text.
+
+    Raises:
+      DomainLandingError: When the response declares no result, the declared entry is not a
+        plain file under `result/`, or the file is missing or empty.
+    """
+    entries = response.get(self._JOB_RESULT)
+    entry = entries[0] if isinstance(entries, list) and entries else None
+    path = entry.get(self._JOB_PATH) if isinstance(entry, dict) else entry
+
+    # guard: the response must name its document as a plain file under result/
+    if not isinstance(path, str) or not path.startswith(self._RESULT_PREFIX):
+      raise _domains.DomainLandingError(f"response declares no result document: {entries!r}")
+    name = path[len(self._RESULT_PREFIX):]
+
+    # guard: a plain filename only — no separator, no parent hop
+    if not name or "/" in name or "\\" in name or name in { ".", ".." }:
+      raise _domains.DomainLandingError(f"result entry is not a plain filename: {path!r}")
+    try:
+      body = (job_dir / self._JOB_RESULT / name).read_text(encoding = self._ENCODING)
+    except OSError as exc:
+      raise _domains.DomainLandingError(f"result document missing: {path!r}") from exc
+
+    # guard: the placeholder core created is empty until the writer fills it
+    if not body.strip():
+      raise _domains.DomainLandingError(f"result document is empty: {path!r}")
+    return body
 
   def _cmd_terms_apply(self, args: argparse.Namespace) -> int:
     """

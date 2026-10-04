@@ -1949,8 +1949,7 @@ class DomainDoctor:
       if not blocks:
         continue
       doc_rel = layout.doc_rel(group)
-      # waiver: planner's protected hash reader reused — one frontmatter notation across the engine
-      stored = _domains.DomainPlanner._stored_hash(self._repo / doc_rel)
+      stored = _domains.DomainPlanner.stored_hash(self._repo / doc_rel)
       digest = _domains.DomainPlanner.group_hash(blocks)
 
       # guard: doc current — no finding
@@ -1997,8 +1996,7 @@ class DomainDoctor:
     carriers: dict[str, str] = {}
     for group in sorted(dictionary):
       doc_rel = layout.doc_rel(group)
-      # waiver: planner's protected tags reader reused — one frontmatter notation across the engine
-      for tag in _domains.DomainPlanner._stored_tags(self._repo / doc_rel):
+      for tag in _domains.DomainPlanner.stored_tags(self._repo / doc_rel):
         # guard: not a wiki tag — irrelevant to axis vocabulary
         if not tag.startswith(_WIKI_TAG_PREFIX):
           continue

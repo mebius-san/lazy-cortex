@@ -85,8 +85,9 @@ class CoreDispatch:
   """
   Thin §1c bridge between lazycortex-wiki and lazycortex-core's CLI.
 
-  Resolves the `lazycortex-core` binary at construction time and exposes a
-  single dispatch-level operation to queue curator jobs.
+  Resolves the `lazycortex-core` binary at construction time and exposes the
+  job-level operations this plugin needs: queueing expert jobs, and listing,
+  reading, and retiring the finished ones it collects itself.
 
   Guarantees:
     - `lazycortex-core` is reached only through its published CLI binary, never by importing a
@@ -129,8 +130,20 @@ class CoreDispatch:
   _CONTEXT_COLLECTED_TAGS = "collected_tags.json"
   _RESULT_ALIAS_MAP       = "alias_map.json"
 
-  # Subcommand forwarded to lazycortex-core.
-  _CMD_DISPATCH = "dispatch-job"
+  # Subcommands forwarded to lazycortex-core.
+  _CMD_DISPATCH  = "dispatch-job"
+  _CMD_LIST_JOBS = "list-jobs"
+  _CMD_COLLECT   = "collect-job"
+  _CMD_CONSUME   = "consume-job"
+
+  # `list-jobs` flags, and the `{expert, job_id}` body keys `collect-job` / `consume-job` read.
+  _ARG_EXPERT = "--expert"
+  _ARG_CWD    = "--cwd"
+  _JOB_EXPERT = "expert"
+  _JOB_ID     = "job_id"
+
+  # Result file the domain-spec writer returns its whole document in.
+  _RESULT_DOMAIN_DOC = "doc.md"
 
   # Environment variable name core reads to locate the repo.
   _ENV_REPO_ROOT = "LAZY_REPO_ROOT"
@@ -383,10 +396,8 @@ class CoreDispatch:
     """
     Queue a `wiki.domain-writer` job for one domain group via `dispatch-job`.
 
-    Forwards the caller's `payload` verbatim (core writes it to
-    `request.json` unchanged); the `dedup_key` combines the domain-spec kind
-    with the group key, so repeated dispatches for the same group collapse
-    to one pending job while other groups stay distinct.
+    The job returns its document as a result file, which `domain-collect`
+    later lands in the generated tree.
 
     Guarantees:
       - The caller's `payload` reaches `request.json` unchanged; no field is added, renamed, or
@@ -413,13 +424,75 @@ class CoreDispatch:
     # The `dedup_key` MUST combine the domain-spec kind with the group key, so repeated dispatches
     # for one group collapse into one pending job while other groups stay independent.
 
-    # the bundle core reads off stdin — layout, config.json and READY ordering stay core's
+    # the bundle core reads off stdin — layout, config.json and READY ordering stay core's; the
+    # writer returns its document in the declared result file, never in the working tree
     bundle: dict = {
       "expert":    self.EXPERT_DOMAIN_WRITER,
       "payload":   payload,
+      "result":    [ self._RESULT_DOMAIN_DOC ],
       "dedup_key": f"{self.KIND_DOMAIN_SPEC}:{group}",
     }
     return self._call_core(self._CMD_DISPATCH, bundle, repo)
+
+  # ------------------------------------------------------------------
+  def query_jobs(self, *, repo: Path, expert: str) -> list[dict]:
+    """
+    List one expert's job bundles via `list-jobs`.
+
+    Args:
+      repo: Absolute path to the repository root.
+      expert: Expert name whose queue is listed.
+
+    Returns:
+      Core's job descriptors, each carrying `expert`, `job_id`, `path`, and `status`; empty when
+      core answered with anything but a JSON array, and any entry that is not an object is dropped.
+
+    Raises:
+      RuntimeError: When the core subprocess exits non-zero.
+      json.JSONDecodeError: When the core subprocess stdout is not valid JSON.
+    """
+    listing = self._run_core([ self._CMD_LIST_JOBS, self._ARG_EXPERT, expert, self._ARG_CWD, str(repo) ], {}, repo)
+    return [ entry for entry in listing if isinstance(entry, dict) ] if isinstance(listing, list) else []
+
+  # ------------------------------------------------------------------
+  def query_job(self, *, repo: Path, expert: str, job_id: str) -> dict:
+    """
+    Read one job's status and response via `collect-job`.
+
+    Args:
+      repo: Absolute path to the repository root.
+      expert: Expert name the job was dispatched to.
+      job_id: The job's identifier.
+
+    Returns:
+      Core's `{status, response}` dict for the job; empty when core answered with a JSON value
+      that is not an object.
+
+    Raises:
+      RuntimeError: When the core subprocess exits non-zero.
+      json.JSONDecodeError: When the core subprocess stdout is not valid JSON.
+    """
+    return self._call_core(self._CMD_COLLECT, { self._JOB_EXPERT: expert, self._JOB_ID: job_id }, repo)
+
+  # ------------------------------------------------------------------
+  def consume_job(self, *, repo: Path, expert: str, job_id: str) -> dict:
+    """
+    Retire one job via `consume-job`, releasing its dedup key.
+
+    Args:
+      repo: Absolute path to the repository root.
+      expert: Expert name the job was dispatched to.
+      job_id: The job's identifier.
+
+    Returns:
+      Core's `{"status": "ok"}` acknowledgement; empty when core answered with a JSON value that
+      is not an object.
+
+    Raises:
+      RuntimeError: When the core subprocess exits non-zero.
+      json.JSONDecodeError: When the core subprocess stdout is not valid JSON.
+    """
+    return self._call_core(self._CMD_CONSUME, { self._JOB_EXPERT: expert, self._JOB_ID: job_id }, repo)
 
   # ------------------------------------------------------------------
   def _call_core(self, subcommand: str, body: dict, repo: Path) -> dict:
@@ -435,10 +508,33 @@ class CoreDispatch:
       repo: Absolute path to the repository root.
 
     Returns:
-      Parsed JSON from the subprocess stdout.
+      Parsed JSON object from the subprocess stdout; empty when core printed a JSON value that is
+      not an object.
 
     Raises:
       RuntimeError: When the subprocess exits non-zero.
+      json.JSONDecodeError: When the subprocess stdout is not valid JSON.
+    """
+    # every body-in verb answers with one JSON object
+    parsed = self._run_core([ subcommand ], body, repo)
+    return parsed if isinstance(parsed, dict) else {}
+
+  # ------------------------------------------------------------------
+  def _run_core(self, argv: list[str], body: dict, repo: Path) -> object:
+    """
+    Run `lazycortex-core` with the given arguments and a JSON body on stdin.
+
+    Args:
+      argv: The subcommand followed by any command-line flags it takes.
+      body: Payload dict serialised to JSON on stdin.
+      repo: Absolute path to the repository root.
+
+    Returns:
+      The parsed JSON value the subprocess printed.
+
+    Raises:
+      RuntimeError: When the subprocess exits non-zero.
+      json.JSONDecodeError: When the subprocess stdout is not valid JSON.
     """
 
     # Domain(plugin.boundaries):
@@ -451,10 +547,11 @@ class CoreDispatch:
     # refusal in full: there is no answer, and the error raised to the caller carries whatever the process
     # managed to print.
 
+    # run core with the repo root exported, the body on stdin
     env = os.environ.copy()
     env[self._ENV_REPO_ROOT] = str(repo)
     proc = subprocess.run(
-      [ sys.executable, str(self._cli), subcommand ],
+      [ sys.executable, str(self._cli), *argv ],
       input = json.dumps(body),
       capture_output = True,
       text = True,
@@ -465,7 +562,7 @@ class CoreDispatch:
     # guard: non-zero exit from core — surface stdout+stderr for diagnosis
     if proc.returncode != 0:
       raise RuntimeError(
-        f"lazycortex-core {subcommand} exit={proc.returncode} "
+        f"lazycortex-core {argv[0]} exit={proc.returncode} "
         f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
       )
     return json.loads(proc.stdout)

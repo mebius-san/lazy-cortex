@@ -19,6 +19,7 @@ Checks:
   check10 — plugin ships a well-formed PostToolUse hook manifest at `hooks/hooks.json`
   check11 — venv probe-then-fallback state mirrors `_ensure_venv.sh`
   check12 — sources carry `Domain(...)` blocks but the domain-groups dictionary is missing
+  check13 — the protected-access mypy plugin is listed in `[tool.mypy]` and its shim is deployed current
 """
 from __future__ import annotations
 
@@ -171,6 +172,7 @@ class Check3ArtifactsPresent:
     ("bin/pcf.py", "pcf checker"),
     ("bin/toi.py", "toi checker"),
     ("bin/pch.py", "pch checker"),
+    ("bin/mypy_protected_access.py", "protected-access mypy plugin"),
     ("hooks/lazy-python.check-style.sh", "PostToolUse hook"),
     ("hooks/hooks.json", "PostToolUse hook manifest"),
     ("skills/lazy-python.check-style/SKILL.md", "check-style skill"),
@@ -182,6 +184,7 @@ class Check3ArtifactsPresent:
     ("templates/python/python-template.py", "python file template"),
     ("templates/python/init-template.py", "__init__.py file template"),
     ("templates/python/scaffold.entries.json", "scaffold manifest"),
+    ("templates/mypy-protected-access-shim.py", "protected-access shim template"),
   )
 
   def __init__(self, *, consumer_dir: Path) -> None:
@@ -742,6 +745,91 @@ class Check12DomainDictionary:
     }
 
 
+# ----------------------------------------------------------------------------------------
+class Check13MypyPlugin:
+  """
+  Audit check for the consumer's protected-access mypy plugin wiring and the currency of its deployed shim.
+
+  Attributes:
+    SHIM_REL: Repo-relative path of the shim the consumer's `[tool.mypy]` plugin entry names.
+    SHIM_TEMPLATE_REL: Plugin-relative path of the shipped shim the deployed copy must equal.
+    consumer_dir: Absolute path to the consumer repository root.
+  """
+
+  SHIM_REL = "cli/mypy/protected_access.py"
+  SHIM_TEMPLATE_REL = "templates/mypy-protected-access-shim.py"
+
+  def __init__(self, *, consumer_dir: Path) -> None:
+    self.consumer_dir: Path = consumer_dir
+
+  def run(self) -> dict:
+    """
+    Check the `[tool.mypy]` plugin entry, the shim's presence, and the shim's currency.
+
+    Returns:
+      Finding dict with `severity` (PASS, WARN, or FAIL) and a `message` string.
+    """
+    pyproject = self.consumer_dir / "pyproject.toml"
+
+    # guard: no pyproject.toml at all, so no mypy configuration can name the plugin
+    if not pyproject.exists():
+      return {"severity": "FAIL", "message": "pyproject.toml not found in consumer root"}
+
+    # guard: a file that does not parse carries no readable mypy configuration
+    try:
+      data = tomllib.loads(pyproject.read_text(encoding = "utf-8"))
+    except tomllib.TOMLDecodeError as exc:
+      return {"severity": "FAIL", "message": f"pyproject.toml is not valid TOML: {exc}"}
+
+    # the `[tool.mypy]` table, or None when `tool` itself is not a table
+    tool = data.get("tool", {})
+    mypy = tool.get("mypy", {}) if isinstance(tool, dict) else None
+
+    # guard: a `tool` or `tool.mypy` that is not a table cannot carry a plugin list, and install cannot merge into it
+    if not isinstance(mypy, dict):
+      return {
+        "severity": "WARN",
+        "message": f'`tool` / `tool.mypy` in pyproject.toml is not a table — make [tool.mypy] a table '
+                   f'with plugins = ["{self.SHIM_REL}"] by hand',
+      }
+
+    # the plugin entries as mypy reads them; mypy also reads `plugins` as one comma-separated string
+    plugins = mypy.get("plugins", [])
+    listed = [entry.strip() for entry in plugins.split(",")] if isinstance(plugins, str) else plugins
+
+    # guard: install extends only a list, so any other form without the shim is the operator's to edit
+    if not isinstance(plugins, list) and (not isinstance(listed, list) or self.SHIM_REL not in listed):
+      return {
+        "severity": "WARN",
+        "message": f'[tool.mypy] `plugins` is not a list and does not name "{self.SHIM_REL}" — add it by hand '
+                   f'(/lazy-python.install edits only a list)',
+      }
+
+    # guard: mypy does not load the shim unless `plugins` lists it
+    if self.SHIM_REL not in listed:
+      return {
+        "severity": "WARN",
+        "message": f'[tool.mypy] `plugins` does not list "{self.SHIM_REL}" — run /lazy-python.install',
+      }
+
+    # the deployed shim the plugin entry names
+    shim = self.consumer_dir / self.SHIM_REL
+
+    # guard: the plugin entry points at a file that was never deployed
+    if not shim.exists():
+      return {"severity": "WARN", "message": f"{self.SHIM_REL} is missing — run /lazy-python.install"}
+
+    # guard: the shim is deployed verbatim, so any byte difference from the template is drift
+    if shim.read_bytes() != (PLUGIN_ROOT / self.SHIM_TEMPLATE_REL).read_bytes():
+      return {
+        "severity": "WARN",
+        "message": f"{self.SHIM_REL} is stale against the plugin template — run /lazy-python.install",
+      }
+
+    # wired and current
+    return {"severity": "PASS", "message": f"protected-access plugin wired and {self.SHIM_REL} current"}
+
+
 def main() -> int:
   """
   Dispatch a named check, emit its JSON finding to stdout, and return 0.
@@ -767,6 +855,7 @@ def main() -> int:
     "check10": Check10Hook,
     "check11": Check11Venv,
     "check12": Check12DomainDictionary,
+    "check13": Check13MypyPlugin,
   }
   handler = checks.get(check_id)
   if handler is None:

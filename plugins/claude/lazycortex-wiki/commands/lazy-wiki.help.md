@@ -29,7 +29,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 - `lazy-wiki.gatherer` — traverses the graph from those entry points (See-also + on-demand backlinks), reads only relevant nodes, and synthesises the `/lazy-wiki.query` answer.
 - `lazy-wiki.structure-curator` — owns `docs/structure.md`: on `curate`/`rename` it applies one path change to the map and commits; on `report` it returns where the map and the tree have drifted apart. Never edits the files it describes.
 - `lazy-wiki.terms-curator` — owns the terms dictionary: on `curate` it reads one changed document and adds, widens, or splits a term, then commits; on `report` it returns where documents and dictionary have drifted apart. Never edits the documents themselves.
-- `lazy-wiki.domain-spec-writer` — writes one domain group's spec doc from its `Domain(…)` blocks (fixed Terms / Principles / Mechanics sections, formulas verified against code, Obsidian LaTeX); dispatched by the domain routines and `/lazy-wiki.domain-sync`.
+- `lazy-wiki.domain-spec-writer` — composes one domain group's spec doc from its `Domain(…)` blocks (fixed Terms / Principles / Mechanics sections, formulas verified against code, Obsidian LaTeX) and returns it as a file; dispatched by the domain routines and `/lazy-wiki.domain-sync`, landed and committed by `domain-collect` / `domain-land`.
 
 **Commands**:
 

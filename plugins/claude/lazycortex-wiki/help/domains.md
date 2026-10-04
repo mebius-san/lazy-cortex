@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Query a generated reference tree built from code's Domain(…) comments — one section or one term at a time, never the whole tree.
-last_regen: 2026-09-28
+last_regen: 2026-10-04
 diagram_spec:
   anchor: "How the domain tree stays current"
   request: "Flow diagram: code Domain(…)/Contract: comments feed domain-plan detection, which dispatches the domain-spec writer per changed group to (re)write docs/domains/<group>.md, then rebuilds the domains.md index; /lazy-wiki.domains reads that generated tree to answer group and term queries."
@@ -10,8 +10,8 @@ source_skills:
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
   - lazy-wiki.domain-spec-writer
-source_sha: e6f72e6c9fd925c00e50fcee5fc5b447600cce7a
-surface_sha: 41a17d3fca171391be29b9098c68895de59e9939ffb67872be656867251db495
+source_sha: 8b05d79f353c84e0c3c4d2085e5a6ad0ffa72fb9
+surface_sha: cbe567d69d4a2d1c8a562e8b9b6d12e9c8ba21c1ef86f7ab05035b30d0b79d02
 ---
 # Domain knowledge lookup
 
@@ -30,7 +30,7 @@ The tree itself is generated, not hand-written: a synthesising agent reads each 
 
 You ask `/lazy-wiki.domains group <group-key> [<section>]` for one group's doc, or `/lazy-wiki.domains term "<text>"` to search the whole tree for a term. A group query with no section returns the doc's overview paragraph plus the list of sections actually present, so you can narrow a follow-up query; naming a section (`Terms`, `Principles`, `Mechanics`, or `Contracts` when present) returns just that block. A term query greps every generated doc case-insensitively and returns the matching excerpts with their file paths — never a full file. Both modes assume the tree already exists; if it doesn't, the skill tells you to run `/lazy-wiki.configure domains` (first-time setup) and `/lazy-wiki.domain-sync` (to generate it) before it can answer anything.
 
-The tree behind those queries is generated, not maintained by hand. When your project runs the background daemon, a git-watch routine and a weekly full sweep keep it current automatically as `Domain(…)` and `Contract:` comments change — you don't have to do anything. When you're not running the daemon, or you just changed a batch of markers and want the docs current right now, `/lazy-wiki.domain-sync` does the same work synchronously: it detects which groups changed since the last generation, dispatches the domain-spec writer once per changed group, deletes docs for groups that no longer have code behind them, rebuilds the `domains.md` index, and commits everything in one step.
+The tree behind those queries is generated, not maintained by hand. When your project runs the background daemon, a git-watch routine and a weekly full sweep keep it current automatically as `Domain(…)` and `Contract:` comments change — you don't have to do anything. The writer only ever returns its document; a collect routine places it, refreshes the `domains.md` index, and commits both. When you're not running the daemon, or you just changed a batch of markers and want the docs current right now, `/lazy-wiki.domain-sync` does the same work synchronously: it detects which groups changed since the last generation, dispatches the domain-spec writer once per changed group, deletes docs for groups that no longer have code behind them, rebuilds the `domains.md` index, and commits everything in one step.
 
 The domain-spec writer is the piece that actually produces a doc. For each group it reads every source file its `Domain(…)` blocks name, verifies the formulas and rules against the real implementation, and writes the group's document as a synthesised story — not a block-by-block transcript — with formulas recorded as proper math notation. It never mentions file paths or symbol names in that prose; the one exception is the Contracts section, where each guarantee is anchored back to `path:symbol` so you can jump to the code the guarantee governs. If the group carries no `Contract:` blocks, that section is left out entirely rather than padded with a placeholder.
 

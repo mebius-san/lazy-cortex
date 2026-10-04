@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, causes, and fixes for lazycortex-python install, audit, style checks, the guideline-review gate, and writer agents.
-last_regen: 2026-10-02
+last_regen: 2026-10-04
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision-tree routing install/audit/check-style/review/writer failures: top-level branch on skill invoked (install vs audit vs check-style vs review vs docstring-writer vs test-writer); install branch splits on phase (source-not-found, rule-read-only, wrapper-template-missing, pyproject-absent, pch-no-inspect-sh, scaffold-sync-fails, env-source-multiple-candidates, wrapper-cannot-resolve-active-install); audit branch splits on check number (check-crash, check1 drift, check2 broken-pointer, check3 artifact-missing, check4 placeholder, check10 invalid-json, check11 venv-degraded, check12 domain-groups-dictionary-missing); check-style branch splits on step (step3-manual-vs-chk, step5-test-gate, step6-violations-persist); pcf branch splits on new-violations-after-upgrade: (a) D2/D5/D7/D9 firing on previously-passing docstrings because project-neutral defaults dropped a project's implicit Generation Rules / Value Ranges / _field_filters conventions, needing [tool.pcf] extra_docstring_sections / d2_exempt_marker_attrs / private_name_allowlist declared; (b) check_language flagging comments/docstrings written outside [tool.pcf] allowed_languages (default english-only), needing translation, allowed_languages, or a # waiver:; (c) project_package autodetection resolving to nothing on an ambiguous src/ + root layout, misclassifying first-party imports, needing [tool.pcf] project_package declared explicitly; review branch splits on: chk-py-all-no-longer-runs-review (review left chk-py all as of 4.0.0 and needs its own chk-py review dispatch, mandatory at the end of a planned-work cycle) vs chk-py-review-base-ref-unresolvable (typo'd or unfetched --base ref, fetch or use git merge-base) vs chk-py-review-render-still-fails-with-FAIL-finding (fix the code, re-run — new scope key re-manifests); docstring-writer branch (step6-chk-violations); test-writer branch (step6-fails-flag, step7-tst-py-fails); each leaf names the fix action"
@@ -19,8 +19,8 @@ source_skills:
   - lazy-python.knowledge-sweep
   - lazy-python.domain-writer
   - lazy-python.contract-writer
-source_sha: 8439297f2cd29c9edeab371cf23ceaf3fa88e2d3
-surface_sha: 1b17cc482810a721e4106b6d716a232df1d33be0802d9010b52a30dd0f2f8a8f
+source_sha: cd5aee8f55053706953da379b04dd224e96b64fd
+surface_sha: 83b62be55d8015e465dee9b2418990b8359808b19cf7add8969a1f6799db06a0
 ---
 # Troubleshooting
 
@@ -246,7 +246,7 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 
 **Likely cause**: The check itself crashed — a missing positional argument, an unrecognized check ID, or an internal exception — rather than finding an actual invariant violation. A check that finds a real problem always reports `FAIL` and exits `0`; a crash is a different failure class and means the check never ran to completion.
 
-**Fix**: Read the command's stderr for the underlying traceback, confirm the check argument is one of `check1`–`check12`, and re-run `/lazy-python.audit`. If the crash persists on a clean re-run with a valid argument, the plugin's own `audit_checks.py` has a bug — file an issue against `lazycortex-python@lazycortex` rather than treating it as a project-level finding.
+**Fix**: Read the command's stderr for the underlying traceback, confirm the check argument is one of `check1`–`check13`, and re-run `/lazy-python.audit`. If the crash persists on a clean re-run with a valid argument, the plugin's own `audit_checks.py` has a bug — file an issue against `lazycortex-python@lazycortex` rather than treating it as a project-level finding.
 
 ---
 
@@ -317,6 +317,16 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 **Likely cause**: The style checker deliberately never validates a `Domain(<group>):` marker's group against anything — it only ever matches the reserved `unfiled` literal — so a project whose knowledge markers all cite real-looking group names passes every checker even if the dictionary meant to define those groups was never created. Check 12 closes that blind spot: once any source carries a `Domain(…)` block, it looks for the dictionary at `.claude/lazy.settings.json[wiki.domains.dictionary]` when configured, else the conventional `docs/guidelines/domain-groups.md`.
 
 **Fix**: Run `/lazy-python.knowledge-sweep` — it builds the dictionary from the project's parked and in-use `Domain(…)` groups (with the operator confirming candidates) and refiles blocks that don't yet cite a real one. Re-run `/lazy-python.audit`; check 12 passes once the dictionary exists (or immediately, if the codebase carries no `Domain(…)` blocks at all).
+
+---
+
+## `/lazy-python.audit` `check13` reports `WARN` or `FAIL` — protected-access mypy plugin not wired
+
+**Symptom**: Check 13 shows `WARN` saying `[tool.mypy]` `plugins` in `pyproject.toml` omits `cli/mypy/protected_access.py`, that the shim file `cli/mypy/protected_access.py` is missing, or that it is stale against the shipped template. It shows `FAIL` when `pyproject.toml` is absent or is not valid TOML.
+
+**Likely cause**: `/lazy-python.install` deploys the mypy shim verbatim into `cli/mypy/protected_access.py` and adds that path to the `[tool.mypy]` `plugins` list. A missing entry or file means the install never ran or predates this feature; a differing shim means the plugin updated since the last install or the shim was hand-edited. A `plugins` value written as one comma-separated string counts as listing each of its entries, but install only extends a list — so a string form without the entry, or a `tool` / `tool.mypy` that is not a table, is a `WARN` the install cannot repair on its own.
+
+**Fix**: Re-run `/lazy-python.install` — it is idempotent and overwrites the shim with the current shipped copy. If the finding came from the string-form or non-table case, the install prints a `manual-edit:` line naming the exact change; make that edit in `pyproject.toml` as the line says, then re-run `/lazy-python.audit`. For a `FAIL`, fix or create `pyproject.toml` first (see the `pyproject.toml` entry above), then re-run the install.
 
 ---
 

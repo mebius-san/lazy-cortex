@@ -6,7 +6,7 @@ user-invocable: true
 ---
 # Audit lazycortex-python
 
-Read-only health check that walks the 12 invariants the Python surface promises to hold. Each check is a separate sub-process call against `bin/audit_checks.py`; the skill aggregates `{severity, message}` payloads into a single report. Findings are surfaced; nothing is mutated, and every finding carries its own repair route.
+Read-only health check that walks the 13 invariants the Python surface promises to hold. Each check is a separate sub-process call against `bin/audit_checks.py`; the skill aggregates `{severity, message}` payloads into a single report. Findings are surfaced; nothing is mutated, and every finding carries its own repair route.
 
 The run follows the shared audit shape in `plugins/claude/lazycortex-core/references/lazy-core.audit-contract.md` — severity vocabulary, finding shape, and the read-only boundary come from there.
 
@@ -14,7 +14,7 @@ A check that reports `FAIL` is a finding, and its exit code stays 0. A non-zero 
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 12 ordered steps (12 checks plus the log write). The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 13 ordered steps (13 checks plus the log write). The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Check 1 — Rules mirror integrity`
@@ -29,6 +29,7 @@ This skill has 12 ordered steps (12 checks plus the log write). The executing ag
    - `Check 10 — PostToolUse hook registration`
    - `Check 11 — Venv bootstrap state`
    - `Check 12 — Domain-groups dictionary`
+   - `Check 13 — Protected-access mypy plugin wired`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND captured an outcome word for it" — `PASS` / `WARN` / `FAIL` for the check steps.
 3. **Do not reach the Report block until the ledger shows every prior task `completed`.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report block is a structural verifier.** Its output MUST contain one line per check above with its severity. A missing line is a bug; do not render the report with gaps.
@@ -59,7 +60,7 @@ Outcome: `PASS` / `WARN` (no mirrored rules under `<consumer>/.claude/rules/` to
 
 ## Check 3: Artifacts present
 
-Verify the plugin tree at `${CLAUDE_PLUGIN_ROOT}` carries every required artifact — manifest + overview, 4 rules, 5 references, 6 binaries, the PostToolUse hook script + its `hooks.json` manifest, the check-style skill, every agent under `agents/`, and the 6 templates. Missing artifact means the plugin install is incomplete on this machine.
+Verify the plugin tree at `${CLAUDE_PLUGIN_ROOT}` carries every required artifact — manifest + overview, 4 rules, 5 references, 7 binaries, the PostToolUse hook script + its `hooks.json` manifest, the check-style skill, every agent under `agents/`, and the 7 templates. Missing artifact means the plugin install is incomplete on this machine.
 
 Run:
 
@@ -177,9 +178,21 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.a
 
 Outcome: `PASS` (dictionary present, or no `Domain(…)` blocks in the sources yet) / `WARN` (the sources file knowledge under `Domain(…)` groups but the configured or conventional dictionary does not exist, so no group is validated against anything → run `/lazy-python.knowledge-sweep`, which builds it and refiles what is parked).
 
+## Check 13: protected-access mypy plugin wired
+
+Verify `<consumer>/pyproject.toml` lists `cli/mypy/protected_access.py` under `[tool.mypy]` `plugins`, that the shim file exists at that path, and that its text equals the shipped `${CLAUDE_PLUGIN_ROOT}/templates/mypy-protected-access-shim.py` byte for byte. Install merges the `plugins` entry from `pyproject-defaults.toml` and deploys the shim verbatim; a missing entry or file means the install never ran or predates the plugin, and a differing shim means the plugin updated since the last install or the shim was hand-edited. `plugins` written as one comma-separated string counts as listing each of its entries, as mypy reads it; install extends only a list, so a string without the entry, or a `tool` / `tool.mypy` that is not a table, is a `WARN` whose route is the manual edit it names. A `pyproject.toml` that is absent or not valid TOML is `FAIL`, as in Check 5.
+
+Run:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py" check13 ${CLAUDE_PROJECT_DIR})
+```
+
+Outcome: `PASS` (plugin listed, shim present and current) / `WARN` (`[tool.mypy]` `plugins` omits `cli/mypy/protected_access.py`, the shim file is missing, or the shim is stale against the template → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts); a string-form `plugins` without the entry, or a non-table `tool` / `tool.mypy` → make the edit the message names by hand) / `FAIL` (`pyproject.toml` absent or not valid TOML → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts)).
+
 ## Report
 
-One line per check in the canonical list, with its severity and the repair route that check's own outcome names — the contract's `[<SEVERITY>] <path-or-artifact> — <what is wrong>; <repair route>` shape, laid out as the fixed-width table below so twelve checks read as one block. A missing line is a bug, and a route repeated across several lines stays repeated — there is no trailing recommendations section. The closing line is the contract's summary, its verdict the highest severity present with `INFO` counting as `PASS`.
+One line per check in the canonical list, with its severity and the repair route that check's own outcome names — the contract's `[<SEVERITY>] <path-or-artifact> — <what is wrong>; <repair route>` shape, laid out as the fixed-width table below so thirteen checks read as one block. A missing line is a bug, and a route repeated across several lines stays repeated — there is no trailing recommendations section. The closing line is the contract's summary, its verdict the highest severity present with `INFO` counting as `PASS`.
 
 ```
 Check  1 — Rules mirror integrity         [<sev>] <message> | <route>
@@ -194,6 +207,7 @@ Check  9 — CLAUDE.md pointer (info)       [<sev>] <message> | <route>
 Check 10 — PostToolUse hook registration  [<sev>] <message> | <route>
 Check 11 — Venv bootstrap state           [<sev>] <message> | <route>
 Check 12 — Domain-groups dictionary       [<sev>] <message> | <route>
+Check 13 — Protected-access mypy plugin   [<sev>] <message> | <route>
 
 audit: <PASS|WARN|FAIL> (<n> findings)   pass=<n> info=<n> warn=<n> fail=<n>
 ```

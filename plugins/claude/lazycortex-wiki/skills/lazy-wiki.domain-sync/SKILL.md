@@ -1,11 +1,11 @@
 ---
 name: lazy-wiki.domain-sync
-description: "Use when the domain-spec tree needs regenerating right now — this checkout runs no runtime daemon, domain markers or the dictionary just changed and the operator wants the docs current, or a `/lazy-python.knowledge-sweep` backfill has landed. Computes the domain plan, dispatches the domain-spec writer synchronously per changed group, removes orphaned docs, rebuilds `domains.md`, and makes one commit under the operator identity."
+description: "Use when the domain-spec tree needs regenerating right now — this checkout runs no runtime daemon, domain markers or the dictionary just changed and the operator wants the docs current, or a `/lazy-python.knowledge-sweep` backfill has landed. Computes the domain plan, dispatches the domain-spec writer synchronously per changed group and lands each returned doc through `domain-land`, removes orphaned docs, rebuilds `domains.md`, and makes one commit under the operator identity."
 allowed-tools: Read, Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(date -u *), Bash(git *), Bash(mkdir -p *), Bash(rm *), Write, Agent
 ---
 # lazy-wiki.domain-sync
 
-Regenerate the domain-spec tree without the runtime daemon — entirely in the current Claude Code session. The deterministic core (`domain-plan`, `domain-apply-index`) decides *what* changed; this skill orchestrates by dispatching the `lazy-wiki.domain-spec-writer` agent as a synchronous subagent in **tail-off mode** (`tail: false`) per changed group. There are **no job dirs** — each writer receives its group's data in the dispatch prompt, writes the doc file, and stops; this skill owns orphan removal, the single index rebuild, and the single commit. The daemon path (`lazy-wiki.domain-scan` git routine + `lazy-wiki.domain-full` weekly schedule) is unaffected and runs the same detect through `domain-tick`.
+Regenerate the domain-spec tree without the runtime daemon — entirely in the current Claude Code session. The deterministic core (`domain-plan`, `domain-apply-index`) decides *what* changed; this skill orchestrates by dispatching the `lazy-wiki.domain-spec-writer` agent as a synchronous subagent in **tail-off mode** (`tail: false`) per changed group. There are **no job dirs** — each writer receives its group's data in the dispatch prompt, writes the doc to a scratch file under `.runtime/`, and stops; this skill lands each returned doc at its `doc_path` through `domain-land` (the same landing primitive the daemon's `domain-collect` uses) and owns orphan removal, the single index rebuild, and the single commit. The daemon path (`lazy-wiki.domain-scan` git routine + `lazy-wiki.domain-full` weekly schedule dispatching jobs, `lazy-wiki.domain-collect` landing them) runs the same detect through `domain-tick`.
 
 Invocation: `/lazy-wiki.domain-sync`
 
@@ -47,14 +47,26 @@ Outcome: `planned: changed=<n> orphaned=<m> unknown=<k>`.
 
 ## Step 2 — Write each changed group
 
-For each entry in `changed_groups`, dispatch the writer synchronously — **no job dir**; the prompt carries the entry's data and the agent writes the doc itself:
+Create the scratch directory the writers return their docs into (gitignored runtime area):
+
+```
+Bash(mkdir -p <repo-root>/.runtime/lazy-wiki.domain-sync)
+```
+
+For each entry in `changed_groups`, dispatch the writer synchronously — **no job dir**; the prompt carries the entry's data, and the agent writes the doc to `output_path`, never into the working tree:
 
 ```
 Agent(subagent_type: "lazycortex-wiki:lazy-wiki.domain-spec-writer",
-      prompt: "kind=domain-spec, tail=false. repo_root=<repo-root>, group=<group>, gloss=<gloss>, language=<language>, doc_path=<doc_path>, hash=<hash>, blocks=<the entry's blocks JSON>, contracts=<the entry's contracts JSON>, tag_axes=<the entry's tag_axes JSON>, existing_tags=<the entry's existing_tags JSON>, tag_dictionary=<the entry's tag_dictionary>. Read the source files the blocks name, verify every formula against the code, and write the doc at doc_path whole (frontmatter domain_group + domain_hash=<hash>, fixed Terms/Principles/Mechanics sections, Obsidian LaTeX formulas, no source references, target language; a trailing Contracts section listing every contract's guarantee text with its path:symbol anchor when contracts is non-empty). STOP after writing — do NOT touch the index, do NOT run git. Report the outcome.")
+      prompt: "kind=domain-spec, tail=false. repo_root=<repo-root>, group=<group>, gloss=<gloss>, language=<language>, doc_path=<doc_path>, output_path=<repo-root>/.runtime/lazy-wiki.domain-sync/<group>.md, hash=<hash>, blocks=<the entry's blocks JSON>, contracts=<the entry's contracts JSON>, tag_axes=<the entry's tag_axes JSON>, existing_tags=<the entry's existing_tags JSON>, tag_dictionary=<the entry's tag_dictionary>. Read the source files the blocks name, verify every formula against the code, and write the doc whole to output_path (frontmatter domain_group + domain_hash=<hash>, fixed Terms/Principles/Mechanics sections, Obsidian LaTeX formulas, no source references, target language; a trailing Contracts section listing every contract's guarantee text with its path:symbol anchor when contracts is non-empty). Never write doc_path, the index, or any other file in the working tree, and never run git. Report the outcome.")
 ```
 
-If a writer reports an error, skip that group and continue; it is re-detected on the next run. Track each written `doc_path` for the Step 5 commit. A `doc_path` that did not exist before this run must be registered with `Bash(git add -N <doc_path>)` so the commit pathspec can see it.
+Then land the returned doc at its `doc_path`:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" domain-land <doc_path> --from <repo-root>/.runtime/lazy-wiki.domain-sync/<group>.md --repo <repo-root>)
+```
+
+`domain-land` writes only a group doc inside the output tree; it refuses (exit 1, reason on stderr) an empty return or a path outside the tree, and writes nothing then. If a writer reports an error or the landing refuses, surface the reason, skip that group, and continue; it is re-detected on the next run. Track each landed `doc_path` for the Step 5 commit. A `doc_path` that did not exist before this run must be registered with `Bash(git add -N <doc_path>)` so the commit pathspec can see it.
 
 Outcome: `written:<n>` (or `empty-set`).
 
@@ -102,6 +114,7 @@ One line per task in the canonical list, with its outcome word. A missing line i
 
 - **`domain-plan` exits non-zero saying wiki.domains is not configured** — the `wiki.domains` section is missing from `lazy.settings.json` → run `/lazy-wiki.configure domains`, then re-run.
 - **A writer subagent reports an error** — unreadable source file or malformed dispatch data → the group is skipped this run and re-detected on the next; surface the message and continue.
+- **`domain-land` refuses a returned doc** — the writer left `output_path` empty, or the plan's `doc_path` is not a group doc inside the output tree → nothing is written for that group; surface the stderr reason, continue, and re-run to regenerate it.
 - **Groups reported under `unknown_groups`** — code carries `Domain(<group>)` blocks whose group is not in the dictionary → either add the group to the dictionary by hand and re-run, or run `/lazy-python.knowledge-sweep`, which grows the dictionary with the operator and refiles the blocks under the accepted groups before this skill runs again. The sweep is the route when several groups are reported at once, when the blocks sit under `Domain(unfiled):`, or when a dictionary rename left the old group name in the code; `/lazy-wiki.audit` flags the same condition.
 - **Docs deleted under `unlisted_docs`** — a group was renamed or removed in the dictionary, so its generated doc is no longer regenerable and this run dropped it → restore the group key in the dictionary and re-run to bring the doc back, or accept the removal and let `/lazy-python.knowledge-sweep` refile the code's blocks under the new group name.
 - **The commit at Step 5 stages nothing** — an idempotent re-run produced no byte change → reported as `unchanged`; no empty commit is created.

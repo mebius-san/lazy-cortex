@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: FAQ on products, nested products, assets, vision/design docs, gates, requests, decisions, coverage gaps, and spec lookups.
-last_regen: 2026-10-01
+last_regen: 2026-10-04
 no_diagram: true
 source_skills:
   - lazy-spec.install
@@ -31,8 +31,8 @@ source_skills:
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
   - lazy-spec.resolve-dependency
-source_sha: de6f0fae7f7a3cf91f8b068e482c0d28d5f418a1
-surface_sha: 628e8b49891ce9c3a560b1097a9eb93170afc85f3ff11b19d4c7bae4a1a05c55
+source_sha: 64bd065116a46a1bd3e779ddb564c01b7f9102c4
+surface_sha: 67568318191992c3fcac5be73935cc061c4bc68b8caf0836f9606064146f61a1
 ---
 # Frequently asked questions
 
@@ -40,7 +40,7 @@ surface_sha: 628e8b49891ce9c3a560b1097a9eb93170afc85f3ff11b19d4c7bae4a1a05c55
 
 `<specs-cli>` stands for the specs plugin's `bin/lazycortex-specs` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-specs/<version>/`, or `plugins/claude/lazycortex-specs/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
-Yes — run `/lazy-spec.install` once per project (or once globally, if you want the plugin available everywhere). It ensures the per-type template-override directories exist, seeds the repo's authoring language (asks only if none is on record), registers the `lazy-spec.gate-tick` and `lazy-spec.coordinator-watch` daemon routines — the pair that clears finished job markers / structurally checks each note and hands operator activity to `spec.coordinator`, which is what actually decides and flips gates — and wires the requests-inbox runtime (open / apply routines, the request-routing expert, and its review class) at project scope. At project scope it also seeds a draft of the **vault spec** — the project-wide `vision.md` at the spec content-root, seeded through `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> seed-doc` from the `system-vision` type's template — whenever neither it nor a pre-existing `design.md` without a vision (the legal pre-vision state, migrated by the operator by hand) is already there; this file is now mandatory groundwork, not an optional nicety, because `/lazy-spec.product-config` refuses to register your first product while both are absent — the split into products is a consequence of the repo-wide spec. It's idempotent — re-running it is always safe and never overwrites config you've customized since. At the end, only when no product is registered yet, it offers to chain straight into `/lazy-spec.product-config` so you can register your first product in the same pass, or you can skip and run that separately whenever you're ready (a skipped offer is made again on the next install run). When a product is already registered, a re-run makes no such offer and moves on.
+Yes — run `/lazy-spec.install` once per project (or once globally, if you want the plugin available everywhere). It ensures the per-type template-override directories exist, seeds the repo's authoring language (asks only if none is on record), registers the `lazy-spec.gate-tick` and `lazy-spec.coordinator-watch` daemon routines — the pair that clears finished job markers / structurally checks each note and hands operator activity to `spec.coordinator`, which is what actually decides and flips gates — and wires the requests-inbox runtime (open / apply routines, the request-routing expert, and its review class) at project scope. At project scope it also seeds a draft of the **vault spec** — the project-wide `vision.md` at the spec content-root, seeded through `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> seed-doc` from the `system-vision` type's template — whenever neither it nor a pre-existing `design.md` without a vision (the legal pre-vision state, migrated by the operator by hand) is already there; this file is now mandatory groundwork, not an optional nicety, because `/lazy-spec.product-config` refuses to register your first product while both are absent — the split into products is a consequence of the repo-wide spec. It's idempotent — re-running it is always safe and never overwrites config you've customized since. Install never asks about products — it only reports whether one is already registered. Registering your first product is a separate, explicit `/lazy-spec.product-config` run, whenever you're ready.
 
 ---
 

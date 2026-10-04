@@ -90,6 +90,8 @@ The source-language rule is checked the same way, and needs the same second half
 - Strict static type checking. Catches type-narrowing mistakes ruff/pylint miss.
 - Configuration in `[tool.mypy]` in `pyproject.toml`.
 - Common invocation: `mypy <path>`. The first run on a cold cache is slow; subsequent runs are fast.
+- The `protected-access` error code comes from the mypy plugin `cli/mypy/protected_access.py`, which install places next to `chk-py`. It fires on an access to a `_member` from a class outside the owner's hierarchy; dunder and sunder names, the namedtuple API of a namedtuple class, and files under a `tests` directory inside the project are exempt.
+- Suppress it only per line, as `# type: ignore[protected-access]  # <reason>`; the `<reason>` states why the access is legitimate.
 
 ## PyLint
 

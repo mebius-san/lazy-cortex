@@ -1,15 +1,15 @@
 ---
 name: lazy-spec.install
-description: "Run when the operator asks to set up the spec system in a repo, after enabling or updating lazycortex-specs, or when spec skills misbehave because the `spec` settings section, the per-category template-override dirs, the `lazy-spec.gate-tick` routine, the request-handler runtime, or the content-root vault spec (`vision.md`) are missing. Also the place the vault spec gets seeded and the first product gets registered. Idempotent — safe to re-run."
+description: "Run when the operator asks to set up the spec system in a repo, after enabling or updating lazycortex-specs, or when spec skills misbehave because the `spec` settings section, the per-category template-override dirs, the `lazy-spec.gate-tick` routine, the request-handler runtime, or the content-root vault spec (`vision.md`) are missing. Also the place the vault spec gets seeded; products are registered separately by `/lazy-spec.product-config`. Idempotent — safe to re-run."
 allowed-tools: Read, Write, Edit, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(test *), Bash(ls *), Bash(date *), Bash(PYTHONPATH=* python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), AskUserQuestion, Agent
 ---
 # Install lazycortex-specs
 
-Bootstrap the plugin in the right scope: ensure the consumer dir exists where per-product authored-doc template overrides live, read-or-seed the repo default language, register the `lazy-spec.gate-tick` routine so the daemon clears finished job markers and structurally checks each asset's status folder-note, register the `lazy-spec.coordinator-watch` routine so the daemon hands operator activity to `spec.coordinator` (the one that actually decides gates and flips them), wire the request-handler runtime, and register the first product.
+Bootstrap the plugin in the right scope: ensure the consumer dir exists where per-product authored-doc template overrides live, read-or-seed the repo default language, register the `lazy-spec.gate-tick` routine so the daemon clears finished job markers and structurally checks each asset's status folder-note, register the `lazy-spec.coordinator-watch` routine so the daemon hands operator activity to `spec.coordinator` (the one that actually decides gates and flips them), wire the request-handler runtime, and report whether a product is registered (it never registers one — that is `/lazy-spec.product-config`).
 
 ## Install philosophy (read before any action)
 
-- **Plugin enabled = full functionality.** An enabled plugin is installed whole. There is no per-part "wire this?" opt-in — wanting the plugin means wanting its surface. The only questions this skill asks collect GENUINE project config that cannot be derived (the repo authoring language; the first product) and are read-first (Read-first / never re-ask).
+- **Plugin enabled = full functionality.** An enabled plugin is installed whole. There is no per-part "wire this?" opt-in — wanting the plugin means wanting its surface. The only questions this skill asks collect GENUINE project config that cannot be derived (the repo authoring language) and are read-first (Read-first / never re-ask).
 - **No daemon gate.** Every routine this skill registers is registered unconditionally — the manual tick drives them just as the daemon does (see § Routines are registered unconditionally). The daemon's own question belongs to `lazy-core.install`, which does not ask it either.
 - **Scope is derived, never asked.** Install scope comes from where the plugin is *enabled* (see Step 1); a project-scope enablement wins even when the install record's `scope` is `user`. Python floor is owned by `lazy-core.install`'s first phase — this skill never re-probes it.
 
@@ -62,7 +62,7 @@ This skill has 17 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 6.5 — Seed agent-model tiers`
    - `Step 6.7 — Register the upstream-tick routine`
    - `Step 6.9 — Seed the vault spec and the catalog root's level note`
-   - `Step 7 — Offer first product registration`
+   - `Step 7 — Report product registration`
    - `Step 7b — Ensure product/category wiki axes (wiki-conditional)`
    - `Step 7c — Backfill spec_doc_type across the catalog`
    - `Step 8 — Register the plugin-CLI Bash allow-pattern`
@@ -849,7 +849,7 @@ The daemon resolves `command[0]` (`lazycortex-specs`) to the plugin's bin script
 
 ## Step 6.9: Seed the vault spec and the catalog root's level note
 
-The project-wide `vision.md` at the spec content-root — the **vault spec** — is the starting point of the whole catalog: it states what the project is, for whom, and what counts as success; the split into products is a consequence of it (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md` Part 1). `lazy-spec.product-config` refuses to register the first product while it is absent (accepting a pre-existing `design.md` without one as a legal pre-vision state), so this step seeds a draft before Step 7 offers that registration.
+The project-wide `vision.md` at the spec content-root — the **vault spec** — is the starting point of the whole catalog: it states what the project is, for whom, and what counts as success; the split into products is a consequence of it (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md` Part 1). `lazy-spec.product-config` refuses to register the first product while it is absent (accepting a pre-existing `design.md` without one as a legal pre-vision state), so this step seeds a draft before any later registration.
 
 **Project scope only.** Vault content lives per-repo; at user scope skip silently with outcome `skipped-user-scope`.
 
@@ -879,26 +879,15 @@ No question — the seed is fully derivable. No review dispatch either: the shar
    Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" catalog-note backfill <product-key>)
    ```
 
-   Zero products registered yet (the from-scratch path — Step 7 registers the first one, and `lazy-spec.product-config` Step 11 calls this same verb for it) makes this a silent no-op.
+   Zero products registered yet (the from-scratch path — `lazy-spec.product-config` Step 11 calls this same verb when it registers the first one) makes this a silent no-op.
 
 Step outcome folds all three: `<vision seeded|already-present>` + `root-note-<created|updated|unchanged>` + `products-backfilled:<n>`.
 
-## Step 7: Offer first product registration
+## Step 7: Report product registration
 
-The vault spec from Step 6.9 now exists, so registration can follow it — products are a consequence of the repo-wide spec.
+Read-only status step. A product is optional: an empty `products` is a valid steady state, and install never asks about it and never registers one. Registration happens only through the explicit `/lazy-spec.product-config` command.
 
-Read `products` from `<settings-dir>/lazy.settings.json` first. Any product key besides `_version` on record → the first product is already registered: state **already-registered** and continue to Step 7b without asking. Only an empty or absent `products` reaches the question below.
-
-```
-Context (print before asking):
-- Where: /lazy-spec.install · Step 7 — Offer first product registration; target `products` and `repos` in <settings-dir>/lazy.settings.json
-- Found: `products` on record: <keys, or "none">; vault spec `<content-root>/vision.md`: <seeded | already-present>
-- Why asking: the first product is genuine project config, and whether to register it now or later is the operator's call
-- Answers: `register-now` — invoke `lazy-spec.product-config` via the `Skill` tool to walk through repo cfg + product cfg creation; it writes the product record into `products` and, for a code-bound product, the repo record describing its source checkout into `repos` (outcome `registered: <compound-key>`); `skip` — consumer config stays empty, outcome `skipped-per-user-choice`; the operator runs `lazy-spec.product-config` later when ready, and this step offers again on the next install run
-AskUserQuestion: header "First product", question "Register the first product of <repo> now via the `lazy-spec.product-config` wizard, or later?", options `register-now` / `skip` with the descriptions above.
-```
-
-If `register-now`: invoke `lazy-spec.product-config` via the `Skill` tool. Report the dispatch outcome. If `skip`: state `skipped-per-user-choice`.
+Read `products` from `<settings-dir>/lazy.settings.json`. Any product key besides `_version` on record → outcome `already-registered`. Empty or absent `products` → outcome `no-products` (silent, non-actionable). Continue to Step 7b either way.
 
 ## Step 7b: Ensure product/category wiki axes (wiki-conditional)
 
@@ -1040,7 +1029,7 @@ Outcome: **cli-allow-added**.
   - Step 6.5 outcome (`seeded` or `unchanged`), with the primitive's report block folded in verbatim; surface `sot-missing` / `no-entries` if returned
   - Step 6.7 outcome (`registered`, `refreshed`, `unchanged`, or `skipped-no-upstream-configured`)
   - Step 6.9 outcome (`seeded`, `already-present`, or `skipped-user-scope`)
-  - Step 7 outcome (`registered: <compound-key>` or `skipped-per-user-choice`)
+  - Step 7 outcome (`already-registered` or `no-products`)
   - Step 7b outcome (`skipped-no-wiki` or `ensured: <N-scopes> (no-scope: <M-products>, cli-failed: <K>)`)
   - Step 7c outcome (`backfilled: <touched>/<skipped>`)
   - Step 7d outcome (`migrated: <touched> typed, <docs> retyped, <files> renamed`)

@@ -1553,12 +1553,12 @@ class _Attach:
 
     # the request joins both projections, frontmatter list and body section, in one write
     write_text_atomic(doc_path,
-                      _Attach._append_source_requests_fm(text[:fm_end], f"[[{request_wikilink}]]")
+                      _Attach.append_source_requests_fm(text[:fm_end], f"[[{request_wikilink}]]")
                       + _Attach._project_requests_body(text[fm_end:], request_wikilink, request_display))
     return True
 
   @staticmethod
-  def _append_source_requests_fm(fm_text: str, member: str) -> str:
+  def append_source_requests_fm(fm_text: str, member: str) -> str:
     """
     Append `member` to the `spec_source_requests:` frontmatter list (create when absent).
 
@@ -1700,7 +1700,7 @@ class _FolderNote:
     # alone is invisible to it, so both projections are maintained together
     _fm_values, fm_end = parse_frontmatter(new_text)
     write_text_atomic(folder_note,
-                      _Attach._append_source_requests_fm(new_text[:fm_end], f"[[{request_wikilink}]]")
+                      _Attach.append_source_requests_fm(new_text[:fm_end], f"[[{request_wikilink}]]")
                       + new_text[fm_end:])
     return True
 
