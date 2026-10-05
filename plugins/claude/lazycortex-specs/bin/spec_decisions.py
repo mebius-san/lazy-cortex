@@ -194,8 +194,8 @@ class _Context:
   Resolved product/asset placement for a `decisions.md` path or a living doc's own path.
 
   Attributes:
-    content_root: The spec content-root (`spec_content_root`), used to build path-qualified
-      wikilinks relative to it.
+    content_root: The spec content-root (`spec_content_root`), the base the placement is resolved from
+      and from which the settings root used for wikilinks is located.
     product: The product's settings-dict key (e.g. `core`) — the literal header value — or None
       at project level (the content-root itself owns no product).
     category: The singular category axis value (`feature` / `change` / `bug` / operator-defined) —
@@ -514,10 +514,6 @@ def _protected_boundary_line(lines: list[str]) -> int:
   Shared by `_insert_record` (the insertion boundary) and `_parse_records` (so a trailing
   protected section is never swept into the last record's parsed body).
 
-  Guarantees:
-    - Never treats a line belonging to a foreign `#protected/<owner>/...` H1 section as part of
-      the registry's own content.
-
   Args:
     lines: The registry body's lines (via `spec_frontmatter.split_lines`).
 
@@ -525,10 +521,6 @@ def _protected_boundary_line(lines: list[str]) -> int:
     The line index of the first H1 heading whose next non-blank line is a `#protected/` tag, or
     `len(lines)` when no such section exists.
   """
-
-  # Contract:
-  # a line belonging to a foreign `#protected/<owner>/...` H1 section — owned by another plugin
-  # and preserved byte-for-byte — is never registry content; every caller of this boundary stops here
 
   # scan every H1 heading in order; the first one whose next non-blank line is a `#protected/`
   # tag marks the boundary
@@ -760,15 +752,20 @@ def _new_file_shell(decisions_path: Path) -> tuple[str, str]:
   return fm_text, header
 
 
-def _self_link(decisions_path: Path, record_id: str, thesis: str, content_root: Path) -> str:
+def _self_link(decisions_path: Path, record_id: str, thesis: str, settings_root: Path) -> str:
   """
   Build a path-qualified, display-carrying wikilink to a record within a registry file.
 
+  Args:
+    decisions_path: The registry file holding the record.
+    record_id: The record's `D-NNN` identifier.
+    thesis: The record's thesis, shown in the link anchor.
+    settings_root: Dir holding `.claude/lazy.settings.json` — the vault root.
+
   Returns:
-    `[[<path/from/content/root/decisions>#D-NNN — thesis|D-NNN]]`.
+    `[[<target>#D-NNN — thesis|D-NNN]]`, the target per `spec_paths.build_wikilink_target`.
   """
-  rel = decisions_path.resolve().relative_to(content_root.resolve()).with_suffix("")
-  return f"[[{rel.as_posix()}#{record_id} — {thesis}|{record_id}]]"
+  return f"[[{spec_paths.build_wikilink_target(decisions_path, settings_root)}#{record_id} — {thesis}|{record_id}]]"
 
 
 def _parse_id(record_id: str) -> int:
@@ -804,6 +801,9 @@ def add(decisions_path: Path, thesis: str, body: str, *,
     - Concurrent callers never allocate the same `D-NNN` number.
     - The record's body text is written exactly as given — never rewritten, summarized, or
       reduced to a subset of its own fields.
+    - A foreign `#protected/<owner>/...` H1 section already in the registry file is preserved
+      byte-for-byte and never treated as registry content: no record is written into it and its
+      text is never read as part of a record.
 
   Args:
     decisions_path: The registry file's path (asset-level or product-level; need not exist yet).
@@ -859,6 +859,11 @@ def add(decisions_path: Path, thesis: str, body: str, *,
     # Contract:
     # the record's body text is written exactly as given — never rewritten, summarized, or
     # reduced to a subset of its own fields before it lands in the registry file.
+
+    # Contract:
+    # a foreign `#protected/<owner>/...` H1 section already in the registry file — owned by
+    # another plugin — is preserved byte-for-byte and never treated as registry content: no
+    # record is written into it and its text is never read as part of a record.
 
     # no dedup match — allocate the next number and write the record
     number = _next_number(existing_body)
@@ -929,9 +934,10 @@ def supersede(decisions_path: Path, old_id: str, thesis: str, body: str, *,
   result = add(decisions_path, thesis, body, origin = origin, today = today)
   new_id = result[_K.ID]
   if result[_K.STATUS] == _Result.ADDED:
-    content_root = resolve_context(decisions_path).content_root
-    link = _self_link(decisions_path, new_id, thesis, content_root)
-    _write_status(decisions_path, old_number, f"superseded-by {link}")
+    # the vault root the new record's link is built against, found from the registry's own placement
+    settings_root = spec_paths.find_settings_root(resolve_context(decisions_path).content_root)
+    _write_status(decisions_path, old_number,
+                  f"superseded-by {_self_link(decisions_path, new_id, thesis, settings_root)}")
   return {_K.STATUS: _Result.SUPERSEDED, _K.OLD_ID: f"D-{old_number:03d}", _K.NEW_ID: new_id}
 
 
@@ -974,12 +980,6 @@ def _find_decision_blocks(body: str) -> list[dict]:
   Locate every `[!decision]` blockquote in a document body, skipping fenced code and any H1
   section whose first non-blank content line is a `#protected/...` or `#expert/...` tag.
 
-  Guarantees:
-    - Two `[!decision]` blocks with no blank line between them are never merged into one — a
-      line opening a new callout always ends the block in progress.
-    - A block is never collected out of a foreign `#protected/...` or `#expert/...` H1
-      section.
-
   Args:
     body: The document's body text (post-frontmatter).
 
@@ -987,15 +987,6 @@ def _find_decision_blocks(body: str) -> list[dict]:
     A list of dicts, document order, each carrying `thesis`, `start`/`end` (line-index range,
     half-open), and `raw_lines` (the block's own lines, including the leading `> `).
   """
-
-  # Contract:
-  # a block's own lines stop at the next line that opens a new callout (`> [!...]`) — two
-  # decision blocks with no blank line between them are never merged into one
-
-  # Contract:
-  # a `[!decision]` block is never collected out of a foreign `#protected/...` or
-  # `#expert/...` H1 section — such a section is owned by another plugin or by a review
-  # cycle, and its content is never read as this document's own decision content.
 
   # set up the scan state before the single forward pass below
   lines = spec_frontmatter.split_lines(body)
@@ -1046,11 +1037,6 @@ def _split_supersedes_and_body(raw_lines: list[str]) -> tuple[str, list[str]]:
   Split a `[!decision]` block's own content, `> `-prefix stripped, into the `**Supersedes.**`
   command (if any) and the remaining body lines.
 
-  Guarantees:
-    - Every content line other than a `**Supersedes.**` line is preserved byte-for-byte (minus
-      its `> ` prefix), in source order — no field-only reconstruction, no dropped continuation
-      or extra prose line.
-
   Args:
     raw_lines: The block's own lines including the leading `[!decision]` line, each prefixed
       `> `.
@@ -1059,12 +1045,6 @@ def _split_supersedes_and_body(raw_lines: list[str]) -> tuple[str, list[str]]:
     `(supersedes, body_lines)` — `supersedes` is the command's value, or empty string when the
     block carries none; `body_lines` is every remaining content line, verbatim.
   """
-
-  # Contract:
-  # every content line that is not itself a `**Supersedes.**` command is carried through
-  # unmodified — `promote` copies a block's body verbatim, never reconstructing it from a
-  # parsed subset of its own fields (spec-decisions-design.md § on how a decision enters the
-  # registry file)
 
   # strip the `[!decision]` opening line and every remaining line's `> ` blockquote prefix
   content = [ln[2:] if ln.startswith("> ") else ln.lstrip(">") for ln in raw_lines[1:]]
@@ -1099,9 +1079,13 @@ def _doc_title_line(body: str) -> str:
   return ""
 
 
-def _resolve_supersedes_link(text: str, content_root: Path) -> tuple[Path | None, int | None]:
+def _resolve_supersedes_link(text: str, settings_root: Path) -> tuple[Path | None, int | None]:
   """
   Parse a `**Supersedes.**` field's wikilink into the target registry file + record number.
+
+  Args:
+    text: The field's value, expected to be a `[[<path>#D-NNN ...]]` wikilink.
+    settings_root: Dir holding `.claude/lazy.settings.json` — the vault root.
 
   Returns:
     `(target_path, number)`, or `(None, None)` when `text` doesn't match the expected wikilink
@@ -1112,7 +1096,8 @@ def _resolve_supersedes_link(text: str, content_root: Path) -> tuple[Path | None
   # guard: not a recognizable `[[<path>#D-NNN ...]]` link
   if m is None:
     return None, None
-  return (content_root / f"{m.group(1)}.md").resolve(), int(m.group(2))
+  return (spec_paths.resolve_wikilink(m.group(1), settings_root).resolve(),
+          int(m.group(2)))
 
 
 def promote(doc_path: Path, *, today: str | None = None) -> dict:
@@ -1133,6 +1118,11 @@ def promote(doc_path: Path, *, today: str | None = None) -> dict:
       `touched_paths`, each `[]` when not applicable.
     - Promoting the same document a second time performs no duplicate work: a block whose
       thesis and body already match an existing record writes no new record.
+    - Two `[!decision]` blocks with no blank line between them are never merged into one record.
+    - A `[!decision]` block inside a foreign `#protected/...` or `#expert/...` H1 section is never
+      transferred.
+    - Each transferred block's content, apart from its `**Supersedes.**` command line, reaches its
+      record verbatim and in source order.
 
   Args:
     doc_path: The living doc's path.
@@ -1201,6 +1191,15 @@ def promote(doc_path: Path, *, today: str | None = None) -> dict:
           return {_K.STATUS: _Result.REFUSED, _K.REASON: f"asset flag {flag} is true",
                   _K.TOUCHED_PATHS: [], _K.RECORDS: []}
 
+  # Contract:
+  # two `[!decision]` blocks with no blank line between them are never merged into one record —
+  # each becomes its own.
+
+  # Contract:
+  # a `[!decision]` block inside a foreign `#protected/...` or `#expert/...` H1 section is never
+  # transferred — such a section is owned by another plugin or by a review cycle, and its content
+  # is never read as this document's own decision content.
+
   # find every transferable block before touching anything on disk
   body = text[fm_end:]
   blocks = _find_decision_blocks(body)
@@ -1211,7 +1210,8 @@ def promote(doc_path: Path, *, today: str | None = None) -> dict:
 
   # the doc's own title line becomes every new record's Origin display text
   decisions_path = doc_path.parent / DECISIONS_BASENAME
-  origin_link = (f"[[{doc_path.resolve().relative_to(ctx.content_root).with_suffix('')}"
+  settings_root = spec_paths.find_settings_root(ctx.content_root)
+  origin_link = (f"[[{spec_paths.build_wikilink_target(doc_path, settings_root)}"
                  f"|{_doc_title_line(body) or doc_path.stem}]]")
   touched: set[str] = set()
   records: list[dict] = []
@@ -1221,6 +1221,11 @@ def promote(doc_path: Path, *, today: str | None = None) -> dict:
   # promoting the same document a second time performs no duplicate work — a block whose
   # thesis and body already match an existing record writes no new record, so a repeat call
   # is safe to retry.
+
+  # Contract:
+  # every content line of a transferred block that is not itself a `**Supersedes.**` command
+  # reaches its record unmodified and in source order — a block's body is copied verbatim, never
+  # reconstructed from a parsed subset of its own fields.
 
   # process blocks in reverse document order so earlier line-range replacements never shift the
   # indices of blocks still to be processed
@@ -1246,18 +1251,19 @@ def promote(doc_path: Path, *, today: str | None = None) -> dict:
     if result[_K.STATUS] == _Result.ADDED:
       records.append({_K.ID: record_id, _K.THESIS: thesis})
       if supersedes:
-        target_path, old_number = _resolve_supersedes_link(supersedes, ctx.content_root)
+        target_path, old_number = _resolve_supersedes_link(supersedes, settings_root)
         if target_path is not None and old_number is not None:
-          new_link = _self_link(decisions_path, record_id, thesis, ctx.content_root)
-          if _write_status(target_path, old_number, f"superseded-by {new_link}"):
+          if _write_status(target_path, old_number,
+                           f"superseded-by {_self_link(decisions_path, record_id, thesis, settings_root)}"):
             touched.add(str(target_path))
 
     # the block's own lines are replaced in-place with a self-describing reference line — the
     # record link plus the visible thesis: this code cannot judge which prose owns the decision,
     # so the line must read on its own until the writer weaves it in (markdown-style canon)
-    link = _self_link(decisions_path, record_id, thesis, ctx.content_root)
     tail = "" if thesis.endswith(( ".", "!", "?", "…" )) else "."
-    lines = [*lines[:blk[_K.START]], f"{link} — {thesis}{tail}", *lines[blk[_K.END]:]]
+    lines = [*lines[:blk[_K.START]],
+             f"{_self_link(decisions_path, record_id, thesis, settings_root)} — {thesis}{tail}",
+             *lines[blk[_K.END]:]]
 
   # write the doc back once, after every block has been replaced
   new_body = "\n".join(lines)

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: chk-py runs pcf, toi, cmp, mypy, ruff, pylint plus guideline review; tst-py runs pytest; both share a venv resolver that works anywhere.
-last_regen: 2026-10-04
+last_regen: 2026-10-05
 diagram_spec:
   anchor: "How the pieces connect"
   request: "Flow diagram showing chk-py and tst-py as entry points; chk-py fans out to six subcommands in the all gate (pcf, toi, cmp, mypy, rf, pylint) plus two standalone subcommands outside the all gate — pch (PyCharm inspection) and review (guideline review, its own cadence via chk-py review --base <ref>); the review step builds a manifest and names the lazy-python.code-reviewer agent to run against it rather than running a deterministic tool, exiting PENDING (2) until the review is dispatched and its findings are rendered, so a pending review fails chk-py review (and any CI step built around it) instead of passing silently; CHK_REVIEW=headless lets review.py dispatch the reviewer agent itself through the claude CLI in the same run; a separate render step (chk-py review --render) reads the agent's findings and can exit non-zero on a FAIL; pcf also checks that every comment and docstring is written in a configured language (allowed_languages, default english) and resolves the consumer's first-party package via [tool.pcf] project_package or autodetection; tst-py calls pytest with the _pytest_dedup plugin loaded via -p; both wrappers source _ensure_venv.sh which probes four venv locations in order (VIRTUAL_ENV env var, project .venv, pyproject.toml config path, fallback create/augment project .venv), then source _ensure_env.sh which optionally sources a repo-declared env-bootstrap script named by python.env_source; pcf is also invoked by the PostToolUse hook on every .py edit; all tools read pyproject.toml for configuration."
@@ -13,8 +13,8 @@ source_skills:
   - pch.py
   - review.py
   - _ensure_venv.sh
-source_sha: 7138c77105d71c2580be141f0ec1f9a8e9d2bd4b
-surface_sha: b1c79830fdf160f961172f9f7df5644beb582b935114d551488061ccb8ad0aa7
+source_sha: c7c72225ad0abdc938b9717334138fdd4e4295d6
+surface_sha: db1f3307e5b8a6acb15e58a30328ca1d2455bac0338cacd25b0097e2d7e20b0b
 ---
 # Python checkers
 

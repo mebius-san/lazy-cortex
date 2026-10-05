@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Non-obvious answers on install, daemon setup, LLM providers, the runtime daemon and experts, routines, scaffolding, git staging, and MCP permissions.
-last_regen: 2026-10-01
+last_regen: 2026-10-05
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -33,8 +33,8 @@ source_skills:
   - lazy-expert.cancel-job
   - lazy-expert.list-jobs
   - lazy-memory.write
-source_sha: e57fd10df03d43025a601372eabfdbba57ff15ac
-surface_sha: 2220a4c78b98719a622781981c7f0bcf80b4228e1f5a6b588c3025cf5baab913
+source_sha: c1ddeed4247b009f0d833019a8c4209f3a4a73d1
+surface_sha: d60797023a91642ae5ee062a88b7b308ad75ace26630a30ac7c5a9c955663d06
 ---
 # FAQ
 
@@ -88,7 +88,7 @@ A **patch bump** (e.g. `1.0.0` → `1.0.1`) is safe to drop in with no action �
 
 ## What's the difference between `/lazy-core.audit`, `/lazy-core.doctor`, and `/lazy-core.slim-context`?
 
-`/lazy-core.audit` is a read-only startup-context and compliance scan: it shows what actually loads into context (rule sizes, loading behavior), checks skill/agent/rule authoring compliance (Execution-Discipline preamble, no-Optional headings, narrative padding, and — for skills, agents, and commands alike — whether each `description:` states an invocation trigger rather than just a mechanism), checks help-doc coverage and staleness against each plugin's README scenarios, and reports the expert-runtime config across sixteen sub-checks. It makes no changes.
+`/lazy-core.audit` is a read-only startup-context and compliance scan: it shows what actually loads into context (rule sizes, loading behavior), checks skill/agent/rule authoring compliance (Execution-Discipline preamble, no-Optional headings, narrative padding, and — for skills, agents, and commands alike — whether each `description:` states an invocation trigger rather than just a mechanism), checks help-doc coverage and staleness against each plugin's README scenarios, and reports the expert-runtime config across seventeen sub-checks. It makes no changes.
 
 `/lazy-core.doctor` is the broader health check: it verifies consistency across rules, agents, skills, commands, settings, memory, hooks, and CLAUDE.md files, confirms every installed plugin is at the latest marketplace version, and delegates to sibling audit skills — `lazy-guard.check-public`, plus each installed plugin's own `<namespace>.audit` skill, when that plugin is enabled and its own opt-in condition (an answer file, a configured scope, a non-empty settings section) is met. `lazycortex-core` is the only plugin in the marketplace that ships its own doctor; every other plugin — including `lazycortex-diagram`, `lazycortex-experts`, `lazycortex-observe`, `lazycortex-obsidian`, `lazycortex-python`, `lazycortex-review`, `lazycortex-specs`, and `lazycortex-wiki` — ships exactly one `<namespace>.audit` skill that `/lazy-core.doctor` folds into its own report, so this is the single health-check entry point across the whole marketplace rather than one doctor per plugin. Unlike audit, it offers targeted fixes you can accept interactively, plus a per-warning waive loop.
 

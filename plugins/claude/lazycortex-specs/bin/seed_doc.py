@@ -267,6 +267,10 @@ def main(argv: list[str]) -> int:
   # a product's own level note is seeded from the product context even when the caller named
   # the product; only an asset's status note drives the asset-type chain
   if product and note_fm.get(SpecKey.ROLE) != SpecValue.ROLE_PRODUCT:
+    # an asset inside a nested product's tree is that product's, whichever key the caller named: its
+    # tokens, templates and paint below all come from the owner
+    product, record = scaffold_asset.resolve_owning_product(
+        repo, note_path.parent, product = product, record = record)
     asset_type = note_fm.get(scaffold_asset.Keys.ASSET_TYPE, "") or scaffold_asset.Keys.DESIGN_STEM
     alias_base = scaffold_asset.resolve_alias_base(asset_type, record)
     tokens = { "product": product, "product_tag": scaffold_asset.product_tag(record),

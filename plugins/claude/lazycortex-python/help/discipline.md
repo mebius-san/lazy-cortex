@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Four always-loaded rules shape every Python edit and every failing test; six reference guidelines back the writer agents and chk-py/tst-py.
-last_regen: 2026-10-04
+last_regen: 2026-10-05
 diagram_spec:
   - anchor: "Rules and the edit loop"
     request: "Architecture diagram showing four path-scoped rules (lazy-python.style on **/*.py, lazy-python.docstrings on **/*.py, lazy-python.failing-tests on **/*.py plus pytest config files, lazy-python.tests on tests/**/*.py) feeding into Claude's edit loop"
@@ -20,8 +20,8 @@ source_skills:
   - lazy-python.checking-guidelines
   - lazy-python.guidelines-index
   - lazy-python.failing-tests
-source_sha: df5e95eef3ef82fb9435967af2456c8d4e659063
-surface_sha: 71f3636f82ab2430e02451ccebcc93d8501194df81cdcfed820010f375246674
+source_sha: 6f79b3ccca6a08e854d76145146578548e60486b
+surface_sha: 8534c4916d44cefca08afc3c83606618cd99a59b81cf8919fac886e334845c5c
 ---
 # Python coding discipline — rules and guidelines
 

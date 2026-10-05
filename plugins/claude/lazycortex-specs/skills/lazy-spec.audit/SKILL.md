@@ -69,9 +69,12 @@ The coordinator (the main session) does NOT scan files itself — it dispatches 
 Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md` (Wikilinks) and `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.sources-protocol.md`.
 
 - **Wikilinks** — extract every `[[wikilink]]` from every `.md` under `<spec_path>`:
-  - **Bare wikilink (FAIL)** — any target without a `/`. Role-only basenames collide by design; the path-qualified form is required. Propose `[[<path>|<display>]]`.
+  - **Resolution** — resolve every target as Obsidian does: `<vault-root>/<target>.md` (the vault root is the settings-dir) when that file exists, else `<content-root>/<target>.md`.
+  - **Bare wikilink (FAIL)** — a target without a `/` that names no file sitting directly at the vault root. Role-only basenames collide by design; the path-qualified form is required. Propose the vault form when the intended file sits at the content-root (`[[specs/vision|vision]]`), the short form otherwise.
+  - **Ambiguous short form (FAIL)** — a target that resolves only under the content-root and is also the tail of another spec document's path (`experts/vision` beside `core/experts/vision.md`): Obsidian's suffix match has two candidates. Propose the vault form of the file the prose means (`[[specs/experts/vision|vision]]`).
+  - **Shadowed target (INFO)** — a target that names a file from the vault root and another from the content-root (`[[specs/vision]]` when `specs/specs/vision.md` also exists). It reaches the vault-root file, as in Obsidian; report both paths so the operator can confirm, and name the vault form of the other (`[[specs/specs/vision|vision]]`) in case the prose means it.
   - **Missing display text (WARN)** — a path-qualified wikilink with no `|<display>`.
-  - **Broken target (FAIL)** — the target page does not exist in the vault. Report file:line.
+  - **Broken target (FAIL)** — the target resolves to no file by either route. Report file:line.
 - **Source links** (skip for design-only — no `base_url` to match against):
   - Grep every `.md` for markdown links whose host+base matches the resolved repo `base_url` (from `lazy-spec.resolve-repo`). Delegate path-scheme matching to the known-forges table — never grep for a literal `/blob/` pattern.
   - For each link in a file allowed to carry source URLs (`tech`, `code-plan`, and `test-plan` only), verify: host+base matches `base_url`; the URL is reproducible via `lazy-spec.source-url(<repo-key>, <path>, <kind>, branch=<pin-or-default>)`; `<local_path>/<path>` exists locally; no `#L<line>` fragment (forbidden).
@@ -307,6 +310,7 @@ scan: Check 11 vault-spec — <clean|INFO|WARN> (<0|1> findings)
 
 ### Errors (must fix)
 - [ ] Bare wikilink: `[[design]]` in `<feat>/code-plan.md:<line>` — use `[[<path>|<display>]]`
+- [ ] Ambiguous wikilink: `[[<target>]]` in `<file>:<line>` is the tail of both `<file-a>` and `<file-b>` — use the vault form `[[<vault-path>|<display>]]`
 - [ ] Broken wikilink: `[[<target>]]` in `<spec_path>/design.md:<line>`
 - [ ] Role violation: source URL in `<spec_path>/design.md:<line>` — belongs in `<spec_path>/tech.md`
 - [ ] Role violation: `source_branches:` frontmatter on `<feat>/design.md`
@@ -420,7 +424,7 @@ For every finding, state the exact file, the specific issue, and the route:
 
 The rest have no owning skill or CLI verb — report the concrete edit and leave it to the operator:
 
-- Rewrite a bare wikilink to path-qualified form.
+- Rewrite a bare or ambiguous wikilink to its path-qualified form (vault form for a content-root document or a non-unique short form).
 - Strip a forbidden source URL / `source_branches:` from a role that may not carry it, moving the URL into the tech file.
 - Rewrite a drifted `iconize_icon` / `iconize_color` to the declared value (name the declared value).
 - Add a missing `# Coordinator rules` / `# Coordinator commands` section to a status folder-note (empty except for the template's `#protected/spec/coordinator-rules` / `#protected/spec/coordinator-commands` tag), or a missing `# Coordinator rules` section to a product or container folder-note (same tag) — the scaffold is empty; the operator authors the constraints.

@@ -4,6 +4,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 10.5.1 — 2026-10-05 UTC
+
+- Audit now flags contradicting aspects composed into one expert, and the doctor reports the same finding.
+- The daemon restarts itself when its Python install is deleted underneath it, instead of staying broken.
+- `[!decision-candidate]` callouts are now raised only by executing experts (implementer, debugger, tester, data implementer, docs writer) for product calls made mid-job. Experts writing a document under review ask a `[!question]` instead, or settle document-level choices silently.
+
 ### 10.5.0 — 2026-10-01 UTC
 
 - A `sandbox` section in `lazy.settings.json`, in Claude Code's own shape, now configures the sandbox of every expert spawn, so a network allowlist survives and confined jobs can fetch. The runtime re-derives the sandbox file before each spawn; preflight, audit, doctor and autocheckup report and repair drift.
@@ -752,6 +758,14 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 9.12.0 — 2026-10-05 UTC
+
+- Deleting a spec document now wakes its coordinator, so the asset or product status updates without a manual nudge; `lazy-spec.install` registers the new routine.
+- Review now opens immediately on every document write, whether or not the document came from a source request.
+- Decision candidates are drafted only for product forks taken mid-job, no longer for choices made by document writers.
+- Wikilinks between spec documents are unambiguous, nested products keep their own ownership, a deferred document can move to cancelled, and code sync follows files moved in the tree.
+- `lazy-spec.sync-with-code` now applies design rewrites and waits for your explicit yes before committing.
+
 ### 9.11.2 — 2026-10-04 UTC
 
 - `/lazy-spec.install` no longer asks whether to register a first product. It only reports whether one exists, and registration is done through `/lazy-spec.product-config`. The install skill description, help text and FAQ are updated to match.
@@ -1479,6 +1493,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+### 6.11.1 — 2026-10-05 UTC
+
+- When an operator's ticked answer is ambiguous, the main writer now settles the leftover call itself instead of raising a new `[!decision-candidate]`. A genuinely new product fork becomes a fresh `[!question]`, and a call about the document's own wording or layout is settled silently, so fewer stray callouts reach `/lazy-review.finalize`.
+
 ### 6.11.0 — 2026-10-01 UTC
 
 - Documents written inside the review loop now see the product's guidelines. A new `guidelines-context` verb resolves the guideline paths for the expert's role, the asset type and the wildcard set. The coordinator names them in every main and barrier writer dispatch, so authors and validators can follow schemas such as a content design's record format.
@@ -1854,6 +1872,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+### 1.9.5 — 2026-10-05 UTC
+
+- Designer, architect and planner experts now ask product questions inside the document as a `[!question]` with options, instead of raising decision candidates. Calls about the document itself (wording, section order, Terms list) are settled silently.
+- Help corrected on how aspects combine. Aspects are listed in the job prompt and the expert reads them before starting. Composition is additive: declaration order sets no precedence, and a contradiction between two aspects is a composition defect.
+
 ### 1.9.4 — 2026-10-01 UTC
 
 - The data implementer now reads an approved content design as one decision per bullet, each naming the schema fields it settles. It raises a decision-candidate for any field the design leaves undecided, rather than for a whole group of fields.
@@ -2036,6 +2059,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 4.10.1 — 2026-10-05 UTC
+
+- The `lazy-python.test-writer` agent and the testing guidelines now allow testing private helpers directly, while still requiring tests for public contracts.
+- The shipped `mypy-protected-access-shim.py` template now waives its own encoding literal, so it no longer triggers a style warning in consumer repos.
 
 ### 4.10.0 — 2026-10-04 UTC
 

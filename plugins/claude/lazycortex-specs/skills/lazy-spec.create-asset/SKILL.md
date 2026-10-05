@@ -154,7 +154,7 @@ On success the primitive prints a JSON object to stdout:
 }
 ```
 
-The `folder`, `folder_note`, and `group_note` fields are **repo-root-relative** (they include the vault-root prefix, e.g. `specs/`). `group_note` is an empty string when nothing was seeded (the group note already existed, the asset nested inside another asset, or it landed at the product root); when non-empty, the caller MUST fold the path into its commit pathspec — a seeded note left untracked halts the runtime daemon's clean-tree check. Consumers that need to open a file use `<repo-root>/<folder>`; wikilinks remain content-root-relative (omit the vault-root prefix).
+The `folder`, `folder_note`, and `group_note` fields are **repo-root-relative** (they include the vault-root prefix, e.g. `specs/`). `group_note` is an empty string when nothing was seeded (the group note already existed, the asset nested inside another asset, or it landed at the product root); when non-empty, the caller MUST fold the path into its commit pathspec — a seeded note left untracked halts the runtime daemon's clean-tree check. Consumers that need to open a file use `<repo-root>/<folder>`; a wikilink to the asset takes the content-root-relative short form (vault-root prefix omitted) while that form is unique, else the vault form — `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md` § Wikilinks.
 
 On `outcome: error` (logical failure — folder exists, unknown product, missing template, etc.) propagate the JSON to the caller and abort; do NOT improvise the scaffold inline. Emit outcome word: `scaffolded:<N>` where N is the doc count, or `refused:<error.category>`.
 

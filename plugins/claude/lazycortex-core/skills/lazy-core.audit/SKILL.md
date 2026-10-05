@@ -26,7 +26,7 @@ Severity is the shared vocabulary of `lazy-core.audit-contract.md` and nothing e
 Resolution says what kind of change the finding implies, and `/lazy-core.checkup` reads it to decide whether to offer a fix-flow at all:
 
 - **`mechanical`** — the repair follows unambiguously from what the check already read; there is no second defensible answer. Checks: L1 consumer-scope copy absent, L2, L3; Agent B scaffold-registry `plugin_root_var`, path hygiene, Python runtime FAIL, rule-writing 3 (inline-array `paths:`) and 9 (missing template pointer), model routing 4 (orphans) and 5 (gaps), audit-shape S4 (contract not named); Agent D D3, D4, D10 index desync, D11 rows other than `not_a_symlink` / `source_missing`, D13.
-- **`selective`** — a repair exists, but which one is right is the operator's call. Checks: L1 missing plugin-source `description:`, L4; Agent A oversize rule and oversize `MEMORY.md`; Agent B MCP enablement, scaffold-registry `parse_error` / `bad_shape` / `glob_overlap` / `missing_template` / `orphan_key`, naming hygiene, every skill-writing, agent-writing and rule-writing check not listed as mechanical above, dirty-tree write-without-commit, reference-writing 11 and 12, audit-shape S1–S3; Agent D D1, D2, D5, D7, D8, D9, D11 `not_a_symlink` / `source_missing`, D12, D14, D15, D16.
+- **`selective`** — a repair exists, but which one is right is the operator's call. Checks: L1 missing plugin-source `description:`, L4; Agent A oversize rule and oversize `MEMORY.md`; Agent B MCP enablement, scaffold-registry `parse_error` / `bad_shape` / `glob_overlap` / `missing_template` / `orphan_key`, naming hygiene, every skill-writing, agent-writing and rule-writing check not listed as mechanical above, dirty-tree write-without-commit, reference-writing 11 and 12, audit-shape S1–S3; Agent D D1, D2, D5, D7, D8, D9, D11 `not_a_symlink` / `source_missing`, D12, D14, D15, D16, D17.
 - **`report-only`** — a measurement or an observation with no change expected. Checks: every sizing row and `total_kb` line from Agents A and B, the Python-runtime `[INFO]` line, model routing 1 (`_version` provenance), 3 (merged entries) and 7 (env var), every visible-waiver `[INFO]` (execution-discipline, `size-waiver:`, dirty-tree), Agent C H1 and H2 (both clear at the next publish bump — there is no manual route), D1's experts-count line, D3's absent-section lines, and D10's persona-but-empty line.
 
 A check added here is assigned a resolution in the same edit; an unassigned finding counts as `report-only` downstream, which silently drops a real repair out of `/lazy-core.checkup`'s question.
@@ -280,7 +280,7 @@ Scope: `lazy.settings.json[experts]`, the flat `lazy.settings.json[daemon]` and 
 
 **Path layout constant**: plugin cache lives under `$HOME/.claude/plugins/cache/<registry>/<plugin>/<version>/bin/<plugin>`.
 
-Perform these 16 sub-checks in order:
+Perform these 17 sub-checks in order:
 
 **D1 — `lazy.settings.json[experts]` schema**
 
@@ -485,6 +485,14 @@ No hook directory, or every hook already listed → emit nothing.
 
 A review class whose validator shares the main writer's expert key proves nothing — the same persona checks its own work. Read `lazy.settings.json[review].classes` (absent or empty → emit nothing). For each class entry: collect the expert names under `experts.main[].name` and the names under `experts.validation.*.name`; a non-empty intersection → `[FAIL] review class <class> is validated by its own main writer <key> | .claude/lazy.settings.json[review.classes]`; `fix: point the validation slot at a different expert, or drop the slot — a class with no validators is legal`. Expert composition is operator content — report only, never auto-repair.
 
+**D17 — Aspect conflicts**
+
+Aspects compose additively (`lazy-core.expert-aspects-contract.md` § 4): obligations that overlap stack, and two that cannot both be obeyed are this check's finding. For each expert entry from D1 carrying two or more `aspects[]` refs, take the paths D8 resolved (refs that did not resolve are D8's finding — skip them here) and `Read` each aspect's `## Side-effect rules` and `## Obligations` sections. Compare every pair of aspects composed into that one entry: a conflict is one aspect requiring what the other forbids — a write one allows outside the job dir and the other prohibits, an outcome or kind one mandates and the other rules out, a step one orders before another that the other orders after. Wording that differs but can be obeyed together is not a conflict; when in doubt, report nothing.
+
+- `[INFO] aspects-conflict: expert <key>: <aspect-a> "<obligation quoted>" vs <aspect-b> "<obligation quoted>" | lazy.settings.json[experts][<key>].aspects`; `fix: edit one of the two aspect files so the obligations agree, drop one aspect from the entry, or change the entry (a different agent or aspect set) so the two no longer compose`.
+
+One finding per conflicting pair per expert. No entry with two or more resolved aspects, or no conflict found → emit nothing. Aspect text and expert composition are operator content — report only, never auto-repair.
+
 ### Structured report shape (Agents A, B, C — unchanged)
 
 ```
@@ -543,6 +551,9 @@ plugins_scanned: <n>  warn: <m>
 ### aspect_resolution
 - [FAIL] expert <key>: aspect reference '<value>' did not resolve | lazy.settings.json[experts]
 
+### aspect_conflicts
+- [INFO] aspects-conflict: expert <key>: <aspect-a> "<obligation>" vs <aspect-b> "<obligation>" | lazy.settings.json[experts][<key>].aspects
+
 ### arguments_validation
 - [FAIL] expert <key>: arguments-key-invalid: <bad-key> | lazy.settings.json[experts]
 - [WARN] expert <key>: arguments payload <N> bytes
@@ -575,7 +586,7 @@ plugins_scanned: <n>  warn: <m>
 pass: <n>  warn: <n>  fail: <n>
 ```
 
-The `external_dirs` and `inbox_ownership` groups are omitted entirely when they carry no findings — a repo that declares no external directories is the common case.
+The `aspect_conflicts`, `external_dirs` and `inbox_ownership` groups are omitted entirely when they carry no findings — a repo that declares no external directories is the common case.
 
 ## Phase 3 — Render
 
@@ -718,6 +729,8 @@ Render Agent D findings, grouped by sub-check. Omit any sub-check whose findings
 
 **Aspect resolution** — one line per `[FAIL]` from D8. Omit the section if all pass.
 
+**Aspect conflicts** — one line per `[INFO] aspects-conflict` from D17, each carrying its own `fix:` route (edit or drop one of the two aspects, or change the entry). Rendered despite being `[INFO]` — the finding names a repair. Omit the section when D17 produced no findings.
+
 **Arguments validation** — one line per `[FAIL]` or `[WARN]` from D9. Omit if all pass.
 
 **Memory hygiene** — one line per `[FAIL]` or `[WARN]` from D10. INFO findings (persona-but-empty) appear only when the full report would otherwise be empty.
@@ -730,7 +743,7 @@ Render Agent D findings, grouped by sub-check. Omit any sub-check whose findings
 
 **Operator git hooks** — one line per `[WARN]` from D15. Omit the section when D15 produced no findings.
 
-**Expert runtime summary**: `PASS: <n> | WARN: <n> | FAIL: <n>` (count across all D1–D16 findings).
+**Expert runtime summary**: `PASS: <n> | WARN: <n> | FAIL: <n>` (count across all D1–D17 findings).
 
 ### Logging compliance
 

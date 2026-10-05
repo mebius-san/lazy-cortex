@@ -25,7 +25,7 @@ Every file this skill creates or updates — settings sections, routine entries,
 
 ## Routines are registered unconditionally — there is no daemon gate
 
-Steps 5, 5b, and 6 register routines (`lazy-spec.gate-tick`, `lazy-spec.coordinator-watch`, `lazy-spec.request-open`, `lazy-spec.request-apply`). None of them is gated on `daemon.enabled`: `/lazy-runtime.tick` runs the registered set in the daemon's own priority order on a checkout that never starts one, so an unregistered routine is not a saved dead entry, it is a routine the operator cannot tick. The flag governs only what a live daemon process must own — the supervisor unit and the metrics endpoint — and both belong to `lazy-core.install`. Never read it here, and never ask about it.
+Steps 5, 5b, and 6 register routines (`lazy-spec.gate-tick`, `lazy-spec.coordinator-watch`, `lazy-spec.coordinator-deletes`, `lazy-spec.request-open`, `lazy-spec.request-apply`). None of them is gated on `daemon.enabled`: `/lazy-runtime.tick` runs the registered set in the daemon's own priority order on a checkout that never starts one, so an unregistered routine is not a saved dead entry, it is a routine the operator cannot tick. The flag governs only what a live daemon process must own — the supervisor unit and the metrics endpoint — and both belong to `lazy-core.install`. Never read it here, and never ask about it.
 
 ## Routine registrations are reconciled, never skipped
 
@@ -316,6 +316,35 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get daemon --key git/re
 ```
 
 When the printed value is anything other than `pull_push`, REPORT it plainly in this step's outcome — do not write `remote_sync` yourself, that is operator territory and a checkout without an `origin` remote legitimately has none configured. State the finding as `remote-sync-not-pull-push:<value>` alongside whatever Step 5b's own outcome was, so the operator sees it before relying on the coordinator unattended. When the value already reads `pull_push`, no separate outcome line is needed — fold a plain `remote-sync-ok` into Step 5b's report.
+
+### 5b-c. Register the coordinator-deletes routine
+
+`watch: changed_files` keeps only added and modified rows, and a deleted file has no frontmatter for the filter above to match, so a commit that deletes a spec document never reaches `lazy-spec.coordinator-watch`. The owning folder-note then keeps launch rows and a `# Status brief` that still describe the deleted document. A second git-watch routine sees deletions and hands them to the same worker:
+
+```json
+{
+  "name": "lazy-spec.coordinator-deletes",
+  "cfg": {
+    "type": "git",
+    "branch": "<base_branch>",
+    "watch": "deleted_files",
+    "path_filter": ":(glob)<vault_root>/**/*.md",
+    "interval_sec": 60,
+    "timeout_sec": 60,
+    "command": ["lazycortex-specs", "coordinator-dispatch"]
+  }
+}
+```
+
+`<base_branch>`, `<vault_root>`, `interval_sec` and `timeout_sec` are the values Step 5b used for `lazy-spec.coordinator-watch`. There is no `filter` block, because a deleted file has no frontmatter to match (the same shape as `lazy-wiki.scan-deletes`). Under the default `group: "all"` the worker receives every deleted path of the tick as one `{"dir": ".", "paths", "sha", "author_name", "author_email"}` item. A deletion by a non-`@bot.` author is an operator edit on the note that still owns the deleted file's place: the asset's status folder-note while the asset folder stands, or the owning product's level note when the whole asset folder went with it. A level document deleted from a product root or the content root wakes that level's own note. A bot-authored deletion, or a deleted path that no product owns, wakes nothing.
+
+Invoke `lazycortex-core:lazy-routine.register` with this `cfg` and `--managed type,watch,path_filter,command`. Then attach the same two protocols, because the coordinator jobs this routine dispatches are the same jobs:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> add-protocols --routine lazy-spec.coordinator-deletes --ids lazycortex-specs:lazy-spec.coordination-playbook,lazycortex-core:lazy-core.markdown-style)
+```
+
+This sub-step adds its own outcome to Step 5b's report: `deletes:<registrar-outcome>+protocol-seeded`.
 
 ## Step 5c: Register the collect routine
 
@@ -1007,6 +1036,7 @@ Outcome: **cli-allow-added**.
 - Confirm `<consumer>/.claude/rules/spec.decisions.md` exists and is byte-identical to `${CLAUDE_PLUGIN_ROOT}/rules/spec.decisions.md` (Step 3b).
 - Confirm the `lazy-spec.gate-tick` routine is present in `lazy.settings.json` (`routines.lazy-spec.gate-tick`) — pure script, no `protocols` entry.
 - Confirm the `lazy-spec.coordinator-watch` routine is present in `lazy.settings.json` (`routines.lazy-spec.coordinator-watch`) and that its `protocols` list carries both `lazycortex-specs:lazy-spec.coordination-playbook` AND `lazycortex-core:lazy-core.markdown-style`.
+- Confirm the `lazy-spec.coordinator-deletes` routine is present in `lazy.settings.json` (`routines.lazy-spec.coordinator-deletes`) with `watch: deleted_files`, no `filter` block, and the same two `protocols`.
 - If Step 4 set a language: confirm `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get spec` reports the chosen `language`.
 - Project scope only: confirm `<content-root>/vision.md` exists (Step 6.9), or a pre-vision `design.md` without one.
 - Unless Step 6 was `skipped-user-scope`: confirm the blocks are present in `lazy.settings.json` (`experts.spec.coordinator`, at least one `review.classes[]` entry covering `requests/*.md` with `terminal.routing` naming `spec.catalog-coordinator` at `position: top`; and `routines.lazy-spec.request-open` / `routines.lazy-spec.request-apply` with `paths` of `<vault_root>/requests/*.md`, unless the daemon gate skipped them). Note: no `experts.lazy-spec.request-apply` entry — the apply routine is `command:`-shape, not expert-based.
@@ -1023,7 +1053,7 @@ Outcome: **cli-allow-added**.
   - Step 3b outcome (`rules-mirrored:<N>`)
   - Step 4 outcome (`language-on-record:<code>`, `language-default-en`, or `language-set:<code>`)
   - Step 5 outcome (`registered`, `refreshed`, or `unchanged`)
-  - Step 5b outcome (`<registrar-outcome>+protocol-seeded`), plus 5b-b's `remote-sync-ok` or `remote-sync-not-pull-push:<value>`
+  - Step 5b outcome (`<registrar-outcome>+protocol-seeded`), plus 5b-b's `remote-sync-ok` or `remote-sync-not-pull-push:<value>` and 5b-c's `deletes:<registrar-outcome>+protocol-seeded`
   - Step 5c outcome (`registered`, `refreshed`, or `unchanged`)
   - Step 6 outcome (`wiring-applied:<N>` or `skipped-user-scope`)
   - Step 6.5 outcome (`seeded` or `unchanged`), with the primitive's report block folded in verbatim; surface `sot-missing` / `no-entries` if returned

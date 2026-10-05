@@ -549,10 +549,6 @@ def _inject_note_keys(text: str, asset_type: str, tools: list[str]) -> str:
   A type declaring no default tools writes no `spec_tools` key at all — an absent key reads as
   "not determined yet", which an empty list would wrongly claim to have settled.
 
-  Guarantees:
-    - A type declaring no default tools writes no `spec_tools` key at all; the key is added only
-      when there are tools to record, never as an empty list.
-
   Args:
     text: Full folder-note text including the leading frontmatter block.
     asset_type: The asset type to stamp.
@@ -561,10 +557,6 @@ def _inject_note_keys(text: str, asset_type: str, tools: list[str]) -> str:
   Returns:
     Text carrying the type key, and the tools key when there were tools to write.
   """
-
-  # Contract:
-  # A type declaring no default tools never gets a `spec_tools` key at all — the key is written
-  # only when there are tools to record, never as an empty list.
 
   # stamp the type unconditionally, the tools line only when there are tools to record
   lines = [ f"{Keys.ASSET_TYPE}: {asset_type}" ]
@@ -584,6 +576,37 @@ def product_tag(record: dict) -> str:
     Tag string suitable for injection into the `{{product_tag}}` template token.
   """
   return record[Keys.SPEC_PATH].split("/")[-1]
+
+
+def resolve_owning_product(repo: Path, folder: Path, *, product: str, record: dict) -> tuple[str, dict]:
+  """
+  Resolve the innermost registered product owning `folder`, the named product when none does.
+
+  Args:
+    repo: Repository root.
+    folder: Absolute asset folder; it need not exist yet.
+    product: The product key the caller named.
+    record: The named product's effective record.
+
+  Returns:
+    The `(key, effective_record)` pair of the owning product, or `(product, record)` when the
+    folder sits outside the repository or no registered product covers it.
+  """
+
+  # Domain(spec.config):
+  # # Innermost product owns a nested document
+  # A document inside a nested product's tree belongs to the innermost product covering it, not to an enclosing one.
+  # Its tag is the last segment of that product's own tree path and its product pin names that product,
+  # so the values of any enclosing product are stale for it, however the caller named the product.
+
+  # the folder's repo-relative path is what the product resolver attributes an owner from
+  try:
+    rel = folder.resolve().relative_to(repo.resolve()).as_posix()
+  except ValueError:
+    # guard: a folder outside the repository has no owner to resolve — keep the caller's product
+    return product, record
+  key, owner = product_registry.effective_record_by_path(repo, rel)
+  return (key, owner) if key is not None and owner is not None else (product, record)
 
 
 def substitute(text: str, tokens: dict) -> str:
@@ -682,11 +705,6 @@ def _set_source_docs(text: str, docs: list[tuple[str, str]]) -> str:
   without operator rewrites; the operator may later override individual displays
   and the projection writer (per `lazy-spec.sources-protocol`) preserves those edits.
 
-  Guarantees:
-    - The seeded document's citation list and its `## Docs` projection state exactly what the
-      caller passed, whatever the template carried: a template shipping stale citations, in
-      either YAML spelling or as projected bullets, is normalised rather than inherited.
-
   Args:
     text: Full file text with the template scaffold.
     docs: `(wikilink_target, display)` tuples to project.
@@ -694,11 +712,6 @@ def _set_source_docs(text: str, docs: list[tuple[str, str]]) -> str:
   Returns:
     Text with both the frontmatter array and body projection updated.
   """
-
-  # Contract:
-  # Both regions are written from `docs` alone. A template layer that ships its own citations —
-  # a block-form list in the frontmatter, bullets between the projection markers — MUST NOT
-  # survive into the seeded document; the caller's list is the only source.
 
   # the frontmatter half is rewritten whole in whatever YAML spelling the template carried —
   # a block list when the caller cited anything, the empty inline list when it cited nothing;
@@ -724,6 +737,10 @@ def main(argv: list[str]) -> int:
   Guarantees:
     - An existing target asset folder is never merged into or overwritten; the scaffold refuses
       the request and creates nothing under it.
+    - A type declaring no default tools yields a folder-note with no `spec_tools` key at all, never
+      an empty list.
+    - Every seeded document's `spec_source_docs` citations and `## Docs` projection come from the
+      scaffold alone; citations a template layer ships never survive into the seeded document.
 
   Args:
     argv: Subcommand argv tail (`<product> <type> <slug> [--doc <name>:<type> ...] [--path <dir>]`).
@@ -750,35 +767,41 @@ def main(argv: list[str]) -> int:
   repo = Path(args.cwd).resolve() if args.cwd else repo_root(Path.cwd())
   record = resolve_product(repo, args.product)
 
-  # an alias type borrows the base's templates; folder and icon stay its own
-  alias_base = resolve_alias_base(args.asset_type, record)
-  icon, color = _icon_color(args.asset_type, record)
+  # the asset folder the scaffold writes into, under the named product's tree
   folder = _type_folder(args.asset_type, record, args.path or "")
-  tools = asset_types.default_tools(args.asset_type, record)
-  tag = product_tag(record)
-
-  # scaffolding onto an existing folder would silently overwrite authored docs
-  spec_path = record[Keys.SPEC_PATH]
   content_root = spec_paths.spec_content_root(repo)
-  target_folder = content_root / spec_path / folder / args.slug
+  target_folder = content_root / record[Keys.SPEC_PATH] / folder / args.slug
+
+  # a `--path` reaching into a nested product's tree lands the asset in that product: its tag,
+  # pins, templates, paint, tools and stages are the innermost owner's, never the caller's key's
+  owner_key, owner_record = resolve_owning_product(repo, target_folder, product = args.product, record = record)
+
+  # an alias type borrows the base's templates; folder and icon stay its own
+  alias_base = resolve_alias_base(args.asset_type, owner_record)
+  icon, color = _icon_color(args.asset_type, owner_record)
+  tools = asset_types.default_tools(args.asset_type, owner_record)
 
   # Contract:
   # An existing target asset folder is never merged into or overwritten; the scaffold refuses the
   # request with a logical error and creates nothing under it.
 
-  # guard: target folder already there, refuse rather than merge into it
+  # guard: target folder already there, refuse rather than silently overwrite authored docs
   if target_folder.exists():
     fail(Keys.CAT_LOGICAL, f"target folder already exists: {target_folder}")
   target_folder.mkdir(parents = True, exist_ok = False)
 
+  # Contract:
+  # A type declaring no default tools never gets a `spec_tools` key in its folder-note at all —
+  # the key is written only when there are tools to record, never as an empty list.
+
   # the status folder-note carries the iconize block that paints the folder in the explorer, plus
   # the asset's own type and — when the type declares any — the tools it is realised with. The
   # `category` token keeps its name for template compatibility and carries the type verbatim.
-  tokens = { "product": args.product, "product_tag": tag,
+  tokens = { "product": owner_key, "product_tag": product_tag(owner_record),
              "slug": args.slug, "category": args.asset_type }
 
   # the asset's own status folder-note, seeded from the type's template chain
-  note_template = resolve_template(repo, args.asset_type, args.product, Keys.FOLDER_NOTE_TMPL,
+  note_template = resolve_template(repo, args.asset_type, owner_key, Keys.FOLDER_NOTE_TMPL,
                                     alias_base = alias_base)
   note_text = substitute(note_template.read_text(encoding = "utf-8"), tokens)
   note_text = inject_iconize(note_text, icon, color)
@@ -786,10 +809,14 @@ def main(argv: list[str]) -> int:
   note_path = target_folder / f"{args.slug}.md"
   spec_paths.write_text_atomic(note_path, note_explainers.heal_note_text(note_path, note_text))
 
+  # Contract:
+  # Every seeded document's source-docs citations and `## Docs` projection come from the scaffold
+  # alone. A template layer that ships its own citations MUST NOT survive into the seeded document.
+
   # one doc per --doc entry, each seeded with its cross-reference block and its declared stage
   produced: list[dict] = []
   for doc, doc_type in layout:
-    tmpl_path = resolve_template(repo, args.asset_type, args.product, doc,
+    tmpl_path = resolve_template(repo, args.asset_type, owner_key, doc,
                                   alias_base = alias_base, expect_type = doc_type)
     doc_text = substitute(tmpl_path.read_text(encoding = "utf-8"), tokens)
     doc_text = ensure_doc_type(doc_text, doc_type)
@@ -797,14 +824,13 @@ def main(argv: list[str]) -> int:
     # the type's own paint: the icon names the kind of document, the registry's matchers own
     # the colour from the first `set-stage` onward. A journal never gets a stage and so keeps
     # this seed for life — which is why no matcher enumerates journals.
-    if (doc_paint := spec_doc_types.icon_color(repo, doc_type, args.product)):
+    if (doc_paint := spec_doc_types.icon_color(repo, doc_type, owner_key)):
       doc_text = inject_iconize(doc_text, doc_paint[0], doc_paint[1] or "")
-    docs = _default_source_docs()
-    doc_text = _set_source_docs(doc_text, docs)
+    doc_text = _set_source_docs(doc_text, _default_source_docs())
     doc_path = target_folder / doc
     spec_paths.write_text_atomic(doc_path, doc_text)
     produced.append({ Keys.OUT_FILE: str(doc_path.relative_to(repo)),
-                      Keys.OUT_STAGE: _initial_stage(repo, doc_type, args.product) })
+                      Keys.OUT_STAGE: _initial_stage(repo, doc_type, owner_key) })
 
   # Domain(obsidian.icon-resolution):
   # # Container colour is the state axis
@@ -835,18 +861,22 @@ def main(argv: list[str]) -> int:
   # intermediate levels note-less; seed them by landing an asset in each, or author notes by hand
   group_dir = target_folder.parent
   group_note = group_dir / f"{group_dir.name}.md"
+  owner_root = content_root / owner_record[Keys.SPEC_PATH]
   seeded_group = ""
-  if not group_note.exists() and group_dir != content_root / spec_path:
-    group_template = resolve_template(repo, args.asset_type, args.product, Keys.GROUP_NOTE_TMPL,
+  if not group_note.exists() and group_dir != owner_root:
+    group_template = resolve_template(repo, args.asset_type, owner_key, Keys.GROUP_NOTE_TMPL,
                                        alias_base = alias_base)
     group_text = substitute(group_template.read_text(encoding = "utf-8"), tokens)
+
+    # the folder is matched as the owner sees it — relative to its own tree, not the caller's
+    owner_folder = group_dir.relative_to(owner_root).as_posix()
     # waiver: sibling-module declaration walk -- the one merged-declaration view every specs primitive shares
-    owner = next((name for name in asset_types.declared(record)
-                  if asset_types.default_path(name, record) == folder), "")
+    owner = next((name for name in asset_types.declared(owner_record)
+                  if asset_types.default_path(name, owner_record) == owner_folder), "")
 
     # an ordinary container takes the owning type's icon and no colour at all: colour is the
     # state axis and a shelf has no state (the intake shelves are the deliberate exception)
-    if owner and (owner_paint := asset_types.icon_color(owner, record)):
+    if owner and (owner_paint := asset_types.icon_color(owner, owner_record)):
       group_text = inject_iconize(group_text, owner_paint[0], "")
     spec_paths.write_text_atomic(group_note, note_explainers.heal_note_text(group_note, group_text))
     summary_render.apply_container_stats(group_note)

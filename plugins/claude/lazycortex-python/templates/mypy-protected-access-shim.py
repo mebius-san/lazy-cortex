@@ -98,6 +98,7 @@ def _find_manifest_install(manifest: Path, repo_root: Path) -> Path | None:
 
   # guard: the manifest is optional; absence or corruption means "not found here"
   try:
+    # waiver: the shim is copied as one standalone file into consumer repos, with no constants container to import
     data = json.loads(manifest.read_text(encoding = "utf-8"))
   except (OSError, ValueError):
     return None

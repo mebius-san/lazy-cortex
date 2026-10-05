@@ -201,19 +201,31 @@ spec_source_requests: []
 All inter-doc references MUST use **path-qualified** wikilinks with explicit display text:
 
 ```
-[[<path/relative/to/vault/root/without/.md>|<display text>]]
+[[<target>|<display text>]]
 ```
 
-- Paths are relative to the vault root. No leading slash.
-- Display text is required — it's what the reader sees.
-- Bare wikilinks like `[[design]]` or `[[code-plan]]` are FORBIDDEN because role-only basenames collide by design (every feature has a `design.md`). `lazy-spec.audit` flags any bare wikilink that resolves ambiguously.
+The target is a path without `.md` and without a leading slash, and it names exactly one file. Obsidian resolves a target from the **vault root** — the settings-dir holding `.claude/lazy.settings.json` — taking the file at that exact path first and otherwise any file whose path ends with the target. Two forms follow:
 
-Examples:
+- **Short form** — the path from the spec content-root (`spec.vault_root`, default `specs`): `[[core/design|core design]]` for `specs/core/design.md`. The catalog's usual form, legal only while it names one file: it has a `/`, no file sits at `<vault-root>/<target>.md`, and no other spec document's path ends with `/<target>.md`.
+- **Vault form** — the full path from the vault root, content-root segment included: `[[specs/core/design|core design]]`. Always unambiguous, and required wherever the short form is not unique:
+  - a document sitting at the content-root itself — `[[specs/vision|vision]]`, `[[specs/decisions#D-001 — <thesis>|D-001]]`;
+  - a short form another vault path shadows — with a product at `specs/specs/`, its vision is `[[specs/specs/vision|vision]]`, because `[[specs/vision]]` is the content-root's own vision;
+  - a short form that is the tail of another document's path — `[[specs/experts/vision|vision]]` beside a nested `specs/core/experts/vision.md`.
+
+When the content-root IS the vault root (`spec.vault_root: "."`) the two forms coincide, and a content-root document is linked by its bare name, which Obsidian matches exactly.
+
+Code and audit resolve a target the way Obsidian does: `<vault-root>/<target>.md` when it exists, else `<content-root>/<target>.md`. Every link the plugin writes goes through `spec_paths.build_wikilink_target`, which emits the short form when it is unique and the vault form otherwise.
+
+- Display text is required — it's what the reader sees.
+- Bare wikilinks like `[[design]]` or `[[code-plan]]` are FORBIDDEN because role-only basenames collide by design (every feature has a `design.md`). `lazy-spec.audit` flags a bare wikilink and an ambiguous short form alike.
+
+Examples, with the content-root at `specs/`:
 
 - `[[Server/Tester/chapter/design|chapter design]]`
 - `[[Server/Tester/chapter/chapter-log/design|chapter-log design]]`
 - `[[Server/Tester/chapter/chapter-log/code-plan|chapter-log code-plan]]`
 - `[[Server/Tester/chapter/changes/rename-chapter-log/design|rename-chapter-log design]]`
+- `[[specs/vision|vision]]` — the content-root's own vision
 
 Asset folder names are NOT required to be globally unique across products — the wikilink path disambiguates them. Request slugs, by contrast, are globally unique across the single content-root `requests/` inbox.
 

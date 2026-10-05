@@ -3,15 +3,15 @@
 Product config lives in `lazy.settings.json[products]` at
 `<vault>/.claude/lazy.settings.json`. The `_version` key carries the
 section schema version and is not a product record. Each remaining key
-is a product whose record holds at least `spec_path` (vault-relative).
+is a product whose record holds at least `spec_path` (content-root-relative).
 
-Two lookups are exposed:
+Four lookups are exposed:
 
 - `resolve_product_by_key` — direct record fetch by product key.
-- `resolve_product_by_path` — owning-product lookup for a vault-relative
-  doc path, matching on path segments (never raw string prefix) and
-  returning the longest matching `spec_path` when several products
-  nest.
+- `resolve_product_by_path` — owning-product lookup for a content-root-relative or repo-relative
+  doc path (an ambiguous leading vault-root segment is settled), matching on path segments
+  (never raw string prefix) and returning the longest matching `spec_path` when several
+  products nest.
 - `owning_product_root` — the on-disk root folder of the product owning
   an absolute path, resolved through the same longest-`spec_path` rule.
 - `resolve_asset_token` — a `spec_targets` / `spec_depends_on` token to
@@ -30,7 +30,7 @@ line and exiting 0 even when nothing resolves: `by-key <key>` and
 reader that acts on a product's configuration wants the `effective`
 pair; the raw pair is for a caller that writes the record back.
 
-Both read the settings JSON directly to stay dependency-light; no
+Every lookup reads the settings JSON directly to stay dependency-light; no
 import of the `lazy_settings` loader, no yaml dependency.
 """
 from __future__ import annotations
@@ -57,6 +57,12 @@ _MODE_BY_KEY = "by-key"
 _MODE_BY_PATH = "by-path"
 _MODE_EFFECTIVE = "effective"
 _MODE_EFFECTIVE_BY_PATH = "effective-by-path"
+_ASSET_TYPES_KEY = "asset_types"
+_GUIDELINES_KEY = "guidelines"
+
+# keys a nested product never takes from an ancestor — a code binding, a dependency list and a
+# paint belong to one product; spec_path names the product itself
+_OWN_ONLY_KEYS = frozenset({ "source", "dependencies", "icon", "color", _SPEC_PATH_KEY })
 
 
 def load_products(vault: Path) -> dict:
@@ -166,7 +172,7 @@ def resolve_product_by_key(vault: Path, key: str) -> dict | None:
 def resolve_product_by_path(vault: Path, rel_path: str, *,
                             products: dict | None = None) -> tuple[str | None, dict | None]:
   """
-  Find the product owning a vault-relative doc path.
+  Find the product owning a content-root-relative or repo-relative doc path.
 
   A product owns the path when its `spec_path` equals the path or is a
   segment-wise prefix of it. When several products nest, the one with the
@@ -177,10 +183,15 @@ def resolve_product_by_path(vault: Path, rel_path: str, *,
       the one with the longest matching `spec_path`, never a shorter enclosing ancestor.
     - With `products` given, the settings file is not read; the answer is the one the same
       registry on disk would have produced.
+    - A path with a leading vault-root segment is accepted repo-relative or content-root-relative and
+      attributed to the same product either way; the reading present on disk wins, else the one a
+      product claims more deeply, and on a tie the leading segment is dropped.
 
   Args:
     vault: Vault root directory holding `.claude/lazy.settings.json`.
-    rel_path: Vault-relative doc path to attribute to a product.
+    rel_path: Doc path to attribute to a product, relative to the content-root or to the
+      settings root (leading vault-root segment); when the leading segment allows both readings,
+      the one present on disk wins, else the one a product claims more deeply.
     products: An already-loaded products registry; None reads it from the settings file.
 
   Returns:
@@ -194,6 +205,12 @@ def resolve_product_by_path(vault: Path, rel_path: str, *,
   # With `products` given, the settings file is not read and the answer is the same one that
   # registry would have produced from disk.
 
+  # Contract:
+  # A path whose leading segment is the vault root's own name is accepted in either form,
+  # repo-relative or content-root-relative, and attributed to the same product either way.
+  # When the leading segment allows both readings, the one present on disk wins, else the one
+  # a product claims more deeply, and on a tie the leading segment is dropped.
+
   # Domain(spec.config):
   # # Nested products resolve by longest owning path
   # A document belongs to whichever configured product's own tree contains it, matched on
@@ -203,17 +220,52 @@ def resolve_product_by_path(vault: Path, rel_path: str, *,
   # longer-matching tree wins, so a sub-product's own documents are never mistakenly
   # attributed to the broader product that just happens to contain it.
 
+  # Domain(spec.config):
+  # # A leading vault-root segment reads two ways
+  # A document path whose first segment equals the vault root's own name is ambiguous. It can be
+  # relative to the repository, where that segment is the vault root and is dropped, or relative
+  # to the content-root, where a product's own tree path itself begins with that name (a product
+  # under the `specs/` root whose tree is `specs/assets`, for instance). The reading whose file
+  # exists on disk wins. When neither or both exist, the reading that some product claims more
+  # deeply wins, and on a tie the segment is dropped. A vault whose content-root is the repository
+  # root has no vault-root segment to confuse, so it has one reading only.
+
+  registry = _registry(vault, products)
   vroot = _vault_root_value(vault)
   parts = list(Path(rel_path).parts)
 
-  # strip the vault-root prefix when the caller passed a repo-root-relative path
-  if vroot != "." and parts and parts[0] == vroot:
-    parts = parts[1:]
-  doc_segments = tuple(parts)
+  # guard: no leading vault-root segment, or the vault is its own content-root — one reading only
+  if vroot == "." or not parts or parts[0] != vroot:
+    return _find_longest_match(registry, parts)[:2]
+
+  # a leading vault-root segment reads two ways: repo-relative (drop it) or content-root-relative
+  # (keep it, a product whose spec_path starts with the vault root's own name); the one on disk wins
+  stripped = parts[1:]
+  as_repo = (vault / rel_path).exists()
+  if as_repo != (vault / vroot / rel_path).exists():
+    return _find_longest_match(registry, stripped if as_repo else parts)[:2]
+
+  # neither or both on disk: the reading a product claims more deeply wins, a tie drops the segment
+  kept = _find_longest_match(registry, parts)
+  dropped = _find_longest_match(registry, stripped)
+  return kept[:2] if kept[2] > dropped[2] else dropped[:2]
+
+
+def _find_longest_match(registry: dict, doc_segments: list[str]) -> tuple[str | None, dict | None, int]:
+  """
+  Find the registered product with the longest `spec_path` owning the given path segments.
+
+  Args:
+    registry: The products registry.
+    doc_segments: Content-root-relative segments of the doc path.
+
+  Returns:
+    A `(key, record, spec_path_length)` triple; `(None, None, -1)` when no product owns the path.
+  """
   best_key: str | None = None
   best_record: dict | None = None
   best_len = -1
-  for key, record in _registry(vault, products).items():
+  for key, record in registry.items():
     spec_path = record.get(_SPEC_PATH_KEY) if isinstance(record, dict) else None
 
     # guard: skip records without a usable spec_path
@@ -222,20 +274,13 @@ def resolve_product_by_path(vault: Path, rel_path: str, *,
     spec_segments = Path(spec_path).parts
 
     # guard: skip products whose spec_path does not own this doc path
-    if not _is_path_prefix(list(spec_segments), list(doc_segments)):
+    if not _is_path_prefix(list(spec_segments), doc_segments):
       continue
     if len(spec_segments) > best_len:
       best_len = len(spec_segments)
       best_key = key
       best_record = record
-  return best_key, best_record
-
-
-# keys a nested product never takes from an ancestor — a code binding, a dependency list and a
-# paint belong to one product; spec_path names the product itself
-_OWN_ONLY_KEYS = frozenset({ "source", "dependencies", "icon", "color", _SPEC_PATH_KEY })
-_ASSET_TYPES_KEY = "asset_types"
-_GUIDELINES_KEY = "guidelines"
+  return best_key, best_record, best_len
 
 
 def ancestor_chain(vault: Path, key: str, *, products: dict | None = None) -> list[str]:
@@ -397,7 +442,7 @@ def effective_record_by_path(vault: Path, rel_path: str, *,
 
   Args:
     vault: Vault root directory holding `.claude/lazy.settings.json`.
-    rel_path: Vault-relative doc path to attribute.
+    rel_path: Doc path to attribute, content-root-relative or repo-relative as `resolve_product_by_path` reads it.
     products: An already-loaded products registry covering only the products; None reads one
       from the settings file. Either way, the catalog-wide `spec.guidelines` are always read
       from the settings file.
@@ -487,13 +532,17 @@ def main(argv: list[str]) -> int:
     argv: Command-line arguments, excluding the program name.
 
   Returns:
-    Exit code: 0 on success, 2 on a usage error or unresolved path.
+    Exit code, always 0; an unknown key or a path no product owns prints a null result and still exits 0.
+
+  Raises:
+    SystemExit: When the command line is not a valid verb with its positional argument.
   """
   # waiver: argparse CLI signature -- program name shown in --help / usage
   parser = argparse.ArgumentParser(prog = "lazycortex-specs resolve-product")
   sub = parser.add_subparsers(dest = "mode", required = True)
 
-  # every verb takes one positional — a registry key or a vault-relative path — plus the vault root
+  # every verb takes one positional — a registry key or a content-root- or repo-relative path —
+  # plus the vault root
   for verb, positional in (
       (_MODE_BY_KEY, "key"), (_MODE_BY_PATH, "relpath"),
       (_MODE_EFFECTIVE, "key"), (_MODE_EFFECTIVE_BY_PATH, "relpath"),

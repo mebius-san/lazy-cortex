@@ -107,14 +107,14 @@ For every class under test, cover **all 9 categories**. Do not skip any.
 # Coverage Requirements
 
 - Cover: `__init__` paths, all public methods, all public properties, at least **2** edge cases and **2** error conditions per method.
-- Do not test private methods directly — test them through public API.
+- Private methods and helpers may be tested directly, but such tests never replace tests of the public contract — public and protected behaviour is always covered through the public API.
 
 # Zero-Tolerance Blockers
 
 - No tests without assertion messages.
 - No test method names exceed 35 characters.
 - No production class name is repeated in test method names.
-- No testing private methods directly.
+- No public or protected behaviour covered only by direct tests of private helpers — it is always tested through the public API.
 - No hardcoded magic numbers without a comment explaining the value.
 - No modifying production code — only write test files.
 - No running `pytest` directly — always use `tst-py` (see Step 7).

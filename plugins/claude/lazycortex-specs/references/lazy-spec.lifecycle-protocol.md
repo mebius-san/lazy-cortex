@@ -33,7 +33,7 @@ Exactly six values. The old `review`, `done`, and `wtr` are gone — "in review"
 - `approved` — accepted: `review_active: false` AND `review_approved: true`. Approved-with-concerns collapses to `approved` (the `review_approved_with_concerns` flag stays readable on the doc for downstream consumers, but `spec_stage` is plain `approved`).
 - `rejected` — review or developer flagged the doc unworkable (a finalize-revert): a rejection callout sits in the body. **NOT terminal** — the doc returns to `draft` to re-open the loop.
 - `cancelled` — doc abandoned. Terminal.
-- `deferred` — doc parked: it exists, it is not abandoned, and nothing automatic acts on it. Its own `review_result` raises no doc-transition wake, stage promotion passes it over, it closes no gate, no `Write` row is hung or replacement seeded for it, and no coordinator edits it. A commit touching it still wakes the owning coordinator as an ordinary operator edit, so the folder note is kept in order around it. Not terminal — `draft` is the one way back out, and it is the only transition that leaves the stage.
+- `deferred` — doc parked: it exists, it is not abandoned, and nothing automatic acts on it. Its own `review_result` raises no doc-transition wake, stage promotion passes it over, it closes no gate, no `Write` row is hung or replacement seeded for it, and no coordinator edits it. A commit touching it still wakes the owning coordinator as an ordinary operator edit, so the folder note is kept in order around it. Not terminal — it has two exits: `draft` brings it back, `cancelled` abandons it where it sits.
 
 ### Applies to
 

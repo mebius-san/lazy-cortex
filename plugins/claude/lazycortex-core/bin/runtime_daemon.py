@@ -1689,6 +1689,22 @@ def _newer_core_runner() -> Path | None:
   return runner if runner.is_file() else None
 
 
+def _interpreter_gone() -> bool:
+  """
+  Report whether the standard library this process loaded from has been deleted from disk.
+
+  A package-manager upgrade of Python (Homebrew moving `python@3.14` from one patch release to the
+  next) deletes the old release's directory while the daemon still runs from it. The modules
+  already imported keep working from memory, but every later import fails, so the process is
+  broken without crashing. `os.__file__` points at the resolved release directory, not at the
+  stable symlink the supervisor launches through, which makes it the probe for that deletion.
+
+  Returns:
+    True when the loaded `os` module's source file no longer exists.
+  """
+  return not Path(os.__file__).is_file()
+
+
 def _restart_in_place(new_runner: Path | None = None) -> None:
   """
   Restart the daemon process so it reloads its own updated source.
@@ -2466,6 +2482,16 @@ def run(repo_root: Path) -> None:
       # so a restart never masks a halt the operator still needs to see and recover from — except a
       # rate-limit halt, which lifts itself, survives the restart via state.json, and burns no
       # tokens restarting; skipping there would hold the daemon on stale code for up to seven days.
+      # A deleted interpreter restarts even while halted: the halt survives in state.json, and a
+      # process that can no longer import anything cannot recover from any halt on its own.
+      if _interpreter_gone():
+        try:
+          _log_routine_result(repo_root, {
+            TickResultKey.NAME: "_self_restart", TickResultKey.EXIT: 0, TickResultKey.DURATION_SEC: 0.0,
+            "message": f"restart: interpreter stdlib deleted ({Path(os.__file__).parent})",
+          })
+        finally:
+          _restart_in_place()
       restart_halt = runtime_state.load(repo_root).get(StateKey.DAEMON_HALTED)
       if not restart_halt or restart_halt.get(HaltKey.REASON) == HaltReason.RATE_LIMIT:
         newer_runner = _newer_core_runner()

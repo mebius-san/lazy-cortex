@@ -1,5 +1,6 @@
 """
-Coordinator wake-trigger worker for the `lazy-spec.coordinator-watch` git-watch routine.
+Coordinator wake-trigger worker for the `lazy-spec.coordinator-watch` and `lazy-spec.coordinator-deletes`
+git-watch routines.
 
 Invoked once per tick, via a `type: git`, `watch: changed_files` routine (`lazycortex-core`'s
 own file-level git-watch — see `routine_types._compute_git_items`) rather than a periodic
@@ -44,6 +45,14 @@ rather than a single file's. A member no status note owns is dispatched as the s
 item it would have been ungrouped. When one owner's or one orphan's dispatch raises, the rest
 of the tick still runs, and the worker closes with the daemon's partial-failure line —
 `{"failed_paths": [...]}` last on stdout, exit 1 — so only those members are retried.
+
+The `lazy-spec.coordinator-deletes` routine (`watch: deleted_files`, no frontmatter filter) feeds the
+same worker, so an item may name paths that no longer exist. A deleted path wakes the note that still
+owns its place as an ordinary operator edit: the asset's status note while the asset folder stands,
+else the owning product's level note. A system document deleted from the spec content root wakes the
+catalog root's level note, and one deleted from a product root wakes that product's level note. A
+deletion authored by a bot identity, or one no coordinated note owns, wakes nothing. In a grouped
+item, a deleted sibling of an asset still on disk joins that asset's one dispatch.
 """
 from __future__ import annotations
 
@@ -214,10 +223,9 @@ _ITEM_PATHS = "paths"
 # daemon retries only the member paths it names, never the paths that already dispatched.
 _FAILED_PATHS = "failed_paths"
 
-# `spec_role` value naming an asset's own status folder-note — the only folder-note shape a
-# sibling doc's owning `<dir>/<dir>.md` may resolve to; a product-root sibling doc (`tech.md`,
-# a loose `design.md`) resolves the same convention to an operator-zone folder-note that never
-# carries this value, which is exactly how `main` tells the two apart.
+# `spec_role` value naming an asset's own status folder-note — the one role that runs the asset
+# ladder; a document lying directly in a product root or the content root resolves to a level
+# note instead, and a loose document to a folder-note carrying neither role, which is skipped.
 _SPEC_ROLE_STATUS = "status"
 
 # Bounded lookback window for `_has_operator_authored_recently`'s bot-buried-operator-commit
@@ -704,18 +712,18 @@ def _is_member_signal_eligible(member: Path) -> bool:
   A sibling under active review (`review_active: true`) is the review loop's own business — an
   operator's edit there must not wake the spec coordinator until the review ends, the moment
   `CoordinatorTrigger.DOC_TRANSITION` already covers (operator decision 2026-08-15). A member
-  gone between scan and dispatch carries no signal either way.
+  missing on disk is a deletion — an operator-edit signal no review owns, left to the author check.
 
   Args:
     member: One changed sibling-doc path.
 
   Returns:
-    True when `member` is a file on disk whose frontmatter does NOT carry `review_active: true`;
-    False when the member is missing, or is under active review.
+    True when `member` is missing on disk, or is a file whose frontmatter does NOT carry
+    `review_active: true`; False when the member is under active review.
   """
-  # guard: a member gone between scan and dispatch carries no signal
+  # guard: a deleted member is an edit no review owns — eligible, the author check still decides
   if not member.is_file():
-    return False
+    return True
   frontmatter, _ = flip_gate.parse_frontmatter(member.read_text(encoding = "utf-8"))
   return not flip_gate.is_true(frontmatter, SpecKey.REVIEW_ACTIVE)
 
@@ -1152,8 +1160,10 @@ def _orphan_members(group_dir: Path, raw_paths: list) -> list[Path]:
 
   A member with no status note between its own folder and `group_dir` is not an asset's file:
   it is a level document of a nested product whose folder the parent's shallow glob grouped,
-  or a bare group folder's own note. Each such member is handled as the single-file item it
-  would have been ungrouped.
+  a bare group folder's own note, or a file of an asset folder deleted whole (its status note
+  deleted with it, so none is left above the file). Each such member is handled as the
+  single-file item it would have been ungrouped; a deleted file then wakes the owning
+  product's level note.
 
   Args:
     group_dir: The group's matched directory, resolved.
@@ -1699,12 +1709,6 @@ def _build_bundle(
   elif product_record:
     warnings.append(f"product folder-note not found: {product_record.get(_SPEC_PATH_KEY)}")
 
-  # Contract:
-  # Container folder-notes between the product root and the asset folder MUST reach `context`
-  # top-down (shallowest first), so the group-scoped `# Coordinator rules` layer closest to the
-  # asset lands last; a container without a folder-note MUST contribute no entry and no warning.
-  # Preceded by every ancestor product's level note, outermost first.
-
   # the container chain itself, anchored on the product's own spec-path root
   if isinstance(spec_path := product_record.get(_SPEC_PATH_KEY), str) and spec_path:
     product_dir = spec_paths.spec_content_root(repo_root) / spec_path
@@ -1748,7 +1752,7 @@ def _build_bundle(
     # strip the list-write quoting first, then the `|display` gloss, then the `[[...]]` brackets
     # — each layer wraps the one before it, so unwrapping out of order leaves stray characters
     pure = raw.strip().strip('"').strip("'").split("|")[0].strip("[]")
-    req_path = repo_root / f"{pure}.md"
+    req_path = spec_paths.resolve_wikilink(pure, repo_root)
     if req_path.is_file():
       context.append(_to_rel_path(repo_root, req_path))
     else:
@@ -1965,6 +1969,10 @@ def coordinator_dispatch(  # pylint: disable=too-many-branches
     - Writes and commits the status folder-note only when the produced text differs from the
       note's bytes as read at the start of the call; a wake that changes nothing leaves the note
       byte-identical and creates no commit.
+    - On the wake of an asset's status note, the context handed to a dispatched job lists the
+      rule layers outermost first, so the layer closest to the asset lands last: ancestor
+      products' level notes, the owning product's note, then container folder-notes shallowest
+      first; a container without a folder-note contributes no entry and no warning.
 
   Notes:
     - A raise here leaves the tick's in-memory state unwritten, but the wake it carried is not
@@ -2410,6 +2418,15 @@ def coordinator_dispatch(  # pylint: disable=too-many-branches
         asset_released = asset_released, child_reapproved = child_reapproved,
     )
   else:
+
+    # Contract:
+    # On the wake of an asset's status note, the context handed to a dispatched coordinator job
+    # lists the rule layers outermost first: every ancestor product's level note, then the owning
+    # product's note, then the container folder-notes between the product root and the asset
+    # folder, shallowest first, so the layer closest to the asset lands last. A container without
+    # a folder-note MUST contribute no entry and no warning.
+
+    # build the asset wake's bundle from the asset's own type, tools, targets and dependencies
     source, context, warnings, payload, dedup_key = _build_bundle(
         repo_root, asset_dir, asset_note, text[:fm_end], trigger,
         doc_transition = doc_transition[0] if doc_transition is not None else None,
@@ -2644,6 +2661,75 @@ def _rekey_to_own_commit(repo_root: Path, item: dict, rel_path: str) -> dict:
   return { **item, _ITEM_SHA: own_sha, _ITEM_AUTHOR_NAME: name, _ITEM_AUTHOR_EMAIL: email }
 
 
+def _find_deleted_path_owner(repo_root: Path, deleted: Path) -> Path | None:
+  """
+  Resolve the coordinated folder-note that still owns the place a deleted file lay.
+
+  Args:
+    repo_root: The repository root the content root and the product records resolve under.
+    deleted: The deleted file's absolute, resolved path.
+
+  Returns:
+    The owning note on disk — the note a live document there would resolve to, else the nearest
+    asset status note above it, else the owning product's level note — or None when none exists.
+  """
+
+  # Domain(spec.lifecycle):
+  # # A deleted document wakes whoever still owns its place
+  # Removing a document is an edit to whatever coordinates the place it lay in. While the asset
+  # folder still stands, its own status record is that owner and has to notice its launch rows
+  # and brief have gone stale. When the whole asset was removed with it, nothing at the asset's
+  # level is left to notice, so the product the asset belonged to is the owner instead and
+  # refreshes its own picture of what it holds. A system document deleted from the catalog root
+  # wakes the catalog root's own record; any other deletion no product owns concerns nobody.
+
+  # the note a live document in the same place would resolve to, while it still coordinates
+  owner = _resolve_owner_note(repo_root, deleted)
+  if owner.is_file():
+    frontmatter, _ = flip_gate.parse_frontmatter(owner.read_text(encoding = "utf-8"))
+    role = frontmatter.get(SpecKey.ROLE)
+    if role == _SPEC_ROLE_STATUS or role in LEVEL_ROLES:
+      return owner
+
+  # the nearest asset still standing above the deleted place (an attachment folder, a nested asset)
+  if (status_note := _owner_status_note(deleted.parent, spec_paths.spec_content_root(repo_root).resolve())):
+    return status_note
+
+  # no asset is left over the place — the owning product's level note, when it exists
+  _, record = resolve_product.resolve_product_by_path(repo_root, _to_rel_path(repo_root, deleted))
+  level_note = _resolve_product_note_path(repo_root, record) if isinstance(record, dict) else None
+  return level_note if level_note is not None and level_note.is_file() else None
+
+
+def _dispatch_deleted_path(deleted: Path, item: dict, today: str | None) -> dict:
+  """
+  Run the dispatch for one deleted path — an operator edit on the note that still owns its place.
+
+  Args:
+    deleted: The deleted file's absolute, resolved path.
+    item: The git-watch item the path came from (its commit fields ride into the dispatch).
+    today: Optional ISO date forwarded into the note's own `# History` line.
+
+  Returns:
+    The tick's result dict; `{"action": "noop"}` when the deletion is bot-authored or no
+    coordinated note owns the deleted place.
+  """
+  # guard: a bot-authored deletion is the system's own housekeeping — no later commit can bury an
+  # operator's deletion of the same path, so the item's own author is the deletion's author
+  if _BOT_MARK in item.get(_ITEM_AUTHOR_EMAIL, ""):
+    return { TickAction.ACTION: TickAction.NOOP }
+
+  # the deleted file's own folder may be gone too, so git runs in the nearest one still standing
+  standing = next(folder for folder in deleted.parents if folder.is_dir())
+
+  # guard: no coordinated note owns the deleted place
+  if (owner := _find_deleted_path_owner(flip_gate.repo_root(standing), deleted)) is None:
+    return { TickAction.ACTION: TickAction.NOOP }
+
+  # an ordinary operator-edit wake on the owner — the deleted file has no frontmatter to read
+  return coordinator_dispatch(owner, item, today = today)
+
+
 def _dispatch_single_path(changed: Path, item: dict, today: str | None) -> dict:
   """
   Run the single-file dispatch for one changed path — a document or a folder-note.
@@ -2651,7 +2737,8 @@ def _dispatch_single_path(changed: Path, item: dict, today: str | None) -> dict:
   A document basename resolves to the folder-note that owns it, by where the document lies;
   every other match IS the folder-note the routine's own `any_of` member selected. The owner's
   own role then picks the ladder: an asset's status note runs the asset one, a product's or the
-  catalog root's level note the level one, and a note carrying neither is nobody's object.
+  catalog root's level note the level one, and a note carrying neither is nobody's object. A path
+  that no longer exists is a deletion and wakes the note that still owns its place instead.
 
   Args:
     changed: The changed file's absolute, resolved path.
@@ -2659,12 +2746,13 @@ def _dispatch_single_path(changed: Path, item: dict, today: str | None) -> dict:
     today: Optional ISO date forwarded into the note's own `# History` line.
 
   Returns:
-    The tick's result dict; `{"action": "noop"}` on every guard (deleted file, no owning note,
-    a note without a coordination role, a document of the other ladder).
+    The tick's result dict; `{"action": "noop"}` on every guard (no owning note, a note without
+    a coordination role, a document of the other ladder, a deletion that is bot-authored or
+    that no coordinated note owns).
   """
-  # guard: the file was deleted or moved between the git-watch scan and this dispatch
+  # a path that no longer exists is a deletion, routed to whichever note still owns where it lay
   if not changed.is_file():
-    return { TickAction.ACTION: TickAction.NOOP }
+    return _dispatch_deleted_path(changed, item, today)
 
   # a document basename resolves to the folder-note that owns it, by where the document lies;
   # every other match IS the folder-note the routine's own `any_of` member selected
@@ -2714,21 +2802,22 @@ def main(argv: list[str]) -> int:
   group's dir looking for the nearest status folder-note; a member an owner is found for joins
   that owner's one dispatch, keyed to the last commit touching that owner's own dir rather than
   the range tip the item names (which may be another asset's commit), and a member no status
-  note owns — a product's or the catalog
-  root's own level document, or a bare group folder's own note — is instead dispatched one by
-  one through the same route a single-file item takes. A group where every member falls into
-  neither bucket (a bare group folder with nothing the worker tracks beneath it, or a race with
-  a deletion) is skipped. A dispatch that raises does not stop the tick: the rest of the owners
-  and orphans still run, and the worker then prints `{"failed_paths": [...]}` — the failed
-  owners' members and the failed orphans — as the LAST stdout line and exits 1, so the daemon
-  retries only those paths. Otherwise (`group: "file"`) the routine's `filter.any_of` matches
+  note owns — a product's or the catalog root's own level document, a bare group folder's
+  own note, or a file of an asset folder deleted whole (its status note deleted too), which wakes
+  the owning product's level note — is instead dispatched one by one through the same route a
+  single-file item takes.
+  A group where every member falls into neither bucket (the item's `paths` holds no usable
+  string entry) is skipped. A dispatch that raises does not stop the tick: the rest of the
+  owners and orphans still run, and the worker then prints `{"failed_paths": [...]}` — the
+  failed owners' members and the failed orphans — as the LAST stdout line and exits 1, so the
+  daemon retries only those paths. Otherwise (`group: "file"`) the routine's `filter.any_of` matches
   a single changed file, either a status folder-note (`spec_role: status`) OR an authored
   document carrying a non-null `spec_doc_type` — `item["path"]` names whichever one matched. A
   sibling-doc item is resolved to its OWNING asset's status folder-note (the Obsidian
-  folder-note convention, `<dir>/<dir>.md`) before dispatch; a sibling living outside an asset
-  folder (a product-root `tech.md` / loose `design.md` — no coordinator-job tracking exists at
-  that level) resolves the same convention to a folder-note that never carries `spec_role: status`,
-  and is skipped.
+  folder-note convention, `<dir>/<dir>.md`) before dispatch; a document lying directly in a
+  product's spec path (a product-root `tech.md` / loose `design.md`) or in the content root
+  resolves to that product's, or the catalog root's, level note and runs the level ladder. Only
+  a document no coordinated note owns is skipped.
 
   A document parked at `spec_stage: deferred` is dispatched on like any other changed path — the
   owning note still needs its gates, brief, and launch rows put in order. What a parked document
@@ -2745,9 +2834,11 @@ def main(argv: list[str]) -> int:
   Returns:
     Exit code: 2 when the item JSON is malformed or carries neither a usable `dir` nor a usable
     `path`; 1 when at least one owner's or orphan's dispatch of a grouped item raised (the
-    `failed_paths` line printed last); 0 on every other path, including a noop when the resolved
-    path no longer exists (a note deleted or moved between the git-watch scan and this dispatch)
-    or resolves to a doc this worker never tracks a coordinator job against.
+    `failed_paths` line printed last); 0 on every other path. A path that no longer exists wakes
+    the note that still owns its place — the asset's status note, or the owning product's level
+    note when the asset folder is gone too — and is a noop only when the deletion is bot-authored
+    or no note owns it; a path resolving to a doc this worker never tracks a coordinator job
+    against is a noop as well.
   """
   # waiver: argparse CLI signature -- program name shown in --help / usage
   parser = argparse.ArgumentParser(prog = "lazycortex-specs coordinator-dispatch")
@@ -2776,14 +2867,13 @@ def main(argv: list[str]) -> int:
     raw_paths = item.get(_ITEM_PATHS, [])
     owners = _split_group_by_owner(group_dir, raw_paths)
 
-    # a member with no status note over it is not an asset's file — a product's or the catalog
-    # root's own level document, or a bare group folder's note — and is dispatched as the
-    # single-file item it would have been ungrouped
+    # a member with no status note over it — a product's or the catalog root's own level
+    # document, a bare group folder's note, or a file of an asset folder deleted whole — is
+    # dispatched as the single-file item it would have been ungrouped
     orphans = _orphan_members(group_dir, raw_paths)
 
-    # guard: no member has a status folder-note over it, and no member is an orphan either (a
-    # bare group folder, an operator zone, or a race with a deletion) — nothing this worker
-    # tracks a coordinator job against
+    # guard: the item names no usable member path at all — nothing this worker tracks a
+    # coordinator job against
     if not owners and not orphans:
       print(json.dumps({ TickAction.ACTION: TickAction.NOOP }))
       return 0

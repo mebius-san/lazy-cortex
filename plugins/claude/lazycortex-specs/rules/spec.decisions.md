@@ -1,5 +1,5 @@
 ---
-description: Two duties for anyone editing a spec-catalog document — read the accumulated decisions before the first edit, and reserve a decision statement for a genuine fork. Owns the weight test that keeps the decisions registry from filling with restated conclusions.
+description: Three duties for anyone editing a spec-catalog document — read the accumulated decisions before the first edit, reserve a decision statement for a genuine fork, and raise a decision candidate only for a product fork taken mid-job, never about the document itself. Owns the weight test that keeps the decisions registry from filling with restated conclusions.
 paths:
   - "**/*.md"
 ---
@@ -25,7 +25,9 @@ Short test: will a later session ask "why not the other way?" and burn an hour r
 
 **Trap marker** — if there is nothing honest to write for the rejected side, there was no fork; do not force one.
 
-The same bar applies to a decision-candidate marked in a report — a candidate that fails these tests is noise the coordinator would carry into design for nothing.
+## 3. A decision candidate deserves the same bar
+
+The same bar applies to a decision-candidate — a candidate that fails these tests is noise the coordinator would carry into design for nothing. Only an expert producing code, data, or a report raises one, because it cannot stop mid-job to ask. An expert writing a document under review never does: a product fork it cannot settle is a `[!question]` with options, and a call about the document itself — what its Terms list holds, section order, wording, formatting — it settles silently, with no signal at all. Decisions are about the product, never about the document that describes it.
 
 ## Enforcement
 

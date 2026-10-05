@@ -35,6 +35,8 @@ _CRLF = "\r\n"
 _CR = "\r"
 _CRLF_BYTES = b"\r\n"
 _LF_BYTES = b"\n"
+_MD = ".md"
+_SEP = "/"
 
 
 def find_settings_root(start: Path) -> Path:
@@ -217,6 +219,94 @@ def spec_roots(start: Path) -> tuple[Path, Path]:
   """
   settings_root = find_settings_root(start)
   return settings_root, spec_content_root(settings_root)
+
+
+def build_wikilink_target(path: Path, settings_root: Path) -> str:
+  """
+  Build the wikilink target that resolves to the given spec document.
+
+  The target is the document's path from the content-root, without `.md`, when no vault-root file
+  and no other spec document under the content-root shares that short form; otherwise it is the
+  document's full path from the vault root (the settings-root), which Obsidian matches exactly. A
+  document sitting directly at the content-root, whose short form has no folder segment, always gets
+  the full vault path, even when its name is unique.
+
+  Guarantees:
+    - The returned target is either the short content-root form, returned only when no vault-root file
+      has that path and no other spec document under the content-root shares it as a tail, or the
+      document's full path from the vault root; in both cases `resolve_wikilink` maps it back to
+      the same document.
+
+  Args:
+    path: The linked document.
+    settings_root: Dir holding `.claude/lazy.settings.json` — the vault root.
+
+  Returns:
+    The suffix-free target, e.g. `core/vision` or `specs/vision`.
+
+  Raises:
+    ValueError: When `path` lies outside the spec content-root.
+  """
+
+  # Contract:
+  # The returned target is either the short content-root form, returned only when no vault-root file
+  # has that path and no other spec document under the content-root shares it as a tail, or the
+  # document's full path from the vault root; in both cases `resolve_wikilink` maps it back to
+  # the same document.
+
+  # Domain(unfiled):
+  # # Catalog links name one document and nothing else
+  # A link to a spec document uses its path from the content-root, without extension, as long as
+  # that short form names the document alone. Obsidian matches a link by path suffix, so the short
+  # form stops being unique in three cases. It has no folder segment, because the document sits
+  # at the content-root itself. It also names a file reached from the vault root, which Obsidian
+  # resolves first. Or it is the tail of another spec document's path. In each case the link
+  # carries the document's full path from the vault root instead, which Obsidian matches exactly.
+
+  root = settings_root.resolve()
+  doc = path.resolve()
+  short = doc.relative_to(spec_content_root(root).resolve()).with_suffix("").as_posix()
+
+  # the catalog's usual short link when it names this document alone, the full vault path otherwise
+  unique = _SEP in short and not (root / f"{short}{_MD}").exists() and not _has_shared_tail(short, doc)
+  return short if unique else doc.relative_to(root).with_suffix("").as_posix()
+
+
+def _has_shared_tail(short: str, doc: Path) -> bool:
+  """
+  Tell whether another spec document's path ends with the same short form as `doc`'s.
+
+  Args:
+    short: The document's suffix-free content-root path.
+    doc: The resolved document path.
+
+  Returns:
+    True when a second document under the content-root carries `short` as its path tail.
+  """
+  tail = f"{_SEP}{short}{_MD}"
+  name = Path(short).name + _MD
+
+  # limit: only the content-root is walked, not the whole Obsidian vault — a same-tailed note
+  # outside the catalog still collides; walk the settings-root if one ever appears
+  for dirpath, _dirs, files in os.walk(spec_content_root(find_settings_root(doc.parent))):
+    if name in files and (cand := Path(dirpath) / name) != doc and cand.as_posix().endswith(tail):
+      return True
+  return False
+
+
+def resolve_wikilink(target: str, settings_root: Path) -> Path:
+  """
+  Resolve a suffix-free wikilink target to the file it names, in the order Obsidian does.
+
+  Args:
+    target: The wikilink target, without `|display` or `#anchor`.
+    settings_root: Dir holding `.claude/lazy.settings.json` — the vault root.
+
+  Returns:
+    `<settings_root>/<target>.md` when that file exists, else `<content-root>/<target>.md`.
+  """
+  vault_path = settings_root / f"{target}{_MD}"
+  return vault_path if vault_path.is_file() else spec_content_root(settings_root) / f"{target}{_MD}"
 
 
 def read_text(path: Path) -> str:

@@ -128,6 +128,7 @@ with pytest.raises(ValueError, match = "Matrix must be square"):
 ## Test Coverage
 - Aim for comprehensive test coverage.
 - Test integration between different components.
+- Private methods and helpers may be tested directly. Such tests never replace tests of the public contract: public and protected behaviour is always covered through the public API.
 
 ## Knowledge-derived tests
 - The knowledge markers in a method body are testable claims, exactly like docstring sections. Each `Contract:` block, each `Domain(…):` block, and each `opt:` clause yields at least one test.

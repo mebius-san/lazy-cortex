@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Common questions about installing lazycortex-experts, the class map, composing specialists, auditing the composition, and the sixteen generic agents' lane boundaries.
-last_regen: 2026-10-01
+last_regen: 2026-10-05
 no_diagram: true
 source_skills:
   - lazy-experts.install
@@ -22,8 +22,8 @@ source_skills:
   - lazy-experts.researcher
   - lazy-experts.editor
   - lazy-experts.fiction-editor
-source_sha: 4901a63aeaca2c6d63cdde7f64c8072d90a52f17
-surface_sha: f829cdb2dbc416e64bf13267f699d74efe119f8108a3148b7d9c8e45caab42c8
+source_sha: 5fd55b22deb887232b08f1a6526d8bbd7f88877b
+surface_sha: 02b48ccc722e96b698b2663b92454e3847d97fe4b8bb3c7e1da80408437a17e9
 ---
 # Frequently asked questions
 
@@ -173,13 +173,13 @@ No — only the debugger does, and only as the last step of its own investigatio
 
 ## What is an aspect and how does it differ from an agent?
 
-An agent is a persona — it defines who the expert is, what its lane is, and what output it produces. An aspect is a pure prompt layer that adds domain knowledge or working discipline to whichever agent you pair it with. Aspects compose onto agents via the `lazy.settings.json[experts]` entry; the expert runtime merges the aspect bodies into the agent's system prompt at dispatch time. Aspects carry no side-effects and add no new write permissions; they expand what the agent knows without changing where or how it writes its output.
+An agent is a persona — it defines who the expert is, what its lane is, and what output it produces. An aspect is a pure prompt layer that adds domain knowledge or working discipline to whichever agent you pair it with. Aspects compose onto agents via the `lazy.settings.json[experts]` entry; at dispatch time the expert runtime lists each aspect in the job prompt, and the expert reads it before it starts work. Aspects carry no side-effects and add no new write permissions; they expand what the agent knows without changing where or how it writes its output.
 
 ---
 
 ## Can I attach more than one aspect to the same agent?
 
-Yes. The `aspects` array in your `lazy.settings.json[experts]` entry accepts any number of aspect references. The expert runtime merges them all into the system prompt in declaration order. When two aspects impose obligations that could conflict, earlier aspects take precedence. For example, a specialist that interprets a config-repo brief for a LazyCortex development machine could combine `dotfiles-aspect` and `claude-plugin-aspect` on the same interpreter entry, alongside `discipline-aspect` and `tech-writing-aspect`. On the fiction side, you can combine both genre aspects — `sci-fi-aspect` and `fantasy-aspect` — on the same `fiction-writer` entry for a story that blends the two.
+Yes. The `aspects` array in your `lazy.settings.json[experts]` entry accepts any number of aspect references. The expert runtime lists them all in the job prompt in declaration order, and the expert applies every one of them — overlapping obligations stack, and the order sets no precedence. Two aspects whose obligations contradict each other are a defect in the composition: drop or replace one of them rather than reordering. For example, a specialist that interprets a config-repo brief for a LazyCortex development machine could combine `dotfiles-aspect` and `claude-plugin-aspect` on the same interpreter entry, alongside `discipline-aspect` and `tech-writing-aspect`. On the fiction side, you can combine both genre aspects — `sci-fi-aspect` and `fantasy-aspect` — on the same `fiction-writer` entry for a story that blends the two.
 
 ---
 

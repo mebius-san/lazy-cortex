@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Ingest free-form requests and route them into the spec tree: classify, find candidates, attach, spawn, or link via a deterministic worker.
-last_regen: 2026-09-30
+last_regen: 2026-10-05
 diagram_spec:
   anchor: "How the block flows"
   request: "Flow diagram showing the requests block pipeline: the catalog-root routing coordinator orchestrates — it calls lazy-spec.request-classify (returns a class token), then lazy-spec.request-find-candidates (returns a ranked candidate list), then writes only structural routing fields (verb, target, product/path/tools/targets/drop) into the routing decision — no per-target prose. Show an operator confirmation step, then a single lazy-spec.request-apply node that branches internally into attach (folds the request onto an existing entity's primary doc) or spawn (scaffolds a new entity's folder and status note only, documents seeded later per launch checkbox) — both paths converge into 'doc's own writer builds from source in its review job'."
@@ -10,8 +10,8 @@ source_skills:
   - lazy-spec.catalog-coordinator
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
-source_sha: fa5b0224e74389a27865661de6432f0a2e5514f1
-surface_sha: 9eb4f3a0d03a40ccffa28f4e96927c94c8dbf88a79796a8352f1872965a121d0
+source_sha: 9c110327bf3385f108b4614ca72bc2adc1fe5c72
+surface_sha: 8e99a873797beb2dab409586f97e5f6896a6aac37f7466b4d37ca66deccc00f5
 ---
 # Requests
 
@@ -46,7 +46,7 @@ The routing coordinator never enacts the routing itself. That is `lazy-spec.requ
 
 **Enact the decision.** Once you confirm, `lazy-spec.request-apply` — a deterministic Python worker, not an LLM-dispatched skill — reads the resolved `# Routing` section and enacts every spawn, spawn-product, attach, and reference line in it:
 
-- **Spawn** — the worker scaffolds the asset folder and its status folder-note alone, through the same primitive `lazy-spec.create-asset` uses for an empty scaffold — no document is written and no review opens yet. The request is recorded on the new folder-note's `## Source requests` list. Every document the asset eventually needs, `design.md` included, is created later, one at a time: ticking a `Write <doc>` launch checkbox on the folder-note dispatches `seed-doc`, which seeds that one doc at stage `empty` and copies the folder-note's accumulated `spec_source_requests` onto it, then opens the writer round via `lazy-review.start` once the folder-note carries at least one source-request entry — the class's main writer works its first round straight from the request(s), never from a placeholder. Reconciling that launch checkbox and dispatching `seed-doc` once you tick it is `spec.coordinator`'s ordinary job on the asset's own folder-note — its first wake after a spawn is a plain transition, not a routing decision.
+- **Spawn** — the worker scaffolds the asset folder and its status folder-note alone, through the same primitive `lazy-spec.create-asset` uses for an empty scaffold — no document is written and no review opens yet. The request is recorded on the new folder-note's `## Source requests` list. Every document the asset eventually needs, `design.md` included, is created later, one at a time: ticking a `Write <doc>` launch checkbox on the folder-note dispatches `seed-doc`, which seeds that one doc at stage `empty` and copies the folder-note's accumulated `spec_source_requests` onto it, then opens the writer round via `lazy-review.start` at once, whether or not the folder-note carries a source-request entry — the class's main writer works its first round from the request(s) when there are any, and from the approved documents above it otherwise, never from a placeholder. Reconciling that launch checkbox and dispatching `seed-doc` once you tick it is `spec.coordinator`'s ordinary job on the asset's own folder-note — its first wake after a spawn is a plain transition, not a routing decision.
 - **Spawn a product** — a `spawn-product` line registers a whole new product rather than one asset inside an existing one: the worker records the product with the given path and no code binding yet (add one later, in edit mode, with `/lazy-spec.product-config`), scaffolds the product's own folder and level note, seeds its `vision.md` at stage `empty` with the request already attributed to it, and opens that document's review — the product's own vision starts from the request, the same way a spawned asset's first document does. Any role experts you settled during the request's review land on the product's config; leave the field off and `/lazy-spec.product-config` fills them in later.
 - **Attach** — the target's primary doc (`design.md` for feature/change, `bug.md` for bug) gets the request added to its `spec_source_requests` frontmatter and its `## Requests` projection under `# Sources` refreshed to match; the target's own folder-note gets a `## Source requests` bullet too. The apply worker never rewrites the doc's existing content itself — instead it opens review on the doc directly: normally at the writer round (`lazy-review.start`), so the class's writer folds the newly attached request into the design on its own next pass, or via `submit` when a pre-launch rollback (below) just reopened that same doc. An attach line naming a system document instead of an asset skips the folder-note step entirely — see "Attach a request to a system document" below.
 - **Reference** — the worker touches nothing on the linked asset: no doc edit, no attribution, no review reopened. It only records the link on the request's own frontmatter (`spec_targets`). A request routed entirely through reference lines still finishes as a full accept — it just added no new asset, because the routing coordinator judged one already exists.

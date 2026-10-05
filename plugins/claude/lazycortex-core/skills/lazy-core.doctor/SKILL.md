@@ -501,7 +501,7 @@ Any one signal is sufficient — doctor should not skip a delegated audit just b
 **11f. Expert runtime** — inline, via `lazy-core.audit` Agent D findings
 - *Availability*: always (expert-runtime checks are part of `lazycortex-core` itself — no separate plugin probe needed).
 - *Run condition*: `.claude/lazy.settings.json` contains a non-empty `experts` section **or a non-empty `external_dirs.paths` list**. Skip if neither is present (no expert runtime configured — silent skip, no report entry). Test the `paths` list, never the section: a settings migration stamps a `{"_version": 1}` stub for every known section into every repo, so "non-empty section" would match everywhere and defeat the skip.
-- *On invoke*: run the Agent D sub-checks from `lazy-core.audit` inline (do NOT dispatch a separate skill — just execute the same D1–D16 logic described in `lazy-core.audit`'s Agent D section). Fold findings into a **Loop runtime** subsection. Retain all D-findings for Phase 4 fix-offer matching (see "Loop runtime fix offers" in Phase 4).
+- *On invoke*: run the Agent D sub-checks from `lazy-core.audit` inline (do NOT dispatch a separate skill — just execute the same D1–D17 logic described in `lazy-core.audit`'s Agent D section). Fold findings into a **Loop runtime** subsection. Retain all D-findings for Phase 4 fix-offer matching (see "Loop runtime fix offers" in Phase 4).
 
 **11g. Obsidian coverage** → `lazy-obsidian.audit`
 - *Availability*: `lazycortex-obsidian` meets the canonical signal set above.

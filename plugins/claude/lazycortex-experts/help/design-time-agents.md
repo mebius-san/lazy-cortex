@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Seven agents that turn a raw request into a scoped design, formal use cases, an optional UI, a code-structure design, a sourced research report, and an ordered implementation plan.
-last_regen: 2026-09-24
+last_regen: 2026-10-05
 diagram_spec:
   anchor: "The design-time pipeline"
   request: "Flow diagram, five nodes in a line: Interpreter -> Use-Case Writer -> Designer -> Architect -> Planner, edges labeled 'brief', 'use cases', 'design spec', 'architecture doc (optional)'. UI Designer hangs off Designer with a single edge labeled 'approved design' (UI Designer has no edge to Architect or Planner). No other nodes."
@@ -13,8 +13,8 @@ source_skills:
   - lazy-experts.architect
   - lazy-experts.planner
   - lazy-experts.researcher
-source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
-surface_sha: dc1db77f01bbb7e737337f6f1aeba9d20f8c60fc9c3e6094d1af34ca7bf9cd48
+source_sha: 5fd55b22deb887232b08f1a6526d8bbd7f88877b
+surface_sha: b2cd4252d1370a29b72d01a716bfae56d31576433a10a68ea89c4d3a3a16c18c
 ---
 # Design-time agents
 

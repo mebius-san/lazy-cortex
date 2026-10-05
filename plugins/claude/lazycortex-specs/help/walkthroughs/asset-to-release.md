@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Take one spec asset from a blank slate through all five readiness gates to a confirmed release.
-last_regen: 2026-09-26
+last_regen: 2026-10-05
 diagram_spec:
   anchor: "How the journey flows"
   request: "Sequence diagram showing the five-skill lifecycle of one asset: lazy-spec.create-asset scaffolds and authors the asset, lazy-spec.set-stage marks the design approved and then the plan approved, lazy-spec.flip-gate advances each gate (spec_design_done through spec_tests_passing), lazy-spec.sync-with-code reconciles code reality and proposes spec_develop_done, lazy-spec.rebase-pins rebases branch pins and proposes spec_released."
@@ -11,8 +11,8 @@ source_skills:
   - lazy-spec.flip-gate
   - lazy-spec.sync-with-code
   - lazy-spec.rebase-pins
-source_sha: 7a2ab2bc75bf9bafa1340246e6c6969c517c4bc7
-surface_sha: 57907bc1a095cc3248cb771c96d6ec8e6f13a1ca1929a4c56bcbaed153a0616d
+source_sha: af7b5dbb7d5df89a342695878be21d14c43d910c
+surface_sha: 9f1276216196b3bda5e39aee71ebfb497369653ba4184bcb7a9d60badcac9b5e
 ---
 # How do I take an asset from creation all the way to release?
 
@@ -65,7 +65,7 @@ Read `design.md` and iterate on its prose as needed (the skill authored a first 
 /lazy-spec.set-stage <design.md path> approved
 ```
 
-`lazy-spec.set-stage` rewrites `spec_stage: approved` in the frontmatter, mirrors the `spec/approved` tag in lock-step, and stamps `spec_approved_at: <ISO 8601 UTC datetime>` on `design.md` itself. No history line is written — `# History` journals operator commands, expert-job outcomes, answered questions and halts, one bullet each under `#### YYYY-MM-DD` day headings. It accepts only the closed set `empty | draft | approved | rejected | cancelled | deferred`; anything outside that set is rejected with a clear error. `deferred` is a special case in that set — it parks a document out of the automation's reach (no gate reads it, nothing edits it further) and has exactly one way back out: setting it to `draft` again. You won't need it for a straight run through this journey, but if you ever need to shelve `design.md` mid-flight, `/lazy-spec.set-stage <design.md path> deferred` is how; `spec.coordinator` and every gate proposal ignore the doc until you un-park it.
+`lazy-spec.set-stage` rewrites `spec_stage: approved` in the frontmatter, mirrors the `spec/approved` tag in lock-step, and stamps `spec_approved_at: <ISO 8601 UTC datetime>` on `design.md` itself. No history line is written — `# History` journals operator commands, expert-job outcomes, answered questions and halts, one bullet each under `#### YYYY-MM-DD` day headings. It accepts only the closed set `empty | draft | approved | rejected | cancelled | deferred`; anything outside that set is rejected with a clear error. `deferred` is a special case in that set — it parks a document out of the automation's reach (no gate reads it, nothing edits it further) and has exactly two ways out: `draft` brings it back, `cancelled` abandons it. You won't need it for a straight run through this journey, but if you ever need to shelve `design.md` mid-flight, `/lazy-spec.set-stage <design.md path> deferred` is how; `spec.coordinator` and every gate proposal ignore the doc until you un-park it.
 
 Approving `design.md` carries three side effects along in the same commit, none of which need a separate step from you:
 
@@ -119,7 +119,7 @@ Once the implementation is written (in its own source-repo branch), run:
 /lazy-spec.sync-with-code <product>
 ```
 
-`lazy-spec.sync-with-code` fetches the source repo, walks commits since the last sync, and surfaces user-visible behavior changes for you to review before applying them to the design doc. It never touches the product tech doc — that document is hand-written, out of scope in both modes, and changes only through its own review; a code-level change with nothing to say to a user goes into the run log and nowhere else. When an approved edit lands on a product design-doc section that already carries a diagram, sync redraws that diagram to match the new prose in the same pass — it never draws one where none existed. It also inspects every asset folder-note and, when commits on the default branch objectively implement this asset AND `spec_plan_done` already reads `true`, proposes flipping `spec_develop_done` via one confirmation question. On yes, it invokes `lazy-spec.flip-gate` for you.
+`lazy-spec.sync-with-code` fetches the source repo, walks commits since the last sync, and rewrites the product design doc itself for every user-visible behavior change it finds, without asking about each one. Nothing is committed until you have read the whole diff and said yes — you approve the run as a whole, never edit by edit. It never touches the product tech doc — that document is hand-written, out of scope in both modes, and changes only through its own review; a code-level change with nothing to say to a user goes into the run log and nowhere else. When a rewrite lands on a product design-doc section that already carries a diagram, sync redraws that diagram to match the new prose in the same pass — it never draws one where none existed. It also inspects every asset folder-note and, when commits on the default branch objectively implement this asset AND `spec_plan_done` already reads `true`, proposes flipping `spec_develop_done` via one confirmation question. On yes, it invokes `lazy-spec.flip-gate` for you.
 
 That `spec_plan_done` check is `sync-with-code`'s own readiness gate, not something the underlying `flip-gate` primitive enforces on its own. If Step 4 hasn't landed yet, sync doesn't propose the flip at all — it reports the asset as blocked on its code-plan gate instead. Finish Step 4, then re-run the sync to get the proposal.
 
@@ -159,7 +159,7 @@ For squash-merges where the branch still exists on the remote, pass `--force-mer
 
 The asset is now fully released. Its folder-note carries five `true` gates, each stamped with its `_at` moment. No `# History` line accumulated from this journey — the audit trail is those stamps plus the commit each skill made along the way. The product tech doc reflects only what you or its own review put there — sync never touches it — and all source links resolve against the default branch.
 
-To revisit a decision — for instance if a test passes retroactively or a design is revised — use `/lazy-spec.flip-gate <asset> <gate> --off` to regress a gate, or `/lazy-spec.set-stage <doc> draft` to re-open a doc for editing. A doc parked with `/lazy-spec.set-stage <doc> deferred` comes back the same way — `draft` is its only exit. Each operation updates the matching stamp (`--off` drops the gate's `_at` key) and lands in its own commit, so the audit trail stays complete.
+To revisit a decision — for instance if a test passes retroactively or a design is revised — use `/lazy-spec.flip-gate <asset> <gate> --off` to regress a gate, or `/lazy-spec.set-stage <doc> draft` to re-open a doc for editing. A doc parked with `/lazy-spec.set-stage <doc> deferred` comes back the same way — `draft` unparks it, and `cancelled` is its only other exit. Each operation updates the matching stamp (`--off` drops the gate's `_at` key) and lands in its own commit, so the audit trail stays complete.
 
 Run `/lazy-spec.audit <product>` periodically to catch drift: missing stage mirrors, stale links, gate inconsistencies, or docs that gained new content without a stage transition.
 

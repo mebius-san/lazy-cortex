@@ -88,6 +88,7 @@ Aspects are versioned **by filename**. There is no version field in the referenc
 - All required sections (§ 2.2) are present → `FAIL` on missing.
 - Every `aspects[]` entry across `lazy.settings.json[experts]` resolves via `reference_resolver` → `FAIL` on unresolvable.
 - Aspect filename matches `^[a-z0-9._-]+-aspect\.md$` → `WARN` on suffix mismatch.
+- Two aspects composed into one expert entry carry obligations or side-effect rules that cannot both be obeyed (§ 4) → `INFO` `aspects-conflict`, one finding per conflicting pair, naming the repair: edit or drop one aspect, or change the entry.
 
 `lazy-core.doctor` Phase 3 surfaces findings and prompts for fixes.
 

@@ -37,7 +37,7 @@ Lives on every stage-bearing authored spec doc (the same full stage-bearing set 
 
 Defaults are written by `lazy-spec.create-asset` at scaffold time. The operator may extend or trim the list manually.
 
-Wikilinks MUST be **path-qualified** (e.g. `[[<spec_path>/<slug>/design]]` for an asset at the product root, `[[<spec_path>/<folder>/<slug>/design]]` for one under a group folder, not bare `[[design]]`) because asset slugs and doc basenames repeat across the vault — bare `[[design]]` is ambiguous.
+Wikilinks MUST be **path-qualified** (e.g. `[[<spec_path>/<slug>/design]]` for an asset at the product root, `[[<spec_path>/<folder>/<slug>/design]]` for one under a group folder, not bare `[[design]]`) because asset slugs and doc basenames repeat across the vault — bare `[[design]]` is ambiguous. A content-root document, or any target whose short form is not unique, takes the vault form (`[[specs/vision]]`) — [file-roles](./lazy-spec.file-roles-protocol.md) § Wikilinks owns both forms and the resolution order.
 
 Consumers (read-only):
 - `lazycortex-review` dispatcher resolves each wikilink and ships the resolved file into the expert's `context/` payload (read-only) at dispatch time;

@@ -1,7 +1,8 @@
 ---
 name: lazy-spec.sync-with-code
-description: Use when source code has changed since the last spec sync — compares a registered code-bound product's source commits against the last synced commit, surfaces user-visible behavior changes for the product design doc, reconciles branch pins, and proposes flat-gate / per-file-stage corrections from the code state. Any authored document a run creates is written parked at `spec_stage: deferred`, so no automation picks it up until the operator moves it to `draft`. Never touches the product tech doc, which is hand-written. No-ops on a design-only product. Given an `<asset>` argument instead of a bare product key, runs in asset mode instead: reconciles ONE feature/change asset's design.md / architecture.md against the current code by anchor (source-links, domain-groups, structure) rather than by commit diff, and never edits spec content silently — every drift finding becomes an `[!attention]` callout, a change-asset proposal, or a gate-correction proposal.
+description: Use when source code has changed since the last spec sync — compares a registered code-bound product's source commits against the last synced commit, rewrites the product design doc for user-visible behavior changes and leaves every edit uncommitted until the operator has read the diff and said yes, reconciles branch pins, and proposes flat-gate / per-file-stage corrections from the code state. Any authored document a run creates is written parked at `spec_stage: deferred`, so no automation picks it up until the operator moves it to `draft`. Never touches the product tech doc, which is hand-written. No-ops on a design-only product. Given an `<asset>` argument instead of a bare product key, runs in asset mode instead: reconciles ONE feature/change asset's design.md / architecture.md against the current code by anchor (source-links, domain-groups, structure) rather than by commit diff, and never edits spec content silently — every drift finding becomes an `[!attention]` callout, a change-asset proposal, or a gate-correction proposal.
 allowed-tools: Read, Bash, Edit, Write, Skill, AskUserQuestion, Agent
+dirty-tree-waiver: "design-doc rewrites and the sync checkpoint stay uncommitted until the operator has read the diff and allowed the commit"
 ---
 # Spec Sync
 
@@ -11,7 +12,7 @@ Synchronize a product specification with source code changes since the last sync
 
 This skill runs in one of two modes, resolved from the argument in Step 0:
 
-- **Product mode** (a bare product compound-key or a source path under one) — the flow below: commit-diff since `last_commit`, behavior-change candidates surfaced for the product design doc, refresh of existing diagrams whose design sections were rewritten, product-wide gate/stage reconciliation, branch-pin reconciliation, state update. Unchanged by this section.
+- **Product mode** (a bare product compound-key or a source path under one) — the flow below: commit-diff since `last_commit`, design-doc rewrites for behavior changes, refresh of existing diagrams whose design sections were rewritten, product-wide gate/stage reconciliation, branch-pin reconciliation, state update. Unchanged by this section.
 - **Asset mode** (an `<asset>` argument naming one feature/change asset) — reconciles that ONE asset's `design.md` / `architecture.md` against the current code state by anchor, never by commit diff. Steps 1–4b, 5a, and 6 do not apply and are marked `skipped` with outcome `skipped-per-mode`; Step 5 runs its **Asset mode** subsection instead of the product-wide folder walk. There is no periodic routine for asset mode — see "Asset-mode triggers" below.
 
 Product config, the five flat gates, per-file stages, source URLs, and pin reconciliation are all owned by `${CLAUDE_PLUGIN_ROOT}/references/` — this skill never inlines those mechanics; it calls the named primitives and references the reference docs.
@@ -26,7 +27,7 @@ This skill has 10 ordered steps. The diagram seam set is **runtime-computed** �
    - `Step 2 — Get relevant changes`
    - `Step 2a — Delegate categorization to parallel agents`
    - `Step 3 — Analyze each commit`
-   - `Step 4 — Surface behavior changes for the design doc (rewrite prose per operator approval)`
+   - `Step 4 — Rewrite the design doc for behavior changes`
    - `Step 4a — Compute runtime seam list` (output: a list of `{target_file, anchor_section, kind, facts}` triples — one per section whose prose was rewritten)
    - `Step 4b — Dispatch diagram per computed seam` (this single entry expands into N additional ledger lines right after Step 4a runs — one line per computed seam, titled `draw-diagram <relative-path>:<anchor>:<kind>` per the drawer's own seam-author clause 2 — and only Step 5 may begin once they are all `completed` or `skipped` with an outcome word)
    - `Step 5 — Reconcile asset status (folder-note scaffold + gate/stage proposals)`
@@ -73,7 +74,7 @@ All narrative prose this skill writes (user-facing summaries presented via `AskU
 
 **Asset mode:** skipped, outcome `skipped-per-mode` — asset mode reads only the ONE resolved asset's `design.md` / `architecture.md` (already in hand from Step 0), never the product-level design/tech docs or a commit range. Go to Step 5.
 
-1. Read the product design doc (`<spec_path>/design.md` — behavior) per `${CLAUDE_PLUGIN_ROOT}/references/`. It is the only product-level document this skill ever proposes an edit to, and even that only per-item with the operator's approval. Do NOT read or open `<spec_path>/tech.md` — it is out of scope per the preamble above, and reading it only invites a proposal this skill may not make.
+1. Read the product design doc (`<spec_path>/design.md` — behavior) per `${CLAUDE_PLUGIN_ROOT}/references/`. It is the only product-level document this skill ever edits. Do NOT read or open `<spec_path>/tech.md` — it is out of scope per the preamble above, and reading it only invites a proposal this skill may not make.
 2. Read `.state/lazy-spec.sync-<product-key>.json` to get `last_commit`. When that file is absent but the pre-convention `.state/spec-sync-<product-key>.json` exists, rename it first (`Bash(mv ...)`) and read the result — the checkpoint follows the `.state/` naming convention (`<namespace>.<name>.json`), and the rename joins Step 6's commit pathspec:
 
    ```json
@@ -99,6 +100,7 @@ All narrative prose this skill writes (user-facing summaries presented via `AskU
 
 1. Run `git -C <repo-config>.local_path fetch --prune <remote>` (prefer `origin`; else the first remote `git -C <local_path> remote` returns). If the fetch fails (network, auth, missing remote) → abort the whole sync with a clear error; never operate on stale branch state — Step 5a's pin reconciliation depends on fresh refs.
 2. Run `git -C <repo-config>.local_path log --oneline <last_commit>..HEAD -- <source.paths>` (one `--` path argument per entry in `source.paths`) to get commits touching this product's source.
+2a. **Follow moves of the source tree.** A path filter only sees the current location, so commits made before the tree was moved into `source.paths` drop out of the window silently. Run `git -C <local_path> log --format=%H --diff-filter=R -M --name-status <last_commit>..HEAD` with no path filter — a filter on the new location alone hides the rename, because git then sees only the added side — and read every `R` line whose destination lies under a `source.paths` entry. For each such rename, add the commits `git -C <local_path> log --oneline <last_commit>..<rename-commit>~1 -- <old-prefix>` returns, where `<old-prefix>` is the rename's source directory, and diff those commits against `<old-prefix>` in sub-step 4.
 3. If no commits → still run Step 5a (pins may need reconciling against the freshly-fetched refs), update the state file with current HEAD, print "No code changes to `<source.paths>`", and stop after Step 5a + state + log.
 4. For each commit, run `git -C <repo-config>.local_path diff <commit>~1..<commit> -- <source.paths>` to get the specific diff.
 
@@ -134,31 +136,33 @@ For each commit, categorize changes:
 | **Class added/removed** | New or deleted class definition |
 | **Config changed** | Changes to configuration values |
 
-## Step 4 — Surface behavior changes for the design doc
+## Step 4 — Rewrite the design doc for behavior changes
 
 **Asset mode:** skipped, outcome `skipped-per-mode` — no design-doc rewrite here; asset mode's drift findings are signals (Step 5's Asset mode subsection), never a routed rewrite.
 
 One document is in scope, and one kind of change reaches it. Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md`:
 
-- **User-visible behavior changes** (identified by Agent C or by inspection of diffs that change what the user sees) → surface to the operator as "This commit appears to change user-facing behavior X. Update the product design doc?" Never silently rewrite the design doc — always ask.
+- **User-visible behavior changes** (identified by Agent C or by inspection of diffs that change what the user sees) → rewrite the matching part of the product design doc so it states the new behavior: correct a statement the change made wrong, add one for behavior the doc never described.
 - **Code-level changes** (routes, functions, signatures, new/removed files, constants) that change nothing a user sees → **no document takes them**. Record them in the run log and move on; the product tech doc is not a mirror of the code and never receives them, and there is no other product-level document that would. A code-level change that DOES alter user-visible behaviour is not a code-level change for this step's purposes — it is a design candidate above.
 - **Source URLs** must never appear in design docs. For asset-level implementation detail a source link belongs in the asset's `code-plan.md` (when one exists — it is opt-in, not scaffolded by default), never in a product-level document this skill writes.
 
-Present the planned design candidates to the operator before applying, one summary listing each. Apply design-doc edits only on per-item approval. Every approval here is an `AskUserQuestion` that prints its context first — where (`/lazy-spec.sync-with-code · Step 4 — Surface behavior changes for the design doc`, the target doc path), found (the commit hash(es) and the diff hunk the change touches, quoted), why asking (a design-doc rewrite is never silent), answers (`apply` — the edit lands in the design doc now and rides the Step 6 commit; `skip` — the doc stays as is, the candidate is listed in the run log and re-surfaces on the next sync that still sees the drift); `question` names the doc and the change, `header` is `Design candidate`.
+Apply every rewrite without asking: the operator approves the run as a whole by reading its diff before the commit (Step 6), never edit by edit. Append one line to the design doc's `# History` section under today's `#### <YYYY-MM-DD>` heading, naming the synced commit window and what changed.
 
-After all approved prose rewrites land, record a list of `(target_file, anchor_section)` pairs that were actually rewritten in this run. This list is the input to Step 4a.
+After the rewrites land, record a list of `(target_file, anchor_section)` pairs that were actually rewritten in this run. This list is the input to Step 4a.
 
 ## Step 4a — Compute runtime seam list
 
 **Asset mode:** skipped, outcome `skipped-per-mode` — Step 4 produced no rewritten sections to seam.
 
-A seam here is **refresh-only**: a rewritten section whose heading ALREADY carries a drawer-authored fence (a `Bash(grep -n "^%%{init:" <target_file>)` hit between the anchor and the next heading proves it). Rewritten prose invalidates the picture that illustrated it, so the existing fence is redrawn; a section with no fence gets none — creating diagrams is not this skill's mandate (the operator asks via `/lazy-diagram.draw`, the writing experts follow `lazy-core.markdown-style` § Figures). For every rewritten `(target_file, anchor_section)` pair that carries a fence, look up the canonical kind for that anchor:
+A seam here is **refresh-only**: a rewritten section whose heading ALREADY carries a drawer-authored fence (a `Bash(grep -n "^%%{init:" <target_file>)` hit between the anchor and the next heading of the same or a higher level proves it — a fence under a `###` subsection belongs to its `##` anchor). Rewritten prose invalidates the picture that illustrated it, so the existing fence is redrawn; a section with no fence gets none — creating diagrams is not this skill's mandate (the operator asks via `/lazy-diagram.draw`, the writing experts follow `lazy-core.markdown-style` § Figures). For every rewritten `(target_file, anchor_section)` pair that carries a fence, look up the canonical kind for that anchor:
 
 | Role | Anchor | kind |
 |---|---|---|
-| design (product) | `## Behavior` | `flow` |
-| design (asset) | `## User Flow` | `flow` |
-| design (asset) | `## Changes` | `flow` |
+| design (product) | `## Design` | `flow` |
+| design (feature asset) | `## Behavior` | `flow` |
+| design (change asset) | `## Target State` | `flow` |
+
+The anchors follow the shipped templates (`spec.product/design.md`, `spec.feature/design.md`, `spec.change/design.md`); when a template renames a section, this table changes in the same edit.
 
 **No product-tech row exists here, deliberately.** Step 4 never rewrites `tech.md`, so no section of it can ever enter `seams[]`; a row for `## Architecture` or `## Components` would be a seam nothing can produce.
 
@@ -273,9 +277,11 @@ Auto-apply (no prompt — the primitive never rewrites an unmerged pin). The lis
 
 Write `.state/lazy-spec.sync-<product-key>.json` with current HEAD and today's date. The file is a tracked cross-machine checkpoint: fold its path (and the removal of a just-renamed `spec-sync-<product-key>.json`, when Step 1 migrated one) into the commit that carries this sync's changes — left dirty it halts the runtime daemon's clean-tree check.
 
+**No commit without the operator's yes.** This skill does not commit the design-doc rewrites, the checkpoint, or any other path it wrote. After Step 8 it shows the operator `git diff` of every path it wrote and stops. The commit happens only after the operator has read that diff and explicitly allowed it, with those paths as the explicit pathspec. A rejected diff is reverted path by path, checkpoint included, so the next sync sees the same window again.
+
 ## Step 7 — Run doctor
 
-Runs in both modes. After sync, run `/lazy-spec.audit` (structure, wikilinks, gate/stage consistency, staleness) to catch any issues the sync may have introduced. Report but don't auto-fix — the operator just approved sync changes and should review doctor findings separately.
+Runs in both modes. After sync, run `/lazy-spec.audit` (structure, wikilinks, gate/stage consistency, staleness) to catch any issues the sync may have introduced. Report but don't auto-fix — the operator reads doctor findings alongside the sync diff and decides on them separately.
 
 ## Verify
 
@@ -318,8 +324,9 @@ There is no periodic routine for asset mode — no `routines[]` registration, no
 - **A created document is born `deferred`** — every authored document a run of this skill creates lands parked (`spec_stage: deferred` + the `spec/deferred` tag), so nothing acts on it until the operator moves it to `draft`. Editing an existing document never changes its stage.
 - **Scaffold, don't infer** — a missing status folder-note is scaffolded with all gates `false`; code-grounded `spec_develop_done` flips and stage corrections are separate, operator-confirmed proposals.
 - **Never write the product tech doc** — `tech.md` is hand-written and out of scope in both modes: not read in Step 1, not edited in Step 4, and never a diagram seam in Step 4a. A code-level change no design doc wants goes in the run log and nowhere else.
-- **Preserve manual additions** — design docs may contain hand-written sections (Goals, Principles, Known Limitations). Never touch these during sync; surface behavior-level change candidates and let the operator edit the design doc.
+- **Preserve manual additions** — design docs may contain hand-written sections (Goals, Principles, Known Limitations). Never touch these during sync; behavior-level rewrites go into the sections that describe behavior.
+- **Edit freely, commit only on the operator's yes** — design-doc rewrites apply without per-item questions; nothing the run wrote is committed until the operator has read the whole diff and allowed the commit (Step 6).
 - **Diff, don't rewrite** — use `Edit` to update specific sections, not `Write` to overwrite the whole file.
-- **Delegate heavy reads** — when the change set is large, fan out to parallel Explore agents; main session synthesizes and asks.
+- **Delegate heavy reads** — when the change set is large, fan out to parallel Explore agents; main session synthesizes and applies.
 - **Asset mode never edits `design.md` / `architecture.md` prose** — a drift finding becomes exactly one of an `[!attention]` callout, a change-asset proposal, or a gate-correction proposal (Step 5's Asset mode subsection); the `[!attention]` splice is the only body edit it ever makes, and even that never touches existing content — it only appends the callout.
 - **Asset mode has no periodic routine** — no `routines[]` entry; it runs on-demand, from `/lazy-spec.drive`, or at a `spec.coordinator` decision point (see "Asset-mode triggers" above).

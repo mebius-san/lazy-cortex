@@ -154,12 +154,8 @@ def _render(source_link: str, title: str, body: str) -> str:
   """
   Render the request document a hand-written candidate is indistinguishable from.
 
-  Guarantees:
-    - Neither `review_active` nor `review_result` is ever written, so the emitted candidate
-      enters the intake pipeline's review loop exactly as a hand-written request does.
-
   Args:
-    source_link: Suffix-free content-root-relative path of the document that raised the candidate.
+    source_link: Suffix-free wikilink target of the document that raised the candidate.
     title: The candidate's title, written as the document's H1.
     body: The candidate's body text, written verbatim below the H1.
 
@@ -176,11 +172,6 @@ def _render(source_link: str, title: str, body: str) -> str:
   # written by hand, so the ordinary intake pipeline opens, classifies, and routes it without
   # ever knowing a coordinator raised it — and the coordinator that raised it never revisits it
   # again once it has been dropped into the inbox.
-
-  # Contract:
-  # Neither `review_active` nor `review_result` is written. `open_request` reads the first as
-  # "already opted in" and the second as "post-finalize", so either key would strand the
-  # candidate outside the review loop the intake pipeline is supposed to pull it into.
 
   # the candidate's whole file text, assembled in one expression so no half-written
   # frontmatter shape can escape this function
@@ -260,6 +251,8 @@ def draft(
   Guarantees:
     - The emitted file is byte-shaped like an operator-written request, so the intake pipeline
       opens and reviews it with no knowledge that a coordinator wrote it.
+    - Neither `review_active` nor `review_result` is ever written, so the emitted candidate
+      enters the intake pipeline's review loop exactly as a hand-written request does.
 
   Args:
     repo: The settings root holding `.claude/lazy.settings.json`.
@@ -275,7 +268,7 @@ def draft(
   Raises:
     subprocess.CalledProcessError: When either git invocation of the drafting commit exits
       non-zero, leaving the written file in the worktree uncommitted.
-    ValueError: When `source` lies outside the spec content root, so no content-root-relative
+    ValueError: When `source` lies outside the spec content root, so no catalog
       attribution wikilink exists for it. `main` refuses such a call before reaching here.
   """
 
@@ -283,15 +276,19 @@ def draft(
   # The emitted file is byte-shaped like an operator-written request, so the intake pipeline
   # opens and reviews it with no knowledge that a coordinator wrote it.
 
+  # Contract:
+  # Neither `review_active` nor `review_result` is written. `open_request` reads the first as
+  # "already opted in" and the second as "post-finalize", so either key would strand the
+  # candidate outside the review loop the intake pipeline is supposed to pull it into.
+
   # the inbox may not exist yet in a vault whose first request this is
-  content_root = spec_paths.spec_content_root(repo)
-  requests_dir = content_root / _K.REQUESTS_DIR
+  requests_dir = spec_paths.spec_content_root(repo) / _K.REQUESTS_DIR
   requests_dir.mkdir(parents = True, exist_ok = True)
 
-  # attribution follows the catalog's own wikilink convention: content-root-relative, suffix-free
-  source_link = str(source.resolve().relative_to(content_root.resolve()).with_suffix(""))
+  # write the request under a fresh name, attributed by the catalog's own wikilink convention
+  # (file-roles protocol § Wikilinks), and commit it
   request_path = _unique_path(requests_dir, _slug(title))
-  spec_paths.write_text_atomic(request_path, _render(source_link, title, body))
+  spec_paths.write_text_atomic(request_path, _render(spec_paths.build_wikilink_target(source, repo), title, body))
   _commit(repo, request_path, author_name, author_email)
   return {
       _K.OUT_OUTCOME: _K.OUTCOME_CREATED,
@@ -335,8 +332,8 @@ def main(argv: list[str]) -> int:
     sys.stderr.write(_ERR_BODY.format(path = args.body))
     return 2
 
-  # guard: the attribution wikilink is content-root-relative, so a source outside that root has
-  # no expressible link — refused here rather than raised out of `draft` as a bare ValueError
+  # guard: the attribution wikilink names a catalog document, so a source outside the spec content
+  # root has no expressible link — refused here rather than raised out of `draft` as a bare ValueError
   content_root = spec_paths.spec_content_root(repo)
   if not source.resolve().is_relative_to(content_root.resolve()):
     sys.stderr.write(_ERR_OUTSIDE.format(root = content_root, path = source))
