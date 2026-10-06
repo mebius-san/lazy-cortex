@@ -578,7 +578,7 @@ The unit of work is not derived. The routines run in the runtime's default `grou
 Bash("${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> structure-watch-config --repo "<repo-root>")
 ```
 
-where `<wiki-cli>` stands for the wiki plugin's `bin/lazycortex-wiki` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-wiki/<version>/`, or `plugins/claude/lazycortex-wiki/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> <verb>`: the file carries no exec bit and is not on `PATH`. It prints one JSON object carrying `path_filter`; pass it through verbatim as `<exclude-pathspecs>` below. No grouping key is derived on purpose: the routines run in the runtime's default whole-list mode, one curator job per tick carrying every changed path.
+where `<wiki-cli>` stands for this plugin's own `bin/lazycortex-wiki` file, "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" — Claude Code substitutes the variable with the root this skill's plugin was loaded from, so no lookup is needed. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> <verb>`: the file carries no exec bit and is not on `PATH`. It prints one JSON object carrying `path_filter`; pass it through verbatim as `<exclude-pathspecs>` below. No grouping key is derived on purpose: the routines run in the runtime's default whole-list mode, one curator job per tick carrying every changed path.
 
 Resolve the watched branch with `Bash(git rev-parse --abbrev-ref HEAD)`. Register each through the registrar, substituting the derived value:
 

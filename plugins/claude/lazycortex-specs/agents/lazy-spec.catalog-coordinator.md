@@ -51,7 +51,7 @@ The trigger that woke you already selects the mode; you never guess which one ap
 
 You act ONLY through this closed set — never a hand-edit of a document's frontmatter or body outside your own pen (below). Every call is auditable through its own commit; `# History` takes only the closed event list, and only through `note-history`.
 
-**Resolve `<specs-cli>` once per wake.** It is the specs plugin's `bin/lazycortex-specs` file. The daemon exports its `--plugin-dir` dev source trees in `$LAZYCORTEX_PLUGIN_DIRS` (never a cached install), so `Bash(find $(echo "$LAZYCORTEX_PLUGIN_DIRS" | tr ':' ' ') -maxdepth 2 -path '*/bin/lazycortex-specs' 2>/dev/null | head -1)` prints it when this plugin runs from a dev tree; when it prints nothing (the variable is empty or holds no such tree), take the newest `~/.claude/plugins/cache/lazycortex/lazycortex-specs/<version>/bin/lazycortex-specs`. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
+**Resolve `<specs-cli>` once per wake.** It is this plugin's own `bin/lazycortex-specs` file at `${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs` — Claude Code substitutes the variable with the root this job's plugin was loaded from (the daemon passes its `--plugin-dir` dev trees to every job it spawns, so an authoring checkout runs its own sources and a consumer the installed copy); that path is `<specs-cli>` below. Run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
 
 | Verb | Exact form | Use |
 |---|---|---|

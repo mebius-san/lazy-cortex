@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, likely causes, and fixes for lazycortex-obsidian — install, iconize, diagram render, plugin updates, tag pages, and vault manifest capture/deploy.
-last_regen: 2026-09-30
+last_regen: 2026-10-06
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree branching first on which skill aborted or misbehaved (install / iconize-install / iconize-config / iconize-sync / diagram-install / update-plugin / gen-tag-pages); each branch then splits on the specific symptom; each leaf names the troubleshooting entry that resolves it"
@@ -16,8 +16,8 @@ source_skills:
   - lazy-obsidian.audit
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: f5ce537f2d45483caf793ec064e00d98b7e1febd
-surface_sha: 43b58119b66b22f28aa29ccc2fe6be66faaab76cbdb234ef77101cc54dac0b7b
+source_sha: 2b8e9e79da15a0e25e187f4c05ae6011a36f0740
+surface_sha: 789f8e700f5d535daefe8163bb70652acb8a6ae50976f612b989179a91c96f21
 ---
 # Troubleshooting
 

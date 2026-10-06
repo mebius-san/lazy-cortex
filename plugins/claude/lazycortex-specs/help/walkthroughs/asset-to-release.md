@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Take one spec asset from a blank slate through all five readiness gates to a confirmed release.
-last_regen: 2026-10-05
+last_regen: 2026-10-06
 diagram_spec:
   anchor: "How the journey flows"
   request: "Sequence diagram showing the five-skill lifecycle of one asset: lazy-spec.create-asset scaffolds and authors the asset, lazy-spec.set-stage marks the design approved and then the plan approved, lazy-spec.flip-gate advances each gate (spec_design_done through spec_tests_passing), lazy-spec.sync-with-code reconciles code reality and proposes spec_develop_done, lazy-spec.rebase-pins rebases branch pins and proposes spec_released."
@@ -11,8 +11,8 @@ source_skills:
   - lazy-spec.flip-gate
   - lazy-spec.sync-with-code
   - lazy-spec.rebase-pins
-source_sha: af7b5dbb7d5df89a342695878be21d14c43d910c
-surface_sha: 9f1276216196b3bda5e39aee71ebfb497369653ba4184bcb7a9d60badcac9b5e
+source_sha: 2b8e9e79da15a0e25e187f4c05ae6011a36f0740
+surface_sha: 8e944d86218456de6da435252fe28ec83f1cbb1877a71c231fb8bd94ed9e06aa
 ---
 # How do I take an asset from creation all the way to release?
 

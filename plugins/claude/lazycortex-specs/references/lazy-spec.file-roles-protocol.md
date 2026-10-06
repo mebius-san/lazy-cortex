@@ -22,7 +22,7 @@ A declaration carries three independent boolean flags, each defaulting to `false
 - `review` — the document goes through the review loop under a class of the same name;
 - `append_only` — the file is only ever appended to, never rewritten.
 
-`<specs-cli>` stands for the specs plugin's `bin/lazycortex-specs` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-specs/<version>/`, or `plugins/claude/lazycortex-specs/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+`<specs-cli>` stands for the specs plugin's `bin/lazycortex-specs` file — the copy under `~/.claude/plugins/cache/lazycortex/lazycortex-specs/<version>/` that `~/.claude/plugins/installed_plugins.json` records as installed, or `plugins/claude/lazycortex-specs/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
 Validation everywhere is "a declaration for this type exists", never "this name is in the enum". `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> doc-type` is the one reader: `of <file>`, `resolve <type> --product <key>`, `list --product <key>`, `backfill`.
 

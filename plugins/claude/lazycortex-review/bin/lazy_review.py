@@ -33,6 +33,9 @@ Subcommands:
 - `guidelines-context` — delegate to :mod:`guidelines_context` (print the `{paths, warnings}`
                  map of the product guidelines one expert carries on one document; the
                  coordinator names the paths in a main or barrier writer dispatch's `context`).
+- `core-cli` — print the absolute path of the `lazycortex-core` CLI this plugin resolves
+                 (`$LAZYCORTEX_PLUGIN_DIRS`, then the dev-vault sibling, then the install
+                 registry); the coordinator agent holds it as `<core-cli>` for the wake.
 """
 from __future__ import annotations
 
@@ -494,6 +497,39 @@ def cmd_guidelines_context(args: argparse.Namespace) -> int:
   return 0
 
 
+def cmd_core_cli(_args: argparse.Namespace) -> int:
+  """
+  Print the absolute path of the `lazycortex-core` CLI this plugin resolves.
+
+  Args:
+    _args: Parsed namespace; the verb takes no arguments.
+
+  Returns:
+    Exit code: 0 with the path on stdout, 1 with an `error:` line on stderr when no lookup
+    stage finds core.
+  """
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
+  import coordinator_dispatch  # type: ignore  # pylint: disable=import-error
+
+  # one resolver for the whole plugin — the verb only exposes what the dispatcher already uses
+  # waiver: protected-access — the dispatcher's resolver is the plugin's single lookup; a second copy is the anti-pattern
+  # waiver: a project-wide mypy run binds the bare name to the specs plugin's same-named module, which lacks the attribute
+  cli = coordinator_dispatch._resolve_core_cli()  # type: ignore[attr-defined]  # pylint: disable=protected-access
+
+  # guard: no lookup stage found a binary — the agent stops and reports rather than guessing a path
+  if cli is None:
+    # waiver: one-off human-facing message -- stderr diagnostic naming every stage searched
+    sys.stderr.write(
+        "error: lazycortex-core CLI not resolvable: $LAZYCORTEX_PLUGIN_DIRS yields no match, no "
+        "dev-vault sibling tree carries bin/lazycortex-core, and the plugin registry records no "
+        "lazycortex-core install with a bin/lazycortex-core entry.\n"
+    )
+    return 1
+  print(cli)
+  return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
   """
   Build and return the top-level argument parser for the lazy-review CLI.
@@ -676,6 +712,11 @@ def build_parser() -> argparse.ArgumentParser:
   # waiver: argparse CLI signature, not a domain key
   p_guidelines.add_argument("expert")
   p_guidelines.set_defaults(func=cmd_guidelines_context)
+
+  # `core-cli` — the resolved `lazycortex-core` CLI path for the coordinator agent's `<core-cli>`
+  # waiver: argparse CLI signature, not a domain key
+  p_core_cli = sub.add_parser("core-cli", help="print the absolute path of the resolved lazycortex-core CLI")
+  p_core_cli.set_defaults(func=cmd_core_cli)
 
   # every subcommand carries its handler in `func`, so the caller dispatches on the parse
   # result alone and never has to match subcommand names a second time

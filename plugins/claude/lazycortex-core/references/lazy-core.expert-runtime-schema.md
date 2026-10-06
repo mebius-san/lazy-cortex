@@ -119,7 +119,7 @@ Every expert spawn is confined by `.runtime/sandbox.settings.json` (daemon-owned
 
 So the file is written by CLI, never by hand:
 
-`<core-cli>` stands for the core plugin's `bin/lazycortex-core` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-core/<version>/`, or `plugins/claude/lazycortex-core/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+`<core-cli>` stands for the core plugin's `bin/lazycortex-core` file — the copy under `~/.claude/plugins/cache/lazycortex/lazycortex-core/<version>/` that `~/.claude/plugins/installed_plugins.json` records as installed, or `plugins/claude/lazycortex-core/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
 ```
 "${LAZYCORTEX_PYTHON:-python3}" <core-cli> sandbox-sync --repo-root <repo> [--allow-read <path>]... [--allow-write <path>]...

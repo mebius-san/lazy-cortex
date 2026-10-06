@@ -137,7 +137,7 @@ then run `/plugin install lazycortex/lazycortex-core`.
 
 ## Step 2: Determine paths
 
-Enumerate every rule file shipped by the plugin via `Bash(ls <installPath>/rules/*.md)` — never hardcode filenames. `<installPath>` is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-core` prints: the authoring repo's own `plugins/claude/lazycortex-core/` when this checkout ships the plugin, else the daemon's exported plugin dir, else the newest cached install. Never read `installed_plugins.json` for it by hand — in a repo that authors the plugin that hands back the previous publish instead of the sources at hand, and every role, rule, template, or tier row added since is silently missed.
+Enumerate every rule file shipped by the plugin via `Bash(ls <installPath>/rules/*.md)` — never hardcode filenames. `<installPath>` is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-core` prints: the authoring repo's own `plugins/claude/lazycortex-core/` when this checkout ships the plugin, else the daemon's exported plugin dir, else the install `~/.claude/plugins/installed_plugins.json` records. Never read `installed_plugins.json` for it by hand — in a repo that authors the plugin that hands back the previous publish instead of the sources at hand, and every role, rule, template, or tier row added since is silently missed.
 
 For each source file `<installPath>/rules/<name>.md`, the target is:
 
@@ -417,7 +417,7 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/file_sync.py" --
 
 State = the receipt's state verbatim: **installed** (was absent), **refreshed** (differed, overwritten), or **unchanged**.
 
-The shim resolves the latest `lazycortex-core/bin/runner` from the plugin cache at exec time, so supervisor units don't need re-rendering after `/plugin update`. Re-copying on content drift is safe — the shim's interface is stable (positional repo-root + repeatable `--plugin-dir`; the `--dev-mode`, `--login-shell`, and repeatable `--env-file <path>` flags are additive and stripped by the shim before the runner exec).
+The shim resolves `lazycortex-core/bin/runner` from the install `~/.claude/plugins/installed_plugins.json` records at exec time, so supervisor units don't need re-rendering after `/plugin update`. Re-copying on content drift is safe — the shim's interface is stable (positional repo-root + repeatable `--plugin-dir`; the `--dev-mode`, `--login-shell`, and repeatable `--env-file <path>` flags are additive and stripped by the shim before the runner exec).
 
 ### Ensure `lazy.settings.json[experts]`
 
@@ -474,7 +474,7 @@ Register every expert candidate the enabled plugins ship — there is no per-can
 
 List agent files that may carry `expert_protocol:` frontmatter at three scopes, one `Bash(ls …)` per pattern below — never `find`, a walk, or a glob over the plugin cache (`~/.claude/plugins/cache/*/*/*/` lists every version ever installed, and the stale ones sort first). Installed plugins come from the plugin registry, each resolved to the one directory its sources are read from:
 
-- `Bash(jq -r '.plugins | keys[]' ~/.claude/plugins/installed_plugins.json)` — every installed `<plugin>@<marketplace>` key; for each, `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" plugin-root <plugin> --cwd <repo-root>)` prints the authored sources in a checkout that ships the plugin, else the newest cached version; then `Bash(ls <printed root>/agents/*.md)`. A non-zero exit means the plugin ships no resolvable sources — skip it.
+- `Bash(jq -r '.plugins | keys[]' ~/.claude/plugins/installed_plugins.json)` — every installed `<plugin>@<marketplace>` key; for each, `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" plugin-root <plugin> --cwd <repo-root>)` prints the authored sources in a checkout that ships the plugin, else the install `installed_plugins.json` records; then `Bash(ls <printed root>/agents/*.md)`. A non-zero exit means the plugin ships no resolvable sources — skip it.
 - `~/.claude/agents/*.md`
 - `<repo-root>/.claude/agents/*.md`
 

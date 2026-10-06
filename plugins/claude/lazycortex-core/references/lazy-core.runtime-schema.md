@@ -192,7 +192,7 @@ Each key under `routines` is the routine name (dot-namespaced, e.g. `lazy-expert
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `interval_sec` | int | yes (interval types) | How often to run this routine (in seconds). Required for `subprocess`, `inbox`, `git`, `md-scan`; `schedule` uses `cron` instead (see `lazy-core.routine-types-schema.md`). |
-| `command` | array of strings | one of `command` / `expert`+`request` | `[<plugin-name>, <args>...]`. First element is resolved via plugin cache (see § 4). A routine sets EITHER `command` OR `expert` + `request`, never both, never neither. |
+| `command` | array of strings | one of `command` / `expert`+`request` | `[<plugin-name>, <args>...]`. First element is resolved via the install registry (see § 4). A routine sets EITHER `command` OR `expert` + `request`, never both, never neither. |
 | `expert` | string | one of `command` / `expert`+`request` | Expert name. When set, `request` is also required. The mutually-exclusive alternative to `command`. |
 | `request` | string \| object | with `expert` | Request template dispatched to `expert`. Required whenever `expert` is set; ignored when `command` is used. |
 | `timeout_sec` | int | no | Per-run timeout. Default: 300 seconds. |
@@ -203,22 +203,15 @@ The `command` / `expert`+`request` choice is the EITHER/OR dispatch contract enf
 
 ---
 
-## 4. Plugin-cache resolution
+## 4. Plugin resolution
 
-The first element of `command` is a plugin name. The daemon resolves it at runtime to:
+The first element of `command` is a plugin name. The daemon (`resolve_routine_command` in `runtime_daemon.py`) resolves it at runtime to `<root>/bin/<plugin>`, where `<root>` is found in this order:
 
-```
-~/.claude/plugins/cache/<registry>/<plugin>/<version>/bin/<plugin>
-```
+1. A dev-plugin directory registered via `--plugin-dir` / `LAZYCORTEX_PLUGIN_DIRS` whose manifest names the plugin, when one exists.
+2. Otherwise the `installPath` of the highest-version `<plugin>@<marketplace>` record in Claude Code's install registry, `~/.claude/plugins/installed_plugins.json`. Versions are compared numerically component by component — the dotted version is split on `.` and each numeric component becomes an integer, so `10.0.0` outranks `9.1.1`; string comparison is never used. The plugin cache (`~/.claude/plugins/cache/`) is never walked: it keeps every version ever installed, so its newest directory is not necessarily the one this machine has enabled.
+3. Assert `<root>/bin/<plugin>` exists; otherwise the routine fails with `FileNotFoundError`.
 
-Resolution steps:
-
-1. Glob `~/.claude/plugins/cache/*/<plugin>` to find all registry/plugin dirs.
-2. Collect all version subdirectories across those dirs.
-3. Sort version directory names numerically and take the highest (latest). The key is built component-wise: the name is split on `.`, each component contributes the integer formed by its leading digits, and a component carrying no digits contributes `0`. String comparison is never used — it ranks `9.1.1` above `10.0.0` and would pick the wrong directory.
-4. Assert `<version>/bin/<plugin>` exists and is executable.
-
-**Always-latest semantics**: no pin syntax. The daemon always runs the latest cached version of the plugin. If two registries both carry a plugin by the same name, all versions from both are pooled and the globally-latest wins.
+**Always-installed semantics**: no pin syntax. The daemon always runs the version the install registry records for the plugin.
 
 ---
 

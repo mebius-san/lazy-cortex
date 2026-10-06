@@ -155,7 +155,7 @@ Each gate is still one of two kinds, a distinction the coordinator's own reasoni
 
 ### The single mutation channel — `lazy-spec.flip-gate`
 
-`<specs-cli>` stands for the specs plugin's `bin/lazycortex-specs` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-specs/<version>/`, or `plugins/claude/lazycortex-specs/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+`<specs-cli>` stands for the specs plugin's `bin/lazycortex-specs` file — the copy under `~/.claude/plugins/cache/lazycortex/lazycortex-specs/<version>/` that `~/.claude/plugins/installed_plugins.json` records as installed, or `plugins/claude/lazycortex-specs/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
 `bin/flip_gate.py` (driven by the `/lazy-spec.flip-gate` skill, and called directly by `spec.coordinator` through the `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> flip-gate` CLI verb) is the **only** writer of gate booleans. The flip is unconditional on call:
 

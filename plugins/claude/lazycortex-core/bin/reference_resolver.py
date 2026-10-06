@@ -4,8 +4,9 @@ Resolve agent / protocol / aspect references to on-disk paths.
 Supports three reference forms — plugin-scoped (`<plugin>:<name>`), user-scoped
 (`user:<name>`), and bare (`<name>`) — and three categories (`agents`,
 `protocols`, `aspects`). Plugin-scoped references prefer dev-plugin directories
-listed in `LAZYCORTEX_PLUGIN_DIRS` before falling back to the Claude Code plugin
-cache.
+listed in `LAZYCORTEX_PLUGIN_DIRS` before falling back to the install root Claude Code's
+plugin registry (`~/.claude/plugins/installed_plugins.json`) records; the plugin cache is
+never walked.
 """
 from __future__ import annotations
 
@@ -15,6 +16,8 @@ from pathlib import Path
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from constants import PluginFile  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from lazy_setup import installed_plugin_root  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -28,30 +31,13 @@ class ReferenceError(Exception):  # pylint: disable=redefined-builtin
   """
 
 
-def _version_sort_key(name: str) -> tuple[int, ...]:
-  """
-  Build a numeric sort key for a plugin-cache version directory name.
-
-  Args:
-    name: Version directory name as it appears in the plugin cache.
-
-  Returns:
-    A tuple of integers so `10.0.0` ranks above `9.1.1`; digit-free components contribute `0`.
-  """
-  out: list[int] = []
-  for part in name.split("."):
-    digits = "".join(c for c in part if c.isdigit())
-    out.append(int(digits) if digits else 0)
-  return tuple(out)
-
-
 def _dev_plugin_dirs() -> list[Path]:
   """
   Return the dev-plugin directories declared by the runtime daemon.
 
   Each entry is a plugin source directory whose `.claude-plugin/plugin.json` name
   is matched against the requested plugin scope before the resolver consults the
-  plugin cache. Subprocess routines inherit this env, so daemon-spawned
+  install registry. Subprocess routines inherit this env, so daemon-spawned
   subcommands see the same dev plugins the daemon does.
 
   Returns:
@@ -72,7 +58,7 @@ def _resolve_in_dev_dir(plugin_dir: Path, plugin_name: str, dir_name: str, name:
 
   The file's existence is not verified here — match-but-missing is a plugin
   authoring bug and must surface as a hard error at the call site rather than be
-  silently shadowed by a cache fall-through.
+  silently shadowed by a registry fall-through.
 
   Args:
     plugin_dir: Dev-plugin source directory to inspect.
@@ -102,19 +88,18 @@ def resolve(ref: str, *, category: str, repo: Path) -> Path:
   Resolve a reference string to a filesystem path.
 
   Reference forms:
-    `<plugin>:<name>` — plugin cache at
-    `~/.claude/plugins/cache/<registry>/<plugin>/<version>/<category>/<name>.md`,
-    picking the version directory that sorts last (lexicographic order, so
-    "2.0.0" > "10.0.0"; this mirrors `resolve_routine_command` in
-    `runtime_daemon.py`).
+    `<plugin>:<name>` — `<installPath>/<category>/<name>.md`, where `<installPath>`
+    is the highest-version record for the plugin in Claude Code's install registry
+    (`~/.claude/plugins/installed_plugins.json`); this mirrors `resolve_routine_command`
+    in `runtime_daemon.py`, and the plugin cache is never walked.
     `user:<name>` — global `~/.claude/<category>/<name>.md`.
     `<name>` — repo-local `.claude/<category>/<name>.md`.
 
   Guarantees:
     - For a plugin-scoped reference, a matching dev-plugin directory takes precedence over
-      the installed plugin cache.
+      the installed copy.
     - A dev-plugin match whose file is missing raises rather than silently falling back to
-      the cache.
+      the installed copy.
 
   Args:
     ref: Reference string in one of the three forms above.
@@ -126,19 +111,19 @@ def resolve(ref: str, *, category: str, repo: Path) -> Path:
 
   Raises:
     ReferenceError: When the resolved path does not exist, when a dev-plugin
-      scope match points at a missing file, when no cache registry contains the
-      plugin scope, or when the plugin has no cached versions.
+      scope match points at a missing file, or when the install registry records
+      no install of the plugin scope.
   """
 
   # Contract:
   # For a plugin-scoped reference, a matching dev-plugin directory MUST be preferred over the
-  # installed plugin cache; only when no dev-plugin directory declares the requested plugin
-  # name does resolution fall back to the cache.
+  # installed copy; only when no dev-plugin directory declares the requested plugin name does
+  # resolution fall back to the install registry.
 
   # Contract:
   # Once a dev-plugin directory's manifest matches the requested plugin name, resolution MUST
-  # NOT fall through to the plugin cache even when the declared file is missing on disk — that
-  # mismatch is raised as an error instead of being silently masked by a cache hit.
+  # NOT fall through to the install registry even when the declared file is missing on disk —
+  # that mismatch is raised as an error instead of being silently masked by an installed hit.
 
   # Domain(plugin.boundaries):
   # # Reference scoping across plugin, user, and repo layers
@@ -147,7 +132,7 @@ def resolve(ref: str, *, category: str, repo: Path) -> Path:
   # A plugin-scoped reference always tries that plugin's active development sources first, so
   # work in progress on a plugin is read from its live source rather than a stale installed
   # copy; only once no matching development source exists does resolution fall back to the
-  # installed copies of that plugin, and it always prefers the newest one found.
+  # installed copy of that plugin — the one the machine's install registry records.
 
   # Plugin-shipped protocols live under <plugin-root>/references/ — the
   # repo-wide convention used by every plugin's own protocol/contract docs
@@ -169,7 +154,7 @@ def resolve(ref: str, *, category: str, repo: Path) -> Path:
       # waiver: filesystem path idiom
       p = Path.home() / ".claude" / dir_name / f"{name}.md"
     else:
-      # Dev-plugin paths take precedence over the plugin cache.
+      # Dev-plugin paths take precedence over the installed copy.
       for plugin_dir in _dev_plugin_dirs():
         hit = _resolve_in_dev_dir(plugin_dir, scope, dir_name, name)
         if hit is not None:
@@ -177,37 +162,12 @@ def resolve(ref: str, *, category: str, repo: Path) -> Path:
           if not hit.exists():
             raise ReferenceError(f"{category} not found in dev plugin: {ref} → {hit}")
           return hit
-      # waiver: filesystem path idiom
-      cache = Path.home() / ".claude/plugins/cache"
+      root = installed_plugin_root(scope)
 
-      # Real layout: cache/<registry>/<plugin>/<version>/<dir>/<name>.md.
-      # Walk all <registry>/<plugin> dirs under any registry prefix.
-      plugin_dirs: list[Path] = []
-      if cache.is_dir():
-        for registry in cache.iterdir():
-          # guard: skip non-directory entries inside the cache root
-          if not registry.is_dir():
-            continue
-          candidate = registry / scope
-          if candidate.is_dir():
-            plugin_dirs.append(candidate)
-
-      # guard: no registry contains the requested plugin scope
-      if not plugin_dirs:
-        raise ReferenceError(f"plugin not in cache: {scope}")
-
-      # Collect all version subdirectories across matching registry/plugin dirs.
-      all_versions: list[Path] = []
-      for pd in plugin_dirs:
-        all_versions.extend(v for v in pd.iterdir() if v.is_dir())
-
-      # guard: plugin dir exists but contains no cached versions
-      if not all_versions:
-        raise ReferenceError(f"no versions cached for plugin: {scope}")
-
-      # highest version by numeric order (consistent with runtime_daemon)
-      latest = max(all_versions, key = lambda v: _version_sort_key(v.name))
-      p = latest / dir_name / f"{name}.md"
+      # guard: the install registry records no install of the requested plugin scope
+      if root is None:
+        raise ReferenceError(f"plugin not installed: {scope}")
+      p = root / dir_name / f"{name}.md"
   else:
     # bare reference resolves under the repo-local .claude tree
     # waiver: filesystem path idiom

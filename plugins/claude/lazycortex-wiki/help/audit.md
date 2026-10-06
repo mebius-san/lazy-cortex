@@ -1,18 +1,18 @@
 ---
 chapter_type: block
 summary: Run integrity checks across a wiki scope, its terms dictionary, structure map, mirrors, and domain tree — with optional auto-repair.
-last_regen: 2026-09-24
+last_regen: 2026-10-06
 no_diagram: true
 source_skills:
   - lazy-wiki.audit
-source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
-surface_sha: 8c2d89219a692906104db0510c3b2ae00938870d155d2ccab446b0d1ed7be0af
+source_sha: 2b8e9e79da15a0e25e187f4c05ae6011a36f0740
+surface_sha: af89671352edb2ba2a209e928ef328130709fd60d94a0536bb390f70005364f9
 ---
 # Wiki integrity audit
 
 Over time a curated wiki drifts: See-also links point to renamed or deleted nodes, summaries go missing on newly added files, the topic index falls out of sync with actual tag usage, axes get mistyped, a document and the terms dictionary settle on different words for the same concept, or the project-structure map stops matching the tree it describes. The audit block gives you a read-only snapshot of every integrity problem across a scope — categorised by severity and annotated with the route that repairs each one. It writes nothing: running the repair is your move. When a scope mirrors a foreign repo, or the domain-spec tree is configured, the same run checks those too.
 
-`<wiki-cli>` stands for the wiki plugin's `bin/lazycortex-wiki` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-wiki/<version>/`, or `plugins/claude/lazycortex-wiki/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> <verb>`: the file carries no exec bit and is not on `PATH`. `<core-cli>` names the same kind of file for the core plugin — its own `bin/lazycortex-core`, resolved the same way, run through the same interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`.
+`<wiki-cli>` stands for the wiki plugin's own `bin/lazycortex-wiki` file, `${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki` — Claude Code substitutes the variable with the root the skill's plugin was loaded from, so there is nothing to look up. Outside a skill, use the install path that `~/.claude/plugins/installed_plugins.json` records for the plugin, or `plugins/claude/lazycortex-wiki/` in a checkout that authors it; never search the plugin cache directories for a copy. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> <verb>`: the file carries no exec bit and is not on `PATH`. `<core-cli>` names the same kind of file for the core plugin — its own `bin/lazycortex-core`, located through the install path the registry records for `lazycortex-core` (or its checkout directory), run through the same interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`.
 
 `/lazy-wiki.audit` is the only member. It reads your scope configuration from `lazy.settings.json`, runs the built-in `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> doctor` command against the target scope (or all scopes), audits any configured terms scopes and the project-structure map — including a hard check that the structure-scan routines' watch filtering still matches the map — and groups every finding into `PASS`, `INFO`, `WARN`, and `FAIL` buckets before presenting them to you. A check that ran and found nothing wrong reports `PASS`.
 

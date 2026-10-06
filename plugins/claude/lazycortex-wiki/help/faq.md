@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about setting up scopes, running relinks, mirroring foreign repos, querying the wiki, the terms dictionary, the structure map, the domain-spec tree, the tag-values canon, and the wiki's own writing language.
-last_regen: 2026-10-04
+last_regen: 2026-10-06
 no_diagram: true
 source_skills:
   - lazy-wiki.install
@@ -13,8 +13,8 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: c307df884e3f0cdbba5aa2025b45e36bf1a93468
-surface_sha: 6243b8e207019fefc8e6cb9af7f9a563bc55e5e9824192469886fdff6fa5c4f0
+source_sha: 2b8e9e79da15a0e25e187f4c05ae6011a36f0740
+surface_sha: b70fa2868c27c17631175afaa6b1987b0a36562c3c106ba38cbb8c3cff4c2ef7
 ---
 # Frequently asked questions
 
@@ -112,7 +112,7 @@ There are two common causes. First, the topics index for the relevant scope may 
 
 ## What does `/lazy-wiki.audit` check, and which findings can it fix automatically?
 
-`<wiki-cli>` stands for the wiki plugin's `bin/lazycortex-wiki` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-wiki/<version>/`, or `plugins/claude/lazycortex-wiki/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+`<wiki-cli>` stands for the wiki plugin's own `bin/lazycortex-wiki` file, written `"${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki"` inside the plugin's skills — Claude Code substitutes the variable with the root the plugin was loaded from, so no lookup is needed. Outside a skill, use the install path that `~/.claude/plugins/installed_plugins.json` records for the plugin, or `plugins/claude/lazycortex-wiki/` in a checkout that authors it; never pick a copy by scanning the plugin cache, which keeps every version ever installed. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
 `/lazy-wiki.audit [<scope-id>]` runs a read-only audit first and groups findings by severity (`PASS`, `INFO`, `WARN`, `FAIL` — a check that ran with nothing wrong is a `PASS`). Fixable findings — `orphan-topic`, `index-desync`, `index-stale`, `see-also-path-base`, `broken-see-also`, and `stale-gloss` — are repaired by rebuilding the topic index (an `index-stale` finding covers a `topics.md` link whose file no longer exists there, and the reverse — a tagged node the index never links, typically after a rename or move), rewriting See-also links onto the canonical path base, dropping broken See-also lines, or refreshing stale glosses. The skill applies none of them — run `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> doctor <scope-id> --apply` for that repair set, or let the daily `lazy-wiki.doctor-apply` routine do it.
 

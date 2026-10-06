@@ -41,7 +41,7 @@ Each plugin declares its registry entries in a per-group manifest `plugins/claud
 
 ## The primitive
 
-`<core-cli>` stands for the core plugin's `bin/lazycortex-core` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-core/<version>/`, or `plugins/claude/lazycortex-core/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+`<core-cli>` stands for the core plugin's `bin/lazycortex-core` file — the copy under `~/.claude/plugins/cache/lazycortex/lazycortex-core/<version>/` that `~/.claude/plugins/installed_plugins.json` records as installed, or `plugins/claude/lazycortex-core/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
 The `## Registry` block is owned exclusively by the `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold` CLI (`bin/scaffold_registry.py`), a dependency-free parser/serializer (no PyYAML). Five subcommands, each of which takes `--registry <path>` naming the registry markdown file to operate on — argparse marks the flag required on all five, so an invocation that omits it exits 2 without touching anything:
 

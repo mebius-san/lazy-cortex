@@ -48,7 +48,7 @@ The navigation rule's `## Coverage` section is the one region a mirror carries t
 
 Scope = **where the plugin is actually enabled**, not where `/plugin install` last ran. The `scope` field in `installed_plugins.json` records the install command's origin, which drifts from the activation scope — a plugin enabled per-project in `.claude/settings.json` can carry an install record of `scope: "user"`. Resolve it via the core CLI, which reads `enabledPlugins` from the project settings first, then the global settings, falling back to the install record's own `scope` only when neither enables the plugin:
 
-**Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file: when this repo authors the plugin itself (`plugins/claude/lazycortex-core/.claude-plugin/plugin.json` exists) that is `<repo-root>/plugins/claude/lazycortex-core/bin/lazycortex-core`; otherwise `Read` `$HOME/.claude/plugins/installed_plugins.json` and take `<installPath>/bin/lazycortex-core` from the last `lazycortex-core@lazycortex` record. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
+**Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file; `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" core-cli)` prints its absolute path — this plugin's own resolver tries the daemon's `$LAZYCORTEX_PLUGIN_DIRS`, then the dev-vault sibling `plugins/claude/lazycortex-core/`, then the install `~/.claude/plugins/installed_plugins.json` records; exit 1 with an `error:` line means core is not installed — abort and say so. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
 
 ```
 Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> detect-scope lazycortex-wiki@lazycortex)
@@ -67,7 +67,7 @@ Outcome: `scope-detected: <user|project>`.
 
 ## Step 2: Determine paths
 
-Run `Bash(git rev-parse --show-toplevel)` to get `<repo-root>` (or use cwd if not in a git repo — warn the user). `<installPath>` is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-wiki` prints: the authoring repo's own `plugins/claude/lazycortex-wiki/` when this checkout ships the plugin, else the daemon's exported plugin dir, else the newest cached install. Never read `installed_plugins.json` for it by hand — in a repo that authors the plugin that hands back the previous publish instead of the sources at hand, and every role, rule, template, or tier row added since is silently missed.
+Run `Bash(git rev-parse --show-toplevel)` to get `<repo-root>` (or use cwd if not in a git repo — warn the user). `<installPath>` is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-wiki` prints: the authoring repo's own `plugins/claude/lazycortex-wiki/` when this checkout ships the plugin, else the daemon's exported plugin dir, else the install `~/.claude/plugins/installed_plugins.json` records. Never read `installed_plugins.json` for it by hand — in a repo that authors the plugin that hands back the previous publish instead of the sources at hand, and every role, rule, template, or tier row added since is silently missed.
 
 Resolve paths:
 
@@ -106,7 +106,7 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> file-sync --src <installPath>/ru
 
 The navigation rule is excluded here and composed below, because its Coverage section is derived and the shipped copy carries only a placeholder.
 
-`<core-cli>` is `<coreInstallPath>/bin/lazycortex-core`, where `<coreInstallPath>` is the `installPath` of the highest-`version` record of `lazycortex-core@lazycortex` in `installed_plugins.json` (the registry keeps one record per project, and an older project's record names an older cache dir); it runs through the interpreter because the file carries no exec bit — `lazycortex-core` is a hard dependency of this plugin, so the CLI is always present.
+`<core-cli>` is the core plugin's `bin/lazycortex-core` file, the path `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" core-cli)` prints (the authoring repo's sources first, then the daemon's export, then the install `installed_plugins.json` records); it runs through the interpreter because the file carries no exec bit — `lazycortex-core` is a hard dependency of this plugin, so the CLI is always present.
 
 The command creates the destination directory, copies absent targets (**installed**), byte-compares the rest (**unchanged**), overwrites every stale target from the shipped source (**refreshed**), and reports owned targets with no source as **kept-orphan** (left in place, never deleted). Exit code 3 with a non-empty `failed` array means a write did not verify — report it as **failed**, never as applied.
 

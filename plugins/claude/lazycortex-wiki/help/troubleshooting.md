@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-wiki skills — symptoms, likely causes, and fixes.
-last_regen: 2026-10-04
+last_regen: 2026-10-06
 no_diagram: true
 source_skills:
   - lazy-wiki.install
@@ -13,12 +13,12 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: c307df884e3f0cdbba5aa2025b45e36bf1a93468
-surface_sha: 6243b8e207019fefc8e6cb9af7f9a563bc55e5e9824192469886fdff6fa5c4f0
+source_sha: 2b8e9e79da15a0e25e187f4c05ae6011a36f0740
+surface_sha: b70fa2868c27c17631175afaa6b1987b0a36562c3c106ba38cbb8c3cff4c2ef7
 ---
 # Troubleshooting
 
-`<wiki-cli>` stands for the wiki plugin's `bin/lazycortex-wiki` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-wiki/<version>/`, or `plugins/claude/lazycortex-wiki/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+`<wiki-cli>` stands for the wiki plugin's own `bin/lazycortex-wiki` file — the path Claude Code substitutes for `${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki` inside a skill, or the install path that `~/.claude/plugins/installed_plugins.json` records for the plugin when you run it outside a skill. It is never found by searching the plugin cache, which keeps every version ever installed. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
 ## `/lazy-wiki.install` aborts: "lazycortex-wiki not enabled"
 

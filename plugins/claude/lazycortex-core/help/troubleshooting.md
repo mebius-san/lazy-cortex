@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-10-05
+last_regen: 2026-10-06
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, generic iteration loops, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys, seed data gaps), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models, plugin-path resolution, stale source paths at claim time), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources, worker import errors), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
@@ -40,8 +40,8 @@ source_skills:
   - lazy-runtime.preflight
   - lazy-runtime.recover
   - lazy-runtime.tick
-source_sha: c1ddeed4247b009f0d833019a8c4209f3a4a73d1
-surface_sha: d60797023a91642ae5ee062a88b7b308ad75ace26630a30ac7c5a9c955663d06
+source_sha: 2b8e9e79da15a0e25e187f4c05ae6011a36f0740
+surface_sha: 3db6c9be68e273a59ff8dc9b98c84a3d2d710e6be2d7c89a4ed81fd575fabfc7
 ---
 # Troubleshooting
 
@@ -447,7 +447,7 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ## `/lazy-core.scaffold-local` fails to resolve the registry or the core CLI
 
-`<core-cli>` stands for the core plugin's `bin/lazycortex-core` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-core/<version>/`, or `plugins/claude/lazycortex-core/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+`<core-cli>` stands for the core plugin's `bin/lazycortex-core` file — the `plugins/claude/lazycortex-core/` copy in a checkout that authors the plugin, otherwise the `installPath` that `~/.claude/plugins/installed_plugins.json` records for `lazycortex-core@lazycortex`. The plugin cache folder is never searched for it: it keeps every version ever installed, so a search can land on an old copy the registry no longer names. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
 **Symptom**: Running `/lazy-core.scaffold-local` fails immediately with "`registry not found at <path>`", "`cannot resolve core CLI — lazycortex-core not installed`", or "`core CLI not found at <path>`".
 

@@ -110,7 +110,7 @@ A `report` dispatch returns findings as its reply, one entry per finding, each n
 
 Format and configuration findings are the dispatching skill's own; the curator neither computes nor returns them.
 
-`<wiki-cli>` stands for the wiki plugin's `bin/lazycortex-wiki` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-wiki/<version>/`, or `plugins/claude/lazycortex-wiki/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+`<wiki-cli>` stands for the wiki plugin's `bin/lazycortex-wiki` file — the copy under `~/.claude/plugins/cache/lazycortex/lazycortex-wiki/<version>/` that `~/.claude/plugins/installed_plugins.json` records as installed, or `plugins/claude/lazycortex-wiki/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
 ## Language
 

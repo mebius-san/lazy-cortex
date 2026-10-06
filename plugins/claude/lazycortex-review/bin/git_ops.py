@@ -288,10 +288,10 @@ def parse_phase_trailer(trailers: Mapping[str, str]) -> tuple[str, str, int | No
 
 def _version_sort_key(name: str) -> tuple[int, ...]:
   """
-  Build a numeric sort key for a plugin-cache version directory name.
+  Build a numeric sort key for a plugin version string.
 
   Args:
-    name: Version directory name as it appears in the plugin cache.
+    name: Version string as the install registry records it.
 
   Returns:
     A tuple of integers so `10.0.0` ranks above `9.1.1`; digit-free components contribute `0`.
@@ -303,40 +303,48 @@ def _version_sort_key(name: str) -> tuple[int, ...]:
   return tuple(out)
 
 
-def _cached_sibling_root(name: str) -> Path | None:
-  """
-  Locate a sibling plugin's newest cached install next to this plugin's own cached install.
+# waiver: external Claude Code registry path, not an internal key
+_INSTALLED_PLUGINS_REL = ".claude/plugins/installed_plugins.json"
 
-  A cached install lives at `<cache>/<registry>/<plugin>/<version>/`, so when this file runs from
-  one, the cache root is four levels above `bin/` and every sibling's versions sit under it. A dev
-  source tree has no version level above `bin/`, so the walk finds nothing there — the dev layout
-  is served by the daemon's env export and each caller's own dev fallback.
+
+def installed_plugin_root(name: str, home: Path | None = None) -> Path | None:
+  """
+  Resolve a plugin's installed source root from Claude Code's plugin registry.
+
+  The registry (`~/.claude/plugins/installed_plugins.json`) records one entry per project and
+  version that installed the plugin, each naming its `installPath`; the highest recorded version
+  wins. The plugin cache itself is never searched: it keeps every version ever installed, so a walk
+  across it returns copies the registry no longer names.
 
   Args:
-    name: Sibling plugin name, which is also its cache directory and CLI name.
+    name: Plugin name without its `@<marketplace>` suffix.
+    home: Home directory holding the registry; the current user's when omitted.
 
   Returns:
-    The sibling's highest cached version directory, or None outside a cached install or when no
-    version of the sibling is cached.
+    The recorded install root when it exists on disk, else None.
   """
-  own = Path(__file__).resolve()
-
-  # guard: not a cached install — a dev checkout has no version directory above bin/
-  if not own.parents[1].name.replace(".", "").isdigit():
-    return None
-
-  # the cache root sits four levels above bin/: cache/<registry>/<plugin>/<version>/bin
+  registry = (home or Path.home()) / _INSTALLED_PLUGINS_REL
   try:
-    cache = own.parents[4]
-  except IndexError:
+    data = json.loads(registry.read_text(encoding = "utf-8"))
+  except (OSError, ValueError):
     return None
-  versions = [
-    version
-    for registry in cache.iterdir() if (registry / name).is_dir()
-    for version in (registry / name).iterdir()
-    if version.is_dir() and version.name.replace(".", "").isdigit()
+  # the registry nests its map under `plugins` in newer files and is the map itself in older ones
+  # waiver: field of Claude Code's external registry schema, not an internal key
+  plugins = data.get("plugins", data) if isinstance(data, dict) else {}
+  records = [
+    rec
+    for key, entries in plugins.items() if key.split("@", 1)[0] == name
+    # waiver: field of Claude Code's external registry schema, not an internal key
+    for rec in (entries or []) if isinstance(rec, dict) and rec.get("installPath")
   ]
-  return max(versions, key = lambda v: _version_sort_key(v.name)) if versions else None
+  # guard: the plugin was never installed on this machine
+  if not records:
+    return None
+  # waiver: fields of Claude Code's external registry schema, not internal keys
+  best = max(records, key = lambda rec: _version_sort_key(str(rec.get("version", ""))))
+  # waiver: field of Claude Code's external registry schema, not an internal key
+  root = Path(str(best["installPath"]))
+  return root if root.is_dir() else None
 
 
 def repaint_inline(repo: Path, paths: list[str]) -> list[str]:
@@ -344,8 +352,8 @@ def repaint_inline(repo: Path, paths: list[str]) -> list[str]:
   Repaint icon frontmatter for `paths` via the obsidian plugin's `sync-paths` op.
 
   Resolves the `lazycortex-obsidian` CLI through `$LAZYCORTEX_PLUGIN_DIRS` (the blessed
-  cross-plugin contract), falling back to the dev-vault sibling tree and then to the plugin
-  cache this plugin runs from, and asks it to refresh the named repo-relative notes, so the
+  cross-plugin contract), falling back to the dev-vault sibling tree and then to the install
+  root Claude Code's plugin registry records, and asks it to refresh the named repo-relative notes, so the
   caller can fold the repainted files into the commit it is about to make — no separate icons
   commit, no operator-edit wake from one.
 
@@ -385,13 +393,13 @@ def repaint_inline(repo: Path, paths: list[str]) -> list[str]:
     if sibling.is_file():
       cli = sibling
 
-  # plugin-cache fallback — a session (hook, skill) has no daemon export to walk
+  # registry fallback — a session (hook, skill) has no daemon export to walk
   if cli is None:
     # waiver: sibling plugin's on-disk CLI layout per dev.plugin-boundaries § 1c, not a domain key
-    root = _cached_sibling_root("lazycortex-obsidian")
-    cached = None if root is None else root / "bin" / "lazycortex-obsidian"
-    if cached is not None and cached.is_file():
-      cli = cached
+    root = installed_plugin_root("lazycortex-obsidian")
+    installed = None if root is None else root / "bin" / "lazycortex-obsidian"
+    if installed is not None and installed.is_file():
+      cli = installed
 
   # guard: no obsidian plugin on this host — repaint silently unavailable
   if cli is None:

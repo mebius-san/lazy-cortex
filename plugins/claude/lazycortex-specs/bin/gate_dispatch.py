@@ -15,6 +15,7 @@ itself is dispatched by the `spec.coordinator` persona directly (its own
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import subprocess
@@ -293,15 +294,15 @@ def _resolve_core_cli(repo: Path) -> Path:
   # side by side, not a general way installed plugin caches can be addressed.
 
   # stage 1 — env-declared plugin dirs (set by the daemon for every subprocess routine), then the
-  # plugin cache a consumer install runs from.
+  # install the plugin registry records for a consumer install.
   cli = spec_paths.resolve_plugin_cli(_CORE_CLI_NAME)
   if cli is not None:
     return cli
 
   # stage 2 — dev-vault-only fallback, deliberate per the task brief — this repo IS
-  # lazycortex-core's own source tree, so a session with no plugin cache on the env path
+  # lazycortex-core's own source tree, so a session with no registry record and nothing on the env path
   # (e.g. a direct dev run of the specs plugin) still resolves the CLI without one plugin
-  # hardcoding another's installed-cache layout (dev.plugin-boundaries § 2b is about the
+  # hardcoding another's install layout (dev.plugin-boundaries § 2b is about the
   # cache, not this repo's own source tree)
   # waiver: sibling-plugin path reach is intentional here — see the paragraph above
   fallback = repo / _PLUGIN_TREE_DIR / _CORE_CLI_NAME / _BIN_DIR / _CORE_CLI_NAME
@@ -319,7 +320,7 @@ def _resolve_core_cli(repo: Path) -> Path:
 
   # no stage found a binary — nothing left to try
   raise RuntimeError(
-      f"lazycortex-core CLI not resolvable: ${_PLUGIN_DIRS_ENV} and the plugin cache yield no match, "
+      f"lazycortex-core CLI not resolvable: ${_PLUGIN_DIRS_ENV} and the plugin registry yield no match, "
       f"{fallback} is absent from this repo and {sibling} is absent beside this plugin"
   )
 
@@ -338,6 +339,33 @@ def resolve_core_cli(repo: Path) -> Path:
     RuntimeError: When no lookup stage finds a binary.
   """
   return _resolve_core_cli(repo)
+
+
+def main_core_cli(argv: list[str]) -> int:
+  """
+  Run the `core-cli` verb: print the resolved `lazycortex-core` CLI path.
+
+  Args:
+    argv: Command-line arguments, excluding the program name.
+
+  Returns:
+    Exit code: `0` with the absolute path on stdout, `1` with an `error:` line on stderr when no
+    lookup stage finds the binary.
+  """
+  # waiver: argparse CLI signature, not a domain key
+  parser = argparse.ArgumentParser(prog = "lazycortex-specs core-cli")
+  # waiver: argparse CLI signature, not a domain key
+  parser.add_argument("--repo", default = ".")
+  args = parser.parse_args(argv)
+
+  # the resolver names every stage it searched in its message; the verb only prefixes it
+  try:
+    cli = _resolve_core_cli(Path(args.repo).resolve())
+  except RuntimeError as exc:
+    sys.stderr.write(f"error: {exc}\n")
+    return 1
+  print(cli)
+  return 0
 
 
 def core_dispatch_job(repo: Path, bundle: dict) -> dict:

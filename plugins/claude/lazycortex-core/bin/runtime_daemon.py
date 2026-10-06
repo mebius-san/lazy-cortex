@@ -26,6 +26,8 @@ from pathlib import Path
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from lazy_settings import load_section  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from lazy_setup import installed_plugin_root, read_install_paths  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import error_ledger  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import expert_runtime  # pylint: disable=import-error
@@ -135,10 +137,10 @@ class GitPushFailed(RuntimeError):
 
 
 # Set by `set_plugin_dirs`. When non-empty, `resolve_routine_command` consults these paths first (each is
-# a plugin source dir containing `.claude-plugin/` and `bin/`) and falls back to the plugin cache if no
-# match. Mirrors Claude Code's `--plugin-dir` for the daemon's separate-process world: a dev-vault
-# operator points the daemon at the source plugins they're working on, instead of routing through a
-# cached install.
+# a plugin source dir containing `.claude-plugin/` and `bin/`) and falls back to the install registry
+# (`~/.claude/plugins/installed_plugins.json`) if no match. Mirrors Claude Code's `--plugin-dir` for
+# the daemon's separate-process world: a dev-vault operator points the daemon at the source plugins
+# they're working on, instead of routing through an installed copy.
 _PLUGIN_DIRS: list[Path] = []
 
 
@@ -161,48 +163,32 @@ def is_cache_root(path: Path) -> bool:
   return _VERSION_DIR_RE.fullmatch(path.name) is not None
 
 
-def cached_plugin_roots(cache: Path) -> list[Path]:
+def installed_plugin_roots(home: Path) -> list[Path]:
   """
-  Resolve the newest installed version of every plugin in the Claude Code plugin cache.
+  List the installed source root of every plugin the machine's plugin registry records.
 
-  Walks `<cache>/<registry>/<plugin>/<version>/`; when a plugin is cached under several registries
-  or versions, the highest version wins, compared numerically so `10.0.0` outranks `9.1.1`.
+  Reads `~/.claude/plugins/installed_plugins.json`, where the highest recorded version of each
+  plugin names its root; the plugin cache is never walked, since it keeps every version ever
+  installed.
 
   Args:
-    cache: The plugin-cache root (`~/.claude/plugins/cache`).
+    home: Home directory holding the registry.
 
   Returns:
-    One root per plugin name, sorted by plugin name; empty when the cache does not exist.
+    One root per plugin name that exists on disk, sorted by plugin name; empty when nothing is installed.
   """
-  # guard: no plugin cache on this machine
-  if not cache.is_dir():
-    return []
-  versions: dict[str, list[Path]] = {}
-  for registry in cache.iterdir():
-    # guard: skip non-directory entries in the cache root
-    if not registry.is_dir():
-      continue
-    for plugin in registry.iterdir():
-      # guard: skip non-directory entries under a registry
-      if not plugin.is_dir():
-        continue
-      versions.setdefault(plugin.name, []).extend(
-        v for v in plugin.iterdir() if v.is_dir() and is_cache_root(v)
-      )
-  return [
-    max(found, key = lambda v: _version_sort_key(v.name)).resolve()
-    for _name, found in sorted(versions.items()) if found
-  ]
+  return [ root for _name, root in sorted(read_install_paths(home).items()) if root.is_dir() ]
 
 
 def set_plugin_dirs(dirs: list[Path]) -> None:
   """
-  Register plugin source directories the daemon should prefer over the plugin cache.
+  Register plugin source directories the daemon should prefer over the installed plugins.
 
   Also exports those directories to the environment so downstream subprocess routines (such as
   `lazycortex-core expert-pump-once` or `lazycortex-review tick`) and their own resolvers reach the
-  same dev sources. A cached plugin is never exported: every consumer resolves the newest cached
-  version itself when it needs one. Pins `EnvVar.MAX_SUBAGENT_SPAWN_DEPTH` for the same subprocesses.
+  same dev sources. An installed plugin is never exported: every consumer resolves it through the
+  install registry itself when it needs one. Pins `EnvVar.MAX_SUBAGENT_SPAWN_DEPTH` for the same
+  subprocesses.
 
   Guarantees:
     - `LAZYCORTEX_PLUGIN_DIRS` lists exactly the registered dev-plugin directories and never a cached
@@ -219,8 +205,8 @@ def set_plugin_dirs(dirs: list[Path]) -> None:
   # Contract:
   # `LAZYCORTEX_PLUGIN_DIRS` lists exactly the registered dev-plugin directories and never a cached
   # plugin root. The daemon outlives plugin updates, so a cached root frozen here at startup would
-  # keep serving an old version; resolvers take the dev entries first and walk the cache themselves,
-  # at call time, for everything else.
+  # keep serving an old version; resolvers take the dev entries first and read the install registry
+  # themselves, at call time, for everything else.
 
   # daemon-internal `resolve_routine_command` uses `_PLUGIN_DIRS` directly, while this env handle
   # exists for everyone else
@@ -1621,39 +1607,19 @@ def _plugin_roots() -> list[Path]:
   return out
 
 
-def _version_sort_key(name: str) -> tuple[int, ...]:
-  """
-  Build a numeric sort key for a plugin-cache version directory name.
-
-  Splits the name on `.` and keeps the leading digits of each component, so `5.13.0` ranks above
-  `5.9.0` — a plain string comparison ranks `9` above `1` and picks the wrong directory. Components
-  carrying no digits contribute `0`.
-
-  Args:
-    name: Version directory name as it appears in the plugin cache.
-
-  Returns:
-    A tuple of integers ordered the way version numbers are.
-  """
-  out: list[int] = []
-  for part in name.split("."):
-    digits = "".join(c for c in part if c.isdigit())
-    out.append(int(digits) if digits else 0)
-  return tuple(out)
-
-
 def _newer_core_runner() -> Path | None:
   """
-  Resolve a newer cached `lazycortex-core` runner than the one this process started from.
+  Resolve the `lazycortex-core` runner the install registry names when it is not the running one.
 
   The own-code fingerprint compares file *contents* at the paths the process actually loaded, which
   never change for a plugin-cache install: an update writes a fresh `<version>/` directory and leaves
   the running one untouched. Without this check a cache-installed daemon keeps running the version it
-  started on until an operator restarts it by hand. Version directories are compared instead of bytes.
+  started on until an operator restarts it by hand. The registry's `installPath` is compared against
+  the running version directory instead of bytes.
 
   Returns:
-    Path to the newer version's runner entrypoint, or `None` when this process runs from a source
-    checkout (where the fingerprint is the live mechanism) or already runs the latest cached version.
+    Path to the registry-named version's runner entrypoint, or `None` when this process runs from a
+    source checkout (where the fingerprint is the live mechanism) or already runs the installed version.
   """
 
   # Domain(runtime.daemon-loop):
@@ -1674,18 +1640,14 @@ def _newer_core_runner() -> Path | None:
   if PLUGIN_CACHE_REL not in here.as_posix():
     return None
   running = here.parent
-  versions = [ v for v in running.parent.iterdir() if v.is_dir() ]
+  # waiver: this plugin's own registry name, the one identity the self-restart check is about
+  installed = installed_plugin_root("lazycortex-core")
 
-  # guard: no sibling version directories to compare against
-  if not versions:
-    return None
-  latest = max(versions, key = lambda v: _version_sort_key(v.name))
-
-  # guard: already on the latest cached version
-  if latest == running:
+  # guard: the registry records no install, or names the version already running
+  if installed is None or installed.resolve() == running:
     return None
   # waiver: filesystem path idiom, not a domain constant
-  runner = latest / "bin" / "runner"
+  runner = installed / "bin" / "runner"
   return runner if runner.is_file() else None
 
 
@@ -2611,14 +2573,14 @@ def resolve_routine_command(cmd: list[str]) -> list[str]:
   Resolve a `[plugin, *args]` command vector to a runnable `[bin_path, *args]` invocation.
 
   Consults dev-plugin source directories registered via `set_plugin_dirs` first, then falls back to
-  the Claude Code plugin cache. When the cache holds multiple versions of the plugin, the highest
-  version wins, compared numerically.
+  the install root Claude Code's plugin registry (`~/.claude/plugins/installed_plugins.json`)
+  records for the plugin; the plugin cache is never walked.
 
   Guarantees:
-    - A registered dev-plugin directory for the named plugin always takes precedence over any
-      cached installation of the same plugin.
-    - When resolution falls back to the cache, the highest version present is selected, compared
-      numerically component by component rather than as strings.
+    - A registered dev-plugin directory for the named plugin always takes precedence over the
+      installed copy of the same plugin.
+    - When resolution falls back to the registry, the highest recorded version's `installPath` is
+      selected, compared numerically component by component rather than as strings.
 
   Args:
     cmd: Routine command vector whose first element is the plugin name and the rest are arguments
@@ -2631,56 +2593,34 @@ def resolve_routine_command(cmd: list[str]) -> list[str]:
 
   Raises:
     FileNotFoundError: When the plugin is not present in any registered source directory or in the
-      plugin cache, or when the resolved version has no bin entrypoint.
+      install registry, or when the resolved root has no bin entrypoint.
     ShebangError: When the resolved entrypoint's shebang line cannot be parsed into an interpreter.
   """
 
   # Contract:
-  # A registered dev-plugin directory for `cmd[0]` always takes precedence over any cached
-  # installation of the same plugin. When resolution falls back to the cache, the highest
-  # version present is the one resolved, compared numerically component by component.
+  # A registered dev-plugin directory for `cmd[0]` always takes precedence over the installed copy
+  # of the same plugin. When resolution falls back to the install registry, the `installPath` of
+  # the highest recorded version is the one resolved, compared numerically component by component;
+  # the plugin cache is never walked.
 
   plugin = cmd[0]
 
-  # dev-plugin paths take precedence over the plugin cache
+  # dev-plugin paths take precedence over the installed copy
   for pd in _PLUGIN_DIRS:
     bin_path = _resolve_in_plugin_dir(pd, plugin)
     if bin_path is not None:
       return argv_for(bin_path, *cmd[1:])
-  cache = Path.home() / PLUGIN_CACHE_REL
+  root = installed_plugin_root(plugin)
 
-  # real layout: cache/<registry>/<plugin>/<version>/bin/<plugin>
-  plugin_dirs: list[Path] = []
-  if cache.is_dir():
-    for registry in cache.iterdir():
-      # guard: skip non-directory entries
-      if not registry.is_dir():
-        continue
-      candidate = registry / plugin
-      if candidate.is_dir():
-        plugin_dirs.append(candidate)
-
-  # guard: plugin missing from both dev-plugin paths and the cache
-  if not plugin_dirs:
+  # guard: plugin missing from both dev-plugin paths and the install registry
+  if root is None:
     raise FileNotFoundError(
-      f"plugin not in cache and no matching --plugin-dir for: {plugin}"
+      f"plugin not recorded in ~/.claude/plugins/installed_plugins.json and no matching --plugin-dir for: {plugin}"
     )
-
-  # across all <registry>/<plugin> dirs, descend into versions and pick latest
-  all_versions: list[Path] = []
-  for pd in plugin_dirs:
-    all_versions.extend(v for v in pd.iterdir() if v.is_dir())
-
-  # guard: no version subdirectories present
-  if not all_versions:
-    raise FileNotFoundError(f"no versions cached for plugin: {plugin}")
-
-  # numeric version order: a plain string sort ranks `9.1.1` above `10.0.0`
-  latest = max(all_versions, key = lambda v: _version_sort_key(v.name))
   # waiver: filesystem path idiom, not a domain constant
-  bin_path = latest / "bin" / plugin
+  bin_path = root / "bin" / plugin
 
-  # guard: latest version has no bin entrypoint
+  # guard: installed root has no bin entrypoint
   if not bin_path.is_file():
     raise FileNotFoundError(f"no bin for plugin: {bin_path}")
   return argv_for(bin_path, *cmd[1:])

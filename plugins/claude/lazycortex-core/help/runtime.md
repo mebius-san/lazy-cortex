@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Register, unregister, tick, preflight, and recover routines in the per-repo serial daemon — six skills keep the async team running in order, decide when a new periodic job needs the daemon at all, and validate broken expert configs before they run live.
-last_regen: 2026-10-01
+last_regen: 2026-10-06
 diagram_spec:
   anchor: "Runtime lifecycle"
   request: "State diagram showing the daemon lifecycle: routines registered in lazy.settings.json feed the serial daemon loop; the daemon runs each routine in order per interval_sec or cron schedule; a dirty working tree triggers an uncommitted_changes halt; a failed remote sync retries with backoff and only escalates to a git_pull_diverged / git_push_failed / git_remote_unavailable halt once retries are exhausted; /lazy-runtime.recover (commit/stash/discard/abort for tree halts; manual-fix + resume for remote-sync halts) cleans the precondition and resumes; unregister removes a routine from the loop."
@@ -17,12 +17,12 @@ source_skills:
   - lazy-core.state-schema
   - lazy-core.expert-runtime-schema
   - lazy-core.metrics-schema
-source_sha: e57fd10df03d43025a601372eabfdbba57ff15ac
-surface_sha: d3d5460ccffc4ff76ff8403b85c9964ea2726a0c58598f438032fae9c4c893de
+source_sha: 2b8e9e79da15a0e25e187f4c05ae6011a36f0740
+surface_sha: ea1e8b98cc78cac2acbdf4729017aa2cbe34895409e5ec396b7a516f8bb5d23b
 ---
 # Runtime daemon — routine management and recovery
 
-`<core-cli>` stands for the core plugin's `bin/lazycortex-core` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-core/<version>/`, or `plugins/claude/lazycortex-core/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+`<core-cli>` stands for the core plugin's `bin/lazycortex-core` file — the `installPath` that Claude Code's install registry, `~/.claude/plugins/installed_plugins.json`, records for the plugin's highest installed version (versions compared numerically, so `10.0.0` outranks `9.1.1`), or `plugins/claude/lazycortex-core/` in a checkout that authors the plugin. The plugin cache is never searched: it keeps every version ever installed, so its newest directory is not necessarily the one this machine has enabled. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
 The lazycortex-core runtime daemon is a per-repo serial loop. It reads the routine registry from `.claude/lazy.settings.json`, runs each entry in order according to its `interval_sec` or cron schedule, and repeats. Because routines execute one at a time, no two ever contend over the working tree or git state — the daemon is the single serializing authority for all background work in the repo. The daemon refuses to start at all inside a Dropbox-synced checkout — any path component named `Dropbox`, or ending in ` Dropbox` (covering `~/Library/CloudStorage/Dropbox…`) — and exits immediately with a `dropbox_denied` error instead of writing a halt block; Dropbox syncs bytes outside git, so the daemon only runs from a git-only clone such as `~/lazy-runtime/<repo>`.
 

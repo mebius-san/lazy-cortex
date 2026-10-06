@@ -42,7 +42,7 @@ commits nothing otherwise.
 order every skill must follow and none may reorder: the repo's own `plugins/claude/<plugin>/` when the
 repo authors the plugin (the sources in the tree outrank the cached copy, which lags them until
 the next publish), then the daemon-exported `$LAZYCORTEX_PLUGIN_DIRS` entry for the plugin,
-then the newest cached install. The plugin name may carry its `@<marketplace>` suffix. Exit
+then the install `installed_plugins.json` records. The plugin name may carry its `@<marketplace>` suffix. Exit
 status 1 and an `error:` line when no stage resolves.
 """
 
@@ -184,13 +184,36 @@ def read_install_paths(home: Path) -> dict[str, Path]:
   plugins = data.get("plugins", data)
 
   # the highest recorded version wins — records differ by version, each naming its own cache dir,
-  # and the registry keeps a stale record for every project that last installed an older one
-  out: dict[str, Path] = {}
+  # and the registry keeps a stale record for every project that last installed an older one;
+  # one plugin installed from two marketplaces has two keys, so records are pooled by bare name first
+  pooled: dict[str, list[dict]] = {}
   for key, entries in plugins.items():
     records = [ rec for rec in entries or [] if isinstance(rec, dict) and rec.get(_INSTALL_PATH) ]
-    if records:
-      out[key.split("@", 1)[0]] = Path(str(max(records, key = _version_key)[_INSTALL_PATH]))
-  return out
+    pooled.setdefault(key.split("@", 1)[0], []).extend(records)
+  return {
+    name: Path(str(max(records, key = _version_key)[_INSTALL_PATH]))
+    for name, records in pooled.items() if records
+  }
+
+
+def installed_plugin_root(name: str, home: Path | None = None) -> Path | None:
+  """
+  Resolve a plugin's installed source root from Claude Code's plugin registry.
+
+  The registry (`~/.claude/plugins/installed_plugins.json`) records one entry per project and
+  version that installed the plugin, each naming its `installPath`; the highest recorded version
+  wins. The plugin cache itself is never searched: it keeps every version ever installed, so a walk
+  across it returns copies the registry no longer names.
+
+  Args:
+    name: Plugin name without its `@<marketplace>` suffix.
+    home: Home directory holding the registry; the current user's when omitted.
+
+  Returns:
+    The recorded install root when it exists on disk, else None.
+  """
+  root = read_install_paths(home or Path.home()).get(name)
+  return root if root is not None and root.is_dir() else None
 
 
 def _version_key(record: dict) -> tuple[int, ...]:
@@ -513,8 +536,8 @@ def plugin_root(plugin: str, repo: Path, home: Path) -> dict | None:
     if candidate.name == name and (candidate / _DEV_MANIFEST).is_file():
       return _root_report(name, candidate, _SRC_ENV)
 
-  # stage three: the newest cached install
-  cached = read_install_paths(home).get(name)
+  # stage three: the install the machine's plugin registry records
+  cached = installed_plugin_root(name, home)
   return _root_report(name, cached, _SRC_CACHE) if cached is not None else None
 
 

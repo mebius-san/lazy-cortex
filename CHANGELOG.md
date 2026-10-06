@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 10.5.2 — 2026-10-06 UTC
+
+- Fix: sibling plugins and newer copies of core are now found through the installed-plugins registry (`~/.claude/plugins/installed_plugins.json`) instead of picking the highest directory in the plugin cache. This used to select a stale version that was installed but not enabled. The runtime daemon and shim, the `lazy-core.install` and `lazy-core.agent-models-seed` skills, and the reference resolver all use the registry now.
+
 ### 10.5.1 — 2026-10-05 UTC
 
 - Audit now flags contradicting aspects composed into one expert, and the doctor reports the same finding.
@@ -758,6 +762,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 9.12.1 — 2026-10-06 UTC
+
+- Fixed `lazy-spec.install` and the other plugin-lookup paths picking a stale cached plugin version. They now resolve the installed version recorded in `installed_plugins.json` instead of the highest version directory in the cache.
+
 ### 9.12.0 — 2026-10-05 UTC
 
 - Deleting a spec document now wakes its coordinator, so the asset or product status updates without a manual nudge; `lazy-spec.install` registers the new routine.
@@ -1146,6 +1154,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 6.1.3 — 2026-10-06 UTC
+
+- Icon sync now finds icon registries shipped by other installed plugins through Claude Code's install registry (`installed_plugins.json`) instead of walking the plugin cache. Previously it could pick up a stale older copy, not the version you have enabled.
+
 ### 6.1.2 — 2026-10-02 UTC
 
 - Fixed Iconize file icons reverting to their old colour on mobile: `iconize-reloader` no longer re-reads `data.json` after its own folder writes, so Iconize's pending in-memory icons are kept. External changes and the manual reload command still re-read.
@@ -1399,6 +1411,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-diagram
 
+### 2.0.2 — 2026-10-06 UTC
+
+- `lazy-diagram.install` and `lazy-diagram.audit` now locate the installed plugin and the core CLI from the highest-version record in `installed_plugins.json`. They no longer pick the last record or the newest cache directory, so they act on the version actually enabled on the machine rather than a stale cached copy.
+
 ### 2.0.1 — 2026-09-24 UTC
 
 - Run logs are now opt-in: `lazy-diagram.audit`, `lazy-diagram.fix`, and `lazy-diagram.install` no longer write to `.logs/`; only `lazy-diagram.draw` keeps logging its runs, since other tooling verifies drawn diagram seams against its log.
@@ -1492,6 +1508,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
 
 ## lazycortex-review
+
+### 6.11.2 — 2026-10-06 UTC
+
+- Review now finds the sibling plugins and its own scripts through the installed-plugins registry instead of picking the highest version left in the plugin cache. This stops it from running an old or non-enabled copy after updates, in the coordinator, the install step and the git and collection helpers.
 
 ### 6.11.1 — 2026-10-05 UTC
 
@@ -1718,6 +1738,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-observe
 
+### 2.2.5 — 2026-10-06 UTC
+
+- Install now finds the `lazycortex-core` CLI through Claude Code's installed-plugins registry instead of walking the plugin cache, so it no longer picks up a stale older version left behind in the cache.
+
 ### 2.2.4 — 2026-10-01 UTC
 
 - `/lazy-observe.install` no longer rewrites the host-wide answer file `~/.config/lazycortex/observe.toml` when its content is unchanged, so re-running it across many repos leaves the file untouched.
@@ -1871,6 +1895,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.
 
 ## lazycortex-experts
+
+### 1.9.6 — 2026-10-06 UTC
+
+- `lazy-experts.install`, `lazy-experts.audit` and the research aspect now locate sibling plugins through the install registry (`installed_plugins.json`) and no longer walk the plugin cache. Previously they could pick up a stale older version, so installs, audits and research-skill discovery now use the plugin version actually enabled on the machine.
 
 ### 1.9.5 — 2026-10-05 UTC
 
@@ -2059,6 +2087,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 4.10.3 — 2026-10-06 UTC
+
+- `lazy-python.install` now locates the plugin and its core companion through the install record in `installed_plugins.json` (highest version) instead of the newest cached copy, so scaffold templates come from the version actually enabled on the machine.
 
 ### 4.10.2 — 2026-10-06 UTC
 
@@ -2308,6 +2340,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 3.4.1 — 2026-10-06 UTC
+
+- Fixed: the wiki plugin now locates sibling plugins and its own installed copy through the plugin registry (`installed_plugins.json`) instead of picking the highest version directory in the plugin cache, so it no longer runs against a stale or non-enabled version. The wiki plugin also gains a `lazycortex-wiki` command-line entry point that skills and agents use for this lookup.
 
 ### 3.4.0 — 2026-10-04 UTC
 

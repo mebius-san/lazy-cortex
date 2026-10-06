@@ -26,7 +26,7 @@ Parse two inputs from `args` (or the invoking skill's context):
 
 ### Locate `default-tiers.json` (the SOT)
 
-`lazycortex-core` is a declared dependency of every consuming plugin, so it is installed (cache) or co-resident (dev vault). `<core-cli>` is the core plugin's own `bin/lazycortex-core` file, `${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core` — this skill ships with that plugin, so no lookup is needed; every verb runs through the interpreter because the file carries no exec bit. The file is `<core-root>/skills/lazy-core.agent-models/default-tiers.json`, where `<core-root>` is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-core` prints — the authoring repo's own `plugins/claude/lazycortex-core/` when this checkout ships the plugin, else the daemon's exported plugin dir, else the newest cached install. Reading the cache first in an authoring repo leaves every tier row added since the last publish unseeded. The env walk and the cache glob below are what the primitive does; run them by hand only when `<core-cli>` itself cannot be resolved:
+`lazycortex-core` is a declared dependency of every consuming plugin, so it is installed (cache) or co-resident (dev vault). `<core-cli>` is the core plugin's own `bin/lazycortex-core` file, `${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core` — this skill ships with that plugin, so no lookup is needed; every verb runs through the interpreter because the file carries no exec bit. The file is `<core-root>/skills/lazy-core.agent-models/default-tiers.json`, where `<core-root>` is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-core` prints — the authoring repo's own `plugins/claude/lazycortex-core/` when this checkout ships the plugin, else the daemon's exported plugin dir, else the install `~/.claude/plugins/installed_plugins.json` records. Reading the cache first in an authoring repo leaves every tier row added since the last publish unseeded. The env walk and the cache glob below are what the primitive does; run them by hand only when `<core-cli>` itself cannot be resolved:
 
 ```
 Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-core)
@@ -34,9 +34,7 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-core)
 
 The verb prints the core plugin's root; the file is `<printed root>/skills/lazy-core.agent-models/default-tiers.json`. A non-zero exit (`not installed`) is `unresolved`.
 
-`unresolved` → `Bash(ls <home>/.claude/plugins/cache/lazycortex/lazycortex-core/*/skills/lazy-core.agent-models/default-tiers.json)` (`<home>` = the absolute home directory) and take the printed path whose version segment sorts highest numerically (`10.0.0` above `9.1.1`). That one pattern is the whole enumeration: never `find` or a walk of the cache, and a refusal is terminal.
-
-The newest version wins. If the file is absent → abort `sot-missing` with `lazycortex-core not installed; install it before seeding <prefix> tiers` — never fall through to a hardcoded fallback (silent drift is exactly what the SOT prevents). Outcome: `sot-resolved` or abort.
+`unresolved`, or the file absent under the printed root → abort `sot-missing` with `lazycortex-core not installed; install it before seeding <prefix> tiers` — never fall through to a hardcoded fallback (silent drift is exactly what the SOT prevents), and never enumerate `~/.claude/plugins/cache/` instead: the verb already reads the install registry (`~/.claude/plugins/installed_plugins.json`), and the cache keeps every version ever installed, so its newest directory is not necessarily the one this machine has enabled. Outcome: `sot-resolved` or abort.
 
 ### Build the seed set
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: One agreed dictionary per scope, consulted at write-time and kept honest by a curator and an audit, so a concept never grows a second name.
-last_regen: 2026-09-24
+last_regen: 2026-10-06
 diagram_spec:
   anchor: "How the pieces fit together"
   request: "Flow diagram with three legs sharing one dictionary file. Leg 1 (write-time): a writing expert calls lazy-wiki.terms mid-document, in lookup mode or check-a-candidate-word mode; the skill reads the dictionary and returns matching definitions, never writes. Leg 2 (curate, git-watch): a document commit triggers the terms-scan routine, which dispatches lazy-wiki.terms-curator in curate mode with every document of one directory that changed in the same wave as its batch; the curator reads the batch as one body of text plus the dictionary headings, decides add / extend / rename / split per candidate concept (a concept spanning several of the batch's documents becomes one candidate, not one per file), edits the dictionary, and commits once for the whole batch. Leg 3 (audit): the terms section of /lazy-wiki.audit checks format and scope configuration by reading, then dispatches lazy-wiki.terms-curator in report mode for meaning checks (divergence, missing, duplicate, dead); /lazy-core.doctor presents each finding to the operator one at a time via AskUserQuestion and applies only what they choose. Show all three legs converging on the one dictionary file, and that report mode writes nothing itself."
@@ -10,8 +10,8 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.terms-curator
   - lazy-wiki.audit
-source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
-surface_sha: 97b910d82fdc8efb54db3757eebeff3cb6510a614df5997c3c985fb9fbedc412
+source_sha: 2b8e9e79da15a0e25e187f4c05ae6011a36f0740
+surface_sha: 54db9b336a309b6d561988d7476e5280a17071e3466342788b8e4eab18ad013c
 ---
 # Terms
 
@@ -34,7 +34,7 @@ The three pieces never touch the same file at the same time. `lazy-wiki.terms` o
 
 **Audit, on demand.** The terms section of `/lazy-wiki.audit` is where drift that slipped past both of the above gets caught. It checks format and scope configuration itself, by reading — a dictionary file that doesn't exist, two scopes' `paths` overlapping, a missing `source_exclude` entry, definitions run past three lines, headings out of sort order. Then, for the judgment calls a program can't make, it dispatches `lazy-wiki.terms-curator` in `report` mode — no job dir this time, just the scope id, the dictionary path, the scope's `paths`, and its `source_exclude` in the prompt — and gets back `divergence` (a document and the dictionary disagree on the word for one concept — including two language forms of the same concept, and a document still writing the bare everyday word for a term the dictionary now carries under its qualified name), `missing` (a document names a project entity the dictionary doesn't carry), `duplicate` (two entries describe one concept), and `dead` (a term no document in the scope actually uses, excluding a term whose definition names a sibling — that's a fresh split, not a corpse). Report mode writes nothing. `/lazy-core.doctor` then walks you through each finding individually via `AskUserQuestion`, since which side of a divergence is "right" is your call, not a default — showing both words, the document, and the dictionary side by side before asking — and leaves alone anything under a document with `review_active: true` or inside a mirrored tree, since editing either would fight the process that owns them.
 
-`<wiki-cli>` stands for the wiki plugin's `bin/lazycortex-wiki` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-wiki/<version>/`, or `plugins/claude/lazycortex-wiki/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+`<wiki-cli>` stands for the wiki plugin's `bin/lazycortex-wiki` file — `${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki`, where Claude Code substitutes the variable with the root the skill's plugin was loaded from, so no lookup is needed. Outside a skill, use the install path recorded for the plugin in `~/.claude/plugins/installed_plugins.json`, or `plugins/claude/lazycortex-wiki/` in a checkout that authors the plugin; never search the plugin cache for it. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
 **Applying a settled divergence.** The decision is yours; carrying it out on the document is not a judgment call, and `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> terms-apply <document> --from "<the document's word>" --to "<the dictionary's term>"` does it. It replaces whole-word occurrences in prose only — the frontmatter block, every fenced code block, every inline code span, every link target, and the protected `# See also` section come through byte-for-byte — and leaves the rewrite uncommitted in your worktree. It refuses, with exit 1 and the reason on stderr, on a document carrying `review_active: true`, on one inside a scope's mirror tree, and on a replacement that contains the word it replaces (which could never settle). Running it a second time reports `noop`. It decides nothing: the direction comes from you, and the other half of a divergence — renaming or widening the dictionary's own term — stays a hand edit in the dictionary, where the curator is the only other writer.
 

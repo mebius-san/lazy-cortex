@@ -45,7 +45,7 @@ Cross-expert reads are explicit (`Read .memory/<other>/<slug>.md`) — no ambien
 
 ## Language
 
-`<core-cli>` stands for the core plugin's `bin/lazycortex-core` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-core/<version>/`, or `plugins/claude/lazycortex-core/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+`<core-cli>` stands for the core plugin's `bin/lazycortex-core` file — the copy under `~/.claude/plugins/cache/lazycortex/lazycortex-core/<version>/` that `~/.claude/plugins/installed_plugins.json` records as installed, or `plugins/claude/lazycortex-core/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
 Memory notes are written in the repository's storage language. Before composing a note body, run `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> resolve-language` and write the note's prose in the code it returns — never in the language of the job payload you happened to receive, and never in the language of the document you were working on. A `.memory/` tree half in one language and half in another is unreadable to the next run that globs it.
 

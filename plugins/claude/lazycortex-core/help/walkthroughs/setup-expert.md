@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Add a named expert role and dispatch your first async job — keep working while the daemon runs it, then collect the result.
-last_regen: 2026-10-01
+last_regen: 2026-10-06
 diagram_spec:
   anchor: "How the pieces fit"
   request: "Sequence diagram showing a user dispatching a job via /lazy-expert.dispatch-job, the daemon picking it up from the .experts/.jobs/ queue, the expert agent writing response.json + DONE marker, and the user collecting the result via /lazy-expert.collect-job. Nodes: User, Claude session, .experts/.jobs/ queue, daemon (runner), expert agent."
@@ -11,8 +11,8 @@ source_skills:
   - lazy-expert.dispatch-job
   - lazy-expert.list-jobs
   - lazy-expert.collect-job
-source_sha: e57fd10df03d43025a601372eabfdbba57ff15ac
-surface_sha: 6d75efee1be754352aac8c0af1d38449423cbab1ddac4b0d7d5a4e4cfb29fe51
+source_sha: 2b8e9e79da15a0e25e187f4c05ae6011a36f0740
+surface_sha: a75d36cb8a39c73b78ec16658f40ceaae0c7ee3b18250fea4ce773720689e904
 ---
 # Add a named expert and dispatch your first async job
 

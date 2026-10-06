@@ -18,6 +18,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import plugin_registry as _plugin_registry  # pylint: disable=import-error
+
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
@@ -49,7 +52,6 @@ class _K:
     FILTER: Per-scope key holding the on-the-fly node filter.
     FRONTMATTER: Filter sub-key holding the per-frontmatter-key predicates.
     FOLDER_NOTE: Filter sub-key selecting or rejecting folder notes.
-    PLUGIN_CACHE: The Claude Code plugin-cache root, relative to the home directory.
     ERROR: Top-level result key used only for the malformed-`wiki.tag_axes` guard, in place of
       the normal status-keyed result shape.
   """
@@ -75,25 +77,7 @@ class _K:
   FILTER = "filter"
   FRONTMATTER = "frontmatter"
   FOLDER_NOTE = "folder_note"
-  PLUGIN_CACHE = ".claude/plugins/cache"
   ERROR = "error"
-
-
-def _version_sort_key(name: str) -> tuple[int, ...]:
-  """
-  Build a numeric sort key for a plugin-cache version directory name.
-
-  Args:
-    name: Version directory name as it appears in the plugin cache.
-
-  Returns:
-    A tuple of integers so `10.0.0` ranks above `9.1.1`; digit-free components contribute `0`.
-  """
-  out: list[int] = []
-  for part in name.split("."):
-    digits = "".join(c for c in part if c.isdigit())
-    out.append(int(digits) if digits else 0)
-  return tuple(out)
 
 
 def _resolve_core_cli() -> Path:
@@ -104,12 +88,11 @@ def _resolve_core_cli() -> Path:
   subprocess routine it spawns, per the inter-plugin boundary contract's § 1c CLI-subprocess
   pattern; fall back to the dev-vault sibling layout (`plugins/claude/lazycortex-core/bin/` next to
   this plugin's own `plugins/claude/lazycortex-wiki/`), so the resolver also works from a plain shell
-  or a test run inside this repo, where the daemon never exported the env var; finally glob the
-  Claude Code plugin cache under the home directory for the newest installed version, since a
-  plain interactive install-time session (no daemon, no dev-vault checkout) exports neither of
-  the first two. Mirrors `mirror.py`'s `_resolve_core_cli` in this same plugin for the first two
-  stages, and `coordinator_dispatch.py`'s own `_resolve_core_cli` in `lazycortex-review` for the
-  cache-glob stage (numeric version order, so `10.0.0` outranks `9.1.1`).
+  or a test run inside this repo, where the daemon never exported the env var; finally read
+  Claude Code's plugin registry (`~/.claude/plugins/installed_plugins.json`) for the install root
+  it records for `lazycortex-core`, since a plain interactive install-time session (no daemon, no
+  dev-vault checkout) exports neither of the first two. Mirrors `mirror.py`'s `_resolve_core_cli`
+  in this same plugin stage for stage.
 
   Returns:
     Resolved binary usable as a subprocess argument.
@@ -132,10 +115,11 @@ def _resolve_core_cli() -> Path:
   # command the neighbour publishes as a separate process, and the exchange goes in JSON. The address of that
   # command is looked up across three sources in turn, from the most precise to the most general: the list of
   # plugin roots the runtime daemon hands to every process it spawns; the layout of the developer's working
-  # vault, where plugins lie as neighbouring directories; the cache of installed plugins, from which the
-  # freshest version is taken. No single source is mandatory on its own, but when none of them worked, the work
-  # stops with an error listing everything that was searched: silently continuing without the neighbour is not
-  # allowed.
+  # vault, where plugins lie as neighbouring directories; the registry of installed plugins, which records
+  # where each enabled plugin was installed and which version. The store of downloaded copies is never
+  # searched: it keeps every version ever installed, so its newest copy need not be the one enabled. No single
+  # source is mandatory on its own, but when none of them worked, the work stops with an error listing
+  # everything that was searched: silently continuing without the neighbour is not allowed.
 
   # dev-vault fallback — this file sits at plugins/claude/lazycortex-wiki/bin/axes.py, so core's own
   # bin/ is two levels up and back down into the sibling plugin tree
@@ -143,22 +127,13 @@ def _resolve_core_cli() -> Path:
   if sibling.is_file():
     return sibling
 
-  # plugin-cache fallback — a real consumer install where neither the daemon env nor the
-  # dev-vault checkout applies; pick the newest installed version across every marketplace
-  # registry directory under the cache root
-  cache = Path.home() / _K.PLUGIN_CACHE
-  if cache.is_dir():
-    plugin_dirs = [
-      registry / _K.CORE_PLUGIN_NAME
-      for registry in cache.iterdir()
-      if registry.is_dir() and (registry / _K.CORE_PLUGIN_NAME).is_dir()
-    ]
-    all_versions = [ v for pd in plugin_dirs for v in pd.iterdir() if v.is_dir() ]
-    if all_versions:
-      latest = max(all_versions, key = lambda v: _version_sort_key(v.name))
-      cli = latest / _K.BIN_SEGMENT / _K.CORE_PLUGIN_NAME
-      if cli.is_file():
-        return cli
+  # registry fallback — a real consumer install where neither the daemon env nor the dev-vault
+  # checkout applies; the install root Claude Code recorded for core's highest installed version
+  installed = _plugin_registry.installed_plugin_root(_K.CORE_PLUGIN_NAME)
+  if installed is not None:
+    cli = installed / _K.BIN_SEGMENT / _K.CORE_PLUGIN_NAME
+    if cli.is_file():
+      return cli
 
   # none of the three stages found a binary — name what was searched so a misconfigured runner
   # is diagnosable
@@ -166,7 +141,8 @@ def _resolve_core_cli() -> Path:
   raise RuntimeError(
     f"lazycortex-core CLI not resolvable: no {_K.BIN_SEGMENT}/{_K.CORE_PLUGIN_NAME} under any "
     f"directory named by ${_K.ENV_PLUGIN_DIRS} (searched: {', '.join(searched)}), no dev-vault "
-    f"sibling at '{sibling}', and no version under '{cache}'."
+    f"sibling at '{sibling}', and no {_K.CORE_PLUGIN_NAME} install recorded in Claude Code's plugin "
+    f"registry."
   )
 
 

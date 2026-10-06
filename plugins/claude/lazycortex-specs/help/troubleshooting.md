@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-10-05
+last_regen: 2026-10-06
 no_diagram: true
 source_skills:
   - lazy-spec.add-asset-type
@@ -25,8 +25,8 @@ source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
   - lazy-spec.audit
-source_sha: 9c110327bf3385f108b4614ca72bc2adc1fe5c72
-surface_sha: 259ddd28957f9b7718b8f7e024ba59555a4fc7ffcd90085649352eb347fa61e1
+source_sha: 2b8e9e79da15a0e25e187f4c05ae6011a36f0740
+surface_sha: f463c9ddf8be5a752bc8795d0742dcc1d4c18412f9f0ecbba6c23334abda2ccc
 ---
 # Troubleshooting
 
@@ -94,7 +94,7 @@ surface_sha: 259ddd28957f9b7718b8f7e024ba59555a4fc7ffcd90085649352eb347fa61e1
 
 **Symptom**: The wizard rejects the derived path with a message that the `spec_path` sits inside another product's `spec_path`.
 
-`<specs-cli>` stands for the specs plugin's `bin/lazycortex-specs` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-specs/<version>/`, or `plugins/claude/lazycortex-specs/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+`<specs-cli>` stands for the specs plugin's `bin/lazycortex-specs` file — the install path that `~/.claude/plugins/installed_plugins.json` records for the plugin, or `plugins/claude/lazycortex-specs/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
 **Likely cause**: Products in lazycortex-specs are flat siblings — one product's folder must not be a subdirectory of another product's folder. A path like `Server/products/api/auth` would be rejected if `Server/products/api` is already registered.
 
@@ -446,9 +446,9 @@ surface_sha: 259ddd28957f9b7718b8f7e024ba59555a4fc7ffcd90085649352eb347fa61e1
 
 **Symptom**: The skill aborts immediately, saying the `lazycortex-core` CLI cannot be resolved.
 
-**Likely cause**: `lazycortex-core` — the plugin `/lazy-spec.drive` calls to resolve settings and dispatch jobs — isn't installed in this environment, or its plugin-cache entry is missing or stale.
+**Likely cause**: `lazycortex-core` — the plugin `/lazy-spec.drive` calls to resolve settings and dispatch jobs — could not be found: the plugin registry yields no match. Either the session's plugin-directory export step did not run, or there are no development sources and `~/.claude/plugins/installed_plugins.json` records no `lazycortex-core@lazycortex` entry.
 
-**Fix**: Install or update `lazycortex-core`, then re-invoke `/lazy-spec.drive` on the same asset.
+**Fix**: Re-run the skill's first phase so the export happens, or install or update `lazycortex-core` so the registry records it, then re-invoke `/lazy-spec.drive` on the same asset.
 
 ---
 

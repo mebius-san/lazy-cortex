@@ -56,6 +56,7 @@ _SUB_PINS = "pins"
 _SUB_DOC_TYPE = "doc-type"
 _SUB_ASSET_TYPE = "asset-type"
 _SUB_TEMPLATE = "template"
+_SUB_CORE_CLI = "core-cli"
 # waiver: usage string -- help text printed to stderr; not a domain constant
 _USAGE = (
     "usage: lazycortex-specs <subcommand> [args...]\n"
@@ -111,6 +112,7 @@ _USAGE = (
     "  template resolve --context <ctx> [--product K] [--type T] [--cwd DIR] <file>\n"
     "                                  print the template file a context resolves for one filename\n"
     "                                  read an asset's spec_asset_type, or add it where missing\n"
+    "  core-cli [--repo DIR]          print the absolute path of the resolved lazycortex-core CLI\n"
 )
 
 
@@ -232,6 +234,10 @@ def main(argv: list[str]) -> int:
     # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
     import template_resolve  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
     return template_resolve.main(rest)
+  if sub == _SUB_CORE_CLI:
+    # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
+    import gate_dispatch  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
+    return gate_dispatch.main_core_cli(rest)
   sys.stderr.write(f"unknown subcommand: {sub}\n")
   return 2
 

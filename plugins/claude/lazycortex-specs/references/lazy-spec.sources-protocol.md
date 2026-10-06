@@ -224,7 +224,7 @@ Shared primitive invoked by `lazy-spec.sync-with-code`, `lazy-spec.create-from-c
 
 ## Part 3 — Dependencies & prerequisites
 
-`<specs-cli>` stands for the specs plugin's `bin/lazycortex-specs` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-specs/<version>/`, or `plugins/claude/lazycortex-specs/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+`<specs-cli>` stands for the specs plugin's `bin/lazycortex-specs` file — the copy under `~/.claude/plugins/cache/lazycortex/lazycortex-specs/<version>/` that `~/.claude/plugins/installed_plugins.json` records as installed, or `plugins/claude/lazycortex-specs/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
 A product MAY declare upstream dependencies in its `dependencies` array under `products[<key>]` in `lazy.settings.json` (resolved via the `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> resolve-product` primitive — see [config-protocol](./lazy-spec.config-protocol.md)):
 

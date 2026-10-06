@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Resolve the latest lazycortex-core in the plugin cache and exec its runner.
-# Real cache layout is 4 levels:
-#   ~/.claude/plugins/cache/<registry>/<plugin>/<version>/bin/<plugin>
+# Resolve the installed lazycortex-core from Claude Code's plugin registry and exec its runner.
+# The registry is ~/.claude/plugins/installed_plugins.json: the highest-version
+# `lazycortex-core@*` record names the install root, `<installPath>/bin/runner`.
+# The plugin cache is never listed — it keeps every version ever installed.
 # Survives plugin version bumps without re-rendering the supervisor unit.
 #
 # Usage: lazy.runtime.sh [--login-shell] [--env-file <path>]... [--dev-mode] <repo-root> [--plugin-dir <path>]...
@@ -110,7 +111,7 @@ if [ "$DEV_MODE" = "1" ] && [ -n "$REPO" ] && [ -d "$REPO/plugins/claude" ]; the
   fi
   # The in-repo core is authoritative in dev-mode — exec ITS runner so the daemon loop
   # imports the same sources its routines resolve to, and the own-code fingerprint
-  # watches files a `git pull` actually rewrites. Falls through to the cache when the
+  # watches files a `git pull` actually rewrites. Falls through to the registry when the
   # repo carries no core plugin (dev-mode on a consumer repo of other plugins).
   if [ -f "$REPO/plugins/claude/lazycortex-core/bin/runner" ]; then
     DEV_RUNNER="$REPO/plugins/claude/lazycortex-core/bin/runner"
@@ -120,9 +121,22 @@ fi
 if [ -n "$DEV_RUNNER" ]; then
   RUNNER="$DEV_RUNNER"
 else
-  # sort -rV: version sort, not lexicographic — plain sort -r picks 5.9.0 over 5.13.0 ("9" > "1")
-  RUNNER=$(ls -d ~/.claude/plugins/cache/*/lazycortex-core/*/bin/runner 2>/dev/null | sort -rV | head -1)
-  [ -z "$RUNNER" ] && { echo "lazycortex-core/bin/runner not found in plugin cache" >&2; exit 1; }
+  # the highest-version lazycortex-core record in the install registry, compared numerically
+  # (5.13.0 above 5.9.0); prints nothing on any error so the guard below fires
+  RUNNER=$("${LAZYCORTEX_PYTHON:-python3}" -I -c '
+import json, os
+try:
+  with open(os.path.join(os.environ["HOME"], ".claude/plugins/installed_plugins.json"), encoding = "utf-8") as fh:
+    data = json.load(fh)
+  plugins = data.get("plugins", data)
+  records = [r for key, entries in plugins.items() if key.split("@", 1)[0] == "lazycortex-core"
+             for r in (entries or []) if isinstance(r, dict) and r.get("installPath")]
+  version = lambda r: tuple(int(p) if p.isdigit() else 0 for p in str(r.get("version", "")).split("."))
+  print(os.path.join(max(records, key = version)["installPath"], "bin", "runner"))
+except Exception:
+  pass
+' 2>/dev/null)
+  [ -z "$RUNNER" ] && { echo "lazycortex-core/bin/runner not recorded in ~/.claude/plugins/installed_plugins.json" >&2; exit 1; }
 fi
 # The runner is Python; run it under the interpreter install recorded rather than
 # whatever `python3` launchd/systemd happen to find — and never via the exec bit,

@@ -91,6 +91,8 @@ _CALLBACK_VAULT_CACHE = None
 # and folds their matchers under the vault's personal icon-map. No install-time merge.
 PLUGIN_DIRS_ENV = "LAZYCORTEX_PLUGIN_DIRS"
 REGISTRY_SUFFIX = ".iconize-registry.json"
+# waiver: external Claude Code registry path, not an internal key
+_INSTALLED_PLUGINS_REL = ".claude/plugins/installed_plugins.json"
 REGISTRY_SCHEMA_VERSION = 1
 
 # Semantic priority bands for registry matchers (see the iconize registry contract):
@@ -1972,10 +1974,10 @@ def _load_registry_or_none(path: Path) -> dict | None:
 
 def _version_sort_key(name: str) -> tuple[int, ...]:
   """
-  Build a numeric sort key for a plugin-cache version directory name.
+  Build a numeric sort key for a plugin version string.
 
   Args:
-    name: Version directory name as it appears in the plugin cache.
+    name: Version string as the install registry records it.
 
   Returns:
     A tuple of integers so `10.0.0` ranks above `9.1.1`; digit-free components contribute `0`.
@@ -1987,44 +1989,45 @@ def _version_sort_key(name: str) -> tuple[int, ...]:
   return tuple(out)
 
 
-def _cached_plugin_roots() -> list[Path]:
+def _installed_plugin_roots(home: Path | None = None) -> list[Path]:
   """
-  Enumerate the newest cached version of every plugin in the cache this plugin runs from.
+  Enumerate every installed plugin's source root from Claude Code's plugin registry.
 
-  A cached install lives at `<cache>/<registry>/<plugin>/<version>/`, so when this file runs from
-  one, the cache root is four levels above `bin/`. A dev source tree has no version level above
-  `bin/`, so the walk yields nothing there.
+  The registry (`~/.claude/plugins/installed_plugins.json`) records one entry per project and
+  version that installed a plugin, each naming its `installPath`; per plugin the highest recorded
+  version wins. The plugin cache itself is never searched: it keeps every version ever installed,
+  so a walk across it returns copies the registry no longer names.
+
+  Args:
+    home: Home directory holding the registry; the current user's when omitted.
 
   Returns:
-    One root per plugin name, sorted by plugin name; empty outside a cached install.
+    One existing root per plugin name, sorted by plugin name; empty without a readable registry.
   """
-  own = Path(__file__).resolve()
-
-  # guard: not a cached install — a dev checkout has no version directory above bin/
-  if not own.parents[1].name.replace(".", "").isdigit():
-    return []
-
-  # the cache root sits four levels above bin/: cache/<registry>/<plugin>/<version>/bin
+  registry = (home or Path.home()) / _INSTALLED_PLUGINS_REL
   try:
-    cache = own.parents[4]
-  except IndexError:
+    data = json.loads(registry.read_text(encoding = "utf-8"))
+  except (OSError, ValueError):
     return []
-  versions: dict[str, list[Path]] = {}
-  for registry in cache.iterdir():
-    # guard: skip non-directory entries in the cache root
-    if not registry.is_dir():
-      continue
-    for plugin in registry.iterdir():
-      # guard: skip non-directory entries under a registry
-      if not plugin.is_dir():
+  # the registry nests its map under `plugins` in newer files and is the map itself in older ones
+  # waiver: install-registry key, Claude Code's own schema
+  plugins = data.get("plugins", data) if isinstance(data, dict) else {}
+  best: dict[str, dict] = {}
+  for key, entries in plugins.items():
+    name = key.split("@", 1)[0]
+    for rec in entries or []:
+      # guard: a record without an install path names nothing to read
+      # waiver: install-registry key, Claude Code's own schema
+      if not isinstance(rec, dict) or not rec.get("installPath"):
         continue
-      versions.setdefault(plugin.name, []).extend(
-        v for v in plugin.iterdir() if v.is_dir() and v.name.replace(".", "").isdigit()
-      )
-  return [
-    max(found, key = lambda v: _version_sort_key(v.name))
-    for _name, found in sorted(versions.items()) if found
-  ]
+      current = best.get(name)
+      # waiver: install-registry key, Claude Code's own schema
+      if current is None or _version_sort_key(str(rec.get("version", ""))) > _version_sort_key(
+          # waiver: install-registry key, Claude Code's own schema
+          str(current.get("version", ""))):
+        best[name] = rec
+  roots = [ Path(str(best[name]["installPath"])) for name in sorted(best) ]
+  return [ root for root in roots if root.is_dir() ]
 
 
 def _plugin_root_name(root: Path) -> str:
@@ -2054,9 +2057,10 @@ def load_plugin_registries(vault: Path) -> list[tuple[str, Path, dict]]:
 
   Plugin roots come from the `LAZYCORTEX_PLUGIN_DIRS` dev trees the runtime daemon exports; when
   that is empty the walk takes the dev-vault sibling layout `<vault>/plugins/claude/*` instead.
-  Every plugin those roots do not cover then comes from the plugin cache this plugin itself runs
-  from (that plugin's newest installed version). A plugin that is not visible simply
-  contributes no rules — best-effort, like every other part of the hook surface.
+  Every plugin those roots do not cover then comes from Claude Code's install registry
+  (`~/.claude/plugins/installed_plugins.json`, that plugin's highest recorded version). A plugin
+  that is not visible simply contributes no rules — best-effort, like every other part of the hook
+  surface.
 
   Args:
     vault: Resolved vault root, used only for the no-daemon fallback walk.
@@ -2085,10 +2089,10 @@ def load_plugin_registries(vault: Path) -> list[tuple[str, Path, dict]]:
     if dev.is_dir():
       roots = [ dev / name for name in sorted(os.listdir(dev)) ]
 
-  # the env carries dev trees only, never a cached install, so every plugin they do not cover comes
-  # from the cache this plugin runs from — resolved now, never frozen at daemon start
+  # the env carries dev trees only, so every plugin they do not cover comes from the install
+  # registry — read now, never frozen at daemon start; a dev root shadows its installed copy by name
   covered = { _plugin_root_name(root) for root in roots }
-  roots += [ root for root in _cached_plugin_roots() if _plugin_root_name(root) not in covered ]
+  roots += [ root for root in _installed_plugin_roots() if _plugin_root_name(root) not in covered ]
 
   # collect every registry file each visible plugin root ships
   out: list[tuple[str, Path, dict]] = []

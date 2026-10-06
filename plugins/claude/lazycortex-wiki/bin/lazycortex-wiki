@@ -92,6 +92,8 @@ _SUBCOMMANDS = {
   "mirror-plan":    "Fetch a mirror scope's source and print the sync plan as JSON (dry-run, mirror untouched).",
   "mirror-sync":    "Fetch a mirror scope's source, sync the mirror tree, and commit the touched files.",
   "structure-watch-config": "Derive the path filter the structure-scan routines must carry.",
+  "core-cli":       "Print the absolute path of the resolved lazycortex-core CLI (exit 1 with an error: line "
+                    "when core is unreachable).",
 }
 
 # Environment variable name that carries the repository root.
@@ -146,6 +148,7 @@ class Cli:
   _CMD_TERMS_APPLY    = "terms-apply"
   _CMD_MIRROR_PLAN    = "mirror-plan"
   _CMD_MIRROR_SYNC    = "mirror-sync"
+  _CMD_CORE_CLI       = "core-cli"
 
   # argparse dest names and help strings — shared or per-subcommand.
   _ARG_PATH           = "path"
@@ -420,6 +423,8 @@ class Cli:
       return self._cmd_mirror_sync(args)
     if cmd == self._CMD_STRUCTURE_WATCH_CONFIG:
       return self._cmd_structure_watch_config(args)
+    if cmd == self._CMD_CORE_CLI:
+      return self._cmd_core_cli()
     return self._not_implemented(cmd)
 
   def _build_parser(self) -> argparse.ArgumentParser:
@@ -951,6 +956,29 @@ class Cli:
       "drift": drifted,
     }, indent = 2, sort_keys = True))
     return 1 if drifted else 0
+
+  def _cmd_core_cli(self) -> int:
+    """
+    Print the absolute path of the `lazycortex-core` CLI this plugin dispatches to.
+
+    An agent prompt shipped by this plugin runs its own verbs through `${CLAUDE_PLUGIN_ROOT}`
+    but has no fixed address for the core plugin; this verb hands it one, resolved through the
+    same stages every bin module uses (`$LAZYCORTEX_PLUGIN_DIRS`, the dev-vault sibling, the
+    plugin registry).
+
+    Returns:
+      Integer exit code — 0 with the path on stdout, 1 with an `error:` line on stderr when no
+      stage resolves core.
+    """
+    # resolve through the plugin's one core-CLI resolver — the verb exists to expose it, not to add a copy
+    try:
+      # waiver: the resolver is module-private by convention; this entry script is its one external caller
+      cli = _axes._resolve_core_cli()  # pylint: disable=protected-access
+    except RuntimeError as err:
+      print(f"error: {err}", file = sys.stderr)
+      return 1
+    print(cli)
+    return 0
 
   @staticmethod
   def _structure_routines(repo: Path) -> dict:

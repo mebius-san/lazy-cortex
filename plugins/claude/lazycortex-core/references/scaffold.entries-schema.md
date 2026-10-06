@@ -3,7 +3,7 @@ description: Schema for a plugin's per-group scaffold.entries.json manifest — 
 ---
 # scaffold.entries manifest schema
 
-`<core-cli>` stands for the core plugin's `bin/lazycortex-core` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-core/<version>/`, or `plugins/claude/lazycortex-core/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+`<core-cli>` stands for the core plugin's `bin/lazycortex-core` file — the copy under `~/.claude/plugins/cache/lazycortex/lazycortex-core/<version>/` that `~/.claude/plugins/installed_plugins.json` records as installed, or `plugins/claude/lazycortex-core/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
 A `scaffold.entries.json` manifest is the plugin-side **source of truth** for the scaffold-registry entries a plugin contributes. It lives at `plugins/claude/<plugin>/templates/<group>/scaffold.entries.json` — one manifest per template group. It is read in place at install time by `lazy-core.scaffold-sync` (which copies the group's templates and upserts the entries into the consumer registry) and is authored / edited via the plugin's scaffold-type management workflow. It is **never copied to the consumer** and is never touched by the `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold` primitive (that primitive operates only on the consumer registry `lazy-core.scaffold.md`).
 

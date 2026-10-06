@@ -9,46 +9,33 @@ sys.path.insert(0, str(Path(__file__).parent))
 # headless spawn inheriting its environment — keeps resolving the bare `lazycortex-core` to the
 # version that was installed when the session began.
 # Decision: the stale-PATH problem is corrected here, inside the binary, not in its callers — a
-# cache-resident copy forwards to the newest cached version before dispatching. The alternative,
-# every skill resolving the installed version's path and invoking it absolutely, touches ~20
-# SKILL.md files across the marketplace and breaks the `Bash(lazycortex-core *)` allow pattern
-# consumers carry: an absolute-path invocation does not match it, so headless spawns under
-# `dontAsk` would be denied. A dev-vault copy never forwards — its source tree is the live one.
+# cache-resident copy forwards to the version the install registry
+# (`~/.claude/plugins/installed_plugins.json`) names before dispatching. The cache is never
+# walked: it keeps every version ever installed, so its newest directory is not necessarily the
+# one this machine has enabled. The alternative, every skill resolving the installed version's
+# path and invoking it absolutely, touches ~20 SKILL.md files across the marketplace and breaks
+# the `Bash(lazycortex-core *)` allow pattern consumers carry: an absolute-path invocation does
+# not match it, so headless spawns under `dontAsk` would be denied. A dev-vault copy never
+# forwards — its source tree is the live one.
 _PLUGIN_CACHE_REL = ".claude/plugins/cache"
 _FORWARDED_ENV = "LAZYCORTEX_CORE_FORWARDED"
 
 
-def _cache_version_key(name: str) -> tuple:
-    """Numeric sort key for a plugin-cache version directory name (`9.10.0` above `9.9.0`)."""
-    out = []
-    for part in name.split("."):
-        digits = ""
-        for ch in part:
-            if not ch.isdigit():
-                break
-            digits += ch
-        out.append(int(digits) if digits else 0)
-    return tuple(out)
-
-
 def _newer_cached_cli() -> Path | None:
-    """Return the newest cached sibling version's CLI when this copy runs from an older one."""
+    """Return the registry-installed CLI when this cache-resident copy is not the one it names."""
     here = Path(__file__).resolve().parent
     if _PLUGIN_CACHE_REL not in here.as_posix():
         return None
-    running = here.parent
-    versions = [v for v in running.parent.iterdir() if v.is_dir()]
-    if not versions:
+    from lazy_setup import installed_plugin_root
+    installed = installed_plugin_root("lazycortex-core")
+    if installed is None or installed.resolve() == here.parent:
         return None
-    latest = max(versions, key=lambda v: _cache_version_key(v.name))
-    if latest == running:
-        return None
-    cli = latest / "bin" / "lazycortex-core"
+    cli = installed / "bin" / "lazycortex-core"
     return cli if cli.is_file() else None
 
 
 def _forward_if_stale() -> None:
-    """Re-exec into the newest cached version, once; a forwarded process never forwards again."""
+    """Re-exec into the registry-installed version, once; a forwarded process never forwards again."""
     if os.environ.get(_FORWARDED_ENV):
         return
     newer = _newer_cached_cli()
@@ -647,7 +634,7 @@ def _cmd_detect_scope(argv: list[str]) -> int:
 def _cmd_plugin_root(argv: list[str]) -> int:
     """Print the directory a plugin's sources are read from: the authoring
     repo's ``plugins/claude/<plugin>/`` when this checkout ships the plugin, else the
-    daemon's ``LAZYCORTEX_PLUGIN_DIRS`` entry, else the newest cached install.
+    daemon's ``LAZYCORTEX_PLUGIN_DIRS`` entry, else the install ``installed_plugins.json`` records.
     One path on stdout; exit 1 with an ``error:`` line when nothing resolves.
 
     The single implementation every install / audit / seed skill points at

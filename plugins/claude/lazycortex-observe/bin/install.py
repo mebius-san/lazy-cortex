@@ -75,6 +75,8 @@ _AGENT_BINARY_CANDIDATES = {
 
 # sibling plugin CLI binary name — the § 1c boundary contract
 _CORE_CLI_NAME = "lazycortex-core"
+# waiver: external Claude Code registry path, not an internal key
+_INSTALLED_PLUGINS_REL = ".claude/plugins/installed_plugins.json"
 # subprocess wall-clock cap in seconds for the registry call
 _CORE_CLI_TIMEOUT_SEC = 30
 # number of leading stderr characters a failed core-CLI call carries into its error message
@@ -809,10 +811,10 @@ def check_local_metrics(scrape_target: str, *, timeout: float = 5.0) -> bool:
 # multi-daemon support: the core-CLI boundary and the coverage pre-flight
 def _compute_version_key(name: str) -> tuple[int, ...]:
   """
-  Compute a numeric sort key for a plugin-cache version directory name.
+  Compute a numeric sort key for a plugin version string.
 
   Args:
-    name: Version directory name as it appears in the plugin cache.
+    name: Version string as the plugin registry records it.
 
   Returns:
     A tuple of integers so `10.0.0` ranks above `9.1.1`; digit-free components contribute `0`.
@@ -824,39 +826,43 @@ def _compute_version_key(name: str) -> tuple[int, ...]:
   return tuple(out)
 
 
-def _find_cached_sibling_root(name: str) -> Path | None:
+def installed_plugin_root(name: str, home: Path | None = None) -> Path | None:
   """
-  Locate a sibling plugin's newest cached install next to this plugin's own cached install.
+  Resolve a plugin's installed source root from Claude Code's plugin registry.
+
+  The registry (`~/.claude/plugins/installed_plugins.json`) records one entry per project and
+  version that installed the plugin, each naming its `installPath`; the highest recorded version
+  wins. The plugin cache itself is never searched: it keeps every version ever installed, so a walk
+  across it returns copies the registry no longer names.
 
   Args:
-    name: Sibling plugin name, which is also its cache directory and CLI name.
+    name: Plugin name without its `@<marketplace>` suffix.
+    home: Home directory holding the registry; the current user's when omitted.
 
   Returns:
-    The sibling's highest cached version directory, or None outside a cached install or when no
-    version of the sibling is cached.
+    The recorded install root when it exists on disk, else None.
   """
-  own = Path(__file__).resolve()
-
-  # guard: not a cached install — a dev checkout has no version directory above bin/
-  if not own.parents[1].name.replace(".", "").isdigit():
-    return None
-
-  # guard: a tree too shallow for cache/<registry>/<plugin>/<version>/bin above bin/ is not a plugin cache
+  registry = (home or Path.home()) / _INSTALLED_PLUGINS_REL
   try:
-    cache = own.parents[4]
-  except IndexError:
+    data = json.loads(registry.read_text(encoding = "utf-8"))
+  except (OSError, ValueError):
     return None
-
-  # every cached version directory of the sibling, across every registry in the cache
-  versions = [
-    version
-    for registry in cache.iterdir() if (registry / name).is_dir()
-    for version in (registry / name).iterdir()
-    if version.is_dir() and version.name.replace(".", "").isdigit()
+  # the registry nests its map under `plugins` in newer files and is the map itself in older ones
+  # waiver: external Claude Code registry key, not an internal key
+  plugins = data.get("plugins", data) if isinstance(data, dict) else {}
+  records = [
+    rec
+    for key, entries in plugins.items() if key.split("@", 1)[0] == name
+    # waiver: external Claude Code registry key, not an internal key
+    for rec in (entries or []) if isinstance(rec, dict) and rec.get("installPath")
   ]
-
-  # the newest cached version wins; nothing cached means no sibling to reach
-  return max(versions, key = lambda entry: _compute_version_key(entry.name)) if versions else None
+  # guard: the plugin was never installed on this machine
+  if not records:
+    return None
+  # waiver: external Claude Code registry key, not an internal key
+  best = max(records, key = lambda rec: _compute_version_key(str(rec.get("version", ""))))
+  root = Path(str(best["installPath"]))
+  return root if root.is_dir() else None
 
 
 def resolve_core_cli() -> Path:
@@ -868,8 +874,8 @@ def resolve_core_cli() -> Path:
 
   Guarantees:
     - The discovery order is fixed — every `$LAZYCORTEX_PLUGIN_DIRS` entry, then the dev-vault
-      sibling layout, then the plugin cache — and the first location that carries the binary
-      always wins, independent of unrelated environment state.
+      sibling layout, then the install registry's record — and the first location that carries
+      the binary always wins, independent of unrelated environment state.
 
   Returns:
     Absolute path to the CLI binary.
@@ -880,8 +886,8 @@ def resolve_core_cli() -> Path:
 
   # Contract:
   # The discovery order is fixed — every `$LAZYCORTEX_PLUGIN_DIRS` entry, then the dev-vault
-  # sibling layout, then the plugin cache — and the first location that carries the binary
-  # always wins, independent of unrelated environment state.
+  # sibling layout, then the install registry's record — and the first location that carries
+  # the binary always wins, independent of unrelated environment state.
 
   # Domain(plugin.boundaries):
   # # A shipper reaches its sibling plugin only through its published command line
@@ -890,11 +896,12 @@ def resolve_core_cli() -> Path:
   # own published command-line program instead and reads back its answer. The search for that program
   # follows a fixed order of decreasing certainty: first every directory a runtime-launched process is
   # explicitly told the enabled plugins live in, then the layout of a development checkout where every
-  # plugin's sources sit side by side, and as a last resort the store of installed plugins this plugin
-  # itself was installed into, where the sibling's newest installed version is taken. The general
-  # command search path is never consulted: the program is a plain script file, not an installed
-  # executable. Nothing found by any of the three means the run cannot reach its sibling at all, and
-  # that failure is reported rather than papered over with a guess.
+  # plugin's sources sit side by side, and as a last resort the record the host's plugin registry keeps
+  # of where the sibling's highest installed version lives. The cache of installed copies is never
+  # walked: it keeps every version ever installed, and the registry alone says which one is current.
+  # The general command search path is never consulted: the program is a plain script file, not an
+  # installed executable. Nothing found by any of the three means the run cannot reach its sibling at
+  # all, and that failure is reported rather than papered over with a guess.
 
   # walk the discovery order and return the first location that actually carries the binary
   # waiver: external env-var name of the plugin-dirs boundary contract
@@ -917,18 +924,19 @@ def resolve_core_cli() -> Path:
   if (sibling := Path(__file__).resolve().parents[2] / _CORE_CLI_NAME / "bin" / _CORE_CLI_NAME).is_file():
     return sibling
 
-  # the cached sibling is the last source — the consumer-install fallback with no daemon export
-  cached_root = _find_cached_sibling_root(_CORE_CLI_NAME)
+  # the registry's install record is the last source — the consumer-install fallback with no daemon export
+  registered_root = installed_plugin_root(_CORE_CLI_NAME)
   # waiver: plugin-tree layout directory name, not an internal key
-  if cached_root is not None and (cached := cached_root / "bin" / _CORE_CLI_NAME).is_file():
-    return cached
+  if registered_root is not None and (registered := registered_root / "bin" / _CORE_CLI_NAME).is_file():
+    return registered
 
   # nothing found by any of the three means the sibling is unreachable from here; name every stage searched
   searched = [ entry for entry in env_dirs if entry ] or [ "<unset>" ]
   raise RuntimeError(
     f"lazycortex-core CLI not found: no bin/{_CORE_CLI_NAME} under any directory named by "
     f"$LAZYCORTEX_PLUGIN_DIRS (searched: {', '.join(searched)}), no dev-vault sibling at '{sibling}', "
-    f"and no cached sibling{f' under {cached_root}' if cached_root is not None else ''}"
+    f"and no registered install"
+    f"{f' under {registered_root}' if registered_root is not None else f' in ~/{_INSTALLED_PLUGINS_REL}'}"
   )
 
 

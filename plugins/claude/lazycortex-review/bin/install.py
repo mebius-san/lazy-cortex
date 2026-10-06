@@ -349,8 +349,8 @@ def _reconcile_routines(repo: Path, cfgs: dict) -> dict:
   if cli is None:
     raise RuntimeError(
         "lazycortex-core CLI not resolvable: $LAZYCORTEX_PLUGIN_DIRS yields no match, no "
-        "dev-vault sibling tree carries bin/lazycortex-core, and the plugin cache has no "
-        "lazycortex-core version with a bin/lazycortex-core entry."
+        "dev-vault sibling tree carries bin/lazycortex-core, and the plugin registry records no "
+        "lazycortex-core install with a bin/lazycortex-core entry."
     )
   outcomes: dict[str, str] = {}
   for name, cfg in cfgs.items():

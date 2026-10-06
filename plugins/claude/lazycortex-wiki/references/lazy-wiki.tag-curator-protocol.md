@@ -5,7 +5,7 @@ description: Tag-canon protocol for the wiki.tag-curator expert — payload/resu
 ---
 # lazy-wiki.tag-curator-protocol v1
 
-`<wiki-cli>` stands for the wiki plugin's `bin/lazycortex-wiki` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-wiki/<version>/`, or `plugins/claude/lazycortex-wiki/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+`<wiki-cli>` stands for the wiki plugin's `bin/lazycortex-wiki` file — the copy under `~/.claude/plugins/cache/lazycortex/lazycortex-wiki/<version>/` that `~/.claude/plugins/installed_plugins.json` records as installed, or `plugins/claude/lazycortex-wiki/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
 Canonical contract for jobs dispatched to `wiki.tag-curator` by `lazycortex-wiki`'s `tag-tick` dispatcher (or any consumer producing tag-curator-shaped jobs). The dispatcher builds the bundle and queues it via `dispatch-job`; the tag curator (C-hybrid, has Bash) applies its judgement by running the deterministic `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> retag` primitive, rewrites the advisory tag-values dictionary to match, and then commits. Which surfaces exist, how often they are ticked, and how the dictionary path is configured are the consumer's concern, out of scope for this wire contract.
 

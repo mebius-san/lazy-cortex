@@ -24,6 +24,11 @@ _SPEC_SECTION = "spec"
 _VAULT_ROOT_KEY = "vault_root"
 # waiver: sibling-plugin CLI env contract per dev.plugin-boundaries § 1c
 _ENV_PLUGIN_DIRS = "LAZYCORTEX_PLUGIN_DIRS"
+# waiver: external Claude Code registry path and record keys, not internal keys
+_INSTALLED_PLUGINS_REL = ".claude/plugins/installed_plugins.json"
+_REG_PLUGINS = "plugins"
+_REG_VERSION = "version"
+_REG_INSTALL_PATH = "installPath"
 _BIN_DIR = "bin"
 _TMP_SUFFIX = ".tmp"
 _ENCODING = "utf-8"
@@ -112,10 +117,10 @@ def spec_content_root(settings_root: Path) -> Path:
 
 def _version_sort_key(name: str) -> tuple[int, ...]:
   """
-  Build a numeric sort key for a plugin-cache version directory name.
+  Build a numeric sort key for a plugin version string.
 
   Args:
-    name: Version directory name as it appears in the plugin cache.
+    name: Version string as the plugin registry records it.
 
   Returns:
     A tuple of integers so `10.0.0` ranks above `9.1.1`; digit-free components contribute `0`.
@@ -127,40 +132,40 @@ def _version_sort_key(name: str) -> tuple[int, ...]:
   return tuple(out)
 
 
-def _cached_sibling_root(name: str) -> Path | None:
+def installed_plugin_root(name: str, home: Path | None = None) -> Path | None:
   """
-  Locate a sibling plugin's newest cached install next to this plugin's own cached install.
+  Resolve a plugin's installed source root from Claude Code's plugin registry.
 
-  A cached install lives at `<cache>/<registry>/<plugin>/<version>/`, so when this file runs from
-  one, the cache root is four levels above `bin/` and every sibling's versions sit under it. A dev
-  source tree has no version level above `bin/`, so the walk finds nothing there — the dev layout
-  is served by the daemon's env export and each caller's own dev fallback.
+  The registry (`~/.claude/plugins/installed_plugins.json`) records one entry per project and
+  version that installed the plugin, each naming its `installPath`; the highest recorded version
+  wins. The plugin cache itself is never searched: it keeps every version ever installed, so a walk
+  across it returns copies the registry no longer names.
 
   Args:
-    name: Sibling plugin name, which is also its cache directory and CLI name.
+    name: Plugin name without its `@<marketplace>` suffix.
+    home: Home directory holding the registry; the current user's when omitted.
 
   Returns:
-    The sibling's highest cached version directory, or None outside a cached install or when no
-    version of the sibling is cached.
+    The recorded install root when it exists on disk, else None.
   """
-  own = Path(__file__).resolve()
-
-  # guard: not a cached install — a dev checkout has no version directory above bin/
-  if not own.parents[1].name.replace(".", "").isdigit():
-    return None
-
-  # the cache root sits four levels above bin/: cache/<registry>/<plugin>/<version>/bin
+  registry = (home or Path.home()) / _INSTALLED_PLUGINS_REL
   try:
-    cache = own.parents[4]
-  except IndexError:
+    data = json.loads(registry.read_text(encoding = "utf-8"))
+  except (OSError, ValueError):
     return None
-  versions = [
-    version
-    for registry in cache.iterdir() if (registry / name).is_dir()
-    for version in (registry / name).iterdir()
-    if version.is_dir() and version.name.replace(".", "").isdigit()
+  # the registry nests its map under `plugins` in newer files and is the map itself in older ones
+  plugins = data.get(_REG_PLUGINS, data) if isinstance(data, dict) else {}
+  records = [
+    rec
+    for key, entries in plugins.items() if key.split("@", 1)[0] == name
+    for rec in (entries or []) if isinstance(rec, dict) and rec.get(_REG_INSTALL_PATH)
   ]
-  return max(versions, key = lambda v: _version_sort_key(v.name)) if versions else None
+  # guard: the plugin was never installed on this machine
+  if not records:
+    return None
+  best = max(records, key = lambda rec: _version_sort_key(str(rec.get(_REG_VERSION, ""))))
+  root = Path(str(best[_REG_INSTALL_PATH]))
+  return root if root.is_dir() else None
 
 
 def resolve_plugin_cli(name: str) -> Path | None:
@@ -169,11 +174,11 @@ def resolve_plugin_cli(name: str) -> Path | None:
 
   Lets a plugin's bin script reach another plugin's published CLI without assuming a fixed
   install layout; each caller applies its own error handling to a missing result. The plugin-dirs
-  environment (exported by the daemon) is walked first; outside the daemon, a cached install falls
-  back to the sibling's newest version in the same plugin cache.
+  environment (exported by the daemon) is walked first; outside the daemon, the sibling's install
+  root is read from Claude Code's plugin registry (`installed_plugin_root`).
 
   Guarantees:
-    - When both the plugin-dirs environment and the plugin cache carry a matching CLI, the
+    - When both the plugin-dirs environment and the plugin registry carry a matching CLI, the
       plugin-dirs environment's copy is returned.
 
   Args:
@@ -181,11 +186,11 @@ def resolve_plugin_cli(name: str) -> Path | None:
 
   Returns:
     The resolved binary path, or None when neither the plugin-dirs environment nor the plugin
-    cache carries the named CLI.
+    registry carries the named CLI.
   """
 
   # Contract:
-  # When both the plugin-dirs environment and the plugin cache carry a matching CLI,
+  # When both the plugin-dirs environment and the plugin registry carry a matching CLI,
   # the plugin-dirs environment's copy is returned.
 
   raw = os.environ.get(_ENV_PLUGIN_DIRS, "")
@@ -197,10 +202,10 @@ def resolve_plugin_cli(name: str) -> Path | None:
     if cli.is_file():
       return cli
 
-  # plugin-cache fallback — a session (hook, skill) has no daemon export to walk
-  root = _cached_sibling_root(name)
+  # registry fallback — a session (hook, skill) has no daemon export to walk
+  root = installed_plugin_root(name)
 
-  # guard: no cached sibling — nothing further to try
+  # guard: no registry record for the sibling — nothing further to try
   if root is None:
     return None
   cli = root / _BIN_DIR / name

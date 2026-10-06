@@ -504,30 +504,13 @@ def _apply_one_job(
 # ------------------------------------------------------------- consume (§1c)
 
 
-def _version_sort_key(name: str) -> tuple[int, ...]:
-  """
-  Build a numeric sort key for a plugin-cache version directory name.
-
-  Args:
-    name: Version directory name as it appears in the plugin cache.
-
-  Returns:
-    A tuple of integers so `10.0.0` ranks above `9.1.1`; digit-free components contribute `0`.
-  """
-  out: list[int] = []
-  for part in name.split("."):
-    digits = "".join(c for c in part if c.isdigit())
-    out.append(int(digits) if digits else 0)
-  return tuple(out)
-
-
 def _resolve_core_cli() -> Path | None:
   """
   Find the `lazycortex-core` CLI binary.
 
   Returns:
     Absolute path to the resolved binary, taking `$LAZYCORTEX_PLUGIN_DIRS` over the dev-vault
-    sibling tree and that over the plugin cache, or `None` when no lookup finds one.
+    sibling tree and that over the install registry, or `None` when no lookup finds one.
   """
   # waiver: matches dispatcher.py's own literal — not a keys.py-promoted constant there either
   dirs = os.environ.get("LAZYCORTEX_PLUGIN_DIRS", "").split(os.pathsep)
@@ -540,28 +523,19 @@ def _resolve_core_cli() -> Path | None:
       return cli
 
   # dev-vault stage — this file sits at plugins/claude/lazycortex-review/bin/, so core's own bin/ is two
-  # levels up and back down the sibling tree; it must precede the cache (§ 2b) so a checkout runs
-  # the sources at hand rather than whatever version happens to be installed
+  # levels up and back down the sibling tree; it must precede the registry (§ 2b) so a checkout
+  # runs the sources at hand rather than whatever version happens to be installed
   sibling = Path(__file__).resolve().parents[2] / Plugin.CORE / Paths.BIN_DIR / Plugin.CORE
   if sibling.is_file():
     return sibling
-  cache = Path.home() / Paths.PLUGIN_CACHE
 
-  # guard: no plugin cache on this machine — nothing further to try
-  if not cache.is_dir():
-    return None
-  plugin_dirs = [
-      registry / Plugin.CORE
-      for registry in cache.iterdir()
-      if registry.is_dir() and (registry / Plugin.CORE).is_dir()
-  ]
-  all_versions = [v for pd in plugin_dirs for v in pd.iterdir() if v.is_dir()]
+  # registry stage — the install root Claude Code's plugin registry records for core
+  root = _git_ops.installed_plugin_root(Plugin.CORE)
 
-  # guard: no installed version found — nothing further to try
-  if not all_versions:
+  # guard: core was never installed on this machine — nothing further to try
+  if root is None:
     return None
-  latest = max(all_versions, key = lambda v: _version_sort_key(v.name))
-  cli = latest / Paths.BIN_DIR / Plugin.CORE
+  cli = root / Paths.BIN_DIR / Plugin.CORE
   return cli if cli.is_file() else None
 
 

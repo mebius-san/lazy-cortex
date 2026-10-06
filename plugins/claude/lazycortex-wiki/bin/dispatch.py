@@ -15,6 +15,8 @@ import sys
 from pathlib import Path
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import plugin_registry as _plugin_registry  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import tags as _tags  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
@@ -23,64 +25,12 @@ if TYPE_CHECKING:
 
 
 # lazycortex-wiki reaches lazycortex-core ONLY via its published CLI —
-# no Python-import coupling, no filesystem-walk binary discovery beyond
-# the $LAZYCORTEX_PLUGIN_DIRS contract.  See
-# the inter-plugin boundary contract for the full pattern.
+# no Python-import coupling, and no plugin-cache walk: the binary comes
+# from the $LAZYCORTEX_PLUGIN_DIRS contract, or else from the install root
+# Claude Code's plugin registry records.  See the inter-plugin boundary
+# contract for the full pattern.
 
 # ----------------------------------------------------------------------------------------
-def _version_sort_key(name: str) -> tuple[int, ...]:
-  """
-  Build a numeric sort key for a plugin-cache version directory name.
-
-  Args:
-    name: Version directory name as it appears in the plugin cache.
-
-  Returns:
-    A tuple of integers so `10.0.0` ranks above `9.1.1`; digit-free components contribute `0`.
-  """
-  out: list[int] = []
-  for part in name.split("."):
-    digits = "".join(c for c in part if c.isdigit())
-    out.append(int(digits) if digits else 0)
-  return tuple(out)
-
-
-def _cached_sibling_root(name: str) -> Path | None:
-  """
-  Locate a sibling plugin's newest cached install next to this plugin's own cached install.
-
-  A cached install lives at `<cache>/<registry>/<plugin>/<version>/`, so when this file runs from
-  one, the cache root is four levels above `bin/` and every sibling's versions sit under it. A dev
-  source tree has no version level above `bin/`, so the walk finds nothing there — the dev layout
-  is served by the daemon's env export and each caller's own dev fallback.
-
-  Args:
-    name: Sibling plugin name, which is also its cache directory and CLI name.
-
-  Returns:
-    The sibling's highest cached version directory, or None outside a cached install or when no
-    version of the sibling is cached.
-  """
-  own = Path(__file__).resolve()
-
-  # guard: not a cached install — a dev checkout has no version directory above bin/
-  if not own.parents[1].name.replace(".", "").isdigit():
-    return None
-
-  # the cache root sits four levels above bin/: cache/<registry>/<plugin>/<version>/bin
-  try:
-    cache = own.parents[4]
-  except IndexError:
-    return None
-  versions = [
-    version
-    for registry in cache.iterdir() if (registry / name).is_dir()
-    for version in (registry / name).iterdir()
-    if version.is_dir() and version.name.replace(".", "").isdigit()
-  ]
-  return max(versions, key = lambda v: _version_sort_key(v.name)) if versions else None
-
-
 class CoreDispatch:
   """
   Thin §1c bridge between lazycortex-wiki and lazycortex-core's CLI.
@@ -92,7 +42,7 @@ class CoreDispatch:
   Guarantees:
     - `lazycortex-core` is reached only through its published CLI binary, never by importing a
       core Python module; the binary is located via `$LAZYCORTEX_PLUGIN_DIRS`, falling back to
-      the newest cached `lazycortex-core` install next to this plugin's own cache entry when the
+      the `lazycortex-core` install root Claude Code's plugin registry records when the
       environment names none.
 
   Attributes:
@@ -108,7 +58,7 @@ class CoreDispatch:
   # Contract:
   # `lazycortex-core` is reached ONLY through its published CLI binary, NEVER by importing a core
   # Python module. The binary is located by walking `$LAZYCORTEX_PLUGIN_DIRS` first, falling back
-  # to the newest cached `lazycortex-core` install next to this plugin's own cache entry when the
+  # to the `lazycortex-core` install root Claude Code's plugin registry records when the
   # environment names none.
 
   # Expert name as it appears in `lazy.settings.json[experts]`.
@@ -176,7 +126,7 @@ class CoreDispatch:
 
     Raises:
       RuntimeError: When neither `$LAZYCORTEX_PLUGIN_DIRS` nor the
-        plugin cache contains a usable `lazycortex-core` binary.
+        plugin registry names a usable `lazycortex-core` binary.
     """
     self._cli = self._resolve_core_cli()
 
@@ -576,13 +526,14 @@ class CoreDispatch:
     Walks `$LAZYCORTEX_PLUGIN_DIRS` — set by the daemon for every subprocess
     routine it spawns — for `<dir>/bin/lazycortex-core`, matching the shape
     `runtime_daemon.resolve_routine_command` uses on the daemon side, then falls
-    back to the plugin cache this plugin itself runs from.
+    back to the install root Claude Code's plugin registry
+    (`~/.claude/plugins/installed_plugins.json`) records for core.
 
     Returns:
       Resolved `Path` to a usable `lazycortex-core` binary.
 
     Raises:
-      RuntimeError: When neither the environment nor the plugin cache carries the binary.
+      RuntimeError: When neither the environment nor the plugin registry carries the binary.
     """
 
     # Domain(plugin.boundaries):
@@ -591,10 +542,11 @@ class CoreDispatch:
     # list of directories where the enabled plugins live. Under that guarantee the neighbour's address is taken
     # from that list alone and nothing else is consulted: the entries are tried in the order given, and the
     # first one that actually carries the published command wins. An empty list means the job was started
-    # outside the runtime; the one other place looked at is the installed-plugin cache this plugin itself
-    # runs from, where the neighbour's newest installed version carries the command. The wider ladder of
-    # sources a resolver needs when it must also serve a development checkout is described where that
-    # resolver lives, and is not repeated here.
+    # outside the runtime; the one other place looked at is the registry of installed plugins, which records
+    # where the neighbour's enabled version was installed. The store of downloaded copies is never searched,
+    # since it keeps every version ever installed and its newest copy need not be the one enabled. The wider
+    # ladder of sources a resolver needs when it must also serve a development checkout is described where
+    # that resolver lives, and is not repeated here.
 
     # take the first directory that actually carries the binary — order is the caller's priority
     env_dirs = os.environ.get(CoreDispatch._ENV_PLUGIN_DIRS, "").split(os.pathsep)
@@ -606,23 +558,24 @@ class CoreDispatch:
       if cli.is_file():
         return cli
 
-    # plugin-cache fallback — a consumer install's own session has no daemon export to walk
-    cached_root = _cached_sibling_root(CoreDispatch._CORE_PLUGIN_NAME)
-    cached = None if cached_root is None else (
-      cached_root / CoreDispatch._BIN_SEGMENT / CoreDispatch._CORE_PLUGIN_NAME
-    )
-    if cached is not None and cached.is_file():
-      return cached
+    # registry fallback — a consumer install's own session has no daemon export to walk; the
+    # install root Claude Code recorded for core's highest installed version
+    installed = _plugin_registry.installed_plugin_root(CoreDispatch._CORE_PLUGIN_NAME)
+    if installed is not None:
+      cli = installed / CoreDispatch._BIN_SEGMENT / CoreDispatch._CORE_PLUGIN_NAME
+      if cli.is_file():
+        return cli
 
-    # the environment and the plugin cache are the only sanctioned discovery channels — see
+    # the environment and the plugin registry are the only sanctioned discovery channels — see
     # dev.plugin-boundaries § 1c; name what was searched so a misconfigured runner is diagnosable
     # from the message alone
     searched = [d for d in env_dirs if d] or ["<unset>"]
     raise RuntimeError(
       f"lazycortex-core CLI not resolvable: no "
       f"{CoreDispatch._BIN_SEGMENT}/{CoreDispatch._CORE_PLUGIN_NAME} under any directory named by "
-      f"${CoreDispatch._ENV_PLUGIN_DIRS} (searched: {', '.join(searched)}) and no cached sibling. "
+      f"${CoreDispatch._ENV_PLUGIN_DIRS} (searched: {', '.join(searched)}) and no "
+      f"{CoreDispatch._CORE_PLUGIN_NAME} install recorded in Claude Code's plugin registry. "
       f"This worker runs as a daemon subprocess, which exports that variable; "
-      f"running it from a plain shell outside a cached install requires exporting "
+      f"running it from a plain shell without an installed core requires exporting "
       f"${CoreDispatch._ENV_PLUGIN_DIRS} to the enabled plugin directories first."
     )

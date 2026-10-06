@@ -8,7 +8,7 @@ A plugin that knows the meaning of its own frontmatter ships that knowledge as a
 ## 1. File location and discovery
 
 - Path: `plugins/claude/<plugin>/references/<ns>.iconize-registry.json` — `<ns>` is the plugin's canonical namespace (`lazy-spec`, `lazy-review`, `lazy-wiki`, …). A plugin may ship several registry files (one per namespace).
-- Discovery: the worker walks the plugin roots in `$LAZYCORTEX_PLUGIN_DIRS` (the `--plugin-dir` dev trees the lazycortex-core runtime daemon exports — never a cached install) and reads every `references/*.iconize-registry.json`. When that variable is empty it takes the dev-vault sibling layout `<vault>/plugins/claude/*` instead. Then — when the worker itself runs from the plugin cache — it adds the newest cached version, resolved on each run, of every installed plugin those roots do not already cover.
+- Discovery: the worker walks the plugin roots in `$LAZYCORTEX_PLUGIN_DIRS` (the `--plugin-dir` dev trees the lazycortex-core runtime daemon exports — never a cached install) and reads every `references/*.iconize-registry.json`. When that variable is empty it takes the dev-vault sibling layout `<vault>/plugins/claude/*` instead. Then it adds, for every installed plugin those roots do not already cover, the install `~/.claude/plugins/installed_plugins.json` records (its highest-version `installPath`), resolved on each run — never a walk of the plugin cache's version directories.
 - Best-effort, always: an absent plugin contributes no rules; an unreadable or malformed registry is skipped with a stderr diagnostic; nothing ever blocks a commit or a run.
 
 ## 2. File schema

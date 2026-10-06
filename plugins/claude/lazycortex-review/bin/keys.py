@@ -570,7 +570,6 @@ class Paths:
     SETTINGS_FILE: The `lazy.settings.json` configuration filename.
     GIT_DIR: The `.git` directory name used as a repo-root marker / walk-skip entry.
     BIN_DIR: The plugin `bin` directory name used for CLI binary resolution.
-    PLUGIN_CACHE: The Claude Code plugin-cache root, relative to the home directory.
     RUNTIME_DIR: The per-repo gitignored runtime-state directory name.
     JOBS_SIDECAR: The job-marker sidecar filename inside `RUNTIME_DIR`.
   """
@@ -579,7 +578,6 @@ class Paths:
   SETTINGS_FILE = "lazy.settings.json"
   GIT_DIR = ".git"
   BIN_DIR = "bin"
-  PLUGIN_CACHE = ".claude/plugins/cache"
   RUNTIME_DIR = ".runtime"
   JOBS_SIDECAR = "lazy-review.jobs.json"
 

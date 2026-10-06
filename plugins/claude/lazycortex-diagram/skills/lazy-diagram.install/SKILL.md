@@ -43,7 +43,7 @@ Scope = **where the plugin is actually enabled**, not where `/plugin install` la
 
 Resolve it via the core CLI, which reads `enabledPlugins` from the project settings first, then the global settings, and falls back to the install record's own `scope` only when neither settings file enables the plugin:
 
-**Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file: when this repo authors the plugin itself (`plugins/claude/lazycortex-core/.claude-plugin/plugin.json` exists) that is `<repo-root>/plugins/claude/lazycortex-core/bin/lazycortex-core`; otherwise `Read` `$HOME/.claude/plugins/installed_plugins.json` and take `<installPath>/bin/lazycortex-core` from the last `lazycortex-core@lazycortex` record. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
+**Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file: when this repo authors the plugin itself (`plugins/claude/lazycortex-core/.claude-plugin/plugin.json` exists) that is `<repo-root>/plugins/claude/lazycortex-core/bin/lazycortex-core`; otherwise `Read` `$HOME/.claude/plugins/installed_plugins.json` and take `<installPath>/bin/lazycortex-core` from the highest-`version` `lazycortex-core@lazycortex` record (the registry keeps one record per project; never a walk of `~/.claude/plugins/cache/`). Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
 
 ```
 Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> detect-scope lazycortex-diagram@lazycortex)
@@ -95,7 +95,7 @@ Byte comparison decides, the script writes, and it verifies each write. Nothing 
 Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> file-sync --src <installPath>/rules --dst <targetRulesDir> --copy-diverged --owned-glob 'lazy-diagram.*.md')
 ```
 
-`<core-cli>` is `<coreInstallPath>/bin/lazycortex-core`, where `<coreInstallPath>` is the `installPath` of the highest-`version` record of `lazycortex-core@lazycortex` in `installed_plugins.json` (the registry keeps one record per project, and an older project's record names an older cache dir); it runs through the interpreter because the file carries no exec bit — `lazycortex-core` is a hard dependency of this plugin, so the CLI is always present.
+`<core-cli>` is `<coreInstallPath>/bin/lazycortex-core`, where `<coreInstallPath>` is the `installPath` of the highest-`version` record of `lazycortex-core@lazycortex` in `installed_plugins.json` (the registry keeps one record per project, and an older project's record names an older cache dir; never a walk of `~/.claude/plugins/cache/`); it runs through the interpreter because the file carries no exec bit — `lazycortex-core` is a hard dependency of this plugin, so the CLI is always present.
 
 The command creates the destination directory, copies absent targets (**installed**), byte-compares the rest (**unchanged**), overwrites every stale target from the shipped source (**refreshed**), and reports owned targets with no source as **kept-orphan** (left in place, never deleted). Exit code 3 with a non-empty `failed` array means a write did not verify — report it as **failed**, never as applied.
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a product bound to existing code, generate vision/design/tech docs from source, then gap-scan for anything missed.
-last_regen: 2026-10-01
+last_regen: 2026-10-06
 diagram_spec:
   anchor: "How the skills hand off"
   request: "Sequence diagram showing the three-skill journey: operator runs lazy-spec.product-config to register the product and write settings, then runs lazy-spec.create-from-code to scan source and produce vision + design + tech docs (and scaffold any candidate features), then runs lazy-spec.coverage to gap-scan the code against the spec tree and materialize anything missed; show the operator, each skill, and the spec vault as actors, with the key handoff points between them."
@@ -10,8 +10,8 @@ source_skills:
   - lazy-spec.create-from-code
   - lazy-spec.create-feature
   - lazy-spec.coverage
-source_sha: de6f0fae7f7a3cf91f8b068e482c0d28d5f418a1
-surface_sha: c8ee20624e50be3cfc92009657cb0d4e8559b74fb4c62c56d51b928b7c471db3
+source_sha: 2b8e9e79da15a0e25e187f4c05ae6011a36f0740
+surface_sha: 326766b058b1206b6fd4ff1580b839c7c27c723eaa141b9d89b13f5a1cbdfeb3
 ---
 # How do I get specs for a codebase that already exists?
 

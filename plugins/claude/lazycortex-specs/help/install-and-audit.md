@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Bootstrap the plugin, register products, audit a product's spec health, and look up its full skill surface.
-last_regen: 2026-10-05
+last_regen: 2026-10-06
 diagram_spec:
   anchor: "How the pieces fit together"
   request: "Flow diagram showing the install-and-audit lifecycle: lazy-spec.install as the first step (creates consumer template dirs, registers lazy-spec.gate-tick routine, wires request-handler runtime across channels 6a–6g), leading to lazy-spec.product-config (product creation wizard: writes product record to lazy.settings.json[products], scaffolds folder tree with # Summary protected sections and précis+stats markers, leaves the shared behaviour-keyed review classes to cover the product and clones a product-scoped override only where a role expert diverges), lazy-spec.audit as a recurring health-check loop that dispatches four parallel agents (A: link health, B: source staleness, C: role/header/stage, D: status gates/folders/intake) plus inline Check 8 cross-reference and Check 9 upstream-sources checks, and lazy-spec.help as an always-available discovery entry point at the side. Show lazy-spec.install feeding into lazy-spec.product-config, lazy-spec.product-config completing to a registered product, and lazy-spec.audit pointing back at the registered product as a recurring validation pass. Keep lazy-spec.help separate."
@@ -10,8 +10,8 @@ source_skills:
   - lazy-spec.product-config
   - lazy-spec.audit
   - lazy-spec.help
-source_sha: 9c110327bf3385f108b4614ca72bc2adc1fe5c72
-surface_sha: 7ef9d0314fa7996a9ecd06c93f0f78afc9a508c20d156f14b626afbe5a006ad3
+source_sha: 2b8e9e79da15a0e25e187f4c05ae6011a36f0740
+surface_sha: 11ad5fea970bf5a1cc7a8ba747fe3eea530700a270f64c4784ca28fddace7bec
 ---
 # Bootstrapping, configuring products, and auditing spec health
 
@@ -21,7 +21,7 @@ Running `/lazy-spec.install` then `/lazy-spec.product-config` in order is the fa
 
 ## When you'd use this
 
-`<specs-cli>` stands for the specs plugin's `bin/lazycortex-specs` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-specs/<version>/`, or `plugins/claude/lazycortex-specs/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+`<specs-cli>` stands for the specs plugin's `bin/lazycortex-specs` file — the copy that `~/.claude/plugins/installed_plugins.json` records as installed for `lazycortex-specs@lazycortex`, or `plugins/claude/lazycortex-specs/` in a checkout that authors the plugin. Never locate it by searching the plugin cache: the cache keeps every version ever installed, so a search can land on a stale copy. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
 - Setting up the plugin for the first time in a project: run `/lazy-spec.install` to create the per-context template override directories — one per shipped asset type, one per level (product-root and vault-root), the linear base, and the request inbox — mirror the plugin's `spec.decisions.md` rule into `.claude/rules/`, register the `lazy-spec.gate-tick`, `lazy-spec.coordinator-watch`, `lazy-spec.coordinator-deletes`, and `lazy-spec.collect` daemon routines, wire the full request-handler runtime (the open and apply channels plus the `spec.coordinator` expert, the review class for `requests/*.md`, and the review classes for every spawned doc kind), seed the `agent_models` tier for `spec.coordinator`, seed the project-wide vault spec draft if it doesn't already exist, and register the plugin's own `Bash("${LAZYCORTEX_PYTHON:-python3}" *)` permission so dispatched experts can call it under `dontAsk` mode — then run `/lazy-spec.product-config` yourself when you want to register your first product (install only reports whether one is registered and never asks).
 - Registering a new product (code-bound or design-only): run `/lazy-spec.product-config` to walk through the product's stable key, its spec folder, source repo attachment, language, icon, and the built-in review-expert roles — the skill writes the product record and its own folder-note (group folders such as `changes/` or `bugs/` appear lazily the first time you scaffold an asset into one), and generates or reuses the vault-wide shared review classes covering every doc kind a product can produce.
