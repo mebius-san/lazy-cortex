@@ -2060,6 +2060,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+### 4.10.2 — 2026-10-06 UTC
+
+- `/lazy-python.help` now lists the `lazy-python.failing-tests` rule, shows four rules instead of three, and reports the correct audit check count (13) and test-writer category count (nine). The command also answers to questions about the failing-test rule.
+
 ### 4.10.1 — 2026-10-05 UTC
 
 - The `lazy-python.test-writer` agent and the testing guidelines now allow testing private helpers directly, while still requiring tests for public contracts.

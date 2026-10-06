@@ -78,7 +78,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 
 | Command | Description |
 |---|---|
-| `lazy-python.help` | Run when the operator asks what lazycortex-python enforces, how Python is checked in this repo, which verb runs the checkers, or where domain and contract markers come from — lists the Python-discipline surface: install / audit / check-style / knowledge-sweep, the `chk-py` and `tst-py` wrappers, the docstring-writer / test-writer / code-reviewer agents plus the domain-writer / contract-writer knowledge-marker pair, the always-loaded style, docstring and test rules, and the PostToolUse style hook. |
+| `lazy-python.help` | Run when the operator asks what lazycortex-python enforces, how Python is checked in this repo, which verb runs the checkers, or where domain and contract markers come from — lists the Python-discipline surface: install / audit / check-style / knowledge-sweep, the `chk-py` and `tst-py` wrappers, the docstring-writer / test-writer / code-reviewer agents plus the domain-writer / contract-writer knowledge-marker pair, the always-loaded style, docstring, test and failing-test rules, and the PostToolUse style hook. |
 
 ## Rules
 

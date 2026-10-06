@@ -1,24 +1,24 @@
 ---
-description: "Run when the operator asks what lazycortex-python enforces, how Python is checked in this repo, which verb runs the checkers, or where domain and contract markers come from — lists the Python-discipline surface: install / audit / check-style / knowledge-sweep, the `chk-py` and `tst-py` wrappers, the docstring-writer / test-writer / code-reviewer agents plus the domain-writer / contract-writer knowledge-marker pair, the always-loaded style, docstring and test rules, and the PostToolUse style hook."
+description: "Run when the operator asks what lazycortex-python enforces, how Python is checked in this repo, which verb runs the checkers, or where domain and contract markers come from — lists the Python-discipline surface: install / audit / check-style / knowledge-sweep, the `chk-py` and `tst-py` wrappers, the docstring-writer / test-writer / code-reviewer agents plus the domain-writer / contract-writer knowledge-marker pair, the always-loaded style, docstring, test and failing-test rules, and the PostToolUse style hook."
 execution-discipline-waiver: "static help text — no executable steps"
 ---
 Output the block below verbatim to the user. Do not summarize, rephrase, or add commentary. Do not invoke any tools. Do not log this run.
 
 ---
 
-**lazycortex-python** — Python coding discipline as a plugin. Ships three path-scoped rules, five reference guidelines, `chk-py`/`tst-py` checker wrappers, a PostToolUse hook, docstring-writer / test-writer / code-reviewer / domain-writer / contract-writer agents, and a canonical file template. Install once per repo via `/lazy-python.install`.
+**lazycortex-python** — Python coding discipline as a plugin. Ships four path-scoped rules, five reference guidelines, `chk-py`/`tst-py` checker wrappers, a PostToolUse hook, docstring-writer / test-writer / code-reviewer / domain-writer / contract-writer agents, and a canonical file template. Install once per repo via `/lazy-python.install`.
 
 **Skills** (invoke as `/<name>` or via Skill tool):
 
 - `lazy-python.install` — quiet install: mirrors rules, deploys `chk-py`/`tst-py` wrappers into `cli/`, bootstraps `pyproject.toml` checker sections (adds `[tool.pch]` automatically when PyCharm is present), gitignores `.venv/`, scaffolds `docs/guidelines/` overlay stubs, syncs the scaffold template. Asks nothing — scope and pch are derived, and it never touches CLAUDE.md. The PostToolUse hook auto-registers from the plugin manifest — no install step needed. Idempotent.
-- `lazy-python.audit` — read-only 12-check health report: rules mirror integrity, reference resolution, artifact presence, wrappers, pyproject sections (incl. `[tool.ruff]`), hook manifest, venv state (`mypy`/`pylint`/`pytest`/`ruff` + `pytest-clarity`/`pytest-sugar`), domain-groups dictionary.
+- `lazy-python.audit` — read-only 13-check health report: rules mirror integrity, reference resolution, artifact presence, wrappers, pyproject sections (incl. `[tool.ruff]`), hook manifest, venv state (`mypy`/`pylint`/`pytest`/`ruff` + `pytest-clarity`/`pytest-sugar`), domain-groups dictionary, protected-access mypy plugin wiring.
 - `lazy-python.check-style` — manual 6-step review: reads canon + overlay, identifies modified files, runs manual inspection categories, then dispatches `chk-py` + `tst-py` to gate.
 - `lazy-python.knowledge-sweep` — grows the domain-groups dictionary from the knowledge parked under `Domain(unfiled):` (operator ticks the candidate groups), reconciles groups used in code but absent from the dictionary, then sweeps the sources with both knowledge-marker agents so every block lands under a real group.
 
 **Agents** (dispatched via `Agent(subagent_type: "lazycortex-python:<name>")`):
 
 - `lazy-python.docstring-writer` — adds or fixes docstrings on classes, methods, and properties; reads canonical guidelines + project overlay on every dispatch.
-- `lazy-python.test-writer` — writes pytest test files covering all seven Paranoid-Testing categories; reads canonical testing + checking guidelines + project overlay. Never modifies production code.
+- `lazy-python.test-writer` — writes pytest test files covering all nine Paranoid-Testing categories; reads canonical testing + checking guidelines + project overlay. Never modifies production code.
 - `lazy-python.code-reviewer` — reviews new or changed code against the canon plus the project overlay — the guideline layer no checker can prove. Runs as the `chk-py review` phase of the check pipeline; reports findings only, never edits code.
 - `lazy-python.domain-writer` — writes `Domain(<group>):` blocks for domain mechanics, formulas, and rules, validating every group against the project's domain-groups dictionary; parks knowledge under `Domain(unfiled):` when no listed group fits, and refiles parked blocks when dispatched with `refile=true`.
 - `lazy-python.contract-writer` — writes `Contract:` blocks for caller-visible guarantees and syncs the owning docstring's `Guarantees` / `Subclassing` section in the same pass.
@@ -28,6 +28,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 - `lazy-python.style` — Python style critical reminders + Verification Order. Triggers on `**/*.py`.
 - `lazy-python.docstrings` — docstring discipline; use the `lazy-python.docstring-writer` agent. Triggers on `**/*.py`.
 - `lazy-python.tests` — test placement, naming, and writing discipline; use the `lazy-python.test-writer` agent. Triggers on `tests/**/*.py`.
+- `lazy-python.failing-tests` — what to do when a test fails: judge which side is wrong first, never bend correct code to an outdated test, never change what a test asserts without the user's explicit yes. Triggers on `**/*.py` and pytest config files.
 
 **Hook** (auto-registered from `hooks/hooks.json` when the plugin is enabled):
 
