@@ -9,7 +9,7 @@ description: Tag-canon protocol for the wiki.tag-curator expert — payload/resu
 
 Canonical contract for jobs dispatched to `wiki.tag-curator` by `lazycortex-wiki`'s `tag-tick` dispatcher (or any consumer producing tag-curator-shaped jobs). The dispatcher builds the bundle and queues it via `dispatch-job`; the tag curator (C-hybrid, has Bash) applies its judgement by running the deterministic `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> retag` primitive, rewrites the advisory tag-values dictionary to match, and then commits. Which surfaces exist, how often they are ticked, and how the dictionary path is configured are the consumer's concern, out of scope for this wire contract.
 
-**Version 1** carries the `normalize-tags` kind that `lazy-wiki.curator-protocol` v4 defined for the `wiki.curator` expert. The kind moved here unchanged in substance; what is new is that a job names a **surface** rather than a scope (a configured wiki scope, or the generated domain-doc tree) and that the expert owns the advisory dictionary as a second output.
+**Version 1** carries the `normalize-tags` kind that the `wiki.curator` expert once owned. The kind moved here unchanged in substance; what is new is that a job names a **surface** rather than a scope (a configured wiki scope, or the generated domain-doc tree) and that the expert owns the advisory dictionary as a second output.
 
 ## Request shape (`request.json`)
 
@@ -71,14 +71,6 @@ Outcome semantics:
 ```
 
 The map gives each in-use value its canonical form per axis: merge a synonym (`"food": "coffee"`), nest a subtype (`"espresso": "coffee/espresso"`), or omit a value to leave it unchanged. Values not listed are kept as-is. An empty object (`{}`) is valid — nothing to consolidate. The file is consumed directly by `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> retag <surface> --from result/alias_map.json`.
-
-## Language
-
-Before writing any prose — a `wiki_summary`, a See-also gloss, a term definition, a directory description, a tag gloss — resolve the language the vault stores its notes in: run `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> resolve-language --repo <repo-root>` and write every line in the code the verb returns. The language never arrives in the job payload and is never inferred from the prose already around you: settings are the source of truth, and the verb is how a writer reads them.
-
-The obligation covers shipped boilerplate. A template heading, a seeded stub, or any English scaffolding you keep in the file you write is translated into the resolved language when it differs. When editing prose that already exists, keep its language — never retranslate.
-
-Never translated, in any language: frontmatter keys and values, `wiki/<axis>/<value>` tags and axis names, canonical section headings (`# Topics`, `# Domains`, `# See also`, `# History`), identifiers, file paths, and link targets. A link's display text may be translated; the path before `|` never is.
 
 ## Side-effect rules
 

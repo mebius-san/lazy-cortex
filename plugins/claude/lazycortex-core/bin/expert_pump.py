@@ -47,6 +47,8 @@ from worktree_tasks import WorktreeStartError, WorktreeTaskManager  # pylint: di
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from provider_env import ProviderKey, build_spawn_env, resolve_token  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from routine_types import protocols_env  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import rate_limit_flag  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import sandbox_scope  # pylint: disable=import-error
@@ -1602,6 +1604,18 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
 
     # pin it on this spawn's own env
     env[EnvVar.MAX_SUBAGENT_SPAWN_DEPTH] = EnvVar.SUBAGENT_SPAWN_DEPTH_PIN
+
+    # Domain(runtime.protocols):
+    # # Protocol inheritance along a job chain
+    # A job's protocols carry over to every job it dispatches from inside its own run, the same
+    # way a routine's subprocess passes the routine's protocols on to the jobs it queues.
+
+    # Decision: export the job's own protocols on each spawn, not inherit them from this
+    # process's routine environment — the pump is a routine of its own with no protocols, so the
+    # dispatching routine's list is absent here and a chained job would otherwise carry none.
+
+    # hand the job's protocol list to the spawn
+    env.update(protocols_env(protocols_refs))
 
     # a provider-bound job talks to its own endpoint: remap the base URL, swap the
     # auth token, and pin every tier alias to the provider's model names so nothing

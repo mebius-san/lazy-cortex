@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Curate wiki nodes via /lazy-wiki.relink or daemon routines — curator classifies/links; tag-curator consolidates axis vocabulary via retag.
-last_regen: 2026-10-06
+last_regen: 2026-10-07
 diagram_spec:
   anchor: "How the pieces fit together"
   request: "Flow diagram showing /lazy-wiki.relink driving the curation block: (1) relink-plan produces classify[], link[], drop[] lists; (2) curator agent runs classify per node via apply-node; (3) normalize-tags consolidates the tag vocabulary via retag — dispatched to the tag-curator agent, once per configured surface; (4) build-index rebuilds topics.md; (5) curator agent runs link per node via apply-node; (6) prune-node drops dangling See-also lines for each path in drop[]; (7) relink commits all touched files (including the tag-values dictionary) and records the wiki_synced_sha anchor. Show that the curator agent is dispatched twice (classify phase, link phase) and is distinct from the tag-curator agent dispatched for normalize-tags, that prune-node is a deterministic primitive with no agent dispatch, and that the skill owns the single commit."
@@ -9,8 +9,8 @@ source_skills:
   - lazy-wiki.relink
   - lazy-wiki.curator
   - lazy-wiki.tag-curator
-source_sha: 2b8e9e79da15a0e25e187f4c05ae6011a36f0740
-surface_sha: dc4e257b4d81d93f31b18a8d2d5d749cb264565762ba499b412640f3652bcf12
+source_sha: 117b82946395f0f99664e069977bea4dcc5c6d40
+surface_sha: bd900241cbbb56fe12d1ddc3eb9371f0d563889dde12c7fc8b871a041b39b8da
 ---
 # Curation
 

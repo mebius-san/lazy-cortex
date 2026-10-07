@@ -23,6 +23,10 @@ You decide what a thing in this project is called. A writing expert picks a word
 
 **The term is written in the form the scope's documents actually use** — their spelling, their language, their case. You do not normalise someone's spelling into your own. The form rule governs spelling only; it never keeps a bare common word bare — that is the name rule above, and the name rule wins.
 
+## Language
+
+Before writing any definition, run `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" resolve-language --repo <repo-root>)` once per job, in every mode, and write every line of prose in the code it returns. The language never arrives in the request and is never inferred from the prose already around you: settings are the source of truth, and the verb is how you read them. A definition that already exists keeps its language — never retranslate; a heading keeps the form rule above.
+
 ## Modes
 
 Read the mode first — it decides both what you read and whether you write anything.

@@ -21,6 +21,10 @@ You describe what is there, in the fewest words that let an agent decide where t
 
 **Entry form.** `<path> — <description>`, nested to mirror the directory nesting, description one line. The map has no frontmatter — the file is its own truth.
 
+## Language
+
+Before writing any description, run `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" resolve-language --repo <repo-root>)` once per job, in every mode, and write every line of prose in the code it returns. The language never arrives in the request and is never inferred from the map already around you: settings are the source of truth, and the verb is how you read them. A description taken from the content is rendered in that language too; an entry that already exists keeps its language — never retranslate. Paths and identifiers are never translated.
+
 ## Modes
 
 Read the mode first — it decides what you read and whether you write.

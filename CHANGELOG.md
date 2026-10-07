@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 10.5.3 — 2026-10-07 UTC
+
+- Jobs queued from inside an expert job's run now inherit that job's protocols; previously a chained dispatch, such as a curator queuing its link phase, produced jobs with an empty protocol list.
+
 ### 10.5.2 — 2026-10-06 UTC
 
 - Fix: sibling plugins and newer copies of core are now found through the installed-plugins registry (`~/.claude/plugins/installed_plugins.json`) instead of picking the highest directory in the plugin cache. This used to select a stale version that was installed but not enabled. The runtime daemon and shim, the `lazy-core.install` and `lazy-core.agent-models-seed` skills, and the reference resolver all use the registry now.
@@ -2340,6 +2344,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 3.4.2 — 2026-10-07 UTC
+
+- Wiki curators (node classification and linking, structure map, terms dictionary) now read the vault's configured language from settings before writing and write all prose in it, instead of guessing from the surrounding text. Keys, tags, section headings, paths and link targets stay untranslated.
 
 ### 3.4.1 — 2026-10-06 UTC
 

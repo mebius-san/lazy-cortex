@@ -186,6 +186,35 @@ def routine_protocols_env(cfg: dict) -> dict[str, str]:
   # guard: routine declared no protocols — overlay is empty
   if not protocols:
     return {}
+
+  # encode the declared list
+  return protocols_env(protocols)
+
+
+def protocols_env(protocols: list[str]) -> dict[str, str]:
+  """
+  Build the environment overlay that hands an explicit protocol list to a subprocess.
+
+  The overlay carries the list a spawned process reads when it queues expert jobs of its own
+  via `dispatch-job`, so those jobs inherit the protocols of whatever spawned them.
+
+  Guarantees:
+    - The overlay entry is present in the returned dict on every call, even for an empty list;
+      only its value is empty in that case, so a value the caller's process inherited from its
+      own environment is always overridden.
+
+  Args:
+    protocols: Protocol IDs to encode; may be empty.
+
+  Returns:
+    `{LAZYCORTEX_ROUTINE_PROTOCOLS: "<id1>;<id2>;..."}`, the value empty when the list is.
+  """
+
+  # Contract:
+  # The entry is emitted on every call, empty value included. A spawn built from a job that
+  # declares no protocols must not pass on a stale value its own process inherited, so the
+  # variable is always rewritten, never left as found.
+
   return { ROUTINE_PROTOCOLS_ENV: _ROUTINE_PROTOCOLS_SEP.join(protocols) }
 
 

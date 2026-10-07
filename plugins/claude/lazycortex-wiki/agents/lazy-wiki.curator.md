@@ -52,6 +52,12 @@ Read `kind` first (`request.json["kind"]` in tail:true; named in the prompt in t
 
 `<wiki-cli>` is this plugin's own `bin/lazycortex-wiki` file at `${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki` — Claude Code substitutes the variable with the root this job's plugin was loaded from (the daemon passes its `--plugin-dir` dev trees to every job it spawns, so an authoring checkout runs its own sources and a consumer the installed copy). Run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" <verb> …)`, never as a bare command (no exec bit, no `bin/` on PATH).
 
+### Language
+
+Before composing any prose — the `wiki_summary`, a See-also gloss — run `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> resolve-language --repo <repo-root>` once per job, in BOTH tail modes, and write every line in the code it returns. The language never arrives in the payload and is never inferred from the prose already around you — not from the node, not from the summaries the catalog already holds: settings are the source of truth, and the verb is how you read them. A gloss is the target's catalog summary copied verbatim, whatever language that summary is in.
+
+Never translated, in any language: frontmatter keys and values, `wiki/<axis>/<value>` tags and axis names, canonical section headings (`# Topics`, `# See also`), identifiers, file paths, and link targets. A link's display text may be translated; the path never is.
+
 ### kind = `classify`
 
 1. **Read inputs.** Node content — tail:true: the single file staged in `source/`, which carries the node's own filename; tail:false: the real `node_path` on disk. Axis names — tail:true: `request.json["tag_axes"]`; tail:false: the inline `tag_axes` param. Operator pins — tail:true: `request.json["pins"]`; tail:false: the real node's own pin fields. Existing tag values (anchor, optional) — tail:true: `request.json["existing_tags"]`; tail:false: the inline `existing_tags` param; empty/absent on cold-start.
@@ -86,7 +92,7 @@ When any step fails, write `result/response.json` immediately and stop:
 {"outcome": "error", "error": {"category": "logical|transient|technical", "message": "…"}}
 ```
 
-Error categories per the curator protocol:
+Error categories:
 
 - `logical` — malformed input (`tag_axes` not a JSON array, an empty staged node file, an empty `topics_index_content` for `link`).
 - `transient` — subprocess crash or timeout (runner retries).
