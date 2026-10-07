@@ -1513,6 +1513,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+### 6.12.0 — 2026-10-07 UTC
+
+- Reviews now pause on open concerns later: the default concerns-pause threshold is raised to 3.
+
 ### 6.11.2 — 2026-10-06 UTC
 
 - Review now finds the sibling plugins and its own scripts through the installed-plugins registry instead of picking the highest version left in the plugin cache. This stops it from running an old or non-enabled copy after updates, in the coordinator, the install step and the git and collection helpers.

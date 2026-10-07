@@ -250,7 +250,7 @@ def desired_state(
   - `CHAIN_EXHAUSTED` → recompute by the spec table:
 
     1. `concerns_decision_pending` (approved + validation H1 non-empty +
-       `review_validation_round >= concerns_decision_threshold` (per-class config, default 2) + no
+       `review_validation_round >= concerns_decision_threshold` (per-class config, default 3) + no
        `review_approved_with_concerns: true`) → CONCERNS_DECISION (highest priority — operator must
        choose continue vs finalize-with-concerns before any other gate applies).
     2. open `#review/question` or unanswered `[!decision-candidate]` → ACTION_NEEDED

@@ -102,7 +102,7 @@ This chapter is the retired `decide()` ladder and the dispatcher's priority orde
 
 **The validator decision**, judged on the collected body:
 
-- **Any validation section holds concerns** → `review_validation_round` increments. The counter is monotonic and never resets over the document's lifetime. Below the class's `concerns_decision_threshold` (default 2, floor 1), revert to main: drop `review_approved`, phase `main`, `review_main_done` empty — and **leave the concern sections in the body**, because the next main round is what reads and answers them. At or above the threshold, stop auto-reverting and hand the choice over: phase `concerns-pause`, the decision banner, and the document waits for the operator to tick continue-or-approve-with-concerns. A class that sets the threshold to 1 pauses on the first concerns round with no auto-revert at all.
+- **Any validation section holds concerns** → `review_validation_round` increments. The counter is monotonic and never resets over the document's lifetime. Below the class's `concerns_decision_threshold` (default 3, floor 1), revert to main: drop `review_approved`, phase `main`, `review_main_done` empty — and **leave the concern sections in the body**, because the next main round is what reads and answers them. At or above the threshold, stop auto-reverting and hand the choice over: phase `concerns-pause`, the decision banner, and the document waits for the operator to tick continue-or-approve-with-concerns. A class that sets the threshold to 1 pauses on the first concerns round with no auto-revert at all.
 - **No concerns** → the terminal phase when the class has terminal writers, otherwise clear the phase; finalize is next.
 
 **The terminal decision**, judged on the collected body:
