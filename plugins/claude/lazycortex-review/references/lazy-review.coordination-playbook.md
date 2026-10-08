@@ -79,11 +79,12 @@ This chapter is the retired `decide()` ladder and the dispatcher's priority orde
 
 **An operator commit mid-loop.** On `operator-edit` while the document is not approved and the phase is `main` or `awaiting-operator`, the round re-opens: `review_phase: main`, `review_main_done` back to empty — the writers speak again against the new text. `review_round` is not bumped by this; the bump rides with the next writer's landing. An operator edit is never an error by itself.
 
-**The three gestures, mirrored before the repaint.** Frontmatter is the durable record and the banner is a disposable projection, so the moment a ticked gesture is read it is mirrored with `set-key`, ahead of `paint-banner`:
+**The four gestures, mirrored before the repaint.** Frontmatter is the durable record and the banner is a disposable projection, so the moment a ticked gesture is read it is mirrored with `set-key`, ahead of `paint-banner`:
 
 - `approve the whole document` → `review_approved: true`.
 - `approve with concerns` → `review_approved_with_concerns: true`.
 - `continue review cycle` → a one-shot signal with no flag of its own: drop `review_approved` back to false, phase `main`, `review_main_done` empty. The validation-round counter is *not* touched by the operator's choice — it belongs to the validator barrier.
+- `continue without this pause` → `review_concerns_auto_continue: true`, then the same revert as `continue review cycle`. The flag is the operator's standing answer to the pause for the rest of this review: every later concerns round reverts to main on its own (the validator decision below), and the operator's control stays where it always was — the approve gesture after each main round. The flag survives an operator edit and every revert; only finalize (by prefix) and a fresh review entry remove it.
 
 **What approve does beyond the flag.** Approving means the operator accepted the document as it stands, so the approve transition also folds the edit markers down — the marked-up text becomes accepted final text, and the writers that fire next review content rather than scaffolding. It drops the resolved validation-owned sections left over from the previous cycle (terminal-owned sections, the operator's prose and `# History` stay). And it enters the first non-empty post-approve phase: `validators` when the class has any, else `terminals`, else neither — a class with no post-approve writers goes straight to finalize.
 
@@ -102,7 +103,7 @@ This chapter is the retired `decide()` ladder and the dispatcher's priority orde
 
 **The validator decision**, judged on the collected body:
 
-- **Any validation section holds concerns** → `review_validation_round` increments. The counter is monotonic and never resets over the document's lifetime. Below the class's `concerns_decision_threshold` (default 3, floor 1), revert to main: drop `review_approved`, phase `main`, `review_main_done` empty — and **leave the concern sections in the body**, because the next main round is what reads and answers them. At or above the threshold, stop auto-reverting and hand the choice over: phase `concerns-pause`, the decision banner, and the document waits for the operator to tick continue-or-approve-with-concerns. A class that sets the threshold to 1 pauses on the first concerns round with no auto-revert at all.
+- **Any validation section holds concerns** → `review_validation_round` increments. The counter is monotonic and never resets over the document's lifetime. Below the class's `concerns_decision_threshold` (default 3, floor 1), revert to main: drop `review_approved`, phase `main`, `review_main_done` empty — and **leave the concern sections in the body**, because the next main round is what reads and answers them. At or above the threshold, stop auto-reverting and hand the choice over: phase `concerns-pause`, the decision banner, and the document waits for the operator to tick continue-or-approve-with-concerns. A class that sets the threshold to 1 pauses on the first concerns round with no auto-revert at all. **`review_concerns_auto_continue: true` overrides the threshold**: the operator already answered the pause for this review, so every concerns round reverts to main the same way a below-threshold round does, and `concerns-pause` is never entered while the flag stands. The counter still increments — it is the record, not the gate.
 - **No concerns** → the terminal phase when the class has terminal writers, otherwise clear the phase; finalize is next.
 
 **The terminal decision**, judged on the collected body:

@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-10-06
+last_regen: 2026-10-08
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, generic iteration loops, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys, seed data gaps), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models, plugin-path resolution, stale source paths at claim time), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources, worker import errors), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
@@ -40,8 +40,8 @@ source_skills:
   - lazy-runtime.preflight
   - lazy-runtime.recover
   - lazy-runtime.tick
-source_sha: 2b8e9e79da15a0e25e187f4c05ae6011a36f0740
-surface_sha: 3db6c9be68e273a59ff8dc9b98c84a3d2d710e6be2d7c89a4ed81fd575fabfc7
+source_sha: 93e0a241c68d2975f6d6856e2e5649abe3eae19f
+surface_sha: 5c8f92a71cfae100d2427d40c55354ffbe91f1a1a8a245874c73ce859396b628
 ---
 # Troubleshooting
 
@@ -875,6 +875,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: Expert spawns run headless and hermetic (`claude -p ... --strict-mcp-config`) — by default an expert loads no MCP servers at all, only the ones declared per-expert via `mcp_config` in `lazy.settings.json[experts]`. If one of those declared servers hangs on initialization (a stdio server waiting on a socket that never connects, a remote server that needs interactive auth) or fails to spawn, the whole `claude -p` invocation stalls until the routine's timeout kills it. The expert never gets to write a response, so the job looks like it silently died.
 
 **Fix**: Run `/lazy-runtime.preflight` (optionally `/lazy-runtime.preflight <expert-name>` to target one expert). It emulates the same spawn the pump uses, with a trivial prompt that does no real work, and reports each declared MCP server's status — `connected`, `timed-out`, `auth-required`, or `spawn-failed`. For a timed-out or failing server it offers to drop the server from that expert's `mcp_config` (the expert then spawns hermetically without it) or, for a server that needs interactive login, prints the exact `claude mcp login <name>` command to run by hand before re-running. Re-run `/lazy-runtime.preflight` after applying a fix to confirm the expert is launchable, then re-dispatch the routine.
+
+---
+
+## Every expert spawn goes silent for the whole idle window on macOS
+
+**Symptom**: Every expert job on a macOS host starts and then produces nothing — no transcript, no session file, no output — until the idle window runs out and the job is killed. A manual `claude -p` run in the same checkout works fine. `/lazy-runtime.preflight` may report a `fail` line for the checkout above the expert table.
+
+**Likely cause**: A `permissions.additionalDirectories` entry points into a location macOS protects behind a consent prompt — `~/Downloads`, `~/Desktop`, `~/Documents`, iCloud, or `/Volumes`. An interactive session can answer that prompt. A headless expert spawn cannot, so it blocks at startup waiting for an answer nobody gives. Before each spawn, the runtime strips such an entry from the checkout's local overlay, `.claude/settings.local.json`, on its own, and preflight only warns about it there. An entry in the tracked `.claude/settings.json` is not stripped, and preflight fails on it. An entry in `~/.claude/settings.json` is flagged as a failure for any expert whose `setting_sources` includes `user`.
+
+**Fix**: Run `/lazy-runtime.preflight` and read the `fail` line it names. Remove the protected-location entry from the tracked `.claude/settings.json`, or point it at a directory outside the protected locations. If the entry sits in `~/.claude/settings.json`, either clean it there or drop `user` from the affected expert's `setting_sources`. Re-run `/lazy-runtime.preflight` to confirm the `fail` is gone, then re-dispatch the job.
 
 ---
 

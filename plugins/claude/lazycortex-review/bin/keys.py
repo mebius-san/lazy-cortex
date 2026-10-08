@@ -42,6 +42,7 @@ class ReviewKey:
     EXPERT: A per-document main-writer override.
     VALIDATION_ROUND: The post-approve validation-barrier round counter.
     APPROVED_WITH_CONCERNS: The accept-concerns-and-finalize flag.
+    CONCERNS_AUTO_CONTINUE: The operator's standing choice to skip the concerns pause for the rest of the cycle.
     PREFIX: The shared prefix of every review-lifecycle frontmatter key.
   """
 
@@ -55,6 +56,7 @@ class ReviewKey:
   EXPERT = "review_expert"
   VALIDATION_ROUND = "review_validation_round"
   APPROVED_WITH_CONCERNS = "review_approved_with_concerns"
+  CONCERNS_AUTO_CONTINUE = "review_concerns_auto_continue"
   PREFIX = "review_"
 
 

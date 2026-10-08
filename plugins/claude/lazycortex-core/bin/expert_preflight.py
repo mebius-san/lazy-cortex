@@ -14,7 +14,11 @@ harmful rather than broken: an inbox already driven by another daemon on this
 host, a sandbox whose unsandboxed-retry switch is not recorded closed (fail),
 and a sandbox allowlist that does not cover a location its own entries
 resolve to (fail for write, warn for read) — a confined spawn is checked
-against the resolved path, so every write through such a symlink fails.
+against the resolved path, so every write through such a symlink fails. It also reports a
+`permissions.additionalDirectories` entry under a macOS TCC-gated location in the tracked
+`.claude/settings.json` (fail) or in the local overlay `.claude/settings.local.json` (warn),
+either of those files failing to parse (fail), and, per expert whose `setting_sources` includes
+`user`, the same entry in `~/.claude/settings.json` (fail).
 
 Emits a JSON verdict document to stdout; the `lazy-runtime.preflight` skill owns
 the log write, the operator-facing table, and any settings fix. This bin never
@@ -35,6 +39,8 @@ from pathlib import Path
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from expert_pump import (  # pylint: disable=import-error
   build_expert_argv,
+  filter_tcc_protected,
+  get_additional_dirs,
   _normalize_mcp_config,
   _normalize_setting_sources,
   _VALID_SETTING_SOURCES,
@@ -52,6 +58,7 @@ import rate_limit_flag  # pylint: disable=import-error
 from reference_resolver import resolve, ReferenceError  # pylint: disable=import-error,redefined-builtin
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from constants import (  # pylint: disable=import-error
+  ClaudeSettingsFile,
   HaltReason,
   InboxGuardKey,
   JobConfigKey,
@@ -478,31 +485,145 @@ def _repo_checks(repo: Path) -> list[dict]:
   Validate the checkout-level conditions that make a launch harmful or broken.
 
   Launchability is not only a property of one expert's config: a checkout whose inbox is already
-  driven by another daemon on this host dispatches every file twice, and a checkout whose sandbox
-  allowlist does not cover a location it is meant to reach fails every write through it silently.
-  Both conditions apply to every expert dispatched from this checkout, so they belong in the
+  driven by another daemon on this host dispatches every file twice, a checkout whose sandbox
+  allowlist does not cover a location it is meant to reach fails every write through it silently,
+  and a checkout whose Claude settings files carry gated directories breaks every spawn that loads
+  them. These conditions apply to every expert dispatched from this checkout, so they belong in the
   same verdict document rather than in any one expert's per-expert findings.
 
   Args:
-    repo: Repository root whose inbox ownership and sandbox scope are read.
+    repo: Repository root whose inbox ownership, sandbox scope, and Claude settings files are read.
 
   Returns:
     One `fail` finding per contested inbox, one `fail` when sandbox keys are declared with no
     sandbox file to carry them, one `warn` per sandbox key on which the file and the declaration
     disagree, one `fail` when the sandbox's unsandboxed-retry switch is not recorded closed,
     one `fail` per uncovered sandbox write location, plus one `warn` per uncovered sandbox read
-    location; empty when the checkout owns every inbox it scans and its sandbox scope matches
-    its declaration and covers everything it grants with the retry closed (or records no scope
-    and declares none, or confinement off).
+    location, one `fail` per gated `permissions.additionalDirectories` entry in the tracked
+    `.claude/settings.json`, one `warn` per gated entry in `.claude/settings.local.json`, and one
+    `fail` per settings file that does not parse; empty when the checkout owns every inbox it scans,
+    its sandbox scope matches its declaration and covers everything it grants with the retry closed
+    (or records no scope and declares none, or confinement off), and its settings files carry no
+    gated entry.
 
   Raises:
     json.JSONDecodeError: If the tracked `lazy.settings.json` or its local overlay is not valid JSON.
   """
-  # a contested inbox is a hard finding on its own; the sandbox audit adds its own rows after it
+  # a contested inbox is a hard finding on its own; the sandbox audit and the settings-scope
+  # audit add their own rows after it
   return [
     _build_finding(Level.FAIL, f"inbox ownership: {finding[InboxGuardKey.DETAIL]}")
     for finding in check_inbox_collision(repo)
-  ] + _sandbox_checks(repo)
+  ] + _sandbox_checks(repo) + _settings_scope_checks(repo)
+
+
+def _read_settings_doc(path: Path) -> tuple[object, str | None]:
+  """
+  Parse one Claude settings file.
+
+  Args:
+    path: Absolute path of the settings file.
+
+  Returns:
+    The parsed document and `None`, or `None` and the parse error text when the file is not
+    valid JSON or cannot be read.
+  """
+  try:
+    return json.loads(path.read_text(encoding = "utf-8")), None
+  except (OSError, json.JSONDecodeError) as error:
+    return None, str(error)
+
+
+def _settings_scope_checks(repo: Path) -> list[dict]:
+  """
+  Validate the checkout's Claude settings files for directories a background spawn cannot load.
+
+  Flags every `permissions.additionalDirectories` entry under a macOS TCC-gated location.
+  An entry in the tracked project file fails, an entry in the local overlay only warns, and
+  a file that does not parse fails outright.
+
+  Args:
+    repo: Repository root whose `.claude/settings.json` and `.claude/settings.local.json` are read.
+
+  Returns:
+    One `fail` per gated entry in the tracked file, one `warn` per gated entry in the local
+    overlay, one `fail` per unparsable file; empty when both files are absent or clean.
+  """
+
+  # Domain(runtime.preflight):
+  # # Extra directories under macOS-protected locations block a background spawn
+  # A directory granted to the agent as an extra working directory may sit under a location macOS guards with
+  # its privacy consent: Downloads, Desktop, Documents, iCloud Drive, or a mounted volume under /Volumes.
+  # A spawn launched by the supervisor has no one at a screen, so on startup it stops at the consent prompt
+  # that only an interactive session can answer, and the job never begins. Where the entry lives decides
+  # whose problem it is. The tracked project settings are shared with the operator, who alone can remove the
+  # entry, so an entry there fails the checkout. The gitignored local overlay only warns, because the
+  # runtime strips such an entry before every spawn and the spawn never sees it. A settings file that does
+  # not parse fails as well, since every spawn loads it and would start with no valid settings to read.
+
+  findings: list[dict] = []
+  for rel, level, remedy in (
+    (ClaudeSettingsFile.PROJECT, Level.FAIL,
+     "remove it from the tracked file — a background spawn cannot answer the consent prompt"),
+    (ClaudeSettingsFile.LOCAL, Level.WARN, "the pump strips it before each spawn"),
+  ):
+    path = repo / rel
+
+    # guard: an absent file loads nothing
+    if not path.is_file():
+      continue
+
+    # a file that does not parse is a hard finding of its own; a parsed one is scanned for entries
+    doc, error = _read_settings_doc(path)
+    if error is not None:
+      findings.append(_build_finding(Level.FAIL, f"{path} is not valid JSON ({error}) — the spawn loads it"))
+      continue
+    findings.extend(
+      _build_finding(level, f"permissions.additionalDirectories entry '{entry}' in {rel} is under a "
+                            f"macOS TCC-gated location; {remedy}")
+      for entry in filter_tcc_protected(get_additional_dirs(doc))
+    )
+  return findings
+
+
+def _user_scope_checks() -> list[dict]:
+  """
+  Validate the operator's user-scope Claude settings for directories a background spawn cannot load.
+
+  Returns:
+    One `fail` per gated `permissions.additionalDirectories` entry in `~/.claude/settings.json`,
+    one `fail` when that file is not valid JSON; empty when the file is absent or clean.
+  """
+
+  # Domain(runtime.preflight):
+  # # The operator's own settings reach a spawn only through the user setting source
+  # The operator's personal settings file in their home directory is not part of the checkout. It reaches an
+  # expert spawn only when that expert declares the user setting source, and an expert that does not declare it
+  # never reads the file. When the expert does declare it, an extra working directory listed there under a
+  # macOS-protected location blocks the background spawn at startup on the same consent prompt that nobody can
+  # answer, exactly as an entry in the project file does. Unlike the local overlay, nothing in the runtime
+  # strips the operator's own file, so such an entry is never softened to a warning: it always fails the
+  # expert. The operator resolves it either by dropping the user setting source from the expert or by removing
+  # the entry. A personal settings file that does not parse fails the same way, because the spawn loads it.
+
+  path = Path(ClaudeSettingsFile.USER).expanduser()
+
+  # guard: no user settings — the scope loads nothing
+  if not path.is_file():
+    return []
+
+  # a parsed file is scanned for entries
+  doc, error = _read_settings_doc(path)
+
+  # guard: a file that does not parse is a hard finding of its own
+  if error is not None:
+    return [ _build_finding(Level.FAIL, f"{path} is not valid JSON ({error}) — the user scope loads it") ]
+  return [
+    _build_finding(Level.FAIL, f"user-scope permissions.additionalDirectories entry '{entry}' in {path} is "
+                               f"under a macOS TCC-gated location — drop `user` from setting_sources or remove "
+                               f"the entry; a background spawn cannot answer the consent prompt")
+    for entry in filter_tcc_protected(get_additional_dirs(doc))
+  ]
 
 
 def _sandbox_checks(repo: Path) -> list[dict]:
@@ -610,12 +731,15 @@ def _static_checks(repo: Path, expert: str, entry: dict | None) -> list[dict]:
   exists and parses as JSON, any pinned model is a recognized tier, an explicit
   model resolves for the expert either via a pinned model or an `agent_models` entry
   for its agent, and every declared inbox directory it is dispatched from resolves
-  on disk. Missing or unresolvable required references and an unresolved model
-  are `fail`; an unknown model tier is a soft `warn`.
+  on disk. When the `user` setting source is declared, the operator's user-scope settings
+  file is also checked for directories a background spawn cannot load. Missing or
+  unresolvable required references and an unresolved model are `fail`; an unknown model
+  tier is a soft `warn`.
 
   Notes:
     - Reads `lazy.settings.json`, its local overlay, the referenced files and each declared
-      `mcp_config` file from disk; nothing is written.
+      `mcp_config` file from disk, plus `~/.claude/settings.json` when the user scope is declared;
+      nothing is written.
 
   Args:
     repo: Repository root whose references and settings are consulted.
@@ -674,6 +798,11 @@ def _static_checks(repo: Path, expert: str, entry: dict | None) -> list[dict]:
   # delegate the two structured settings blocks to their own checkers
   findings.extend(_mcp_config_checks(repo, entry.get(JobConfigKey.MCP_CONFIG)))
   findings.extend(_setting_sources_checks(entry.get(JobConfigKey.SETTING_SOURCES)))
+
+  # the operator's own settings file reaches a spawn only when the expert opts into the user scope
+  # waiver: external Claude Code setting-source scope name, not an internal key
+  if "user" in _normalize_setting_sources(entry.get(JobConfigKey.SETTING_SOURCES)):
+    findings.extend(_user_scope_checks())
 
   # an unrecognized pin is only a soft warning — the CLI may still accept the alias
   model = entry.get(JobConfigKey.MODEL)

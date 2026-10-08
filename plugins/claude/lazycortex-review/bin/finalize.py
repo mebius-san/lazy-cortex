@@ -80,7 +80,8 @@ _APPROVE_LINE_RE = re.compile(
     r"^>\s*-\s*\[[ x]\]\s*"
     r"(?:approve the whole document"
     r"|approve with concerns"
-    r"|continue review cycle)"
+    r"|continue review cycle"
+    r"|continue without this pause)"
     r"[^\n]*\n",
     re.MULTILINE | re.IGNORECASE,
 )

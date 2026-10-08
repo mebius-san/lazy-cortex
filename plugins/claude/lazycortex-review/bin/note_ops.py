@@ -67,9 +67,12 @@ from keys import LANG_EN as _LANG_EN, Bucket, Phase, ReviewKey, Tag  # noqa: E40
 _KNOWN_REVIEW_KEYS = frozenset({
     ReviewKey.ACTIVE, ReviewKey.ROUND, ReviewKey.APPROVED, ReviewKey.PHASE, ReviewKey.RESULT,
     ReviewKey.MARKER_STYLE, ReviewKey.MAIN_DONE, ReviewKey.EXPERT, ReviewKey.VALIDATION_ROUND,
-    ReviewKey.APPROVED_WITH_CONCERNS,
+    ReviewKey.APPROVED_WITH_CONCERNS, ReviewKey.CONCERNS_AUTO_CONTINUE,
 })
-_BOOL_REVIEW_KEYS = frozenset({ ReviewKey.ACTIVE, ReviewKey.APPROVED, ReviewKey.APPROVED_WITH_CONCERNS })
+_BOOL_REVIEW_KEYS = frozenset({
+    ReviewKey.ACTIVE, ReviewKey.APPROVED, ReviewKey.APPROVED_WITH_CONCERNS,
+    ReviewKey.CONCERNS_AUTO_CONTINUE,
+})
 _INT_REVIEW_KEYS = frozenset({ ReviewKey.ROUND, ReviewKey.VALIDATION_ROUND })
 
 # Banner-state tags (`banner.State` values) are reported via `banner`, never duplicated in
@@ -127,7 +130,7 @@ def _coerce_known_value(key: str, raw: str) -> bool | int | str:
     raw: The raw string value `frontmatter.parse` read for `key`.
 
   Returns:
-    `bool` for the three flag keys, `int` for the two round-counter keys (falling back to the
+    `bool` for the flag keys, `int` for the two round-counter keys (falling back to the
     raw string when it isn't numeric), and the raw string for everything else.
   """
   if key in _BOOL_REVIEW_KEYS:
@@ -499,8 +502,9 @@ def repaint_banner(text: str, *, job_in_flight: bool = False, lang: str = _LANG_
   Recompute and repaint the top banner from the document's current frontmatter state.
 
   The banner state is driven by frontmatter (`review_approved`,
-  `review_approved_with_concerns`, `review_phase`) plus the body's own open-question/-concern
-  content — no class-config lookup. A job in flight always paints the in-process banner.
+  `review_approved_with_concerns`, `review_concerns_auto_continue`, `review_phase`) plus the
+  body's own open-question/-concern content — no class-config lookup. A job in flight always paints
+  the in-process banner.
 
   Guarantees:
     - Repainting is idempotent: calling this function again on its own output, with the
@@ -562,6 +566,7 @@ def repaint_banner(text: str, *, job_in_flight: bool = False, lang: str = _LANG_
       body, state,
       approved = approved,
       approve_with_concerns = _is_flag_true(meta, ReviewKey.APPROVED_WITH_CONCERNS),
+      auto_continue = _is_flag_true(meta, ReviewKey.CONCERNS_AUTO_CONTINUE),
       waiting_context = waiting_context,
       lang = lang,
   )

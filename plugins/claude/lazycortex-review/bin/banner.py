@@ -55,8 +55,8 @@ class State(enum.Enum):
     IN_PROCESS: Agents are working; the operator waits for the chain to hand back control.
     ACTION_NEEDED: An open question or concern blocks progress until the operator responds.
     READY: The document is ready for the operator to approve.
-    CONCERNS_DECISION: The operator must choose between continuing the review cycle or
-      approving with outstanding concerns.
+    CONCERNS_DECISION: The operator must choose between continuing the review cycle, approving with
+      outstanding concerns, or continuing without this pause for the rest of the review.
     FINALIZING: The document has been approved and is being finalized.
   """
 
@@ -405,6 +405,8 @@ _CONCERNS_DECISION_TEMPLATE: dict[str, str] = {
         "answer the concerns in the next main-writer round and re-approve\n"
         "> - [{tick_approve}] approve with concerns — "
         "accept the concerns recorded below as-is and finalize the document\n"
+        "> - [{tick_auto}] continue without this pause — "
+        "on further concerns go back to the main writer at once; you still approve every round\n"
     ),
     # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
     "ru": (  # noqa: RUF001
@@ -417,6 +419,8 @@ _CONCERNS_DECISION_TEMPLATE: dict[str, str] = {
         # waiver: deliberate Russian UI string — the bare one-letter word is a preposition, not a Latin lookalike (RUF001)
         "> - [{tick_approve}] утвердить с замечаниями — "  # noqa: RUF001
         "принять записанные ниже замечания как есть и финализировать документ\n"
+        "> - [{tick_auto}] продолжать без этой паузы — "
+        "при новых замечаниях сразу возвращать основному писателю; каждый круг вы по-прежнему утверждаете\n"
     ),
 }
 
@@ -442,6 +446,7 @@ def render(
     approved: bool = False,
     continue_review: bool = False,
     approve_with_concerns: bool = False,
+    auto_continue: bool = False,
     waiting_context: str | None = None,
     lang: str = _LANG_EN,
 ) -> str:
@@ -450,8 +455,8 @@ def render(
 
   - For `State.READY`, `approved=True` produces a ticked checkbox (mirrors frontmatter `review_approved`
     for visual consistency).
-  - For `State.CONCERNS_DECISION`, the dual-checkbox body is rendered; `continue_review` ticks the first
-    option and `approve_with_concerns` ticks the second.
+  - For `State.CONCERNS_DECISION`, the three-checkbox body is rendered; `continue_review` ticks the first
+    option, `approve_with_concerns` ticks the second, and `auto_continue` ticks the third.
   - For `State.IN_PROCESS`, `waiting_context` enriches the title ("Waiting: validators" etc.);
     unknown or `None` → bare "Waiting".
 
@@ -464,6 +469,7 @@ def render(
     approved: Ticks the approval checkbox when rendering `State.READY`.
     continue_review: Ticks the "continue review cycle" checkbox when rendering `State.CONCERNS_DECISION`.
     approve_with_concerns: Ticks the "approve with concerns" checkbox when rendering `State.CONCERNS_DECISION`.
+    auto_continue: Ticks the "continue without this pause" checkbox when rendering `State.CONCERNS_DECISION`.
     waiting_context: Phase label inserted into the `State.IN_PROCESS` title; `None` yields bare "Waiting".
     lang: Resolved language code for the body prose; titles stay English, and a language with
       no table of its own renders the shipped English wording throughout.
@@ -486,6 +492,7 @@ def render(
     return _resolve_for_language(_CONCERNS_DECISION_TEMPLATE, lang).format(
         tick_continue = "x" if continue_review        else " ",
         tick_approve = "x" if approve_with_concerns else " ",
+        tick_auto = "x" if auto_continue else " ",
     )
   template = _resolve_for_language(_TEMPLATES, lang)[state]
   if state is State.READY:
@@ -542,6 +549,7 @@ def replace_banner(
     approved: bool = False,
     continue_review: bool = False,
     approve_with_concerns: bool = False,
+    auto_continue: bool = False,
     waiting_context: str | None = None,
     lang: str = _LANG_EN,
 ) -> str:
@@ -564,6 +572,16 @@ def replace_banner(
         directly below any leading frontmatter (or at the very top when there is none) —
         never above the frontmatter and never further down, regardless of where a prior
         banner sat in `body`.
+
+    Args:
+      body: Full document or post-frontmatter body whose banner is replaced.
+      state: Banner state to render.
+      approved: Ticks the approval checkbox when rendering `State.READY`.
+      continue_review: Ticks the "continue review cycle" checkbox when rendering `State.CONCERNS_DECISION`.
+      approve_with_concerns: Ticks the "approve with concerns" checkbox when rendering `State.CONCERNS_DECISION`.
+      auto_continue: Ticks the "continue without this pause" checkbox when rendering `State.CONCERNS_DECISION`.
+      waiting_context: Phase label inserted into the `State.IN_PROCESS` title; `None` yields bare "Waiting".
+      lang: Resolved language code for the body prose.
 
     Returns:
       The body with exactly one banner block, anchored at the top of the
@@ -590,6 +608,7 @@ def replace_banner(
       approved=approved,
       continue_review=continue_review,
       approve_with_concerns=approve_with_concerns,
+      auto_continue=auto_continue,
       waiting_context=waiting_context,
       lang=lang,
   ) + "\n"

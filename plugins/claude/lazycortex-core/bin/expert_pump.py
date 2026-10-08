@@ -54,6 +54,7 @@ import rate_limit_flag  # pylint: disable=import-error
 import sandbox_scope  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from constants import (  # pylint: disable=import-error
+  ClaudeSettingsFile, ClaudeSettingsKey,
   DaemonKey, EnvVar, GitConfigKey, HaltKey, HaltReason, IncidentActor, IncidentKey, IncidentKind, IncidentPhase,
   IncidentState, JobArtifact, JobConfigKey, JobErrorCategory, JobFile, JobIODir, JobLogOutcome, JobMarker,
   JobOutcome, JobRequestKey, JobResponseKey, JobStatus, RateLimitGuardKey, RateLimitRecordKey, RuntimeFile,
@@ -78,6 +79,9 @@ _STREAM_MAX_RETRIES_DEFAULT  = 3
 _WATCHDOG_POLL_SEC = 1.0
 # Grace between SIGTERM and SIGKILL when tearing down a stalled spawn's process group.
 _KILL_GRACE_SEC = 5.0
+# Locations macOS TCC gates behind a consent prompt. A background `claude -p` that loads one of
+# them through `permissions.additionalDirectories` blocks at startup on a prompt no one can answer.
+_TCC_PROTECTED_ROOTS = ( "~/Downloads", "~/Desktop", "~/Documents", "~/Library/Mobile Documents", "/Volumes" )
 # Dead-scan grace window (seconds): a claimed job whose claimant PID is gone but which has
 # no response.json yet is first tagged with a DEAD_CANDIDATE marker; DEAD lands only when a
 # later scan still finds no response.json after this window. The PID file holds the pump's
@@ -344,6 +348,8 @@ def _detect_dead_jobs(repo: Path, *, grace_sec: float = 0.0) -> int:
 
   Notes:
     - Records a `job_dead` incident in the error ledger for each job newly marked dead.
+    - Tears down (signals) any process still naming a job directory before marking that job dead, and may
+      block for up to two kill grace windows per such process.
 
   Args:
     repo: Repository root containing the expert job tree.
@@ -453,6 +459,19 @@ def _detect_dead_jobs(repo: Path, *, grace_sec: float = 0.0) -> int:
         _finalize_orphaned_job(jdir)
         _append_jobs_log(repo, edir.name, jdir.name, _classify_finished(jdir))
         continue
+
+      # Domain(runtime.job-execution):
+      # # A dead job leaves no live session behind
+      # An expert spawn runs in its own process session, apart from the pump that started it. A supervised
+      # daemon restart or a routine-timeout kill of the pump therefore takes down only the pump's group,
+      # while the spawn keeps running on its own, for days if nothing stops it. So a job declared dead after
+      # its grace window first has every process still naming its job directory torn down, and only then is
+      # it buried. Burying a job never leaves a live session working on it behind.
+
+      # a spawn that outlived its pump (a daemon restart, a routine-timeout kill) sits in its
+      # own session and would run on for days; it is torn down before the job is buried
+      if _kill_orphaned_spawns(jdir):
+        sys.stderr.write(f"dead-scan: killed orphaned spawn of {edir.name}/{jdir.name}\n")
       marked += _mark_dead(repo, edir.name, jdir, blob)
 
   # the tick summary carries this count so a checkout burying jobs every tick is visible in
@@ -828,6 +847,14 @@ def pump(repo: Path) -> dict:
 
   Guarantees:
     - Spawns at most one Claude expert process per call, regardless of how many jobs are READY.
+    - No spawned expert process loads a TCC-gated `permissions.additionalDirectories` entry from the checkout's
+      `.claude/settings.local.json`.
+
+  Notes:
+    - When a tick buries a dead job whose spawn outlived its pump, it signals process groups outside this
+      process and blocks for up to two kill grace windows per such process.
+    - Rewrites the operator's gitignored `.claude/settings.local.json` in the checkout when that file
+      carries a TCC-gated `permissions.additionalDirectories` entry.
 
   Args:
     repo: Repository root containing the expert job tree.
@@ -839,11 +866,18 @@ def pump(repo: Path) -> dict:
     instead, adds the offending expert and job_id. While a halt stands or the tree is dirty,
     only bundles whose `config.json` carries `halt_exempt` are eligible; the rest are left
     READY for the halt to lift.
+
+  Raises:
+    OSError: When rewriting the checkout's `.claude/settings.local.json` after stripping a TCC-gated entry fails.
   """
 
   # Contract:
   # A single call MUST spawn at most one Claude expert process, even when several jobs are
   # READY across the queue; only the oldest READY job is picked and processed per call.
+
+  # Contract:
+  # An expert process that a call spawns MUST NOT load a TCC-gated `permissions.additionalDirectories`
+  # entry from the checkout's `.claude/settings.local.json`.
 
   repo = Path(repo)
   settings_path = repo / SettingsFile.REL
@@ -1227,6 +1261,105 @@ def _refresh_sandbox_file(repo: Path) -> None:
   sandbox_scope.sync(repo)
 
 
+def filter_tcc_protected(entries: list[object]) -> list[str]:
+  """
+  Select the directory entries a background spawn cannot load without a TCC consent prompt.
+
+  Guarantees:
+    - The returned entries keep the order of the input and are spelled exactly as written,
+      never expanded or normalised, so a caller can match them back to the input by equality.
+
+  Args:
+    entries: Values of a `permissions.additionalDirectories` list, as written.
+
+  Returns:
+    The string entries that, with `~` and environment variables expanded, name a TCC-gated
+    location or lie under one, in their input order and spelled as written.
+  """
+
+  # Contract:
+  # The returned entries keep the order of the input and are spelled exactly as written,
+  # never expanded or normalised, so a caller can match them back to the input by equality.
+
+  # the roots are compared in expanded form so a tilde entry and its absolute twin match alike
+  roots = [ os.path.normpath(os.path.expanduser(root)) for root in _TCC_PROTECTED_ROOTS ]
+  flagged: list[str] = []
+  for entry in entries:
+    # guard: only a non-empty string names a directory
+    if not isinstance(entry, str) or not entry:
+      continue
+
+    # an entry is gated when it is a gated root itself or sits anywhere below one
+    expanded = os.path.normpath(os.path.expandvars(os.path.expanduser(entry)))
+    if any(expanded == root or expanded.startswith(root + os.sep) for root in roots):
+      flagged.append(entry)
+  return flagged
+
+
+def get_additional_dirs(doc: object) -> list[object]:
+  """
+  Read the `permissions.additionalDirectories` list out of a parsed Claude settings document.
+
+  Args:
+    doc: The parsed settings document.
+
+  Returns:
+    The list as written, or an empty list when the document or either key is missing or malformed.
+  """
+  permissions = doc.get(ClaudeSettingsKey.PERMISSIONS) if isinstance(doc, dict) else None
+  dirs = permissions.get(ClaudeSettingsKey.ADDITIONAL_DIRECTORIES) if isinstance(permissions, dict) else None
+  return dirs if isinstance(dirs, list) else []
+
+
+def _sanitize_local_settings(repo: Path) -> list[str]:
+  """
+  Strip TCC-gated directories from the checkout's local Claude settings before a spawn loads them.
+
+  Notes:
+    - Rewrites the operator's gitignored `.claude/settings.local.json` in place when something is stripped.
+    - Writes one line to stderr when a file is skipped as unreadable or unparsable, and one line when
+      entries are stripped.
+
+  Args:
+    repo: Repository root whose `.claude/settings.local.json` is read and, when needed, rewritten.
+
+  Returns:
+    The removed entries as written; empty when the file is absent, unreadable, not valid JSON,
+    or carries nothing to strip — in those cases the file is left byte-identical.
+
+  Raises:
+    OSError: If the rewritten file cannot be written.
+  """
+  path = repo / ClaudeSettingsFile.LOCAL
+
+  # guard: no local overlay — a spawn loads nothing from it
+  if not path.is_file():
+    return []
+
+  # guard: a file that cannot be read or parsed is left alone — nothing can be stripped from it safely
+  try:
+    doc = json.loads(path.read_text(encoding = "utf-8"))
+  except (OSError, json.JSONDecodeError) as error:
+    sys.stderr.write(f"local settings not sanitized: {path} cannot be read as JSON ({error})\n")
+    return []
+
+  # the gated entries are selected from the list as written so they can be matched back exactly
+  dirs = get_additional_dirs(doc)
+  removed = filter_tcc_protected(dirs)
+
+  # guard: nothing gated in the list — the file stays byte-identical
+  if not removed:
+    return []
+
+  # the list is rewritten in place; every other key of the document survives untouched
+  doc[ClaudeSettingsKey.PERMISSIONS][ClaudeSettingsKey.ADDITIONAL_DIRECTORIES] = [
+    entry for entry in dirs if entry not in removed
+  ]
+  path.write_text(json.dumps(doc, indent = 2) + "\n", encoding = "utf-8")
+  sys.stderr.write(f"local settings: stripped TCC-gated additionalDirectories {removed} from {path}\n")
+  return removed
+
+
 def _spawn_settings_argv(repo: Path) -> list[str]:
   """
   Build the `--settings` argv fragment for an expert spawn.
@@ -1427,6 +1560,10 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
       spawn environment — neither the operator's own Anthropic credentials nor the daemon's own
       token source ever reaches a foreign endpoint.
 
+  Notes:
+    - Each run rewrites the checkout's `.claude/settings.local.json` in place, before the expert is spawned,
+      when that file carries a TCC-gated `permissions.additionalDirectories` entry.
+
   Args:
     repo: Repository root the spawn runs inside.
     expert_name: Name of the expert that owns this job.
@@ -1434,6 +1571,7 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
 
   Raises:
     _ExpertLeftDirtyTree: When the expert exited cleanly but left uncommitted changes.
+    OSError: When rewriting the checkout's `.claude/settings.local.json` after stripping a TCC-gated entry fails.
   """
   # Idle-watchdog config is read per-job (cheap single-file read) so _process_one keeps
   # its 3-arg signature — pump()'s call site and the halt-test monkeypatch stay valid.
@@ -1695,6 +1833,14 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     # so a domain declared since the last install reaches this very job
     _refresh_sandbox_file(repo)
 
+    # Decision: the daemon checkout's local overlay is rewritten in place, not shadowed by a
+    # filtered copy — Claude Code concatenates `additionalDirectories` across every loaded
+    # scope, so a copy handed through `--settings` cannot hide an entry the file still carries
+
+    # a TCC-gated directory in the local overlay would hang the spawn at startup on a consent
+    # prompt no background process can answer, so it is stripped before the spawn loads the file
+    _sanitize_local_settings(repo)
+
     # The spawn command line — permission mode, hermetic `--strict-mcp-config` +
     # any per-expert `--mcp-config`, hermetic `--setting-sources`, plugin dirs,
     # `--settings` sandbox, model, and `--agent` — is assembled by
@@ -1899,6 +2045,89 @@ def _kill_process_group(proc: subprocess.Popen) -> None:
     os.killpg(pgid, signal.SIGKILL)
   except ProcessLookupError:
     pass
+
+
+def _kill_pid_group(pid: int) -> bool:
+  """
+  Terminate the process group of a process this pump did not spawn, escalating SIGTERM to SIGKILL.
+
+  Notes:
+    - Signals a process group outside this process and never the caller's own group.
+    - Blocks for up to two grace windows, one after SIGTERM and one after SIGKILL.
+
+  Args:
+    pid: Process identifier whose whole group is torn down.
+
+  Returns:
+    True when at least one signal reached the group, False when the process was already gone
+    or sits in the pump's own group.
+  """
+  # guard: the process is already gone — there is no group left to signal
+  try:
+    pgid = os.getpgid(pid)
+  except ProcessLookupError:
+    return False
+
+  # guard: never signal the pump's own group — the target is always a spawn in its own session
+  if pgid == os.getpgid(0):
+    return False
+
+  # each signal gets the grace window to take effect before the next one is sent
+  signalled = False
+  for sig in (signal.SIGTERM, signal.SIGKILL):
+    # guard: the group vanished between signals — nothing left to escalate to
+    try:
+      os.killpg(pgid, sig)
+    except ProcessLookupError:
+      return signalled
+    signalled = True
+
+    # the grace window: poll for the process to disappear before escalating to the next signal
+    deadline = time.monotonic() + _KILL_GRACE_SEC
+    while time.monotonic() < deadline:
+      # guard: the process is gone — the signal did its job
+      if not _pid_alive(pid):
+        return True
+      # waiver: 0.05s is the liveness poll cadence, same floor the watchdog read loop uses
+      time.sleep(0.05)
+  return True
+
+
+def _kill_orphaned_spawns(jdir: Path) -> int:
+  """
+  Terminate every process whose command line names a job directory — a spawn that outlived its pump.
+
+  Notes:
+    - Reads the host process table through `ps` and signals process groups outside this process, never the
+      pump itself.
+    - Blocks for up to two kill grace windows per signalled process group.
+
+  Args:
+    jdir: Absolute job directory the spawn's command line carries.
+
+  Returns:
+    The number of processes signalled; zero when none names the directory or `ps` is unavailable.
+  """
+  # guard: without `ps` no spawn can be found, so none is signalled
+  try:
+    listing = subprocess.run(
+      [ "ps", "-ax", "-o", "pid=,command=" ],
+      capture_output = True, text = True, check = False, encoding = "utf-8",
+    ).stdout
+  except OSError:
+    return 0
+
+  # every process naming the job dir on its command line is one of its spawns, never the pump itself
+  needle = str(jdir)
+  killed = 0
+  for line in listing.splitlines():
+    pid_text, _, command = line.strip().partition(" ")
+    # guard: only a parseable pid whose command line carries the job dir is a spawn of this job
+    if not pid_text.isdigit() or needle not in command or int(pid_text) == os.getpid():
+      continue
+    if _kill_pid_group(int(pid_text)):
+      killed += 1
+  return killed
 
 
 def _spawn_with_idle_watchdog(

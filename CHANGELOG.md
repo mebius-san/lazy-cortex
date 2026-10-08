@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 10.5.4 — 2026-10-08 UTC
+
+- Expert jobs no longer hang at startup on macOS. The runtime now strips privacy-protected folders from the checkout's local `additionalDirectories` before each spawn, and the preflight fails when they appear in the tracked or user settings. Orphaned spawns are cleaned up when a daemon restarts.
+
 ### 10.5.3 — 2026-10-07 UTC
 
 - Jobs queued from inside an expert job's run now inherit that job's protocols; previously a chained dispatch, such as a curator queuing its link phase, produced jobs with an empty protocol list.
@@ -1512,6 +1516,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
 
 ## lazycortex-review
+
+### 6.12.1 — 2026-10-08 UTC
+
+- The concerns-pause banner gains a third checkbox that continues without pausing. Once ticked, every later concerns round goes straight back to the main writer, and you still approve after each main round. The choice survives your own edits and reverts, and finalize clears it.
 
 ### 6.12.0 — 2026-10-07 UTC
 

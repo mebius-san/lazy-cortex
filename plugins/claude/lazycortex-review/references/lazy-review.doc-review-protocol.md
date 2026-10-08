@@ -160,6 +160,7 @@ The following frontmatter keys are managed by the dispatcher and cannot be writt
 - ``review_approved`` — `true` once the operator approved.
 - ``review_validation_round`` — count of validation rounds since opening.
 - ``review_approved_with_concerns`` — `true` if the operator chose to finalize with outstanding concerns.
+- ``review_concerns_auto_continue`` — `true` once the operator chose to skip the concerns pause for the rest of the review; later concerns rounds revert to the main writer without asking, while the approve gesture after each main round stays the operator's.
 - ``review_marker_style`` — the edit-marker style pinned to this review cycle at open time. Every consumer of the style (dispatch payload, strip-markup views, finalize's marker fold) reads this key first and falls back to ``review.edit_marker_style`` in settings only when it is absent, so changing the settings value mid-cycle never touches an open review.
 - ``review_result`` — terminal discriminator stamped by finalize as the LAST step (``approved`` | ``approved-with-concerns``). All other ``review_*`` keys are stripped at finalize; ``review_result`` is the single key that survives and signals downstream md-scan routines (e.g. consumer apply-gates) that the review has closed. Cleared by the open transition when a doc re-enters the review loop.
 

@@ -753,6 +753,36 @@ class SettingsFile:
 
 
 # ----------------------------------------------------------------------------------------
+class ClaudeSettingsFile:
+  """
+  Locations of the Claude Code settings files an expert spawn loads.
+
+  Attributes:
+    PROJECT: The repo-relative tracked project settings file (`project` scope).
+    LOCAL: The repo-relative gitignored local overlay (`local` scope).
+    USER: The home-relative operator settings file (`user` scope), `~` unexpanded.
+  """
+
+  PROJECT = ".claude/settings.json"
+  LOCAL = ".claude/settings.local.json"
+  USER = "~/.claude/settings.json"
+
+
+# ----------------------------------------------------------------------------------------
+class ClaudeSettingsKey:
+  """
+  Keys of a Claude Code settings document the runtime reads or rewrites.
+
+  Attributes:
+    PERMISSIONS: The top-level permissions block.
+    ADDITIONAL_DIRECTORIES: The list of extra working directories inside the permissions block.
+  """
+
+  PERMISSIONS = "permissions"
+  ADDITIONAL_DIRECTORIES = "additionalDirectories"
+
+
+# ----------------------------------------------------------------------------------------
 class RuntimeFile:
   """
   Repository-relative paths of daemon-owned files under the `.runtime/` directory.
