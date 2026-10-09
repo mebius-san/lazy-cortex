@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Register, unregister, tick, preflight, and recover routines in the per-repo serial daemon — six skills keep the async team running in order, decide when a new periodic job needs the daemon at all, and validate broken expert configs before they run live.
-last_regen: 2026-10-08
+last_regen: 2026-10-09
 diagram_spec:
   anchor: "Runtime lifecycle"
   request: "State diagram showing the daemon lifecycle: routines registered in lazy.settings.json feed the serial daemon loop; the daemon runs each routine in order per interval_sec or cron schedule; a dirty working tree triggers an uncommitted_changes halt; a failed remote sync retries with backoff and only escalates to a git_pull_diverged / git_push_failed / git_remote_unavailable halt once retries are exhausted; /lazy-runtime.recover (commit/stash/discard/abort for tree halts; manual-fix + resume for remote-sync halts) cleans the precondition and resumes; unregister removes a routine from the loop."
@@ -18,7 +18,7 @@ source_skills:
   - lazy-core.expert-runtime-schema
   - lazy-core.metrics-schema
 source_sha: 93e0a241c68d2975f6d6856e2e5649abe3eae19f
-surface_sha: ecb056a9731a93b5ac1723a2a6b9c233974106eff1e43c4b0febff736ca1100a
+surface_sha: faf29a77a9f844bae8f9572ba146d8ab6112cc1dece9889aeb9c94eb3f0abe37
 ---
 # Runtime daemon — routine management and recovery
 

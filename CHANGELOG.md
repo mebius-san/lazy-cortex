@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 10.5.5 — 2026-10-09 UTC
+
+- The markdown-style guidance on the expert-authored `[!question]` callout now says only where the callout lands and what shape it takes. When an expert may raise one is left to that expert's own discipline.
+
 ### 10.5.4 — 2026-10-08 UTC
 
 - Expert jobs no longer hang at startup on macOS. The runtime now strips privacy-protected folders from the checkout's local `additionalDirectories` before each spawn, and the preflight fails when they appear in the tracked or user settings. Orphaned spawns are cleaned up when a daemon restarts.
@@ -770,6 +774,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 9.12.2 — 2026-10-09 UTC
+
+- Document writers now settle forks themselves from the approved documents and record the choice in the text. The `spec.decisions` rule gains a fourth duty: a `[!question]` is raised only for a contradiction between inputs, an unclear purpose, or a product fork no approved document answers. Failure behaviour, defaults, wording and similar calls no longer reach the operator as questions.
+
 ### 9.12.1 — 2026-10-06 UTC
 
 - Fixed `lazy-spec.install` and the other plugin-lookup paths picking a stale cached plugin version. They now resolve the installed version recorded in `installed_plugins.json` instead of the highest version directory in the cache.
@@ -1517,6 +1525,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+### 6.12.2 — 2026-10-09 UTC
+
+- Document reviews ask fewer questions. Main writers no longer turn every validator concern into an operator question. The review protocol and coordination playbook drop the re-asking and residual-call rules and keep only how questions are signalled, so when a writer may ask is left to the experts' own discipline.
+
 ### 6.12.1 — 2026-10-08 UTC
 
 - The concerns-pause banner gains a third checkbox that continues without pausing. Once ticked, every later concerns round goes straight back to the main writer, and you still approve after each main round. The choice survives your own edits and reverts, and finalize clears it.
@@ -1911,6 +1923,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.
 
 ## lazycortex-experts
+
+### 1.9.7 — 2026-10-09 UTC
+
+- Document-writing experts (designer, ui-designer, use-case-writer, architect) now settle design forks themselves from the approved documents and their own principles. They raise a question only for contradicting inputs, an unclear purpose, or a product fork no approved document answers. The designer also builds a short structure-and-principles base first and derives failure behaviour and edge cases from it.
 
 ### 1.9.6 — 2026-10-06 UTC
 

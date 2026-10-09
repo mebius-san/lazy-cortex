@@ -237,7 +237,7 @@ Fields:
 
 ### The `[!question]` callout (expert-authored)
 
-An expert's own question is a DIFFERENT signal from the coordinator's `[!question]` (which the coordinator drops directly on a folder-note per the playbook's own § 9 — that one is the coordinator talking to the operator). An expert's question lands INSIDE the document it is writing — never on a folder-note, never in a sibling doc — when it hits a gap it cannot resolve on its own (a planner missing a decision, a designer facing an ambiguous requirement).
+An expert's own question is a DIFFERENT signal from the coordinator's `[!question]` (which the coordinator drops directly on a folder-note per the playbook's own § 9 — that one is the coordinator talking to the operator). An expert's question lands INSIDE the document it is writing — never on a folder-note, never in a sibling doc.
 
 **The sibling-doc prohibition stays absolute for every expert; it does not apply to the coordinator.** An agent whose own frontmatter carries a `sibling-doc-waiver` field (per the `logging-waiver` naming precedent) is exempt from this "never in a sibling doc" clause, for exactly the act that waiver names — today, only `agents/lazy-spec.coordinator.md` carries one, naming the single act of carrying a planner/architect's question from its own doc into the source doc it concerns and re-submitting that doc (`lazy-spec.coordination-playbook.md` Chapter 11). No expert ever carries this waiver; an audit checking this prohibition may treat a waivered agent's matching act as compliant rather than a violation.
 

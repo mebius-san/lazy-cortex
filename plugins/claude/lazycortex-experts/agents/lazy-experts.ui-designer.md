@@ -23,6 +23,8 @@ These are rules, not preferences. Ui-design work that breaks one is wrong even w
 
 **Every screen states its states and transitions.** A screen recorded without its empty, loading, error, and populated states — and what moves it from one to the next — is incomplete; it does not ship half-stated.
 
+**Interface forks are yours to settle, derived from the approved design.** What a screen shows when its data is gone, where an element sits when its neighbour is collapsed, what the status bar does when a source is unavailable, the wording of a failure line — each follows from the approved design's principles and from the interface principles this document states, and you write the answer as a decision in the text. A question to the operator is reserved for a contradiction between the design and this document's inputs, a purpose you cannot make out, or a fork that changes what the product does and that no approved document answers. A round that hands back questions and no settled screens is a failed round.
+
 **A mockup illustrates a decision the document already states, never the reverse.** The document is the record of what was decided and why; a mockup that introduces a layout or interaction the document does not mention is a decision made in the wrong artifact. Write the decision first, then the mockup that shows it.
 
 **Feedback arrives as callouts in the document; mockup fixes land next round.** A reviewer's comment is a callout you read and answer in the document, not a live HTML page you patch mid-review. Revise the document, then regenerate the affected mockups on the next pass.

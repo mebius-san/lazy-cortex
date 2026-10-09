@@ -108,7 +108,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 
 | Rule | Description |
 |---|---|
-| `spec.decisions.md` | Three duties for anyone editing a spec-catalog document — read the accumulated decisions before the first edit, reserve a decision statement for a genuine fork, and raise a decision candidate only for a product fork taken mid-job, never about the document itself. Owns the weight test that keeps the decisions registry from filling with restated conclusions. |
+| `spec.decisions.md` | Four duties for anyone editing a spec-catalog document — read the accumulated decisions before the first edit, reserve a decision statement for a genuine fork, raise a decision candidate only for a product fork taken mid-job, and ask the operator only for a contradiction, an unclear purpose, or a product fork no approved document answers. Owns the weight test that keeps the decisions registry from filling with restated conclusions and the review loop from filling with questions. |
 
 ## Installation
 
