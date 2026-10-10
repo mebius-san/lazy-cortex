@@ -2084,6 +2084,10 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
       if not isinstance(node, ast.ImportFrom):
         continue
 
+      # guard: a waiver on the import exempts it from the parent-import ban
+      if _has_waiver(self.source_lines, lineno):
+        continue
+
       # an absolute import names the ancestor directly
       if node.level == 0 and node.module:
         import_parts = node.module.split('.')

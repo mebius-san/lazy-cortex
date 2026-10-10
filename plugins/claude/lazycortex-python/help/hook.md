@@ -7,8 +7,8 @@ source_skills:
   - lazy-python.check-style.sh
   - hooks.json
   - pcf.py
-source_sha: 8b1648549bdb076343d714eccdc2b6cb766c8147
-surface_sha: 57d21a5a7b9da5162066503d9d53141f9016a40f3c8abda4bae4ba50c41da59c
+source_sha: a257e6bb11ec7294d4b279cf1c6fe62aa3c75fec
+surface_sha: 37017e231a576fef385ef93ca1b4e35f79a172092ccf305c20fd880f8a54c5e6
 ---
 # Inline style feedback on every Python edit
 

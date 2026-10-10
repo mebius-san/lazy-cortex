@@ -2120,6 +2120,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+### 4.11.1 — 2026-10-10 UTC
+
+- Fixed: the `pcf` checker now honours a `# waiver:` comment on a parent-module import, so a waived import no longer gets flagged.
+
 ### 4.11.0 — 2026-10-10 UTC
 
 - Test files are no longer recognised by a hardcoded `test_` prefix. A shipped `[tool.pcf.overrides]` entry for `**/tests/**/test_*.py` turns off `check_assert` and `check_magic_literal` there. Override keys now accept globs (`**` across directories, `*` and `?` within a segment) beside path prefixes. Your own entries merge after the shipped one, so redefining the key changes it.

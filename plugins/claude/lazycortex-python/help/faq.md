@@ -21,8 +21,8 @@ source_skills:
   - review.py
   - lazy-python.coding-guidelines
   - lazy-python.checking-guidelines
-source_sha: 8b1648549bdb076343d714eccdc2b6cb766c8147
-surface_sha: 4a2c8962875123197774a5c370de889b7634da9348f0beb30d0f43e5d8d59ed8
+source_sha: a257e6bb11ec7294d4b279cf1c6fe62aa3c75fec
+surface_sha: 3a24c8d69ef47e7232ee3be6307875b00ca1e7e6a532508d535c55e769bdfe1c
 ---
 # Frequently asked questions
 
