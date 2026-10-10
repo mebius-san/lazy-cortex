@@ -111,7 +111,7 @@ Outcome: `pch-ready` or `pch-missing-inspect-sh`.
 
 Merges checker sections from `${CLAUDE_PLUGIN_ROOT}/templates/pyproject-defaults.toml` into the consumer's `pyproject.toml` under the **File-sync policy**'s consumer-owned-config half: missing sections are appended (clean merge, silent); existing sections are preserved verbatim (consumer wins). Only a direct contradiction — a consumer checker key set to a value that opposes a required one — is a conflict that asks.
 
-The always-on sections (`pcf`, `toi`, `pytest`, `mypy`, `pylint`, `ruff`) deploy unconditionally. The `pch` section is **fully derived from `<pycharm_present>`** (Step 3) — no question, no persisted flag. An enabled plugin installs its whole surface, so when PyCharm is here, pch is part of it:
+The always-on sections (`pcf`, `toi`, `pytest`, `mypy`, `protected_access`, `pylint`, `ruff`) deploy unconditionally. The `pch` section is **fully derived from `<pycharm_present>`** (Step 3) — no question, no persisted flag. An enabled plugin installs its whole surface, so when PyCharm is here, pch is part of it:
 
 - **`<pycharm_present>` is `True`** (`inspect.sh` found) → deploy `[tool.pch]` too. State `+pch-enabled`.
 - **`<pycharm_present>` is `False`** (no PyCharm on this machine) → leave `[tool.pch]` out; pch is meaningless without PyCharm, and the next run re-derives if PyCharm is installed later. State `+pch-skipped-no-pycharm`.

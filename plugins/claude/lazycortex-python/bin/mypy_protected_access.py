@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import re
+import tomllib
 from functools import partial
 from pathlib import Path, PurePath
 
@@ -15,6 +17,7 @@ if TYPE_CHECKING:
   from collections.abc import Callable
 
   from mypy.nodes import Context
+  from mypy.options import Options
   from mypy.plugin import AttributeContext, CheckerPluginInterface, MethodContext, ReportConfigContext
   from mypy.types import ProperType, Type
 
@@ -24,8 +27,12 @@ PROTECTED_ACCESS = ErrorCode("protected-access", "Check access to protected clas
 # the documented public API of `collections.namedtuple` and `typing.NamedTuple`, underscored to avoid field clashes
 _NAMEDTUPLE_API = frozenset({ "_asdict", "_fields", "_field_defaults", "_make", "_replace" })
 
-# the directory name whose presence on a file's path inside the project marks the file as test code
-_TESTS_DIR = "tests"
+# the plugin's own `pyproject.toml` section and the key listing the path globs it never reports in
+_CONFIG_SECTION = "protected_access"
+_EXEMPT_KEY = "exempt_paths"
+
+# the shipped exemption: every file under a directory named exactly `tests`, at any depth inside the project
+_DEFAULT_EXEMPT_PATHS = ("**/tests/**/*.py",)
 
 
 # ----------------------------------------------------------------------------------------
@@ -40,12 +47,15 @@ class ProtectedAccessPlugin(Plugin):
   allowed only from code lexically inside a class whose MRO contains the declaring class; anything else,
   module-level code included, is reported under the `protected-access` error code.
 
-  Test code is exempt: nothing is reported in a file with a directory named exactly `tests` on its path inside the
-  project, at any depth. A file named `tests.py` or a directory such as `tests_util` is checked as usual.
+  Exempt paths are never reported in. They come from `[tool.protected_access] exempt_paths` in the project's
+  `pyproject.toml`, a list of repo-relative globs where `**` spans directories and `*` / `?` stay within one
+  segment; the shipped default is `**/tests/**/*.py`, every file under a directory named exactly `tests` at any
+  depth inside the project. A file named `tests.py` or a directory such as `tests_util` is checked as usual.
 
   Guarantees:
     - Each protected access is reported at most once.
     - The type mypy inferred for a checked access is never changed.
+    - A change of `exempt_paths` invalidates mypy's cache for the plugin.
 
   Notes:
     - Not reported: a receiver typed `Any`, access through `getattr` with a string name, and a bound method
@@ -55,6 +65,10 @@ class ProtectedAccessPlugin(Plugin):
     - The project is the current working directory: a file under it is judged by its path inside it, any other
       file by its path as given.
     - Depends on mypy internals outside the plugin API; verified against mypy 2.1.0.
+
+  Attributes:
+    exempt_globs: The exempt-path globs as configured, in order.
+    exempt_paths: The same globs compiled, in the same order.
   """
 
   # Contract:
@@ -62,6 +76,13 @@ class ProtectedAccessPlugin(Plugin):
 
   # Contract:
   # The plugin never changes the type mypy inferred for an access it checks; checking only reports.
+
+  def __init__(self, options: Options) -> None:
+    super().__init__(options)
+
+    # the exemptions come from the config file mypy itself resolved, so IDE and CLI runs agree
+    self.exempt_globs: tuple[str, ...] = _load_exempt_paths(options.config_file)
+    self.exempt_paths: tuple[re.Pattern[str], ...] = tuple(_glob_to_regex(glob) for glob in self.exempt_globs)
 
   def get_attribute_hook(self, fullname: str) -> Callable[[AttributeContext], Type] | None:
     """
@@ -114,15 +135,22 @@ class ProtectedAccessPlugin(Plugin):
   # waiver: ctx is fixed by mypy's Plugin.report_config_data signature
   def report_config_data(self, ctx: ReportConfigContext) -> str:  # pylint: disable=unused-argument
     """
-    Return the SHA-256 hex digest of this plugin file, so any edit of the plugin invalidates the mypy cache.
+    Return a digest of this plugin file and its exemptions, so an edit of either invalidates the mypy cache.
 
     Args:
       ctx: Report context, unused.
 
     Returns:
-      The SHA-256 hex digest of this plugin file's bytes.
+      The SHA-256 hex digest of this plugin file's bytes followed by the exempt-path globs.
     """
-    return hashlib.sha256(Path(__file__).resolve().read_bytes()).hexdigest()
+
+    # Contract:
+    # A change of `exempt_paths` changes the digest, so mypy re-checks every cached file.
+
+    # the globs join the file bytes so a config edit alone drops the cache
+    digest = hashlib.sha256(Path(__file__).resolve().read_bytes())
+    digest.update("\n".join(self.exempt_globs).encode("utf-8"))
+    return digest.hexdigest()
 
   def _check_attribute(self, declaring: str, name: str, ctx: AttributeContext) -> Type:
     """
@@ -192,7 +220,7 @@ class ProtectedAccessPlugin(Plugin):
 
   def _report(self, declaring: str, name: str, api: CheckerPluginInterface, context: Context) -> None:
     """
-    Fail the access unless it sits in test code or the enclosing class has the declaring class in its MRO.
+    Fail the access unless it sits on an exempt path or the enclosing class has the declaring class in its MRO.
 
     Args:
       declaring: Full name of the declaring class.
@@ -219,8 +247,8 @@ class ProtectedAccessPlugin(Plugin):
     if not isinstance(api, TypeChecker):
       raise TypeError("protected-access plugin is built for mypy 2.1.0 and found no TypeChecker.scope")
 
-    # guard: test code may touch protected members
-    if _is_test_file(api.path):
+    # guard: code on an exempt path, test code by default, may touch protected members
+    if _is_exempt(api.path, self.exempt_paths):
       return
 
     # the innermost class enclosing the access, or none for module-level code
@@ -271,29 +299,85 @@ def _is_namedtuple_api(declaring: TypeInfo, name: str) -> bool:
   return declaring.is_named_tuple and name in _NAMEDTUPLE_API
 
 
-def _is_test_file(path: str) -> bool:
+def _load_exempt_paths(config_file: str | None) -> tuple[str, ...]:
   """
-  Tell whether a checked file is test code.
+  Read the exempt-path globs from the project's `pyproject.toml`.
+
+  Args:
+    config_file: Path of the config file mypy resolved, or `None` when it found none.
+
+  Returns:
+    The `[tool.protected_access] exempt_paths` list, or the shipped default when the file is not a readable
+    `pyproject.toml` or does not set the key.
+  """
+  # guard: only a pyproject carries tool sections; mypy.ini and setup.cfg leave the default in place
+  if not config_file or Path(config_file).name != "pyproject.toml":
+    return _DEFAULT_EXEMPT_PATHS
+
+  # a missing or broken file is mypy's to report; the plugin falls back to the default
+  try:
+    section = tomllib.loads(Path(config_file).read_text(encoding = "utf-8")).get("tool", {}).get(_CONFIG_SECTION, {})
+  except (OSError, tomllib.TOMLDecodeError):
+    return _DEFAULT_EXEMPT_PATHS
+  patterns = section.get(_EXEMPT_KEY) if isinstance(section, dict) else None
+
+  # guard: an absent or malformed key leaves the default in place
+  if not isinstance(patterns, list):
+    return _DEFAULT_EXEMPT_PATHS
+  return tuple(pattern for pattern in patterns if isinstance(pattern, str))
+
+
+def _glob_to_regex(pattern: str) -> re.Pattern[str]:
+  """
+  Compile a path glob into a regex over a posix repo-relative path.
+
+  Args:
+    pattern: Glob where `**` spans any run of segments, `*` and `?` stay within one segment.
+
+  Returns:
+    Compiled regex to full-match the path against.
+  """
+  # `**/` also matches an empty run, so `**/tests/**/*.py` covers a top-level `tests/` directory
+  pieces: list[str] = []
+  for token in re.split(r"(\*\*/|\*\*|\*|\?)", pattern):
+    if token == "**/":
+      pieces.append("(?:.*/)?")
+    elif token == "**":
+      pieces.append(".*")
+    elif token == "*":
+      pieces.append("[^/]*")
+    elif token == "?":
+      pieces.append("[^/]")
+    else:
+      pieces.append(re.escape(token))
+  return re.compile("".join(pieces))
+
+
+def _is_exempt(path: str, exempt_paths: tuple[re.Pattern[str], ...]) -> bool:
+  """
+  Tell whether a checked file lies on an exempt path.
 
   Args:
     path: Path of the checked file, as mypy received it.
+    exempt_paths: Compiled exempt-path globs.
 
   Returns:
-    `True` when a directory of the file's path, taken relative to the current working directory when the file lies
-    under it, is named exactly `tests`.
+    `True` when the file's path, taken relative to the current working directory when the file lies under it,
+    full-matches one of the globs.
   """
 
   # Domain(pytool.code-discipline):
-  # # Test code is exempt from protected access
-  # Tests reach into the internals they verify, so protected access is not reported in test code. A file is test
-  # code when a directory named exactly `tests` lies on its path inside the project, at any depth. Directories above
-  # the project root do not count. A file named `tests.py` or a directory such as `tests_util` is ordinary code.
+  # # Exempt paths are not checked for protected access
+  # Tests reach into the internals they verify, so protected access is not reported on exempt paths, which by
+  # default are every file under a directory named exactly `tests` inside the project, at any depth. A project
+  # redefines the list in its own `pyproject.toml`. Directories above the project root do not count. A file named
+  # `tests.py` or a directory such as `tests_util` is ordinary code under the default.
 
-  # mypy runs from the project root, so only the directories inside the project decide; an IDE passes absolute paths
+  # mypy runs from the project root, so only the path inside the project decides; an IDE passes absolute paths
   file = Path(path).resolve()
   cwd = Path.cwd().resolve()
-  dirs = file.relative_to(cwd).parent.parts if file.is_relative_to(cwd) else PurePath(path).parent.parts
-  return _TESTS_DIR in dirs
+  rel = file.relative_to(cwd) if file.is_relative_to(cwd) else PurePath(path)
+  return any(pattern.fullmatch(rel.as_posix()) for pattern in exempt_paths)
 
 
 def _find_declaring_info(receiver: ProperType, name: str) -> TypeInfo | None:

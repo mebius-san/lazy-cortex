@@ -309,7 +309,8 @@ class Phase3Pyproject:
   from the template.
 
   Adds the `[tool.pcf]`, `[tool.pcf.overrides]`, `[tool.toi]`, `[tool.pch]`,
-  `[tool.pytest.ini_options]`, `[tool.mypy]`, `[tool.pylint]`, and `[tool.ruff]` sections
+  `[tool.pytest.ini_options]`, `[tool.mypy]`, `[tool.protected_access]`, `[tool.pylint]`, and
+  `[tool.ruff]` sections
   (and any nested sub-tables, e.g. `[tool.ruff.lint]`) that the consumer's file is missing,
   and completes the missing sub-keys of any of those sections the consumer already has. A
   `[tool.mypy]` `plugins` list the consumer already has gains the template's plugin entries
@@ -338,7 +339,7 @@ class Phase3Pyproject:
   # Always-deployed checker sections. pch is added only when PyCharm is present —
   # it spins up a headless PyCharm and is meaningless without it, so it is deployed
   # only when the install skill sets the matching env flag (see OPTIONAL_SECTIONS + run()).
-  CHECKER_SECTIONS = ("pcf", "toi", "pytest", "mypy", "pylint", "ruff")
+  CHECKER_SECTIONS = ("pcf", "toi", "pytest", "mypy", "protected_access", "pylint", "ruff")
   OPTIONAL_SECTIONS = {"pch": "LAZY_PYTHON_ENABLE_PCH"}
 
   # the checker section and key whose list install extends instead of leaving alone

@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, knowledge markers, tests, and the checker stack.
-last_regen: 2026-10-06
+last_regen: 2026-10-10
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -21,8 +21,8 @@ source_skills:
   - review.py
   - lazy-python.coding-guidelines
   - lazy-python.checking-guidelines
-source_sha: 2b8e9e79da15a0e25e187f4c05ae6011a36f0740
-surface_sha: efec2d69b9653e5505e7d1422bd71bfa6f41e37e3c5901d813662453f344c2a0
+source_sha: 8b1648549bdb076343d714eccdc2b6cb766c8147
+surface_sha: 4a2c8962875123197774a5c370de889b7634da9348f0beb30d0f43e5d8d59ed8
 ---
 # Frequently asked questions
 
@@ -142,7 +142,7 @@ If your repo has more than one top-level package (a monorepo, a `src/` layout wi
 
 ## `pcf` used to flag `assert` statements and numeric literals in my test files. Why doesn't it anymore?
 
-`pcf` now recognises a pytest test file by path — a filename starting with `test_` somewhere under a `tests` directory — and exempts it from `check_assert` and `check_magic_literal`. Under pytest the `assert` *is* the check itself, and a literal is the expected value the test is checking against, so both production-code rules would otherwise flag a test file for doing its job. The exemption is intrinsic to that path-based detection, not a `pyproject.toml` toggle; production code under any other path is still fully checked for both.
+`pcf` ships one `[tool.pcf.overrides]` entry of its own: `"**/tests/**/test_*.py" = { check_assert = false, check_magic_literal = false }`. Under pytest the `assert` *is* the check itself, and a literal is the expected value the test is checking against, so both production-code rules would otherwise flag a test file for doing its job. The entry is a default, not a rule baked into the checker: your own `[tool.pcf.overrides]` entries merge after it, so a test tree whose files are not named `test_*.py` gets the same relief from an entry such as `"tests/**/*.py" = { check_assert = false, check_magic_literal = false }`, and redefining the shipped key with both checks `true` switches the default off. Production code under any other path is still fully checked for both.
 
 ---
 

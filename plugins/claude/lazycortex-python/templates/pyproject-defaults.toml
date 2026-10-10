@@ -16,6 +16,7 @@
 #   [tool.pch]              — pch (PyCharm inspection runner) policy
 #   [tool.pytest.ini_options] — pytest defaults
 #   [tool.mypy]             — mypy strict-mode policy
+#   [tool.protected_access] — protected-access mypy plugin policy
 #   [tool.pylint]           — pylint policy
 #   [tool.ruff]             — ruff linter/style policy
 #   [tool.ruff.lint]        — ruff rule selection + ignores
@@ -66,6 +67,13 @@ disallow_untyped_globals = true
 
 # explicitly tell mypy which top-level packages to check
 packages = []  # <add your source package roots, e.g. ["myapp", "api"]>
+
+
+[tool.protected_access]
+# Repo-relative globs the protected-access mypy plugin never reports in (`**` spans
+# directories, `*` / `?` stay within one segment). Tests reach into the internals they
+# verify, so the default covers every file under a directory named exactly `tests`.
+exempt_paths = [ "**/tests/**/*.py" ]
 
 
 [tool.pylint]
@@ -298,8 +306,13 @@ banned_docstring_phrases = [
 # ref_exempt = true
 
 [tool.pcf.overrides]
+# Keys are repo-relative globs (`**` spans directories, `*` / `?` stay within one segment)
+# or plain path prefixes; the last matching key wins. The shipped default below keeps a
+# pytest test file's asserts and expected-value literals: under pytest the `assert` is the
+# check itself and a literal is the value being checked for. Redefine the key to change it,
+# e.g. "tests/**/*.py" for a test tree whose files are not named test_*.py.
+"**/tests/**/test_*.py" = { check_assert = false, check_magic_literal = false }
 # <add per-path overrides as needed, e.g.>
-# "tests"          = { check_assert = false }
 # "tools"          = { check_magic_literal = false }
 # "<your-pkg>/foo" = { check_magic_literal = false }
 

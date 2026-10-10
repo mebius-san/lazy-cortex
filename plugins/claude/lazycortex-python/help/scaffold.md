@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Canonical Python file skeletons — python-template.py for regular files, init-template.py for __init__.py — installed once via /lazy-python.install Step 6.
-last_regen: 2026-10-06
+last_regen: 2026-10-10
 diagram_spec:
   anchor: "How the templates reach your project"
   request: "Flow showing python-template.py, init-template.py, and scaffold.entries.json shipping from the plugin, scaffold-sync copying both templates into .claude/templates/python/ in the consumer project, and the lazy-core.scaffold rule matching a new *.py file against python-template.py or, when the file is an __init__.py, against init-template.py instead (the more specific glob wins)"
@@ -10,8 +10,8 @@ source_skills:
   - python/init-template.py
   - python/scaffold.entries.json
   - lazy-python.install
-source_sha: 2b8e9e79da15a0e25e187f4c05ae6011a36f0740
-surface_sha: 3adafdf5676d13cab5d16a9c4f24788ae07bbf04ee1a522b07858d1c33717488
+source_sha: 8b1648549bdb076343d714eccdc2b6cb766c8147
+surface_sha: cf0f259c24d599f49be6ed77062ddb6c7d57127f84137773d713d665a3d43aca
 ---
 # Python file scaffold
 

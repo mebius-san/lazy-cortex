@@ -46,6 +46,15 @@ LANGUAGE_SCRIPTS = {
   'korean':     ('HANGUL',),
 }
 
+# Per-path overrides keyed by a repo-relative glob (`**`, `*`, `?`) or a plain path prefix,
+# applied last-match-wins; the consumer's [tool.pcf.overrides] entries merge after these, so
+# a project redefines a key to change it. The shipped entry keeps a pytest test file's asserts
+# and expected-value literals: under pytest the `assert` is the check itself and a literal is
+# the value being checked for.
+DEFAULT_OVERRIDES: dict[str, dict[str, bool]] = {
+  '**/tests/**/test_*.py': { 'check_assert': False, 'check_magic_literal': False },
+}
+
 # default configuration values
 DEFAULT_CONFIG = {
   'max_line_length': 117,
@@ -85,6 +94,8 @@ DEFAULT_CONFIG = {
   # empty means autodetect a single top-level package (root or src/), and when neither
   # yields a name both project-import checks are disabled.
   'project_package': '',
+  # per-path overrides, see DEFAULT_OVERRIDES
+  'overrides': DEFAULT_OVERRIDES,
 }
 
 # type alias for a suggestion map
@@ -419,6 +430,14 @@ def load_config(start_path: str | None = None) -> dict:
         pyproject = tomllib.load(handle)
       pcf_config = pyproject.get('tool', {}).get('pcf', {})
       config.update(pcf_config)
+
+      # the shipped overrides stay unless the consumer redefines the same key; consumer entries
+      # come last so they win on an overlapping path
+      consumer_overrides = pcf_config.get('overrides', {})
+      config['overrides'] = {
+        **DEFAULT_OVERRIDES,
+        **(consumer_overrides if isinstance(consumer_overrides, dict) else {}),
+      }
       config['_project_root'] = str(pyproject_path.parent)
     except (OSError, tomllib.TOMLDecodeError):
       pass
@@ -427,11 +446,57 @@ def load_config(start_path: str | None = None) -> dict:
   return config
 
 
+def glob_to_regex(pattern: str) -> re.Pattern[str]:
+  """
+  Compile a path glob into a regex over a posix repo-relative path.
+
+  Args:
+    pattern: glob where `**` spans any run of segments, `*` and `?` stay within one segment.
+
+  Returns:
+    Compiled regex to full-match the path against.
+  """
+  # `**/` also matches an empty run, so `**/tests/**/*.py` covers a top-level `tests/` directory
+  pieces: list[str] = []
+  for token in re.split(r'(\*\*/|\*\*|\*|\?)', pattern):
+    if token == '**/':
+      pieces.append('(?:.*/)?')
+    elif token == '**':
+      pieces.append('.*')
+    elif token == '*':
+      pieces.append('[^/]*')
+    elif token == '?':
+      pieces.append('[^/]')
+    else:
+      pieces.append(re.escape(token))
+  return re.compile(''.join(pieces))
+
+
+def override_matches(rel_path: str, pattern: str) -> bool:
+  """
+  Tell whether an override key covers a repo-relative posix path.
+
+  Args:
+    rel_path: posix path of the file relative to the project root.
+    pattern: override key, a glob or a plain path prefix.
+
+  Returns:
+    `True` when the key covers the path.
+  """
+  # guard: a key without glob characters is a prefix naming a directory or file and everything below
+  if not any(char in pattern for char in '*?'):
+    prefix = pattern.rstrip('/')
+    return rel_path == prefix or rel_path.startswith(prefix + '/')
+
+  # a glob must cover the whole path, never a prefix of it
+  return glob_to_regex(pattern).fullmatch(rel_path) is not None
+
+
 def resolve_config_for_file(base_config: dict,
                             file_path: str,
                             project_root: str) -> dict:
   """
-  Resolve the effective config for a file by applying per-folder overrides.
+  Resolve the effective config for a file by applying per-path overrides.
 
   Args:
     base_config: base configuration dictionary from `load_config`.
@@ -439,7 +504,7 @@ def resolve_config_for_file(base_config: dict,
     project_root: absolute path to the project root directory.
 
   Returns:
-    Configuration dictionary with matching overrides applied.
+    Configuration dictionary with matching overrides applied, last match winning.
   """
   overrides = base_config.get('overrides', {})
 
@@ -447,16 +512,15 @@ def resolve_config_for_file(base_config: dict,
   if not overrides:
     return base_config
 
-  # override patterns are authored repo-relative, so the file must be expressed the same way
-  rel_path = os.path.relpath(file_path, project_root)
+  # override keys are authored repo-relative and posix, so the file must be expressed the same way
+  rel_path = Path(os.path.relpath(file_path, project_root)).as_posix()
 
   # start with base config excluding the overrides key
   effective = { key: val for key, val in base_config.items() if key != 'overrides' }
 
   # apply matching overrides (last-match-wins)
   for pattern, override_values in overrides.items():
-    prefix = pattern.rstrip('/')
-    if rel_path.startswith(prefix + '/') or rel_path == prefix:
+    if override_matches(rel_path, pattern):
       effective.update(override_values)
 
   # the merged result replaces the base config for this one file only
@@ -6359,14 +6423,6 @@ def analyze_file(path: str, config: dict | None = None) -> list[tuple[int, str]]
   # a package init is allowed wildcard imports that a module is not
   is_init_file = os.path.basename(path) == '__init__.py'
 
-  # a pytest test file keeps its asserts and its expected-value literals: under pytest the
-  # `assert` is the check itself and a literal is the value being checked for, so the two
-  # production-code rules would flag every test for doing its job
-  is_test_file = (
-    os.path.basename(path).startswith('test_')
-    and 'tests' in Path(os.path.abspath(path)).parts
-  )
-
   # each analyzer is opt-out through its own config key
   if config.get('check_imports', True):
     import_analyzer = ImportFormatAnalyzer(
@@ -6417,8 +6473,9 @@ def analyze_file(path: str, config: dict | None = None) -> list[tuple[int, str]]
     docstring_analyzer.visit(tree)
     all_issues.extend(docstring_analyzer.analyze())
 
-  # magic-literal rules skip test files, where a literal is the expected value
-  if bool(config.get('check_magic_literal', True)) and not is_test_file:
+  # magic-literal rules read the allowlists; a test file reaches here with the check already off
+  # through the shipped `[tool.pcf.overrides]` entry
+  if bool(config.get('check_magic_literal', True)):
     project_root_raw = config.get('_project_root')
     project_root = project_root_raw if isinstance(project_root_raw, str) else None
     allowed_numbers_raw = config.get('allowed_magic_numbers', []) or []
@@ -6462,7 +6519,7 @@ def analyze_file(path: str, config: dict | None = None) -> list[tuple[int, str]]
       is_init_file = is_init_file,
       check_line_length = check_code_line_length,
       check_indentation = True,
-      check_assert = bool(config.get('check_assert', True)) and not is_test_file,
+      check_assert = bool(config.get('check_assert', True)),
       check_block_comments = bool(config.get('check_block_comments', True)),
       check_language = bool(config.get('check_language', True)),
       allowed_languages = allowed_languages,
@@ -6521,7 +6578,7 @@ def walk_dir(root: str,
   # the venv and bytecode dirs are never scanned whatever the caller excludes
   all_excludes = HARDCODED_EXCLUDES + exclude_substrings
 
-  # per-folder overrides are keyed off the project root, not the directory scanned
+  # per-path overrides are keyed off the project root, not the directory scanned
   project_root = config.get('_project_root', root) if config else root
 
   # recursively walk directory and process all .py files
