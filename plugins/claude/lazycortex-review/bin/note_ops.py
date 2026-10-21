@@ -12,13 +12,20 @@ Report shape (see `build_report`):
       "parse_failed": bool,
       "frontmatter": {<ReviewKey>: bool | int | str},
       "unknown_review_keys": [str, ...],
-      "banner": {"present": bool, "state_tag": str | None, "gestures": [{"label", "ticked"}]},
+      "banner": {"present": bool, "state_tag": str | None, "gestures": [{"label", "ticked", "kind"}]},
       "sections": [{"title": str, "owner_tag": str}],
       "callouts": [{"type": str, "tag": str, "line": int, "body": str}],
       "ticked_question_options": [{"callout_line": int, "option": str}],
       "job_markers": {"coordinator_job": str | None, "active_job": str | None,
                       "pending_wake": str | None},
     }
+
+Each banner gesture's `kind` is derived from the checkbox's position inside the banner callout, never from its
+label, so every banner language yields the same kinds. In the ready state the closed set is `approve`,
+`approve-autorun`, and `approve-skip-validation` (the first, second, and third box, as in
+`banner.READY_GESTURE_KINDS`). A box beyond the third, and any box in a non-ready state, reports `kind: null`.
+Every checkbox is reported in banner order with its `ticked` flag, so two simultaneous ticks both appear and
+resolving them is the caller's job.
 
 `job_markers` is the one block that does not come from the document's own bytes: the review
 loop's job markers are runtime state in `job_markers.py`'s sidecar, not frontmatter, and they
@@ -59,7 +66,7 @@ import parser as _parser  # noqa: E402  # pylint: disable=import-error,wrong-imp
 from errors import ParseError  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 # pylint: disable-next=import-error,wrong-import-position
-from keys import LANG_EN as _LANG_EN, Bucket, Phase, ReviewKey, Tag  # noqa: E402
+from keys import LANG_EN as _LANG_EN, AutorunState, Bucket, Phase, ReviewKey, Tag  # noqa: E402
 
 
 # The closed `review_*` frontmatter schema (spec § Frontmatter schema) — any `review_`-prefixed
@@ -67,13 +74,13 @@ from keys import LANG_EN as _LANG_EN, Bucket, Phase, ReviewKey, Tag  # noqa: E40
 _KNOWN_REVIEW_KEYS = frozenset({
     ReviewKey.ACTIVE, ReviewKey.ROUND, ReviewKey.APPROVED, ReviewKey.PHASE, ReviewKey.RESULT,
     ReviewKey.MARKER_STYLE, ReviewKey.MAIN_DONE, ReviewKey.EXPERT, ReviewKey.VALIDATION_ROUND,
-    ReviewKey.APPROVED_WITH_CONCERNS, ReviewKey.CONCERNS_AUTO_CONTINUE,
+    ReviewKey.SKIP_VALIDATION, ReviewKey.AUTORUN, ReviewKey.AUTORUN_CYCLES,
 })
-_BOOL_REVIEW_KEYS = frozenset({
-    ReviewKey.ACTIVE, ReviewKey.APPROVED, ReviewKey.APPROVED_WITH_CONCERNS,
-    ReviewKey.CONCERNS_AUTO_CONTINUE,
-})
-_INT_REVIEW_KEYS = frozenset({ ReviewKey.ROUND, ReviewKey.VALIDATION_ROUND })
+_BOOL_REVIEW_KEYS = frozenset({ ReviewKey.ACTIVE, ReviewKey.APPROVED, ReviewKey.SKIP_VALIDATION })
+_INT_REVIEW_KEYS = frozenset({ ReviewKey.ROUND, ReviewKey.VALIDATION_ROUND, ReviewKey.AUTORUN_CYCLES })
+
+# The closed value set `set_key` accepts for `review_autorun`.
+_AUTORUN_STATES = frozenset({ AutorunState.RUNNING, AutorunState.CLEAN, AutorunState.CAP, AutorunState.QUESTION })
 
 # Banner-state tags (`banner.State` values) are reported via `banner`, never duplicated in
 # `callouts` — computed from the enum so a future banner state stays in sync automatically.
@@ -97,7 +104,7 @@ _WAITING_CONTEXT_BY_PHASE = {
 _GESTURE_RE = re.compile(r"^>\s*-\s*\[([ xX])\]\s*(.+)$", re.MULTILINE)
 
 # Any `[!<marker>] ... #review/<tag>` callout head line — generalises banner.py's own
-# `_FIRST_LINE_RE` (which only recognises the five banner-state tags) to any review-owned
+# `_FIRST_LINE_RE` (which only recognises the four banner-state tags) to any review-owned
 # callout marker (`todo`, `question`, `attention`, ...), per the reference shape in
 # `lazycortex-specs/bin/coordinator_dispatch.py`'s `_QUESTION_HEAD_RE`, rewritten here rather
 # than imported (plugin boundary).
@@ -198,16 +205,19 @@ def _empty_banner_report() -> dict:
   return { "present": False, "state_tag": None, "gestures": [] }
 
 
-def _build_banner_report(text: str, body: str) -> dict:
+def _build_banner_report(body: str) -> dict:
   """
   Build the `banner` report block for one document.
 
   Args:
-    text: Full document text (frontmatter included), used to locate the first H1 heading.
     body: Document body text (post-frontmatter) to scan for the banner and its gestures.
 
   Returns:
-    Dict with `present`, `state_tag`, and `gestures` — see module docstring.
+    Dict with `present`, `state_tag`, and `gestures` — see module docstring. Gestures come only from the banner
+    callout block itself, never from a question or any other callout before the first H1. Each gesture's `kind`
+    follows the checkbox's position among the ready banner's checkboxes (so every language's banner reports the
+    same kinds), and is `None` for a checkbox past the last known position and for every checkbox of a banner
+    that is not the ready one.
   """
   state = _banner.extract(body)
 
@@ -215,13 +225,21 @@ def _build_banner_report(text: str, body: str) -> dict:
   if state is None:
     return _empty_banner_report()
 
-  # the banner's own territory is everything before the first H1; a document with no H1 at all
-  # treats the whole body as banner territory (mirrors `banner.extract`'s own scan region)
-  top = _parser.parse(text).top_heading
-  banner_region = body[: body.index(top.heading_line)] if top is not None else body
+  # only the banner callout's own lines are gestures: a question or any other callout near the
+  # banner, before the first H1 or in a document with none, never reads as one
+  banner_block = _banner.extract_block(body)
+
+  # a checkbox's gesture kind follows its position among the ready banner's checkboxes, never
+  # its label, so every language's banner reports the same kinds; a checkbox past the last
+  # known position, or on a banner that is not the ready one, has no kind
+  kinds = _banner.READY_GESTURE_KINDS if state is _banner.State.READY else ()
   gestures = [
-      { "label": m.group(2).strip(), "ticked": m.group(1).lower() == _TICK_CHAR }
-      for m in _GESTURE_RE.finditer(banner_region)
+      {
+          "label": match.group(2).strip(),
+          "ticked": match.group(1).lower() == _TICK_CHAR,
+          "kind": kinds[index] if index < len(kinds) else None,
+      }
+      for index, match in enumerate(_GESTURE_RE.finditer(banner_block))
   ]
   return { "present": True, "state_tag": state.value, "gestures": gestures }
 
@@ -357,7 +375,7 @@ def build_report(text: str, job_markers: dict[str, str | None] | None = None) ->
       "parse_failed": False,
       "frontmatter": frontmatter,
       "unknown_review_keys": unknown_review_keys,
-      "banner": _build_banner_report(text, body),
+      "banner": _build_banner_report(body),
       "sections": _build_sections_report(text),
       "callouts": callouts,
       "ticked_question_options": ticked_question_options,
@@ -369,8 +387,9 @@ def set_key(text: str, key: str, value: object) -> str:
   """
   Set a frontmatter key to a value, using line-surgery to preserve byte-for-byte.
 
-  The key must be a member of the closed schema `_KNOWN_REVIEW_KEYS`. When the value
-  is `None`, the key line is deleted instead. Document body is preserved byte-for-byte.
+  The key must be a member of the closed schema. When the value is `None`, the key line is
+  deleted instead. A retired key accepts only `None`. The autorun state must be one of the
+  autorun states, and the autorun cycle count must be a non-negative integer.
 
   Guarantees:
     - The document body (everything after the frontmatter block) is preserved byte-for-byte;
@@ -380,19 +399,29 @@ def set_key(text: str, key: str, value: object) -> str:
     text: Raw document text to modify.
     key: The frontmatter key to set or delete.
     value: The value to write, or `None` to delete the key. Serialised to a bare YAML
-      literal (true/false for bool, null for None, string/int otherwise).
+      literal (true/false for bool, null for None, string/int otherwise). The autorun cycle
+      count accepts a non-negative `int` or its ASCII digit string and is written as an `int`;
+      a `bool` is refused.
 
   Returns:
     The updated document text with the key set/deleted and all other bytes unchanged.
 
   Raises:
-    ValueError: If `key` is not in the closed schema.
+    ValueError: If `key` is not in the closed schema, is retired and the value is not `None`, the
+      autorun state is not one of the autorun states, or the cycle count is not a non-negative integer.
     ParseError: If the document has an opening frontmatter fence with no matching closing fence.
   """
 
   # Contract:
   # The document body (everything after the frontmatter block) remains byte-for-byte
   # unchanged; only the target key's frontmatter line is added, updated, or removed.
+
+  # guard: a retired key may only be deleted, so a stale document can be cleaned up
+  if key in ReviewKey.RETIRED:
+    # guard: null on a retired key deletes its line
+    if value is None:
+      return _fm.unset_field(text, key)
+    raise ValueError(f"set-key: key '{key}' is retired; only null (delete) is accepted")
 
   # guard: key must be in the known schema
   if key not in _KNOWN_REVIEW_KEYS:
@@ -404,8 +433,41 @@ def set_key(text: str, key: str, value: object) -> str:
   if value is None:
     return _fm.unset_field(text, key)
 
+  # guard: the autorun state is a closed value set
+  if key == ReviewKey.AUTORUN and value not in _AUTORUN_STATES:
+    raise ValueError(
+        f"set-key: value {value!r} for '{key}' is not one of {', '.join(sorted(_AUTORUN_STATES))}"
+    )
+
+  # normalise the autorun cycle counter to a non-negative integer, given as an int or its digit string
+  if key == ReviewKey.AUTORUN_CYCLES:
+    value = _non_negative_int(key, value)
+
   # set or overwrite the key using line-surgery (preserves body byte-for-byte)
   return _fm.set_field(text, key, value)
+
+
+def _non_negative_int(key: str, value: object) -> int:
+  """
+  Normalize a value to a non-negative integer.
+
+  Args:
+    key: The frontmatter key being set, named in the error message.
+    value: A non-negative `int` or its ASCII digit string; a `bool` is refused.
+
+  Returns:
+    The value as a non-negative integer.
+
+  Raises:
+    ValueError: If the value is neither a non-negative `int` nor an ASCII digit string.
+  """
+  # guard: an int (never a bool) passes through
+  if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+    return value
+  # guard: an ASCII digit string is the CLI's spelling of the same integer
+  if isinstance(value, str) and value.isascii() and value.isdigit():
+    return int(value)
+  raise ValueError(f"set-key: value {value!r} for '{key}' is not an integer >= 0")
 
 
 def _is_flag_true(meta: dict[str, str], key: str) -> bool:
@@ -421,6 +483,22 @@ def _is_flag_true(meta: dict[str, str], key: str) -> bool:
   """
   # waiver: the bare YAML boolean literal frontmatter.py's own `_serialise_scalar` writes
   return meta.get(key, "").strip().lower() == "true"
+
+
+def _int_field(meta: dict[str, str], key: str) -> int:
+  """
+  Read a `ReviewKey` counter field from the parsed frontmatter.
+
+  Args:
+    meta: Parsed frontmatter dict from `frontmatter.parse`.
+    key: The counter `ReviewKey` to read.
+
+  Returns:
+    The integer for a plain ASCII digit string, `0` when the field is absent, empty, negative, or
+    otherwise not a plain non-negative integer.
+  """
+  raw = meta.get(key, "").strip()
+  return int(raw) if raw.isascii() and raw.isdigit() else 0
 
 
 def waiting_context_for_phase(review_phase: str | None) -> str:
@@ -501,10 +579,11 @@ def repaint_banner(text: str, *, job_in_flight: bool = False, lang: str = _LANG_
   """
   Recompute and repaint the top banner from the document's current frontmatter state.
 
-  The banner state is driven by frontmatter (`review_approved`,
-  `review_approved_with_concerns`, `review_concerns_auto_continue`, `review_phase`) plus the
-  body's own open-question/-concern content — no class-config lookup. A job in flight always paints
-  the in-process banner.
+  The banner state is driven by frontmatter (`review_approved`, `review_phase`,
+  `review_validation_round`, `review_autorun`, `review_autorun_cycles`) plus the
+  body's own open-question and decision-candidate content — no class-config lookup. A
+  `review_validation_round` of 1 or more paints the three-checkbox ready banner. A job in flight
+  always paints the in-process banner.
 
   Guarantees:
     - Repainting is idempotent: calling this function again on its own output, with the
@@ -556,7 +635,6 @@ def repaint_banner(text: str, *, job_in_flight: bool = False, lang: str = _LANG_
       body = body,
       dispatch_state = dispatch_state,
       approved = approved,
-      concerns_decision_pending = review_phase == Bucket.CONCERNS_PAUSE,
       review_phase = review_phase,
   )
 
@@ -565,8 +643,9 @@ def repaint_banner(text: str, *, job_in_flight: bool = False, lang: str = _LANG_
   new_body = _banner.replace_banner(
       body, state,
       approved = approved,
-      approve_with_concerns = _is_flag_true(meta, ReviewKey.APPROVED_WITH_CONCERNS),
-      auto_continue = _is_flag_true(meta, ReviewKey.CONCERNS_AUTO_CONTINUE),
+      validation_seen = _int_field(meta, ReviewKey.VALIDATION_ROUND) >= 1,
+      autorun = meta.get(ReviewKey.AUTORUN, "").strip() or None,
+      autorun_cycles = _int_field(meta, ReviewKey.AUTORUN_CYCLES),
       waiting_context = waiting_context,
       lang = lang,
   )

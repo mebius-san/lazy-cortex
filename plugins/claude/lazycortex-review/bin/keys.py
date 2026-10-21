@@ -25,6 +25,9 @@ if TYPE_CHECKING:
 # plugin — `note_ops`, `start` and `banner` all read this one.
 LANG_EN = "en"
 
+# The autorun cycle cap a review class gets when its config names none.
+DEFAULT_AUTORUN_MAX_CYCLES = 7
+
 
 # ----------------------------------------------------------------------------------------
 class ReviewKey:
@@ -41,9 +44,11 @@ class ReviewKey:
     MAIN_DONE: The bracketed list of main writers already run.
     EXPERT: A per-document main-writer override.
     VALIDATION_ROUND: The post-approve validation-barrier round counter.
-    APPROVED_WITH_CONCERNS: The accept-concerns-and-finalize flag.
-    CONCERNS_AUTO_CONTINUE: The operator's standing choice to skip the concerns pause for the rest of the cycle.
+    SKIP_VALIDATION: Whether the operator chose to finalize without the validation barrier.
+    AUTORUN: The autorun state, one of the `AutorunState` tokens.
+    AUTORUN_CYCLES: The count of autorun cycles run in this review.
     PREFIX: The shared prefix of every review-lifecycle frontmatter key.
+    RETIRED: The retired key names, which only accept deletion and are never written again.
   """
 
   ACTIVE = "review_active"
@@ -55,9 +60,29 @@ class ReviewKey:
   MAIN_DONE = "review_main_done"
   EXPERT = "review_expert"
   VALIDATION_ROUND = "review_validation_round"
-  APPROVED_WITH_CONCERNS = "review_approved_with_concerns"
-  CONCERNS_AUTO_CONTINUE = "review_concerns_auto_continue"
+  SKIP_VALIDATION = "review_skip_validation"
+  AUTORUN = "review_autorun"
+  AUTORUN_CYCLES = "review_autorun_cycles"
   PREFIX = "review_"
+  RETIRED: frozenset[str] = frozenset({ "review_concerns_auto_continue", "review_approved_with_concerns" })
+
+
+# ----------------------------------------------------------------------------------------
+class AutorunState:
+  """
+  Autorun state value tokens compared as strings.
+
+  Attributes:
+    RUNNING: The autorun is advancing the review loop on its own.
+    CLEAN: The autorun stopped because a cycle ended with no outstanding concerns.
+    CAP: The autorun stopped at the configured cycle cap.
+    QUESTION: The autorun stopped because a writer raised a question for the operator.
+  """
+
+  RUNNING = "running"
+  CLEAN = "clean"
+  CAP = "cap"
+  QUESTION = "question"
 
 
 # ----------------------------------------------------------------------------------------
@@ -173,8 +198,9 @@ class Action:
 
   Attributes:
     APPROVE_MIRROR: Mirror the operator's whole-document approval into frontmatter.
-    APPROVE_WITH_CONCERNS_MIRROR: Mirror the approve-with-concerns gesture into frontmatter.
-    CONTINUE_REVIEW_MIRROR: Process the continue-review-cycle gesture.
+    APPROVE_AUTORUN_MIRROR: Mirror the operator's approve-with-autorun gesture into frontmatter.
+    APPROVE_SKIP_VALIDATION_MIRROR: Mirror the operator's approve-without-validation gesture into frontmatter.
+    AUTORUN_ADVANCE: Advance an autorunning document into its next cycle without waiting for the operator.
     BANNER_REPAINT: Repaint the top banner to the desired state.
     RESET_APPROVAL: Reset approval and re-open the validator barrier.
     BARRIER_DISPATCH: Queue every pending writer of the active barrier at once.
@@ -183,8 +209,9 @@ class Action:
   """
 
   APPROVE_MIRROR = "approve-mirror"
-  APPROVE_WITH_CONCERNS_MIRROR = "approve-with-concerns-mirror"
-  CONTINUE_REVIEW_MIRROR = "continue-review-mirror"
+  APPROVE_AUTORUN_MIRROR = "approve-autorun-mirror"
+  APPROVE_SKIP_VALIDATION_MIRROR = "approve-skip-validation-mirror"
+  AUTORUN_ADVANCE = "autorun-advance"
   BANNER_REPAINT = "banner-repaint"
   RESET_APPROVAL = "reset-approval"
   BARRIER_DISPATCH = "barrier-dispatch"
@@ -279,7 +306,7 @@ class JobKey:
     WRITER_COMMIT_TIMESTAMP: The per-job dispatch-time writer-commit timestamp field.
     FILE_SNAPSHOT_HASH: The per-job dispatch-time file-content snapshot-hash field.
     DEDUP_TRACKER: The per-job dispatch-dedup tracker key field.
-    CONCERNS_DECISION_THRESHOLD: The per-class concerns-pause round-threshold config key.
+    AUTORUN_MAX_CYCLES: The review-class config key capping the autorun cycles.
     DOC_DOCTOR: The `review.doc_doctor` repair-expert config key.
     FOUND: The `lookup-expert` hit-flag response field.
     ENTRY: The `lookup-expert` expert-entry response field.
@@ -294,7 +321,7 @@ class JobKey:
     REPAIRED_HISTORY_SECTION: A historian-response repaired-section field.
     SECTION_COMMITS: A barrier-collect summary section-commits field.
     NEW_VALIDATION_ROUND: A validator-barrier summary new-validation-round field.
-    DECISION_COMMIT_SHA: A concerns-decision summary commit-sha field.
+    DECISION_COMMIT_SHA: A retired decision summary commit-sha field that no code sets or reads.
     HISTORY_PICKUP: A consume-pass summary history-pickup field.
     CONTEXT_FROM_FRONTMATTER: A class-config frontmatter-key-list field for job-context resolution.
     WARNINGS: A tick-summary non-fatal-warnings-list field.
@@ -381,7 +408,7 @@ class JobKey:
   WRITER_COMMIT_TIMESTAMP = "_writer_commit_timestamp"
   FILE_SNAPSHOT_HASH = "_file_snapshot_hash"
   DEDUP_TRACKER = "_dedup_key"
-  CONCERNS_DECISION_THRESHOLD = "concerns_decision_threshold"
+  AUTORUN_MAX_CYCLES = "autorun_max_cycles"
   DOC_DOCTOR = "doc_doctor"
   FOUND = "found"
   ENTRY = "entry"
@@ -494,7 +521,6 @@ class Bucket:
     TERMINALS: The terminal barrier phase / waiting-context label.
     WRITER: The main-writer waiting-context label.
     AWAITING_OPERATOR: The post-main-round `review_phase` awaiting an operator gesture.
-    CONCERNS_PAUSE: The `review_phase` for the outstanding-concerns operator pause.
   """
 
   VALIDATION = "validation"
@@ -503,7 +529,6 @@ class Bucket:
   TERMINALS = "terminals"
   WRITER = "writer"
   AWAITING_OPERATOR = "awaiting-operator"
-  CONCERNS_PAUSE = "concerns-pause"
 
 
 # ----------------------------------------------------------------------------------------

@@ -137,7 +137,6 @@ State blocks the dispatcher repaints on every wake; never authored by a writer.
 | State block: finalizing | `[!hint] #review/finalizing` | dispatcher | — |
 | State block: action needed | `[!caution] #review/action-needed` | dispatcher | — |
 | State block: ready to approve | `[!success] #review/ready` | dispatcher | — |
-| State block: outstanding concerns | `[!warning] #review/concerns-decision` | dispatcher | — |
 
 ### Review — author-written
 

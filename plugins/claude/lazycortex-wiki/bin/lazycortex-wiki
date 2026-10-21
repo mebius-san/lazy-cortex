@@ -66,7 +66,7 @@ _SUBCOMMANDS = {
   "resolve-language": "Resolve the language wiki writers must write in (wiki.language, then repo default, then en).",
   "text":           "Print one canonical wiki passage by key, in the resolved language.",
   "ensure-axes":    "Idempotently union axis names into the repository-wide tag_axes.",
-  "ensure-scope-config": "Idempotently seed filter predicates and exclude globs on one scope.",
+  "ensure-scope-config": "Idempotently seed filter predicates, exclude globs, and index badges on one scope.",
   "apply-node":     "Apply a curation.json result to a node file (classify or link fields).",
   "process-file":   "Process a single node: dispatch a classify curation job.",
   "prune-node":     "Drop See-also links to a deleted node and rebuild the scope index.",
@@ -480,6 +480,13 @@ class Cli:
           default = None,
           help = "Exclude globs to append to the scope when missing.",
         )
+        p.add_argument(
+          "--index-badges",
+          dest = "index_badges",
+          nargs = "*",
+          default = None,
+          help = "Frontmatter keys to seed as the scope's index badge list when it has none.",
+        )
         p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
       elif name == self._CMD_APPLY_NODE:
         p.add_argument(self._ARG_PATH, help = self._ARG_APPLY_PATH_HELP)
@@ -771,15 +778,15 @@ class Cli:
 
   def _cmd_ensure_scope_config(self, args: argparse.Namespace) -> int:
     """
-    Idempotently seed filter predicates and exclude globs on one configured scope.
+    Idempotently seed filter predicates, exclude globs, and index badges on one configured scope.
 
     Delegates to `axes.ensure_scope_config`, which reads and writes the `wiki` section through
     `lazycortex-core`'s `settings-get` / `settings-set` CLI. Prints the outcome dict to stdout
     as JSON.
 
     Args:
-      args: Parsed argument namespace; must carry `.scope_id`, `.filter_json`, `.exclude`, and
-        `.repo`.
+      args: Parsed argument namespace; must carry `.scope_id`, `.filter_json`, `.exclude`,
+        `.index_badges`, and `.repo`.
 
     Returns:
       Integer exit code: `1` when the filter JSON does not parse to an object, when the named
@@ -801,6 +808,7 @@ class Cli:
         return 1
     result = _axes.ensure_scope_config(
       repo, args.scope_id, filter_frontmatter = frontmatter, exclude = args.exclude,
+      index_badges = args.index_badges,
     )
     print(json.dumps(result))
     # guard: the malformed-scopes shape and the unknown-scope outcome both count as failure

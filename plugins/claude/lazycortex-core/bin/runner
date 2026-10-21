@@ -9,36 +9,65 @@ daemon's routine resolver consults these paths first, falling back to the
 plugin cache. Mirrors Claude Code's `--plugin-dir` for the daemon's
 separate-process world.
 """
-import os, sys
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  pass
+
+
+# The one option the runner itself understands; everything else is the repository root or a mistake.
+_PLUGIN_DIR_FLAG = "--plugin-dir"
+
 
 # guard: the daemon requires Python >= 3.12 — launchd/PATH may resolve an older python3, which
 # crash-loops every iteration and floods the error ledger. Refuse before any import.
-if sys.version_info < (3, 12):
-    sys.exit(f"lazycortex runner: Python >= 3.12 required, got {sys.version.split()[0]} "
-             f"({sys.executable}) — fix which python3 the supervisor resolves")
+# waiver: ruff UP036 reads this as dead code under the 3.12 floor, but the check exists precisely for an
+# interpreter below that floor — the supervisor may resolve one, and the floor is what this line enforces
+if sys.version_info < (3, 12):  # noqa: UP036
+  sys.exit(f"lazycortex runner: Python >= 3.12 required, got {sys.version.split()[0]} "
+           f"({sys.executable}) — fix which python3 the supervisor resolves")
 
-from pathlib import Path
+# the daemon module lives beside this script in the flat plugin `bin/`, reachable only after the path insert
 sys.path.insert(0, str(Path(__file__).parent))
-from runtime_daemon import run, set_plugin_dirs
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime
+# via sys.path, and only after the version guard so an old interpreter never parses 3.12-only syntax
+# pylint: disable-next=import-error,wrong-import-position
+from runtime_daemon import run, set_plugin_dirs  # noqa: E402
 
+# one pass over argv: the flag consumes its value, the first bare argument is the repository root
 repo = None
 plugin_dirs: list[Path] = []
 i = 1
 while i < len(sys.argv):
-    a = sys.argv[i]
-    if a == "--plugin-dir":
-        if i + 1 >= len(sys.argv):
-            sys.stderr.write("--plugin-dir requires a path argument\n")
-            sys.exit(2)
-        plugin_dirs.append(Path(sys.argv[i + 1]))
-        i += 2
-        continue
-    if repo is None:
-        repo = Path(a)
-        i += 1
-        continue
+  a = sys.argv[i]
+  if a == _PLUGIN_DIR_FLAG:
+    if i + 1 >= len(sys.argv):
+      sys.stderr.write(f"{_PLUGIN_DIR_FLAG} requires a path argument\n")
+      sys.exit(2)
+    plugin_dirs.append(Path(sys.argv[i + 1]))
+    i += 2
+    continue
+  if a in ("-h", "--help"):
+    print(__doc__.strip())
+    sys.exit(0)
+  # a flag never doubles as the repository path: taken literally it would make the daemon
+  # create `<cwd>/<flag>/.runtime/` just to record its own refusal there
+  if a.startswith("-"):
     sys.stderr.write(f"unexpected argument: {a}\n")
     sys.exit(2)
+  if repo is None:
+    repo = Path(a)
+    i += 1
+    continue
+  sys.stderr.write(f"unexpected argument: {a}\n")
+  sys.exit(2)
 
+# the dev plugin dirs are exported before the loop starts so every spawned routine inherits them
 set_plugin_dirs(plugin_dirs)
 run(repo if repo is not None else Path(os.getcwd()))

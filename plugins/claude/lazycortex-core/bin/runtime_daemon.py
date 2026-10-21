@@ -3599,5 +3599,43 @@ def _refresh_disk_gauges(repo_root: Path) -> None:
   metrics.aggregate_incidents_from_ledger(repo_root)
 
 
+# Usage text the script prints for `-h` / `--help`.
+_USAGE = (
+  "Usage: runtime_daemon.py [<repo-root>]\n\n"
+  "Drive the lazycortex runtime daemon against <repo-root> (default: the current directory)."
+)
+
+
+def main(argv: list[str]) -> None:
+  """
+  Run the daemon against the repository named on the command line, or the current directory.
+
+  Serve as the script's command-line entry: a help flag shows the usage text, and any other option is refused
+  instead of being taken as a repository path.
+
+  Notes:
+    - Prints the usage text to standard output for a help flag, and the refusal message to standard error.
+
+  Args:
+    argv: Command-line arguments after the script name.
+
+  Raises:
+    SystemExit: Code 0 after printing usage for `-h` / `--help`, code 2 for any other argument starting with `-`.
+  """
+  # guard: a help flag answers with the usage text and nothing else — no gate runs, nothing is written
+  if argv and argv[0] in ("-h", "--help"):
+    print(_USAGE)
+    sys.exit(0)
+
+  # guard: a flag never doubles as the repository path — taken literally it would make the daemon
+  # create `<cwd>/<flag>/.runtime/` just to record its own refusal there
+  if argv and argv[0].startswith("-"):
+    print(f"unexpected argument: {argv[0]}", file = sys.stderr)
+    sys.exit(2)
+
+  # the positional root, or the cwd when the supervisor starts the daemon inside the checkout
+  run(Path(argv[0]) if argv else Path(os.getcwd()))
+
+
 if __name__ == "__main__":
-  run(Path(sys.argv[1] if len(sys.argv) > 1 else os.getcwd()))
+  main(sys.argv[1:])

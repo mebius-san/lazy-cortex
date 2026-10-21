@@ -4,6 +4,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 10.5.6 — 2026-10-21 UTC
+
+- Settings migration now admits draft and deferred specs into the wiki: a scope still on the old default stage filter (approved and stageless only) is widened to include them, and gains an `index_badges` entry so the topic index shows each document's stage. Customized stage filters and an existing `index_badges` value are left untouched.
+- Review settings migration drops the retired per-class `concerns_decision_threshold` key from every review class, and leaves classes it doesn't apply to untouched.
+- The daemon entry points now print usage for `-h`/`--help` instead of creating a stray `--help/.runtime/` directory, and exit with an error on any other dash-prefixed argument.
+
 ### 10.5.5 — 2026-10-09 UTC
 
 - The markdown-style guidance on the expert-authored `[!question]` callout now says only where the callout lands and what shape it takes. When an expert may raise one is left to that expert's own discipline.
@@ -774,6 +780,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 9.12.3 — 2026-10-21 UTC
+
+- `lazy-spec.install` now seeds the spec-catalog wiki scope to include draft, approved and deferred documents. Rejected documents, empty scaffolds, the request inbox and plan/report working papers stay out. The topics index shows a `[spec_stage: <stage>]` badge beside each entry, so you can tell a draft from an approved document without opening it. The seed only fills in what the scope lacks, so any filter, exclude list or badge list you set yourself is kept on re-runs.
+
 ### 9.12.2 — 2026-10-09 UTC
 
 - Document writers now settle forks themselves from the approved documents and record the choice in the text. The `spec.decisions` rule gains a fourth duty: a `[!question]` is raised only for a contradiction between inputs, an unclear purpose, or a product fork no approved document answers. Failure behaviour, defaults, wording and similar calls no longer reach the operator as questions.
@@ -1525,6 +1535,14 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+### 6.13.0 — 2026-10-21 UTC
+
+- **Breaking:** The "concerns pause" is replaced by autorun. Documents now use `autorun` and `skip-validation` frontmatter keys, and the review coordinator runs its ladder on its own. It stops only at the iteration cap or when it needs to ask you a question. Documents that still carry the old pause keys or a legacy pause banner are cleaned up on re-open.
+- The ready banner now offers three approve gestures. The separate concerns-decision banner is gone, and gestures are read only from the banner callout.
+- Approving a document as the operator now folds its edit markers in place, through the new fold-markup step.
+- Finalize now sets "approved with concerns" when validation was skipped and sections with concerns remain. It keeps only the validation sections that still hold concerns.
+- Review fixes: re-opening a document clears a stale clean verdict, the fold-failure question now offers options, and commit steps pass `--history` lines through to the commit.
+
 ### 6.12.2 — 2026-10-09 UTC
 
 - Document reviews ask fewer questions. Main writers no longer turn every validator concern into an operator question. The review protocol and coordination playbook drop the re-asking and residual-call rules and keep only how questions are signalled, so when a writer may ask is left to the experts' own discipline.
@@ -1924,6 +1942,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+### 1.9.8 — 2026-10-21 UTC
+
+- Research experts now treat a wiki node marked as a draft or deferred document as a neighbour's current intent, not an approved fact. A conflict between the document being written and such a draft is resolved in favour of the approved documents and is no longer raised to the operator as a question.
+
 ### 1.9.7 — 2026-10-09 UTC
 
 - Document-writing experts (designer, ui-designer, use-case-writer, architect) now settle design forks themselves from the approved documents and their own principles. They raise a question only for contradicting inputs, an unclear purpose, or a product fork no approved document answers. The designer also builds a short structure-and-principles base first and derives failure behaviour and edge cases from it.
@@ -2119,6 +2141,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 4.11.2 — 2026-10-21 UTC
+
+- A file you touch is now brought fully clean: checker findings that predate your change are fixed in the same pass, or waived with a real reason when the code is right. Findings in files the change never opens stay out of scope. The rule and the coding guidelines both state this.
 
 ### 4.11.1 — 2026-10-10 UTC
 
@@ -2381,6 +2407,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 3.5.0 — 2026-10-21 UTC
+
+- The topics index can now show frontmatter badges beside each entry, as `[<key>: <value>]` (for example `[spec_stage: draft]`). A scope lists the keys in its `index_badges` setting. A reader sees a node's state without opening it, and install and configure keep the setting intact on re-runs.
+- `/lazy-wiki.query` keeps the badges. The seeker carries them from the index, and the gatherer repeats them on each cited source. A draft node now reads as informing the answer, not settling it.
 
 ### 3.4.2 — 2026-10-07 UTC
 

@@ -61,7 +61,7 @@ If the merged-and-validated set is empty, proceed to Phase 4 noting `no-entry-po
 
 ### Agentless mode (no Agent tool)
 
-For each scope whose `topics_index` exists on disk (`Bash(test -f <abs-index-path>)`), `Read` the index yourself — this is the one context in which reading `topics.md` directly is correct (per `lazy-wiki.navigation` § When to query). Pick the entry points a seeker would: the node paths whose gloss addresses the question, tagged with their `scope_id`. Paths come from the index verbatim, so they're already on disk; no separate validation pass is needed.
+For each scope whose `topics_index` exists on disk (`Bash(test -f <abs-index-path>)`), `Read` the index yourself — this is the one context in which reading `topics.md` directly is correct (per `lazy-wiki.navigation` § When to query). Pick the entry points a seeker would: the node paths whose gloss addresses the question, tagged with their `scope_id`. Paths come from the index verbatim, so they're already on disk; no separate validation pass is needed. An index entry may carry `[<key>: <value>]` badges between the link and the gloss, such as `[spec_stage: draft]`; keep them with the gloss of each entry point you pick, exactly as a seeker copies them.
 
 If no scope has a `topics_index` on disk, proceed to Phase 4 with an empty entry-point set.
 
@@ -82,7 +82,7 @@ If Phase 2 produced no entry points, skip the dispatch and carry an empty answer
 
 ### Agentless mode (no Agent tool)
 
-Do what the gatherer would, in this same context: `Read` each Phase-2 entry point's body, follow its `# See also` (`#protected/wiki/see-also`) glossed links that bear on the question, `Read` those in turn — bounded to what the question needs, not an exhaustive walk. Fall back to `Grep` for the node's repo-relative path across the scope only when the entry points and their forward links don't answer it (backlinks). Synthesise the same shape the gatherer returns: `## answer` plus `## sources` (the paths actually read).
+Do what the gatherer would, in this same context: `Read` each Phase-2 entry point's body, follow its `# See also` (`#protected/wiki/see-also`) glossed links that bear on the question, `Read` those in turn — bounded to what the question needs, not an exhaustive walk. Fall back to `Grep` for the node's repo-relative path across the scope only when the entry points and their forward links don't answer it (backlinks). Synthesise the same shape the gatherer returns: `## answer` plus `## sources` (the paths actually read). When an entry point's gloss carried badges, repeat them after the link in its `## sources` line, as `- <path-actually-read> [spec_stage: draft] — <one-line what it contributed>`, exactly as the gatherer does, so both modes return the same shape.
 
 If Phase 2 produced no entry points, skip straight to Phase 4 with an empty answer.
 

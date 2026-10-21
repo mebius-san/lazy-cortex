@@ -244,6 +244,7 @@ Always include the project's standard copyright/license header at the top of all
 ## Error Suppression
 - **Never suppress linter or type-checker errors** (`# type: ignore`, `# noqa`, `# pylint: disable`, etc.) without explicit user approval.
 - If a linter or type checker reports an error, fix the root cause.
+- **A touched file is brought fully clean.** A finding that predates the change but sits in a file the change edits is fixed in the same pass, or waived with a real reason when the code is right as-is. Pre-existing findings in an edited file are not out of scope and not "while I'm here" work — the file is already being touched, and leaving them is leaving the file half-clean. Findings in files the change never opens stay out of scope.
 - If suppression is truly the only option, ask the user first and explain why.
 - When suppression is approved, add a `# waiver: <reason>` comment (see Waiver Comments below).
 - **No meaningless code changes for tool warnings.** Do not add redundant guards, restructure control flow, or otherwise change working code solely to silence a static analysis tool (PyCharm, mypy, etc.) when the change has no real effect on runtime behavior or type correctness. Instead, add a waiver or `# noinspection` comment that explains (a) why the code is correct as-is and (b) what limitation of the checker triggers the warning.

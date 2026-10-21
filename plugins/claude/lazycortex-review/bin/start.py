@@ -65,6 +65,10 @@ import parser as _parser  # noqa: E402  # pylint: disable=import-error,wrong-imp
 from keys import LANG_EN as _LANG_EN, Phase, ReviewKey, Tag  # noqa: E402
 
 
+# The per-cycle autorun choices a review entry removes from the frontmatter.
+_AUTORUN_KEYS = ( ReviewKey.SKIP_VALIDATION, ReviewKey.AUTORUN, ReviewKey.AUTORUN_CYCLES )
+
+
 # comment one-liner seeded under the `# History` heading (after its owner tag) so the section
 # is self-described in source without rendering; per vault language, English is the floor
 _HISTORY_EXPLAINERS = {
@@ -195,6 +199,8 @@ def open_review(file_path: Path, *, expert: str | None = None) -> bool:
       the call unchanged; only a missing key is seeded.
     - Opening a document that still carries a prior finalize's terminal outcome clears
       `review_result` from the frontmatter and strips the terminal status callout from the body.
+    - Opening clears `review_skip_validation`, `review_autorun`, and `review_autorun_cycles`
+      from the frontmatter, so each review cycle starts without the previous cycle's choices.
 
   Returns:
     `True` if anything changed; `False` if the file was already opted-in and fully bootstrapped
@@ -250,6 +256,14 @@ def open_review(file_path: Path, *, expert: str | None = None) -> bool:
 # has nothing to act on yet — its trigger is the *next* finalize.
   if ReviewKey.RESULT in meta:
     new_text = _fm.unset_field(new_text, ReviewKey.RESULT)
+
+# Drop the previous cycle's autorun and skip-validation choices: each review cycle
+# starts with the operator choosing them afresh.
+  for key in _AUTORUN_KEYS:
+    if key in meta:
+      new_text = _fm.unset_field(new_text, key)
+
+# Seed the per-document main-writer override when the caller names one.
   if expert:
     new_text = _fm.set_field(new_text, ReviewKey.EXPERT, expert)
 

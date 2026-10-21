@@ -30,7 +30,7 @@ Exactly six values. The old `review`, `done`, and `wtr` are gone — "in review"
 
 - `empty` — doc not needed right now (resolved for optional docs). No review.
 - `draft` — content being written. Maps to `review_active: true` once opted into the loop, OR pre-review (authored but not yet submitted). No separate waiting-room state.
-- `approved` — accepted: `review_active: false` AND `review_approved: true`. Approved-with-concerns collapses to `approved` (the `review_approved_with_concerns` flag stays readable on the doc for downstream consumers, but `spec_stage` is plain `approved`).
+- `approved` — accepted: `review_active: false` AND `review_approved: true`. Approved-with-concerns collapses to `approved`: the outcome is read from `review_result` (`approved` | `approved-with-concerns`), the one review key finalize leaves on the doc, but `spec_stage` is plain `approved`.
 - `rejected` — review or developer flagged the doc unworkable (a finalize-revert): a rejection callout sits in the body. **NOT terminal** — the doc returns to `draft` to re-open the loop.
 - `cancelled` — doc abandoned. Terminal.
 - `deferred` — doc parked: it exists, it is not abandoned, and nothing automatic acts on it. Its own `review_result` raises no doc-transition wake, stage promotion passes it over, it closes no gate, no `Write` row is hung or replacement seeded for it, and no coordinator edits it. A commit touching it still wakes the owning coordinator as an ordinary operator edit, so the folder note is kept in order around it. Not terminal — it has two exits: `draft` brings it back, `cancelled` abandons it where it sits.
@@ -47,7 +47,7 @@ Does NOT carry `spec_stage` — every type declared `stages: false`, plus the un
 |---|---|
 | `empty` | no review opened on the doc |
 | `draft` | `review_active: true` (in the loop), OR pre-review (authored, not yet submitted) |
-| `approved` | `review_active: false` + `review_approved: true`; approved-with-concerns collapses here (`review_approved_with_concerns` stays readable) |
+| `approved` | `review_active: false` + `review_approved: true`; approved-with-concerns collapses here (the outcome is read from `review_result`) |
 | `rejected` | finalize-revert; a rejection callout in the body |
 | `cancelled` | abandoned, terminal |
 | `deferred` | parked; whatever review flags the doc carries raise no transition while it stays here |

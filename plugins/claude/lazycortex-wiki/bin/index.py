@@ -73,6 +73,9 @@ class TopicIndex:
   # Default relative path when `topics_index` is absent from the config.
   _DEFAULT_TOPICS_INDEX = "wiki/topics.md"
 
+  # Config key holding the index badges: the frontmatter keys shown as badges on node lines.
+  _CFG_INDEX_BADGES = "index_badges"
+
   def __init__(self, *, repo: Path, cfg: dict, scope_id: str) -> None:
     """
     Initialise the builder for one scope.
@@ -173,14 +176,16 @@ class TopicIndex:
     self,
     node_paths: list[Path],
     index_path: Path,
-  ) -> dict[str, dict[str, list[tuple[str, str, str | None, list[str]]]]]:
+  ) -> dict[str, dict[str, list[tuple[str, str, str | None, list[str], list[str]]]]]:
     """
     Traverse node files and build the axis → value → node-entries tree.
 
     Each entry in the innermost list is `(rel_link, link_text, summary,
-    connectors)`.  A node may appear under multiple axes / values when it
-    carries multiple `wiki/*` tags.  All keys and entry lists are sorted for
-    determinism.
+    connectors, badges)`, where `badges` holds one `<key>: <value>` string per
+    configured index badge the node carries with a single-line value, in config
+    order.  A node may appear
+    under multiple axes / values when it carries multiple `wiki/*` tags.  All
+    keys and entry lists are sorted for determinism.
 
     Args:
       node_paths: Absolute paths of candidate nodes from `iter_nodes`.
@@ -188,7 +193,7 @@ class TopicIndex:
         relative links from the index's directory to each node.
 
     Returns:
-      Nested dict: `{axis: {value_path: [(rel_link, link_text, summary_or_None, connectors), ...]}}`.
+      Nested dict: `{axis: {value_path: [(rel_link, link_text, summary_or_None, connectors, badges), ...]}}`.
       All outer and inner keys are in sorted order; inner lists are sorted
       by `rel_link`.
     """
@@ -202,11 +207,21 @@ class TopicIndex:
     # gloss; one that declares neither says nothing about itself and stays out, as do files of a kind the wiki
     # does not know how to read. Each listing shows the node's gloss, so a reader can judge whether to open
     # the node without opening it, and the node's connector phrases follow it — the short facets by which the
-    # node can be reached from elsewhere — whenever it declares any. The catalog is derived from the current
-    # state of the scope alone and ordered stably, so the same state always yields the same catalog.
+    # node can be reached from elsewhere — whenever it declares any. A scope may also name a few frontmatter
+    # keys whose values the catalog shows beside each listing, between the node's name and its gloss, as short
+    # badges in the order the scope names them — a declared state such as a document's stage, readable without
+    # opening the node. A node that does not carry a named key simply shows no badge for it, nor does one whose
+    # value spans several lines, since a badge sits on the listing's single line; a node of a kind without
+    # frontmatter shows none at all, and a scope that names no keys shows plain listings with no badges. The
+    # catalog is derived from the current state of the scope alone and ordered stably, so the same state always
+    # yields the same catalog.
 
-    # Raw accumulator: axis → value_path → list of (rel_link, link_text, summary, connectors)
-    raw: dict[str, dict[str, list[tuple[str, str, str | None, list[str]]]]] = {}
+    # index badges: a list of key names; any other shape names no badges, and non-string items are skipped
+    raw_keys = self._cfg.get(self._CFG_INDEX_BADGES)
+    index_badges = [ k for k in raw_keys if isinstance(k, str) ] if isinstance(raw_keys, list) else []
+
+    # Raw accumulator: axis → value_path → list of (rel_link, link_text, summary, connectors, badges)
+    raw: dict[str, dict[str, list[tuple[str, str, str | None, list[str], list[str]]]]] = {}
 
     # fold every node into each axis/value bucket its tags name
     for node_path in node_paths:
@@ -216,15 +231,25 @@ class TopicIndex:
       if node is None:
         continue
 
-      # Normalise the two node types to a common (wiki_tags, summary, connectors) triple.
+      # Normalise the two node types to common wiki_tags, summary, badges, and connectors.
       if isinstance(node, _nodes.MarkdownNode):
         wiki_tags = node.wiki_tags
         summary = node.wiki_summary
+        badges: list[str] = []
+        for key in index_badges:
+          value = node.frontmatter_scalar(key)
+
+          # guard: the key is absent, or its value spans lines and would break the one-line listing
+          if value is None or "\n" in value:
+            continue
+          badges.append(f"{key}: {value}")
       else:
         # CodeNode: topics are plain `axis/value` strings; prefix with `wiki/`
         # so `_split_tag` can extract the axis and value in the same way.
         wiki_tags = [ f"{_WIKI_TAG_PREFIX}{t}" for t in node.topics ]
         summary = node.summary
+        # a code node has no frontmatter, so no badge
+        badges = []
       connectors = node.connectors
 
       # guard: nothing to index — no wiki tags and no summary
@@ -246,10 +271,10 @@ class TopicIndex:
         # grow the nesting on demand, then record this node under the pair
         raw.setdefault(axis, {})
         raw[axis].setdefault(value_path, [])
-        raw[axis][value_path].append((rel_link, link_text, summary, connectors))
+        raw[axis][value_path].append((rel_link, link_text, summary, connectors, badges))
 
     # Sort: axes → values → nodes (by rel_link for stability)
-    result: dict[str, dict[str, list[tuple[str, str, str | None, list[str]]]]] = {}
+    result: dict[str, dict[str, list[tuple[str, str, str | None, list[str], list[str]]]]] = {}
     for axis in sorted(raw):
       result[axis] = {}
       for value_path in sorted(raw[axis]):
@@ -327,7 +352,7 @@ class TopicIndex:
 
   def _render(
     self,
-    tree: dict[str, dict[str, list[tuple[str, str, str | None, list[str]]]]],
+    tree: dict[str, dict[str, list[tuple[str, str, str | None, list[str], list[str]]]]],
     synced_sha: str | None,
   ) -> str:
     """
@@ -339,8 +364,11 @@ class TopicIndex:
     - `# Topics — <scope_id>` title.
     - `## <axis>` for each axis.
     - `### <axis>/<value_path>` for each value under an axis.
-    - `- [<link_text>](<rel_link>) — <summary>` per node; when the node
-      has no summary the ` — <summary>` suffix is omitted.
+    - `- [<link_text>](<rel_link>) [<key>: <value>] — <summary>` per node,
+      one bracketed badge per configured index badge the node carries, in
+      config order; with no badges the line keeps its plain
+      `- [<link_text>](<rel_link>) — <summary>` shape, and when the node has
+      no summary the ` — <summary>` suffix is omitted.
     - `  · connectors: <a>; <b>` continuation sub-line under a node when it
       carries connectors; omitted entirely when the node has none.
 
@@ -371,11 +399,12 @@ class TopicIndex:
       lines.append(f"## {axis}")
       for value_path, entries in values.items():
         lines.append(f"### {axis}/{value_path}")
-        for rel_link, link_text, summary, connectors in entries:
-          if summary:
-            lines.append(f"- [{link_text}]({rel_link}) — {summary}")
-          else:
-            lines.append(f"- [{link_text}]({rel_link})")
+        for rel_link, link_text, summary, connectors, badges in entries:
+          # link, then any badges, then the gloss when the node has one
+          head = f"- [{link_text}]({rel_link})"
+          if badges:
+            head += " " + " ".join(f"[{b}]" for b in badges)
+          lines.append(f"{head} — {summary}" if summary else head)
 
           # emit the connectors sub-line only when the node has any
           if connectors:

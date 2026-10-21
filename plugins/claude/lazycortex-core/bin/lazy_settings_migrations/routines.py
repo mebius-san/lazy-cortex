@@ -39,8 +39,15 @@ from `changed_files` to `new_files`: the structure map describes the tree's
 shape, which a content edit never changes, so the `M` status only produced one
 curator job per modified file with nothing to apply. Deletions and renames keep
 their own routines. An entry already off `changed_files` (operator override) and
-a section without the routine pass through unchanged. Add
-`7: lambda data: <transformed>` here when a v7 → v8 migration is needed.
+a section without the routine pass through unchanged.
+
+v7 → v8 (`MIGRATIONS[7]`) lets deferred documents back into the wiki routines: on every routine
+in the `lazy-wiki.` namespace whose frontmatter filter carries exactly the seeded
+`spec_stage: {not_in: [deferred]}` predicate, that one predicate is removed — the wiki scope
+itself now decides which stages it admits. The routine's other predicates stay, and a filter left
+with no predicates keeps its empty `frontmatter` block. A reshaped stage predicate, routines of
+other plugins, and routines without a filter pass through unchanged. Add
+`8: lambda data: <transformed>` here when a v8 → v9 migration is needed.
 """
 from __future__ import annotations
 
@@ -104,6 +111,43 @@ _STRUCTURE_SCAN_KEY = "lazy-wiki.structure-scan"
 _WATCH_KEY = "watch"
 _STRUCTURE_SCAN_OLD_WATCH = "changed_files"
 _STRUCTURE_SCAN_NEW_WATCH = "new_files"
+
+
+# waiver: routine-key prefix and filter sub-keys local to this single predicate drop, not reusable domain values
+_WIKI_ROUTINE_PREFIX = "lazy-wiki."
+_FILTER_KEY = "filter"
+_FRONTMATTER_KEY = "frontmatter"
+_STAGE_FIELD = "spec_stage"
+
+# The stage predicate the wiki routines were seeded with while deferred documents stayed out of the wiki.
+_WIKI_DEFERRED_PREDICATE = { "not_in": [ "deferred" ] }
+
+
+def _drop_wiki_deferred_predicate(entry: object) -> object:
+  """
+  Remove the seeded deferred-stage predicate from one wiki routine's frontmatter filter.
+
+  Args:
+    entry: One routine entry from the section, or any non-dict value the section carries.
+
+  Returns:
+    The entry without its `spec_stage` predicate, or the input unchanged when it carries no
+    frontmatter filter or a stage predicate other than the exact seeded value.
+  """
+  # reach the frontmatter predicates through the filter, tolerating a malformed shape at either level
+  flt = entry.get(_FILTER_KEY) if isinstance(entry, dict) else None
+  frontmatter = flt.get(_FRONTMATTER_KEY) if isinstance(flt, dict) else None
+
+  # ref: Domain(settings.versioning) in lazy_settings_migrations/daemon.py — rewrite only the old seed literal
+  # guard: no frontmatter filter, or a stage predicate the operator reshaped — an edited value is kept
+  if not isinstance(entry, dict) or not isinstance(flt, dict) or not isinstance(frontmatter, dict) \
+      or frontmatter.get(_STAGE_FIELD) != _WIKI_DEFERRED_PREDICATE:
+    return entry
+
+  # drop only the stage predicate; an emptied frontmatter block stays in place
+  return { **entry, _FILTER_KEY: {
+    **flt, _FRONTMATTER_KEY: { k: v for k, v in frontmatter.items() if k != _STAGE_FIELD },
+  } }
 
 
 def _recanon_expert_ref(entry: object) -> object:
@@ -230,6 +274,11 @@ MIGRATIONS = {
       and rv.get(_WATCH_KEY) == _STRUCTURE_SCAN_OLD_WATCH
       else rv
     )
+    for rk, rv in data.items()
+  },
+  # v7 → v8: wiki routines stop excluding deferred documents — the scope decides which stages enter.
+  7: lambda data: {
+    rk: _drop_wiki_deferred_predicate(rv) if rk.startswith(_WIKI_ROUTINE_PREFIX) else rv
     for rk, rv in data.items()
   },
 }

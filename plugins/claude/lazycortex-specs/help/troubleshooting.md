@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-10-06
+last_regen: 2026-10-21
 no_diagram: true
 source_skills:
   - lazy-spec.add-asset-type
@@ -25,8 +25,8 @@ source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
   - lazy-spec.audit
-source_sha: 2b8e9e79da15a0e25e187f4c05ae6011a36f0740
-surface_sha: f463c9ddf8be5a752bc8795d0742dcc1d4c18412f9f0ecbba6c23334abda2ccc
+source_sha: 21763ae2fa16878b13efb42b047e99dfe583b898
+surface_sha: bfae30442f57bfd0e4624743dadf6a62c1a97583f75cc0aef138615e7c772a6c
 ---
 # Troubleshooting
 
@@ -526,9 +526,9 @@ surface_sha: f463c9ddf8be5a752bc8795d0742dcc1d4c18412f9f0ecbba6c23334abda2ccc
 
 **Symptom**: The skill refuses, saying the target document is deferred and cannot take the stage you asked for.
 
-**Likely cause**: The document's `spec_stage` currently reads `deferred` — parked out of sight of the coordinator and every other automation — and the stage you passed is neither `draft` nor `cancelled`.
+**Likely cause**: The document's `spec_stage` currently reads `deferred` — parked out of sight of the coordinator — and the stage you passed is neither `draft` nor `cancelled`.
 
-**Fix**: Run `/lazy-spec.set-stage <doc> draft` first — `draft` and `cancelled` are the only ways out of `deferred`, and `cancelled` abandons the document instead of bringing it back. Once `draft` lands, the coordinator and every other automation start reacting to the document again, and you can move it on to whatever stage you actually intended.
+**Fix**: Run `/lazy-spec.set-stage <doc> draft` first — `draft` and `cancelled` are the only ways out of `deferred`, and `cancelled` abandons the document instead of bringing it back. Once `draft` lands, the coordinator starts reacting to the document again, and you can move it on to whatever stage you actually intended.
 
 ---
 
@@ -572,13 +572,13 @@ surface_sha: f463c9ddf8be5a752bc8795d0742dcc1d4c18412f9f0ecbba6c23334abda2ccc
 
 ---
 
-## A document `/lazy-spec.sync-with-code` created is ignored by the coordinator and the wiki
+## A document `/lazy-spec.sync-with-code` created is ignored by the coordinator
 
-**Symptom**: After a sync run, a new asset `design.md`, `architecture.md`, or plan exists, but no coordinator wake, review, or wiki indexing reacts to it.
+**Symptom**: After a sync run, a new asset `design.md`, `architecture.md`, or plan exists, but no coordinator wake or review reacts to it, even though the wiki's topics index already lists it.
 
-**Likely cause**: Every authored document a sync run creates is born parked at `spec_stage: deferred`, so nothing picks it up until you decide it is ready. Editing an existing document never changes its stage.
+**Likely cause**: Every authored document a sync run creates is born parked at `spec_stage: deferred`, so the coordinator leaves it alone until you decide it is ready. The wiki does not wait: it curates deferred documents too, and the topics index shows `[spec_stage: deferred]` beside the entry so a reader can tell it from approved text. Editing an existing document never changes its stage.
 
-**Fix**: When you want the document worked, run `/lazy-spec.set-stage <doc> draft`; the coordinator and the wiki routines start reacting to it from that moment. To abandon it instead, run `/lazy-spec.set-stage <doc> cancelled` — `draft` and `cancelled` are the only two exits from `deferred`.
+**Fix**: When you want the document worked, run `/lazy-spec.set-stage <doc> draft`; the coordinator starts reacting to it from that moment, and the wiki's badge changes to `[spec_stage: draft]`. To abandon it instead, run `/lazy-spec.set-stage <doc> cancelled` — `draft` and `cancelled` are the only two exits from `deferred`.
 
 ---
 

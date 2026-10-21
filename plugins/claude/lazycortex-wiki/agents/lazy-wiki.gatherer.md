@@ -46,4 +46,6 @@ Return exactly this block and nothing else:
 - <path-actually-read> — <one-line what it contributed>
 ```
 
+When a source's entry-point gloss carried a badge (`[<key>: <value>]`, such as `[spec_stage: draft]`), repeat the badge after the link in its `## sources` line, as `- <path-actually-read> [spec_stage: draft] — <one-line what it contributed>`, so the caller sees the state of what it is citing.
+
 When nothing relevant was found, return `## answer` stating that plainly and an empty `## sources` list. A partial or ungrounded report is a bug.

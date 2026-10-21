@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: FAQ on products, nested products, assets, vision/design docs, gates, requests, decisions, coverage gaps, and spec lookups.
-last_regen: 2026-10-06
+last_regen: 2026-10-21
 no_diagram: true
 source_skills:
   - lazy-spec.install
@@ -31,8 +31,8 @@ source_skills:
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
   - lazy-spec.resolve-dependency
-source_sha: 2b8e9e79da15a0e25e187f4c05ae6011a36f0740
-surface_sha: 07a402fc709602d790711bbb894186b203aafca5461cc16652f367f349438fdb
+source_sha: 21763ae2fa16878b13efb42b047e99dfe583b898
+surface_sha: d5ff0f18f46ee66fbe8bc3e75eebd9712fd11a10e498d83e442d792d6fb8d91c
 ---
 # Frequently asked questions
 
@@ -160,7 +160,7 @@ Yes, automatically. A markdown attachment — a file carrying `spec_owner_doc` p
 
 ## What does the `deferred` stage do, and how do I get a parked document moving again?
 
-`deferred` is a sixth `spec_stage` value alongside `empty | draft | approved | rejected | cancelled` — a park, not a review outcome. Run `/lazy-spec.set-stage <doc> deferred` on any stage-bearing document, at asset level or at a product/vault system-document level, and nothing acts on it automatically afterward: no gate closes on it, the coordinator never promotes it by review result, replaces it, or edits it, and (with the wiki plugin installed, once `/lazy-spec.install` has seeded the predicate into its scan routines) the terms and structure curators skip it too. `/lazy-spec.sync-with-code` uses this stage by default for every document it creates from scratch rather than edits — a batch of retro-specs generated from your codebase lands parked instead of flooding the review queue before you've picked which ones to work on.
+`deferred` is a sixth `spec_stage` value alongside `empty | draft | approved | rejected | cancelled` — a park, not a review outcome. Run `/lazy-spec.set-stage <doc> deferred` on any stage-bearing document, at asset level or at a product/vault system-document level, and nothing acts on it automatically afterward: no gate closes on it, the coordinator never promotes it by review result, replaces it, or edits it, and the wiki, when that plugin is installed, keeps it in view: the wiki scope covering your catalog curates `draft`, `deferred` and `approved` documents alike (`/lazy-spec.install` seeds that default for the scope), and the topics index shows `[spec_stage: <stage>]` beside each entry, so a parked document reads as parked without being opened. `/lazy-spec.sync-with-code` uses this stage by default for every document it creates from scratch rather than edits — a batch of retro-specs generated from your codebase lands parked instead of flooding the review queue before you've picked which ones to work on.
 
 A committed edit to a parked document still wakes its owning coordinator the same as any operator edit — the folder-note's gates and status brief stay current — but the document's own content is left alone. There are two ways out. `draft` brings it back: either tick the `Review <doc>` row the folder note grows in place of the usual `Write <doc>` checkbox (ticking it moves the document to `draft` and opens its review in one action), or run `/lazy-spec.set-stage <doc> draft` yourself. `/lazy-spec.set-stage <doc> cancelled` abandons it where it sits. Asking for any other stage on a parked document — `approved`, `rejected`, `empty` — is refused.
 

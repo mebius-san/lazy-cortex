@@ -27,6 +27,8 @@ Subcommands:
 - `finalize` — delegate to :mod:`finalize`.
 - `strip-markup` — print the document with its edit-annotation markup resolved (the
                  markup-final view validation / terminal dispatches use as source).
+- `fold-markup` — fold the document's edit-annotation markup in place, frontmatter untouched,
+                 printing `{"changed": bool}` — run on an operator approve gesture.
 - `decisions-context` — delegate to :mod:`decisions_context` (print the `{filename: text}`
                  map of whichever decisions-registry file(s) resolve for one document; the
                  coordinator folds this into a main or barrier writer dispatch's `context`).
@@ -146,8 +148,8 @@ def cmd_set_key(args: argparse.Namespace) -> int:
   try:
     # waiver: type: ignore — note_ops is a deferred/late-bound sibling import; mypy cannot resolve it
     updated_text = note_ops.set_key(lf_text, args.key, parsed_value)  # type: ignore[attr-defined]
-  except ValueError as e:
-    sys.stderr.write(f"{e}\n")
+  except ValueError as error:
+    sys.stderr.write(f"{error}\n")
     return 2
 
   # write the updated document
@@ -291,7 +293,7 @@ def cmd_commit_doc(args: argparse.Namespace) -> int:
   Delegate the `commit-doc` subcommand to the commit_doc module.
 
   Args:
-    args: Parsed namespace with `file`, `subject`, `repo`, and `also` attributes.
+    args: Parsed namespace with `file`, `subject`, `repo`, `also`, and `history` attributes.
 
   Returns:
     Exit code from the commit_doc module.
@@ -302,7 +304,9 @@ def cmd_commit_doc(args: argparse.Namespace) -> int:
 
   # each landed attachment is replayed as its own flag — the verb reads `--also` repeatably
   extra = [token for path in (args.also or ()) for token in ("--also", path)]
-  return commit_doc.main([args.file, "--subject", args.subject, "--repo", args.repo, *extra])
+  # each History line is replayed as its own flag, in the order given
+  lines = [token for line in (args.history or ()) for token in ("--history", line)]
+  return commit_doc.main([args.file, "--subject", args.subject, "--repo", args.repo, *extra, *lines])
 
 
 def cmd_start(args: argparse.Namespace) -> int:
@@ -449,6 +453,76 @@ def cmd_strip_markup(args: argparse.Namespace) -> int:
 
   # the resolved document goes to stdout whole — the caller pipes it straight into a source file
   sys.stdout.write(fm_text + body)
+  return 0
+
+
+def cmd_fold_markup(args: argparse.Namespace) -> int:
+  """
+  Fold the document's edit-annotation markup into final text in place.
+
+  Backs the `fold-markup` verb, run on an operator approve gesture so the next ready-to-approve round shows only the
+  edits made since. The document's pinned edit-marker style applies, falling back to the settings value.
+
+  Guarantees:
+    - Frontmatter bytes are left untouched.
+    - The file is rewritten only when the fold changed something, so a repeat call leaves it as it is.
+    - A rewrite is atomic.
+
+  Notes:
+    - Prints one JSON line, `{"changed": bool}`, to stdout on success.
+
+  Args:
+    args: Parsed namespace with `file` and `repo` attributes.
+
+  Returns:
+    Exit code: 0 on success, 1 when the file is missing, 2 when the edit-marker style is unknown (file untouched).
+  """
+
+  # Contract:
+  # The document's frontmatter MUST be left byte-for-byte untouched; only the body is ever folded.
+
+  # Contract:
+  # The file MUST be rewritten only when the fold changed the body; when nothing changed the file is not touched,
+  # so a repeat call is a no-op.
+
+  # Contract:
+  # A rewrite MUST be atomic: a reader never observes a partially written document.
+
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
+  import body as _body  # type: ignore  # pylint: disable=import-error
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
+  import finalize  # type: ignore  # pylint: disable=import-error
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
+  import frontmatter as _fm  # type: ignore  # pylint: disable=import-error
+
+  # resolve the file against --repo; an absolute file argument wins over the repo root
+  file_path = (Path(args.repo).resolve() / args.file).resolve()
+
+  # guard: only an existing file has a body to fold
+  if not file_path.is_file():
+    sys.stderr.write(f"file not found: {file_path}\n")
+    return 1
+
+  # split the document once — the frontmatter half is written back byte-for-byte
+  lf_text, ending = _atomic_io.to_lf(_atomic_io.read_text(file_path))
+  _meta, body = _fm.parse(lf_text)
+  fm_text = lf_text[: len(lf_text) - len(body)]
+
+  # fold the body per the document's pinned style; an unknown style leaves the file untouched
+  try:
+    folded = _body.fold_edit_markers(body, style = finalize.document_edit_marker_style(file_path))
+  except ValueError as error:
+    sys.stderr.write(f"{error}\n")
+    return 2
+
+  # write only when the fold changed something, so a repeat call is a no-op on disk
+  changed = folded != body
+  if changed:
+    _atomic_io.write_text_atomic(file_path, _atomic_io.restore_ending(fm_text + folded, ending))
+  print(json.dumps({ "changed": changed }))
   return 0
 
 
@@ -640,6 +714,10 @@ def build_parser() -> argparse.ArgumentParser:
   # repeatable: one `--also <path>` per attachment a `collect-job` landed beside the document
   # waiver: argparse CLI signature, not a domain key
   p_commit_doc.add_argument("--also", action = "append", default = None)
+
+  # repeatable: one `--history <line>` per journal line the verb lands under today's day group
+  # waiver: argparse CLI signature, not a domain key
+  p_commit_doc.add_argument("--history", action = "append", default = None)
   p_commit_doc.set_defaults(func=cmd_commit_doc)
 
   # `coordinator-dispatch` — the git-watch routine's entrypoint for one tick's changed documents
@@ -694,6 +772,15 @@ def build_parser() -> argparse.ArgumentParser:
   # waiver: argparse CLI signature, not a domain key
   p_strip.add_argument("file")
   p_strip.set_defaults(func=cmd_strip_markup)
+
+  # `fold-markup` — fold the edit markers in place on an operator approve gesture
+  # waiver: argparse CLI signature, not a domain key
+  p_fold = sub.add_parser("fold-markup", help="fold the doc's edit markup in place")
+  # waiver: argparse CLI signature, not a domain key
+  p_fold.add_argument("file")
+  # waiver: argparse CLI signature, not a domain key
+  p_fold.add_argument("--repo", default = ".")
+  p_fold.set_defaults(func=cmd_fold_markup)
 
   # `decisions-context` — decisions-registry context map for a main / barrier writer dispatch
   # waiver: argparse CLI signature, not a domain key

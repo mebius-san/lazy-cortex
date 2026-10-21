@@ -302,7 +302,7 @@ Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=<name> <cfg ke
 
 **Absent-only seeding is what leaves a consumer on an old shape forever.** A routine registered before this plugin changed what it watches or how it dispatches keeps the old record, because nothing ever revisits an entry that already exists. The keys named in `--managed` are this plugin's own knowledge and are corrected on every install run. `git_author` is among them for the same reason it is on every other routine this plugin registers: every check across the runtime reads that identity to tell a system commit from a person's, so a registration predating the block would keep the wrong answer indefinitely. The cadence keys `interval_sec`, `timeout_sec`, `priority` and `hooks_enabled` stay outside the list because an operator may have tuned them.
 
-`filter` is deliberately outside the list too. The spec plugin's install patches a stage exclusion into `lazy-wiki.scan` and the scan routines, and a wiki run that reasserted the block would delete a sibling plugin's work on every pass.
+`filter` is deliberately outside the list too. An operator's own predicates on a routine's `filter` must survive every install, and a wiki run that reasserted the block would delete them on every pass.
 
 `protocols` is outside it for the same shape of reason. An operator attaches an extra protocol to a routine deliberately, and reasserting the shipped list would delete that attachment on every install. The shipped refs still reach a registration that lacks them, through the additive union the protocol sub-step below performs.
 

@@ -51,16 +51,16 @@ CURRENT_VERSIONS = {
   "agent_models": 2,
   "daemon": 4,
   "external_dirs": 1,
-  "routines": 7,
+  "routines": 8,
   "experts": 4,
   "git": 1,
   "products": 2,
   "repos": 1,
-  "review": 12,
+  "review": 13,
   "spec": 2,
   "structure": 1,
   "terms": 1,
-  "wiki": 2,
+  "wiki": 3,
 }
 
 

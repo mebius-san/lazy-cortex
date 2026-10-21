@@ -46,12 +46,14 @@ class _K:
     ADDED: Result-dict key listing the axes newly added to the vocabulary.
     ADDED_FILTER_KEYS: Result-dict key listing the filter keys newly seeded on a scope.
     ADDED_EXCLUDES: Result-dict key listing the exclude globs newly appended to a scope.
+    ADDED_INDEX_BADGES: Result-dict key listing the index badges newly seeded on a scope.
     REASON: Result-dict key naming why an outcome is `error`.
     SCOPES: Key within the `wiki` section holding the per-scope config dict.
     EXCLUDE_PATHS: Per-scope key holding the scope's own exclude globs.
     FILTER: Per-scope key holding the on-the-fly node filter.
     FRONTMATTER: Filter sub-key holding the per-frontmatter-key predicates.
     FOLDER_NOTE: Filter sub-key selecting or rejecting folder notes.
+    INDEX_BADGES: Per-scope key listing the frontmatter keys the topic index shows as badges on node lines.
     ERROR: Top-level result key used only for the malformed-`wiki.tag_axes` guard, in place of
       the normal status-keyed result shape.
   """
@@ -71,12 +73,14 @@ class _K:
   ADDED = "added_axes"
   ADDED_FILTER_KEYS = "added_filter_keys"
   ADDED_EXCLUDES = "added_excludes"
+  ADDED_INDEX_BADGES = "added_index_badges"
   REASON = "reason"
   SCOPES = "scopes"
   EXCLUDE_PATHS = "exclude_paths"
   FILTER = "filter"
   FRONTMATTER = "frontmatter"
   FOLDER_NOTE = "folder_note"
+  INDEX_BADGES = "index_badges"
   ERROR = "error"
 
 
@@ -284,24 +288,33 @@ def ensure_scope_config(
   *,
   filter_frontmatter: dict | None = None,
   exclude: list[str] | None = None,
+  index_badges: list[str] | None = None,
 ) -> dict:
   """
-  Idempotently seed filter predicates and exclude globs on one configured scope.
+  Idempotently seed filter predicates, exclude globs, and index badges on one configured scope.
 
-  Reads the `wiki` settings section, appends the requested exclude globs the scope does not
-  already list, seeds each requested frontmatter predicate whose key the scope's filter does not
-  already carry, and writes the section back only when something actually changed. An operator's
-  existing predicate for the same key always wins — the seed never overwrites or merges into it.
+  After the call the scope lists every requested exclude glob, and its filter carries every
+  requested frontmatter predicate whose key it did not already carry. An operator's existing
+  predicate for the same key always wins — the seed never overwrites or merges into it. The index
+  badge list is seeded the same way: only a scope with no `index_badges` key at all receives the
+  requested keys, and a scope that carries the key with any value keeps it exactly as found.
 
   Guarantees:
     - An existing predicate for a requested filter key is never overwritten, merged into, or
       reordered; only absent keys are seeded.
     - An exclude glob already listed is never duplicated; missing ones are appended in the order
       requested.
+    - A present `index_badges` value — a list, an empty list, or any other value — is never
+      changed; only a scope without the key is seeded, with the requested keys deduplicated in
+      request order.
     - A scope that is not configured is never created; the failure is reported as this call's
       outcome and nothing is written.
     - The `wiki` section is written at most once per call, and only when the scope actually
       changed.
+
+  Notes:
+    - Reads and rewrites the repository's `wiki` settings section through the core settings
+      CLI; a call that finds everything already in place writes nothing.
 
   Args:
     repo: Absolute repository root.
@@ -309,10 +322,13 @@ def ensure_scope_config(
     filter_frontmatter: Frontmatter predicates to seed, keyed by frontmatter key; `None` seeds
       none.
     exclude: Exclude globs to append when missing; `None` appends none.
+    index_badges: Frontmatter key names to seed as the scope's index badge list when the scope
+      has none; `None` seeds none.
 
   Returns:
     `{"status": "added", "added_filter_keys": [...], "added_excludes": [...]}` when anything
-    changed, `{"status": "unchanged"}` when everything requested was already in place, or
+    changed, also carrying `"added_index_badges": [...]` when the index badge list was seeded;
+    `{"status": "unchanged"}` when everything requested was already in place; or
     `{"status": "error", "reason": "no such scope"}` for an unknown `scope_id`. When
     `wiki.scopes` itself is not an object, the result is instead the single-key
     `{"error": "wiki.scopes must be an object"}`.
@@ -360,6 +376,20 @@ def ensure_scope_config(
       continue
     changed_excludes.append(glob)
 
+  # Contract:
+  # A present `index_badges` value — a list, an empty list, or any other value — is NEVER
+  # changed; only a scope without the key is seeded, with the requested keys deduplicated in
+  # request order.
+
+  # collect the index badges to seed, in request order; a scope that carries the key keeps it as found
+  changed_badges: list[str] = []
+  if _K.INDEX_BADGES not in cfg:
+    for key in index_badges or []:
+      # guard: repeated inside this same request
+      if key in changed_badges:
+        continue
+      changed_badges.append(key)
+
   # the filter block is created on first need; folder notes stay rejected per the structural
   # default every scope gets at configure time
   flt_raw = cfg.get(_K.FILTER)
@@ -379,12 +409,14 @@ def ensure_scope_config(
   # changed; a call that seeds nothing MUST leave the settings untouched.
 
   # guard: everything requested was already in place — no write at all
-  if not changed_excludes and not changed_keys:
+  if not changed_excludes and not changed_keys and not changed_badges:
     return { _K.STATUS: _K.STATUS_UNCHANGED }
 
   # fold each part that changed into the scope config
   if changed_excludes:
     cfg[_K.EXCLUDE_PATHS] = [ *existing_excludes, *changed_excludes ]
+  if changed_badges:
+    cfg[_K.INDEX_BADGES] = changed_badges
   if changed_keys:
     new_filter = { **flt, _K.FRONTMATTER: frontmatter }
     new_filter.setdefault(_K.FOLDER_NOTE, False)
@@ -392,8 +424,13 @@ def ensure_scope_config(
   scopes[scope_id] = cfg
   wiki[_K.SCOPES] = scopes
   _settings_set(repo, _K.WIKI_SECTION, wiki)
-  return {
+
+  # report what landed; the index badge entry appears only when the index badge list was seeded
+  result: dict = {
     _K.STATUS: _K.STATUS_ADDED,
     _K.ADDED_FILTER_KEYS: changed_keys,
     _K.ADDED_EXCLUDES: changed_excludes,
   }
+  if changed_badges:
+    result[_K.ADDED_INDEX_BADGES] = changed_badges
+  return result

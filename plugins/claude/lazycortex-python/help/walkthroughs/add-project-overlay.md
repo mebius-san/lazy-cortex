@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a documentation-guideline clause in the project overlay, then confirm lazy-python.docstring-writer honors it in the generated docstring.
-last_regen: 2026-10-10
+last_regen: 2026-10-21
 diagram_spec:
   anchor: "How the overlay and pyproject.toml layers combine"
   request: "Sequence diagram of one flow: the user registers an extra_docstring_sections entry (name/style/anchor/ref_exempt) plus optional d2_exempt_marker_attrs / private_name_allowlist in pyproject.toml [tool.pcf], writes the section's content rules in docs/guidelines/documenting_guidelines.md, and dispatches lazy-python.docstring-writer. The agent reads the plugin's documenting-guidelines canon, then the project overlay (override-on-conflict), then CLAUDE.md's Documenting section if present, applies the merged ruleset plus the pyproject.toml registrations to the target file, then runs chk-py against the changed file to verify. Show the overlay directory and pyproject.toml [tool.pcf] block as the two inputs feeding one agent and one verification command."
@@ -9,8 +9,8 @@ source_skills:
   - lazy-python.install
   - lazy-python.docstring-writer
   - lazy-python.coding-guidelines
-source_sha: 8b1648549bdb076343d714eccdc2b6cb766c8147
-surface_sha: 47bc1675ef6aafe119d56555d1a407b7646666388df7d99e721d0d30c0ebc3f2
+source_sha: 3759a36417b589f58fc0454df71dd60790b8d933
+surface_sha: 6960f4dbece6258017dd8378222a4cf1b1569cfe0e48ca5d95433b5ab9aed033
 ---
 # Add a project-specific documentation-guideline clause and confirm the docstring writer honors it
 

@@ -120,10 +120,9 @@ _SANITIZE_ROUTINE = "lazy-review.sanitize"
 # and reasserting the shipped list would delete that attachment on the next install — the shipped
 # refs reach a registration that lacks them through the same additive union), `interval_sec`,
 # `timeout_sec`, `priority`, `cron` and `branch` (cadence and scope the operator retunes), and
-# the watch's `filter` block — `review_active` is load-bearing there, but the block is also the
-# seam the core CLI's `routine-ensure-filter` verb plants sibling-plugin predicates into (the
-# specs plugin parks `deferred` documents that way), and owning the whole block would silently
-# undo such a seed on the next install. A registration that carries no `filter` at all still
+# the watch's `filter` block — `review_active` is load-bearing there, but the block stays
+# operator-owned: an operator's own predicates on it must survive every install, and owning the
+# whole block would silently delete them on the next run. A registration that carries no `filter` at all still
 # gains the shipped one, which is the case a stale install actually presents.
 _MANAGED_FIELDS = {
     _COLLECT_ROUTINE: ("command",),

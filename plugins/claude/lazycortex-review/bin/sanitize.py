@@ -14,7 +14,7 @@ finding with any doubt in it reads as not-a-problem and is left exactly as found
   coordinator directly.
 - **Orphaned review**: a document carries `review_active: true` while nothing can ever move it —
   no live coordinator job, no tracked writer job, no pending wake, and the banner is not one of
-  the operator-waiting states (`ready` / `action-needed` / `concerns-decision`, where silence is
+  the operator-waiting states (`ready` / `action-needed`, where silence is
   the loop legitimately handing the turn to the operator). Repair: dispatch a coordinator wake —
   the coordinator decides the next move, never this sweep.
 - **Review without a document**: a sidecar entry keys a path that no longer exists on disk.
@@ -64,7 +64,7 @@ _STATUS_VANISHED = "vanished"
 # The banner states in which a silent review loop is the operator's turn, not a stuck loop —
 # the orphaned-review check never fires on them.
 _OPERATOR_WAITING_STATES = frozenset({
-    _banner.State.READY, _banner.State.ACTION_NEEDED, _banner.State.CONCERNS_DECISION,
+    _banner.State.READY, _banner.State.ACTION_NEEDED,
 })
 
 # The `true` literal `frontmatter.parse`'s raw string values are compared against.
@@ -204,9 +204,11 @@ def _is_orphaned(repo: Path, doc: Path) -> bool:
   # move it forward again — no writer job in flight, no wake waiting to be acted on, and no
   # coordinator currently deciding what happens next. Silence alone does not mean this: a
   # document can also sit quietly because the loop deliberately handed the decision to the
-  # operator and is waiting on them, and that silence is never mistaken for the document being
-  # abandoned. Only the combination — nothing in flight, and the loop not currently waiting on
-  # the operator by design — marks a review as truly stranded.
+  # operator and is waiting on them. Exactly two banner states mean that: `ready` and
+  # `action-needed`. While the banner shows either one, silence is the loop waiting for the
+  # operator by design, and the review is never judged orphaned, whatever else is absent. Any
+  # other banner state gives no such excuse. Only the combination — nothing in flight, and a
+  # banner in neither of those two states — marks a review as truly stranded.
 
   entry = _job_markers.read(repo, doc)
 

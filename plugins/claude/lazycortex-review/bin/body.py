@@ -1,4 +1,5 @@
-"""Strip / reassemble document parts for agent dispatch.
+"""
+Strip / reassemble document parts for agent dispatch.
 
 This module is half of the ownership-isolation contract — together
 with :mod:`reapply`. The agent never sees more of the document than
@@ -31,6 +32,8 @@ from __future__ import annotations
 import re
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import edit_markup as _edit_markup  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import frontmatter as _fm  # pylint: disable=import-error
 # waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
 import parser as _parser  # pylint: disable=import-error,deprecated-module
@@ -45,13 +48,14 @@ if TYPE_CHECKING:
 # ----------------------------------------------------------- internals
 
 
-# Strip block: banner + any trailing blank lines. All 4 banner-state
-# tags from spec § Top banner: in-process / action-needed / ready /
-# concerns-decision.
+# Strip block: banner + any trailing blank lines. Every banner-state
+# tag from spec § Top banner: in-process / action-needed / ready /
+# finalizing, plus the retired `concerns-decision` pause banner, never a state: a legacy one at
+# the top of the operator body is carried forward until the next banner repaint replaces it.
 _BANNER_BLOCK_RE = re.compile(
     r"(?ms)"
     r"^>\s*\[!\w+\][^\n]*"
-    r"#review/(?:in-process|action-needed|ready|concerns-decision|finalizing)"
+    r"#review/(?:in-process|action-needed|ready|finalizing|concerns-decision)"
     r"[^\n]*\n"
     r"(?:>[^\n]*\n)*"
     r"(?:\n)*"
@@ -233,6 +237,7 @@ def _drop_sections(
     is always preserved.
   """
   spans = _enumerate_h1_spans(body)
+  # guard: no H1 section at all — nothing to remove
   if not spans:
     return body
   keep_ranges: list[tuple[int, int]] = []
@@ -277,10 +282,11 @@ def _heading_line_for(start: int, end: int, body: str) -> str:
 
 # Approve-checkbox lines inside the ready banner. Already covered by
 # banner-block stripping above, but kept as a safety net when a stale
-# checkbox sits outside a banner. Covers both the clean-approve form
-# and the "approve with concerns" escape (Bug 44).
+# checkbox sits outside a banner. Covers the four English gesture labels:
+# the one-box approve and the three post-validation gestures.
 _APPROVE_LINE_RE = re.compile(
-    r"^>\s*-\s*\[[ x]\]\s*approve(?:\s+the\s+whole\s+document|\s+with\s+concerns)[^\n]*$",
+    r"^>\s*-\s*\[[ x]\]\s*approve(?:\s+the\s+whole\s+document|\s+this\s+and\s+previous\s+rounds"
+    r"|\s+and\s+run\s+to\s+the\s+end\s+without\s+stops|\s+without\s+further\s+validation)[^\n]*$",
     re.MULTILINE | re.IGNORECASE,
 )
 
@@ -381,6 +387,7 @@ def section_content_for_owner(body: str, owner: tuple[str, str]) -> str | None:
     such section exists.
   """
   section_text = _extract_section_by_owner(body, owner)
+  # guard: no section owned by `owner`
   if section_text is None:
     return None
   heading_line = _heading_line_for(0, len(section_text), section_text)
@@ -411,6 +418,7 @@ def section_has_substance(body: str, owner: tuple[str, str]) -> bool:
     `True` when the section exists and has non-whitespace content; `False` otherwise.
   """
   content = section_content_for_owner(body, owner)
+  # guard: no section owned by `owner` — nothing to hold content
   if content is None:
     return False
   return any(line.strip() for line in content.split("\n"))
@@ -448,6 +456,7 @@ def section_has_concerns(body: str, owner: tuple[str, str]) -> bool:
   # validation forever.
 
   content = section_content_for_owner(body, owner)
+  # guard: no section owned by `owner` — nothing to raise a concern
   if content is None:
     return False
   stripped = _APPROVE_MARKER_RE.sub("", content)
@@ -659,7 +668,8 @@ def strip_owned_h1_sections(
   ownership tag are kept. `preserve_section_ids` is an optional set of section-ids (the
   second component of the ownership tag); sections whose section-id appears in the set
   survive the strip. Spec § Stage 7: terminal section-ids are always preserved; validation
-  section-ids only when `review_approved_with_concerns: true`. The caller assembles the
+  section-ids only when the caller's finalize policy keeps them (the operator approved without
+  further validation and the section carries concerns). The caller assembles the
   set. Used at finalize so post-approve validation sections and pre-approve section-writer
   artefacts are removed, leaving only operator-authored prose and `# History`.
 
@@ -668,6 +678,7 @@ def strip_owned_h1_sections(
   """
   preserve_section_ids = preserve_section_ids or set()
   spans = _enumerate_h1_spans(body)
+  # guard: no H1 section at all — nothing to remove
   if not spans:
     return body
   keep_ranges: list[tuple[int, int]] = []
@@ -714,9 +725,10 @@ _REVIEW_CALLOUT_BLOCK_RE = re.compile(
 )
 
 
+# `concerns-decision` is the retired pause banner: never a state, only stripped as a legacy leftover
 _BANNER_CALLOUT_BLOCK_RE = re.compile(
     r"(?ms)^>\s*\[![\w-]+\][^\n]*"
-    r"#review/(?:in-process|action-needed|ready|concerns-decision)"
+    r"#review/(?:in-process|action-needed|ready|finalizing|concerns-decision)"
     r"[^\n]*\n(?:>[^\n]*\n)*"
 )
 
@@ -725,11 +737,11 @@ def strip_banner_callouts(body: str) -> str:
   """
   Remove banner-state callouts from `body`.
 
-  Removes only `#review/in-process`, `#review/action-needed`, `#review/ready`, and
-  `#review/concerns-decision` callouts. Used by the historian-dispatch gate so the
-  historian receives body content stripped of banner-state scaffolding and narrates
-  substance only. Writer-authored `[!question]` and `[!attention]` callouts are substance
-  and are preserved.
+  Removes the `#review/in-process`, `#review/action-needed`, `#review/ready`, and `#review/finalizing` callouts,
+  along with the legacy `#review/concerns-decision` pause banner left over from the retired concerns pause.
+  Used by the historian-dispatch gate so the historian receives body content stripped of banner-state
+  scaffolding and narrates substance only. Writer-authored `[!question]` and `[!attention]` callouts are
+  substance and are preserved.
 
   Returns:
     `body` with banner-state callout blocks removed.
@@ -759,8 +771,8 @@ def strip_answered_questions(body: str) -> str:
     - A callout inside a code fence, and any line outside the callout's own `>` lines, survives
       untouched.
     - Only `[!question] #review/question` and `[!decision-candidate]` callouts are considered;
-      a ticked option inside any other callout (`[!warning] #review/concerns-decision` above
-      all) is left exactly as found.
+      a ticked option inside any other callout (a ticked `[!note] #review/other`
+      callout, say) is left exactly as found.
 
   Args:
     body: Document body (no frontmatter).
@@ -886,6 +898,40 @@ def restore_protected_sections(body: str, saved: list[str]) -> str:
   for idx, section_text in enumerate(saved):
     body = body.replace(_PROTECTED_PLACEHOLDER.format(idx=idx) + "\n", section_text, 1)
   return body
+
+
+def fold_edit_markers(body: str, *, style: str) -> str:
+  """
+  Fold every edit-annotation marker in a document body into its final text.
+
+  Text outside the markers passes through unchanged except for blank-line normalisation: every run of three or more
+  newlines outside code fences collapses, whether or not the body carries any marker, so normalisation alone can
+  change the result. Sections owned by other plugins are left out of the fold and of that normalisation.
+
+  Guarantees:
+    - Every foreign `#protected/<owner>/...` H1 section, such as the wiki See-also block or the review `# History`
+      section, is reproduced byte-for-byte, including any markup inside it.
+
+  Args:
+    body: Document body, without frontmatter.
+    style: Name of the edit-marker style the markers are written in.
+
+  Returns:
+    The body with all markers of `style` folded and the protected sections intact.
+
+  Raises:
+    ValueError: If `style` is not a known edit-marker style.
+  """
+
+  # Contract:
+  # Every foreign `#protected/<owner>/...` H1 section MUST come out byte-for-byte identical to how it went in,
+  # including any markup inside it, whatever markers the rest of the body carries.
+
+  # lift foreign `#protected/<owner>/...` sections so the fold never reaches inside them
+  rest, saved = split_out_protected_sections(body)
+
+  # fold every edit marker of the pinned style in what remains, then splice the sections back
+  return restore_protected_sections(_edit_markup.strip_markers(rest, style = style), saved)
 
 
 def _apply_frontmatter_overlay(
@@ -1096,18 +1142,13 @@ def _carry_banner_from_operator(operator_body: str, new_body: str) -> str:
     `new_body` with the operator's banner prepended and normalized, or `new_body` unchanged
     when the operator body carries no banner.
   """
-  head = ""
-
-  # Find the banner block at the very top of operator_body.
-  m = _BANNER_BLOCK_RE.match(operator_body)
-  if m is not None:
-    head = m.group(0)
-  if not head:
+  # guard: no banner block at the very top of operator_body — nothing to carry
+  if (match := _BANNER_BLOCK_RE.match(operator_body)) is None:
     return new_body
 
   # Normalize: strip all trailing newlines, then re-attach exactly one
   # trailing newline + one blank-line separator.
-  head = head.rstrip("\n") + "\n\n"
+  head = match.group(0).rstrip("\n") + "\n\n"
 
   # Strip any banner already in new_body to avoid duplication.
   new_body_no_banner = _strip_banner(new_body).lstrip("\n")
@@ -1115,18 +1156,18 @@ def _carry_banner_from_operator(operator_body: str, new_body: str) -> str:
 
 
 def _document_title_heading(body: str) -> str | None:
-  """Return the heading line of the document's title.
+  """
+  Return the heading line of the document's title.
 
-    The title is the first H1 that is neither the historian's `# History`
-    section nor any tagged section — that is, the document headline
-    the operator authored. Returns None when the body carries no such H1.
+  The title is the first H1 that is neither the historian's `# History` section nor any tagged section — that is,
+  the document headline the operator authored. Returns None when the body carries no such H1.
 
-    Args:
-      body: Document body (post-frontmatter) to inspect.
+  Args:
+    body: Document body (post-frontmatter) to inspect.
 
-    Returns:
-      The title heading line without its trailing newline, or None.
-    """
+  Returns:
+    The title heading line without its trailing newline, or None.
+  """
   spans = _enumerate_h1_spans(body)
   for start, end, _title, _heading in spans:
     section_text = body[start:end]
@@ -1145,24 +1186,20 @@ def _document_title_heading(body: str) -> str | None:
 
 
 def _carry_title_from_operator(operator_body: str, new_content: str) -> str:
-  """Restore the document title onto `new_content` when the main writer
-    dropped it.
+  """
+  Restore the document title onto `new_content` when the main writer dropped it.
 
-    The title H1 is the document's identity, not writer-editable content; a
-    writer that omits it must not silently delete it from the document
-    (Bug 105 — a dropped title left the banner-placement logic anchoring on
-    `# History` and parking the banner at the bottom). No-op when the
-    writer kept a title H1, or when the operator body itself has none.
+  The title H1 is the document's identity, not writer-editable content, so a writer that omits it does not delete
+  it from the document. Nothing changes when the writer kept a title H1 or when the operator body has none.
 
-    Args:
-      operator_body: The operator-anchored base the writer edited from.
-      new_content: The writer's content body, owned sections and history
-        already stripped.
+  Args:
+    operator_body: The operator-anchored base the writer edited from.
+    new_content: The writer's content body, owned sections and history already stripped.
 
-    Returns:
-      `new_content` with the operator's title re-anchored at the top when
-      the writer dropped it, otherwise `new_content` unchanged.
-    """
+  Returns:
+    `new_content` with the operator's title re-anchored at the top when the writer dropped it, otherwise
+    `new_content` unchanged.
+  """
 
   # Domain(review.markup):
   # # The document title is not writer-editable content

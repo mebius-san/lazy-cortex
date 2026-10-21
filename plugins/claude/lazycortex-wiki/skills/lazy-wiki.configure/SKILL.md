@@ -126,6 +126,8 @@ The per-scope `filter` excludes a node from the wiki on the fly (the node is not
 
 The review-skip half is not asked either. Seed `frontmatter.review_active.not_in = [true]` whenever the sub-filter lacks that key: harmless in a repo without lazycortex-review (no document ever carries the flag) and required in one that runs it (a document under an open review must stay out of the wiki until review closes). Never overwrite an operator's own predicate on that key. Hold the merged filter `{ "frontmatter": { "review_active": { "not_in": [true] } }, "folder_note": false }` over whatever is on record.
 
+`index_badges` is not asked either. It is an optional list of frontmatter keys whose values the topics index shows beside each entry as `[<key>: <value>]`, so a reader sees a node's state without opening it. A sibling plugin's install seeds it — the spec catalog's install seeds `spec_stage` — or the operator writes it by hand; in edit mode it is carried over untouched, and a new scope gets none.
+
 Richer predicates (other frontmatter keys, `in` allow-lists) follow the same schema as a routine's `filter` block and are hand-editable in `lazy.settings.json` — this wizard seeds the two structural defaults and collects nothing.
 
 Outcome: `derived`.
@@ -142,7 +144,7 @@ Build the scope object:
 }
 ```
 
-`tag_axes` is the narrowing held by Phase 5, not a vocabulary of its own — an empty array means the scope uses every axis `wiki.tag_axes` declares. Add `"exclude_paths"` only if the collected array is non-empty. Add `"filter"` as held by Phase 7 — always present, since `folder_note` is seeded there; in edit mode carry over any operator-authored sub-filter the wizard does not collect.
+`tag_axes` is the narrowing held by Phase 5, not a vocabulary of its own — an empty array means the scope uses every axis `wiki.tag_axes` declares. Add `"exclude_paths"` only if the collected array is non-empty. In edit mode carry over `"index_badges"` untouched when the scope on record has it; a new scope gets none. Add `"filter"` as held by Phase 7 — always present, since `folder_note` is seeded there; in edit mode carry over any operator-authored sub-filter the wizard does not collect.
 
 Write the updated settings back: set `lazy.settings.json[wiki.scopes][<id>]` to the constructed object. Preserve all other keys. Use `Write` to the target file.
 

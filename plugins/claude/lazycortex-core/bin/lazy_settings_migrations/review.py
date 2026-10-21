@@ -93,8 +93,14 @@ throughout; nothing is ever removed or rewritten.
 v11 → v12 (`MIGRATIONS[11]`) adds the document-height protocol to every
 `system-tech` class (product-qualified variants included): the tech document
 joined the protocol's scope so a product-level tech never repeats the
-content-root one. Same guarded add-if-absent union as v9 → v10. Add `12:
-lambda data: <transformed>` here when a v12 → v13 migration is needed.
+content-root one. Same guarded add-if-absent union as v9 → v10.
+
+v12 → v13 (`MIGRATIONS[12]`) retires the concerns pause: the per-class
+`concerns_decision_threshold` key is dropped from every class entry. The
+optional `autorun_max_cycles` key that replaces it is not seeded — its
+default applies while it is absent. Every other key, class, and entry is
+preserved. Idempotent: a second run finds no key to drop. Add `13: lambda
+data: <transformed>` here when a v13 → v14 migration is needed.
 """
 from __future__ import annotations
 
@@ -123,6 +129,10 @@ _HEIGHT_CLASS_NAMES = { ReviewClassName.DESIGN, "system-design" }
 # the v11 -> v12 union: the tech document joined the height protocol's scope (waiver: one-off
 # literal — "system-tech" carries no ReviewClassName constant either)
 _TECH_HEIGHT_CLASS_NAMES = { "system-tech" }
+
+# waiver: v12 -> v13 retired per-class key, not tracked in ReviewClassKey (that enum covers the
+# current class schema only, and this key is gone from it)
+_CONCERNS_THRESHOLD_KEY = "concerns_decision_threshold"
 
 # the v10 -> v11 vision seeding: class tokens, path globs, and the content-root use-cases path
 # (waiver: one-off literals for this single seeding step; "vision" / "system-vision" carry no
@@ -833,6 +843,32 @@ def _migrate_vision_and_use_cases(data: dict) -> dict:
   return { **data, ReviewClassKey.CLASSES: classes }
 
 
+def _migrate_drop_concerns_threshold(data: dict) -> dict:
+  """
+  Apply the v12 → v13 removal of the retired per-class `concerns_decision_threshold` key.
+
+  Args:
+    data: The `review` section content.
+
+  Returns:
+    The section content with `concerns_decision_threshold` removed from every class entry; non-dict
+    entries, every other class key, and every other section key are preserved, and the replacing
+    `autorun_max_cycles` key is not seeded. A section whose `classes` key is absent or null is returned
+    as given, with no `classes` key added.
+  """
+  # guard: no class list (key absent or null) means nothing to drop; the section returns as given
+  if data.get(ReviewClassKey.CLASSES) is None:
+    return data
+
+  # drop the retired key from every class entry; non-dict entries pass through
+  classes = [
+    { key: val for key, val in entry.items() if key != _CONCERNS_THRESHOLD_KEY }
+    if isinstance(entry, dict) else entry
+    for entry in data[ReviewClassKey.CLASSES]
+  ]
+  return { **data, ReviewClassKey.CLASSES: classes }
+
+
 MIGRATIONS = {
   1: _migrate_plan_classes,
   2: _migrate_test_plan_main_to_tester,
@@ -845,4 +881,5 @@ MIGRATIONS = {
   9: _migrate_doc_height_protocol,
   10: _migrate_vision_and_use_cases,
   11: _migrate_tech_height_protocol,
+  12: _migrate_drop_concerns_threshold,
 }

@@ -19,9 +19,9 @@ You are the **wiki seeker**. Given a question and the path to one scope's `topic
 
 ## What you do
 
-1. `Read` the file at `topics_index_abs_path`. It is a `wiki_role: topics-index` document: `## <axis>` → `### <axis>/<value>` → `- [<text>](<rel-link>) — <summary>` bullets, with optional `  · connectors: …` sub-lines.
+1. `Read` the file at `topics_index_abs_path`. It is a `wiki_role: topics-index` document: `## <axis>` → `### <axis>/<value>` → `- [<text>](<rel-link>) — <summary>` bullets, with optional `  · connectors: …` sub-lines. A bullet may carry badges between the link and the gloss, `- [<text>](<rel-link>) [<key>: <value>] — <summary>`, one per badge key the scope lists and in the order written; a node without the key carries no badge.
 2. Scan every axis/value/node entry. Select the nodes whose axis-value path, link text, summary, or connectors are relevant to `question`. Rank by apparent relevance; keep the strongest (aim for ≤ 8 — entry points, not the whole catalog).
-3. For each selected node, emit its link target **verbatim as written in the index** (do not normalise, resolve, or invent paths), its gloss (the summary text after ` — `, verbatim; empty if the node had none), and a one-line `why` stating what in the entry matched the question.
+3. For each selected node, emit its link target **verbatim as written in the index** (do not normalise, resolve, or invent paths), its gloss (the summary text after ` — `, verbatim; empty if the node had none), and a one-line `why` stating what in the entry matched the question. Copy the node's badges verbatim as the prefix of the gloss column, so the entry reads `<rel-link> | [spec_stage: draft] <summary> | <why>` and the caller sees the node's state without opening it; a node without badges keeps its gloss as it stands.
 
 ## Constraints
 

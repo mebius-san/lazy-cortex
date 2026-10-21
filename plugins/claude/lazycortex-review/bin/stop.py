@@ -27,6 +27,10 @@ import frontmatter as _fm  # noqa: E402  # pylint: disable=import-error,wrong-im
 from keys import ReviewKey  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
+# The per-cycle autorun choices stopping a review removes from the frontmatter.
+_AUTORUN_KEYS = ( ReviewKey.SKIP_VALIDATION, ReviewKey.AUTORUN, ReviewKey.AUTORUN_CYCLES )
+
+
 def _atomic_commit(file_path: Path) -> None:
   cwd = file_path.parent
   subprocess.run(
@@ -43,11 +47,12 @@ def _atomic_commit(file_path: Path) -> None:
 
 def stop_review(file_path: Path) -> bool:
   """
-  Set `review_active` to `false` in the document's frontmatter.
+  Set `review_active` to `false` and drop the cycle's autorun choices from the frontmatter.
 
   Guarantees:
     - Leaves the round counter, phase, done-lists, approval state, and the document body
-      unchanged; only `review_active` is modified.
+      unchanged; only `review_active` is modified and `review_skip_validation`, `review_autorun`,
+      and `review_autorun_cycles` are removed.
 
   Args:
     file_path: Absolute path to the markdown file to update.
@@ -58,19 +63,28 @@ def stop_review(file_path: Path) -> bool:
 
   # Domain(review.lifecycle):
   # # Stopping pauses the round machine, it does not reset it
-  # Leaving review only turns the loop off; the round counter, phase, done-lists, and
-  # approval state are left exactly as they stood, and the document body is untouched. A
-  # later re-entry into review resumes the round machine from wherever it was paused,
-  # rather than starting the cycle over.
+  # Leaving review turns the loop off and drops the cycle's autorun choices; the round
+  # counter, phase, done-lists, and approval state are left exactly as they stood, and the
+  # document body is untouched. A later re-entry into review resumes the round machine from
+  # wherever it was paused, rather than starting the cycle over.
 
   # Contract:
-  # Stopping review changes only `review_active`; the round counter, phase,
+  # Stopping review changes only `review_active` and removes `review_skip_validation`,
+  # `review_autorun`, and `review_autorun_cycles`; the round counter, phase,
   # done-lists, approval state, and the document body are left unchanged.
 
-  # flip the active flag; every other lifecycle key is left untouched
+  # flip the active flag
   text = _atomic_io.read_text(file_path)
   lf_text, ending = _atomic_io.to_lf(text)
-  new_text = _atomic_io.restore_ending(_fm.set_field(lf_text, ReviewKey.ACTIVE, False), ending)
+  lf_text = _fm.set_field(lf_text, ReviewKey.ACTIVE, False)
+
+  # drop the cycle's autorun choices; every other lifecycle key is left untouched
+  for key in _AUTORUN_KEYS:
+    lf_text = _fm.unset_field(lf_text, key)
+
+  # write only when something changed
+  new_text = _atomic_io.restore_ending(lf_text, ending)
+  # guard: an unchanged document is not rewritten
   if new_text == text:
     return False
   _atomic_io.write_text_atomic(file_path, new_text)

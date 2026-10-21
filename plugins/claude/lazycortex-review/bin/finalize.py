@@ -1,9 +1,10 @@
-"""`/lazy-review.finalize <file>` — close out a fully-approved doc.
+"""
+`/lazy-review.finalize <file>` — close out a fully-approved doc.
 
 The finalizing commit:
 
 1. Folds all edit-annotation markers into the final text (via
-   :func:`edit_markup.strip_markers` in the configured style).
+   :func:`body.fold_edit_markers` in the configured style, foreign protected sections kept intact).
 2. Drops the top banner block (whichever state it was in).
 3. Drops the approve-checkbox line.
 4. Drops every other system callout (`#review/<x>`) from the body
@@ -60,9 +61,10 @@ import parser as _parser  # noqa: E402  # pylint: disable=import-error,wrong-imp
 from keys import Bucket, JobKey, Paths, ResultValue, ReviewKey, Style  # noqa: E402
 
 
+# `concerns-decision` is the retired pause banner: never a state, only stripped as a legacy leftover
 _BANNER_RE = re.compile(
     r"(?ms)^>\s*\[!\w+\][^\n]*"
-    r"#review/(?:in-process|action-needed|ready|concerns-decision)"
+    r"#review/(?:in-process|action-needed|ready|finalizing|concerns-decision)"
     r"[^\n]*\n(?:>[^\n]*\n)*(?:\n)*"
 )
 _SYSTEM_CALLOUT_RE = re.compile(
@@ -79,9 +81,9 @@ _LEFTOVER_CALLOUT_RES = (
 _APPROVE_LINE_RE = re.compile(
     r"^>\s*-\s*\[[ x]\]\s*"
     r"(?:approve the whole document"
-    r"|approve with concerns"
-    r"|continue review cycle"
-    r"|continue without this pause)"
+    r"|approve this and previous rounds"
+    r"|approve and run to the end without stops"
+    r"|approve without further validation)"
     r"[^\n]*\n",
     re.MULTILINE | re.IGNORECASE,
 )
@@ -153,6 +155,7 @@ def settings_edit_marker_style(file_path: Path) -> str:
         )
       except (OSError, json.JSONDecodeError):
         return Style.SIMPLE
+    # guard: filesystem root reached without a settings file — fall back to the default style
     if cur.parent == cur:
       break
     cur = cur.parent
@@ -163,15 +166,17 @@ def _load_settings(repo: Path) -> dict:
   """
   Read `<repo>/.claude/lazy.settings.json`.
 
-  Local copy rather than a cross-module import — the coordinator migration's
-  own-verbs-only boundary (`coordinator_dispatch.py` and `submit.py` carry the same copy).
-
   Args:
     repo: Repository root to resolve the settings path against.
 
   Returns:
     Parsed settings dict, or `{}` when the file is absent or unparseable.
   """
+
+  # Decision: a local copy of the settings reader, not a cross-module import — the coordinator
+  # migration's own-verbs-only boundary (`coordinator_dispatch.py` and `submit.py` carry the same copy)
+
+  # the settings file sits at a fixed path under the repo's `.claude` dir
   path = repo / Paths.CLAUDE_DIR / Paths.SETTINGS_FILE
 
   # guard: no settings file at all — nothing registered
@@ -184,24 +189,26 @@ def _load_settings(repo: Path) -> dict:
 
 
 def _section_ids_for_finalize(
-    class_cfg: dict | None, *, with_concerns: bool,
+    class_cfg: dict | None, *, concern_section_ids: set[str],
 ) -> set[str]:
   """
   Assemble the preserve section-id set one finalize pass needs.
 
   Terminal section-ids (keys under the class's `experts.terminal`) always survive the
-  strip. Validation section-ids (keys under `experts.validation`) are added only under
-  `with_concerns` — preserved verbatim, ownership tag included, so the surviving
-  concern section keeps a visible author.
+  strip. A validation section survives only when its own section-id is among the concern
+  section-ids — preserved verbatim, ownership tag included, so the surviving concern
+  section keeps a visible author. A clean validation section never survives, even when
+  another validation section carries a concern.
 
   Args:
     class_cfg: The document's matched review-class config, or `None` when no class
       matches (nothing to preserve beyond what `finalize_text` already keeps).
-    with_concerns: Whether the document is being finalized with outstanding concerns
-      accepted.
+    concern_section_ids: Section-ids of the validation sections that themselves still carry a concern;
+      empty unless the operator skipped validation.
 
   Returns:
-    The set of section-ids whose owned H1 sections survive the finalize strip.
+    The terminal section-ids united with exactly `concern_section_ids`, naming the owned H1 sections
+    that survive the finalize strip.
   """
 
   # Domain(review.lifecycle):
@@ -209,15 +216,37 @@ def _section_ids_for_finalize(
   # A review class distinguishes two kinds of authored section: a terminal kind whose writer
   # closes the review cycle, and a validation kind whose writer only matters while concerns
   # are still open. A terminal section always survives the finalize strip — it is the record
-  # of the decision itself. A validation section survives only when the document is finalized
-  # with outstanding concerns accepted; a clean approval drops it, since nothing about it
-  # still needs explaining.
+  # of the decision itself. Survival of a validation section is decided for each section on
+  # its own, and only under the operator's skip-validation choice: a validation section that
+  # itself still holds a concern survives, keeping its ownership tag verbatim so the author of
+  # the concern stays visible. A validation section holding no concern, only scaffolding or the
+  # no-concerns marker, is dropped even when another validation section of the same document
+  # holds one, since nothing in it still needs explaining. When no validation section holds a
+  # concern, the skip is a clean approval and every validation section is dropped. Without the
+  # skip, finalize is likewise a clean approval and drops every validation section.
 
   experts_cfg = (class_cfg or {}).get(JobKey.EXPERTS) or {}
-  preserve_section_ids = set(experts_cfg.get(Bucket.TERMINAL) or {})
-  if with_concerns:
-    preserve_section_ids |= set(experts_cfg.get(Bucket.VALIDATION) or {})
-  return preserve_section_ids
+  return set(experts_cfg.get(Bucket.TERMINAL) or {}) | concern_section_ids
+
+
+def _validation_owners(class_cfg: dict | None) -> list[tuple[str, str]]:
+  """
+  Return the ownership pair of every validation section the review class declares.
+
+  Args:
+    class_cfg: The document's matched review-class config, or `None` when no class matches.
+
+  Returns:
+    One `(flat expert name, section-id)` pair per section under the class's `experts.validation`, the flat
+    name being the Obsidian-tag-safe form used in `#expert/<flat>/<section-id>` ownership tags. Empty when
+    no class matches or the class declares no validation sections.
+  """
+  # the class's `experts.validation` map, section-id to expert entry; empty when no class or no validation
+  validation_cfg = ((class_cfg or {}).get(JobKey.EXPERTS) or {}).get(Bucket.VALIDATION) or {}
+  return [
+      ( _parser.flatten_expert_name(entry.get(JobKey.NAME, "")), section_id )
+      for section_id, entry in validation_cfg.items()
+  ]
 
 
 def finalize_text(
@@ -239,15 +268,13 @@ def finalize_text(
     style: Edit-marker style passed to the strip-markers step.
     preserve_section_ids: Optional set of section-id strings (keys under
       `experts.terminal.<id>` / `experts.validation.<id>`) whose owned H1
-      sections survive the strip. Terminal section-ids are always included;
-      validation section-ids are included only when `with_concerns=True`.
-      The caller assembles the set; this function only consumes it.
-    with_concerns: When `True`, stamp the `approved-with-concerns` status
-      callout (info marker) instead of the clean `approved` (success marker).
-      Validation-umbrella section-ids are assumed to already be in
-      `preserve_section_ids` (caller's responsibility). Preserved sections
-      keep their `#expert/<flat>/<id>` ownership-tag line — the surviving
-      concern's author stays visible in the finalized document.
+      sections survive the strip. The caller passes the terminal section-ids plus only those
+      validation section-ids whose own section still carries a concern; a clean validation
+      section's id is never in the set, even when a sibling validation section holds a concern.
+      Preserved sections keep their `#expert/<flat>/<id>` ownership-tag line.
+    with_concerns: Whether at least one validation section still carries a concern under the
+      operator's skip-validation choice. When `True`, stamp the `approved-with-concerns` status
+      callout and result instead of the clean `approved` ones.
 
   Returns:
     Finalized document text with review-machinery markers, transient frontmatter
@@ -260,11 +287,15 @@ def finalize_text(
 
   # Domain(review.lifecycle):
   # # Terminal review outcome
-  # A finalized document carries one terminal outcome — approved, or approved with concerns
-  # — recorded twice: as a frontmatter value other systems treat as the signal that a review
-  # has just closed and their own follow-on action may now run, and as a status callout
-  # placed above the document's first heading so a reader sees the outcome without opening
-  # frontmatter or scanning history. The callout lives in its own status namespace, distinct
+  # A finalized document carries one terminal outcome — approved, or approved with concerns.
+  # The outcome is approved with concerns when the operator's skip-validation choice is set on
+  # the document and at least one validation section still holds a concern; otherwise it is
+  # approved. Skipping validation with nothing raised is therefore a plain approval, and an
+  # unskipped validation never ends in concerns. The outcome is recorded twice: as a
+  # frontmatter value other systems treat as the signal that a review has just closed and
+  # their own follow-on action may now run, and as a status callout placed above the
+  # document's first heading so a reader sees the outcome without opening frontmatter or
+  # scanning history. The callout lives in its own status namespace, distinct
   # from the in-review callouts it replaces, and is upserted rather than accumulated, so
   # re-finalizing an already-finalized document leaves it unchanged. A consumer that owns a
   # richer terminal state of its own may overwrite the callout with its own record once its
@@ -282,7 +313,7 @@ def finalize_text(
 
   # erase the inline review machinery — edit markers, the waiting banner, the approve
   # checkbox line and the system callouts — none of it belongs to a finalized document
-  body = _edit_markup.strip_markers(body, style=style)
+  body = _body.fold_edit_markers(body, style = style)
   # (a fenced example of any of them is literal content and is left alone)
   body = _parser.sub_outside_fences(_BANNER_RE, "", body, count = 1)
   body = _parser.sub_outside_fences(_APPROVE_LINE_RE, "", body)
@@ -323,7 +354,7 @@ def finalize_text(
   # status callout above documents the outcome for humans, and the
   # consumer's apply transition (if any) sets its own status fields.
   # Order: status-callout decision was made above using the original
-  # `meta` dict (still has `review_approved` / `review_approved_with_concerns`),
+  # `meta` dict (still has `review_approved` / `review_skip_validation`),
   # so the strip below is safe to run after.
   # Idempotent: if the doc was already finalized (none of these keys
   # present), every unset_field is a no-op and the function returns
@@ -401,9 +432,9 @@ def _status_callout_for_finalize(meta: dict, *, with_concerns: bool = False) -> 
 
   Args:
     meta: Parsed frontmatter dict for the document being finalized.
-    with_concerns: When `True`, use the `approved-with-concerns` variant (info marker,
-      distinct tag) so the callout reflects that the operator accepted outstanding
-      concerns rather than driving them to zero.
+    with_concerns: Whether the operator skipped further validation while a validation section
+      still carries a concern. When `True`, use the `approved-with-concerns` variant so the
+      callout reflects that the document was approved with that concern left open.
 
   Returns:
     A dict with `state`, `marker`, `title`, and `body_lines` keys suitable for passing
@@ -411,6 +442,7 @@ def _status_callout_for_finalize(meta: dict, *, with_concerns: bool = False) -> 
     and therefore no terminal status to record.
   """
   approved_raw = str(meta.get(ReviewKey.APPROVED, "")).strip().lower()
+  # guard: no approval flag — no terminal status to record
   if approved_raw not in ("true", "yes", "1"):
     return None
   if with_concerns:
@@ -462,6 +494,7 @@ def _repo_root_for(file_path: Path) -> Path:
   for _ in range(20):
     if (cur / Paths.GIT_DIR).exists():
       return cur
+    # guard: filesystem root reached without a `.git` entry — fall back to the file's parent
     if cur.parent == cur:
       break
     cur = cur.parent
@@ -471,6 +504,12 @@ def _repo_root_for(file_path: Path) -> Path:
 def main(argv: list[str]) -> int:
   """
   Finalize a fully-approved review document from the command line.
+
+  The document is stamped `review_result: approved-with-concerns` only when the operator chose to skip
+  further validation and at least one validation section of the document's review class still carries a
+  concern; then only the validation sections that themselves carry a concern survive, and a clean
+  validation section is dropped even when a sibling holds a concern. Every other approval is stamped
+  `approved` and keeps no validation section.
 
   Args:
     argv: Command-line arguments, excluding the program name.
@@ -488,6 +527,7 @@ def main(argv: list[str]) -> int:
   parser.add_argument("--no-commit", action="store_true")
   args = parser.parse_args(argv)
   file_path: Path = args.file.resolve()
+  # guard: nothing to finalize — the named file does not exist
   if not file_path.exists():
     sys.stderr.write(f"file not found: {file_path}\n")
     return 2
@@ -495,25 +535,30 @@ def main(argv: list[str]) -> int:
   original = _atomic_io.read_text(file_path)
 
   # guard: a questionnaire the writer never folded must not ship inside an approved document
-  leftovers = leftover_callouts(original)
-  if leftovers:
+  if leftovers := leftover_callouts(original):
     lines = ", ".join(f"line {line}: {kind}" for line, kind in leftovers)
     sys.stderr.write(f"refused: unfolded operator callouts remain in {file_path} ({lines})\n")
     # waiver: process exit code, not a domain constant
     return 3
-  meta, _body_text = _fm.parse(original)
-  with_concerns = str(meta.get(ReviewKey.APPROVED_WITH_CONCERNS, "")).strip().lower() in ("true", "yes", "1")
+  lf_text, ending = _atomic_io.to_lf(original)
+  meta, body_text = _fm.parse(lf_text)
   repo = _repo_root_for(file_path)
   settings = _load_settings(repo)
   class_cfg = _doc_class.class_for_file(settings, repo, file_path)
-  preserve_section_ids = _section_ids_for_finalize(class_cfg, with_concerns=with_concerns)
-  lf_text, ending = _atomic_io.to_lf(original)
+
+  # under the operator's skip-validation choice, each validation section that still carries a concern
+  # survives on its own; with none of them raising one the skip is a plain approve
+  skip_validation = str(meta.get(ReviewKey.SKIP_VALIDATION, "")).strip().lower() in ("true", "yes", "1")
+  concern_section_ids = {
+      owner[1] for owner in _validation_owners(class_cfg) if _body.section_has_concerns(body_text, owner)
+  } if skip_validation else set()
   new_text = finalize_text(
-      lf_text, style=style,
-      preserve_section_ids=preserve_section_ids,
-      with_concerns=with_concerns,
+      lf_text, style = style,
+      preserve_section_ids = _section_ids_for_finalize(class_cfg, concern_section_ids = concern_section_ids),
+      with_concerns = bool(concern_section_ids),
   )
   new_text = _atomic_io.restore_ending(new_text, ending)
+  # guard: already finalized — the transforms changed nothing, so nothing to write or commit
   if new_text == original:
     print(f"already finalized: {file_path}")
     return 0
@@ -522,6 +567,7 @@ def main(argv: list[str]) -> int:
   # the finalized document carries no review machinery, and its runtime job markers are part
   # of that machinery — a stale one would paint the next cycle's banner from a dead job
   _job_markers.clear(repo, file_path)
+  # guard: the caller asked for an uncommitted finalize — stop before the commit
   if args.no_commit:
     print(f"finalized (uncommitted): {file_path}")
     return 0

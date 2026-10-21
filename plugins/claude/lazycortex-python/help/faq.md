@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, knowledge markers, tests, and the checker stack.
-last_regen: 2026-10-10
+last_regen: 2026-10-21
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -21,8 +21,8 @@ source_skills:
   - review.py
   - lazy-python.coding-guidelines
   - lazy-python.checking-guidelines
-source_sha: a257e6bb11ec7294d4b279cf1c6fe62aa3c75fec
-surface_sha: 3a24c8d69ef47e7232ee3be6307875b00ca1e7e6a532508d535c55e769bdfe1c
+source_sha: 3759a36417b589f58fc0454df71dd60790b8d933
+surface_sha: 9a5c0e9bfc8463440b309ee5f19373f82a9f1b6a8ad6a9aed2ac4b6eee2d6db3
 ---
 # Frequently asked questions
 
@@ -178,7 +178,7 @@ Because the file it sits in did. The agent re-reads every `opt:` in a file whene
 
 ## The reviewer flagged my `Contract:` / `Domain(…):` / `opt:` block for having no test. What test does it want?
 
-Per the testing canon's *Knowledge-derived tests* section, a changed or added knowledge marker is itself a testable claim: a `Contract:` block wants one test per guarantee it states (including one inherited from an interface declaration), a `Domain(…):` block wants expected values worked out by hand from the formula or rule for two or three inputs, and an `opt:` clause wants a test that violates the named assumption and asserts the result stays correct or the cache is dropped. The review only judges the touched regions of changed files — a pre-existing marker with no test is not this review's debt — and a `Domain(unfiled):` block is judged the same as any filed one: parking the group does not park its test.
+Per the testing canon's *Knowledge-derived tests* section, a changed or added knowledge marker is itself a testable claim: a `Contract:` block wants one test per guarantee it states (including one inherited from an interface declaration), a `Domain(…):` block wants expected values worked out by hand from the formula or rule for two or three inputs, and an `opt:` clause wants a test that violates the named assumption and asserts the result stays correct or the cache is dropped. The reviewer's own test check is aimed at markers the change added or altered, but that does not make an older gap in an edited file someone else's problem: the coding canon says a touched file is brought fully clean, so a finding that predates your change yet sits in a file you edit is fixed in the same pass, or waived with a real reason when the code is right as it stands. Findings in files the change never opens stay out of scope. A `Domain(unfiled):` block is judged the same as any filed one: parking the group does not park its test.
 
 ---
 

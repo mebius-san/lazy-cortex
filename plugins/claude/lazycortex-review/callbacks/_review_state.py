@@ -39,12 +39,10 @@ class WaitTag:
   Attributes:
     ACTION_NEEDED: Banner tag for a callout blocked on an operator decision before work can resume.
     READY: Banner tag for a callout announcing the document is ready for the operator to review.
-    CONCERNS_DECISION: Banner tag for a callout awaiting an operator decision on raised concerns.
   """
 
   ACTION_NEEDED = "action-needed"
   READY = "ready"
-  CONCERNS_DECISION = "concerns-decision"
 
 
 class WorkTag:
@@ -192,7 +190,7 @@ def _has_waiting_sibling(root: Path, path: str) -> bool:
       text = entry.read_text(encoding = "utf-8")
     except OSError:
       continue
-    if _banner_tag(text) in { WaitTag.ACTION_NEEDED, WaitTag.READY, WaitTag.CONCERNS_DECISION }:
+    if _banner_tag(text) in { WaitTag.ACTION_NEEDED, WaitTag.READY }:
       return True
   return False
 
@@ -228,7 +226,7 @@ def is_awaiting_operator(path: str, frontmatter: dict) -> bool:
     text = (root / path).read_text(encoding = "utf-8")
   except OSError:
     return False
-  return _banner_tag(text) in { WaitTag.ACTION_NEEDED, WaitTag.READY, WaitTag.CONCERNS_DECISION }
+  return _banner_tag(text) in { WaitTag.ACTION_NEEDED, WaitTag.READY }
 
 
 def is_in_process(path: str) -> bool:

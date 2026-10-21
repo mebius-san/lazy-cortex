@@ -1366,6 +1366,21 @@ class MarkdownNode:
     """
     return _get_scalar_field(self._text, _KEY_SRC_HASH)
 
+  def frontmatter_scalar(self, key: str) -> str | None:
+    """
+    Read the value of one top-level frontmatter key.
+
+    Args:
+      key: Top-level frontmatter key to read.
+
+    Returns:
+      The value unquoted and with any trailing comment stripped. A literal (`|`) or folded (`>`) block
+      scalar yields its content with the line breaks its style and chomping keep, so the value may span
+      several lines; a flow sequence yields its raw text, brackets included (`[a, b]`). `None` when the
+      key is absent, blank, or the document has no frontmatter.
+    """
+    return _get_scalar_field(self._text, key)
+
   # ── write ──────────────────────────────────────────────────────────────────
 
   def apply(
@@ -1970,11 +1985,6 @@ def _render_wiki_block_lines(
   For block-comment languages, the opening is `/* <wiki>`, the closing is
   `</wiki> */`, and interior lines have no prefix.
 
-  Guarantees:
-    - A line break in any rendered value collapses to one space, so it never ends the comment early.
-    - In the block-comment style, the comment's own closing sequence inside a value is rewritten so
-      the block's own closing line is the only place the rendered comment terminates.
-
   Args:
     fields: Dict of field name → value (string or list) to emit.
     prefix: Comment prefix or `"/*"`.
@@ -1982,13 +1992,6 @@ def _render_wiki_block_lines(
   Returns:
     List of line strings without trailing newlines.
   """
-
-  # Contract:
-  # A line break in a rendered value — LF, CR, NEL, the line separator, or the paragraph separator —
-  # MUST collapse to one space, together with any surrounding whitespace, so it can never end the
-  # comment early. In the block-comment style, the comment's own closing sequence inside a value is
-  # NEVER emitted as-is; it is rewritten so the block's own closing line is the only place the
-  # rendered comment terminates.
 
   block_comment = prefix == _BLOCK_COMMENT_SENTINEL
   out: list[str] = []
@@ -2123,6 +2126,9 @@ class CodeNode:
     - Each write phase leaves the block fields it does not own untouched.
     - Every write operation is idempotent: identical inputs leave byte-identical content on the second call.
     - A write preserves the file's original line ending; a file read with CRLF stays CRLF.
+    - A line break inside a written field value collapses to one space, and in the block-comment style
+      the comment's own closing sequence inside a value is rewritten, so the block always ends on its own
+      closing line.
   """
 
   # Contract:
@@ -2148,6 +2154,13 @@ class CodeNode:
   # Contract:
   # A write preserves the file's original line ending: a file read with CRLF line endings is written
   # back with CRLF, never silently converted to LF.
+
+  # Contract:
+  # A line break inside a written field value — LF, CR, NEL, the line separator, or the paragraph
+  # separator — MUST collapse to one space, together with any surrounding whitespace, so it can never end
+  # the comment early. In the block-comment style, the comment's own closing sequence inside a value is
+  # NEVER emitted as-is; it is rewritten so the block's own closing line is the only place the rendered
+  # comment terminates.
 
   # File encoding for read/write.
   _ENCODING = "utf-8"

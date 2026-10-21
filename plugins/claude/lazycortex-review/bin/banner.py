@@ -1,6 +1,7 @@
-"""Top-of-body status callout (the "banner").
+"""
+Top-of-body status callout (the "banner").
 
-Pure-function module. Recognises and renders the three banner states
+Pure-function module. Recognises and renders the banner states
 defined by the spec § Top-banner. The state machine owns the *when*
 of repaints; this module owns the *what*.
 
@@ -15,8 +16,7 @@ Key invariants enforced here:
   :attr:`State.IN_PROCESS`: the operator's hand-off is unconditional
   ("Waiting" rules until the chain exhausts and is ready to hand back").
 - :func:`render` for :attr:`State.READY` is the SOLE place the
-  `- [ ] approve the whole document` checkbox appears. The other
-  two states never carry it.
+  approval checkboxes appear. Every other state never carries one.
 - Banner is anchored above the first H1 of the body. Mid-body banner-
   shaped callouts (stale, mis-pasted) are ignored by :func:`extract`.
 """
@@ -30,7 +30,7 @@ import re
 # waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
 import parser as _parser  # pylint: disable=import-error,deprecated-module
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from keys import LANG_EN as _LANG_EN, Bucket, Phase  # pylint: disable=import-error
+from keys import LANG_EN as _LANG_EN, AutorunState, Bucket, Phase  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -55,15 +55,12 @@ class State(enum.Enum):
     IN_PROCESS: Agents are working; the operator waits for the chain to hand back control.
     ACTION_NEEDED: An open question or concern blocks progress until the operator responds.
     READY: The document is ready for the operator to approve.
-    CONCERNS_DECISION: The operator must choose between continuing the review cycle, approving with
-      outstanding concerns, or continuing without this pause for the rest of the review.
     FINALIZING: The document has been approved and is being finalized.
   """
 
   IN_PROCESS = "in-process"
   ACTION_NEEDED = "action-needed"
   READY = "ready"
-  CONCERNS_DECISION = "concerns-decision"
   FINALIZING = "finalizing"
 
 
@@ -85,6 +82,15 @@ class DispatchState(enum.Enum):
   CHAIN_EXHAUSTED = "chain-exhausted"
 
 
+# --------------------------------------------------------- gestures
+
+
+# The machine kinds of the ready banner's approval gestures, in the fixed order its checkbox
+# lines render; a reader assigns each checkbox its kind by position, never by label text, so
+# every language's banner yields the same kinds and a one-checkbox banner yields the first.
+READY_GESTURE_KINDS: tuple[str, ...] = ( "approve", "approve-autorun", "approve-skip-validation" )
+
+
 # --------------------------------------------------------- tag / shape
 
 
@@ -92,7 +98,6 @@ _TAG_TO_STATE = {
     "in-process": State.IN_PROCESS,
     "action-needed": State.ACTION_NEEDED,
     "ready": State.READY,
-    "concerns-decision": State.CONCERNS_DECISION,
     "finalizing": State.FINALIZING,
 }
 
@@ -150,6 +155,46 @@ def extract(body: str) -> State | None:
   return None
 
 
+def extract_block(body: str) -> str:
+  """
+  Return the banner callout block of `body`.
+
+  Guarantees:
+    - The returned text is the banner callout alone: its `#review/<state>` first line and the quoted lines that
+      continue it.
+    - The banner is taken only from the region above the first top-level heading, or from the whole body when
+      there is none.
+    - Any other callout, before or after the banner, is never part of the returned text.
+
+  Args:
+    body: Document body text to search for the banner callout.
+
+  Returns:
+    The banner callout block, including its continuation lines and any blank lines right after it, or an empty
+    string when no banner callout sits above the first top-level heading.
+  """
+
+  # Contract:
+  # The returned text MUST be the banner callout alone — its `#review/<state>` first line and
+  # the quoted lines that continue it — taken only from the region above the first top-level
+  # heading; any other callout, before or after the banner, MUST NEVER be part of it.
+
+  # the banner lives only above the first H1, the same region `extract` reads; the strip pattern also matches
+  # the retired concerns-decision callout, which carries no state, so only a block `extract` reads as a state
+  # banner qualifies
+  headings = _parser.h1_headings(body)
+  scan_end = headings[0][0] if headings else len(body)
+  found = next(
+      ( block for block in _BANNER_BLOCK_RE.finditer(body[:scan_end]) if extract(block.group(0)) is not None ),
+      None,
+  )
+
+  # guard: no state banner callout in that region
+  if found is None:
+    return ""
+  return found.group(0)
+
+
 # -------------------------------------------------------- desired_state
 
 
@@ -181,6 +226,7 @@ def _find_callout_block(body: str, header_match: re.Match[str]) -> str:
   lines = body[start:].splitlines()
   collected: list[str] = []
   for line in lines:
+    # guard: the first line without a `>` prefix ends the callout block
     if not line.startswith(">"):
       break
     collected.append(line)
@@ -240,7 +286,6 @@ def desired_state(
     dispatch_state: DispatchState,
     approved: bool = False,
     domain_ready: bool = True,
-    concerns_decision_pending: bool = False,
     review_phase: str | None = None,
 ) -> State:
   """
@@ -249,13 +294,9 @@ def desired_state(
   - `OPERATOR_COMMITTED` / `CHAIN_IN_PROGRESS` → always `State.IN_PROCESS` (agents work next; operator waits).
   - `CHAIN_EXHAUSTED` → recompute by the spec table:
 
-    1. `concerns_decision_pending` (approved + validation H1 non-empty +
-       `review_validation_round >= concerns_decision_threshold` (per-class config, default 3) + no
-       `review_approved_with_concerns: true`) → CONCERNS_DECISION (highest priority — operator must
-       choose continue vs finalize-with-concerns before any other gate applies).
-    2. open `#review/question` or unanswered `[!decision-candidate]` → ACTION_NEEDED
-    3. consumer's `domain_ready` predicate False → ACTION_NEEDED
-    4. `approved == True` → phase-aware:
+    1. open `#review/question` or unanswered `[!decision-candidate]` → ACTION_NEEDED
+    2. consumer's `domain_ready` predicate False → ACTION_NEEDED
+    3. `approved == True` → phase-aware:
          - `review_phase in {"validators", "terminals"}` → `IN_PROCESS`. Validators (stage 5) and
            terminals (stage 6) are post-approve barriers that run BEFORE finalize; the caller passes
            a matching `waiting_context` to `replace_banner` so the rendered title reads "Waiting:
@@ -268,25 +309,23 @@ def desired_state(
            post-approve banner-tick would repaint over the approved-mirror, showing
            `- [ ] approve the whole document` on top of a doc whose frontmatter already carries
            `review_approved: true`.)
-    5. else → READY
+    4. else → READY
 
   Guarantees:
     - Returns `State.IN_PROCESS` whenever `dispatch_state` is not `CHAIN_EXHAUSTED`,
       regardless of every other argument.
-    - Once the dispatch has exhausted, the result follows a fixed priority: a pending
-      concerns decision outranks every other signal; an unanswered question, an
-      undecided candidate, an open concern, or a failed `domain_ready` check outranks
+    - Once the dispatch has exhausted, the result follows a fixed priority: an unanswered
+      question, an undecided candidate, or a failed `domain_ready` check outranks
       approval; and only once none of those hold does `approved` decide between
       `IN_PROCESS` / `FINALIZING` and `READY`.
 
   Args:
-    body: Full document text, scanned for open questions and concerns.
+    body: Full document text, scanned for open questions and decision candidates.
     dispatch_state: Current phase of the dispatch cycle.
     approved: Frontmatter-mirrored approve flag; `True` after the dispatcher has mirrored the operator's
       `- [x] approve the whole document` tick into `review_approved`.
     domain_ready: Consumer-supplied predicate; `False` forces `ACTION_NEEDED`.
-    concerns_decision_pending: When `True`, forces `CONCERNS_DECISION` before all other gates.
-    review_phase: Frontmatter `review_phase` value (`validators` / `terminals` / `concerns-pause` /
+    review_phase: Frontmatter `review_phase` value (`validators` / `terminals` /
       `finalizing` / `main` / `awaiting-operator` / `bootstrapping`) or `None` when absent. When
       `approved == True` and `dispatch_state == CHAIN_EXHAUSTED`, drives the validators/terminals →
       `IN_PROCESS` vs finalizing → `FINALIZING` branch above. Ignored when `approved == False`.
@@ -297,28 +336,25 @@ def desired_state(
 
   # Contract:
   # When `dispatch_state` is not `CHAIN_EXHAUSTED`, the result MUST be `State.IN_PROCESS`
-  # regardless of every other argument. Once exhausted, `concerns_decision_pending` MUST
-  # outrank every other signal; an open question, undecided candidate, open concern, or a
-  # failed `domain_ready` check MUST outrank approval; and only once none of those hold
-  # does `approved` decide between `IN_PROCESS` / `FINALIZING` and `READY`.
+  # regardless of every other argument. Once exhausted, an open question, undecided
+  # candidate, or a failed `domain_ready` check MUST outrank approval; and only once none
+  # of those hold does `approved` decide between `IN_PROCESS` / `FINALIZING` and `READY`.
 
   # Domain(review.markup):
   # # Banner state priority once the work chain has emptied
   # While an agent action is still pending in the current round, the banner always reports
   # that work is in progress — the operator has nothing to decide yet. Once the chain has
-  # drained, the state follows a fixed priority: a pending concerns decision comes first and
-  # overrides every other signal, because the operator must choose a direction before anything
-  # else matters. Next, an open question, an undecided proposal, or an open concern holds the
-  # document at "action needed", and so does a failed domain-specific readiness check even with
-  # no open callout. Only once none of these hold does approval take over: an approved document
+  # drained, the state follows a fixed priority: an open question or an undecided proposal
+  # holds the document at "action needed" first, and so does a failed domain-specific
+  # readiness check even with no open callout. No separate pause for a decision about
+  # validators' concerns exists: those concerns come back to the operator on the ordinary
+  # ready-to-approve banner. Only once none of these hold does approval take over: an approved document
   # still reports work in progress while post-approval validation is still running, and only
   # reports "finalizing" once that work is done. A document that clears every gate without yet
   # being approved is simply ready for the operator to approve.
 
   if dispatch_state is not DispatchState.CHAIN_EXHAUSTED:
     return State.IN_PROCESS
-  if concerns_decision_pending:
-    return State.CONCERNS_DECISION
   if _any_unanswered_question(body) or _has_unanswered_candidate(body):
     return State.ACTION_NEEDED
   if not domain_ready:
@@ -354,6 +390,7 @@ _TEMPLATES: dict[str, dict[State, str]] = {
     _LANG_EN: {
         State.IN_PROCESS: (
             "> [!hint] {title} #review/in-process\n"
+            "{autorun}"
             "> To intervene, or to wake a document that looks stuck, write the instruction "
             "in a `[!todo] #review/command` callout.\n"
         ),
@@ -362,19 +399,13 @@ _TEMPLATES: dict[str, dict[State, str]] = {
             "> Answer the open question or the decision candidate below by ticking an option, "
             "then commit.\n"
         ),
-        State.READY: (
-            "> [!success] Ready to approve #review/ready\n"
-            "> Tick the box below to approve the whole document.\n"
-            "> To send it back for another writer round, edit the text and commit, "
-            "or write the instruction in a `[!todo] #review/command` callout.\n"
-            "> - [{tick}] approve the whole document\n"
-        ),
         State.FINALIZING: "> [!hint] Waiting: finalize #review/finalizing\n",
     },
     # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
     "ru": {  # noqa: RUF001
         State.IN_PROCESS: (
             "> [!hint] {title} #review/in-process\n"
+            "{autorun}"
             "> Чтобы вмешаться или разбудить застрявший документ, напишите указание "
             "в коллауте `[!todo] #review/command`.\n"
         ),
@@ -383,45 +414,88 @@ _TEMPLATES: dict[str, dict[State, str]] = {
             "> Ответьте на открытый вопрос или кандидат решения ниже, отметив вариант, "
             "и закоммитьте.\n"
         ),
-        State.READY: (
-            "> [!success] Ready to approve #review/ready\n"
-            "> Отметьте галочку ниже, чтобы утвердить документ целиком.\n"
-            "> Чтобы отправить на доработку, поправьте текст и закоммитьте "
-            "или напишите указание в коллауте `[!todo] #review/command`.\n"
-            "> - [{tick}] утвердить документ целиком\n"
-        ),
         # a title and nothing else: no body prose exists here to carry the language
         State.FINALIZING: "> [!hint] Waiting: finalize #review/finalizing\n",
     },
 }
 
-_CONCERNS_DECISION_TEMPLATE: dict[str, str] = {
+# The ready banner before any validation round: one approval checkbox, the `approve` gesture.
+# `{autorun}` takes the stop line of an autorun that ended, or nothing.
+_READY_SINGLE_TEMPLATE: dict[str, str] = {
     _LANG_EN: (
-        "> [!warning] Outstanding concerns — choose how to proceed #review/concerns-decision\n"
-        "> The validation writer raised concerns up to the configured pause threshold. "
-        "The section(s) below show them. "
-        "Tick ONE of the boxes:\n"
-        "> - [{tick_continue}] continue review cycle — "
-        "answer the concerns in the next main-writer round and re-approve\n"
-        "> - [{tick_approve}] approve with concerns — "
-        "accept the concerns recorded below as-is and finalize the document\n"
-        "> - [{tick_auto}] continue without this pause — "
-        "on further concerns go back to the main writer at once; you still approve every round\n"
+        "> [!success] Ready to approve #review/ready\n"
+        "{autorun}"
+        "> Tick the box below to approve the whole document.\n"
+        "> To send it back for another writer round, edit the text and commit, "
+        "or write the instruction in a `[!todo] #review/command` callout.\n"
+        "> - [{tick}] approve the whole document\n"
     ),
     # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
     "ru": (  # noqa: RUF001
-        "> [!warning] Outstanding concerns — choose how to proceed #review/concerns-decision\n"
-        "> Валидационный писатель поднял замечания вплоть до настроенного порога паузы. "
-        "Разделы ниже показывают их. "
-        "Отметьте ОДНУ из галочек:\n"
-        "> - [{tick_continue}] продолжить цикл ревью — "
-        "ответить на замечания в следующем раунде основного писателя и утвердить заново\n"
-        # waiver: deliberate Russian UI string — the bare one-letter word is a preposition, not a Latin lookalike (RUF001)
-        "> - [{tick_approve}] утвердить с замечаниями — "  # noqa: RUF001
-        "принять записанные ниже замечания как есть и финализировать документ\n"
-        "> - [{tick_auto}] продолжать без этой паузы — "
-        "при новых замечаниях сразу возвращать основному писателю; каждый круг вы по-прежнему утверждаете\n"
+        "> [!success] Ready to approve #review/ready\n"
+        "{autorun}"
+        "> Отметьте галочку ниже, чтобы утвердить документ целиком.\n"
+        "> Чтобы отправить на доработку, поправьте текст и закоммитьте "
+        "или напишите указание в коллауте `[!todo] #review/command`.\n"
+        "> - [{tick}] утвердить документ целиком\n"
     ),
+}
+
+# The ready banner once a validation round has run: the three approval checkboxes, in
+# `READY_GESTURE_KINDS` order. `{autorun}` takes the stop line of an autorun that ended, or nothing.
+_READY_TRIPLE_TEMPLATE: dict[str, str] = {
+    _LANG_EN: (
+        "> [!success] Ready to approve #review/ready\n"
+        "{autorun}"
+        "> Tick ONE box: approve and send to the validators, approve and let the loop run to the end, "
+        "or approve and finalize without another validation round.\n"
+        "> To send it back for another writer round, edit the text and commit, "
+        "or write the instruction in a `[!todo] #review/command` callout.\n"
+        "> - [{tick}] approve this and previous rounds\n"
+        "> - [ ] approve and run to the end without stops\n"
+        "> - [ ] approve without further validation\n"
+    ),
+    # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
+    "ru": (  # noqa: RUF001
+        "> [!success] Ready to approve #review/ready\n"
+        "{autorun}"
+        "> Отметьте ОДНУ галочку: утвердить и отдать валидаторам, утвердить и дать циклу дойти до конца, "
+        "или утвердить и финализировать без ещё одного круга валидации.\n"
+        "> Чтобы отправить на доработку, поправьте текст и закоммитьте "
+        "или напишите указание в коллауте `[!todo] #review/command`.\n"
+        "> - [{tick}] утвердить этот и предыдущие раунды\n"
+        "> - [ ] утвердить и догнать до конца без остановок\n"
+        "> - [ ] утвердить без дальнейшей валидации\n"
+    ),
+}
+
+# The ready banner's opening line after an autorun stopped; `{reason}` comes from `_AUTORUN_STOP_REASONS`.
+_AUTORUN_STOP_LINE: dict[str, str] = {
+    _LANG_EN: "> Autorun stopped after {cycles} cycle(s): {reason}\n",
+    # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
+    "ru": "> Автопрогон остановлен после {cycles} круг(ов): {reason}\n",  # noqa: RUF001
+}
+
+# Why an autorun stopped, keyed by its `review_autorun` stop state; a running or absent autorun has no entry.
+_AUTORUN_STOP_REASONS: dict[str, dict[str, str]] = {
+    _LANG_EN: {
+        AutorunState.CLEAN: "the validators raised no concerns",
+        AutorunState.CAP: "the cycle cap was reached",
+        AutorunState.QUESTION: "an expert asked a question",
+    },
+    # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
+    "ru": {  # noqa: RUF001
+        AutorunState.CLEAN: "валидаторы не подняли замечаний",
+        AutorunState.CAP: "достигнут потолок кругов",
+        AutorunState.QUESTION: "эксперт задал вопрос",
+    },
+}
+
+# The in-process banner's progress line while an autorun is still turning.
+_AUTORUN_RUNNING_LINE: dict[str, str] = {
+    _LANG_EN: "> Autorun in progress: {cycles} cycle(s) done without operator stops.\n",
+    # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
+    "ru": "> Идёт автопрогон: пройдено кругов без остановок: {cycles}.\n",  # noqa: RUF001
 }
 
 
@@ -444,32 +518,38 @@ def render(
     state: State,
     *,
     approved: bool = False,
-    continue_review: bool = False,
-    approve_with_concerns: bool = False,
-    auto_continue: bool = False,
+    validation_seen: bool = False,
+    autorun: str | None = None,
+    autorun_cycles: int | None = None,
     waiting_context: str | None = None,
     lang: str = _LANG_EN,
 ) -> str:
   """
   Render the callout markdown for `state`.
 
-  - For `State.READY`, `approved=True` produces a ticked checkbox (mirrors frontmatter `review_approved`
-    for visual consistency).
-  - For `State.CONCERNS_DECISION`, the three-checkbox body is rendered; `continue_review` ticks the first
-    option, `approve_with_concerns` ticks the second, and `auto_continue` ticks the third.
+  - For `State.READY`, one checkbox (`approve the whole document`) is rendered before any validation round;
+    once a validation round has run (`validation_seen`), three checkboxes are rendered in the order of
+    `READY_GESTURE_KINDS`: `approve this and previous rounds`, `approve and run to the end without stops`,
+    `approve without further validation`. `approved=True` ticks the first box (mirrors frontmatter
+    `review_approved` for visual consistency).
+  - For `State.READY` after an autorun stopped (`autorun` is `clean`, `cap` or `question`), the banner opens
+    right under its title with `Autorun stopped after {n} cycle(s): {reason}`.
   - For `State.IN_PROCESS`, `waiting_context` enriches the title ("Waiting: validators" etc.);
-    unknown or `None` → bare "Waiting".
+    unknown or `None` → bare "Waiting". While `autorun` is `running`, the title is followed by
+    `Autorun in progress: {n} cycle(s) done without operator stops.`
 
   Guarantees:
-    - The "approve the whole document" checkbox line appears in the rendered markup only
-      when `state` is `State.READY`; every other state's output never carries it.
+    - Approval checkbox lines appear in the rendered markup only when `state` is `State.READY`;
+      every other state's output never carries one.
+    - For `State.READY`, the markup carries one approval line before any validation round, and the three gestures
+      in `READY_GESTURE_KINDS` order once `validation_seen` is set.
 
   Args:
     state: Banner state to render.
-    approved: Ticks the approval checkbox when rendering `State.READY`.
-    continue_review: Ticks the "continue review cycle" checkbox when rendering `State.CONCERNS_DECISION`.
-    approve_with_concerns: Ticks the "approve with concerns" checkbox when rendering `State.CONCERNS_DECISION`.
-    auto_continue: Ticks the "continue without this pause" checkbox when rendering `State.CONCERNS_DECISION`.
+    approved: Ticks the first approval checkbox when rendering `State.READY`.
+    validation_seen: Whether a validation round has run; selects the three-checkbox `State.READY` banner.
+    autorun: The `review_autorun` value (`running` / `clean` / `cap` / `question`), or `None` for no autorun.
+    autorun_cycles: Autoapprovals done in the current autorun, shown as `n` in the autorun line; `None` counts as 0.
     waiting_context: Phase label inserted into the `State.IN_PROCESS` title; `None` yields bare "Waiting".
     lang: Resolved language code for the body prose; titles stay English, and a language with
       no table of its own renders the shipped English wording throughout.
@@ -479,28 +559,53 @@ def render(
   """
 
   # Contract:
-  # The rendered markup MUST carry the "approve the whole document" checkbox line only
-  # when `state` is `State.READY`; every other state's output MUST NEVER contain it.
+  # The rendered markup MUST carry approval checkbox lines only when `state` is
+  # `State.READY` — one line before any validation round, the three gestures in
+  # `READY_GESTURE_KINDS` order once `validation_seen`; every other state's output MUST
+  # NEVER contain an approval checkbox.
 
   # Domain(review.markup):
   # # Approval checkbox scope
-  # The tickable "approve the whole document" checkbox appears only in the ready-to-approve
-  # banner. No other banner state ever renders it — an operator cannot approve mid-round, while
-  # a concerns decision is still pending, or once finalizing has already started.
+  # Approval checkboxes appear only in the ready-to-approve banner. Before validators have
+  # looked at the document it carries one box, approving the whole document. Once a validation
+  # round has run it carries three, always in the same order: approve this and the previous
+  # rounds and send the document to the validators again, approve and let the loop run on its
+  # own to the end, or approve and finalize without another validation round. The three boxes
+  # are told apart by their position, not by their wording, so every language's banner means
+  # the same gestures. No other banner state ever renders an approval box — an operator cannot
+  # approve mid-round, while a self-running loop is still turning, or once finalizing has
+  # already started.
 
-  if state is State.CONCERNS_DECISION:
-    return _resolve_for_language(_CONCERNS_DECISION_TEMPLATE, lang).format(
-        tick_continue = "x" if continue_review        else " ",
-        tick_approve = "x" if approve_with_concerns else " ",
-        tick_auto = "x" if auto_continue else " ",
-    )
-  template = _resolve_for_language(_TEMPLATES, lang)[state]
+  # Domain(review.markup):
+  # # Autorun status lines
+  # A loop the operator let run on its own reports itself on the banner. While it turns, the
+  # in-process banner says how many cycles have passed without an operator stop. Once it stops,
+  # the ready-to-approve banner opens with how many cycles it ran and why it stopped: the
+  # validators raised no concerns, the cycle cap was reached, or an expert asked a question.
+  # Without such a loop neither line appears.
+
+  # the autorun cycle count both banners print; an absent count reads as zero
+  cycles = autorun_cycles or 0
+
+  # the ready banner: one or three approval boxes, opened by the stop line of an autorun that ended
   if state is State.READY:
-    return template.format(tick="x" if approved else " ")
+    ready = _resolve_for_language(_READY_TRIPLE_TEMPLATE if validation_seen else _READY_SINGLE_TEMPLATE, lang)
+    reason = _resolve_for_language(_AUTORUN_STOP_REASONS, lang).get(autorun or "")
+    stop_line = "" if reason is None else _resolve_for_language(_AUTORUN_STOP_LINE, lang).format(
+        cycles = cycles, reason = reason,
+    )
+    return ready.format(tick = "x" if approved else " ", autorun = stop_line)
+
+  # the waiting banner: a phase-enriched title, plus the progress line of an autorun still turning
+  template = _resolve_for_language(_TEMPLATES, lang)[state]
   if state is State.IN_PROCESS:
     # waiver: one-off human-facing message
     title = _WAITING_CONTEXT_LABELS.get(waiting_context or "", _WAITING_BARE)
-    return template.format(title=title)
+    running_line = (
+        _resolve_for_language(_AUTORUN_RUNNING_LINE, lang).format(cycles = cycles)
+        if autorun == AutorunState.RUNNING else ""
+    )
+    return template.format(title = title, autorun = running_line)
   return template
 
 
@@ -509,7 +614,8 @@ def render(
 
 _BANNER_BLOCK_RE = re.compile(
     r"(?ms)"  # multiline + dotall
-    r"^>\s*\[!\w+\][^\n]*#review/(?:in-process|action-needed|ready|concerns-decision|finalizing)[^\n]*\n"
+    # `concerns-decision` is the retired pause banner: never a state, only stripped so a legacy one cannot linger
+    r"^>\s*\[!\w+\][^\n]*#review/(?:in-process|action-needed|ready|finalizing|concerns-decision)[^\n]*\n"
     r"(?:>[^\n]*\n)*"  # continuation lines of the callout
     r"(?:\n)*"  # optional blank lines after the callout
 )
@@ -547,46 +653,38 @@ def replace_banner(
     state: State,
     *,
     approved: bool = False,
-    continue_review: bool = False,
-    approve_with_concerns: bool = False,
-    auto_continue: bool = False,
+    validation_seen: bool = False,
+    autorun: str | None = None,
+    autorun_cycles: int | None = None,
     waiting_context: str | None = None,
     lang: str = _LANG_EN,
 ) -> str:
-  """Return `body` with its banner replaced (or inserted, if absent).
+  """
+  Return `body` with its banner replaced (or inserted, if absent).
 
-    The new banner is rendered for `state` and anchored as the first
-    non-empty line of the body — directly below a leading YAML
-    frontmatter block when the caller passes one, never above it. Any
-    existing banner block is removed first, *wherever* it sits: a round
-    that assembled a body without its title H1 leaves the prior banner
-    mis-anchored below the content (the old "above the first H1" rule
-    then picked `# History` as the anchor and parked the banner at the
-    bottom — Bug 105), so a head-only strip would duplicate it. Leading
-    whitespace ahead of the banner is dropped so the banner sits flush
-    against whatever precedes the body and the blank-line-or-not
-    ambiguity (Bug 30 part a) can't bleed in.
+  The new banner is rendered for `state` and anchored as the first non-empty content of the body, directly below
+  a leading YAML frontmatter block when the caller passes one, never above it. Any existing banner block is
+  removed first, wherever it sits, so the result carries exactly one banner. Leading blank lines ahead of the
+  banner are dropped.
 
-    Guarantees:
-      - The result carries exactly one banner block, positioned as the first content
-        directly below any leading frontmatter (or at the very top when there is none) —
-        never above the frontmatter and never further down, regardless of where a prior
-        banner sat in `body`.
+  Guarantees:
+    - The result carries exactly one banner block, positioned as the first content directly below any leading
+      frontmatter (or at the very top when there is none) — never above the frontmatter and never further down,
+      regardless of where a prior banner sat in `body`.
 
-    Args:
-      body: Full document or post-frontmatter body whose banner is replaced.
-      state: Banner state to render.
-      approved: Ticks the approval checkbox when rendering `State.READY`.
-      continue_review: Ticks the "continue review cycle" checkbox when rendering `State.CONCERNS_DECISION`.
-      approve_with_concerns: Ticks the "approve with concerns" checkbox when rendering `State.CONCERNS_DECISION`.
-      auto_continue: Ticks the "continue without this pause" checkbox when rendering `State.CONCERNS_DECISION`.
-      waiting_context: Phase label inserted into the `State.IN_PROCESS` title; `None` yields bare "Waiting".
-      lang: Resolved language code for the body prose.
+  Args:
+    body: Full document or post-frontmatter body whose banner is replaced.
+    state: Banner state to render.
+    approved: Ticks the first approval checkbox when rendering `State.READY`.
+    validation_seen: Whether a validation round has run; selects the three-checkbox `State.READY` banner.
+    autorun: The `review_autorun` value (`running` / `clean` / `cap` / `question`), or `None` for no autorun.
+    autorun_cycles: Autoapprovals done in the current autorun, shown in the autorun line; `None` counts as 0.
+    waiting_context: Phase label inserted into the `State.IN_PROCESS` title; `None` yields bare "Waiting".
+    lang: Resolved language code for the body prose.
 
-    Returns:
-      The body with exactly one banner block, anchored at the top of the
-      content below any leading frontmatter.
-    """
+  Returns:
+    The body with exactly one banner block, anchored at the top of the content below any leading frontmatter.
+  """
 
   # Contract:
   # The returned body MUST carry exactly one banner block, anchored as the first content
@@ -605,17 +703,23 @@ def replace_banner(
 
   new_banner = render(
       state,
-      approved=approved,
-      continue_review=continue_review,
-      approve_with_concerns=approve_with_concerns,
-      auto_continue=auto_continue,
-      waiting_context=waiting_context,
-      lang=lang,
+      approved = approved,
+      validation_seen = validation_seen,
+      autorun = autorun,
+      autorun_cycles = autorun_cycles,
+      waiting_context = waiting_context,
+      lang = lang,
   ) + "\n"
 
   # Split a leading frontmatter block so the banner never lands above it.
   fm_prefix = _leading_frontmatter(body)
   rest = body[len(fm_prefix):]
+
+  # Decision: strip the prior banner wherever it sits, not only above the first H1 — a round that assembled a
+  # body without its title H1 leaves the banner mis-anchored below the content, and the old "above the first
+  # H1" rule then picked `# History` as the anchor and parked the banner at the bottom (Bug 105), so a
+  # head-only strip would duplicate it. Leading whitespace ahead of the banner is dropped so the
+  # blank-line-or-not ambiguity (Bug 30 part a) cannot bleed in.
 
   # Strip the existing banner block wherever it sits (top OR mis-anchored
   # below the content), then anchor the fresh banner flush at the top of

@@ -166,7 +166,7 @@ def open_submit(
   text = _atomic_io.read_text(file_path)
 
   # Reuse start's bootstrap (review_active / round / approved / banner /
-  # review_result clear / optional review_expert).
+  # review_result and autorun-key clear / optional review_expert).
   _start.open_review(file_path, expert=expert)  # bootstrap, writes in place, no commit
   # the edits run on LF text; the document's own ending comes back once, on write
   bootstrapped, ending = _atomic_io.to_lf(_atomic_io.read_text(file_path))
