@@ -42,6 +42,9 @@ _WIKI_TAG_PREFIX = "wiki/"
 # Separator joining connector phrases on a node's index sub-line.
 _CONNECTOR_SEP = "; "
 
+# Separator joining path segments in a node's link text when its file name alone is not unique.
+_LINK_TEXT_SEP = " · "
+
 # Inline marker preceding the connectors sub-line in a node entry.
 _CONNECTOR_PREFIX = "  · connectors: "
 
@@ -181,8 +184,11 @@ class TopicIndex:
     Traverse node files and build the axis → value → node-entries tree.
 
     Each entry in the innermost list is `(rel_link, link_text, summary,
-    connectors, badges)`, where `badges` holds one `<key>: <value>` string per
-    configured index badge the node carries with a single-line value, in config
+    connectors, badges)`, where `link_text` is the shortest name that tells the node apart from every other
+    listed node of the scope: the file name without its extension, plus enclosing folders only as far as
+    needed, the parts joined by a middle dot.  The name is judged across all listed nodes of the scope, so
+    it is identical under every topic the node is listed under.  `badges` holds one `<key>: <value>` string
+    per configured index badge the node carries with a single-line value, in config
     order.  A node may appear
     under multiple axes / values when it carries multiple `wiki/*` tags.  All
     keys and entry lists are sorted for determinism.
@@ -205,8 +211,13 @@ class TopicIndex:
     # judgement: a node is listed under exactly the topics it carries, and a node carrying several topics is
     # listed once under each of them. A node earns a place by declaring at least one topic or a one-line
     # gloss; one that declares neither says nothing about itself and stays out, as do files of a kind the wiki
-    # does not know how to read. Each listing shows the node's gloss, so a reader can judge whether to open
-    # the node without opening it, and the node's connector phrases follow it — the short facets by which the
+    # does not know how to read. Each listing is named by the node's file name; when several listed nodes share
+    # a file name, each of them takes on its enclosing folders, one at a time and only as far as needed to tell
+    # it apart from the others, the parts separated by a middle dot. Only nodes the catalog actually lists count
+    # when judging whether a name is shared, and the judgement spans the whole scope rather than one topic, so a
+    # node keeps the same name under every topic it is listed under. Each listing shows the node's gloss, so a
+    # reader can judge whether to open the node without opening it, and the node's connector phrases follow it —
+    # the short facets by which the
     # node can be reached from elsewhere — whenever it declares any. A scope may also name a few frontmatter
     # keys whose values the catalog shows beside each listing, between the node's name and its gloss, as short
     # badges in the order the scope names them — a declared state such as a document's stage, readable without
@@ -223,7 +234,8 @@ class TopicIndex:
     # Raw accumulator: axis → value_path → list of (rel_link, link_text, summary, connectors, badges)
     raw: dict[str, dict[str, list[tuple[str, str, str | None, list[str], list[str]]]]] = {}
 
-    # fold every node into each axis/value bucket its tags name
+    # keep only the nodes the catalog will list, so their names are judged among them alone
+    indexed: list[tuple[Path, list[str], str | None, list[str], list[str]]] = []
     for node_path in node_paths:
       node = _nodes.node_for(node_path)
 
@@ -255,9 +267,15 @@ class TopicIndex:
       # guard: nothing to index — no wiki tags and no summary
       if not wiki_tags and summary is None:
         continue
+      indexed.append((node_path, wiki_tags, summary, connectors, badges))
 
+    # every listed node gets one name, the shortest path tail that sets it apart from the other listed nodes
+    link_texts = self._compute_link_texts([ entry[0] for entry in indexed ])
+
+    # fold every listed node into each axis/value bucket its tags name
+    for node_path, wiki_tags, summary, connectors, badges in indexed:
       # every bucket entry for this node shares the same label and link
-      link_text = node_path.stem
+      link_text = link_texts[node_path]
       rel_link = self._relative_link(node_path, index_path)
 
       # a node appears once under each axis/value pair it is tagged with
@@ -282,6 +300,52 @@ class TopicIndex:
 
     # the sorted mirror is what the renderer walks
     return result
+
+  def _compute_link_texts(self, node_paths: list[Path]) -> dict[Path, str]:
+    """
+    Name each listed node by the shortest tail of its repo-relative path that no other listed node shares.
+
+    The name starts as the file name without its extension and takes on enclosing folders one at a time, only
+    while another listed node bears the same name; the parts are joined by a middle dot.  A node whose name
+    still collides once its whole path is used keeps the full path name.
+
+    Args:
+      node_paths: Absolute paths of every node the index lists; uniqueness is judged among these alone.
+
+    Returns:
+      Mapping of each node path to its link text.
+    """
+
+    # each node's path segments from the repository root, the file named without its extension
+    segments: dict[Path, list[str]] = {}
+    for node_path in node_paths:
+      rel = node_path.relative_to(self._repo) if node_path.is_relative_to(self._repo) else node_path
+      segments[node_path] = [ *rel.parent.parts, rel.stem ]
+
+    # every name starts as the bare file name and grows one folder at a time only while it collides
+    depth = dict.fromkeys(node_paths, 1)
+    while True:
+      texts = { node: _LINK_TEXT_SEP.join(segments[node][-depth[node]:]) for node in node_paths }
+      holders: dict[str, list[Path]] = {}
+      for node_path, text in texts.items():
+        holders.setdefault(text, []).append(node_path)
+
+      # lengthen every colliding name that still has a folder left to take
+      grown = False
+      for members in holders.values():
+        # guard: a name held by one node is already unique
+        if len(members) < 2:
+          continue
+        for node_path in members:
+          # guard: the whole path is already used, nothing left to add
+          if depth[node_path] >= len(segments[node_path]):
+            continue
+          depth[node_path] += 1
+          grown = True
+
+      # guard: a pass that lengthened nothing has settled every name
+      if not grown:
+        return texts
 
   def _split_tag(self, tag: str) -> tuple[str | None, str | None]:
     """

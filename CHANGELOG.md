@@ -2408,6 +2408,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-wiki
 
+### 3.6.0 — 2026-10-21 UTC
+
+- Topic-index entries now show each note by its shortest unique name, using the file name alone and adding enclosing folders (joined by a middle dot) only where several notes share a file name. A note keeps the same name under every topic it is listed under.
+
 ### 3.5.0 — 2026-10-21 UTC
 
 - The topics index can now show frontmatter badges beside each entry, as `[<key>: <value>]` (for example `[spec_stage: draft]`). A scope lists the keys in its `index_badges` setting. A reader sees a node's state without opening it, and install and configure keep the setting intact on re-runs.
