@@ -497,17 +497,21 @@ class Doctor:
 
   # Check identifiers (canonical names).
   CHECK_ORPHAN_TOPIC    = "orphan-topic"
+  # Check identifier for a See-also link whose target does not exist.
   CHECK_BROKEN_SEE_ALSO = "broken-see-also"
   CHECK_PATH_BASE       = "see-also-path-base"
   CHECK_DANGLING_AT     = "dangling-at-prefix"
   CHECK_INDEX_DESYNC    = "index-desync"
   CHECK_INDEX_STALE     = "index-stale"
+  # Check identifier for a node with no summary.
   CHECK_MISSING_SUMMARY = "missing-summary"
   CHECK_STALE_GLOSS     = "stale-gloss"
   CHECK_UNKNOWN_AXIS    = "unknown-axis"
   CHECK_DUP_BRANCH      = "dup-branch"
+  # Check identifier for a code node with an unterminated `<wiki>` block.
   CHECK_BROKEN_WIKI_BLOK = "broken-wiki-block"
   CHECK_SCOPE_OVERLAP   = "scope-overlap"
+  # Check identifier for a runtime clone whose scope has no `mirror` block.
   CHECK_MIRROR_ORPHAN_CLONE = "mirror-clone-orphaned"
   CHECK_MIRROR_DIR_MISSING  = "mirror-dir-missing"
   CHECK_MIRROR_UNCOVERED    = "mirror-paths-uncovered"

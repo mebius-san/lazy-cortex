@@ -353,113 +353,204 @@ class _K:
 
   # Frontmatter keys
   SPEC_ROLE = "spec_role"
+  # Frontmatter key naming a request's lifecycle status.
   REQUEST_STATUS = "request_status"
+  # Frontmatter key naming a request's routed classification.
   REQUEST_CLASS = "request_class"
+  # Frontmatter key naming a doc's terminal review outcome.
   REVIEW_RESULT = "review_result"
+  # Frontmatter key marking a doc as opted into the review loop.
   REVIEW_ACTIVE = "review_active"
+  # Frontmatter key naming a doc's current review round.
   REVIEW_ROUND = "review_round"
+  # Frontmatter key holding a file's tag list.
   TAGS = "tags"
+  # Frontmatter key listing the requests that populated a doc.
   SPEC_SOURCE_REQUESTS = "spec_source_requests"
   # Frontmatter values
   STATUS_DRAFT = "draft"
+  # The accepted terminal `request_status` value.
   STATUS_ACCEPTED = "accepted"
+  # The rejected terminal `request_status` value.
   STATUS_REJECTED = "rejected"
+  # The unclassified `request_class` value.
   CLASS_UNKNOWN = "unknown"
+  # The canonical `spec_role` value for a request file.
   ROLE_REQUEST = "request"
   # Tag prefixes / members
   TAG_PREFIX = "request/"
   # Filenames + doc roles
   DESIGN_MD = "design.md"
+  # Filename of the bug-layout design-side doc.
   BUG_MD = "bug.md"
+  # The feature asset kind.
   FEATURE_KIND = "feature"
+  # The change asset kind.
   CHANGE_KIND = "change"
   # Path segments
   CLAUDE_DIR = ".claude"
+  # Filename of the settings file.
   SETTINGS_FILE = "lazy.settings.json"
+  # Settings key holding the product registry.
   PRODUCTS = "products"
+  # Settings key naming a product's spec directory.
   SPEC_PATH = "spec_path"
+  # The `.git` entry checked to detect a repo checkout.
   GIT_DIR = ".git"
+  # Directory segment holding request files.
   REQUESTS_DIR = "requests"
+  # Filename of the requests folder-note.
   REQUESTS_NOTE = "requests.md"
   # Routing-section markers
   ROUTING_H1 = "# Routing"
+  # Heading marking a file's history log section.
   HISTORY_H1 = "# History"
+  # Opening marker of an embedded routing-decision comment.
   ROUTING_DECISION_OPEN = "<!-- routing-decision"
+  # Closing marker of an embedded HTML comment.
   ROUTING_DECISION_CLOSE = "-->"
+  # The routing-decision verb for a spawn target.
   DECISION_VERB_SPAWN = "spawn"
+  # The routing-decision verb for an attach target.
   DECISION_VERB_ATTACH = "attach"
+  # The routing-decision verb for a reference target — an existing asset the router judges already implements the
+  # request; registers a link, spawns/attaches nothing.
   DECISION_VERB_REFERENCE = "reference"
+  # The routing-decision verb registering a whole design-only product.
   DECISION_VERB_SPAWN_PRODUCT = "spawn-product"
+  # Prefix marking the mandatory `key=` field naming a spawned product's key.
   DECISION_KEY_PREFIX = "key="
+  # Prefix marking the optional `experts=` field naming a spawned product's role experts.
   DECISION_EXPERTS_PREFIX = "experts="
+  # Token separating a role from its expert name inside the `experts=` field.
   ROLE_NAME_SEP = ":"
+  # Token separating a routing-decision line's target spec from its free-text description.
   DECISION_DESC_SEP = "::"
+  # Prefix marking the optional design-cascade `targets=` field on a change-spawn line.
   DECISION_TARGETS_PREFIX = "targets="
+  # Prefix marking the optional spawning-product `product=` field on a spawn line.
   DECISION_PRODUCT_PREFIX = "product="
+  # Prefix marking the optional `path=` field naming a spawn's folder.
   DECISION_PATH_PREFIX = "path="
+  # Prefix marking the optional `tools=` field naming a spawn's tools.
   DECISION_TOOLS_PREFIX = "tools="
+  # Prefix marking the optional `drop=` field naming an attach's dropped docs.
   DECISION_DROP_PREFIX = "drop="
+  # The `scaffold-asset` flag naming the folder the asset lands in.
   SCAFFOLD_PATH_FLAG = "--path"
+  # The scaffold result key naming the group folder-note it seeded.
   SCAFFOLD_GROUP_NOTE_KEY = "group_note"
+  # Frontmatter key listing the tools the asset is realised and checked with.
   SPEC_TOOLS_KEY = "spec_tools"
+  # Settings key holding a product's own asset-type declarations.
   ASSET_TYPES = "asset_types"
   # Settings sections and the product-record / review-class keys a spawn-product writes
   SETTINGS_SPEC = "spec"
+  # Settings section holding the review configuration.
   SETTINGS_REVIEW = "review"
+  # Settings section holding the registered experts, keyed by expert name.
   SETTINGS_EXPERTS = "experts"
+  # Settings key naming a product's authoring language.
   LANGUAGE = "language"
+  # Settings key naming a product's explorer icon.
   ICON = "icon"
+  # The default explorer icon every registered product carries.
   ICON_PRODUCT = "LiPackage"
+  # Review-section key holding the ordered class list.
   REVIEW_CLASSES = "classes"
+  # Review-class key carrying the class's identity label.
   CLASS_LABEL = "class"
+  # Review-class key carrying the class's glob list.
   CLASS_PATHS = "paths"
+  # Review-class key carrying the class's writer buckets.
   CLASS_EXPERTS = "experts"
+  # Expert-bucket key holding the opening-writer chain.
   EXPERTS_MAIN = "main"
+  # Expert-bucket key holding the named validation writers.
   EXPERTS_VALIDATION = "validation"
+  # Expert-bucket key holding the named post-approve routing writers.
   EXPERTS_TERMINAL = "terminal"
+  # Writer-object key carrying the expert's registered name.
   EXPERT_NAME = "name"
+  # Token joining a class label to the product key it is scoped to.
   OVERRIDE_LABEL_SEP = "@"
+  # Suffix a validation section id carries after the role it binds.
   VALIDATION_ROLE_SUFFIX = "_review"
+  # Role of every main writer after the first in a review class.
   EDITOR_ROLE = "editor"
+  # Result key under which `catalog-note backfill` reports the note it wrote.
   NOTE_KEY = "note"
+  # Heading marking a doc's sources section.
   SOURCES_H1 = "# Sources"
+  # Protected-section tag guarding a doc's sources section.
   SOURCES_TAG = "#protected/spec/sources"
+  # Sub-heading marking a doc's requests projection.
   REQUESTS_H2 = "## Requests"
+  # Opening marker delimiting a doc's requests projection.
   REQUESTS_MARKER_START = "<!-- auto:spec-requests:start -->"
+  # Closing marker delimiting a doc's requests projection.
   REQUESTS_MARKER_END = "<!-- auto:spec-requests:end -->"
+  # Sub-heading marking a folder-note's source-requests list.
   SOURCE_REQUESTS_H2 = "## Source requests"
+  # Sub-heading marking a doc's history log.
   HISTORY_H2 = "## History"
   # Status callout strings
   CALLOUT_SUCCESS = "[!success] Request accepted #status/accepted"
+  # The callout text stamped on a rejected request.
   CALLOUT_WARNING = "[!warning] Request rejected #status/rejected"
+  # Regex pattern matching an existing status tag to replace.
   STATUS_TAG_PATTERN = r"#status/\S+"
+  # Recovery-hint text appended to a rejection callout.
   REJECT_HINT = "To re-open: clear request_status, clear review_result, restore review_active: true."
+  # Default rejection reason when routing names no target.
   REJECT_REASON_DEFAULT = "Routing prose named no resolvable target."
   # Subprocess + git
   GIT = "git"
   # CLI identity
   PROG = "lazycortex-specs apply-request"
+  # Plugin name used to resolve the `lazycortex-specs` CLI.
   CLI_LAZYCORTEX_SPECS = "lazycortex-specs"
+  # Plugin name used to resolve the `lazycortex-review` CLI.
   CLI_LAZYCORTEX_REVIEW = "lazycortex-review"
+  # Plugin name used to resolve the `lazycortex-core` CLI.
   CLI_LAZYCORTEX_CORE = "lazycortex-core"
+  # The `lazycortex-core` subcommand reading one settings section.
   CLI_SETTINGS_GET = "settings-get"
+  # The `lazycortex-core` subcommand persisting one settings section.
   CLI_SETTINGS_SET = "settings-set"
+  # The `lazycortex-specs` subcommand seeding one document beside a folder-note.
   CLI_SEED_DOC = "seed-doc"
+  # The flag naming the repo a sibling CLI resolves settings against.
   CLI_CWD_FLAG = "--cwd"
+  # The `seed-doc` flag naming the produced document.
   SEED_DOC_FLAG = "--doc"
+  # The `<name>:<type>` token seeding a level's own vision document.
   VISION_DOC_TOKEN = f"{LevelDoc.VISION}:system-vision"
+  # Env var listing plugin dirs to walk for CLI resolution.
   ENV_PLUGIN_DIRS = "LAZYCORTEX_PLUGIN_DIRS"
+  # Env var passed to the `lazycortex-core` CLI naming the repo it should resolve settings and job storage against.
   ENV_REPO_ROOT = "LAZY_REPO_ROOT"
+  # Reason text recorded on every gate a pre-launch ladder rollback flips back to false.
   ROLLBACK_GATE_OFF_REASON = "request attached before implementation launched"
+  # Seconds the best-effort `lazycortex-review stop` subprocess may run.
   REVIEW_STOP_TIMEOUT_S = 60
+  # Per-plugin `bin/` subdir holding a CLI binary.
   BIN_DIR = "bin"
+  # The markdown file extension.
   MD_SUFFIX = ".md"
+  # Default git author name for the apply-transition commit.
   BOT_NAME_DEFAULT = "lazy-spec.request-apply"
+  # Default git author email for the apply-transition commit.
   BOT_EMAIL_DEFAULT = "lazy-spec.request-apply@bot.invalid"
+  # CLI positional argument name for the request file.
   ARG_FILE = "file"
+  # CLI flag overriding the commit author name.
   ARG_AUTHOR_NAME = "--author-name"
+  # CLI flag overriding the commit author email.
   ARG_AUTHOR_EMAIL = "--author-email"
+  # Substring identifying an already-active review start as a no-op.
   REVIEW_START_IDEMPOTENT_MARK = "already"
+  # Error message used when a spawn target needs products but none are registered.
   ERR_NO_PRODUCTS = (
       "no products registered in lazy.settings.json; cannot resolve spawn target"
   )
@@ -467,19 +558,33 @@ class _K:
   CAT_LOGICAL = "logical"
   # stdout-envelope field names — the wire contract the calling routine parses
   OUT_OUTCOME = "outcome"
+  # The stdout-envelope field carrying a failure's own object.
   OUT_ERROR = "error"
+  # The error object's field naming the failure category.
   OUT_CATEGORY = "category"
+  # The error object's field carrying the one-line cause.
   OUT_MESSAGE = "message"
+  # The stdout-envelope field naming which no-op a skip was.
   OUT_SKIP = "skip"
+  # The stdout-envelope field carrying the request's terminal verdict.
   OUT_RESULT = "result"
+  # The stdout-envelope field carrying the classified request class.
   OUT_REQUEST_CLASS = "request_class"
+  # The stdout-envelope field counting the assets the pass spawned.
   OUT_SPAWN_COUNT = "spawn_count"
+  # The stdout-envelope field counting the folder-notes the pass attached to.
   OUT_ATTACH_COUNT = "attach_count"
+  # The stdout-envelope field counting the documents the pass stamped.
   OUT_POPULATED_COUNT = "populated_count"
+  # The stdout-envelope field listing the pass's non-fatal warnings.
   OUT_WARNINGS = "warnings"
+  # Outcome token for a completed apply transition.
   OUTCOME_SUCCESS = "success"
+  # Outcome token for a failed apply transition.
   OUTCOME_ERROR = "error"
+  # Outcome token for a no-op on an already-terminal request.
   OUTCOME_TERMINAL_SKIP = "terminal-state-skip"
+  # Outcome token for a no-op on a request with no routing section.
   OUTCOME_NO_ROUTING_SKIP = "no-routing-skip"
   # Allowed class enum
   CLASS_ENUM = ( "feature", "change", "bug", "task", "spec", "plan", "feedback", "unknown" )

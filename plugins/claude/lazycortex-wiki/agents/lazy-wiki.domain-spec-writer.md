@@ -1,7 +1,7 @@
 ---
 name: lazy-wiki.domain-spec-writer
 description: "Dispatched by the `lazy-wiki.domain-scan` / `lazy-wiki.domain-full` routines (daemon path — reads its job dir) and by the /lazy-wiki.domain-sync skill (tail:false path — data in the dispatch prompt); not for direct use. Composes one domain group's spec doc and returns it as a file outside the working tree — `result/doc.md` on the daemon path, the prompt's `output_path` on the tail:false path; deterministic code lands it at the doc path, refreshes the index, and commits. A whole-document rewrite with fixed Terms / Principles / Mechanics sections, formulas verified against the code the group's Domain(…) blocks annotate and recorded as Obsidian LaTeX, plus a trailing Contracts section for the group's attributed Contract: blocks, in the configured language."
-tools: Read, Write, Grep, Bash, Skill, Agent
+tools: Read, Write, Edit, Grep, Bash, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response-per-job expert — one payload in, one doc file out; the dispatching routine/skill is the contract"
 ---

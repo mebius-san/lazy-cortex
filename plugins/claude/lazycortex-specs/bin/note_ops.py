@@ -101,9 +101,13 @@ class _Kind:
     DICT: The compact single-line JSON object shape `gate_tick.set_fm_json` writes.
   """
 
+  # The `true`/`false` literal shape written by `flip_gate.set_bool`.
   BOOL = "bool"
+  # The bare single-line scalar shape written by this module's own `set_fm_scalar`.
   STR = "str"
+  # The YAML block-list shape, or the empty inline-list shape (`key: []`), that `gate_tick.write_fm_list` writes.
   LIST = "list"
+  # The compact single-line JSON object shape `gate_tick.set_fm_json` writes.
   DICT = "dict"
 
 
@@ -128,18 +132,31 @@ class _ResultKey:
     MARKER: The field carrying the owner tag a section was missing.
   """
 
+  # The `note_set_key` outcome-field key.
   STATUS = "status"
+  # The `note_check` overall-pass field key.
   OK = "ok"
+  # The `note_check` field carrying the note's runtime job-marker sidecar entry.
   JOB_MARKERS = "job_markers"
+  # The `note_check` field naming the note that was checked.
   NOTE = "note"
+  # The `note_check` field listing every finding.
   VIOLATIONS = "violations"
+  # The field naming which violation a finding is.
   KIND = "kind"
+  # The field naming the frontmatter key a finding is about.
   KEY = "key"
+  # The field carrying a refusal's human-readable cause.
   REASON = "reason"
+  # The field carrying the offending raw value.
   VALUE = "value"
+  # The field naming the shape a `BAD_TYPE` finding expected.
   EXPECTED = "expected"
+  # The field naming the body section a finding is about.
   SECTION = "section"
+  # The field listing the canonical section order a finding compares against.
   SECTIONS = "sections"
+  # The field carrying the owner tag a section was missing.
   MARKER = "marker"
 
 
@@ -156,10 +173,15 @@ class _Violation:
     SECTION_ORDER: The required sections are present but not in canonical order.
   """
 
+  # A frontmatter key the note schema does not recognize.
   UNKNOWN_KEY = "unknown-key"
+  # A recognized key whose raw value does not parse into its declared shape.
   BAD_TYPE = "bad-type"
+  # A required body section the note does not carry.
   MISSING_SECTION = "missing-section"
+  # A present section whose next line is not its protected-owner tag.
   MISSING_MARKER = "missing-marker"
+  # The required sections are present but not in canonical order.
   SECTION_ORDER = "section-order"
 
 
@@ -174,8 +196,11 @@ class _SetKeyStatus:
     REFUSED: The key or value was rejected — no write.
   """
 
+  # A fresh frontmatter write landed.
   SET = "set"
+  # The value already matched what was on disk — no write, no commit.
   NOOP = "noop"
+  # The key or value was rejected — no write.
   REFUSED = "refused"
 
 
@@ -190,8 +215,11 @@ class _DropKeyStatus:
     REFUSED: The key is recognized by the note schema, or belongs to another worker — no write.
   """
 
+  # The key was present and unrecognized, and the note was rewritten without it.
   DROPPED = "dropped"
+  # The note carries no such key — no write, no commit.
   ABSENT = "absent"
+  # The key is recognized by the note schema, or belongs to another worker — no write.
   REFUSED = "refused"
 
 

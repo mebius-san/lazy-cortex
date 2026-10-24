@@ -60,8 +60,11 @@ class _Out:
     ADDED: The field listing every frontmatter key and section heading the run added.
   """
 
+  # The field naming what the run did to the note.
   OUTCOME = "outcome"
+  # The field carrying the note's repo-relative path.
   NOTE = "note"
+  # The field listing every frontmatter key and section heading the run added.
   ADDED = "added"
 
 
@@ -76,8 +79,11 @@ class _Outcome:
     UNCHANGED: The note already carried the full schema — nothing was written.
   """
 
+  # The note did not exist and was seeded from the template.
   CREATED = "created"
+  # The note existed and gained at least one key or section.
   UPDATED = "updated"
+  # The note already carried the full schema — nothing was written.
   UNCHANGED = "unchanged"
 
 

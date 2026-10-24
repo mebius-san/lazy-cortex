@@ -1,4 +1,5 @@
-"""Deterministic read/write primitives for one review document: `parse-note`, `set-key`, `paint-banner`.
+"""
+Deterministic read/write primitives for one review document: `parse-note`, `set-key`, `paint-banner`.
 
 The `parse-note` report (`build_report`) is what the `spec.coordinator`-style watch worker and
 coordinator agent read to decide what a review document needs next, without re-implementing
@@ -103,11 +104,8 @@ _WAITING_CONTEXT_BY_PHASE = {
 # document`. Scoped to the region before the first H1 (the banner's own territory).
 _GESTURE_RE = re.compile(r"^>\s*-\s*\[([ xX])\]\s*(.+)$", re.MULTILINE)
 
-# Any `[!<marker>] ... #review/<tag>` callout head line — generalises banner.py's own
-# `_FIRST_LINE_RE` (which only recognises the four banner-state tags) to any review-owned
-# callout marker (`todo`, `question`, `attention`, ...), per the reference shape in
-# `lazycortex-specs/bin/coordinator_dispatch.py`'s `_QUESTION_HEAD_RE`, rewritten here rather
-# than imported (plugin boundary).
+# Any `[!<marker>] ... #review/<tag>` callout head line, whatever the marker (`todo`, `question`,
+# `attention`, ...) and whatever the review tag; captures the marker and the tag.
 _CALLOUT_HEAD_RE = re.compile(r"^>\s*\[!(\w+)\][^#\n]*#review/([a-z-]+)\s*$", re.MULTILINE)
 
 # A ticked option line inside a callout block, once its leading `> ` quote prefix is stripped.
@@ -175,6 +173,7 @@ def _callout_block_lines(body: str, start: int) -> list[str]:
   """
   collected: list[str] = []
   for line in body[start:].splitlines():
+    # guard: the first line without a `>` prefix ends the callout block
     if not line.startswith(">"):
       break
     collected.append(line)
@@ -582,8 +581,9 @@ def repaint_banner(text: str, *, job_in_flight: bool = False, lang: str = _LANG_
   The banner state is driven by frontmatter (`review_approved`, `review_phase`,
   `review_validation_round`, `review_autorun`, `review_autorun_cycles`) plus the
   body's own open-question and decision-candidate content — no class-config lookup. A
-  `review_validation_round` of 1 or more paints the three-checkbox ready banner. A job in flight
-  always paints the in-process banner.
+  `review_validation_round` of 1 or more paints the three-checkbox ready banner unless `review_autorun` is
+  `clean`, which keeps the one-checkbox ready banner (approve the whole document) with the autorun stop line.
+  A job in flight always paints the in-process banner.
 
   Guarantees:
     - Repainting is idempotent: calling this function again on its own output, with the
@@ -616,9 +616,8 @@ def repaint_banner(text: str, *, job_in_flight: bool = False, lang: str = _LANG_
   if not meta:
     return text
 
-  # read the frontmatter fields that drive the banner state — mirrors the minimal slice of
-  # dispatcher.py's end-of-tick banner repaint; the caller's `job_in_flight` stands in for the
-  # old dispatch-state chain, since the marker it comes from is set on dispatch and cleared on collect
+  # read the approve flag and the review phase from the frontmatter; `job_in_flight` decides the dispatch
+  # state, because a job in flight means an agent still works on the document and the operator waits
   approved = _is_flag_true(meta, ReviewKey.APPROVED)
   review_phase_raw = meta.get(ReviewKey.PHASE)
   review_phase = review_phase_raw.strip() or None if review_phase_raw is not None else None
@@ -676,6 +675,8 @@ def main(argv: list[str]) -> int:
   # operand of `/` when the right one is absolute, so this is safe either way)
   repo = Path(args.repo).resolve()
   file_path = (repo / args.file).resolve()
+
+  # guard: a missing document cannot be reported on
   if not file_path.is_file():
     sys.stderr.write(f"file not found: {file_path}\n")
     return 2

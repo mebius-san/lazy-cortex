@@ -44,11 +44,17 @@ class Verb:
     PERMANENT_FAIL: Record a doctor diagnosis on a dead job bundle.
   """
 
+  # Print the halt block.
   HALT = "halt"
+  # Apply a cleanup mode to the working tree.
   CLEANUP = "cleanup"
+  # Clear the halt block.
   RESUME = "resume"
+  # Restore tracked paths to `HEAD`.
   REVERT = "revert"
+  # Re-arm a dead job bundle for retry.
   CLEAR_DEAD = "clear-dead"
+  # Record a doctor diagnosis on a dead job bundle.
   PERMANENT_FAIL = "permanent-fail"
 
 
@@ -69,13 +75,21 @@ class Outcome:
     STILL_DIRTY_PREFIX: Prefix of the line `resume` prints when the tree is still dirty.
   """
 
+  # `halt` found no halt block.
   NOT_HALTED = "not_halted"
+  # `cleanup` applied its mode.
   CLEANED = "cleaned"
+  # `resume` cleared the halt block.
   RESUMED = "resumed"
+  # `revert` restored every named path.
   REVERTED = "reverted"
+  # `clear-dead` re-armed the bundle.
   CLEARED = "cleared"
+  # `permanent-fail` wrote the diagnosis.
   MARKED = "marked"
+  # Prefix of the line printed when a verb fails.
   ERROR_PREFIX = "error: "
+  # Prefix of the line `resume` prints when the tree is still dirty.
   STILL_DIRTY_PREFIX = "still-dirty: "
 
 

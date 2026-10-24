@@ -231,7 +231,7 @@ Writes go through `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> mark-job <asset_n
 
 There is no fixed list of labels in this protocol, and no primitive holds one. The VOCABULARY — which labels exist on an asset, what each one's appearance condition is, and what a tick dispatches — is declared by the asset's type playbook and by the playbooks of the tools in its `spec_tools`; the coordinator reconciles exactly that declared set on every relevant wake (`lazy-spec.coordination-playbook.md` Chapter 5). An implementation label is parameterised by tool whenever an asset carries more than one: `Start implementation (<tool>)`, one box per tool, so the ticks stay distinguishable in `# Gates` and in the dedup key.
 
-The one label outside that arrangement is the review-launch label documented below. It belongs to no playbook's vocabulary because it is not a unit of work a playbook could declare — its condition is per-file and reads only a document's own type declaration, so every asset of every type hangs it under the same rule.
+The one label outside that arrangement is the review-launch label documented below. It belongs to no playbook's vocabulary because it is not a unit of work a playbook could declare — its condition is per-file and reads only a document's own type declaration, its `review_active` flag and its `spec_stage`, so every asset of every type hangs it under the same rule.
 
 `spec_halted: true` overrides every declared label unconditionally in the coordinator's own reasoning — no checkbox is hung, and any already up come down, regardless of gate state.
 
@@ -240,6 +240,7 @@ The one label outside that arrangement is the review-launch label documented bel
 ```
 > [!gate] Write code-plan
 > - [ ] Write code-plan
+>
 > tick to dispatch: planner writes code-plan.md from design.md
 ```
 
@@ -249,20 +250,23 @@ A head line therefore reads one of two ways, and both are checkbox blocks: a **d
 
 ### The review-launch block
 
-The second class of `[!gate]` block. Same callout, same single `- [ ]` row, label `Review <file>.md`, and a third line that says `tick to open review` rather than `tick to dispatch`:
+The second class of `[!gate]` block. Same callout, same single `- [ ]` row, the same blank quoted line, label `Review <file>.md`, and a fourth line that says `tick to open review` rather than `tick to dispatch`:
 
 ```
 > [!gate] Review races.md
 > - [ ] Review races.md
+>
 > tick to open review: races.md re-enters the loop at the reviewer round
 ```
 
-- **The reviewable set.** One row per markdown file of the asset whose `spec_doc_type` declares `review`. The coordinator scans the asset folder's markdown frontmatter for that key and reads each type's declaration; a document whose type has `review: false` never hangs a box, and neither does a file carrying no type at all. Ownership does not enter this — an attachment and a canonical document are gathered by exactly the same rule, which is the point of typing.
+The blocks are written by one verb, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> review-rows <note>`: it computes the reviewable set below for the note, hangs the missing blocks in exactly this four-line shape, takes down an un-ticked block whose document left the set, never removes a ticked one, and commits nothing. The coordinator runs it on every wake and again after enacting a tick; when it runs and how a tick is enacted is `lazy-spec.coordination-playbook.md` Chapter 5.
+
+- **The reviewable set.** One row per markdown file of the asset whose `spec_doc_type` declares `review: true` and not `append_only: true`, in any `spec_stage` except `cancelled`. The verb reads each file's type declaration; a document whose type has `review: false` never hangs a box, and neither does a file carrying no type at all. The append-only report journals never hang one: a report enters review only when the job writing it finishes. Ownership does not enter this — an attachment and a canonical document are gathered by exactly the same rule, which is the point of typing. A level note (product root, catalog root) is gathered by the same rule over the level's own documents.
 - **Granularity is the file.** The asset layout is flat, so there is nothing coarser to offer.
-- **A document already under review hangs no box.** A file carrying `review_active: true` is in the loop; a second entry gesture is meaningless.
-- **The tick opens review, it does not dispatch.** It invokes `lazy-review.submit` for that file — the content is already written, so review opens at the reviewer round, and the writer-round entry is never reachable from this block. No expert job is queued and no `active_job` marker is written, which is the one structural difference from a dispatch label. In that respect it behaves like `Publish` below, but it clears no flag and hangs on a per-file rather than a per-asset condition.
+- **A document already under review hangs no box.** A file carrying `review_active: true` is in the loop; a second entry gesture is meaningless. The box returns when the review ends.
+- **The tick opens review, it does not dispatch.** It invokes `lazy-review.submit` for that file — preceded by `lazy-spec.set-stage <file> draft` when the file sits at `empty` or `deferred` — so review opens at the reviewer round, and the writer-round entry is never reachable from this block. A file that is still the untouched template has nothing to review, and its tick launches nothing. No expert job is queued and no `active_job` marker is written, which is the one structural difference from a dispatch label. In that respect it behaves like `Publish` below, but it clears no flag and hangs on a per-file rather than a per-asset condition.
 - **Class resolution is not this block's business.** Every row resolves its class the same way any document does, from its own `spec_doc_type`. The block only decides which files get a row.
-- **`spec_halted: true` takes every row down**, exactly as it does for a dispatch label.
+- **`spec_halted: true` takes every un-ticked row down**, exactly as it does for a dispatch label.
 
 ### Dispatch (ticked checkbox → expert job)
 

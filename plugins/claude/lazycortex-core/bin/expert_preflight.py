@@ -116,8 +116,11 @@ class Level:
     FAIL: A hard finding that fails the expert's verdict.
   """
 
+  # An informational note that does not affect the verdict.
   INFO = "info"
+  # A soft finding (e.g. an unrecognized model tier) that does not fail the expert.
   WARN = "warn"
+  # A hard finding that fails the expert's verdict.
   FAIL = "fail"
 
 
@@ -135,11 +138,17 @@ class ServerStatus:
     UNKNOWN: The server's init outcome could not be recognized from the log.
   """
 
+  # The server completed MCP initialization successfully.
   CONNECTED = "connected"
+  # The server did not initialize within the MCP timeout.
   TIMED_OUT = "timed-out"
+  # The server needs interactive authentication / login.
   AUTH_REQUIRED = "auth-required"
+  # The server's launcher command could not be spawned.
   SPAWN_FAILED = "spawn-failed"
+  # The server's config is awaiting operator approval.
   PENDING_APPROVAL = "pending-approval"
+  # The server's init outcome could not be recognized from the log.
   UNKNOWN = "unknown"
 
 
@@ -175,29 +184,53 @@ class ResultKey:
     SKIPPED: The reason token when the probe was deliberately not run.
   """
 
+  # The per-expert result list of the verdict document.
   EXPERTS = "experts"
+  # The one-line headline of the verdict document.
   SUMMARY = "summary"
+  # The expert or server name.
   NAME = "name"
+  # The static-check finding list.
   STATIC = "static"
+  # The dynamic-probe result block, or null when the probe was skipped.
   DYNAMIC = "dynamic"
+  # The effective `--setting-sources` scopes the spawn will pass.
   SETTING_SOURCES = "setting_sources"
+  # The `ok` / `fail` verdict for the expert.
   VERDICT = "verdict"
+  # The proposed-fix list for a failing expert.
   FIXES = "fixes"
+  # The repository-level finding list, shared by every expert in the checkout.
   REPO = "repo"
+  # The severity of a static finding.
   LEVEL = "level"
+  # The human-readable text of a static finding.
   MESSAGE = "message"
+  # The probe subprocess exit code.
   EXIT = "exit"
+  # The probe wall duration in seconds.
   DURATION_S = "duration_s"
+  # Whether the probe hit the wall timeout.
   TIMED_OUT = "timed_out"
+  # Why the probe subprocess could not be spawned, or null when it ran.
   SPAWN_ERROR = "spawn_error"
+  # Whether the probe resolved the agent (vs. the default assistant).
   AGENT_RESOLVED = "agent_resolved"
+  # The per-server classification list of the probe.
   SERVERS = "servers"
+  # Whether plugin-dir resolution was left best-effort.
   BEST_EFFORT_PLUGIN_DIRS = "best_effort_plugin_dirs"
+  # A server's MCP-init status.
   STATUS = "status"
+  # A short human-readable detail line.
   DETAIL = "detail"
+  # The fix-proposal kind.
   KIND = "kind"
+  # The fix-proposal target locator.
   TARGET = "target"
+  # The fix-proposal action description.
   ACTION = "action"
+  # The reason token when the probe was deliberately not run.
   SKIPPED = "skipped"
 
 
@@ -211,7 +244,9 @@ class Verdict:
     FAIL: The expert has a hard static failure or a failed launch probe.
   """
 
+  # The expert is launchable with the current config.
   OK = "ok"
+  # The expert has a hard static failure or a failed launch probe.
   FAIL = "fail"
 
 
@@ -227,9 +262,13 @@ class FixKind:
     PIN_MODEL: Pin a model tier for an expert that resolves no explicit model.
   """
 
+  # Remove an offending server from the expert's mcp_config.
   DROP_MCP_SERVER = "drop-mcp-server"
+  # Authenticate a server manually (cannot be auto-fixed).
   MCP_LOGIN = "mcp-login"
+  # Correct or remove a bad mcp_config path.
   FIX_PATH = "fix-path"
+  # Pin a model tier for an expert that resolves no explicit model.
   PIN_MODEL = "pin-model"
 
 

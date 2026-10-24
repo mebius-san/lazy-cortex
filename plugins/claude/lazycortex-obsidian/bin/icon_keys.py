@@ -40,7 +40,9 @@ class IconKey:
   # Repaint reads and writes only NAME and COLOR on a note's frontmatter; every other frontmatter
   # field is never read or written by the repaint mechanism.
 
+  # The icon identifier key Iconize paints from.
   NAME = "iconName"
+  # The optional icon color key Iconize paints from.
   COLOR = "iconColor"
 
 
@@ -77,20 +79,35 @@ class ResultKey:
   # after repainting, the worker commits the touched notes and reports how many landed in the commit,
   # or a one-line reason when the commit could not land.
 
+  # The operation discriminator naming which subcommand produced the envelope.
   OP = "op"
+  # The vault-relative path the envelope reports on.
   PATH = "path"
+  # The resolved icon name carried in a per-file result.
   ICON = "icon"
+  # The resolved icon color carried in a per-file result.
   COLOR = "color"
+  # Whether a single-file rewrite altered the note on disk.
   CHANGED = "changed"
+  # Marker flagging an envelope produced without writing to disk.
   DRY_RUN = "dry_run"
+  # The list of would-be per-file results gathered during a dry run.
   PLANNED = "planned"
+  # The list of paths whose frontmatter the run rewrote.
   TOUCHED = "touched"
+  # The count of paths rewritten when individual paths are not enumerated.
   TOUCHED_COUNT = "touched_count"
+  # The single sub-tree prefix a reconcile run was scoped to.
   PREFIX = "prefix"
+  # The set of sub-tree prefixes a dirty-reconcile run covered.
   PREFIXES = "prefixes"
+  # The plugin name a plugin-scoped reconcile run targeted.
   PLUGIN = "plugin"
+  # The compatibility classification carried in the version report.
   STATUS = "status"
+  # The count of notes a run committed after repainting them.
   COMMITTED = "committed"
+  # The one-line reason a run could not land its repaint.
   ERROR = "error"
 
 
@@ -115,10 +132,15 @@ class CallbackKey:
   # or a resolved icon entry. The callback is the only place where resolution logic can depend on
   # computation outside the icon-map document itself.
 
+  # The operation discriminator naming the callback request kind.
   OP = "op"
+  # The vault-relative path the callback request concerns.
   PATH = "path"
+  # The parsed frontmatter mapping sent in a callback request.
   FRONTMATTER = "frontmatter"
+  # The parsed icon-map mapping sent in a resolve callback request.
   ICON_MAP = "icon_map"
+  # The boolean verdict a `when` callback returns.
   MATCH = "match"
 
 
@@ -172,20 +194,35 @@ class MapKey:
   # Overlays are applied in descending PRIORITY order; the highest-priority overlay whose own WHEN
   # predicate matches wins over every lower-priority overlay.
 
+  # The schema-generation integer the document declares.
   SCHEMA_VERSION = "schema_version"
+  # The minimum worker hook version the document requires.
   MIN_HOOK_VERSION = "min_hook_version"
+  # The ordered list of matcher entries the document carries.
   MATCHERS = "matchers"
+  # The directory prefixes outside of which no note is read or written.
   PAINT_ROOTS = "paint_roots"
+  # The named lookup tables referenced by resolve specs.
   REGISTRIES = "registries"
+  # The stage-to-color registry referenced by resolve specs.
   STAGE_COLORS = "stage_colors"
+  # The predicate block selecting which files a matcher or overlay applies to.
   WHEN = "when"
+  # The resolution block producing an icon entry for a matched file.
   RESOLVE = "resolve"
+  # The base resolve block composed under overlays.
   BASE = "base"
+  # The list of conditional overlay resolve blocks layered on the base.
   OVERLAYS = "overlays"
+  # The integer ordering weight on a single overlay.
   PRIORITY = "priority"
+  # The external-callback identifier driving a resolution or predicate.
   CALLBACK = "callback"
+  # The dotted registry path a field-lookup spec reads from.
   FROM = "from"
+  # The interpolated registry key a field-lookup spec resolves.
   KEY = "key"
+  # The optional sub-field a field-lookup spec extracts from a registry record.
   FIELD = "field"
 
 
@@ -229,14 +266,23 @@ class WhenKey:
   # Several predicate keys present on the same matcher or overlay combine with AND semantics: a note
   # matches only when every present predicate holds.
 
+  # Exact final-path-segment equality predicate.
   BASENAME = "basename"
+  # Membership-in-container predicate over the final path segment.
   BASENAME_IN = "basename_in"
+  # Glob-match predicate over the full vault-relative path.
   PATH_GLOB = "path_glob"
+  # Predicate tying the `role` frontmatter value to the basename stem.
   ROLE_MATCHES_BASENAME = "role_matches_basename"
+  # The prefix marking a `frontmatter.<key>` equality predicate.
   FRONTMATTER_PREFIX = "frontmatter."
+  # Key-presence predicate over the frontmatter mapping.
   FRONTMATTER_HAS = "frontmatter_has"
+  # Key-absence predicate over the frontmatter mapping.
   FRONTMATTER_MISSING = "frontmatter_missing"
+  # Predicate selecting notes named after their own parent folder.
   IS_FOLDER_NOTE = "is_folder_note"
+  # External-callback predicate name.
   CALLBACK = "callback"
 
 
@@ -249,6 +295,7 @@ class FrontmatterKey:
     ROLE: The note-role field compared against the basename stem.
   """
 
+  # The note-role field compared against the basename stem.
   ROLE = "role"
 
 
@@ -276,7 +323,9 @@ class InterpToken:
   # BASENAME and BASENAME_STEM are the only interpolation tokens a resolve block's template string
   # may reference.
 
+  # The full-basename token reference.
   BASENAME = "basename"
+  # The basename-without-extension token reference.
   BASENAME_STEM = "basename.stem"
 
 
@@ -306,7 +355,9 @@ class YamlScalar:
   # TRUE and FALSE are the only spellings the flat frontmatter parser recognizes as booleans; every
   # other value, including any different casing or a numeric literal, is read back as a plain string.
 
+  # The boolean-true scalar token.
   TRUE = "true"
+  # The boolean-false scalar token.
   FALSE = "false"
 
 
@@ -339,7 +390,11 @@ class VersionStatus:
   # The version report's STATUS field always carries exactly one of MISSING, OK, or INCOMPATIBLE;
   # DECLARED never appears as a STATUS value, it names the report's separate declared-schema field.
 
+  # No icon-map present.
   MISSING = "missing"
+  # Icon-map is fully compatible.
   OK = "ok"
+  # Icon-map schema or min-hook-version is unsatisfiable.
   INCOMPATIBLE = "incompatible"
+  # The report key carrying the icon-map's declared schema generation.
   DECLARED = "declared"

@@ -43,10 +43,15 @@ class HistoryShape:
     FRONTMATTER_FENCE: The line that opens and closes a leading YAML block.
   """
 
+  # The default H1 line that opens the section.
   HEADING = "# History"
+  # The level-4 heading prefix of a day group.
   DAY_PREFIX = "#### "
+  # The prefix of every history line.
   BULLET = "- "
+  # The prefix that ends the section — only an H1 is a boundary.
   H1_PREFIX = "# "
+  # The line that opens and closes a leading YAML block.
   FRONTMATTER_FENCE = "---"
 
 
@@ -64,11 +69,17 @@ class IoKey:
     NEW_DAY: Whether the append opened a new day group.
   """
 
+  # The whole note text (stdin input and stdin-mode output).
   TEXT = "text"
+  # The history line to append.
   LINE = "line"
+  # The `YYYY-MM-DD` day the line belongs to.
   DATE = "date"
+  # The H1 that opens the section, when not the default.
   HEADING = "heading"
+  # The note path as given, echoed in file-mode output.
   FILE = "file"
+  # Whether the append opened a new day group.
   NEW_DAY = "new_day"
 
 

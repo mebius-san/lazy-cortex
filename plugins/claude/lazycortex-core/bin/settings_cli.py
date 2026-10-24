@@ -65,9 +65,13 @@ class ConfirmKey:
     ERROR: The failure text of a rejected call.
   """
 
+  # The outcome word of a successful write.
   STATUS = "status"
+  # The section the write landed in.
   SECTION = "section"
+  # The nested key path a keyed write touched.
   KEY = "key"
+  # The failure text of a rejected call.
   ERROR = "error"
 
 
@@ -82,7 +86,9 @@ class Outcome:
     DELETED: The nested key was removed, or was already absent.
   """
 
+  # The section or nested value was stored.
   WRITTEN = "written"
+  # The nested key was removed, or was already absent.
   DELETED = "deleted"
 
 

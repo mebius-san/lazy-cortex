@@ -44,12 +44,19 @@ class _Wire:
     DATE: JSON key of the pinned date.
   """
 
+  # The core CLI subcommand.
   VERB = "history-append"
+  # The flag selecting the in-memory mode (JSON in, JSON out, no disk write).
   STDIN_FLAG = "--stdin"
+  # The file-mode flag carrying the line text.
   LINE_FLAG = "--line"
+  # The flag pinning the day group's date.
   DATE_FLAG = "--date"
+  # JSON key of the whole note text, both directions.
   TEXT = "text"
+  # JSON key of the line to append.
   LINE = "line"
+  # JSON key of the pinned date.
   DATE = "date"
 
 

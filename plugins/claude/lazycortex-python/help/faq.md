@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, knowledge markers, tests, and the checker stack.
-last_regen: 2026-10-21
+last_regen: 2026-10-24
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -21,8 +21,8 @@ source_skills:
   - review.py
   - lazy-python.coding-guidelines
   - lazy-python.checking-guidelines
-source_sha: 3759a36417b589f58fc0454df71dd60790b8d933
-surface_sha: 9a5c0e9bfc8463440b309ee5f19373f82a9f1b6a8ad6a9aed2ac4b6eee2d6db3
+source_sha: 33e8a296cb2bda2f7c06945ca9d46e24ed4c1858
+surface_sha: c219377568500f251cb77bb1cdada3c0dc9c02d078314048b78283cb2ef6f4ad
 ---
 # Frequently asked questions
 
@@ -292,7 +292,7 @@ Yes. `Test unit for X.` and `Test that Y.` docstrings are written in the multi-l
 
 ## A test written by the agent fails against the current implementation. Should I fix the test?
 
-No. Per the Golden Rule in `lazy-python.test-writer`: if a test correctly reflects documented behaviour but fails against the current implementation, the implementation is suspect. The agent will decorate the test method with `@pytest.mark.xfail(strict = True, reason = "<reason>")` and report the divergence to you. Fix the production code (or update the docstring if the spec has changed), not the test. Once the fix lands, the strict marker fails the run on the unexpected pass, and the marker comes off in the same change. Modifying an existing test also requires your explicit approval naming the specific test file — the agent will ask before touching it.
+No. Per the Golden Rule in `lazy-python.test-writer`: if a test correctly reflects documented behaviour but fails against the current implementation, the implementation is suspect. The agent leaves the test in the run and red — it never adds a `skip`, `skipif`, or `xfail` marker, which the `lazy-python.failing-tests` rule forbids without your explicit yes — names the divergence in its report, and finishes as blocked: the report ends with a `Status: blocked` line instead of `Status: done`. Fix the production code (or update the docstring if the spec has changed), not the test; the test goes green once the fix lands. Modifying an existing test also requires your explicit approval naming the specific test file — the agent will ask before touching it.
 
 ---
 

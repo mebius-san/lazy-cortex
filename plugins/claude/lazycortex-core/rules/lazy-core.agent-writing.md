@@ -39,6 +39,7 @@ Minimum tools. Dispatch cost scales with surface.
 - `tools: ["*"]` without justification → `WARN`.
 - Tools listed but never invoked in the body → `WARN` (dead surface).
 - `Agent` is a MANDATORY member of every agent's `tools:` list (operator decision, 2026-08-12) — sub-dispatching a further subagent is a supported design for any agent, headless experts included, not dead surface even on a run that never invokes it. A `tools:` list missing `Agent` → `WARN`.
+- `Write` implies `Edit` (operator decision, 2026-10-24) — an agent allowed to write a whole file is allowed to patch one. Without `Edit` the agent rewrites files in full or patches them through ad-hoc scripts, both worse than the targeted edit. A `tools:` list with `Write` and no `Edit` → `WARN`.
 
 ## 6. Shared rules (cross-reference, do not duplicate)
 

@@ -39,9 +39,13 @@ class ProviderKey:
     TOKEN_ENV: The key naming the field holding the auth token's environment variable name.
     MODELS: The key naming the field mapping each tier in `PROVIDER_TIERS` to a model alias.
   """
+  # The key naming the provider entry's dict field.
   NAME = "name"
+  # The key naming the provider's endpoint URL field.
   BASE_URL = "base_url"
+  # The key naming the field holding the auth token's environment variable name.
   TOKEN_ENV = "token_env"
+  # The key naming the field mapping each tier in `PROVIDER_TIERS` to a model alias.
   MODELS = "models"
 
 

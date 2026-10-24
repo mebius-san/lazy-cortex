@@ -158,83 +158,162 @@ class _K:
     DOCTOR_PROG: CLI program name shown in `upstream-doctor --help` output.
   """
 
+  # Settings top-level key holding plugin-owned spec settings.
   SPEC_SECTION = "spec"
+  # `spec` settings sub-key holding every configured upstream source.
   UPSTREAM_SECTION = "upstream"
+  # Config key naming the shared per-tick unit-work budget.
   MAX_UNITS = "max_units_per_tick"
+  # Config key naming the per-file mirror size ceiling.
   MAX_TEXT_BYTES = "max_text_file_bytes"
+  # Config key naming the source-note retry threshold (read-through only — Phase B never consumes it).
   FETCH_FAILURE_THRESHOLD = "fetch_failure_threshold"
+  # Config keys under `upstream` that are never a `<repo-key>`.
   RESERVED_KEYS = frozenset({MAX_UNITS, MAX_TEXT_BYTES, FETCH_FAILURE_THRESHOLD})
+  # Per-source config key naming the git URL.
   URL = "url"
+  # Per-source config key naming the tracked branch.
   BRANCH = "branch"
+  # Per-source config key holding the mount map.
   MOUNTS = "mounts"
+  # Per-mount config key naming the in-repo root.
   SOURCE_PATH = "source_path"
+  # Per-mount config key holding the unit-boundary glob list.
   UNITS = "units"
+  # Per-mount config key holding the exclusion glob list.
   EXCLUDE = "exclude"
+  # Fallback `max_units_per_tick`.
   DEFAULT_MAX_UNITS = 7
+  # Fallback `max_text_file_bytes`.
   DEFAULT_MAX_TEXT_BYTES = 1_048_576
+  # Fallback `fetch_failure_threshold`.
   DEFAULT_FAILURE_THRESHOLD = 5
+  # Repository-root-relative segment upstream mirrors live under.
   UPSTREAM_ROOT = "upstream"
+  # Repo-relative dir holding one gitignored clone per `<repo-key>`.
   RUNTIME_CLONE_ROOT = ".runtime/lazy-specs/upstreams"
+  # Repo-relative path of the fetch-phase continuation cursor.
   CURSOR_FILE = ".runtime/lazy-specs/upstream_tick_cursor.json"
+  # Unit-relative dir holding the current mirror.
   SOURCE_DIR = "source"
+  # Unit-relative dir holding the last-processed snapshot.
   PROCESSED_DIR = "processed"
+  # Markdown file extension.
   MD_SUFFIX = ".md"
+  # The plugin subdirectory holding the shipped icon registry.
   REFERENCES_DIR = "references"
+  # Filename of the shipped iconize matcher registry.
   ICON_REGISTRY_FILE = "lazy-spec.iconize-registry.json"
+  # Registry key holding the matcher list.
   ICON_MATCHERS = "matchers"
+  # Matcher key holding the frontmatter predicate.
   ICON_WHEN = "when"
+  # Matcher key holding the resolved paint.
   ICON_RESOLVE = "resolve"
+  # Matcher key holding the tie-break priority.
   ICON_PRIORITY = "priority"
+  # Resolve key holding the icon name.
   ICON_NAME = "iconName"
+  # Resolve key holding the icon colour.
   ICON_COLOR = "iconColor"
+  # Opening of a template token — an icon name carrying it borrows the note's own icon rather than naming one.
   ICON_BORROW_MARK = "{{"
+  # Frontmatter key carrying a note's role.
   ROLE_KEY = "spec_role"
+  # Frontmatter list key carrying a note's tags.
   TAGS_KEY = "tags"
+  # Git executable name.
   GIT = "git"
+  # `.git` entry marking a working copy.
   GIT_DIR = ".git"
+  # Git author name for this module's own commits.
   BOT_NAME = "lazy-spec.upstream-tick"
+  # Git author email for this module's own commits.
   BOT_EMAIL = "lazy-spec.upstream-tick@bot.invalid"
+  # Heading of a unit note's operator-actions section.
   ACTIONS_H1 = "# Actions"
+  # Heading of a unit note's current not-mirrored-file list.
   SKIPPED_CURRENT_H1 = "# Not mirrored (current)"
+  # Heading of a unit note's processed not-mirrored-file list.
   SKIPPED_PROCESSED_H1 = "# Not mirrored (processed)"
+  # The current list's pre-rename heading, read-only fallback.
   LEGACY_SKIPPED_CURRENT_H1 = "# Skipped (current)"
+  # The processed list's pre-rename heading, read-only fallback.
   LEGACY_SKIPPED_PROCESSED_H1 = "# Skipped (processed)"
+  # Heading of a unit note's closed-request log.
   HISTORY_H1 = "# History"
+  # English language token — the explainer fallback.
   LANG_EN = "en"
+  # Russian language token.
   LANG_RU = "ru"
+  # Placeholder line rendered under an empty list section.
   NONE_MARKER = "_(none)_"
+  # `remote-mirror` plan-only mode token.
   MODE_PLAN = "plan"
+  # `remote-mirror` sync mode token.
   MODE_SYNC = "sync"
+  # Env var listing plugin dirs to resolve the core CLI in.
   PLUGIN_DIRS_ENV = "LAZYCORTEX_PLUGIN_DIRS"
+  # The `lazycortex-core` CLI binary name.
   CORE_CLI_NAME = "lazycortex-core"
+  # Per-plugin `bin/` sub-dir.
   BIN_DIR = "bin"
+  # Dev-vault plugin-tree segment (fallback CLI resolution).
   PLUGIN_TREE_DIR = "plugins/claude"
+  # Env var the core CLI reads to resolve settings/paths against.
   REPO_ROOT_ENV = "LAZY_REPO_ROOT"
+  # The core CLI's `remote-mirror` subcommand token.
   REMOTE_MIRROR_VERB = "remote-mirror"
+  # CLI program name shown in `--help` output.
   PROG = "lazycortex-specs upstream-tick"
+  # CLI flag overriding the repo root.
   ARG_CWD = "--cwd"
+  # `upstream-doctor` flag selecting its repair mode over its read-only default.
   ARG_APPLY = "--apply"
+  # `argparse` action name for a boolean flag.
   ACTION_STORE_TRUE = "store_true"
+  # `remote-mirror` request field naming the mode token.
   MODE = "mode"
+  # `remote-mirror` request field naming the shared working-clone directory.
   CACHE_DIR = "cache_dir"
+  # `remote-mirror` request field naming the include-glob list scoping the request.
   INCLUDE = "include"
+  # `remote-mirror` request field naming the per-file size ceiling.
   MAX_BYTES = "max_bytes"
+  # `remote-mirror` request field naming the sync/plan destination directory.
   DEST = "dest"
+  # `remote-mirror` request field reusing an existing clone without a network round-trip — set on every per-unit
+  # sync, since the tick's own plan call already fetched.
   SKIP_FETCH = "skip_fetch"
+  # Content-root-relative dir a Phase C request lands under.
   REQUESTS_DIR = "requests"
+  # Heading of a request body's sole, service-only section.
   REQUEST_H1 = "# Upstream"
+  # Frontmatter key naming a request file's lifecycle status.
   REQUEST_STATUS_KEY = "request_status"
+  # Frontmatter key naming whether a request is under active review.
   REQUEST_REVIEW_ACTIVE_KEY = "review_active"
+  # Frontmatter key naming a finalized review's terminal verdict.
   REQUEST_REVIEW_RESULT_KEY = "review_result"
+  # Pre-terminal `request_status` value.
   REQUEST_STATUS_DRAFT = "draft"
+  # Terminal `request_status` value for a routed-and-applied request.
   REQUEST_STATUS_ACCEPTED = "accepted"
+  # Terminal `request_status` value for a request whose routing named no applicable target.
   REQUEST_STATUS_REJECTED = "rejected"
+  # Heading of a source note's fetch-status section.
   SOURCE_NOTE_H1 = "# Fetch status"
+  # Heading of a source note's Dataview unit-summary section.
   SOURCE_UNITS_H1 = "# Units"
+  # Heading of a source note's vault-unsafe-directory-name list (§ 3/§ 5).
   SOURCE_INVALID_H1 = "# Invalid names"
+  # Frontmatter key carrying a folder-note's icon.
   ICONIZE_ICON = "iconize_icon"
+  # Frontmatter key carrying a folder-note's icon colour.
   ICONIZE_COLOR = "iconize_color"
+  # Default icon seeded on every source's repo-level folder-note.
   SOURCE_NOTE_ICON = "LiGitFork"
+  # Default icon seeded on the root upstream catalog note.
   ROOT_NOTE_ICON = "LiCloudDownload"
 
   # Domain(obsidian.icon-resolution):
@@ -248,10 +327,15 @@ class _K:
   # accent colour shared by the root upstream catalog note and every per-source note
   INTAKE_COLOR = "#f0abfc"
 
+  # Title line of the root upstream catalog note.
   ROOT_NOTE_TITLE = "# Upstream"
+  # Characters that make a source directory name vault-unsafe (§ 3).
   UNSAFE_NAME_CHARS = frozenset({ "#", "[", "]", "|", ":" })
+  # Refusal reason rendered for a name colliding only in case (§ 3).
   CASE_DUPLICATE_REASON = "case-only duplicate of another unit directory"
+  # Fenced-code language tag opening a `dataviewjs` block.
   DATAVIEWJS_FENCE = "```dataviewjs"
+  # CLI program name shown in `upstream-doctor --help` output.
   DOCTOR_PROG = "lazycortex-specs upstream-doctor"
 
 
@@ -303,12 +387,19 @@ class _PlanKey:
     FETCHED_SHA: Response field naming the clone's resolved commit SHA on a successful sync.
   """
 
+  # Plan-item field naming the classified file's relative POSIX path.
   PATH = "path"
+  # Plan-item field naming the classification token.
   ACTION = "action"
+  # Response field naming an error message when the request could not be completed.
   ERROR = "error"
+  # Response field naming the classified plan-item list.
   PLAN = "plan"
+  # Action token for a newly landed file.
   ADDED = "added"
+  # Action token for a changed file.
   UPDATED = "updated"
+  # Response field naming the clone's resolved commit SHA on a successful sync.
   FETCHED_SHA = "fetched_sha"
 
 
@@ -326,8 +417,11 @@ class _SkipKey:
     HASH: Field naming the skipped file's own content hash.
   """
 
+  # Field naming why the file was skipped (`remote-mirror`'s own tokens, plus `SKIP_REASON_IGNORED`).
   REASON = "reason"
+  # Field naming the skipped file's byte size, when known.
   SIZE = "size"
+  # Field naming the skipped file's own content hash.
   HASH = "hash"
 
 
@@ -2746,13 +2840,26 @@ class DoctorFinding:
       than its current `url` (Task 4's own guard, surfaced here by name for the operator).
   """
 
+  # A `upstream/<repo-key>/` subtree exists with no matching config entry (§ 12: a subtree on disk with no matching
+  # config entry).
   UNCONFIGURED_SOURCE = "unconfigured-source"
+  # A `upstream/<repo-key>/<mount>/` subtree exists with no matching mount in that source's config.
   UNCONFIGURED_MOUNT = "unconfigured-mount"
+  # A unit directory (carries `source/` or `processed/`) has no own note file.
   MISSING_NOTE = "missing-note"
+  # A unit note's `tags:` list does not mirror its own `spec_upstream_status` value.
   TAG_STATUS_MISMATCH = "tag-status-mismatch"
+  # A unit note reads `UpstreamStatus.PROCESSED` but its `processed/` directory is missing or empty. Content
+  # divergence in a populated `processed/` is not checked (see `_scan_unit`).
   PROCESSED_WITHOUT_SNAPSHOT = "processed-without-snapshot"
+  # A `UpstreamStatus.IN_REVIEW` unit's request link is missing, or present but does not resolve to an existing
+  # request file (§ 8: dangling mutex).
   DANGLING_REQUEST_LINK = "dangling-request-link"
+  # A unit note's `# Actions` section carries a checkbox label outside the closed `UpstreamAction` set (deferred from
+  # Task 5's own scope to this one).
   UNKNOWN_ACTION_LABEL = "unknown-action-label"
+  # A configured source's working clone points at a different remote than its current `url` (Task 4's own guard,
+  # surfaced here by name for the operator).
   CLONE_ORIGIN_MISMATCH = "clone-origin-mismatch"
 
 

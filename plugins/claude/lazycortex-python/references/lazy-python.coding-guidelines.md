@@ -30,8 +30,11 @@ conventions.
   - an expensive result (I/O, DB, heavy compute) used more than once;
   - loop-invariant hoisting of non-trivial work;
   - a genuinely complex multi-step expression — then a comment says what it holds;
-  - an access chain reaching **two or more objects deep** (`self._place.place_grid`, `entity_data.state_b.position`) that is read more than once, and especially inside a loop — there the alias shortens every use site and saves the repeated walk.
+  - an access chain reaching **two or more objects deep** (`self._place.place_grid`, `entity_data.state_b.position`) that is read more than once, and especially inside a loop — there the alias shortens every use site and saves the repeated walk;
+  - a flag that takes the boolean result of a call made for its effect (repairing, dropping, saving) — the call does the work and the local only records whether it changed anything; assigning each such result first also keeps every call running, which an inline `or` would short-circuit (`has_dead = self._drop_dead_ids(...)`, then `if has_dead or has_dead_groups:`) — no `# waiver:` needed;
+  - a complex argument lifted out of a call, per the bullet below.
   A local that must stay for any other reason carries a `# waiver: <reason>` line above it, since a bare `local = <accessor>` reads as a violation.
+- **A complex call should not be nested inside another call.** When an argument is itself a multi-line call, a conditional expression wrapping a call, or a call with its own keyword arguments, assign it to a local first and pass the local; this is the counterpart of the rule above, not an exception to it. A one-line argument with no arguments of its own stays inline.
 
 ### Knowledge Marker Rules
 - **Mark knowledge as you write it.** Knowledge markers are written by the author at writing time, not backfilled by a later sweep:
@@ -250,6 +253,11 @@ Always include the project's standard copyright/license header at the top of all
 - **No meaningless code changes for tool warnings.** Do not add redundant guards, restructure control flow, or otherwise change working code solely to silence a static analysis tool (PyCharm, mypy, etc.) when the change has no real effect on runtime behavior or type correctness. Instead, add a waiver or `# noinspection` comment that explains (a) why the code is correct as-is and (b) what limitation of the checker triggers the warning.
 - **Abstract intermediate classes**: when an intermediate class in an inheritance chain intentionally does not override an abstract method (because concrete subclasses provide the implementation), suppress with `# pylint: disable=abstract-method` and a `# waiver:` comment. Both comments must be placed **inside the class body, immediately after the docstring** — never inline on the `class` line or above it. Do not copy empty `NotImplementedError`-raising stubs just to silence the warning.
 
+## Compatibility Code
+- **Never produce aliases, shims, wrappers, or backward-compatibility layers without the operator's explicit consent.**
+- A renamed or removed symbol is renamed or removed everywhere it is used; nothing keeps the old name alive.
+- An existing compatibility pattern in the code is not a precedent to replicate.
+
 ## Waiver Comments
 - When code must deviate from a coding rule, add a `# waiver: <explanation>` comment explaining why the exception is justified.
 - **Prefer line comments over side comments.** Place waiver and `# noinspection` comments on the line immediately above the exempted code, not as trailing (side) comments on the same line. Side comments reduce readability and risk exceeding the line-length limit.
@@ -322,16 +330,16 @@ Organize modules in the following order:
 ## __init__.py File Patterns
 - Use wildcard imports for module exports: `from .submodule import *`.
   - This import MUST go first before any other imports, except  `from __future__ import annotations`
+- **A module never defines or imports a public name equal to its own name.** `from .builder import *` rebinds `builder` from the module to the object it exports, so the package can no longer reach the module. Name the object after its class or its action (`chapter_builder` for the `ChapterBuilder` singleton, `profile_call` for the profiling decorator), never after the module.
+- A new module that carries a public class or function should be wired into its package `__init__.py` export chain (`from .module import *`) in the same change that adds it; a public symbol not reachable from its package escapes the package's public API. Private-only modules (all names underscore-prefixed) have nothing to export.
 - Group imports logically (core functionality first, then extensions).
 - Do not add `from __future__ import annotations` if the file has no other imports and no meaningful code lines.
 - Every source `__init__.py` under the main project package(s) must have a module-level docstring describing the
   package's purpose. Insert the docstring after the copyright header and before any imports. Follow this format:
   - Summary: One sentence describing the package's purpose.
-  - Extended description (optional): 1–3 sentences on the package's role.
-  - Subpackages (if any): `  name: Description.` (2-space indent, one per line).
-  - Dependencies (if any): Which sibling packages this module imports from.
-  - Dependents (if any): Which packages import from this one.
+  - Extended description (optional): 1–3 sentences on the package's role and the pattern its members follow.
   - Omit empty sections entirely.
+- A package docstring never enumerates its contents by name — no submodule or subpackage listings and no prose naming the contained classes one by one; such inventories rot on every addition, and the import chain is the inventory.
 
 
 # Import Organization
@@ -415,7 +423,7 @@ if TYPE_CHECKING:
   - By import dependency order if possible (e.g., if module A depends on module B, import B before A).
   - By import depth (if no dependency order is clear, import shallower modules before deeper ones).
 - Use the same rules for imports under `if TYPE_CHECKING:`.
-- Run `ruff check <path>` to validate import order and grouping — its `I` (isort) and `F401` rules cover most violations.
+- The `rf` phase (`chk-py rf <path> -q`) validates import order and grouping — ruff's `I` (isort) and `F401` rules cover most violations.
 
 
 # Naming Conventions
@@ -428,6 +436,11 @@ if TYPE_CHECKING:
 - Avoid digits unless they are part of an established term (e.g., `Vec2`, `Sha256`).
 - Do not prefix interfaces with `I`. Use suffixes to indicate roles instead.
 - Keep naming stable. Rename it only for semantic correctness.
+
+### Renaming.
+- **A rename re-formats every call it touches.** When a method, function, or attribute name changes length, every multi-line call of it has continuation lines aligned to the old opening parenthesis.
+- After the replacement, re-align those lines to the new parenthesis (or re-wrap the call) in the same change — a mechanical search-and-replace is only half of a rename.
+- The same applies to test method names, docstring and comment mentions, and any plan or spec that names the member.
 
 ### Roles: Prefixes and Suffixes.
 - Abstract base private classes: **prefix** `_Base`. Examples: `_BaseHandler`, `_BaseStore`.
@@ -507,6 +520,11 @@ if TYPE_CHECKING:
 - Use the `list_` prefix for generators that use `yield`.
 - Use the `_batch` suffix for bulk operations.
 - Avoid vague verbs like `do`, `process`, or `handle` when a more precise verb exists.
+
+### Sibling Members.
+- Members that answer the same question in a different form should carry the full name, differing by exactly one word.
+  - When two or more methods or properties measure the same thing and differ only in the shape of the answer — its type, its narrowing, or its scope — none of them keeps the bare name: `footprint_shape` / `footprint_box`, `count_all_neighbours` / `count_free_neighbours`.
+  - A bare `footprint` beside a `footprint_box` hides which variant it is.
 
 ### Name Length & Abbreviation Rules.
 - Prefer shorter method names while keeping them descriptive.
@@ -601,6 +619,7 @@ if TYPE_CHECKING:
 - **Minimum length rule**: all variable names must have at least three characters.
   - Do not use single-letter or two-letter names, even in small loops, comprehensions, or generators.
   - Always choose meaningful names that reflect the purpose of the variable (`idx`, `row`, `col`, `val`, `num`, etc.).
+  - **Exception — mathematical notation.** In a pure math or geometry method, a parameter whose only meaning is its position in a formula may be shorter than three characters when it follows the standard notation of that formula: symmetric operands of a comparison or binary operation (`a`, `b`, `c`), coordinate components (`cx`, `cy`, `cz`), ordered curve points (`p0`, `p1`, `p2`, `p3`). A parameter that carries domain meaning is never covered, however short the name would be.
 
 ## Magic Literals
 - **Every magic numeric or string literal used inline must be moved to an Enum or a class-level constants container, or carry a `# waiver: <reason>` comment on the preceding line.** A "magic literal" is a value that encodes structural or domain meaning (a prefix, a tag, a threshold, a naming convention) but appears as a bare `'...'` or number at the use site. Declare it once — as an `Enum` / `IntEnum` / `StrEnum` member when the value belongs to a finite named set, or as a class attribute on a dedicated constants-container class when it is a singleton value.

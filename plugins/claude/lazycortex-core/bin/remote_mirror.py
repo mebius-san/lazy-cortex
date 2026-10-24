@@ -80,21 +80,38 @@ class _Key:
     REASON: Plan-item field naming the skip reason (`skipped` items only).
   """
 
+  # Request field naming the source repository's git URL.
   URL = "url"
+  # Request field naming the branch to clone/fetch.
   BRANCH = "branch"
+  # Request field naming the caller-owned clone directory.
   CACHE_DIR = "cache_dir"
+  # Request field naming the destination directory.
   DEST = "dest"
+  # Request field naming the include-glob list.
   INCLUDE = "include"
+  # Request field naming the exclude-glob list.
   EXCLUDE = "exclude"
+  # Request field naming the per-file size ceiling.
   MAX_BYTES = "max_bytes"
+  # Request field naming the `plan`/`sync` mode.
   MODE = "mode"
+  # Optional request field; a true value reuses an existing clone without a network round-trip. Ignored when no clone
+  # exists yet.
   SKIP_FETCH = "skip_fetch"
+  # Response field naming the clone's resolved commit SHA.
   FETCHED_SHA = "fetched_sha"
+  # Response field naming the classified plan-item list.
   PLAN = "plan"
+  # Response field naming whether the plan was applied.
   APPLIED = "applied"
+  # Response field naming an error message when the request could not be completed.
   ERROR = "error"
+  # Plan-item field naming the classified file's relative POSIX path.
   PATH = "path"
+  # Plan-item field naming the classification token.
   ACTION = "action"
+  # Plan-item field naming the skip reason (`skipped` items only).
   REASON = "reason"
 
 

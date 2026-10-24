@@ -1,7 +1,7 @@
 ---
 name: lazy-core.autosetup
 description: "Dispatch from a cross-project rollout loop (one agent per project), or directly when ONE repo's lazycortex config must be brought current with no operator in the loop — e.g. after a plugin update changed what install seeds. Receives `repo=<absolute path>` in the prompt, optionally `ignore=<prefix>[,<prefix>]` naming operator work-in-progress the run must leave alone. Executes every applicable `<namespace>.install` SKILL.md against that repo under a no-questions discipline: derivable or already-recorded decisions apply, question-gated steps are skipped and reported. Commits its own writes and nothing else in the target repo, and refuses only when the dirty tree overlaps what the install chain writes. NOT for first-time project setup — a repo with no recorded install decisions mostly reports `needs-interactive`. Sibling `lazy-core.autocheckup` checks and repairs instead of installing."
-tools: Read, Write, Edit, Bash, Skill, Agent
+tools: Read, Write, Edit, Bash, Agent
 model: inherit
 ---
 # lazy-core.autosetup

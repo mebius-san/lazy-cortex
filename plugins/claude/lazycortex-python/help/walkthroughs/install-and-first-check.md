@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Install lazycortex-python, then run chk-py all -q directly to build the project venv and prove the six-step checker gate is clean.
-last_regen: 2026-10-10
+last_regen: 2026-10-24
 diagram_spec:
   anchor: "Install-and-first-check flow"
   request: "Sequence diagram: user runs /lazy-python.install (quiet install wizard, detail out of scope here) → user runs cli/chk-py all -q from a terminal → the shared venv resolver probes $VIRTUAL_ENV, then <project>/.venv, then a configured path, finds none, creates a project-local .venv and installs mypy/pylint/pytest/ruff plus the pytest-clarity/pytest-sugar plugins → the six-step gate runs in order: pcf, toi, cmp, mypy, ruff, pylint, each reporting clean on the still-untouched repo (the guideline-review phase is deliberately NOT part of this run — it has its own cadence) → user runs cli/tst-py -q to confirm the same venv's pytest works → pytest completes with no failures."
@@ -11,8 +11,8 @@ source_skills:
   - chk
   - tst
   - pcf.py
-source_sha: a257e6bb11ec7294d4b279cf1c6fe62aa3c75fec
-surface_sha: a61495f8c3ee3cf9d26326d73cfcb5745284c54aa1d13928be9733e552df0c14
+source_sha: 33e8a296cb2bda2f7c06945ca9d46e24ed4c1858
+surface_sha: be0fb0047ce7b47e9b65c152c3a8ca9b85d904028c406f8f93763f8509560ca9
 ---
 # Bootstrap the plugin in a clean repo and confirm the checker stack is wired up
 

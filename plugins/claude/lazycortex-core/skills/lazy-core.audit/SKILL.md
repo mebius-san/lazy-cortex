@@ -176,7 +176,7 @@ Emit WARN only when the match survives all three gates.
 1. **Frontmatter complete** — `name`, `description`, `tools` all present. Missing any → `[FAIL]`.
 2. **Preamble present** (for multi-phase agents) — same check as skill-writing §1. Agents with `## Phase N` or `## Process` sections must carry the preamble OR a valid `execution-discipline-waiver:` string. Same FAIL/INFO vocabulary.
 3. **No `AskUserQuestion` in agent body** — grep for `AskUserQuestion` outside fenced code/frontmatter. Match → `[FAIL]` (agents have no user channel).
-4. **Tool allowlist hygiene** — `tools: ["*"]` → `[WARN]` (unless a justification comment on the same line). `tools:` present but missing `Agent` → `[WARN]` (`Agent` is a mandatory member per `lazy-core.agent-writing § 5`); never flag its presence.
+4. **Tool allowlist hygiene** — `tools: ["*"]` → `[WARN]` (unless a justification comment on the same line). `tools:` present but missing `Agent` → `[WARN]` (`Agent` is a mandatory member per `lazy-core.agent-writing § 5`); never flag its presence. `tools:` listing `Write` without `Edit` → `[WARN]` (`Write` implies `Edit` per the same section).
 5. **No "Optional" in phase/step headings** — same as skill-writing §2 → `[FAIL]`.
 7. **Narrative padding (heuristic)** — same denylist as skill-writing §3 → `[WARN]`.
 
@@ -657,6 +657,7 @@ Omit the whole subsection when S1–S4 produced no findings.
 - **`AskUserQuestion` in agent body** (FAIL) — one line per match; route: delete the question — an agent has no user channel; return the choice to its caller instead.
 - **`tools: ["*"]` without justification** (WARN) — one line per match; route: enumerate the tools the agent actually uses, or justify the wildcard on the same line.
 - **`tools:` missing `Agent`** (WARN) — one line per agent whose `tools:` list omits it; route: add `Agent` per `lazy-core.agent-writing § 5`.
+- **`tools:` with `Write` but no `Edit`** (WARN) — one line per agent; route: add `Edit` per `lazy-core.agent-writing § 5`.
 - **"Optional" in heading** (FAIL) — one line per match; route: rename the heading, as in the skill-writing case above.
 - **Narrative-padding heuristic** (WARN) — one line per match; route: drop the passage when its removal leaves executable behaviour unchanged.
 

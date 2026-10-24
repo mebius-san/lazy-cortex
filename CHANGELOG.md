@@ -4,6 +4,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 10.6.0 — 2026-10-24 UTC
+
+- `lazy-core.audit` now warns about any agent whose `tools:` list has `Write` but not `Edit`, and the agent-writing rule now requires both together.
+- The shipped `lazy-core.autosetup`, `lazy-log.bullets` and `lazy-runtime.doctor` agents were adjusted to match: `lazy-log.bullets` and `lazy-runtime.doctor` gain `Edit` (and `lazy-runtime.doctor` gains `Write`), while `lazy-core.autosetup` drops `Skill`.
+- The always-loaded git rule now says one logical change per commit, so a diff that mixes a feature and an unrelated fix is split in two. Its wording is also tightened.
+
 ### 10.5.6 — 2026-10-21 UTC
 
 - Settings migration now admits draft and deferred specs into the wiki: a scope still on the old default stage filter (approved and stageless only) is widened to include them, and gains an `index_badges` entry so the topic index shows each document's stage. Customized stage filters and an existing `index_badges` value are left untouched.
@@ -780,6 +786,14 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 9.13.0 — 2026-10-24 UTC
+
+- Every reviewable document that sits outside a review now gets a `Review` row on its asset or level note, in any stage except cancelled and excluding append-only report journals. Ticking the row on an empty or deferred document first moves it to draft, then opens its review. A tick on a document that is still the untouched template launches nothing and the status brief says so. An operator edit alone never opens a review.
+- New `review-rows` verb on the specs CLI computes and rewrites those rows on every coordinator wake. It never removes a block you have ticked, and the coordinators no longer hang or remove the rows by hand.
+- A level whose `vision.md` is still empty now says so in its status brief and tells the operator to write the vision and then tick `Review vision.md`.
+- A ticked `Write` or `Review` row on a level note no longer adds a line to the note's history, matching the asset coordinator.
+- Every member of a constant container in the shipped Python modules now carries a comment naming its purpose.
+
 ### 9.12.3 — 2026-10-21 UTC
 
 - `lazy-spec.install` now seeds the spec-catalog wiki scope to include draft, approved and deferred documents. Rejected documents, empty scaffolds, the request inbox and plan/report working papers stay out. The topics index shows a `[spec_stage: <stage>]` badge beside each entry, so you can tell a draft from an approved document without opening it. The seed only fills in what the scope lacks, so any filter, exclude list or badge list you set yourself is kept on re-runs.
@@ -1535,6 +1549,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+### 6.13.1 — 2026-10-24 UTC
+
+- An autorun that reaches a clean validator barrier before completing any automatic approve no longer stops on you: the document moves on to its terminals or to finalize, exactly as without autorun. This also holds for classes with no validators.
+- After a clean autorun stop, the ready banner now shows a single approve box instead of three, since every gesture would do the same thing there. The cap stop keeps its three boxes.
+
 ### 6.13.0 — 2026-10-21 UTC
 
 - **Breaking:** The "concerns pause" is replaced by autorun. Documents now use `autorun` and `skip-validation` frontmatter keys, and the review coordinator runs its ladder on its own. It stops only at the iteration cap or when it needs to ask you a question. Documents that still carry the old pause keys or a legacy pause banner are cleaned up on re-open.
@@ -1942,6 +1961,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+### 1.9.9 — 2026-10-24 UTC
+
+- The `lazy-experts.reviewer` and `lazy-experts.tester` agents can now edit files in place (`Edit` added beside `Write`), so they patch a report they own instead of rewriting it whole.
+
 ### 1.9.8 — 2026-10-21 UTC
 
 - Research experts now treat a wiki node marked as a draft or deferred document as a neighbour's current intent, not an approved fact. A conflict between the document being written and such a draft is resolved in favour of the approved documents and is no longer raised to the operator as a question.
@@ -2141,6 +2164,14 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 4.12.0 — 2026-10-24 UTC
+
+- The coding canon gets new rules. Compatibility aliases, shims and wrappers need the operator's explicit consent. A module must not export a public name equal to its own name. New public modules are wired into the package `__init__.py` export chain. A rename re-aligns every multi-line call it touches. Sibling members that answer the same question differ by one word. Short parameter names are allowed in math notation. Complex call arguments and effect-call flags are lifted into locals.
+- Comment and docstring rules are tightened. Comments no longer ground a rule in an example from another module. Capitalization follows position. `Domain(…)` group names need at least two dot-separated segments. Package docstrings no longer list their submodules or classes, and the `__init__.py` template matches.
+- Testing guidelines forbid asserting defaults or tuning values. Rule-breaking in tests is allowed only with a `# waiver:` comment and a line-level suppression.
+- The style rule adds a final gate before any commit and at the end of any task. It is a full-project `chk-py all -q` plus a full-suite `tst-py -q`, with the output read unfiltered. The guidelines now name only the project's own `chk-py` / `tst-py` runners and their phases.
+- The `lazy-python.test-writer` agent no longer marks a test that contradicts the implementation as `xfail`. It leaves the test red, names it in the report, and ends with a `Status: done | blocked` line. The `code-reviewer`, `docstring-writer` and `test-writer` agents also gain the tools they need to write their output (`Edit` or `Bash`).
 
 ### 4.11.2 — 2026-10-21 UTC
 
@@ -2407,6 +2438,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 3.6.1 — 2026-10-24 UTC
+
+- Topics-index notes no longer get the purple library icon from the shipped icon registry; the index keeps whatever icon the vault gives it.
+- The domain-groups dictionary template now states that a group name needs at least two dot-separated segments (subject area, then topic), and its sample group is now `simulation.mechanics`.
+- The domain-spec writer agent can now use `Edit` as well as `Write`.
 
 ### 3.6.0 — 2026-10-21 UTC
 

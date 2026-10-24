@@ -27,7 +27,7 @@ After making code changes, **always** verify in this exact order. Every step goe
    bash ./cli/chk-py all <file>.py -q
    ```
    If more than three files in the same module changed, target the module directory instead of one-by-one — `bash ./cli/chk-py all <module-dir>/ -q`.
-2. **Full-project lint + type-check** before declaring done:
+2. **Full-project lint + type-check** after the per-file step is clean:
    ```bash
    bash ./cli/chk-py all -q
    ```
@@ -43,6 +43,12 @@ Do not run tests before lint and type-check are clean — typing errors mask tes
    bash ./cli/chk-py review
    ```
    Unlike steps 1-3, this one does not belong in the edit loop: it runs at the end of a logical piece of work, and is mandatory at the end of a full cycle of planned work. See `## Guideline review phase` below.
+
+5. **Final gate** — before any commit and as the closing step of any task or plan: `chk-py all -q` with no path and `tst-py -q` with no module argument, the whole project and the whole suite. Steps 1–3 are the inner loop and never close the work. Read the full output of both; a filtered view (`head`, `grep`, `tail`) hides failures in code the change reaches indirectly. Green means both exit 0; anything red blocks the commit and is reported with the failing names, never presented as passing or dismissed as pre-existing.
+   ```bash
+   bash ./cli/chk-py all -q
+   bash ./cli/tst-py -q
+   ```
 
 ## Never disable or relax checker rules without explicit approval (MANDATORY)
 
@@ -81,29 +87,30 @@ The source-language rule is checked the same way, and needs the same second half
 ## Ruff
 
 - Fast linter written in Rust; covers most format rules plus a large slice of pylint / pyflakes / isort.
-- Run during local edits and pre-commit; runs in the `all` check sequence before mypy / pylint because it is the fastest.
+- Catches import order, unused names, and the pyflakes / pycodestyle slice of the style canon.
+- Phase `rf` of `chk-py`; it runs in the `all` sequence after `mypy` and before `pylint`. Run the phase alone as `chk-py rf <path> -q`.
 - Configuration lives under `[tool.ruff]` and `[tool.ruff.lint]` in `pyproject.toml`.
-- Common invocation: `ruff check <path>`. Use `ruff check --fix <path>` to auto-apply safe fixes; review the diff before committing.
+- The phase reports findings only; fixes are made by hand in the source.
 
 ## MyPy
 
 - Strict static type checking. Catches type-narrowing mistakes ruff/pylint miss.
 - Configuration in `[tool.mypy]` in `pyproject.toml`.
-- Common invocation: `mypy <path>`. The first run on a cold cache is slow; subsequent runs are fast.
+- Phase `mypy` of `chk-py`, run alone as `chk-py mypy <path> -q`. The first run on a cold cache is slow; subsequent runs are fast.
 - The `protected-access` error code comes from the mypy plugin `cli/mypy/protected_access.py`, which install places next to `chk-py`. It fires on an access to a `_member` from a class outside the owner's hierarchy; dunder and sunder names, the namedtuple API of a namedtuple class, and files on a path listed in `[tool.protected_access] exempt_paths` (by default `**/tests/**/*.py`, every file under a `tests` directory inside the project) are exempt.
 - Suppress it only per line, as `# type: ignore[protected-access]  # <reason>`; the `<reason>` states why the access is legitimate.
 
 ## PyLint
 
 - Deeper analysis than ruff (control-flow inspection, attribute-existence checks, doc / naming rules).
-- Slower than ruff; run after ruff on the same path so trivial style errors are already gone.
+- Slower than ruff; it is the last phase of the `all` sequence, so trivial style errors are already gone when it runs.
 - Configuration in `[tool.pylint]` in `pyproject.toml`.
-- Common invocation: `pylint <package_or_module>` (pylint targets are packages or dotted module paths, not file paths).
+- Phase `pylint` of `chk-py`, run alone as `chk-py pylint <path> -q`.
 
 ## Py-compile
 
-- Fast syntax / bytecode check via `python -m py_compile <files>`.
-- Use when you want to confirm "this parses and compiles" without running the test suite or invoking heavy type-check tools.
+- Fast syntax / bytecode-compile check of every `.py` file under the given paths.
+- Phase `cmp` of `chk-py`, third in the `all` sequence; run alone as `chk-py cmp <path> -q` to confirm "this parses and compiles" without running the test suite or the heavy type-check phases.
 - Does NOT perform type checking, style linting, or import availability validation.
 
 ## Type-only imports (toi)
@@ -134,20 +141,16 @@ from myapp.core import (
 
 ## PyTest
 
-- Run from the project root with the project venv active.
+- Run by `tst-py` from the project root; the runner activates the venv and sources the project environment itself.
 - Configuration in `[tool.pytest.ini_options]` in `pyproject.toml`.
-- Common invocations:
-  - All tests under a module:        `pytest tests/<module>/`
-  - One test file:                   `pytest tests/<module>/test_<file>.py`
-  - One test class:                  `pytest tests/<module>/test_<file>.py::TestClassName`
-  - One test method:                 `pytest tests/<module>/test_<file>.py::TestClassName::test_method`
-  - Keyword filter:                  `pytest -k <expression>`
-  - Verbose / fail-fast:             `pytest -vv -x`
-- Use `pytest --collect-only` to verify test discovery before running anything heavy.
+- Invocations:
+  - All tests under a module:        `tst-py <module> -q` (the `tests/<module>/` directory)
+  - The whole suite:                 `tst-py -q`, or `tst-py all -q`
+- The module is the only filter: `tst-py` takes one module name and no file, class, method, or keyword selector. A module name with no `tests/<module>/` directory is refused, and the refusal lists the modules that exist.
 
 ## Re-export shim de-duplication (automatic)
 
-`tst-py <module>` scopes a run at the directory level (`pytest tests/<module>/`). In repositories that aggregate their suites through **re-export shims** — a `test_all.py` that star-imports every package, plus per-package shim files that re-export a package's own test classes — each test class is then collected **twice**: once through its own shim and once through the aggregator. Double collection doubles the reported test count and can produce false failures when the repeated instances share mutable state between runs.
+`tst-py <module>` scopes a run at the directory level, to `tests/<module>/`. In repositories that aggregate their suites through **re-export shims** — a `test_all.py` that star-imports every package, plus per-package shim files that re-export a package's own test classes — each test class is then collected **twice**: once through its own shim and once through the aggregator. Double collection doubles the reported test count and can produce false failures when the repeated instances share mutable state between runs.
 
 The runner loads a small pytest plugin (`bin/_pytest_dedup.py`, injected via `-p _pytest_dedup`) that removes these duplicates automatically — no setting to enable, nothing in `lazy.settings.json`.
 
@@ -171,7 +174,7 @@ In a repository **without** re-export shims no key ever repeats, so the plugin i
 ## Performance / property-based tests
 
 - Use `hypothesis` for property-based testing when appropriate.
-- Place performance tests under `tests/pf/` and run them on demand with `pytest tests/pf/<path>`.
+- Place performance tests under `tests/pf/` and run them on demand with `tst-py pf -q`.
 
 ## Project environment bootstrap (`python.env_source`)
 

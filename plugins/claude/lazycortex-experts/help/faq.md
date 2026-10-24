@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Common questions about installing lazycortex-experts, the class map, composing specialists, auditing the composition, and the sixteen generic agents' lane boundaries.
-last_regen: 2026-10-09
+last_regen: 2026-10-24
 no_diagram: true
 source_skills:
   - lazy-experts.install
@@ -22,8 +22,8 @@ source_skills:
   - lazy-experts.researcher
   - lazy-experts.editor
   - lazy-experts.fiction-editor
-source_sha: a7a35ec8ab40ff3ca0355187a0cfa62ed6d6e906
-surface_sha: e024544fc5ea12ea98603a4d5ae5048b236a5d6578be4d1b760e7859df7209f2
+source_sha: 33e8a296cb2bda2f7c06945ca9d46e24ed4c1858
+surface_sha: 830a292079eea6b57c08abb6938fc4252dcf20f304a6b228e752a281a2f9abd8
 ---
 # Frequently asked questions
 
@@ -161,13 +161,13 @@ The class map now seeds `<domain>.docs-writer` for every technical class — wri
 
 Both take a document someone else already wrote and bring its prose in line — the editor works on technical documents (shop talk, coined terminology, synonym rotation, filler, evaluative epithets, broken language), the fiction-editor works on literary text (rhythm, filter words, dead metaphor, named emotion where behaviour belongs, point-of-view leaks, and the tics machine prose falls into). Neither ever crosses into the other's domain: the technical prose canon's bans contradict literary craft, and a genre aspect has nothing to say about a plan. They change how a document reads; they never change what it says — no claim is added, dropped, narrowed, or widened, no plot beat or character decision moves, and every correction lands in place under the protocol's edit markers so the author can see exactly what was taken. A defect that can't be fixed without touching meaning — an ambiguous or self-contradictory sentence, a missing paragraph, an unwritten transition — is written up in the report and left standing rather than guessed at.
 
-This is what separates them from the reviewer: the reviewer reads a change and returns ranked findings without editing anything, while the editor and fiction-editor correct in place and report what they could not correct. Neither carries `can_commit_in_repo` — like the interpreter, the reviewer, and the fiction-writer, they deliver their product back through the review payload channel rather than committing it themselves, since the document they work on was handed to them rather than created by them. Both are independently dispatchable directly with a document to edit and a report to journal into, without going through the expert runtime.
+This is what separates them from the reviewer: the reviewer reads a change and returns ranked findings without editing the code or document under review (its only writing is the findings journal, which travels back through the job's `result/`), while the editor and fiction-editor correct in place and report what they could not correct. Neither carries `can_commit_in_repo` — like the interpreter, the reviewer, and the fiction-writer, they deliver their product back through the review payload channel rather than committing it themselves, since the document they work on was handed to them rather than created by them. Both are independently dispatchable directly with a document to edit and a report to journal into, without going through the expert runtime.
 
 ---
 
 ## Do the debugger, reviewer, and tester all fix the problems they find?
 
-No — only the debugger does, and only as the last step of its own investigation. The debugger's four-phase process (investigate, find a working pattern to compare against, form one hypothesis at a time, then fix) ends with it writing a failing test and making the change itself. The reviewer and the tester never fix anything: the reviewer returns ranked, evidence-backed findings and leaves the fix to the implementer; the tester discovers defects, writes bug reports, and minimizes reproductions, but creates no fixes and edits no existing tests. Neither does the docs-writer, the use-case-writer, the ui-designer, or the researcher — each of them writes its own document straight from an approved brief, design, or research design and journals whatever is left unsettled as an open question, rather than fixing the product to match what it wanted to document. The editor and fiction-editor sit apart from both patterns: they do correct defects in place, but only defects of wording — never a defect of content, code, or plot, and never anything the canon doesn't already name (see "What do the editor and fiction-editor do, and how do they differ from the reviewer?" above). If your workflow needs a review's findings or a tester's bug report turned into code, that's a separate dispatch to the implementer or the debugger.
+No — only the debugger does, and only as the last step of its own investigation. The debugger's four-phase process (investigate, find a working pattern to compare against, form one hypothesis at a time, then fix) ends with it writing a failing test and making the change itself. The reviewer and the tester never fix anything. Both can write files, but only their own output: the reviewer returns ranked, evidence-backed findings in its findings journal (delivered through the job's `result/`) and never edits the code it reviews, leaving the fix to the implementer; the tester discovers defects, writes bug reports, and minimizes reproductions, but patches no production code and edits no existing tests — it creates new test artifacts (a fixture, a reproduction script, a harness) only when the request asks for them, on its own job branch beside the tests they serve, and its report goes back through `result/`. Neither does the docs-writer, the use-case-writer, the ui-designer, or the researcher — each of them writes its own document straight from an approved brief, design, or research design and journals whatever is left unsettled as an open question, rather than fixing the product to match what it wanted to document. The editor and fiction-editor sit apart from both patterns: they do correct defects in place, but only defects of wording — never a defect of content, code, or plot, and never anything the canon doesn't already name (see "What do the editor and fiction-editor do, and how do they differ from the reviewer?" above). If your workflow needs a review's findings or a tester's bug report turned into code, that's a separate dispatch to the implementer or the debugger.
 
 ---
 

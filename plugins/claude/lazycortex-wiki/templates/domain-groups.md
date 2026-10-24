@@ -7,10 +7,11 @@ reserved group `unfiled` and reports a candidate — add the real group below an
 block to resolve the checker finding. The reserved `unfiled` group is never listed here.
 
 Format: one `##` heading per group (lowercase, dot-separated hierarchy) and a one-line
-gloss under it.
+gloss under it. A group name carries at least two dot-separated segments — the subject
+area, then the topic inside it.
 
 <!-- Replace the sample group below with your project's groups. -->
 
-## simulation
+## simulation.mechanics
 
 Rules of the simulated world's mechanics: what happens, in what order, under which chances.

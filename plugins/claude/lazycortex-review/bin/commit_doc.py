@@ -53,7 +53,9 @@ class _HistoryWire:
     LINE_FLAG: The flag carrying the line text.
   """
 
+  # The `lazycortex-core` subcommand.
   VERB = "history-append"
+  # The flag carrying the line text.
   LINE_FLAG = "--line"
 
 

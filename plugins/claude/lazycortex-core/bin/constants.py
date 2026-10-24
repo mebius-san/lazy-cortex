@@ -40,12 +40,20 @@ class StateKey:
     LAST_CLEANUP_AT: The wall-clock timestamp of the last housekeeping pass.
   """
 
+  # The optional halt-reason block written when the daemon stops.
   DAEMON_HALTED = "daemon_halted"
+  # The daemon-paused flag key; the pause itself is the `.runtime/daemon.pause` semaphore file.
   DAEMON_PAUSED = "daemon_paused"
+  # The per-`git`-watch baseline-SHA tracking sub-map.
   GIT_WATCH = "git_watch"
+  # The per-routine last-successful-run timestamp sub-map.
   LAST_RUN = "last_run"
+  # The per-watch baseline SHA stored inside a `git_watch` entry.
   LAST_SEEN_SHA = "last_seen_sha"
+  # The per-watch list of items whose `command`-shape worker exited non-zero, stored inside a `git_watch` entry;
+  # retried before fresh items on the next tick.
   FAILED_ITEMS = "failed_items"
+  # The wall-clock timestamp of the last housekeeping pass.
   LAST_CLEANUP_AT = "last_cleanup_at"
 
 
@@ -69,12 +77,20 @@ class JobMarker:
     PID: Holds the OS process id of the pump worker that claimed the job.
   """
 
+  # Atomic activation marker — the bundle is complete and may be spawned.
   READY = "READY"
+  # Producer-side terminal marker — the pump finished processing the job.
   DONE = "DONE"
+  # Marker for a job whose claimant process died before producing output.
   DEAD = "DEAD"
+  # Timestamped marker recording that a claimed job's claimant process appears dead. The dead-scan promotes it to
+  # `DEAD` only once it outlives a grace window with still no `response.json`.
   DEAD_CANDIDATE = "DEAD_CANDIDATE"
+  # Consumer-side marker — whoever read the response is finished with it.
   CONSUMED = "CONSUMED"
+  # Operator-side terminal marker — the job was cancelled; the bundle stays for forensics.
   CANCELLED = "CANCELLED"
+  # Holds the OS process id of the pump worker that claimed the job.
   PID = "PID"
 
 
@@ -89,8 +105,11 @@ class JobFile:
     CONFIG: The per-job config snapshot the pump reads at spawn time.
   """
 
+  # The JSON request payload the expert reads.
   REQUEST = "request.json"
+  # The JSON outcome the expert writes.
   RESPONSE = "response.json"
+  # The per-job config snapshot the pump reads at spawn time.
   CONFIG = "config.json"
 
 
@@ -106,9 +125,13 @@ class PluginFile:
     VERSION: The version key inside the manifest payload.
   """
 
+  # The plugin manifest filename.
   MANIFEST = "plugin.json"
+  # The directory that holds the plugin manifest.
   MANIFEST_DIR = ".claude-plugin"
+  # The plugin-scope key inside the manifest payload.
   NAME = "name"
+  # The version key inside the manifest payload.
   VERSION = "version"
 
 
@@ -123,8 +146,11 @@ class RepoDir:
     TAGS: The memory tag-index subdirectory.
   """
 
+  # The root of the per-repo expert work tree.
   EXPERTS = ".experts"
+  # The job-queue subdirectory under the expert root.
   JOBS = ".jobs"
+  # The memory tag-index subdirectory.
   TAGS = ".tags"
 
 
@@ -151,18 +177,32 @@ class RoutineKey:
     GIT_AUTHOR: The git identity block for any commits the routine's own subprocess makes.
   """
 
+  # The routine's registered name.
   NAME = "name"
+  # The routine type discriminator (`subprocess`, `git`, `md-scan`, ...).
   TYPE = "type"
+  # The subprocess command vector for the `command` dispatch shape.
   COMMAND = "command"
+  # The expert name for the `expert + request` dispatch shape.
   EXPERT = "expert"
+  # The minimum seconds between interval-based ticks.
   INTERVAL_SEC = "interval_sec"
+  # The per-tick subprocess timeout in seconds.
   TIMEOUT_SEC = "timeout_sec"
+  # The ascending per-tick execution-order key.
   PRIORITY = "priority"
+  # The list of protocol identifiers declared by the routine.
   PROTOCOLS = "protocols"
+  # The watched branch for a `git` routine.
   BRANCH = "branch"
+  # The flag letting a routine tick even while the daemon is halted.
   IGNORE_HALT = "ignore_halt"
+  # The repo-relative directory an inbox routine scans.
   INBOX_DIR = "inbox_dir"
+  # The allow-list of lazycortex hook short names the routine's own subprocess may run. Inert on the `expert`
+  # dispatch shape, whose session is spawned by the pump routine and therefore carries the pump's list.
   HOOKS_ENABLED = "hooks_enabled"
+  # The git identity block for any commits the routine's own subprocess makes.
   GIT_AUTHOR = "git_author"
 
 
@@ -191,22 +231,39 @@ class DaemonKey:
     RATE_LIMIT_GUARD: The subscription-rate-limit guard sub-configuration block.
   """
 
+  # The metrics sub-configuration block.
   METRICS = "metrics"
+  # The on/off flag inside a sub-block.
   ENABLED = "enabled"
+  # The daemon-identifier label for metrics.
   DAEMON_NAME = "daemon_name"
+  # The metrics endpoint bind address.
   BIND = "bind"
+  # The metrics endpoint TCP port.
   PORT = "port"
+  # The override for the `repo` metric label.
   REPO_LABEL = "repo_label"
+  # The repeated-identical-tick halt threshold.
   LOOP_DETECT_THRESHOLD = "loop_detect_threshold"
+  # The error-ledger sub-configuration block.
   ERRORS = "errors"
+  # The journal-retention window in days.
   RETENTION_DAYS = "retention_days"
+  # The git-integration sub-configuration block.
   GIT = "git"
+  # The runtime-log retention window.
   CLEANUP_RUNTIME_LOG_AFTER = "cleanup_runtime_log_after"
+  # The main-loop polling cadence in seconds.
   POLLING_INTERVAL_SEC = "polling_interval_sec"
+  # The hostname-to-checkout-path mapping deciding whether the daemon starts in this working copy.
   RUN_HERE = "run_here"
+  # The subscription-rate-limit guard sub-configuration block.
   RATE_LIMIT_GUARD = "rate_limit_guard"
+  # Seconds of expert-spawn stdout silence before the watchdog re-spawns it.
   STREAM_IDLE_TIMEOUT_SEC = "stream_idle_timeout_sec"
+  # Transient-error budget per job bundle before the pump closes it.
   TRANSIENT_MAX_RETRIES = "transient_max_retries"
+  # The name of the environment variable holding this daemon's OAuth token.
   TOKEN_ENV = "token_env"
 
 
@@ -224,10 +281,16 @@ class RateLimitGuardKey:
       the guard; a warning below it — or one carrying no utilization reading — never does.
   """
 
+  # The master on/off switch for the guard.
   ENABLED = "enabled"
+  # Whether a pre-exhaustion warning frame trips the guard.
   ON_ALLOWED_WARNING = "on_allowed_warning"
+  # Whether an already-closed window trips the guard.
   ON_REJECTED = "on_rejected"
+  # Whether spend having crossed into paid overage trips the guard.
   ON_OVERAGE = "on_overage"
+  # Window utilization at or above which a warning frame trips the guard; a warning below it — or one carrying no
+  # utilization reading — never does.
   WARNING_UTILIZATION_THRESHOLD = "warning_utilization_threshold"
 
 
@@ -254,8 +317,11 @@ class RateLimitTrigger:
   # continuing past the window as paid overage — has no matching provider status; it is inferred
   # instead from a separate overage indicator carried on the same signal.
 
+  # The provider signalled the window is close to exhaustion.
   ALLOWED_WARNING = "allowed_warning"
+  # The provider refused the call because the window is closed.
   REJECTED = "rejected"
+  # The window was passed and spend continues as paid overage.
   OVERAGE = "overage"
 
 
@@ -274,12 +340,19 @@ class RateLimitRecordKey:
     ACCOUNT: The identity of the account whose window the record describes.
   """
 
+  # The epoch-second timestamp at which this window reopens.
   RESETS_AT = "resets_at"
+  # The provider status token carried by the frame that raised the record.
   STATUS = "status"
+  # Whether the frame reported spend already running as paid overage.
   IS_USING_OVERAGE = "is_using_overage"
+  # The closed-set trigger token that raised the record.
   TRIGGER = "trigger"
+  # The label of the process that wrote the record.
   WRITER = "writer"
+  # The epoch-second timestamp at which the record was written.
   WRITTEN_AT = "written_at"
+  # The identity of the account whose window the record describes.
   ACCOUNT = "account"
 
 
@@ -294,7 +367,9 @@ class MetricsNet:
     SCRAPE_TARGETS_REL: The scrape-targets file location relative to the XDG config home.
   """
 
+  # The first port considered when allocating a metrics port for a daemon.
   PORT_BASE = 9464
+  # The last port considered; the allocation range is `PORT_BASE..PORT_CEIL` inclusive.
   PORT_CEIL = 9563
   # waiver: filesystem path idiom relative to XDG config home, not an internal key
   SCRAPE_TARGETS_REL = "lazycortex/scrape-targets.json"
@@ -315,12 +390,19 @@ class GitConfigKey:
     ALLOWED_HOOKS: The operator git-hook filenames allowed to run under the daemon.
   """
 
+  # The integration base branch.
   BASE_BRANCH = "base_branch"
+  # The directory isolated job worktrees are created under.
   WORKTREE_ROOT = "worktree_root"
+  # The shell command run in a fresh job worktree before the spawn.
   WORKTREE_BOOTSTRAP_CMD = "worktree_bootstrap_cmd"
+  # The remote-sync mode (`pull`, `pull_push`, or off).
   REMOTE_SYNC = "remote_sync"
+  # The operator shell command run after each push that advances origin.
   POST_PUSH_HOOK = "post_push_hook"
+  # The wall-clock cap on the post-push hook process, in seconds.
   POST_PUSH_TIMEOUT_SEC = "post_push_timeout_sec"
+  # The operator git-hook filenames allowed to run under the daemon.
   ALLOWED_HOOKS = "allowed_hooks"
 
 
@@ -349,19 +431,34 @@ class JobConfigKey:
     PROVIDER: The resolved provider block for the spawn, or unset for Anthropic.
   """
 
+  # The agent dispatch reference the pump spawns.
   AGENT = "agent"
+  # The resolved protocol references for the spawn.
   PROTOCOLS = "protocols"
+  # The resolved aspect references for the spawn.
   ASPECTS = "aspects"
+  # The routine-supplied keyword arguments for the expert.
   ARGUMENTS = "arguments"
+  # The git identity block for any commits the expert makes.
   GIT_AUTHOR = "git_author"
+  # The model tier pin, or unset to inherit the CLI default.
   MODEL = "model"
+  # Whether the expert may write and commit inside the repo it runs in.
   CAN_COMMIT_IN_REPO = "can_commit_in_repo"
+  # Whether the pump still serves this job while the system is halted or dirty; written only by a dispatcher whose
+  # job is the triage of that very condition.
   HALT_EXEMPT = "halt_exempt"
+  # Explicit MCP-config path(s) the spawn loads under strict mode, or unset for none.
   MCP_CONFIG = "mcp_config"
+  # Setting scopes the spawn loads (`user`/`project`/`local`), or unset for the hermetic default.
   SETTING_SOURCES = "setting_sources"
+  # The workspace mode (`main`/`branch`) the pump enforces before and after the spawn.
   WORKSPACE = "workspace"
+  # The `source_paths` key — repo-relative paths the pump copies into `source/` when it claims the job.
   SOURCE_PATHS = "source_paths"
+  # The `context_paths` key — repo-relative paths the pump copies into `context/` when it claims the job.
   CONTEXT_PATHS = "context_paths"
+  # The resolved provider block for the spawn, or unset for Anthropic.
   PROVIDER = "provider"
 
 
@@ -377,7 +474,9 @@ class WorkspaceMode:
       the base branch afterward.
   """
 
+  # The expert's spawn runs on the daemon's base branch — today's behavior, and the default when the key is absent.
   MAIN = "main"
+  # The pump creates or reuses a job-scoped branch before the spawn and restores the base branch afterward.
   BRANCH = "branch"
 
 
@@ -399,15 +498,25 @@ class SettingsKey:
     SANDBOX: The expert-spawn sandbox declaration section name, in Claude Code's own `sandbox` shape.
   """
 
+  # The per-section schema-version sentinel key.
   VERSION = "_version"
+  # The daemon configuration section name.
   DAEMON = "daemon"
+  # The routine registry section name.
   ROUTINES = "routines"
+  # The expert registry section name.
   EXPERTS = "experts"
+  # The agent-model-tier registry section name.
   AGENT_MODELS = "agent_models"
+  # The lifecycle-hook enablement section name.
   HOOKS = "hooks"
+  # The pre-split root-level version key migrations fold away.
   LEGACY_VERSION = "version"
+  # The provider configuration section name.
   PROVIDERS = "providers"
+  # The externally-sourced working-directory declaration section name.
   EXTERNAL_DIRS = "external_dirs"
+  # The expert-spawn sandbox declaration section name, in Claude Code's own `sandbox` shape.
   SANDBOX = "sandbox"
 
 
@@ -423,9 +532,13 @@ class MemoryFrontmatterKey:
     SUMMARY: The one-line note summary.
   """
 
+  # The note's human-facing title.
   TITLE = "title"
+  # The list of `memory/`-prefixed topic tags.
   TAGS = "tags"
+  # The note's closed-set kind discriminator.
   TYPE = "type"
+  # The one-line note summary.
   SUMMARY = "summary"
 
 
@@ -450,17 +563,29 @@ class IncidentKey:
     STATE: The folded incident state carried on a listing entry.
   """
 
+  # The stable incident-folding key.
   INCIDENT = "incident"
+  # The closed-set event kind.
   KIND = "kind"
+  # The closed-set cause string.
   CAUSE = "cause"
+  # The event severity.
   SEVERITY = "severity"
+  # The owning expert name, when the incident is job-scoped.
   EXPERT = "expert"
+  # The owning routine name, when the incident is routine-scoped.
   ROUTINE = "routine"
+  # The lifecycle phase the event records — an incident opening or a later triage.
   PHASE = "phase"
+  # The component that recorded the event.
   ACTOR = "actor"
+  # The owning job identifier, when the incident is job-scoped.
   JOB_ID = "job_id"
+  # The one-line human-readable description.
   DETAIL = "detail"
+  # The map of artifact paths an operator needs to inspect the incident.
   REFS = "refs"
+  # The folded incident state carried on a listing entry.
   STATE = "state"
 
 
@@ -476,9 +601,13 @@ class HookKey:
     CWD: The working directory the hook payload reports.
   """
 
+  # The tool identifier the hook fired for.
   TOOL_NAME = "tool_name"
+  # The tool's input payload.
   TOOL_INPUT = "tool_input"
+  # The lifecycle event name (`PreToolUse`, `Stop`, ...).
   HOOK_EVENT_NAME = "hook_event_name"
+  # The working directory the hook payload reports.
   CWD = "cwd"
 
 
@@ -506,14 +635,27 @@ class EnvVar:
       digest of that token, never the token.
   """
 
+  # The comma-separated allow-list of hook short names that may run. Its presence (even empty) puts every lazycortex
+  # hook into allow-list mode — only the named hooks run; the daemon sets it from the dispatching routine's
+  # `hooks_enabled`, and every process that routine spawns — expert sessions included — inherits it.
   HOOKS_ALLOW_LIST = "LAZYCORTEX_HOOKS_ALLOW_LIST"
+  # The `claude` CLI's own subagent-nesting-depth variable name.
   MAX_SUBAGENT_SPAWN_DEPTH = "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"
+  # The value this runtime always sets it to — see the `Decision:` comment at `expert_pump.py`'s own env-construction
+  # site for why.
   SUBAGENT_SPAWN_DEPTH_PIN = "3"
+  # git's own variable naming how many config slots the environment carries.
   GIT_CONFIG_COUNT = "GIT_CONFIG_COUNT"
+  # Prefix of a slot's config-key variable; the slot index completes the name.
   GIT_CONFIG_KEY = "GIT_CONFIG_KEY_"
+  # Prefix of a slot's config-value variable; the slot index completes it.
   GIT_CONFIG_VALUE = "GIT_CONFIG_VALUE_"
+  # Common prefix of every variable in git's environment-config protocol, numbered slots and config-file handles
+  # alike.
   GIT_CONFIG_PREFIX = "GIT_CONFIG_"
+  # The git config key naming the directory hooks are read from.
   GIT_HOOKS_PATH = "core.hooksPath"
+  # The marker the daemon exports beside a token it sourced itself — a SHA-256 digest of that token, never the token.
   DAEMON_TOKEN_MARK = "LAZYCORTEX_DAEMON_TOKEN_SHA256"
 
 
@@ -535,11 +677,17 @@ class HookName:
     COMMIT_RECORDER: The commit-log recorder hook.
   """
 
+  # The staging-mutex / dirty-index guard hook.
   GIT_GUARD = "lazy-core.git-guard"
+  # The subagent model-tier routing hook.
   MODEL_ROUTER = "lazy-core.model-router"
+  # The public-repo PII / infrastructure scan hook.
   CHECK_PUBLIC = "lazy-guard.check-public"
+  # The always-on secret scan hook.
   SECRETS_GUARD = "lazy-guard.secrets"
+  # The settings-file edit guard hook.
   SETTINGS_GUARD = "lazy-guard.settings"
+  # The commit-log recorder hook.
   COMMIT_RECORDER = "lazy-log.commit-recorder"
 
 
@@ -552,6 +700,7 @@ class HooksKey:
     DISABLED: Root-section block-list — hook short names silenced in interactive sessions.
   """
 
+  # Root-section block-list — hook short names silenced in interactive sessions.
   DISABLED = "disabled"
 
 
@@ -564,6 +713,7 @@ class ToolName:
     AGENT: The subagent-dispatch tool.
   """
 
+  # The subagent-dispatch tool.
   AGENT = "Agent"
 
 
@@ -577,7 +727,9 @@ class AgentToolInput:
     SUBAGENT_TYPE: The dispatched subagent's registered name.
   """
 
+  # The model-tier field the router pins on a subagent spawn.
   MODEL = "model"
+  # The dispatched subagent's registered name.
   SUBAGENT_TYPE = "subagent_type"
 
 
@@ -591,7 +743,9 @@ class IncidentPhase:
     TRIAGED: The phase of a triage event that classifies an open incident.
   """
 
+  # The phase of the first event that opens an incident.
   OPENED = "opened"
+  # The phase of a triage event that classifies an open incident.
   TRIAGED = "triaged"
 
 
@@ -612,13 +766,22 @@ class IncidentKind:
       for a condition neither a job nor a routine result can express.
   """
 
+  # A job whose claimant process died before producing output.
   JOB_DEAD = "job_dead"
+  # A job that completed with an error outcome.
   JOB_ERROR = "job_error"
+  # A routine tick that failed.
   ROUTINE_ERROR = "routine_error"
+  # A daemon-wide halt block.
   DAEMON_HALT = "daemon_halt"
+  # An unexpected daemon-loop exception.
   DAEMON_ERROR = "daemon_error"
+  # A worktree-task lifecycle failure.
   WORKTREE_TASK_ERROR = "worktree_task_error"
+  # A dispatch whose model resolved to nothing and fell back to the CLI default.
   UNPINNED_MODEL = "unpinned_model"
+  # An in-band failure a sibling plugin reported through the error-record CLI, for a condition neither a job nor a
+  # routine result can express.
   PLUGIN_ERROR = "plugin_error"
 
 
@@ -635,10 +798,15 @@ class IncidentActor:
     DISPATCHER: The job-dispatch primitive in the expert runtime.
   """
 
+  # The runtime daemon loop itself.
   DAEMON = "daemon"
+  # The expert-job pump.
   PUMP = "pump"
+  # The recovery doctor primitives.
   DOCTOR = "doctor"
+  # The halt-recovery primitives.
   RECOVER = "recover"
+  # The job-dispatch primitive in the expert runtime.
   DISPATCHER = "dispatcher"
 
 
@@ -652,7 +820,9 @@ class IncidentResolution:
     REVERTED: The halt was cleared by reverting the dirty paths to HEAD.
   """
 
+  # The halt was cleared by resuming the daemon on a clean tree.
   RESUMED = "resumed"
+  # The halt was cleared by reverting the dirty paths to HEAD.
   REVERTED = "reverted"
 
 
@@ -669,10 +839,15 @@ class RecoverMode:
     MANUAL_FIX: A no-op shape signalling the operator will fix the tree by hand.
   """
 
+  # Stage and commit the dirty tree with an operator-supplied message.
   COMMIT = "commit"
+  # Push the dirty tree (including untracked) onto the stash.
   STASH = "stash"
+  # Revert tracked changes and remove untracked files.
   DISCARD = "discard"
+  # A no-op shape that leaves the tree untouched.
   ABORT = "abort"
+  # A no-op shape signalling the operator will fix the tree by hand.
   MANUAL_FIX = "manual-fix"
 
 
@@ -687,8 +862,11 @@ class IncidentState:
     ALL: The wildcard selector matching every state.
   """
 
+  # An incident with no terminal resolution yet.
   OPEN = "open"
+  # An incident escalated for manual operator action.
   NEEDS_OPERATOR = "needs_operator"
+  # The wildcard selector matching every state.
   ALL = "all"
 
 
@@ -705,10 +883,15 @@ class HaltKey:
     RESETS_AT: The epoch-second timestamp a rate-limit halt lifts itself at.
   """
 
+  # The wall-clock timestamp at which the halt was raised.
   HALTED_SINCE = "halted_since"
+  # The routine or subsystem name that triggered the halt.
   TRIGGERED_BY = "triggered_by"
+  # The closed-set halt-reason code.
   REASON = "reason"
+  # The repository-relative paths reported dirty at halt time.
   DIRTY_PATHS = "dirty_paths"
+  # The epoch-second timestamp a rate-limit halt lifts itself at.
   RESETS_AT = "resets_at"
 
 
@@ -729,14 +912,23 @@ class HaltReason:
     RATE_LIMIT: The subscription rate-limit window is closed; spawns pause until it reopens.
   """
 
+  # An expert or routine left the working tree dirty.
   UNCOMMITTED_CHANGES = "uncommitted_changes"
+  # The loop detector tripped on repeated identical ticks.
   SUSPECTED_LOOP = "suspected_loop"
+  # A pre-tick pull found diverged history.
   GIT_PULL_DIVERGED = "git_pull_diverged"
+  # A post-tick push could not complete.
   GIT_PUSH_FAILED = "git_push_failed"
+  # The git remote could not be reached.
   GIT_REMOTE_UNAVAILABLE = "git_remote_unavailable"
+  # A local git sync command failed with no remote involved.
   GIT_LOCAL_FAILED = "git_local_failed"
+  # Another checkout on this host drives the same physical inbox.
   INBOX_COLLISION = "inbox_collision"
+  # A registry entry does not conform to its type schema.
   ROUTINE_CONFIG_INVALID = "routine_config_invalid"
+  # The subscription rate-limit window is closed; spawns pause until it reopens.
   RATE_LIMIT = "rate_limit"
 
 
@@ -749,6 +941,7 @@ class SettingsFile:
     REL: The repo-relative location of `lazy.settings.json`.
   """
 
+  # The repo-relative location of `lazy.settings.json`.
   REL = ".claude/lazy.settings.json"
 
 
@@ -763,8 +956,11 @@ class ClaudeSettingsFile:
     USER: The home-relative operator settings file (`user` scope), `~` unexpanded.
   """
 
+  # The repo-relative tracked project settings file (`project` scope).
   PROJECT = ".claude/settings.json"
+  # The repo-relative gitignored local overlay (`local` scope).
   LOCAL = ".claude/settings.local.json"
+  # The home-relative operator settings file (`user` scope), `~` unexpanded.
   USER = "~/.claude/settings.json"
 
 
@@ -778,7 +974,9 @@ class ClaudeSettingsKey:
     ADDITIONAL_DIRECTORIES: The list of extra working directories inside the permissions block.
   """
 
+  # The top-level permissions block.
   PERMISSIONS = "permissions"
+  # The list of extra working directories inside the permissions block.
   ADDITIONAL_DIRECTORIES = "additionalDirectories"
 
 
@@ -793,8 +991,11 @@ class RuntimeFile:
     CONSUMED_UNPUSHED: The ledger of jobs consumed since the last publish, one `expert/job_id` per line.
   """
 
+  # The Claude Code settings file that confines expert spawns to the sandbox scope.
   SANDBOX_SETTINGS = ".runtime/sandbox.settings.json"
+  # The operator's local pause semaphore — while present, the daemon skips all work.
   PAUSE = ".runtime/daemon.pause"
+  # The ledger of jobs consumed since the last publish, one `expert/job_id` per line.
   CONSUMED_UNPUSHED = ".runtime/consumed-unpushed.log"
 
 
@@ -812,11 +1013,17 @@ class SandboxKey:
     ALLOW_WRITE: The allowlist of paths a confined spawn may write.
   """
 
+  # The top-level block that confines an expert spawn.
   SANDBOX = "sandbox"
+  # The switch that turns the confinement on.
   ENABLED = "enabled"
+  # The switch that lets a blocked command be retried outside the confinement.
   ALLOW_UNSANDBOXED = "allowUnsandboxedCommands"
+  # The block holding the path allowlists.
   FILESYSTEM = "filesystem"
+  # The allowlist of paths a confined spawn may read.
   ALLOW_READ = "allowRead"
+  # The allowlist of paths a confined spawn may write.
   ALLOW_WRITE = "allowWrite"
 
 
@@ -840,16 +1047,28 @@ class SandboxSyncKey:
     CHANGED: Whether the sync rewrote the file.
   """
 
+  # Absolute location of the sandbox settings file the result describes.
   PATH = "path"
+  # Whether that file existed before the call.
   PRESENT = "present"
+  # The confinement switch as recorded in the file, or null when unrecorded.
   ENABLED = "enabled"
+  # The unsandboxed-retry switch as recorded in the file, or null when unrecorded.
   ALLOW_UNSANDBOXED = "allow_unsandboxed"
+  # Read-allowlist entries the sync appended.
   ADDED_READ = "added_read"
+  # Write-allowlist entries the sync appended.
   ADDED_WRITE = "added_write"
+  # Read-allowlist entries the sync pruned as dead plugin-cache versions.
   REMOVED_READ = "removed_read"
+  # Resolved read targets no recorded entry covers.
   MISSING_READ = "missing_read"
+  # Resolved write targets no recorded entry covers.
   MISSING_WRITE = "missing_write"
+  # Dotted sandbox keys on which the settings' declaration and the file disagree; an undeclared switch and a recorded
+  # path allowlist entry are never drift.
   DRIFT = "drift"
+  # Whether the sync rewrote the file.
   CHANGED = "changed"
 
 
@@ -871,12 +1090,21 @@ class JobArtifact:
       saw a given commit compares against this, never against the claim's wall-clock time.
   """
 
+  # The forensic payload describing a job marked dead.
   DEAD_JSON = "dead.json"
+  # The doctor's diagnosis written when a job is permanently failed.
   DIAGNOSIS_JSON = "diagnosis.json"
+  # The cumulative attempt-counter file.
   ATTEMPTS = "attempts"
+  # The transient-error counter file the retry budget is judged against.
   TRANSIENT_ERRORS = "transient_errors"
+  # The captured stream-json transcript of the expert spawn.
   TRANSCRIPT = "transcript.jsonl"
+  # The per-attempt rejection payload fed back into the next attempt's prompt.
   ERROR_JSON = "error.json"
+  # The commit the work tree stood at when the pump claimed the job — the tree its `source/` / `context/` were copied
+  # from. A consumer deciding whether the job already saw a given commit compares against this, never against the
+  # claim's wall-clock time.
   CLAIM_HEAD = "claim_head"
 
 
@@ -891,8 +1119,11 @@ class JobIODir:
     RESULT: The directory the expert writes its output files into.
   """
 
+  # The read-only input files the expert consumes.
   SOURCE = "source"
+  # The optional supplementary context files.
   CONTEXT = "context"
+  # The directory the expert writes its output files into.
   RESULT = "result"
 
 
@@ -909,8 +1140,13 @@ class JobRequestKey:
       continuation lands on the same branch instead of a fresh one.
   """
 
+  # The optional dedup marker that suppresses duplicate dispatches.
   DEDUP_KEY = "_dedup_key"
+  # The optional identity token of the artifact behind the dedup key at dispatch time.
   DEDUP_FINGERPRINT = "_dedup_fingerprint"
+  # The job-scoped branch name a `workspace: branch` expert's spawn runs on; a caller dispatching a continuation job
+  # passes back the value read off the original dispatch so the continuation lands on the same branch instead of a
+  # fresh one.
   BRANCH = "branch"
 
 
@@ -926,9 +1162,13 @@ class JobResponseKey:
     MESSAGE: The human-readable error message inside the error sub-object.
   """
 
+  # The terminal outcome discriminator the expert writes.
   OUTCOME = "outcome"
+  # The error sub-object present when the outcome is an error.
   ERROR = "error"
+  # The error category label inside the error sub-object.
   CATEGORY = "category"
+  # The human-readable error message inside the error sub-object.
   MESSAGE = "message"
 
 
@@ -943,8 +1183,11 @@ class JobErrorCategory:
     UNCOMMITTED_CHANGES: A clean exit that left the working tree dirty.
   """
 
+  # A config-level fault the pump can attribute deterministically.
   LOGICAL = "logical"
+  # A spawn-level fault that may succeed on a later retry.
   TRANSIENT = "transient"
+  # A clean exit that left the working tree dirty.
   UNCOMMITTED_CHANGES = "uncommitted_changes"
 
 
@@ -968,7 +1211,10 @@ class JobOutcome:
   # completion must recognise deferred as a distinct case that keeps the input live for a later
   # attempt.
 
+  # The outcome value marking a job that failed.
   ERROR = "error"
+  # The outcome value marking work the expert deliberately left undone with its input untouched, so a consumer must
+  # neither drain the input nor treat it as failed.
   DEFERRED = "deferred"
 
 
@@ -985,10 +1231,15 @@ class JobLogOutcome:
     ERROR: The attempt failed transiently or logically; the job stays queued for retry.
   """
 
+  # The attempt finished the job without an error outcome.
   DONE = "done"
+  # The attempt finished the job with an error outcome.
   FAILED = "failed"
+  # The attempt deliberately left the work undone with its input untouched.
   DEFERRED = "deferred"
+  # The job was marked dead by the dead-job detector.
   DEAD = "dead"
+  # The attempt failed transiently or logically; the job stays queued for retry.
   ERROR = "error"
 
 
@@ -1009,14 +1260,23 @@ class JobCollectKey:
     AGE_SEC: Seconds elapsed since the entry's bundle finished.
   """
 
+  # The job's classified lifecycle status.
   STATUS = "status"
+  # The parsed `response.json` payload carried on a finished job.
   RESPONSE = "response"
+  # The owning expert name.
   EXPERT = "expert"
+  # The job identifier within the expert's queue.
   JOB_ID = "job_id"
+  # The dedup fingerprint carried on a reconcilable finished-job entry.
   DEDUP_FINGERPRINT = "dedup_fingerprint"
+  # The absolute job-directory path.
   PATH = "path"
+  # The dedup key carried on a reconcilable finished-job entry.
   DEDUP_KEY = "dedup_key"
+  # The error category of a failed finished-job entry, absent on a success.
   CATEGORY = "category"
+  # Seconds elapsed since the entry's bundle finished.
   AGE_SEC = "age_sec"
 
 
@@ -1038,15 +1298,25 @@ class JobStatus:
     ALREADY_QUEUED: Dispatch result token — a live bundle already owns the dedup key.
   """
 
+  # The bundle directory does not exist.
   MISSING = "missing"
+  # The pump has not produced a terminal marker yet.
   PENDING = "pending"
+  # The bundle is READY but not yet claimed (no PID).
   QUEUED = "queued"
+  # The bundle is READY and claimed (PID present).
   ACTIVE = "active"
+  # The bundle finished without an error outcome.
   DONE = "done"
+  # The bundle finished with an error outcome.
   FAILED = "failed"
+  # The bundle finished with the reserved deferred outcome — work postponed, input untouched.
   DEFERRED = "deferred"
+  # The bundle carries a DEAD marker.
   DEAD = "dead"
+  # The bundle carries a CANCELLED marker — cancelled by the operator.
   CANCELLED = "cancelled"
+  # Dispatch result token — a live bundle already owns the dedup key.
   ALREADY_QUEUED = "already-queued"
 
 
@@ -1065,11 +1335,17 @@ class TickResultKey:
       routine type does not report one.
   """
 
+  # The routine name the tick ran for.
   NAME = "name"
+  # The tick exit code (`0` success, non-zero failure).
   EXIT = "exit"
+  # The wall-clock duration of the tick in seconds.
   DURATION_SEC = "duration_sec"
+  # An optional non-error status note.
   NOTE = "note"
+  # The failure message present when the tick failed.
   ERROR = "error"
+  # The number of items the tick actually dispatched; absent when the routine type does not report one.
   DISPATCHED_COUNT = "dispatched_count"
 
 
@@ -1107,31 +1383,57 @@ class MetricStateKey:
     SERVER_THREAD: The server's background thread.
   """
 
+  # Whether `init` has run.
   INITIALIZED = "initialized"
+  # The repo label captured at init.
   REPO = "repo"
+  # The plugin version captured at init.
   VERSION = "version"
+  # The daemon identifier captured at init.
   DAEMON_NAME = "daemon_name"
+  # The threading lock guarding metric mutations.
   LOCK = "lock"
+  # The routine-tick counter instrument.
   TICKS = "ticks"
+  # The non-idle-run counter instrument.
   RUNS = "runs"
+  # The routine-error counter instrument.
   ERRORS = "errors"
+  # The token-consumption counter instrument.
   TOKENS = "tokens"
+  # The tick-duration histogram instrument.
   DURATION = "duration"
+  # The last-tick-timestamp gauge instrument.
   LAST_TICK = "last_tick"
+  # The expert-queue-depth gauge instrument.
   QUEUE_DEPTH = "queue_depth"
+  # The endpoint-up gauge instrument.
   UP = "up"
+  # The daemon-halted gauge instrument.
   DAEMON_HALTED = "daemon_halted"
+  # The operator-pause gauge instrument.
   DAEMON_PAUSED = "daemon_paused"
+  # The build-info gauge instrument.
   BUILD_INFO = "build_info"
+  # The cumulative-halt counter instrument.
   HALT_COUNT = "halt_count"
+  # The dirty-working-tree silent-skip gauge instrument.
   DIRTY_TREE = "dirty_tree"
+  # The expert-job-attempt counter instrument.
   EXPERT_JOBS = "expert_jobs"
+  # The expert-job-attempt duration histogram instrument.
   EXPERT_JOB_DURATION = "expert_job_duration"
+  # The error-ledger incident counter instrument.
   INCIDENTS = "incidents"
+  # The byte offset into the token log read so far.
   TOKEN_OFFSET = "token_offset"
+  # The byte offset into the job log read so far.
   JOBS_OFFSET = "jobs_offset"
+  # The byte offset into the error-ledger journal read so far.
   INCIDENTS_OFFSET = "incidents_offset"
+  # The WSGI server object.
   SERVER = "server"
+  # The server's background thread.
   SERVER_THREAD = "server_thread"
 
 
@@ -1157,16 +1459,27 @@ class MetricLabel:
     DAEMON_NAME: The daemon-identifier label.
   """
 
+  # The repository label.
   REPO = "repo"
+  # The routine-name label.
   ROUTINE = "routine"
+  # The tick-status label.
   STATUS = "status"
+  # The error-reason label.
   REASON = "reason"
+  # The expert-name label.
   EXPERT = "expert"
+  # The job-attempt outcome label.
   OUTCOME = "outcome"
+  # The model-tier label.
   MODEL = "model"
+  # The token-kind label, reused for the incident-kind label.
   KIND = "kind"
+  # The incident-cause label.
   CAUSE = "cause"
+  # The plugin-version label.
   VERSION = "version"
+  # The daemon-identifier label.
   DAEMON_NAME = "daemon_name"
 
 
@@ -1181,8 +1494,11 @@ class ExternalDirsKey:
     DECLINED: The local-overlay flag recording that the operator declined to configure a source.
   """
 
+  # The tracked list of repo-relative paths that live outside the repository.
   PATHS = "paths"
+  # The local-overlay absolute path the declared paths point at.
   ROOT = "root"
+  # The local-overlay flag recording that the operator declined to configure a source.
   DECLINED = "declined"
 
 
@@ -1201,12 +1517,19 @@ class ExternalDirStatus:
     UNCONFIGURED: Paths declared while no source root is on record for this checkout.
   """
 
+  # A symlink pointing at the declared source, whose source exists.
   OK = "ok"
+  # Nothing in the declared slot while the source is available.
   MISSING = "missing"
+  # A symlink whose target does not exist.
   DANGLING = "dangling"
+  # A live symlink pointing somewhere other than the declared source.
   WRONG_TARGET = "wrong_target"
+  # Operator content occupying the declared slot.
   NOT_A_SYMLINK = "not_a_symlink"
+  # Nothing in the slot and no source to link to.
   SOURCE_MISSING = "source_missing"
+  # Paths declared while no source root is on record for this checkout.
   UNCONFIGURED = "unconfigured"
 
 
@@ -1224,11 +1547,17 @@ class ExternalDirFindingKey:
     ACTION: The repair outcome from `ExternalDirAction`, present on repair records only.
   """
 
+  # The declared repo-relative path the record describes.
   PATH = "path"
+  # The diagnosis token from `ExternalDirStatus`.
   STATUS = "status"
+  # The absolute source path, or None when no source root is on record.
   SOURCE = "source"
+  # Whether git ignores the declared path in this repository.
   GITIGNORED = "gitignored"
+  # The ignore-coverage token from `ExternalDirIgnore`.
   IGNORE_RULE = "ignore_rule"
+  # The repair outcome from `ExternalDirAction`, present on repair records only.
   ACTION = "action"
 
 
@@ -1244,8 +1573,12 @@ class ExternalDirIgnore:
     ABSENT: No ignore rule covers the name in any form.
   """
 
+  # The declared path as it stands is ignored — nothing dirties the tree.
   IGNORED = "ignored"
+  # An ignore rule covers the name as a directory only, so the symlink planted in the slot stays visible to git and
+  # an anchored slashless rule is missing.
   DIR_ONLY = "dir_only"
+  # No ignore rule covers the name in any form.
   ABSENT = "absent"
 
 
@@ -1261,9 +1594,13 @@ class ExternalDirAction:
     SKIPPED: The state was left untouched and reported to the operator instead.
   """
 
+  # A missing symlink was created.
   LINKED = "linked"
+  # An existing symlink was re-pointed at the declared source.
   RELINKED = "relinked"
+  # The declared path already pointed at its source.
   UNCHANGED = "unchanged"
+  # The state was left untouched and reported to the operator instead.
   SKIPPED = "skipped"
 
 
@@ -1276,6 +1613,7 @@ class RoutineType:
     INBOX: The inbox-scanning routine type.
   """
 
+  # The inbox-scanning routine type.
   INBOX = "inbox"
 
 
@@ -1288,6 +1626,7 @@ class InboxGuardKind:
     COLLISION: Two checkouts on this host drive one physical inbox.
   """
 
+  # Two checkouts on this host drive one physical inbox.
   COLLISION = "inbox_collision"
 
 
@@ -1305,11 +1644,17 @@ class InboxGuardKey:
     DETAIL: A one-line human-readable description.
   """
 
+  # The finding kind from `InboxGuardKind`.
   KIND = "kind"
+  # The local routine whose inbox is contested.
   ROUTINE = "routine"
+  # The canonical absolute path both checkouts resolve to.
   INBOX = "inbox"
+  # The absolute repo root of the other checkout driving the same inbox.
   OTHER_REPO = "other_repo"
+  # The routine name the other checkout scans it under.
   OTHER_ROUTINE = "other_routine"
+  # A one-line human-readable description.
   DETAIL = "detail"
 
 
@@ -1325,9 +1670,13 @@ class ReviewClassKey:
     EXPERTS: The per-class expert wiring block.
   """
 
+  # The `review.classes` list key.
   CLASSES = "classes"
+  # The class name (a token from `ReviewClassName`).
   CLASS = "class"
+  # The glob patterns routing a document to this class.
   PATHS = "paths"
+  # The per-class expert wiring block.
   EXPERTS = "experts"
 
 
@@ -1349,13 +1698,23 @@ class ReviewClassName:
     ARCHITECTURE: The architect-facing architecture document class (v6 → v7).
   """
 
+  # The pre-v2 class name retired via `DEV_PLAN` in favor of today's `CODE_PLAN`.
   LEGACY_PLAN = "plan"
+  # The pre-v9 planner-facing class name that `CODE_PLAN` replaces.
   DEV_PLAN = "dev-plan"
+  # The planner-facing implementation-plan document class (v8 → v9).
   CODE_PLAN = "code-plan"
+  # The tester-facing test-plan document class, mirroring the plan class's experts.
   TEST_PLAN = "test-plan"
+  # The pre-v9 implementer-facing class name that `CODE_REPORT` replaces.
   DEV_REPORT = "dev-report"
+  # The implementer-facing implementation-report document class (v8 → v9).
   CODE_REPORT = "code-report"
+  # The tester-facing test-report document class.
   TEST_REPORT = "test-report"
+  # The designer-facing design document class.
   DESIGN = "design"
+  # The tester-facing bug-report document class.
   BUG = "bug"
+  # The architect-facing architecture document class (v6 → v7).
   ARCHITECTURE = "architecture"

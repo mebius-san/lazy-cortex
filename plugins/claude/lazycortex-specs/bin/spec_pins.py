@@ -83,18 +83,31 @@ class Keys:
     ENV_REPO_ROOT: Env var naming the repository root, read when `--cwd` is not passed.
   """
 
+  # Frontmatter key naming a doc's role.
   SPEC_ROLE = "spec_role"
+  # Frontmatter key holding the doc's tags, the product tag among them.
   TAGS = "tags"
+  # Product-record key naming the product's folder under the content-root.
   SPEC_PATH = "spec_path"
+  # Prefix of the product-axis pin value.
   PRODUCT_PIN = "wiki/product/"
+  # Frontmatter key the pin block is written under.
   WIKI_PINNED_TOPICS = "wiki_pinned_topics"
+  # Result-dict key counting documents a pin was added to or whose stale product values were repaired.
   TOUCHED = "touched"
+  # Result-dict key counting role-bearing documents left untouched.
   SKIPPED = "skipped"
+  # Markdown file extension, used to filter the content-root walk.
   MD_SUFFIX = ".md"
+  # File encoding used throughout this module.
   ENCODING = "utf-8"
+  # CLI flag overriding the repository root.
   ARG_CWD = "--cwd"
+  # CLI help text for `--cwd`.
   ARG_CWD_HELP = "Repository root (defaults to $LAZY_REPO_ROOT or cwd)."
+  # CLI program name shown in `--help` output.
   PROG = "lazycortex-specs pins"
+  # Env var naming the repository root, read when `--cwd` is not passed.
   ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 
 

@@ -62,9 +62,13 @@ class _SettingsKey:
     BASE_BRANCH: The daemon's base-branch field inside that block.
   """
 
+  # The routine-registry section.
   ROUTINES = "routines"
+  # The runtime-daemon section.
   DAEMON = "daemon"
+  # The daemon's git block.
   GIT = "git"
+  # The daemon's base-branch field inside that block.
   BASE_BRANCH = "base_branch"
 
 
@@ -81,10 +85,15 @@ class _CoreCommand:
     STATUS: Result key holding the verb's outcome word.
   """
 
+  # The subcommand name.
   RECONCILE_ROUTINE = "reconcile-routine"
+  # Flag carrying the shipped config body as JSON.
   CFG_FLAG = "--cfg-json"
+  # Flag carrying the comma-separated owned-key list.
   MANAGED_FLAG = "--managed"
+  # Flag carrying the repository root to write into.
   CWD_FLAG = "--cwd"
+  # Result key holding the verb's outcome word.
   STATUS = "status"
 
 

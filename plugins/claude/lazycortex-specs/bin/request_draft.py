@@ -72,29 +72,43 @@ class _K:
 
   # Frontmatter keys and values not already carried by `spec_keys`
   DOC_TYPE = "spec_doc_type"
+  # The `spec_source_docs` frontmatter key carrying the attribution wikilink.
   SOURCE_DOCS = "spec_source_docs"
+  # The `spec_doc_type` value every request file carries.
   DOC_TYPE_REQUEST = "request"
   # Path segments
   REQUESTS_DIR = "requests"
+  # The markdown filename suffix.
   MD_SUFFIX = ".md"
   # Slug rule
   SLUG_FALLBACK = "untitled"
+  # The first numeric suffix a colliding slug takes.
   COLLISION_START = 2
   # Commit
   GIT_TOPLEVEL = "--show-toplevel"
+  # The default git author name for the drafting commit.
   AUTHOR_NAME = "spec.catalog-coordinator"
+  # The default git author email for the drafting commit.
   AUTHOR_EMAIL = "spec.catalog-coordinator@bot.invalid"
   # Output JSON keys
   OUT_OUTCOME = "outcome"
+  # Output JSON key carrying the request's repo-relative path.
   OUT_REQUEST = "request"
+  # The only outcome this verb reports.
   OUTCOME_CREATED = "created"
   # CLI argparse
   PROG = "lazycortex-specs request-draft"
+  # CLI flag naming the system document that raised the candidate.
   ARG_SOURCE = "--source"
+  # CLI flag carrying the candidate's title.
   ARG_TITLE = "--title"
+  # CLI flag naming the file holding the candidate's body.
   ARG_BODY = "--body"
+  # CLI flag overriding the repo root.
   ARG_CWD = "--cwd"
+  # CLI flag overriding the commit's author name.
   ARG_AUTHOR_NAME = "--author-name"
+  # CLI flag overriding the commit's author email.
   ARG_AUTHOR_EMAIL = "--author-email"
 
 

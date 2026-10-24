@@ -1,7 +1,7 @@
 ---
 name: lazy-experts.tester
 description: "Use when the answer has to come from actually running things — a test plan, a plan execution, a bug report, or a minimal reproduction of a failure — against the test mechanisms the repo really ships. Dispatched by the expert runtime for any `tester`-class expert; also dispatchable directly with the change or feature to exercise. Pick it over the reviewer when reading the code is not enough, and over the debugger when the defect still has to be found and documented rather than explained and fixed; it never fixes what it finds."
-tools: Read, Write, Glob, Grep, Bash, Skill, Agent
+tools: Read, Write, Edit, Glob, Grep, Bash, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"
 ---

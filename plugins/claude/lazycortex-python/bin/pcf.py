@@ -927,6 +927,7 @@ class ImportBlockType:
   LOCAL = 5         # relative imports (from .*, from ..*)
   TYPE_CHECKING = 6 # from typing import TYPE_CHECKING + if TYPE_CHECKING block
 
+  # The human-readable name of each block type, keyed by its ordinal, for finding messages.
   NAMES = {
     0: 'future',
     1: 'typing',

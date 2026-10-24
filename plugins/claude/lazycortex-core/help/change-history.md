@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Run-log housekeeping and change-history access — clean up orphaned log directories and ask "why was X changed?" across every source at once.
-last_regen: 2026-09-24
+last_regen: 2026-10-24
 diagram_spec:
   anchor: "How the members fit together"
   request: "Architecture diagram showing the two groups of members in the change-history block: (1) lazy-log.clean prunes the .logs/claude/ tree; (2) lazy-log.recall, lazy-log.timeline, and lazy-log.summary read from run logs + commits.jsonl + git log + memory to answer history queries; (3) lazy-log.bullets reads git commits to draft a release block."
@@ -11,8 +11,8 @@ source_skills:
   - lazy-log.timeline
   - lazy-log.summary
   - lazy-log.bullets
-source_sha: f65d48e838d0f6b1517b240cc91d3b51162cc445
-surface_sha: 061ba1f19ef37807fb3da37355fc98982c13f31f888f3968744a72916560db1a
+source_sha: 33e8a296cb2bda2f7c06945ca9d46e24ed4c1858
+surface_sha: a9f9284915b7c55224db487f6db24c5fb4999e1a2b7e0d84c4c26399ab8a33d5
 ---
 # Change history and run-log housekeeping
 
@@ -28,7 +28,7 @@ Every commit your project lands is recorded, and every skill or agent that opts 
 
 **`lazy-log.summary`** aggregates every match for a topic and synthesizes a multi-paragraph narrative: why the work started, what was done, what issues came up, and where it ended up. Unlike `recall` (point-in-time) and `timeline` (chronological), `summary` clusters by sub-theme — design decisions, implementation phases, issues encountered, follow-up work — and writes prose for a reader who was not there.
 
-**`lazy-log.bullets`** is the release-time tool. You dispatch it with a plugin name, the commit range since the last release, the new version, and the date. It reads the commits, drops anything purely internal (chore, style, test, docs-sync), rewrites the survivors as outcome-led bullets grouped by scope (with any `#` token from a commit subject wrapped in backticks for tag safety), and returns a release block ready to prepend to `CHANGELOG.public.md`.
+**`lazy-log.bullets`** is the release-time tool. You dispatch it with a plugin name, the commit range since the last release, the new version, and the date. It reads the commits, drops anything purely internal (chore, style, test, docs-sync), rewrites the survivors as outcome-led bullets grouped by scope (with any `#` token from a commit subject wrapped in backticks for tag safety), and returns a release block ready to prepend to `CHANGELOG.public.md`. Two rules keep the block honest. A reworded `description:` on a shipped skill, agent, or command is always kept as a bullet, because that field decides when the artifact gets picked for a request. And a repo-wide commit is judged by what it changed inside the plugin being released, not by its subject line, so a commit that reads like plumbing but changed this plugin's behavior still earns a bullet while one that only touched its README does not.
 
 ## How they work together
 
@@ -48,7 +48,7 @@ All three return git SHAs so you can `git show <sha>` to inspect the exact chang
 
 `lazy-log.recall`, `lazy-log.timeline`, and `lazy-log.summary` all write their own prose in the project's configured language — the top-level `language` key in `.claude/lazy.settings.json`, falling back to English when the key is absent — before producing a single line of output. Only quoted source material stays as-is: commit subjects, file paths, SHAs, identifiers, and section names.
 
-`lazy-log.bullets` sits outside the normal query flow. It is dispatched by the publish pipeline when drafting a release and needs the git commit range for one plugin translated into what a user installing the plugin would actually care about. Internal chore commits are filtered out automatically; what surfaces is a ready-to-paste release block.
+`lazy-log.bullets` sits outside the normal query flow. It is dispatched by the publish pipeline when drafting a release and needs the git commit range for one plugin translated into what a user installing the plugin would actually care about. Internal chore commits are filtered out automatically; what surfaces is a ready-to-paste release block. If every commit in the range is filtered out, it re-reads the per-plugin diffs once before declaring "no user-visible changes", since an empty block tells readers nothing changed for them. It never edits `CHANGELOG.public.md` or commits anything; prepending the block is the caller's job.
 
 ## Common adjustments
 

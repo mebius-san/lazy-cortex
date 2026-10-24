@@ -117,9 +117,13 @@ class _Trigger:
     COMMAND: A non-empty `[!todo] #review/command` callout is present.
   """
 
+  # A document was just opted into review.
   REVIEW_ENTRY = "review-entry"
+  # The postman landed a dispatched job's payload and raised the pending wake.
   JOB_DONE = "job-done"
+  # A non-bot commit landed on an already-active document.
   OPERATOR_EDIT = "operator-edit"
+  # A non-empty `[!todo] #review/command` callout is present.
   COMMAND = "command"
 
 

@@ -133,65 +133,105 @@ class Keys:
 
   # Settings + frontmatter keys
   PRODUCTS = "products"
+  # Settings key naming a product's spec directory.
   SPEC_PATH = "spec_path"
+  # Settings key holding a product's operator-defined asset-type declarations.
   ASSET_TYPES = "asset_types"
+  # Frontmatter key naming the asset's own type on its status folder-note.
   ASSET_TYPE = "spec_asset_type"
+  # Frontmatter key listing the tools the asset is realised and checked with.
   SPEC_TOOLS = "spec_tools"
+  # Key naming an asset type's icon.
   ICON = "icon"
+  # Frontmatter key listing a folder-note's authored sibling docs.
   SPEC_SOURCE_DOCS = "spec_source_docs"
+  # Frontmatter key carrying the folder-note's icon.
   ICONIZE_ICON = "iconize_icon"
+  # Frontmatter key carrying the folder-note's optional icon color.
   ICONIZE_COLOR = "iconize_color"
   # Filenames
   FOLDER_NOTE_TMPL = "asset-note.md"
+  # Filename of the group folder-note template.
   GROUP_NOTE_TMPL = "group-note.md"
   # Doc stems (basename without extension) for sibling wikilinks
   DESIGN_STEM = "design"
+  # Filename stem of the tech doc.
   TECH_STEM = "tech"
   # Path segments
   CLAUDE_DIR = ".claude"
+  # Filename of the settings file.
   SETTINGS_FILE = "lazy.settings.json"
+  # The templates directory segment.
   TEMPLATES_DIR = "templates"
+  # The per-type template directory serving every asset type.
   LINEAR_TMPL_DIR = "spec.docs"
+  # The type-agnostic template directory serving a type with no directory of its own.
   SHARED_TMPL_DIR = "spec.asset"
   # Template layer labels the `template resolve` verb prints
   LAYER_PRODUCT_OVERRIDE = "product-override"
+  # Layer label — the consumer's file in a context folder.
   LAYER_CONSUMER_CONTEXT = "consumer-context"
+  # Layer label — the plugin's file in a context folder.
   LAYER_PLUGIN_CONTEXT = "plugin-context"
+  # Label prefix for the alias base's three context layers.
   LAYER_BASE_PREFIX = "base-"
+  # Layer label — the consumer's file in the linear base.
   LAYER_CONSUMER_LINEAR = "consumer-linear"
+  # Layer label — the plugin's file in the linear base.
   LAYER_PLUGIN_LINEAR = "plugin-linear"
+  # Layer label — the plugin's file in the type-agnostic base.
   LAYER_PLUGIN_SHARED = "plugin-shared"
+  # Frontmatter key naming a seeded document's type.
   DOC_TYPE = "spec_doc_type"
+  # Markdown file extension, stripped to derive a document's type from its filename.
   MD_SUFFIX = ".md"
   # Body markers
   DOCS_MARKER_START = "<!-- auto:spec-docs:start -->"
+  # Closing HTML marker delimiting the folder-note's sibling-docs block.
   DOCS_MARKER_END = "<!-- auto:spec-docs:end -->"
   # Error categories + outcome strings
   CAT_LOGICAL = "logical"
+  # Outcome token for a failed scaffold.
   OUTCOME_ERROR = "error"
+  # Outcome token for a completed scaffold.
   OUTCOME_SUCCESS = "success"
   # Stage values
   STAGE_DRAFT = "draft"
+  # The doc-stage value for a scaffolded but unwritten doc.
   STAGE_EMPTY = "empty"
   # Path segments the CLI validates against
   PARENT_SEGMENT = ".."
   # CLI argparse
   PROG = "lazycortex-specs scaffold-asset"
+  # CLI positional argument name for the product compound-key.
   ARG_PRODUCT = "product"
+  # CLI positional argument name for the asset type.
   ARG_TYPE = "asset_type"
+  # CLI repeatable flag naming one produced document as `<name>:<type>`.
   ARG_DOC = "--doc"
+  # CLI flag overriding the folder the asset lands in.
   ARG_PATH = "--path"
+  # Separator inside a `--doc` value.
   DOC_TOKEN_SEP = ":"
+  # CLI positional argument name for the asset slug.
   ARG_SLUG = "slug"
+  # CLI flag overriding the repo root.
   ARG_CWD = "--cwd"
+  # CLI help text for the product argument.
   HELP_PRODUCT = "Product compound-key"
+  # CLI help text for the type argument.
   HELP_TYPE = "Asset type, as declared in asset_types"
+  # CLI help text for the `--doc` flag.
   HELP_DOC = "Produced document as <name>:<spec_doc_type>; repeatable, may be absent"
+  # CLI help text for the `--path` flag.
   HELP_PATH = "Folder under spec_path the asset lands in; defaults to the type's default_path"
+  # CLI help text for the slug argument.
   HELP_SLUG = "Asset slug (lowercase-with-hyphens)"
+  # CLI help text for the `--cwd` flag.
   HELP_CWD = "Override repo root"
   # Output JSON keys
   OUT_FILE = "file"
+  # Output JSON key naming a produced doc's initial stage.
   OUT_STAGE = "stage"
   # Repo discovery
   GIT_DIR = ".git"

@@ -34,9 +34,13 @@ class _Outcome:
   Stdout wire-shape outcomes returned by `ensure_permission_allow`.
   """
 
+  # The pattern was missing and has been written into the allow list.
   ADDED = "added"
+  # The pattern was already in the allow list; nothing was written.
   ALREADY_PRESENT = "already-present"
+  # Check mode: the pattern is in the allow list.
   PRESENT = "present"
+  # Check mode: the pattern is not in the allow list.
   ABSENT = "absent"
 
 
@@ -45,7 +49,9 @@ class _SettingsKey:
   Top-level keys this helper reads/writes in the target settings JSON.
   """
 
+  # The top-level permissions block of a Claude Code settings file.
   PERMISSIONS = "permissions"
+  # The allow-pattern list inside the permissions block.
   ALLOW = "allow"
 
 
@@ -54,12 +60,19 @@ class _CliMeta:
   Argparse metadata for the `permission-allow` subcommand.
   """
 
+  # The program name shown in `--help` output.
   PROG = "lazycortex-core permission-allow"
+  # The positional argument naming the settings file.
   ARG_PATH = "settings_path"
+  # The positional argument naming the allow pattern.
   ARG_PATTERN = "pattern"
+  # The help text of the settings-file argument.
   HELP_PATH = "Target settings file (e.g. .claude/settings.local.json)"
+  # The help text of the allow-pattern argument.
   HELP_PATTERN = "Bash allow-pattern, e.g. Bash(lazycortex-specs *)"
+  # The flag selecting check mode.
   ARG_CHECK = "--check"
+  # The help text of the check-mode flag.
   HELP_CHECK = "Only report whether the pattern is present (present / absent); never write"
 
 

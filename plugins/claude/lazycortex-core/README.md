@@ -125,7 +125,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 | Rule | Description |
 |---|---|
 | `lazy-core.agent-writing.md` | Authoring contract for agents (subagents dispatched via the Agent tool). Covers frontmatter requirements, single-response execution model, reporting contract, tool-allowlist hygiene, and cross-references to the shared Execution-Discipline preamble in lazy-core.skill-writing. |
-| `lazy-core.git.md` | Protect the shared git index — the pathspec commit discipline and the staging-window mutex, both enforced by the lazy-core.git-guard hook. |
+| `lazy-core.git.md` | Protect the shared git index: the pathspec commit discipline and the staging-window mutex, enforced by the lazy-core.git-guard hook. |
 | `lazy-core.hook-writing.md` | Authoring contract for Claude Code lifecycle hooks — PreToolUse, PostToolUse, Stop, SessionStart, etc. Covers script discipline, trigger gating, branch determinism, loop guards, transactional skip, the no-dirty-tree clause, and logging. |
 | `lazy-core.hygiene.md` | Project hygiene constraints checked by lazy-core.audit, lazy-core.doctor, and lazy-core.slim-context — scope, naming, settings split, MCP scope, and path hygiene. |
 | `lazy-core.reference-writing.md` | Authoring contract for reference docs (protocols, schemas, contracts) under references/ at any scope. |

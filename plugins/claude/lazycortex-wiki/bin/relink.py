@@ -57,7 +57,9 @@ class RelinkPlanner:
 
   # Plan modes.
   MODE_INITIAL     = "initial"
+  # Plan mode used when the anchor is a reachable ancestor of HEAD.
   MODE_INCREMENTAL = "incremental"
+  # Plan mode used when the anchor is unreachable and content hashes decide the plan instead.
   MODE_ANCHOR_LOST = "anchor-lost"
 
   # Plan-dict keys.

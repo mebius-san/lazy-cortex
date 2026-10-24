@@ -46,15 +46,25 @@ class _K:
     NOT_AN_OBJECT: The reason reported when the predicates argument is not a JSON object.
   """
 
+  # The routine's filter block.
   FILTER = "filter"
+  # The frontmatter-predicate sub-block of a filter.
   FRONTMATTER = "frontmatter"
+  # Result status key.
   STATUS = "status"
+  # Status value when at least one key was seeded.
   ADDED = "added"
+  # Status value when every requested key was already present.
   UNCHANGED = "unchanged"
+  # Status value for an unregistered routine or malformed input.
   ERROR = "error"
+  # Result key carrying the error reason.
   REASON = "reason"
+  # Result key listing the seeded frontmatter keys.
   ADDED_KEYS = "added_filter_keys"
+  # The reason reported for an unregistered routine.
   NO_SUCH_ROUTINE = "no such routine"
+  # The reason reported when the predicates argument is not a JSON object.
   NOT_AN_OBJECT = "filter-json must be a JSON object"
 
 

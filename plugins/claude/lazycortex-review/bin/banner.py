@@ -17,6 +17,8 @@ Key invariants enforced here:
   ("Waiting" rules until the chain exhausts and is ready to hand back").
 - :func:`render` for :attr:`State.READY` is the SOLE place the
   approval checkboxes appear. Every other state never carries one.
+- The ready banner carries ONE approval checkbox when the autorun stopped clean or no validation round has run, and
+  the three gestures only when a validation round has run and the autorun did not stop clean.
 - Banner is anchored above the first H1 of the body. Mid-body banner-
   shaped callouts (stale, mis-pasted) are ignored by :func:`extract`.
 """
@@ -37,7 +39,7 @@ if TYPE_CHECKING:
   pass
 
 
-# one entry of a per-language string table — a template string, or a table of them
+# One entry of a per-language string table — a template string, or a table of them
 _EntryType = TypeVar("_EntryType")
 
 
@@ -58,9 +60,13 @@ class State(enum.Enum):
     FINALIZING: The document has been approved and is being finalized.
   """
 
+  # Agents are working; the operator waits for the chain to hand back control.
   IN_PROCESS = "in-process"
+  # An open question or concern blocks progress until the operator responds.
   ACTION_NEEDED = "action-needed"
+  # The document is ready for the operator to approve.
   READY = "ready"
+  # The document has been approved and is being finalized.
   FINALIZING = "finalizing"
 
 
@@ -77,8 +83,11 @@ class DispatchState(enum.Enum):
     CHAIN_EXHAUSTED: The chain has drained and control has returned to the operator.
   """
 
+  # The operator just committed and the chain has not yet picked up work.
   OPERATOR_COMMITTED = "operator-committed"
+  # An agent is currently working on the document.
   CHAIN_IN_PROGRESS = "chain-in-progress"
+  # The chain has drained and control has returned to the operator.
   CHAIN_EXHAUSTED = "chain-exhausted"
 
 
@@ -237,14 +246,16 @@ def _any_unanswered_question(body: str) -> bool:
   """
   Report whether `body` contains an open question callout with no operator tick.
 
+  Args:
+    body: Document text, scanned outside code fences for open `#review/question` callouts.
+
   Returns:
     True if at least one unanswered question callout is present, False otherwise.
   """
-    # Strip code-fence regions — callout-shaped lines inside ```...```
-    # fences are body content, never gating callouts (see parser.strip_code_fences).
+  # callout-shaped lines inside code fences are body content, never gating callouts, so fences are stripped first
   scan_body = _parser.strip_code_fences(body)
-  for m in _QUESTION_OPEN_RE.finditer(scan_body):
-    block = _find_callout_block(scan_body, m)
+  for match in _QUESTION_OPEN_RE.finditer(scan_body):
+    block = _find_callout_block(scan_body, match)
     if not _TICKED_OPTION_RE.search(block):
       return True
   return False
@@ -419,7 +430,8 @@ _TEMPLATES: dict[str, dict[State, str]] = {
     },
 }
 
-# The ready banner before any validation round: one approval checkbox, the `approve` gesture.
+# The ready banner before any validation round, or after an autorun stopped clean: one approval checkbox, the
+# `approve` gesture.
 # `{autorun}` takes the stop line of an autorun that ended, or nothing.
 _READY_SINGLE_TEMPLATE: dict[str, str] = {
     _LANG_EN: (
@@ -441,8 +453,8 @@ _READY_SINGLE_TEMPLATE: dict[str, str] = {
     ),
 }
 
-# The ready banner once a validation round has run: the three approval checkboxes, in
-# `READY_GESTURE_KINDS` order. `{autorun}` takes the stop line of an autorun that ended, or nothing.
+# The ready banner once a validation round has run, unless an autorun stopped clean: the three approval
+# checkboxes, in `READY_GESTURE_KINDS` order. `{autorun}` takes the stop line of an autorun that ended, or nothing.
 _READY_TRIPLE_TEMPLATE: dict[str, str] = {
     _LANG_EN: (
         "> [!success] Ready to approve #review/ready\n"
@@ -527,11 +539,12 @@ def render(
   """
   Render the callout markdown for `state`.
 
-  - For `State.READY`, one checkbox (`approve the whole document`) is rendered before any validation round;
-    once a validation round has run (`validation_seen`), three checkboxes are rendered in the order of
-    `READY_GESTURE_KINDS`: `approve this and previous rounds`, `approve and run to the end without stops`,
-    `approve without further validation`. `approved=True` ticks the first box (mirrors frontmatter
-    `review_approved` for visual consistency).
+  - For `State.READY`, one checkbox (`approve the whole document`) is rendered when the autorun stopped clean
+    (`autorun` is `clean`, even after a validation round) or when no validation round has run. Three checkboxes
+    are rendered in the order of `READY_GESTURE_KINDS` only when a validation round has run (`validation_seen`)
+    and the autorun did not stop clean (no autorun, or a `cap` / `question` stop): `approve this and previous
+    rounds`, `approve and run to the end without stops`, `approve without further validation`. `approved=True`
+    ticks the first box (mirrors frontmatter `review_approved` for visual consistency).
   - For `State.READY` after an autorun stopped (`autorun` is `clean`, `cap` or `question`), the banner opens
     right under its title with `Autorun stopped after {n} cycle(s): {reason}`.
   - For `State.IN_PROCESS`, `waiting_context` enriches the title ("Waiting: validators" etc.);
@@ -541,14 +554,18 @@ def render(
   Guarantees:
     - Approval checkbox lines appear in the rendered markup only when `state` is `State.READY`;
       every other state's output never carries one.
-    - For `State.READY`, the markup carries one approval line before any validation round, and the three gestures
-      in `READY_GESTURE_KINDS` order once `validation_seen` is set.
+    - For `State.READY`, the markup carries one approval line before any validation round (`validation_seen` is
+      false) and whenever `autorun` is `clean`, and the three gestures in `READY_GESTURE_KINDS` order otherwise
+      (a validation round has run and `autorun` is absent, `cap`, or `question`).
+    - The autorun stop line is painted above the approval line(s) for every stop state, `clean` included.
 
   Args:
     state: Banner state to render.
     approved: Ticks the first approval checkbox when rendering `State.READY`.
-    validation_seen: Whether a validation round has run; selects the three-checkbox `State.READY` banner.
-    autorun: The `review_autorun` value (`running` / `clean` / `cap` / `question`), or `None` for no autorun.
+    validation_seen: Whether a validation round has run; with an `autorun` that did not stop clean, selects the
+      three-checkbox `State.READY` banner.
+    autorun: The `review_autorun` value (`running` / `clean` / `cap` / `question`), or `None` for no autorun;
+      `clean` keeps the `State.READY` banner at one checkbox even when `validation_seen` is set.
     autorun_cycles: Autoapprovals done in the current autorun, shown as `n` in the autorun line; `None` counts as 0.
     waiting_context: Phase label inserted into the `State.IN_PROCESS` title; `None` yields bare "Waiting".
     lang: Resolved language code for the body prose; titles stay English, and a language with
@@ -560,21 +577,27 @@ def render(
 
   # Contract:
   # The rendered markup MUST carry approval checkbox lines only when `state` is
-  # `State.READY` — one line before any validation round, the three gestures in
-  # `READY_GESTURE_KINDS` order once `validation_seen`; every other state's output MUST
-  # NEVER contain an approval checkbox.
+  # `State.READY`. For `State.READY` it MUST carry ONE approval checkbox line before any
+  # validation round (`validation_seen` is false) and whenever the autorun stopped clean
+  # (`autorun` is `clean`), and the three gestures in `READY_GESTURE_KINDS` order otherwise
+  # (a validation round has run and the autorun is absent, `cap`, or `question`). Every
+  # other state's output MUST NEVER contain an approval checkbox.
 
   # Domain(review.markup):
   # # Approval checkbox scope
-  # Approval checkboxes appear only in the ready-to-approve banner. Before validators have
-  # looked at the document it carries one box, approving the whole document. Once a validation
-  # round has run it carries three, always in the same order: approve this and the previous
-  # rounds and send the document to the validators again, approve and let the loop run on its
-  # own to the end, or approve and finalize without another validation round. The three boxes
-  # are told apart by their position, not by their wording, so every language's banner means
-  # the same gestures. No other banner state ever renders an approval box — an operator cannot
-  # approve mid-round, while a self-running loop is still turning, or once finalizing has
-  # already started.
+  # Approval checkboxes appear only in the ready-to-approve banner. It carries one box,
+  # approving the whole document, in two situations: before validators have looked at the
+  # document at all, and whenever a self-running loop stopped because the validators raised no
+  # concerns, even after validation rounds have run. Once a validation round has run and the
+  # loop did not stop clean, the banner carries three boxes instead, always in the same order:
+  # approve this and the previous rounds and send the document to the validators again,
+  # approve and let the loop run on its own to the end, or approve and finalize without
+  # another validation round. That happens when no self-running loop was active, or when one
+  # stopped at the cycle cap or because an expert asked a question. The three boxes are told
+  # apart by their position, not by their wording, so every language's banner means the same
+  # gestures. No other banner state ever renders an approval box — an operator cannot approve
+  # mid-round, while a self-running loop is still turning, or once finalizing has already
+  # started.
 
   # Domain(review.markup):
   # # Autorun status lines
@@ -582,14 +605,19 @@ def render(
   # in-process banner says how many cycles have passed without an operator stop. Once it stops,
   # the ready-to-approve banner opens with how many cycles it ran and why it stopped: the
   # validators raised no concerns, the cycle cap was reached, or an expert asked a question.
-  # Without such a loop neither line appears.
+  # The stop line opens the ready banner for every stop reason. After a clean stop it sits
+  # above a single box that approves the whole document, since the validators have nothing
+  # left to say; after the other stops the operator still gets the full set of boxes. Without
+  # such a loop neither line appears.
 
   # the autorun cycle count both banners print; an absent count reads as zero
   cycles = autorun_cycles or 0
 
-  # the ready banner: one or three approval boxes, opened by the stop line of an autorun that ended
+  # the ready banner: one box on a clean autorun stop or before any validation round, three otherwise, opened by
+  # the stop line of an autorun that ended
   if state is State.READY:
-    ready = _resolve_for_language(_READY_TRIPLE_TEMPLATE if validation_seen else _READY_SINGLE_TEMPLATE, lang)
+    three_boxes = validation_seen and autorun != AutorunState.CLEAN
+    ready = _resolve_for_language(_READY_TRIPLE_TEMPLATE if three_boxes else _READY_SINGLE_TEMPLATE, lang)
     reason = _resolve_for_language(_AUTORUN_STOP_REASONS, lang).get(autorun or "")
     stop_line = "" if reason is None else _resolve_for_language(_AUTORUN_STOP_LINE, lang).format(
         cycles = cycles, reason = reason,
@@ -599,8 +627,7 @@ def render(
   # the waiting banner: a phase-enriched title, plus the progress line of an autorun still turning
   template = _resolve_for_language(_TEMPLATES, lang)[state]
   if state is State.IN_PROCESS:
-    # waiver: one-off human-facing message
-    title = _WAITING_CONTEXT_LABELS.get(waiting_context or "", _WAITING_BARE)
+    title =_WAITING_CONTEXT_LABELS.get(waiting_context or "", _WAITING_BARE)
     running_line = (
         _resolve_for_language(_AUTORUN_RUNNING_LINE, lang).format(cycles = cycles)
         if autorun == AutorunState.RUNNING else ""
@@ -624,7 +651,7 @@ _BANNER_BLOCK_RE = re.compile(
 # body rather than a post-frontmatter one. The banner anchors BELOW it.
 _LEADING_FRONTMATTER_RE = re.compile(r"(?s)\A---\n(.*?)\n---\n")
 
-# a line a YAML frontmatter block can hold: a top-level key, an indented continuation, a list
+# A line a YAML frontmatter block can hold: a top-level key, an indented continuation, a list
 # item, a comment, or a blank; any other line means the `---` pair is a pair of thematic breaks
 _FRONTMATTER_LINE_RE = re.compile(r"[A-Za-z_][\w.-]*[ \t]*:(?:\s|$)|[ \t]|-(?:\s|$)|#|$")
 
@@ -676,8 +703,10 @@ def replace_banner(
     body: Full document or post-frontmatter body whose banner is replaced.
     state: Banner state to render.
     approved: Ticks the first approval checkbox when rendering `State.READY`.
-    validation_seen: Whether a validation round has run; selects the three-checkbox `State.READY` banner.
-    autorun: The `review_autorun` value (`running` / `clean` / `cap` / `question`), or `None` for no autorun.
+    validation_seen: Whether a validation round has run; with an `autorun` that did not stop clean, selects the
+      three-checkbox banner.
+    autorun: The `review_autorun` value (`running` / `clean` / `cap` / `question`), or `None` for no autorun;
+      `clean` keeps the `State.READY` banner at one checkbox even when `validation_seen` is set.
     autorun_cycles: Autoapprovals done in the current autorun, shown in the autorun line; `None` counts as 0.
     waiting_context: Phase label inserted into the `State.IN_PROCESS` title; `None` yields bare "Waiting".
     lang: Resolved language code for the body prose.
@@ -711,7 +740,7 @@ def replace_banner(
       lang = lang,
   ) + "\n"
 
-  # Split a leading frontmatter block so the banner never lands above it.
+  # split off a leading frontmatter block so the banner never lands above it
   fm_prefix = _leading_frontmatter(body)
   rest = body[len(fm_prefix):]
 
@@ -721,9 +750,6 @@ def replace_banner(
   # head-only strip would duplicate it. Leading whitespace ahead of the banner is dropped so the
   # blank-line-or-not ambiguity (Bug 30 part a) cannot bleed in.
 
-  # Strip the existing banner block wherever it sits (top OR mis-anchored
-  # below the content), then anchor the fresh banner flush at the top of
-  # the remaining content. Independent of where the first H1 is, so a
-  # dropped title can no longer push the banner down to `# History`.
+  # drop the old banner and anchor the fresh one at the top of the remaining content
   rest = _parser.sub_outside_fences(_BANNER_BLOCK_RE, "", rest, count = 1).lstrip("\n")
   return fm_prefix + new_banner + rest

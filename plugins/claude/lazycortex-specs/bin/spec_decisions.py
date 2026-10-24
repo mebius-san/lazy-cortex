@@ -100,44 +100,84 @@ class _K:
     PROG: CLI program name shown in `--help` output.
   """
 
+  # Settings key naming a product's spec directory.
   SPEC_PATH = "spec_path"
+  # Frontmatter key naming a doc's role, read to gate `promote` to living docs.
   SPEC_ROLE = "spec_role"
+  # The role value of an asset's status folder-note.
   ROLE_STATUS = "status"
+  # Frontmatter key naming an asset's kind, read for the category of an asset sitting straight at the product root,
+  # where no group folder names one.
   ASSET_TYPE = "spec_asset_type"
+  # The `spec_asset_type` sentinel written before anybody judged the kind.
   TYPE_UNKNOWN = "unknown"
+  # The `.git` entry marking a repo root / holding the exclusive lock file.
   GIT_DIR = ".git"
+  # The `#protected/` H1-section owner-tag prefix (cross-plugin owned sections).
   TAG_PROTECTED = "#protected/"
+  # The `#expert/` H1-section owner-tag prefix (review-cycle-scoped sections).
   TAG_EXPERT = "#expert/"
+  # A parsed record's `D-NNN` integer field.
   NUMBER = "number"
+  # A parsed record's or decision-block's thesis-line field.
   THESIS = "thesis"
+  # A parsed record's `Status:` field, or an operation result's outcome field.
   STATUS = "status"
+  # A parsed record's `Date:` field.
   DATE = "date"
+  # A parsed record's `Origin:` field.
   ORIGIN = "origin"
+  # A parsed record's full body text (everything below `Origin:`, verbatim).
   BODY = "body"
+  # A decision-block's starting line index (half-open range).
   START = "start"
+  # A decision-block's ending line index (half-open range).
   END = "end"
+  # A decision-block's own raw source lines.
   RAW_LINES = "raw_lines"
+  # An operation result's record-id field.
   ID = "id"
+  # An operation result's registry-file-path field.
   FILE = "file"
+  # `supersede`'s result field naming the superseded record.
   OLD_ID = "old_id"
+  # `supersede`'s result field naming the fresh record.
   NEW_ID = "new_id"
+  # A refusal result's reason field.
   REASON = "reason"
+  # `promote`'s result field listing every path it wrote.
   TOUCHED_PATHS = "touched_paths"
+  # `promote`'s result field listing every fresh record it wrote.
   RECORDS = "records"
+  # The CLI subparser dest naming which operation was selected.
   OP = "op"
+  # The `add` operation token.
   OP_ADD = "add"
+  # The `supersede` operation token.
   OP_SUPERSEDE = "supersede"
+  # The `obsolete` operation token.
   OP_OBSOLETE = "obsolete"
+  # The `promote` operation token.
   OP_PROMOTE = "promote"
+  # CLI positional argument name for the registry file path.
   ARG_DECISIONS_PATH = "decisions_path"
+  # CLI positional argument name for a record's thesis.
   ARG_THESIS = "thesis"
+  # CLI positional argument name for `supersede`'s target record id.
   ARG_OLD_ID = "old_id"
+  # CLI positional argument name for `obsolete`'s target record id.
   ARG_RECORD_ID = "record_id"
+  # CLI positional argument name for `obsolete`'s reason text.
   ARG_REASON = "reason"
+  # CLI positional argument name for `promote`'s living-doc path.
   ARG_DOC_PATH = "doc_path"
+  # CLI positional argument name for a record's justification prose.
   ARG_JUSTIFICATION = "justification"
+  # CLI flag name for the `Origin:` field.
   FLAG_ORIGIN = "--origin"
+  # CLI flag name overriding the recorded date.
   FLAG_TODAY = "--today"
+  # CLI program name shown in `--help` output.
   PROG = "lazycortex-specs decide"
 
 
@@ -156,12 +196,19 @@ class _Result:
     REFUSED: The operation was rejected; no mutation happened.
   """
 
+  # A fresh record was written.
   ADDED = "added"
+  # A dedup match already existed — nothing was written.
   DUPLICATE = "duplicate"
+  # A fresh record was written and an older one marked `superseded-by`.
   SUPERSEDED = "superseded"
+  # An existing record was marked `obsolete`.
   OBSOLETED = "obsoleted"
+  # One or more `[!decision]` blocks were transferred out of a living doc.
   PROMOTED = "promoted"
+  # `promote` found no `[!decision]` blocks — nothing was written.
   NOOP = "noop"
+  # The operation was rejected; no mutation happened.
   REFUSED = "refused"
 
 

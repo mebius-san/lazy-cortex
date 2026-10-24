@@ -58,29 +58,54 @@ class _K:
       the normal status-keyed result shape.
   """
 
+  # Settings section name carrying the axis vocabulary.
   WIKI_SECTION = "wiki"
+  # Section-level key holding the ordered list of classification axes.
   TAG_AXES = "tag_axes"
+  # Name of the `lazycortex-core` plugin/binary.
   CORE_PLUGIN_NAME = "lazycortex-core"
+  # The `bin` path segment under a plugin root.
   BIN_SEGMENT = "bin"
+  # Env var the daemon exports naming candidate plugin roots.
   ENV_PLUGIN_DIRS = "LAZYCORTEX_PLUGIN_DIRS"
+  # Core CLI subcommand name for a section read.
   SUB_SETTINGS_GET = "settings-get"
+  # Core CLI subcommand name for a section write.
   SUB_SETTINGS_SET = "settings-set"
+  # Core CLI flag naming the repository root.
   ARG_CWD = "--cwd"
+  # Result-dict key naming one scope's outcome.
   STATUS = "status"
+  # Outcome value when at least one axis was newly unioned in.
   STATUS_ADDED = "added"
+  # Outcome value when every requested axis was already declared.
   STATUS_UNCHANGED = "unchanged"
+  # Outcome value when the named scope does not exist.
   STATUS_ERROR = "error"
+  # Result-dict key listing the axes newly added to the vocabulary.
   ADDED = "added_axes"
+  # Result-dict key listing the filter keys newly seeded on a scope.
   ADDED_FILTER_KEYS = "added_filter_keys"
+  # Result-dict key listing the exclude globs newly appended to a scope.
   ADDED_EXCLUDES = "added_excludes"
+  # Result-dict key listing the index badges newly seeded on a scope.
   ADDED_INDEX_BADGES = "added_index_badges"
+  # Result-dict key naming why an outcome is `error`.
   REASON = "reason"
+  # Key within the `wiki` section holding the per-scope config dict.
   SCOPES = "scopes"
+  # Per-scope key holding the scope's own exclude globs.
   EXCLUDE_PATHS = "exclude_paths"
+  # Per-scope key holding the on-the-fly node filter.
   FILTER = "filter"
+  # Filter sub-key holding the per-frontmatter-key predicates.
   FRONTMATTER = "frontmatter"
+  # Filter sub-key selecting or rejecting folder notes.
   FOLDER_NOTE = "folder_note"
+  # Per-scope key listing the frontmatter keys the topic index shows as badges on node lines.
   INDEX_BADGES = "index_badges"
+  # Top-level result key used only for the malformed-`wiki.tag_axes` guard, in place of the normal status-keyed
+  # result shape.
   ERROR = "error"
 
 

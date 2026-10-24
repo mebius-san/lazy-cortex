@@ -1,7 +1,7 @@
 ---
 name: lazy-log.bullets
 description: "Use when one plugin is being released and its CHANGELOG.public.md needs a release block drafted from a commit range — dispatched by any release-drafting flow, or directly with plugin + range + version. Renders the `### <version> — <date> UTC` block of user-visible bullets, the one release-facing writer in the lazy-log family."
-tools: Bash, Write, Skill, Agent
+tools: Bash, Write, Edit, Skill, Agent
 model: inherit
 ---
 # Draft user-facing changelog bullets for one plugin release

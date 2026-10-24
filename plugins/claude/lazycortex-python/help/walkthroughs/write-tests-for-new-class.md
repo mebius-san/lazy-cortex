@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Dispatch lazy-python.test-writer against a new class and get a test file that covers all nine Paranoid-Testing categories, verified by tst-py.
-last_regen: 2026-10-05
+last_regen: 2026-10-24
 diagram_spec:
   anchor: "How test-writer walks a class"
   request: "Sequence diagram showing: user invokes lazy-python.test-writer for a target class; agent reads plugin canon (testing-guidelines + checking-guidelines) then project overlay (testing_guidelines.md, checking_guidelines.md, CLAUDE.md ## Testing section); agent identifies test targets (init paths, public methods, properties, documented guarantees, exceptions, operator overloads, Contract: blocks, Domain(...): blocks, opt: clauses); agent writes test file covering all 9 Paranoid-Testing categories; agent runs chk-py per file then chk-py all then tst-py on the module. Show the guideline read order (canon first, overlay second, CLAUDE.md ## Testing third) and the three-step toolchain verification."
@@ -9,8 +9,8 @@ source_skills:
   - lazy-python.test-writer
   - lazy-python.testing-guidelines
   - tst
-source_sha: 6f79b3ccca6a08e854d76145146578548e60486b
-surface_sha: 582f69dc057b1d0afb653dded74857e18d7bb9f71f28205076a44b334fb43be8
+source_sha: 33e8a296cb2bda2f7c06945ca9d46e24ed4c1858
+surface_sha: 08946b92a701377dbe16f372959faa3ff109e6b6fbb75e2e0b98f1e7a9b24bfc
 ---
 # Generate tests that cover all nine Paranoid-Testing categories for a new class
 
@@ -23,7 +23,7 @@ This walkthrough takes you from a freshly written class to a verified test file 
 After completing this walkthrough you have:
 
 - A test file at the mirrored path (e.g. `src/mymodule/widget.py` → `tests/mymodule/widget.py`) that covers all nine Paranoid-Testing categories.
-- The file passing `chk-py all -q` (style + type clean) and `tst-py <module> -q` (suite green, with a strict `xfail` marker on any test the implementation does not yet satisfy).
+- The file passing `chk-py all -q` (style + type clean) and `tst-py <module> -q`. If a test correctly reflects the documented behavior but the implementation does not satisfy it, that test stays red on purpose, carries no `skip` / `skipif` / `xfail` marker, and the agent's report ends with `Status: blocked` instead of `Status: done`.
 
 ## What you need
 
@@ -94,8 +94,10 @@ The agent then runs its seven ordered steps:
 3. **Identify test targets** — enumerates `__init__` paths, public methods, properties, documented guarantees, documented exceptions, operator overloads, and every `Contract:` block, `Domain(…):` block, and `opt:` clause found in Step 2. Outcome: `<N>-targets`.
 4. **Write tests** — writes the test file covering all 9 Paranoid-Testing categories (see Step 4 below for what that means). Outcome: `<N>-tests-written`.
 5. **Add class and method docstrings** — ensures every test class starts with `"Test unit for "` and every test method starts with `"Test that "`. Outcome: `done` or `already-present`.
-6. **Handle implementation-vs-spec mismatches** — if a test correctly reflects documented behavior but the implementation does not satisfy it yet, the agent decorates that method with `@pytest.mark.xfail(strict = True, reason = "<reason>")` and reports the divergence. It does not delete the test or fix production code. Outcome: `none` or `<N>-mismatches-flagged`.
-7. **Verify with toolchain** — runs `chk-py all <test_file>.py -q`, then `chk-py all -q` for the full project, then `tst-py <module> -q`. Guideline review (`chk-py review`) is not a step of `chk-py all` at all — it runs on its own cadence, and the agent never touches it; that decision is left to you (see Step 6). Outcome: `clean` or `<N>-violations-fixed`.
+6. **Handle implementation-vs-spec mismatches** — if a test correctly reflects documented behavior but the implementation does not satisfy it yet, the agent leaves that test in the run and red — no `skip`, `skipif`, or `xfail` marker, which the `lazy-python.failing-tests` rule forbids without your yes — and names the divergence in its report. It does not delete the test, bend it to match the implementation, or fix production code. Outcome: `none` or `<N>-mismatches-flagged`.
+7. **Verify with toolchain** — runs `chk-py all <test_file>.py -q`, then `chk-py all -q` for the full project, then `tst-py <module> -q`. Guideline review (`chk-py review`) is not a step of `chk-py all` at all — it runs on its own cadence, and the agent never touches it; that decision is left to you (see Step 6). Outcome: `clean`, `<N>-violations-fixed`, or `<N>-left-red` — the last only when Step 6 flagged mismatches: the checkers ran, and the `<N>` flagged tests stay red on purpose.
+
+The report then lists one line per step with its outcome word and ends with a `Status: done | blocked` line. It reads `blocked` whenever Step 6 flagged any mismatch, and `done` otherwise.
 
 Watch for the Step 3 outcome line. It tells you the exact test targets the agent found — if the count is lower than you expect, the missing targets are likely undocumented methods or unmarked knowledge blocks.
 
@@ -121,7 +123,7 @@ After the agent completes, open the test file at the mirrored path. Check:
 
 - **Naming**: test class is `Test<ProductionClassName>`, test methods are under 35 characters, no production class name repeated in method names.
 - **Coverage**: scan the nine categories above. Each category should have at least the minimums the guidelines require, where the source has markers or docstring sections to drive it.
-- **Strict `xfail` markers**: any test the agent marked as failing against the current implementation. These are not errors in the test file — they are signals that the production code does not yet satisfy its own documented contract. Decide whether to fix the implementation or update the docstring; once the fix lands, the unexpected pass fails the run and the marker comes off in the same change. The always-loaded `lazy-python.failing-tests` rule governs how you settle it: judge which side is wrong before touching either, never bend correct code to satisfy an outdated test, and treat an edit to what a test asserts, or any new `skip` / `skipif` / `xfail` marker beyond the ones the agent flagged for you to review, as something that needs your explicit yes.
+- **Tests left red**: any test the agent named in its report as failing against the current implementation (Step 6 outcome `<N>-mismatches-flagged`, `Status: blocked`). These are not errors in the test file — they are signals that the production code does not yet satisfy its own documented contract. Decide whether to fix the implementation or update the docstring; once the fix lands, the test goes green with nothing to remove. The always-loaded `lazy-python.failing-tests` rule governs how you settle it: judge which side is wrong before touching either, never bend correct code to satisfy an outdated test, and treat an edit to what a test asserts, or any new `skip` / `skipif` / `xfail` marker, as something that needs your explicit yes.
 - **Assertion messages**: every `assert` statement should carry an f-string message showing both expected and actual values.
 
 ### Step 6 — Run the suite yourself
@@ -146,7 +148,7 @@ If your project has no such shims, no key ever repeats and the line never prints
 
 The agent's own verification runs `chk-py all` twice (Step 7) but never touches guideline review — `chk-py review` is not a step of `all`; it runs on its own cadence, mandatory at the end of a full unit of planned work and recommended after any subagent cycle that produced substantial Python (a new test file qualifies). Run it yourself once the dispatch is done: `chk-py review --base <ref>` naming the commit your work started from, so a multi-commit unit of work gets reviewed in full instead of only its tail. The command prints a manifest and exits `2` while the review is pending — dispatch `lazy-python.code-reviewer` against that manifest, then render its findings with `chk-py review --render <findings.json>`; a `FAIL` finding blocks the commit exactly like a `pcf` FAIL. Its checks reach categories no automated checker proves on the file the agent just wrote — docstring quality, contract consistency between the new tests and the production signatures they exercise, whether a changed `Contract:`, `Domain(…):`, or `opt:` block got a matching test change, and preservation of any `TODO:` / `TMP:` / `DBG:` / `ref:` markers. Skipping this step leaves the guideline layer — the rules no AST-based checker can prove, like naming semantics and your own overlay clauses — unchecked. `/lazy-python.check-style` (Steps 3–4) covers the same manual-review categories plus the automated `chk-py` gate for a batch of edits, but it does not run `chk-py review` either — that phase is invoked directly, on its own cadence, not through any wrapping skill.
 
-A green run with no `xfailed` tests means the class is fully covered and the implementation satisfies its contract. A run that reports `xfailed` tests means the agent found divergences between the docstring contract and the implementation — these need your attention before the class can be considered done, even though the run itself is green.
+A green run, with the agent's report ending in `Status: done`, means the class is fully covered and the implementation satisfies its contract. A red run, with the report ending in `Status: blocked` and an `<N>-left-red` verification outcome, means the agent found `<N>` divergences between the docstring contract and the implementation. The run fails on exactly those tests, and the class is not done until you settle each one.
 
 ### Step 7 — Iterate as the class evolves
 

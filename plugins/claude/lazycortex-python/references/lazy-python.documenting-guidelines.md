@@ -26,6 +26,7 @@ in the sibling `lazy-python.comment-guidelines.md`.
   - Adding implementation steps in Summary or Scope, e.g., “It validates…,” “It sets up…,” “It assigns…,” or “with the given X and Y…”.
   - Mentioning private internal components or backing storage in Scope or Notes unless explicitly part of the public API.
   - Rewriting Scope to include algorithms, loops, or call sequences instead of caller-visible guarantees.
+  - Grounding a rule in an example from another module (`as X does in path/to/module.py`) in `Subclassing`, `Notes`, or `Guarantees`; a docstring states the rule and stops.
   - Exciding the line length limit of 117 characters.
 - Preservation rules:
   - When editing an existing docstring, keep all valid parts intact unless they are: Probably wrong or Do not describe the current code or describe it incorrectly or Violate these guidelines.

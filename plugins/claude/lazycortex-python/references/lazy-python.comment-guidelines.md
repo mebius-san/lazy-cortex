@@ -22,9 +22,13 @@ Python projects that adopt these conventions.
 - Never leave more than five consecutive lines of code inside functions or methods without a comment.
 - Do not comment on self-explanatory code (e.g. library imports or simple assignments).
 - Prefer meaningful explanations to repeating code in words.
+- A comment states a rule; it never grounds the rule in an example from another module. Phrases such as `following the same pattern X follows in path/to/module.py`, `as Y does`, `see Z for the model` are forbidden — the cited code can change or go away, it was never written to be a norm, and a reader who follows it inherits its mistakes. A `# ref:` line is a citation of related code, not an example, and stays.
 - Each member of the class must have a comment explaining its purpose.
+- Capitalization follows position:
+  - A comment on a declaration — a class-level attribute, a constant, a module-level name — starts with a capital letter.
+  - A block purpose comment, a `# guard:` clause or any other marker clause inside a method or function body starts with a lowercase letter.
+  - The text of a `Contract:` or `Domain(…):` block is prose: its `# #` title and each sentence start with a capital letter.
 - All inline comments must:
-  - Start with a lowercase letter.
   - Be concise (one sentence when possible).
   - Do not add any comments to any imports and all import sections even if it has more than five lines.
 - Use `# guard: <description>` ONLY for a guard clause: an `if` whose body exits the current scope — `return`, `continue`, `break`, `raise`, or `sys.exit`. If the body does anything else (assign, append, call, mutate), it is NOT a guard — use a plain `# <description>` comment or none.
@@ -221,12 +225,12 @@ A block marker is **not a comment to the code** — it is a standalone block, se
 - Domain comments are written for human reading and for extraction: the wiki plugin's domain routine collects the blocks of one group and regenerates that group's document from them, so a block's wording is published prose, not a private note.
 - Format:
   - Start with `# Domain(group):`.
-  - The group name must be lowercase. It can be a single word (e.g., `mechanics`, `principles`, `algorithms`) or dot-separated for subcategories (e.g., `mechanics.fighting`, `mechanics.skills`). Dots lay the group out in the generated documentation tree: every segment but the last is a directory and the last is the document itself, under the configured output root (`docs/domains` unless the project sets its own) — `Domain(mechanics.fighting)` becomes the `fighting` document inside the `mechanics` directory.
+  - The group name is lowercase and carries at least two dot-separated segments — the subject area, then the topic inside it (`entities.lifecycle`, `space.grids`). A single word is never a group name: it names an area with no topic or a topic with no area. The first segment names a subject area, never a package or directory; a segment naming a family of things is plural (`grids`, `shapes`), one activity or quality is singular; a group names a subject, never a formula. Dots lay the group out in the generated documentation tree: every segment but the last is a directory and the last is the document itself, under the configured output root (`docs/domains` unless the project sets its own) — `Domain(mechanics.fighting)` becomes the `fighting` document inside the `mechanics` directory.
   - Use `# #` for the title line.
   - Continue with `#` for the body text describing the principles.
 - Example format:
 ```python
-# Domain(mechanics):
+# Domain(simulation.mechanics):
 # # Title of the concept
 # Description of the domain mechanics, principles, or rules.
 # Additional details about how the system works conceptually.

@@ -71,11 +71,17 @@ class RegistryRow:
     PORT: The metrics endpoint TCP port.
   """
 
+  # The supervisor unit's `<REPO_ID>` segment.
   REPO_ID = "repo_id"
+  # The absolute repo-root path extracted from the unit.
   REPO_ROOT = "repo_root"
+  # The resolved `repo` metric label for the daemon.
   REPO_LABEL = "repo_label"
+  # Whether the repo's `daemon.metrics.enabled` flag is on.
   METRICS_ENABLED = "metrics_enabled"
+  # The metrics endpoint bind address.
   BIND = "bind"
+  # The metrics endpoint TCP port.
   PORT = "port"
 
 
@@ -90,8 +96,11 @@ class HolderKey:
     REPO_ROOT: The registered daemon repo holding the port, when the listener is one of ours.
   """
 
+  # The listening process id.
   PID = "pid"
+  # The listening process command name.
   COMMAND = "command"
+  # The registered daemon repo holding the port, when the listener is one of ours.
   REPO_ROOT = "repo_root"
 
 

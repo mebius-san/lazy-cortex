@@ -55,10 +55,15 @@ class DocTypeFlag:
     COLOR: Optional iconize colour paired with the icon.
   """
 
+  # Whether the type carries `spec_stage` and is settable by `lazy-spec.set-stage`.
   STAGES = "stages"
+  # Whether the type goes through the review loop under its same-named class.
   REVIEW = "review"
+  # Whether the file may only be appended to, never rewritten.
   APPEND_ONLY = "append_only"
+  # Iconize icon name a document of the type is seeded with at creation.
   ICON = "icon"
+  # Optional iconize colour paired with the icon.
   COLOR = "color"
 
 
@@ -82,17 +87,29 @@ class _K:
     CLASS_PRODUCT_SEP: Separator between a class name and the product qualifying it.
   """
 
+  # Frontmatter key naming a document's type.
   DOC_TYPE = "spec_doc_type"
+  # Settings key holding a product's own type declarations.
   DOC_TYPES = "doc_types"
+  # The plugin subdirectory holding the shipped declaration file.
   REFERENCES_DIR = "references"
+  # Filename of the shipped declaration file.
   DEFAULTS_FILE = "lazy-spec.doc-types.json"
+  # Repo-relative path of the settings file.
   SETTINGS_REL = Path(".claude") / "lazy.settings.json"
+  # File encoding used throughout this module.
   ENCODING = "utf-8"
+  # The plugin subdirectory holding the shipped template trees.
   TEMPLATES_DIR = "templates"
+  # The template subdirectory holding one file per document type.
   DOC_TEMPLATES_DIR = "spec.docs"
+  # Settings key holding the review section.
   REVIEW = "review"
+  # Settings key holding the review-class registry.
   CLASSES = "classes"
+  # Field naming one review class.
   CLASS = "class"
+  # Separator between a class name and the product qualifying it.
   CLASS_PRODUCT_SEP = "@"
 
 

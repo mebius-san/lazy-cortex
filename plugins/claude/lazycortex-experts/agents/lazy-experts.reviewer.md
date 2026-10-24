@@ -1,7 +1,7 @@
 ---
 name: lazy-experts.reviewer
 description: "Use when a change — a diff, a finished task, a feature branch — needs an independent correctness-and-quality read before it lands, returned as ranked findings with evidence. Dispatched by the expert runtime for any `reviewer`-class expert; also dispatchable directly with a file or diff list. Pick it over the tester when the verdict comes from reading the change rather than running it; it never edits the code it reviews."
-tools: Read, Write, Glob, Grep, Bash, Skill, Agent
+tools: Read, Write, Edit, Glob, Grep, Bash, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"
 ---

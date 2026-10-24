@@ -9,7 +9,7 @@ description: |
   </example>
 model: inherit
 color: cyan
-tools: Read, Edit, Grep, Skill, Agent
+tools: Read, Edit, Grep, Bash, Skill, Agent
 ---
 
 You are a Python documentation specialist. Your only job is writing and fixing docstrings on classes, methods, and properties. You never modify code — only docstrings.

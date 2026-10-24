@@ -1,4 +1,5 @@
-"""Shared HTML-comment explainer lines for generated spec-note sections.
+"""
+Shared HTML-comment explainer lines for generated spec-note sections.
 
 Every bot-written section of a spec note carries one `<!-- ... -->` one-liner
 under its heading, in the vault's authoring language, so the operator never has
@@ -7,7 +8,8 @@ view. This module owns the mechanics (idempotent insert/replace) plus the text
 table for asset/container folder-note sections; `upstream_tick.py` keeps its
 own upstream-note table and reuses the mechanics. It also owns the
 language-resolved templates for the narrative `# History` lines the bin
-primitives land on notes.
+primitives land on notes, and the language-resolved helper line of a
+`Review <doc>` gate block in a folder note's `# Gates` section.
 
 Asterisk-italic lines (`*...*`) — the explainers' pre-comment form — are still
 recognized at the explainer slot and migrate to the comment form on the next
@@ -45,21 +47,21 @@ from spec_keys import HistoryEvent, Section  # noqa: E402  # pylint: disable=imp
 LANG_EN = "en"
 LANG_RU = "ru"
 
-# a section's owner tag line sits directly under the heading and stays the first content line
+# A section's owner tag line sits directly under the heading and stays the first content line
 _PROTECTED_PREFIX = "#protected/"
 
-# an explainer is exactly one line in the comment form or the legacy asterisk-italic form;
+# An explainer is exactly one line in the comment form or the legacy asterisk-italic form;
 # underscore-italic placeholders are content, and so is any `<!-- spec:... -->` marker comment.
 # Public: section readers (e.g. the commands-wake detector) use it to skip the explainer line.
 EXPLAINER_LINE_RE = re.compile(r"^(?:\*[^*].*\*|<!--(?!\s*spec:).*-->)\s*$")
 
-# sections the operator writes into: an italic line or a comment right under the heading may be
+# Sections the operator writes into: an italic line or a comment right under the heading may be
 # theirs, so only an explainer this plugin ships — word for word — is replaced there
 OPERATOR_SECTIONS = frozenset({ Section.COORD_RULES, Section.COORD_COMMANDS })
 
-# one-liners rendered as `<!-- ... -->` under the generated sections of asset/container
+# One-liners rendered as `<!-- ... -->` under the generated sections of asset/container
 # folder-notes — the note documents itself so the operator never has to guess what a section means
-# waiver: the RU lines carry `# noqa: RUF001` — Cyrillic in Russian UI strings is the content,
+# waiver: the RU lines carry a RUF001 noqa suppression — Cyrillic in Russian UI strings is the content,
 # not a lookalike-character typo; the checker cannot distinguish deliberate Russian text
 ASSET_EXPLAINERS: dict[tuple[str, str], str] = {
     (Section.SUMMARY, LANG_EN):
@@ -91,13 +93,13 @@ ASSET_EXPLAINERS: dict[tuple[str, str], str] = {
         "Что уже произошло. Заполняется автоматически.",  # noqa: RUF001
 }
 
-# narrative line templates the bin primitives land on notes — `# History` tails plus the halt
+# Narrative line templates the bin primitives land on notes — `# History` tails plus the halt
 # callout's tail — keyed by event and language; the `- <date> — <author> · ` / `> [!failure] `
 # wrappers stay at the call sites (dates, bot identities, and callout marks are
 # language-neutral). A key whose rendering is a substring of another key's — `HALTED_CALLOUT`
 # under `HALTED` — is a fragment key: `history_fragments` renders it in every language so a
 # caller can recognize the event in a body regardless of how the note was authored.
-# waiver: the RU lines carry `# noqa: RUF001` — Cyrillic in Russian UI strings is the content,
+# waiver: the RU lines carry a RUF001 noqa suppression — Cyrillic in Russian UI strings is the content,
 # not a lookalike-character typo; the checker cannot distinguish deliberate Russian text
 HISTORY_LINES: dict[tuple[str, str], str] = {
     (HistoryEvent.SCAFFOLDED, LANG_EN): "scaffolded {asset_type} '{slug}' under {product}",
@@ -134,6 +136,16 @@ HISTORY_LINES: dict[tuple[str, str], str] = {
     (HistoryEvent.REQUEST_PROCESSED, LANG_RU):
         # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
         "запрос [[{wikilink}]] принят → обработан",  # noqa: RUF001
+}
+
+# The fourth line of a `Review <file>` gate block, under the checkbox, keyed by language; `{file}`
+# is the basename the block opens review on
+# waiver: the RU line carries a RUF001 noqa suppression — Cyrillic in Russian UI strings is the content,
+# not a lookalike-character typo; the checker cannot distinguish deliberate Russian text
+REVIEW_HELPER: dict[str, str] = {
+    LANG_EN: "tick to open review: {file} re-enters the loop at the reviewer round",
+    # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
+    LANG_RU: "отметьте, чтобы открыть ревью {file}",  # noqa: RUF001
 }
 
 

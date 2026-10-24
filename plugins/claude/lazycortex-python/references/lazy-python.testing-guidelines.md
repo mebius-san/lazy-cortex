@@ -130,6 +130,13 @@ with pytest.raises(ValueError, match = "Matrix must be square"):
 - Test integration between different components.
 - Private methods and helpers may be tested directly. Such tests never replace tests of the public contract: public and protected behaviour is always covered through the public API.
 
+## Forbidden Test Patterns
+- Never assert a default or a tuning value. A test that checks a field's default, a `_def_*` class constant, or a number read from a config restates the data instead of proving behaviour; it breaks on every tuning change and catches nothing. Feed the value under test in through the data or a loaded config and assert what the code does with it.
+
+## Rule Waivers in Tests
+- A test may break a coding rule under two conditions that must hold together. First, the violation serves the check itself: the test needs a private helper, a protected member, an internal state, or a submodule path that no public surface reaches. Second, the only alternative is production code that would exist for the test alone — a public re-export, an accessor, a hook that no caller needs. A violation that merely saves effort, or one that a legitimate public surface avoids, is not covered and is fixed like any other.
+- Every such violation carries a `# waiver:` comment on the line above naming the rule the test breaks and why the test needs it; the checker suppression the violation requires sits on the violating line itself, never file-wide.
+
 ## Knowledge-derived tests
 - The knowledge markers in a method body are testable claims, exactly like docstring sections. Each `Contract:` block, each `Domain(…):` block, and each `opt:` clause yields at least one test.
 - **`Contract:`** — one test per guarantee, including a block the class inherits from an interface declaration: the implementation's docstring only points at it, so read the interface. The `Guarantees` section mirrors these blocks; it is not a substitute for reading them.

@@ -11,6 +11,7 @@ Subcommands dispatched here:
   transition (`lazy-spec.request-apply` agent) fires later when the
   request reaches the post-finalize stage.
 """
+
 from __future__ import annotations
 # waiver: lazy sibling imports below -- flat bin/ dir resolved via sys.path at runtime, not statically importable
 # pylint: disable=import-error
@@ -57,6 +58,7 @@ _SUB_DOC_TYPE = "doc-type"
 _SUB_ASSET_TYPE = "asset-type"
 _SUB_TEMPLATE = "template"
 _SUB_CORE_CLI = "core-cli"
+_SUB_REVIEW_ROWS = "review-rows"
 # waiver: usage string -- help text printed to stderr; not a domain constant
 _USAGE = (
     "usage: lazycortex-specs <subcommand> [args...]\n"
@@ -113,6 +115,8 @@ _USAGE = (
     "                                  print the template file a context resolves for one filename\n"
     "                                  read an asset's spec_asset_type, or add it where missing\n"
     "  core-cli [--repo DIR]          print the absolute path of the resolved lazycortex-core CLI\n"
+    "  review-rows <note>              reconcile the Review <doc> checkbox blocks of a folder note's\n"
+    "                                  # Gates section\n"
 )
 
 
@@ -238,6 +242,10 @@ def main(argv: list[str]) -> int:
     # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
     import gate_dispatch  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
     return gate_dispatch.main_core_cli(rest)
+  if sub == _SUB_REVIEW_ROWS:
+    # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
+    import review_rows  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
+    return review_rows.main(rest)
   sys.stderr.write(f"unknown subcommand: {sub}\n")
   return 2
 

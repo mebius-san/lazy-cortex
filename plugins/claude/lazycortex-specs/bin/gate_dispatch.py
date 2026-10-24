@@ -57,13 +57,23 @@ class WireKey:
       `JobStatus.ALREADY_QUEUED` per `dev.plugin-boundaries.md` § 2a rather than imported.
   """
 
+  # The dispatched expert's name.
   EXPERT = "expert"
+  # The job payload dict (`kind` / `role` / `request`).
   PAYLOAD = "payload"
+  # The repo-relative paths of the source files the pump copies at claim time.
   SOURCE = "source"
+  # The repo-relative paths of the context files the pump copies at claim time.
   CONTEXT = "context"
+  # The list of expected result filenames.
   RESULT = "result"
+  # The dedup key guarding against a repeat dispatch.
   DEDUP_KEY = "dedup_key"
+  # The queued job's id, as returned by the CLI.
   JOB_ID = "job_id"
+  # The dedup-hit token the CLI echoes back on its own response instead of a fresh `queue_path` (absent on a fresh
+  # dispatch); mirrored file-wise from `lazycortex-core`'s `JobStatus.ALREADY_QUEUED` per `dev.plugin-boundaries.md`
+  # § 2a rather than imported.
   STATUS = "status"
 
 
@@ -80,7 +90,9 @@ class PayloadKey:
       product's.
   """
 
+  # Repo-relative paths of the product's role guidelines followed by its wildcard ones.
   GUIDELINES = "guidelines"
+  # Repo-relative paths of the asset's own `decisions.md` followed by the owning product's.
   DECISIONS = "decisions"
 
 
@@ -99,7 +111,9 @@ class _SettingsKey:
     WILDCARD_ROLE: The guidelines role key that applies to every dispatched role.
   """
 
+  # A product record's `guidelines` dict.
   GUIDELINES = "guidelines"
+  # The guidelines role key that applies to every dispatched role.
   WILDCARD_ROLE = "*"
 
 

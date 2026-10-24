@@ -39,21 +39,37 @@ class VaultPath:
     JSON_GLOB: Glob matching top-level config files.
   """
 
+  # The vault config directory itself, at the repo root.
   OBSIDIAN = ".obsidian"
+  # The tracked manifest file this worker owns, at the repo root.
   MANIFEST = ".obsidian.manifest.json"
+  # Directory holding CSS snippets.
   SNIPPETS = "snippets"
+  # Directory holding one subdirectory per community plugin.
   PLUGINS = "plugins"
+  # Directory holding one subdirectory per installed theme.
   THEMES = "themes"
+  # Per-plugin manifest naming the plugin's id and version.
   PLUGIN_MANIFEST = "manifest.json"
+  # Per-plugin bundle entry point.
   PLUGIN_MAIN = "main.js"
+  # Per-plugin optional stylesheet.
   PLUGIN_STYLES = "styles.css"
+  # Per-plugin settings file.
   PLUGIN_DATA = "data.json"
+  # Per-theme manifest naming the theme's name and version.
   THEME_MANIFEST = "manifest.json"
+  # Per-theme stylesheet, the whole theme.
   THEME_CSS = "theme.css"
+  # List of enabled plugin ids, rebuilt by deploy.
   COMMUNITY_PLUGINS = "community-plugins.json"
+  # Theme, accent, and enabled-snippet settings.
   APPEARANCE = "appearance.json"
+  # Suffix of the scratch file every atomic write renames from.
   TMP_SUFFIX = ".tmp"
+  # Glob matching snippet files.
   CSS_GLOB = "*.css"
+  # Glob matching top-level config files.
   JSON_GLOB = "*.json"
 
 
@@ -67,7 +83,9 @@ class TemplatePath:
     VAULT: Vault-shaped subtree inside the template directory.
   """
 
+  # Template directory under the plugin root.
   ROOT = "templates"
+  # Vault-shaped subtree inside the template directory.
   VAULT = "obsidian"
 
 
@@ -85,11 +103,17 @@ class CachePath:
     THEME_CATALOG: Cached copy of the community-theme catalog.
   """
 
+  # Fallback cache root when XDG_CACHE_HOME is unset.
   DEFAULT_ROOT = ".cache"
+  # This plugin's directory inside the cache root.
   NAMESPACE = "lazycortex-obsidian"
+  # Directory holding one vendored plugin bundle per id.
   BUNDLES = "plugin-bundles"
+  # Directory holding one vendored theme per name.
   THEMES = "theme-bundles"
+  # Cached copy of the community-plugin catalog.
   CATALOG = "community-plugins.json"
+  # Cached copy of the community-theme catalog.
   THEME_CATALOG = "community-css-themes.json"
 
 
@@ -108,12 +132,19 @@ class ManifestKey:
     SECRETS_OMITTED: Dotted paths of secret-looking values capture refused to record.
   """
 
+  # Schema version of the manifest itself.
   VERSION = "manifest_version"
+  # Palette group the vault was created from, carried as metadata.
   GROUP = "group"
+  # Name of the theme the vault renders with.
   THEME = "theme"
+  # Map of top-level Obsidian config filename to its whole content.
   CONFIG = "config"
+  # Map of snippet filename to its provenance and body.
   SNIPPETS = "snippets"
+  # Map of plugin id to its enablement, captured version, and settings.
   PLUGINS = "plugins"
+  # Dotted paths of secret-looking values capture refused to record.
   SECRETS_OMITTED = "secrets_omitted"
 
 
@@ -131,11 +162,17 @@ class PluginKey:
     VERSION: Plugin version as declared by the plugin's own manifest.
   """
 
+  # Whether the vault has the plugin turned on.
   ENABLED = "enabled"
+  # Version installed when the snapshot was taken; a warning source only.
   CAPTURED_VERSION = "captured_version"
+  # The plugin's whole settings payload, or None when its state is derived.
   DATA = "data"
+  # Explicit `owner/name` override for a plugin outside the community catalog.
   REPO = "repo"
+  # Plugin id as declared by the plugin's own manifest.
   ID = "id"
+  # Plugin version as declared by the plugin's own manifest.
   VERSION = "version"
 
 
@@ -150,8 +187,11 @@ class ThemeKey:
     REPO: Owner/name of the theme's GitHub repo, as declared by the catalog.
   """
 
+  # Theme name as declared by the theme's own manifest and by the catalog.
   NAME = "name"
+  # Theme version as declared by the theme's own manifest.
   VERSION = "version"
+  # Owner/name of the theme's GitHub repo, as declared by the catalog.
   REPO = "repo"
 
 
@@ -165,7 +205,9 @@ class SnippetKey:
     BODY: The snippet's CSS, recorded only for vault-owned snippets.
   """
 
+  # Who owns the snippet — this plugin, or the vault.
   SOURCE = "source"
+  # The snippet's CSS, recorded only for vault-owned snippets.
   BODY = "body"
 
 
@@ -179,8 +221,11 @@ class SnippetSourceKind(StrEnum):
     VAULT: Personal or edited; deploy writes the body recorded in the manifest.
   """
 
+  # Byte-identical to what this plugin ships; deploy re-copies it from the plugin.
   PLUGIN = "plugin"
+  # Personal or edited; deploy writes the body recorded in the manifest.
   VAULT = "vault"
+  # The canon-mandated invalid sentinel, outside the named set.
   INVALID = "~inv~"
 
 
@@ -199,12 +244,19 @@ class BundleKey:
     ERROR: Why upstream was not used, set whenever a fallback was needed.
   """
 
+  # Where the bundle came from.
   SOURCE = "source"
+  # Version of the resolved bundle.
   VERSION = "version"
+  # Raw bytes of the plugin's manifest file.
   MANIFEST_BYTES = "manifest_bytes"
+  # Raw bytes of the plugin's bundle entry point.
   MAIN_BYTES = "main_bytes"
+  # Raw bytes of the plugin's stylesheet, or None when it ships none.
   STYLES_BYTES = "styles_bytes"
+  # Raw bytes of a theme's stylesheet, set only on a resolved theme.
   CSS_BYTES = "css_bytes"
+  # Why upstream was not used, set whenever a fallback was needed.
   ERROR = "error"
 
 
@@ -229,10 +281,15 @@ class BundleSourceKind(StrEnum):
   # repository that has been renamed or repurposed can never serve as the bundle source for a
   # different plugin id than the one it originally shipped.
 
+  # Fetched from the plugin's GitHub release.
   UPSTREAM = "upstream"
+  # Served from the vendored cache after upstream failed.
   CACHE = "cache"
+  # Copied from what this plugin ships, for plugins with no public release.
   BUNDLED = "bundled"
+  # Nothing could be resolved; the plugin was skipped.
   NONE = "none"
+  # The canon-mandated invalid sentinel, outside the named set.
   INVALID = "~inv~"
 
 
@@ -262,15 +319,25 @@ class ReportKey:
   # operator must resolve; a report carrying even one error means the run as a whole failed,
   # regardless of how much of the work it otherwise completed.
 
+  # Which subcommand produced the report.
   ACTION = "action"
+  # Absolute path of the manifest written.
   MANIFEST = "manifest"
+  # Config filenames captured or deployed.
   CONFIG_FILES = "config_files"
+  # Snippet filenames captured or written.
   SNIPPETS = "snippets"
+  # Plugin ids captured, or per-plugin install records on deploy.
   PLUGINS = "plugins"
+  # Theme name deploy restored or left in place.
   THEME = "theme"
+  # Dotted paths of values never recorded.
   SECRETS_OMITTED = "secrets_omitted"
+  # Differences between the live config and what the manifest records.
   DRIFT = "drift"
+  # Conditions worth the operator's attention that are not drift.
   WARNINGS = "warnings"
+  # Conditions the operator must resolve; a non-empty list fails the run.
   ERRORS = "errors"
 
 
@@ -292,7 +359,9 @@ class AppearanceKey:
   # record, so restoring the configuration on a different device leaves that device's own zoom
   # exactly where it already was rather than overwriting it with a value that belonged elsewhere.
 
+  # Name of the active theme.
   CSS_THEME = "cssTheme"
+  # Window zoom, a per-device value never captured.
   ZOOM_FACTOR = "zoomFactor"
 
 
@@ -308,10 +377,15 @@ class CommandKind(StrEnum):
     LOOKUP: Resolve one community plugin's GitHub repo from the catalog, touching no vault.
   """
 
+  # Snapshot the vault config into the manifest.
   CAPTURE = "capture"
+  # Rebuild the vault config from the manifest.
   DEPLOY = "deploy"
+  # Report how the live vault config differs from the manifest, writing nothing.
   DRIFT = "drift"
+  # Resolve one community plugin's GitHub repo from the catalog, touching no vault.
   LOOKUP = "lookup"
+  # The canon-mandated invalid sentinel, outside the named set.
   INVALID = "~inv~"
 
 
@@ -341,13 +415,21 @@ class Http:
   # over the one behind an external command, since reading the environment carries no risk of
   # side effects.
 
+  # Accept header name.
   ACCEPT = "Accept"
+  # User-Agent header name.
   USER_AGENT = "User-Agent"
+  # Authorization header name.
   AUTHORIZATION = "Authorization"
+  # User-Agent value identifying this worker upstream.
   AGENT_VALUE = "lazycortex-obsidian/1.0"
+  # Media type for catalog and manifest requests.
   JSON = "application/json"
+  # Media type for release-asset downloads.
   OCTET_STREAM = "application/octet-stream"
+  # Environment variables consulted for a GitHub token, in order.
   ENV_TOKENS = ("GH_TOKEN", "GITHUB_TOKEN")
+  # Hosts whose requests carry the token.
   TOKEN_HOSTS = ("api.github.com", "github.com", "raw.githubusercontent.com")
 
 
@@ -360,4 +442,5 @@ class Encoding:
     UTF8: The only encoding Obsidian writes, and the one every file is read as.
   """
 
+  # The only encoding Obsidian writes, and the one every file is read as.
   UTF8 = "utf-8"

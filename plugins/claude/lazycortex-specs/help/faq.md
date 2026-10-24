@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: FAQ on products, nested products, assets, vision/design docs, gates, requests, decisions, coverage gaps, and spec lookups.
-last_regen: 2026-10-21
+last_regen: 2026-10-24
 no_diagram: true
 source_skills:
   - lazy-spec.install
@@ -31,8 +31,8 @@ source_skills:
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
   - lazy-spec.resolve-dependency
-source_sha: 21763ae2fa16878b13efb42b047e99dfe583b898
-surface_sha: d5ff0f18f46ee66fbe8bc3e75eebd9712fd11a10e498d83e442d792d6fb8d91c
+source_sha: 33e8a296cb2bda2f7c06945ca9d46e24ed4c1858
+surface_sha: 3ea97057035934de41932b56006c0e2c442fcca48321264b017fca5613499918
 ---
 # Frequently asked questions
 
@@ -162,7 +162,7 @@ Yes, automatically. A markdown attachment — a file carrying `spec_owner_doc` p
 
 `deferred` is a sixth `spec_stage` value alongside `empty | draft | approved | rejected | cancelled` — a park, not a review outcome. Run `/lazy-spec.set-stage <doc> deferred` on any stage-bearing document, at asset level or at a product/vault system-document level, and nothing acts on it automatically afterward: no gate closes on it, the coordinator never promotes it by review result, replaces it, or edits it, and the wiki, when that plugin is installed, keeps it in view: the wiki scope covering your catalog curates `draft`, `deferred` and `approved` documents alike (`/lazy-spec.install` seeds that default for the scope), and the topics index shows `[spec_stage: <stage>]` beside each entry, so a parked document reads as parked without being opened. `/lazy-spec.sync-with-code` uses this stage by default for every document it creates from scratch rather than edits — a batch of retro-specs generated from your codebase lands parked instead of flooding the review queue before you've picked which ones to work on.
 
-A committed edit to a parked document still wakes its owning coordinator the same as any operator edit — the folder-note's gates and status brief stay current — but the document's own content is left alone. There are two ways out. `draft` brings it back: either tick the `Review <doc>` row the folder note grows in place of the usual `Write <doc>` checkbox (ticking it moves the document to `draft` and opens its review in one action), or run `/lazy-spec.set-stage <doc> draft` yourself. `/lazy-spec.set-stage <doc> cancelled` abandons it where it sits. Asking for any other stage on a parked document — `approved`, `rejected`, `empty` — is refused.
+A committed edit to a parked document still wakes its owning coordinator the same as any operator edit — the folder-note's gates and status brief stay current — but the document's own content is left alone. There are two ways out. `draft` brings it back: either tick the `Review <doc>` row on the folder note (ticking it on a parked document moves it to `draft` and opens its review in one action), or run `/lazy-spec.set-stage <doc> draft` yourself. The `Review <doc>` row is not special to parked documents: the coordinators hang one for every reviewable document that is outside review, in any stage except `cancelled`, and take it down while a review is running. A tick on a document that has no prose yet — only the untouched template — launches nothing: the box is unticked, the stage stays where it was, and `# Status brief` says the document is still empty and waits for your text. `/lazy-spec.set-stage <doc> cancelled` abandons it where it sits. Asking for any other stage on a parked document — `approved`, `rejected`, `empty` — is refused.
 
 When every stage-bearing document under an asset ends up parked this way, the asset's own folder-note picks up a matching asset-level state, `spec_state: deferred` — decided purely from the documents' own stages, whatever else the note happens to hang (an open launch row, a pending question, or nothing at all) — and its folder paints grey instead of the orange `waits-operator` colour: a parked backlog reads differently at a glance from an asset that's genuinely waiting on you to act. One live (non-parked) document among the rest is enough to put the asset back on the ordinary state table, where the parked documents simply close nothing. This `spec_state` value is distinct from the per-document `spec_stage: deferred` described above — one is the asset's own derived status (what the coordinator and the icon registry read), the other is a single document's park state — and `/lazy-spec.audit` treats both as legal, unrelated values.
 

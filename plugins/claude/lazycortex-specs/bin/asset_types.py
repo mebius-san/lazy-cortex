@@ -61,13 +61,22 @@ class AssetTypeField:
       whatever role it dispatches — a content type's record schema lives here.
   """
 
+  # Iconize icon name the asset folder is painted with.
   ICON = "icon"
+  # Optional iconize colour paired with the icon.
   COLOR = "color"
+  # Reference of the playbook the coordinator loads for the type.
   PLAYBOOK = "playbook"
+  # Name of the concrete type this one borrows its playbook from.
   ALIAS_OF = "alias_of"
+  # Folder name a new asset of the type lands in when the caller names none.
   DEFAULT_PATH = "default_path"
+  # The type's starting document as a `<file>:<doc_type>` token.
   START_DOC = "start_doc"
+  # Tools the type implies before anyone has judged the asset.
   DEFAULT_TOOLS = "default_tools"
+  # Repo-relative guideline paths every job on an asset of the type carries, whatever role it dispatches — a content
+  # type's record schema lives here.
   GUIDELINES = "guidelines"
 
 
@@ -91,17 +100,29 @@ class _K:
     SKIPPED: Result field counting notes the backfill left alone.
   """
 
+  # Settings key holding a product's own asset-type declarations.
   ASSET_TYPES = "asset_types"
+  # Settings key holding the product registry.
   PRODUCTS = "products"
+  # The plugin subdirectory holding the shipped declaration file.
   REFERENCES_DIR = "references"
+  # Filename of the shipped declaration file.
   DEFAULTS_FILE = "lazy-spec.asset-types.json"
+  # Repo-relative path of the settings file.
   SETTINGS_REL = Path(".claude") / "lazy.settings.json"
+  # File encoding used throughout this module.
   ENCODING = "utf-8"
+  # Separator between the file and the document type in a `start_doc` token.
   START_DOC_SEP = ":"
+  # Filename suffix every spec document carries.
   MD_SUFFIX = ".md"
+  # Frontmatter key naming a document's role.
   SPEC_ROLE = "spec_role"
+  # The `spec_role` value marking a status folder-note.
   STATUS_ROLE = "status"
+  # Result field counting notes the backfill wrote to.
   TOUCHED = "touched"
+  # Result field counting notes the backfill left alone.
   SKIPPED = "skipped"
 
 

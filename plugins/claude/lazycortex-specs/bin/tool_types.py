@@ -49,8 +49,11 @@ class ToolTypeField:
     PLAN_DOC: Document type the tool's plan is written as, absent for a tool needing none.
   """
 
+  # Reference of the playbook the coordinator loads for the tool.
   PLAYBOOK = "playbook"
+  # Document type the tool's own report is written as.
   REPORT_DOC = "report_doc"
+  # Document type the tool's plan is written as, absent for a tool needing none.
   PLAN_DOC = "plan_doc"
 
 
@@ -66,9 +69,13 @@ class _K:
     ENCODING: File encoding used throughout this module.
   """
 
+  # Settings key holding a product's own tool declarations.
   TOOL_TYPES = "tool_types"
+  # The plugin subdirectory holding the shipped declaration file.
   REFERENCES_DIR = "references"
+  # Filename of the shipped declaration file.
   DEFAULTS_FILE = "lazy-spec.tool-types.json"
+  # File encoding used throughout this module.
   ENCODING = "utf-8"
 
 
