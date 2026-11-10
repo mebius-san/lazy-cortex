@@ -5,7 +5,7 @@ description: Structure-map protocol for the wiki.structure-curator expert — pa
 ---
 # lazy-wiki.structure-protocol v1
 
-Canonical contract for jobs dispatched to `wiki.structure-curator` (or any consumer producing structure-curator-shaped jobs). The structure map is one file per repository, `docs/structure.md` — a tree of `path — description` entries whose nesting mirrors the directory nesting. The curator is a C-hybrid expert: it has Bash, edits the map in place, and commits. Which path classes are described at which depth, and which paths are excluded, is consumer configuration the curator reads from the settings itself — out of scope for this wire contract.
+Canonical contract for jobs dispatched to `wiki.structure-curator` (or any consumer producing structure-curator-shaped jobs). The structure map is one file per repository, `docs/structure.md` — a tree of `path — description` entries whose nesting mirrors the directory nesting. The curator is a C-hybrid expert: it has Bash, decides the map operations, and hands them to the deterministic `structure-apply` verb, which writes the map, commits it, and writes the job's response. Which path classes are described at which depth, and which paths are excluded, is consumer configuration; the curator never reads it itself but takes each path's depth from the `structure-resolve` verb, which applies it, and the rule is out of scope for this wire contract.
 
 ## Request shape (`request.json`)
 
@@ -39,7 +39,7 @@ Field notes:
 - `paths` / `status` — (`curate` only) the changed paths and the git status letter they share. `A` arrives from a new-files watch, `D` from a deleted-files watch; the watches feed one kind because the curator's response differs only in direction (enter or update versus remove). `M` stays a legal value for a consumer that dispatches curator-shaped jobs from its own changed-files watch, but no shipped routine sends it — the map describes the tree's shape, and a content edit never changes that.
 - `old_paths` / `new_paths` — (`rename` only) both sides of every rename in the batch, the same length and aligned index by index. Both lists are required: removing the old entry needs the old name, and the two names travel in one request because a rename split into a delete and an add would touch the map twice for one event.
 - **A request carries a batch, and one path is a batch of one.** A watch hands every path of one tick to a single job, so the curator is dispatched once per tick rather than once per file — the map's unit of change is the batch, and forty files moved together are one change to it. The singular keys `path`, `old_path` and `new_path` remain legal for a consumer dispatching its own curator-shaped jobs; a request carrying one is read as a batch of one, and a request carrying both forms uses the list.
-- **Every path in one request shares one status and one commit.** The batch is applied as a whole: the curator judges each member, folds every resulting operation into one `result/structure.json`, and lands one commit for the map. A member that changes nothing contributes no operation; a request whose members all change nothing is a `noop` for the whole batch.
+- **Every path in one request shares one status and one commit.** The batch is applied as a whole: the curator judges each member, folds every resulting operation into one `result/structure.json`, and `structure-apply` lands one commit for the map. A member that changes nothing contributes no operation; a request whose members all change nothing is a `noop` for the whole batch.
 - There is no `source/` — the curator reads the real file (or notices its absence) in the working tree, because the description is derived from live content and a snapshot of one file cannot show the directory around it.
 - No extra fields.
 
@@ -61,7 +61,7 @@ A `report` dispatch writes no `response.json` at all; its findings travel in the
 ## Kind enum
 
 - `curate` — apply a batch of path changes to the map: enter or update each path's entry (and its directory's entry when the directory's role shifted) on `A`/`M`, remove it on `D`. Per-batch, one commit.
-- `rename` — move a batch of entries: remove each old path's entry, enter each new path at the depth its class prescribes. Per-batch, one commit.
+- `rename` — move a batch of entries: remove each old path's entry, enter each new path at the depth `structure-resolve` returns for it. Per-batch, one commit.
 - `report` — read the whole map against the tree and return the divergences. Repo-level, read-only, no job dir.
 
 ## Outcome by kind
@@ -116,13 +116,13 @@ A `report` dispatch returns findings as its reply, one entry per finding, each n
 - `missing-file` — a load-bearing file is absent from the map (load-bearing is the curator's judgement, which is why this finding is not deterministic);
 - `dead-entry` — the map carries an entry whose path is not on disk;
 - `divergence` — an entry's description no longer matches what the path holds;
-- `depth` — a path is described at a different depth than its class prescribes.
+- `depth` — a path is described at a different depth than `structure-resolve` returns for it.
 
 Configuration findings (exclusions, routine wiring, profile overlaps) are the dispatching skill's own; the curator neither computes nor returns them.
 
 ## Side-effect rules
 
-- The expert MAY edit the repository's structure map in place, and commit it under the git identity its environment carries.
+- The expert changes the repository's structure map only through `structure-apply`: the entry form, its place under the nearest described parent, the duplicate-entry refusal, and the commit are the verb's, and the commit carries the git identity the job's environment holds, so the map is attributed to the curator and to nothing else.
 - The expert MUST NOT edit any other tracked file — the paths it describes are read-only material, and a missing docstring or README is never "fixed" to improve a description.
 - The expert MUST NOT create the map when it is missing: the full build belongs to the rebuild mode of the structure skill, and an incremental job against a missing map is an `error`, not an invitation.
 - The expert MUST NOT touch anything outside the job dir except the map.

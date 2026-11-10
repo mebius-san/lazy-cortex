@@ -1,8 +1,8 @@
 """
 Centralized key names for the Iconize sync system.
 
-The iconize-sync worker reads and writes a fixed pair of Iconize frontmatter
-keys across many resolution and reconcile paths, emits result envelopes whose
+The iconize-sync worker relies on the fixed pair of keys an icon entry is built from
+across many resolution, validation and reconcile paths, emits result envelopes whose
 keys are parsed by callers, and exchanges payloads with external callbacks over
 a fixed protocol. Defining every such key once here means a mistyped key
 surfaces as an `AttributeError` at import time rather than as a silently
@@ -18,31 +18,33 @@ if TYPE_CHECKING:
 # ----------------------------------------------------------------------------------------
 class IconKey:
   """
-  Iconize frontmatter key names resolved and written by the sync worker.
+  Key names of an icon entry, the mapping that represents one icon.
 
-  Guarantees:
-    - Repaint reads and writes only the NAME and COLOR keys; every other frontmatter field on the
-      note is left untouched.
+  The one shape every stage of the icon pipeline stores, writes and reads, so an entry produced by one stage is
+  consumed unchanged by the next.
 
   Attributes:
-    NAME: The icon identifier key Iconize paints from.
-    COLOR: The optional icon color key Iconize paints from.
+    NAME: The key holding an entry's icon identifier.
+    COLOR: The key holding an entry's optional icon color.
   """
 
-  # Domain(obsidian.icon-repaint):
-  # # Managed icon frontmatter keys
-  # Icon repaint touches exactly two frontmatter keys on a note: the icon identifier and an optional color.
-  # No other frontmatter field is ever read or written by the repaint mechanism, which is what lets a
-  # surgical rewrite of a note replace only these two keys and leave every other byte of the note's
-  # frontmatter and body untouched.
+  # Domain(obsidian.icon-resolution):
+  # # Icon entry shape
+  # An icon is always represented by the same small mapping, an icon entry, which carries an icon
+  # identifier, a color, or both. An entry that names a look carries the identifier, and its color is
+  # optional: left out, the icon is painted without one. A color-only entry is a legitimate shape too: it
+  # paints a color and leaves the look to another rule, or to whatever the note already carries.
+  # Resolution can therefore return an entry with no identifier, for instance when a rule paints a state
+  # color and borrows its look from elsewhere. The standalone entry validation checks an entry that names
+  # a look, so it rejects an entry whose identifier is missing or empty. The same shape is used everywhere
+  # an icon is spoken of: it is how the icon-map and its registries store icons, what a matcher's resolve
+  # block and its overlays write, what resolution returns for a note, and what that validation reads.
+  # Because every stage speaks this one shape, an entry produced by one stage can be consumed unchanged
+  # by the next.
 
-  # Contract:
-  # Repaint reads and writes only NAME and COLOR on a note's frontmatter; every other frontmatter
-  # field is never read or written by the repaint mechanism.
-
-  # The icon identifier key Iconize paints from.
+  # The key holding the icon identifier of an icon entry.
   NAME = "iconName"
-  # The optional icon color key Iconize paints from.
+  # The key holding the optional icon color of an icon entry.
   COLOR = "iconColor"
 
 
@@ -75,9 +77,11 @@ class ResultKey:
   # produced it. A run started as a dry run reports the icons it would assign without writing anything
   # to disk, while a real run reports either the individual paths it actually rewrote or, when
   # individual paths are not tracked, only their count. A reconcile run can be scoped narrowly to one
-  # sub-tree prefix, broadly to a set of dirty prefixes, or to every note belonging to one plugin;
-  # after repainting, the worker commits the touched notes and reports how many landed in the commit,
-  # or a one-line reason when the commit could not land.
+  # sub-tree prefix, broadly to a set of dirty prefixes, or to every note belonging to one plugin.
+  # Only the run triggered by a commit goes on to commit anything: it commits the notes whose drift is
+  # icon-only and reports how many landed in the commit, which can differ from the number of notes the
+  # run rewrote, or a one-line reason when the commit could not land. Every other run leaves committing
+  # to its caller and reports no commit count.
 
   # The operation discriminator naming which subcommand produced the envelope.
   OP = "op"
@@ -128,7 +132,7 @@ class CallbackKey:
   # # External callback resolution protocol
   # When a matcher's predicate or resolve block delegates to an external callback, the worker sends
   # the callback the note's vault-relative path and its parsed frontmatter, plus — for a resolve
-  # callback — the parsed icon-map's named registries, then reads back either a boolean match verdict
+  # callback — the whole composed icon-map, registries included, then reads back either a boolean match verdict
   # or a resolved icon entry. The callback is the only place where resolution logic can depend on
   # computation outside the icon-map document itself.
 
@@ -304,9 +308,6 @@ class InterpToken:
   """
   Interpolation token references substituted inside icon-map template strings.
 
-  Guarantees:
-    - BASENAME and BASENAME_STEM are the only interpolation tokens a template string may reference.
-
   Attributes:
     BASENAME: The full-basename token reference.
     BASENAME_STEM: The basename-without-extension token reference.
@@ -315,13 +316,11 @@ class InterpToken:
   # Domain(obsidian.icon-resolution):
   # # Icon template interpolation
   # A resolve block's icon or color name may reference the note's own basename, or the basename with
-  # its file extension stripped, as an interpolation token inside the template string. The worker
-  # substitutes these tokens with the actual note filename fragments before the resolved value is
-  # written back to the note's frontmatter.
-
-  # Contract:
-  # BASENAME and BASENAME_STEM are the only interpolation tokens a resolve block's template string
-  # may reference.
+  # its file extension stripped, as an interpolation token inside the template string. A third family
+  # of tokens names one frontmatter field of the note, by a key of letters, digits and underscores, and
+  # stands for that field's value, or for nothing when the note lacks the field. The worker substitutes
+  # these tokens with the actual note values before the resolved value is written back to the note's
+  # frontmatter.
 
   # The full-basename token reference.
   BASENAME = "basename"
@@ -334,11 +333,6 @@ class YamlScalar:
   """
   YAML scalar literals the flat frontmatter parser recognizes.
 
-  Guarantees:
-    - TRUE and FALSE are the only spellings the flat frontmatter parser recognizes as booleans; every
-      other value, including any different casing or a numeric literal, is read back as a plain
-      string.
-
   Attributes:
     TRUE: The boolean-true scalar token.
     FALSE: The boolean-false scalar token.
@@ -347,13 +341,10 @@ class YamlScalar:
   # Domain(obsidian.icon-resolution):
   # # Frontmatter scalar recognition for matching
   # When a predicate compares a note's frontmatter value against a literal, the frontmatter is read by
-  # a flat parser that recognizes only the literal true and false tokens as booleans; every other
-  # scalar value, including numbers and quoted or unquoted strings, is treated as a plain string. A
-  # predicate that expects a boolean must match this literal spelling exactly.
-
-  # Contract:
-  # TRUE and FALSE are the only spellings the flat frontmatter parser recognizes as booleans; every
-  # other value, including any different casing or a numeric literal, is read back as a plain string.
+  # a flat parser that recognizes only the literal true and false tokens as booleans, and a value made
+  # of digits alone, with an optional leading minus, as an integer; every other scalar value, quoted or
+  # unquoted, is treated as a plain string. A predicate that expects a boolean must match this literal
+  # spelling exactly, and one that compares against a number must give a number, not a quoted string.
 
   # The boolean-true scalar token.
   TRUE = "true"

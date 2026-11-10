@@ -1,36 +1,45 @@
 """Inline icon repaint for spec bot commits.
 
-One helper: hand it the repo-relative notes a commit is about to carry and it asks the
-obsidian plugin's `sync-paths` op to refresh their icon frontmatter, returning the paths
-that actually changed so the caller folds them into the same commit. No separate icons
-commit is born, and no coordinator reads a repaint as an operator edit.
+Hand it the repo-relative notes a commit is about to carry and it asks the obsidian plugin's
+`sync-paths` op to refresh their icon frontmatter, returning the paths that actually changed so
+the caller folds them into the same commit. No separate icons commit is born, and no coordinator
+reads a repaint as an operator edit.
 
-Best-effort by contract: a consumer without the obsidian plugin, an unset
-`$LAZYCORTEX_PLUGIN_DIRS` and no registry record for the sibling, or a failing worker yields an empty list and never raises.
+Two forms: the best-effort one, where a host without the obsidian plugin's CLI or a failing worker
+yields an empty list and never raises, and a checked one that raises on a failed repaint so a
+caller can report it.
 """
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
-
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from spec_paths import installed_plugin_root  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
 
 
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+from spec_paths import resolve_plugin_cli  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+
+
+class RepaintFailedError(RuntimeError):
+  """
+  Failure of an icon repaint that was attempted but did not complete.
+  """
+
+
 def repaint_paths(repo: Path, paths: list[str]) -> list[str]:
   """
-  Repaint icon frontmatter for `paths` via the obsidian plugin's `sync-paths` op.
+  Repaint icon frontmatter for `paths` via the obsidian plugin's `sync-paths` op, best-effort.
 
-  Resolves the `lazycortex-obsidian` CLI through `$LAZYCORTEX_PLUGIN_DIRS` (the blessed
-  cross-plugin contract), falling back to the install root Claude Code's plugin registry records
-  for it, and asks it to refresh the named repo-relative notes.
+  The non-raising form of `repaint_paths_checked`, for callers that do not report a failed repaint.
 
   Guarantees:
     - Never raises; any failure — the obsidian plugin absent, the environment unset, the
@@ -59,47 +68,96 @@ def repaint_paths(repo: Path, paths: list[str]) -> list[str]:
   # its icon refreshed together with the change, or it does not, silently, until the next change
   # gives the repaint another chance.
 
+  # a failed repaint reads as one that changed nothing
+  try:
+    return repaint_paths_checked(repo, paths)
+  except RepaintFailedError:
+    return []
+
+
+def repaint_paths_checked(repo: Path, paths: list[str]) -> list[str]:
+  """
+  Repaint icon frontmatter for `paths` via the obsidian plugin's `sync-paths` op, telling a failure apart.
+
+  Asks the obsidian plugin to refresh the icons of the named repo-relative notes and reports which
+  of them changed.
+
+  Guarantees:
+    - A repaint that was attempted and failed raises `RepaintFailedError`; it never reads as a repaint that
+      changed nothing.
+    - An unavailable repaint — no paths, no obsidian plugin on this host, or a worker that exits cleanly with no
+      output because it stays inert on this vault — is not a failure and yields an empty list.
+
+  Args:
+    repo: Absolute path to the repository root.
+    paths: Repo-relative POSIX paths of the notes about to be committed.
+
+  Returns:
+    Repo-relative paths whose frontmatter the repaint actually changed; empty when the
+    repaint was unavailable or changed nothing.
+
+  Raises:
+    RepaintFailedError: If the worker could not be started, exited non-zero, or printed output that is not a
+      JSON object with a `touched` list.
+  """
+
+  # Contract:
+  # A repaint that was attempted and failed raises `RepaintFailedError`, never an empty list,
+  # so a caller can tell a failure from a repaint that changed nothing.
+
+  # Contract:
+  # An unavailable repaint — no paths, no obsidian plugin on this host, or a worker that exits cleanly
+  # with no output because it stays inert on this vault — is NOT a failure.
+
   # guard: nothing to repaint — skip the subprocess entirely
   if not paths:
     return []
 
-  # walk the plugin-dir registry for the obsidian CLI; absence means no repaint here
-  cli = None
-  for entry in os.environ.get("LAZYCORTEX_PLUGIN_DIRS", "").split(os.pathsep):
-    # guard: empty segments appear when the variable is unset or ends with a separator
-    if not entry:
-      continue
-    # waiver: sibling plugin's on-disk CLI layout per dev.plugin-boundaries § 1c, not a domain key
-    candidate = Path(entry) / "bin" / "lazycortex-obsidian"
-    if candidate.is_file():
-      cli = candidate
-      break
+  # the obsidian CLI through the shared sibling lookup; absence means no repaint here
+  # waiver: sibling plugin's CLI name per dev.plugin-boundaries § 1c, not a domain key
+  cli = resolve_plugin_cli("lazycortex-obsidian", dev_repo = repo)
 
-  # registry fallback — a session (hook, skill) has no daemon export to walk
-  if cli is None:
-    # waiver: sibling plugin's on-disk CLI layout per dev.plugin-boundaries § 1c, not a domain key
-    root = installed_plugin_root("lazycortex-obsidian")
-    installed = None if root is None else root / "bin" / "lazycortex-obsidian"
-    if installed is not None and installed.is_file():
-      cli = installed
-
-  # guard: no obsidian plugin on this host — repaint silently unavailable
+  # guard: no obsidian plugin on this host — repaint unavailable, which is not a failure
   if cli is None:
     return []
 
-  # run the repaint and read back which notes actually changed
+  # run the repaint; a worker that cannot start, or whose output cannot be decoded, is a failed repaint
   try:
     proc = subprocess.run(
         # waiver: the obsidian CLI's subcommand vocabulary, owned by lazycortex-obsidian
         [sys.executable, str(cli), "sync-paths", *paths],
         cwd = repo, capture_output = True, text = True, check = False, encoding = "utf-8",
     )
+  except OSError as error:
+    raise RepaintFailedError(f"worker did not start: {error}") from error
+  except ValueError as error:
+    raise RepaintFailedError(f"worker output is not UTF-8: {error}") from error
 
-    # guard: a failing worker must never block the caller's commit
-    if proc.returncode != 0:
-      return []
-    # waiver: the obsidian CLI's JSON result vocabulary, owned by lazycortex-obsidian
-    touched = json.loads(proc.stdout.strip().splitlines()[-1]).get("touched", [])
-  except (OSError, ValueError, IndexError):
+  # guard: a worker that exits non-zero failed the repaint
+  if proc.returncode != 0:
+    raise RepaintFailedError(f"worker exited {proc.returncode}: {proc.stderr.strip()[-240:]}")
+
+  # guard: a clean exit with no output is a worker that stayed inert on this vault — unavailable, not failed
+  if not proc.stdout.strip():
     return []
+
+  # read back which notes actually changed; output that is not JSON is a failed repaint
+  try:
+    result = json.loads(proc.stdout.strip().splitlines()[-1])
+  except (ValueError, IndexError) as error:
+    raise RepaintFailedError(f"unparseable worker output: {proc.stdout.strip()[-240:]!r}") from error
+
+  # guard: valid JSON of the wrong shape is as unparseable as garbage
+  if not isinstance(result, dict):
+    raise RepaintFailedError(f"worker output is not an object: {proc.stdout.strip()[-240:]!r}")
+
+  # read the list of changed notes the worker reported
+  # waiver: the obsidian CLI's JSON result vocabulary, owned by lazycortex-obsidian
+  touched = result.get("touched", [])
+
+  # guard: a non-list touched value would iterate as characters or raise
+  if not isinstance(touched, list):
+    raise RepaintFailedError(f"worker `touched` is not a list: {touched!r}")
+
+  # only string paths count as touched notes
   return [p for p in touched if isinstance(p, str)]

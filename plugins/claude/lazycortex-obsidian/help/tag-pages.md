@@ -1,16 +1,16 @@
 ---
 chapter_type: block
 summary: Keep a Tags/ folder in sync with every tag used across your vault — pages created, updated, and pruned automatically.
-last_regen: 2026-09-24
+last_regen: 2026-11-10
 no_diagram: true
 source_skills:
   - lazy-obsidian.gen-tag-pages
-source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
-surface_sha: 81a8fe424eb72bbaa2be7518eabcb199305547c45bf2cf96b13f03c15038a0ff
+source_sha: 0fbf083425e77d4114828956e4ab35cfecddbc4d
+surface_sha: a9932f36619109e844ef0c0dbc3981ddb8b0290d956576b028ad2021c4dbd327
 ---
 # Tag page generation
 
-When a vault accumulates tags across dozens or hundreds of notes, navigating by tag becomes friction: you can search, but you can't browse a tag the way you browse a note. Tag pages solve that — one page per tag, auto-populated by a Dataview query, sitting in a `Tags/` folder whose hierarchy mirrors the tag hierarchy. The `lazy-obsidian.gen-tag-pages` agent builds and maintains that folder for you: it scans every `.md` file's frontmatter, derives the full set of tags (including implicit parent segments for nested tags like `rpg/effects/layers`), and creates, keeps, or removes pages to match reality.
+When a vault accumulates tags across dozens or hundreds of notes, navigating by tag becomes friction: you can search, but you can't browse a tag the way you browse a note. Tag pages solve that — one page per tag, auto-populated by a Dataview query, sitting in a `Tags/` folder whose hierarchy mirrors the tag hierarchy. The `lazy-obsidian.gen-tag-pages` agent builds and maintains that folder for you: it scans every `.md` file's frontmatter, derives the full set of tags (including implicit parent segments for nested tags like `docs/api/endpoints`), and creates, keeps, or removes pages to match reality.
 
 The template each page is rendered from lives in your repo at `.claude/templates/lazy-obsidian.tag-page-template.md`. It ships with a DataviewJS `Index` block that lists every note carrying the tag. You can edit the template freely — the agent reads it fresh each run and never overwrites pages it has already created, so your customised summaries survive regeneration.
 
@@ -25,7 +25,7 @@ The template each page is rendered from lives in your repo at `.claude/templates
 
 Run `/lazy-obsidian.gen-tag-pages` and the agent handles everything in one pass. It opens with a scan — all `.md` files outside system directories (`.claude/`, `Ω System/`, `Tags/` itself) are grepped for `tags:` frontmatter. Template/placeholder tags (anything containing `<` and `>`) are silently ignored.
 
-Once the tag set is collected, the agent expands it: `rpg/effects/layers/aura` implicitly requires pages for `rpg`, `rpg/effects`, and `rpg/effects/layers` as well, so those parent entries are added automatically. It then inventories what already exists under `Tags/`, computes the three-way diff (create / keep / delete), and acts on it.
+Once the tag set is collected, the agent expands it: `docs/api/endpoints/auth` implicitly requires pages for `docs`, `docs/api`, and `docs/api/endpoints` as well, so those parent entries are added automatically. It then inventories what already exists under `Tags/`, computes the three-way diff (create / keep / delete), and acts on it.
 
 Pages in the "keep" set are left untouched — their summaries survive across runs. Pages in the "delete" set are removed and any directories they leave empty are pruned. Pages in the "create" set are written from your local template: the agent infers a concise 1–2 sentence summary for each tag (drawing on the tag name, the notes that carry it, and its position in the hierarchy) before substituting `{{TAG_PATH}}` and `{{SUMMARY}}` into the template.
 

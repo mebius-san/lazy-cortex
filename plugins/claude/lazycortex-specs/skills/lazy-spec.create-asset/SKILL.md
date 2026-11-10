@@ -30,7 +30,7 @@ This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorde
 Signature: `<product> <asset-type> <slug> [--path <dir>] [--empty]`.
 
 1. **`<product>`** — the product compound-key (e.g. `dashboards`, `server-tester-chapter`).
-2. **`<asset-type>`** — the asset type: one of the plugin's shipped declarations (`feature` / `change` / `bug` / `content` / `research`), or a key the product declares under `asset_types` (e.g. `characters`, `scenes`).
+2. **`<asset-type>`** — the asset type: one of the plugin's shipped declarations (`feature` / `change` / `bug` / `content` / `research` / `release` — the last is created by the product coordinator's `Start release`, never through this skill), or a key the product declares under `asset_types` (e.g. `characters`, `scenes`).
 3. **`<slug>`** — the asset slug, lowercase-with-hyphens. The skill does NOT infer it — the caller passes it.
 4. **`--path <dir>`** (optional) — the folder under `spec_path` the asset lands in, relative to the product root; `.` is the product root. When present, Step 2 takes it as the settled placement and asks nothing.
 5. **`--empty`** (optional) — scaffold-only mode. Produces the folder-note plus empty-stage authored docs, with no clarifying questions and no prose. Used by the request system's spawn path — `lazy-spec.request-apply` (`${CLAUDE_PLUGIN_ROOT}/bin/apply_request.py`) invokes the equivalent `scaffold-asset` CLI primitive directly, then seeds the router's per-target description onto the primary doc afterward (`lazy-spec.request-protocol.md` § Body distribution rules).
@@ -42,7 +42,7 @@ When invoked with `--empty`:
 - Step 2 validates the type as usual but asks nothing — its location question is skipped; when the caller named no `--path` the folder falls back to the type's `default_path` (outcome suffix `path-default`), and when the caller named one, that `--path` is the settled placement (outcome suffix `path-given`) exactly as in normal mode.
 - Skip Step 3 (no clarifying questions) — emit outcome `skipped-empty-mode`.
 - Step 4 still resolves the start doc + icon (the scaffold needs both), and never widens the document set beyond the type's `start_doc`.
-- Step 5 (scaffold) runs as usual; the seeded doc is set to `draft` via `lazy-spec.set-stage` as in normal mode — see Step 5 note. The scaffold seeds ONLY the type's start doc; every further document is opt-in and is never created here (see Step 4).
+- Step 5 (scaffold) runs as usual; `scaffold-asset` seeds the doc's stage itself, as in normal mode — see Step 5. The scaffold seeds ONLY the type's start doc; every further document is opt-in and is never created here (see Step 4).
 - Skip Step 6 (no précis) — emit outcome `skipped-empty-mode`.
 - Skip Step 7 (no prose) — emit outcome `skipped-empty-mode`.
 
@@ -98,7 +98,7 @@ Otherwise ask 2–5 targeted questions via `AskUserQuestion` — ONE question at
 Scale the topics to the asset type:
 
 - **`feature`** — scope (in/out), users (who triggers it, how), edge-case behavior the user likely hasn't considered.
-- **`change`** — what it was → what it becomes, migration / compatibility from current behavior; also ask, as a separate targeted question, which existing asset(s) this change modifies — offer the product's existing `feature` (and other-type) assets as options, multi-select, explicitly optional (a cross-cutting or infrastructure-only change may name none). The answer becomes `spec_targets` (Step 5 note) — the design cascade in `lazy-spec.lifecycle-protocol.md` Part 4 folds this change's approved design into each named target's own `design.md` / `test-plan.md` once the change's own design is approved.
+- **`change`** — what it was → what it becomes, migration / compatibility from current behavior; also ask, as a separate targeted question, which existing asset(s) this change modifies — offer the product's existing `feature` (and other-type) assets as options, multi-select, explicitly optional (a cross-cutting or infrastructure-only change may name none). The answer becomes `spec_targets` (Step 5 `--target`) — the design cascade in `lazy-spec.lifecycle-protocol.md` Part 4 folds this change's approved design into each named target's own `design.md` / `test-plan.md` once the change's own design is approved.
 - **`bug`** — repro steps, observed-vs-expected, environment (platform / version / data state).
 - **any other declared type** — whatever the type's start doc should capture; ground the questions in the prose sections that document will hold, per the type's own playbook.
 
@@ -108,8 +108,8 @@ Scale the topics to the asset type:
 
 **Widening the set is the playbook's call, not this skill's.** `Read` the reference named by the declaration's `playbook` (resolving one `alias_of` hop when the type declares none of its own). A declaration carrying neither `playbook` nor `alias_of` is refused: the coordinator would have no law to work the asset under, so creating it would strand it. Refuse with a message naming the type and pointing at `/lazy-spec.add-asset-type` to complete the declaration. Two widening channels:
 
-- **A mandatory vision replaces the start doc.** When the type record carries `vision: mandatory` (the shipped `feature` does), `vision.md:vision` is seeded INSTEAD of the start doc. The type playbook holds the start doc until the vision is `approved` — the coordinator seeds it later through its own launch row — so seeding both here would put the start doc ahead of the vision it must follow. Any other document the playbook's definition-documents chapter declares unconditionally mandatory joins the doc set as long as the playbook does not gate it on the vision the same way. Under `--empty` this bullet does not apply: the doc set stays the bare start doc, the pre-vision state the playbook leaves to the operator.
-- **Opt-in documents are offered, not assumed.** In normal mode (not `--empty`), one `AskUserQuestion` (multiSelect) offers the opt-in documents the playbook allows on this type — `vision.md` (where the contract is `opt-in`, e.g. a change), `use-cases.md`, `ui-design.md`:
+- **A mandatory vision replaces the start doc.** When the type record carries `vision: mandatory` (no shipped type does — the shipped `feature`, `change` and `content` declare `vision: opt-in` in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.asset-types.json`; only an operator-declared type can carry `mandatory`), `vision.md:vision` is seeded INSTEAD of the start doc. The type playbook holds the start doc until the vision is `approved` — the coordinator seeds it later through its own launch row — so seeding both here would put the start doc ahead of the vision it must follow. Any other document the playbook's definition-documents chapter declares unconditionally mandatory joins the doc set as long as the playbook does not gate it on the vision the same way. Under `--empty` this bullet does not apply: the doc set stays the bare start doc, the pre-vision state the playbook leaves to the operator.
+- **Opt-in documents are offered, not assumed.** In normal mode (not `--empty`), one `AskUserQuestion` (multiSelect) offers the opt-in documents the playbook allows on this type — `vision.md` (where the contract is `opt-in`, e.g. a feature or a change), `use-cases.md`, `ui-design.md`:
 
   ```
   Context (print before asking):
@@ -135,10 +135,10 @@ The status template ships WITHOUT `iconize_icon` / `iconize_color` lines (a dev-
 Invoke the deterministic scaffold primitive via `Bash`:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" scaffold-asset <product> <asset-type> <slug> --doc <name>:<spec_doc_type> [--doc ...] [--path <dir>])
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" scaffold-asset <product> <asset-type> <slug> --doc <name>:<spec_doc_type> [--doc ...] [--path <dir>] [--target <folder>/<slug> ...])
 ```
 
-Pass one `--doc` per document Step 4 resolved — the type's `start_doc` (or the mandatory vision standing in for it) first, then anything the type playbook added. **At least one `--doc` is mandatory**: the primitive has no default layout and a call carrying none is a logical refusal, not an empty scaffold. Pass `--path <dir>` when Step 2 settled on a folder other than the type's `default_path` — the caller's own `--path`, or the operator's answer; omit it to take the default.
+Pass one `--doc` per document Step 4 resolved — the type's `start_doc` (or the mandatory vision standing in for it) first, then anything the type playbook added. **At least one `--doc` is mandatory**: the primitive has no default layout and a call carrying none is a logical refusal, not an empty scaffold. Pass `--path <dir>` when Step 2 settled on a folder other than the type's `default_path` — the caller's own `--path`, or the operator's answer; omit it to take the default. For a `change` whose Step 3 clarification named the existing assets it modifies, pass one `--target <folder>/<slug>` per named asset — tokens relative to the product's `spec_path`, in the order the operator picked them; the primitive writes them as the folder-note's `spec_targets`, the key `lazy-spec.lifecycle-protocol.md` Part 4's design cascade reads once the change's own `spec_design_done` flips true. No targets named → no `--target`, and the key stays absent (a normal state for a cross-cutting or infrastructure-only change, not a gap).
 
 The primitive (`${CLAUDE_PLUGIN_ROOT}/bin/scaffold_asset.py`) owns the mechanical scaffold work — template resolution (the six-layer chain of `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md` plus one override layer per ancestor product: the type's own per-product override → the same override for each ancestor product of that one, innermost ancestor first → the consumer context baseline → the plugin context baseline → the consumer linear base → the plugin linear base → the type-agnostic base; an alias type's own chain outranks its base type's in full), token substitution (`{{product}}`, `{{slug}}`, `{{product_tag}}`, `iconize_icon`, `iconize_color`), file writes (folder-note + the named documents), per-file stage seeding (no history line — scaffolding is not a journaled event), and lazy group-folder seeding — the first asset landing in a group folder seeds its operator-zone group folder-note (icon from the type whose `default_path` names that folder; an ad-hoc folder no declaration names gets a note without iconize keys). It refuses if the target folder already exists; the operator must pick a unique slug.
 
@@ -160,17 +160,19 @@ On `outcome: error` (logical failure — folder exists, unknown product, missing
 
 After this step, the folder exists with template-substituted content, `spec_source_docs` defaults populated, `# Sources / ## Docs` projection rendered, and each seeded doc's stage matching its own doc type's default. The folder-note's `# History` section stays empty — scaffolding and seeding are not journaled events.
 
-**`change` type, targets named in Step 3.** When Step 3's clarification named one or more existing assets this change modifies, write `spec_targets: ["<folder>/<slug>", ...]` into the freshly-scaffolded folder-note's frontmatter — tokens relative to the product's `spec_path`, one per named target, in the order the operator picked them. No targets named → leave the key absent entirely (an absent `spec_targets` is a normal state for a cross-cutting or infrastructure-only change, not a gap). This is the same frontmatter key `lazy-spec.lifecycle-protocol.md` Part 4's design cascade reads once the change's own `spec_design_done` flips true.
-
-**This skill never writes `spec_depends_on`.** Unlike `spec_targets` above, the dependency graph (`lazy-spec.coordination-playbook.md` § 8) is coordinator-written ONLY — via `note-set-key`, either materializing an architect's `[!asset-proposal]` child (Chapter 10) or an operator-driven edit routed through the coordinator. No wizard step here asks for dependencies; a freshly-scaffolded asset always starts with the key absent.
-
 ## Step 6 — Author the asset précis
 
 Skip entirely under `--empty` (outcome `skipped-empty-mode`).
 
 Otherwise author the asset's `# Summary` précis: 1–2 phrases capturing the feature / change / bug essence drawn from the clarification answers (Step 3) and the doc just scaffolded. Write the précis as the section's content in the asset's `<slug>.md` folder-note (the `folder_note` path from the scaffold's JSON output): one plain line directly below the section's engine-owned explainer line, under the `#protected/spec/summary` tag. An asset note carries no `<!-- spec:precis:* -->` markers — those belong to group and product notes (`summary_render.py`); write the line itself, replacing a previous précis line when one is already there, and touch nothing else in the section.
 
-Commit the updated folder-note by naming it in the commit pathspec (`git commit -m "docs(<slug>): author précis" -- <folder_note>`), appending `<group_note>` whenever the scaffold's JSON reported a non-empty one — a freshly seeded group note left out of the pathspec stays untracked and halts the runtime daemon's clean-tree check. No `git add` — the pathspec carries the worktree content directly, per `lazy-core.git`'s pathspec discipline, and leaves the operator's index untouched.
+Commit the folder-note together with everything the scaffold seeded, through the verb:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" commit-note <folder_note> --subject "docs(<slug>): author précis" [--path <group_note>] --path <doc> [--path <doc> ...])
+```
+
+Pass `--path <group_note>` whenever the scaffold's JSON reported a non-empty one, and one `--path` per `docs[].file` it reported, so the asset enters history whole — a seeded file left out stays untracked and halts the runtime daemon's clean-tree check. The verb commits by explicit pathspec and leaves the operator's index untouched.
 
 Outcome: `precis-authored` or `skipped-empty-mode`.
 
@@ -187,7 +189,7 @@ One prose pass per document the scaffold actually seeded, driven by that documen
 - **`bug`** — fill `bug.md`'s sections (`## Overview`, `## Way to reproduce`, `## Observed behavior`, `## Expected behavior`, `## Environment`, `## Related code / logs`) from the repro / observed-vs-expected / environment answers.
 - **any other seeded doc type** — author it per the sections its own template carries, grounded in the Step 3 clarification and in what the type playbook says that document is for.
 
-In every authored doc, record a real decision fork the clarification settled (per the weight test in `${CLAUDE_PLUGIN_ROOT}/rules/spec.decisions.md`) as a `[!decision] <thesis> #spec/decision` callout whose body is the justification in plain prose per `lazy-core.markdown-style` — on the document's approve these transfer automatically into the sibling `decisions.md`. Never force a fork that is not there.
+In every authored doc, record a real decision fork the clarification settled (per the weight test in `${CLAUDE_PLUGIN_ROOT}/rules/lazy-spec.decisions.md`) as a `[!decision] <thesis> #spec/decision` callout whose body is the justification in plain prose per `lazy-core.markdown-style` — on the document's approve these transfer automatically into the sibling `decisions.md`. Never force a fork that is not there.
 
 This skill never authors plan or report documents — they are not part of the scaffold (Step 4/5) and stay out of scope here too.
 
@@ -197,7 +199,9 @@ One line per task in the canonical list, with its outcome word. A missing line i
 
 ## Failure modes
 
-- **`/lazy-spec.create-asset` refuses naming an unknown product** — `<product>` has no record in `lazy.settings.json[products]` → register it via `/lazy-spec.product-config`, then re-invoke.
+- **`/lazy-spec.create-asset` ends `refused:logical` naming an unknown product** — `<product>` has no record in `lazy.settings.json[products]` → register it via `/lazy-spec.product-config`, then re-invoke.
 - **`/lazy-spec.create-asset` refuses naming an unknown asset type** — `<asset-type>` is neither shipped nor declared in the product's `asset_types` → declare it via `/lazy-spec.add-asset-type`, then re-invoke.
 - **`/lazy-spec.create-asset` refuses saying the type has no playbook** — the declaration carries neither `playbook` nor `alias_of`, so the coordinator would have no law to work the asset under → complete the declaration via `/lazy-spec.add-asset-type`, then re-invoke.
 - **`/lazy-spec.create-asset` refuses saying the type declares no start document** — the declaration has no `start_doc` token, and there is no default layout to fall back on → add `start_doc` via `/lazy-spec.add-asset-type`, then re-invoke.
+- **`/lazy-spec.create-asset` ends `refused:logical` with `target folder already exists`** — an asset with that slug is already there → pick another slug, or work the existing asset.
+- **`/lazy-spec.create-asset` ends `refused:logical` with `invalid --target token`** — a `--target` value is empty, has an empty segment, or steps through `.` / `..` → pass the target as `<folder>/<slug>` from the product root, then re-invoke.

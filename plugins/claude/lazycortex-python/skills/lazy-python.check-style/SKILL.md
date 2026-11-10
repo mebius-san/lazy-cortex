@@ -113,7 +113,7 @@ Confirm the fixes landed cleanly:
 
 - **Per file / per dir**: re-run `chk-py all <file>.py -q` for each fixed file, or `chk-py all <dir>/ -q` for a multi-file refactor.
 - **Whole project**: re-run `chk-py all -q`.
-- **Tests**: run `tst-py <module> -q` for each module the edits touched. Pass the bare module name (e.g. `core`, `rpg`), not a path and not `.py`.
+- **Tests**: run `tst-py <module> -q` for each module the edits touched. Pass the bare module name (e.g. `core`, `billing`), not a path and not `.py`.
 
 If any check still reports violations, do not loop back to Step 5 silently — escalate to the user with the remaining issue list and ask how to proceed.
 

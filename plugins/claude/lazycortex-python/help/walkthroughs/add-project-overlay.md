@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a documentation-guideline clause in the project overlay, then confirm lazy-python.docstring-writer honors it in the generated docstring.
-last_regen: 2026-10-24
+last_regen: 2026-11-10
 diagram_spec:
   anchor: "How the overlay and pyproject.toml layers combine"
   request: "Sequence diagram of one flow: the user registers an extra_docstring_sections entry (name/style/anchor/ref_exempt) plus optional d2_exempt_marker_attrs / private_name_allowlist in pyproject.toml [tool.pcf], writes the section's content rules in docs/guidelines/documenting_guidelines.md, and dispatches lazy-python.docstring-writer. The agent reads the plugin's documenting-guidelines canon, then the project overlay (override-on-conflict), then CLAUDE.md's Documenting section if present, applies the merged ruleset plus the pyproject.toml registrations to the target file, then runs chk-py against the changed file to verify. Show the overlay directory and pyproject.toml [tool.pcf] block as the two inputs feeding one agent and one verification command."
@@ -9,8 +9,8 @@ source_skills:
   - lazy-python.install
   - lazy-python.docstring-writer
   - lazy-python.coding-guidelines
-source_sha: 33e8a296cb2bda2f7c06945ca9d46e24ed4c1858
-surface_sha: 5e2729852214159a9c3b87e7590f6cfe7b9a6284f173ada4f3aca3294b7e41a3
+source_sha: 2a09f47e1d9e777cff05b9a3c2c3d132fe1c3555
+surface_sha: 3a48b7744992939e19d97199170bdafdba412308a584a09a0b73b80c9419aa0a
 ---
 # Add a project-specific documentation-guideline clause and confirm the docstring writer honors it
 
@@ -57,7 +57,9 @@ The same run also refreshes the plugin's always-loaded rules in `.claude/rules/`
 
 The agent is dispatched fresh each time and does not inherit the main session's loaded rules, so it re-reads all three layers on every run — there is nothing to restart or reload after you edit the overlay.
 
-This same canon-then-overlay layering is how every `docs/guidelines/<topic>_guidelines.md` file works — `coding_guidelines.md`, `testing_guidelines.md`, and `checking_guidelines.md` follow the identical pattern for their own writer and checker consumers. The coding canon's Knowledge Marker Rules — never remove or alter `TODO:`, `TMP:`, `DBG:`, `ref:`, `Domain(…):`, `Contract:` comments — apply here too: `lazy-python.docstring-writer`'s own Special Comment Handling rules mirror them, so a class's `Domain(…)` or `Contract:` markers keep their meaning as its docstring evolves under this walkthrough.
+This same canon-then-overlay layering is how every `docs/guidelines/<topic>_guidelines.md` file works — `coding_guidelines.md`, `testing_guidelines.md`, and `checking_guidelines.md` follow the identical pattern for their own writer and checker consumers. The coding canon's Knowledge Marker Rules — never remove or alter `TODO:`, `TMP:`, `DBG:`, `ref:`, `Decision:`, `Domain(…):`, `Contract:` comments — apply here too: `lazy-python.docstring-writer`'s own Special Comment Handling rules mirror them. It ignores `Domain(…):`, `ref:` and `DBG:` tags when writing a docstring, and treats code marked `Decision:` as settled, never carrying its rationale into the docstring. A class's markers therefore keep their meaning as its docstring evolves under this walkthrough.
+
+One rule from the coding canon holds in every project, whatever your overlay says: source is written in English. That covers docstrings, comments and `Domain(…)` / `Contract:` blocks, even when your project's documents and conversations use another language. A project-specific clause you add to the overlay is therefore written for English docstrings — a quoted foreign-language literal the code genuinely handles is data and stays as it is.
 
 ### Step 3 — Write a project-specific clause in the documenting overlay
 
@@ -103,9 +105,9 @@ Read the docstring the agent wrote (or edited). Confirm:
 
 - The `Field Semantics` section (or whatever you named it) appears at the position you anchored it (`after = "Guarantees"` in the example above).
 - Its content follows the style you declared (`bulleted`, in the example) and the wording rule you wrote in the overlay.
-- Every other section still follows the canon's ordinary rules — the overlay only adds to the section machinery, it doesn't relax the zero-tolerance blockers.
+- Every other section still follows the canon's ordinary rules — the overlay only adds to the section machinery, it doesn't relax the zero-tolerance blockers. Among them: no inventory in Summary or Scope (a sentence walking through the fields, axes or cases one by one), no private attributes in `Attributes` unless your declared escape hatch covers them, and the 117-character line limit.
 
-The agent's own Step 6 already runs `chk-py all <file>.py -q` against the changed file as part of its dispatch — a clean run confirms the file passes the deterministic checks; it does not by itself confirm your new section's wording, which is your judgment call at this step.
+Before that, the agent's Step 5 self-check walks every docstring it wrote against its checklist (what-not-how, no private internals in prose, no inventory, no private names in `Attributes`), so most semantic slips are caught before the checker runs. The agent's own Step 6 then runs `chk-py all <file>.py -q` against the changed file as part of its dispatch — a clean run confirms the file passes the deterministic checks; it does not by itself confirm your new section's wording, which is your judgment call at this step.
 
 If the section is missing, confirm the registration in `pyproject.toml` uses the exact section `name` your overlay heading uses — a mismatch means the agent has no rule to follow for a section it isn't told exists.
 
@@ -117,7 +119,7 @@ Once the first clause is confirmed, add more as your project's documentation con
 
 `docs/guidelines/documenting_guidelines.md` and the `[tool.pcf]` registrations in `pyproject.toml` are living project config. Track both in version control. When a teammate's `lazy-python.docstring-writer` dispatch produces a docstring that disagrees with a project convention, the fix is an overlay edit (and, for structural additions, a `pyproject.toml` registration) — not a one-off manual rewrite repeated file by file.
 
-To verify the overlay stub itself is intact (not accidentally deleted or corrupted), run `/lazy-python.audit` — its overlay check covers all four `docs/guidelines/*.md` files, not just the one this walkthrough touches. It does not validate clause content — that judgment belongs to you and your team, backed by the docstrings `lazy-python.docstring-writer` actually produces.
+To verify the overlay stub itself is intact (not accidentally deleted or corrupted), run `/lazy-python.audit` — its overlay check covers all four `docs/guidelines/*.md` files, not just the one this walkthrough touches, and looks for the `# Project additions to <topic>` header each stub opens with. Keep that header when you edit: it is how the writer agents recognize the file as an overlay rather than the canon. If a header goes missing, restore it by hand — a re-run of `/lazy-python.install` keeps your edited overlay body untouched. The audit does not validate clause content — that judgment belongs to you and your team, backed by the docstrings `lazy-python.docstring-writer` actually produces.
 
 ## How the overlay and pyproject.toml layers combine
 

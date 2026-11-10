@@ -1,7 +1,7 @@
 ---
 name: lazy-core.setup
 description: "Run after `/plugin update`, on a fresh clone, after enabling a new plugin, or whenever the operator asks to set lazycortex up in this project — the meta-installer that discovers and runs every enabled plugin's `<namespace>.install` skill plus any `lazy_setup_phase:` configurator in one ordered pass, so the operator never invokes install skills one by one. Idempotent; `--dry-run` previews the plan without executing."
-allowed-tools: Read, Write, AskUserQuestion, Skill, Bash(mkdir -p *), Bash(git rev-parse *), Bash(date *), Bash(PYTHONPATH=* python3 *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
+allowed-tools: Read, Write, AskUserQuestion, Skill, Bash(mkdir -p *), Bash(rm *.runtime/lazy-setup-guard.json*), Bash(git rev-parse *), Bash(date *), Bash(PYTHONPATH=* python3 *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
 ---
 # Run lazycortex meta-installer
 
@@ -22,7 +22,7 @@ Single command that brings the current project up-to-date with every enabled plu
 This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
-   - `Step 0 — Migrate settings`
+   - `Step 0 — Snapshot and migrate settings`
    - `Step 1 — Discover`
    - `Step 2 — Plan`
    - `Step 3 — Preview`
@@ -33,9 +33,17 @@ This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorde
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
-## Step 0: Migrate settings
+## Step 0: Snapshot and migrate settings
 
-Bring `.claude/lazy.settings.json` up to the current per-section schema version before any installer reads or writes it. The migration ladder lives in `${CLAUDE_PLUGIN_ROOT}/bin/lazy_settings_migrations/` and is exposed via the `lazy_settings.py` CLI.
+First record which files are already uncommitted, before this run writes anything. The closing migration stage reads the snapshot to tell the install chain's own writes, which it commits before its steps run, from the operator's uncommitted work, which it never commits. With `--dry-run` nothing is written and nothing is migrated, so no snapshot is taken: skip to the settings migration below. Otherwise run exactly:
+
+```
+Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazy_setup.py" snapshot .)
+```
+
+It prints `{"snapshot": <file>, "dirty": [<paths>]}`; keep `snapshot` for Step 5. A non-zero exit is `failed: snapshot: <stderr>` — stop the run, surface it in Step 6, and skip Steps 1–5 with outcome `aborted-by-snapshot-failure`.
+
+Then bring `.claude/lazy.settings.json` up to the current per-section schema version before any installer reads or writes it. The migration ladder lives in `${CLAUDE_PLUGIN_ROOT}/bin/lazy_settings_migrations/` and is exposed via the `lazy_settings.py` CLI.
 
 Run exactly:
 
@@ -81,7 +89,7 @@ Group discovered skills by phase. Execution order is fixed:
 
 1. **`pre-install`** — runs before any plugin templates land. Reserved for future use.
 2. **`per-plugin`** — every `<namespace>.install` discovered above. Sort with `lazy-core.install` first (it seeds `lazy.settings.json` consumed by later steps), then alphabetical for the rest.
-3. **`post-install`** — cross-cutters that depend on plugin templates already being in place. Sort alphabetical.
+3. **`post-install`** — cross-cutters that depend on plugin templates already being in place. Sort alphabetical, except the skill whose frontmatter declares `lazy_setup_last: true`: it closes the phase, after every other post-install skill.
 
 If the plan is empty (no enabled plugins ship `*.install` and no skill opts in), set outcome `nothing-to-do` and skip to Step 6.
 
@@ -116,7 +124,7 @@ Proceed straight to Step 5. Outcome: `proceed` (or `dry-run` when Step 3 already
 
 For each skill in the plan, in plan order:
 
-1. Invoke via `Skill(skill: "<full-dispatch-string>")`. The child owns its own interactivity (its own `AskUserQuestion` prompts, sub-confirmations) and its own `./.logs/claude/<child>/...` log.
+1. Invoke via `Skill(skill: "<full-dispatch-string>")`; `lazycortex-core:lazy-core.migrate` alone gets `args: "--snapshot <snapshot>"`, the file Step 0 printed. The child owns its own interactivity (its own `AskUserQuestion` prompts, sub-confirmations) and its own `./.logs/claude/<child>/...` log.
 2. Capture the child's outcome:
    - `ok` — the child reached its own Report step and reported success or no-op.
    - `failed: <reason>` — the child errored, was aborted, or surfaced an error in its report. Capture the reason verbatim.
@@ -127,15 +135,23 @@ Per-skill outcomes accumulate in three lists for Step 6: `ok`, `failed`, `skippe
 
 ## Step 6: Report
 
+When Step 0 took a snapshot, remove it first, whatever the earlier steps ended in, so no snapshot file outlives the run:
+
+```
+Bash(rm "<snapshot>")
+```
+
+A failed removal is reported as `snapshot not removed: <stderr>` under the Step 0 line; it never fails the run.
+
 Render three sections plus a per-step status line. The Report MUST contain one line per Step 0–5 task and one line per child:
 
 ```
-Step 0 — up-to-date | migrated: N sections (M up-to-date) | failed: <stderr>
+Step 0 — up-to-date | migrated: N sections (M up-to-date) | failed: <stderr> | failed: snapshot: <stderr>
 Step 1 — discovered: N skills (M install + K configurator)
 Step 2 — planned: N total (P pre + Q per-plugin + R post)
 Step 3 — previewed
 Step 4 — proceed | dry-run
-Step 5 — ran: X/N ok, Y failed, Z skipped | dry-run | aborted-by-migration-failure
+Step 5 — ran: X/N ok, Y failed, Z skipped | dry-run | aborted-by-migration-failure | aborted-by-snapshot-failure
 
 ✓ ran successfully:
   • <full-dispatch-string>

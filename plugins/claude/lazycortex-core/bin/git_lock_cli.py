@@ -13,49 +13,20 @@ from __future__ import annotations
 
 import argparse
 import socket
-import subprocess
 import time
-from pathlib import Path
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import staging_lock  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from repo_root import resolve_repo_root  # pylint: disable=import-error
+from repo_root import resolve_git_toplevel  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  pass
+  from pathlib import Path
 
 
-def _resolve_repo(cwd: str | None) -> Path:
-  """
-  Resolve the git toplevel from an optional explicit working directory.
-
-  Notes:
-    - Reads `LAZY_REPO_ROOT` from the environment when `cwd` is `None`.
-    - Spawns `git rev-parse --show-toplevel` in the starting directory; a git binary that cannot
-      be spawned, or a start outside any checkout, leaves the starting directory as the result.
-
-  Args:
-    cwd: Explicit starting directory, or `None` to fall back to the `LAZY_REPO_ROOT`
-      environment variable and then the process working directory.
-
-  Returns:
-    The git toplevel above the starting directory, or the starting directory itself when
-    git cannot name one.
-  """
-  # the starting directory follows the dispatcher convention: explicit --cwd, then LAZY_REPO_ROOT, then cwd
-  start = resolve_repo_root(cwd)
-
-  # git names the toplevel; a git binary that cannot be spawned leaves the starting directory in charge
-  try:
-    done = subprocess.run([ "git", "rev-parse", "--show-toplevel" ], cwd = start,
-                          capture_output = True, text = True, check = False, encoding = "utf-8")
-  except OSError:
-    return start
-
-  # a start outside any checkout also falls back to itself
-  return Path(done.stdout.strip()) if done.returncode == 0 and done.stdout.strip() else start
+# waiver: operator-facing owner words of the status report, verbatim from the git-status skill
+_OWNER_SELF, _OWNER_PEER = "this session", "peer"
 
 
 def _print_status(repo: Path) -> None:
@@ -91,22 +62,23 @@ def _print_status(repo: Path) -> None:
   now = time.time()
   # waiver: git's own index file location, not a domain key
   index = repo / ".git" / "index"
-  # waiver: private break-rule probes reused so the report matches what the guard itself would decide
-  breakable, reason = staging_lock._is_breakable(repo, state, cfg, now = now)  # pylint: disable=protected-access
+  # the guard's own break-rule probe, so the report matches what the guard itself would decide
+  breakable, reason = staging_lock.evaluate_break(repo, state, cfg, now = now)
   # waiver: operator-facing report lines, verbatim from the git-status skill
   print(f"Lock:        HELD by session {state.session_id} (PID {state.pid})")
   print(f"Branch:      {state.branch}")
   print(f"Held for:    {int(now - state.started_at)}s")
   print(f"Index touched: "
         f"{int(now - max(state.last_index_mtime, index.stat().st_mtime if index.exists() else 0.0))}s ago")
-  # waiver: private liveness probe reused so the report matches what the guard itself would decide
-  # pylint: disable-next=protected-access
-  print(f"Liveness:    PID alive={staging_lock._pid_alive(state.pid)}, "
+  # waiver: operator-facing report wording, verbatim from the git-status skill
+  print(f"Liveness:    PID alive={staging_lock.is_pid_alive(state.pid)}, "
         f"host={'this' if state.host == socket.gethostname() else f'other({state.host})'}")
   # waiver: operator-facing report wording, verbatim from the git-status skill
   print(f"Breakable:   {f'YES ({reason})' if breakable else 'NO (within thresholds)'}")
+  # the lock is this session's when it records this host and this session's own process
+  own = state.host == socket.gethostname() and state.pid == staging_lock.resolve_holder_pid()
   # waiver: operator-facing report wording, verbatim from the git-status skill
-  print(f"Owner:       {'this session' if state.session_id == staging_lock.resolve_session_id() else 'peer'}")
+  print(f"Owner:       {_OWNER_SELF if own else _OWNER_PEER}")
 
 
 def cmd_git_lock(argv: list[str]) -> int:
@@ -130,7 +102,7 @@ def cmd_git_lock(argv: list[str]) -> int:
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--cwd", default = None, help = "Repository root (default: $LAZY_REPO_ROOT or cwd)")
   args = parser.parse_args(argv)
-  repo = _resolve_repo(args.cwd)
+  repo = resolve_git_toplevel(args.cwd)
 
   # `status` prints the read-only report and never touches the lock file
   if args.action == "status":
@@ -140,5 +112,5 @@ def cmd_git_lock(argv: list[str]) -> int:
 
   # `break` force-deletes the lock and reports whether there was one to delete
   # waiver: CLI outcome tokens read by the git-unlock skill; `manual` is the audit reason it records
-  print("broken" if staging_lock.break_lock(repo, reason = "manual") else "no-lock")
+  print("broken" if staging_lock.break_lock(repo) else "no-lock")
   return 0

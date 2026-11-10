@@ -14,15 +14,17 @@ Merge semantics on read mirror Claude Code's stack:
 - arrays: union + dedupe (tracked order first, novel local entries appended);
 - objects: recursive deep merge.
 
-The `_version` key is owned by tracked and never adopted from local —
-migration ladders run against tracked only.
+The `_version` key is owned by tracked and never adopted from local — `migrate_all` walks every
+overlay section through its ladder: a stamped section from its own stamp, an unstamped one from the
+version the tracked file's same section sat on before the run, and it leaves unstamped sections unstamped.
 
-Writes go to tracked. `save_section` never touches local. Callers that
+Writes go to tracked. `save_section` never touches local and stamps a section only with a version the
+file's own section already stands on (the current one for a section the file does not carry yet). Callers that
 need a load → modify → save round-trip on a single layer should use
 `load_tracked_section` to avoid local-overlay leaks into the tracked file.
 
 Migration model. All read entry points (`load_section` / `load_tracked_section` /
-`load_local_only_section`) are PURE reads — they never run the migration ladder
+`load_verbatim_tracked_section` / `load_local_only_section`) are PURE reads — they never run the migration ladder
 and never write to disk. Migration is an install / doctor responsibility, invoked
 explicitly via `migrate_all` (called from `/lazy-core.install` / `/lazy-core.doctor`).
 The daemon never migrates anything from a read path; if the on-disk schema is behind
@@ -54,14 +56,15 @@ CURRENT_VERSIONS = {
   "routines": 8,
   "experts": 4,
   "git": 1,
-  "products": 2,
-  "repos": 1,
+  "products": 3,
   "review": 13,
   "spec": 2,
   "structure": 1,
   "terms": 1,
   "wiki": 3,
 }
+# Sections no plugin reads any more; the migration ladder deletes them from the file
+RETIRED_SECTIONS = ( "repos", )
 
 
 def resolve_agent_model_tier(value: object) -> str | None:
@@ -137,9 +140,9 @@ def migrate_root_version_to_section_version(raw: dict) -> dict:
     legacy = raw.pop(SettingsKey.LEGACY_VERSION)
 
     # propagate legacy version into every section that has no per-section version yet
-    for v in raw.values():
-      if isinstance(v, dict) and SettingsKey.VERSION not in v:
-        v[SettingsKey.VERSION] = legacy
+    for section in raw.values():
+      if isinstance(section, dict) and SettingsKey.VERSION not in section:
+        section[SettingsKey.VERSION] = legacy
   return raw
 
 
@@ -156,9 +159,7 @@ def _local_overlay_path(tracked_path: Path) -> Path:
   Returns:
     Path with `.local` inserted before the final suffix, in the same directory.
   """
-  stem = tracked_path.stem
-  suffix = tracked_path.suffix
-  return tracked_path.with_name(f"{stem}.local{suffix}")
+  return tracked_path.with_name(f"{tracked_path.stem}.local{tracked_path.suffix}")
 
 
 def _deep_merge_claude(base: object, overlay: object) -> object:
@@ -191,14 +192,14 @@ def _deep_merge_claude(base: object, overlay: object) -> object:
 
   if isinstance(base, dict) and isinstance(overlay, dict):
     result = { **base }
-    for k, v in overlay.items():
+    for key, value in overlay.items():
       # guard: tracked owns versioning — never adopt _version from local
-      if k == SettingsKey.VERSION:
+      if key == SettingsKey.VERSION:
         continue
-      if k in result:
-        result[k] = _deep_merge_claude(result[k], v)
+      if key in result:
+        result[key] = _deep_merge_claude(result[key], value)
       else:
-        result[k] = v
+        result[key] = value
     return result
   if isinstance(base, list) and isinstance(overlay, list):
     merged = list(base)
@@ -248,6 +249,8 @@ def load_tracked_section(path: Path | str, section_key: str) -> dict:
   # guard: no tracked file yet — return a fresh section pinned to the current version
   if not path.exists():
     return { SettingsKey.VERSION: CURRENT_VERSIONS.get(section_key, 1) }
+
+  # the section as the tracked file stores it
   # waiver: stdlib encoding idiom
   raw = json.loads(path.read_text(encoding = "utf-8") or "{}")
   section = raw.get(section_key, {})
@@ -256,6 +259,44 @@ def load_tracked_section(path: Path | str, section_key: str) -> dict:
   if not section:
     return { SettingsKey.VERSION: CURRENT_VERSIONS.get(section_key, 1) }
   return section
+
+
+def load_verbatim_tracked_section(path: Path | str, section_key: str) -> dict | None:
+  """
+  Load one section from the tracked settings file exactly as it is stored.
+
+  Unlike `load_tracked_section`, an absent section is reported as absent rather than replaced by a
+  version-stamped stub, and the local overlay is not applied.
+
+  Guarantees:
+    - Never writes to disk and never runs a migration ladder; this is a pure read of
+      whatever is already on disk.
+
+  Args:
+    path: Path to the tracked settings file. May be a string or `Path`.
+    section_key: Name of the section to load.
+
+  Returns:
+    The section dict as stored, or `None` when the file does not exist or does not carry the key.
+
+  Raises:
+    json.JSONDecodeError: If the tracked file is not valid JSON.
+  """
+
+  # Contract:
+  # Never writes to disk and never runs a migration ladder; this function is a pure
+  # read of whatever is already on disk.
+
+  path = Path(path)
+
+  # guard: no tracked file — the section is absent
+  if not path.exists():
+    return None
+
+  # the section exactly as stored, `None` when the file does not carry it
+  # waiver: stdlib encoding idiom
+  raw = json.loads(path.read_text(encoding = "utf-8") or "{}")
+  return raw.get(section_key)
 
 
 def load_local_only_section(path: Path | str, section_key: str) -> dict:
@@ -291,6 +332,8 @@ def load_local_only_section(path: Path | str, section_key: str) -> dict:
   # guard: no overlay file present — caller sees an empty view
   if not local_path.exists():
     return {}
+
+  # the overlay's own view of the section, empty when it does not carry it
   # waiver: stdlib encoding idiom
   raw = json.loads(local_path.read_text(encoding = "utf-8") or "{}")
   return raw.get(section_key, {}) or {}
@@ -342,30 +385,51 @@ def load_section(path: Path | str, section_key: str) -> dict:
 
 def migrate_all(path: Path | str) -> dict[str, tuple[int, int]]:
   """
-  Run the migration ladder for every section declared in `CURRENT_VERSIONS`.
+  Bring every declared settings section to its current version and drop the retired sections.
 
   Install / doctor-side entry point — invoked ONLY by `/lazy-core.install`,
   `/lazy-core.doctor`, or the CLI `lazy_settings.py migrate` subcommand. The daemon
   never calls this from a read path: migration is an explicit, operator-triggered action,
   never a side effect of reading settings (Bug 104).
 
-  Walks the file, applies every section's ladder, writes the migrated content back to
-  disk atomically when any upgrade ran.
+  Walks the tracked file, applies every section's ladder, writes the migrated content back to
+  disk atomically when any upgrade ran. The sibling gitignored overlay `lazy.settings.local.json`
+  is migrated too: retired sections are deleted from it, and every overlay section below the current
+  version is walked through its ladder. A stamped overlay section walks from its own stamp, with the
+  stamp advanced. An unstamped one is taken to sit on the version the tracked file's same section had
+  before this run migrated it (`1` when that section carries no stamp, the current version when it is
+  absent or empty), and stays unstamped.
+
+  Guarantees:
+    - The sibling local overlay is never created by this call.
+    - The overlay never gains a section or a version stamp it did not already carry.
+    - The overlay is rewritten only when something in it changed.
 
   Args:
-    path: Path to the tracked settings file. The file may be missing; in that case every
-      section is treated as already at the current version (the result map is empty).
+    path: Path to the tracked settings file. The file may be missing; in that case the tracked
+      sections are treated as already at the current version, so no unstamped overlay section is
+      walked, the overlay is still migrated, and the result map is empty.
 
   Returns:
-    Mapping from section key to `(before, after)` version tuples for sections that were
-    upgraded. Sections already at the target version are omitted from the result.
+    Mapping from section key to `(before, after)` version tuples for tracked sections that were
+    upgraded. Sections already at the target version are omitted; overlay upgrades are not reported.
 
   Raises:
-    OSError: If the migrated tracked file cannot be written back to disk.
-    json.JSONDecodeError: If the tracked file is not valid JSON.
-    KeyError: If a section's ladder has no step for a version the file is sitting on, so the
-      walk to the current version cannot complete.
+    OSError: If the migrated tracked file or overlay cannot be written back to disk.
+    json.JSONDecodeError: If the tracked file or the overlay is not valid JSON.
+    KeyError: If a section's ladder has no step for a version the tracked file or an overlay section
+      is sitting on, so the walk to the current version cannot complete.
   """
+
+  # Contract:
+  # The sibling local overlay is never created by this call; a missing overlay stays missing.
+
+  # Contract:
+  # The overlay never gains a section or a version stamp it did not already carry.
+
+  # Contract:
+  # The overlay is rewritten only when something in it changed;
+  # an overlay that needs no change is left untouched on disk.
 
   # Domain(settings.versioning):
   # # Settings evolve one section at a time, only when explicitly asked
@@ -377,67 +441,199 @@ def migrate_all(path: Path | str) -> dict[str, tuple[int, int]]:
   # never a side effect of simply reading the settings — it only happens when explicitly asked,
   # so an ordinary run never rewrites a file the operator has not touched. A section with no
   # documented path from its current version to the version the project expects is treated as
-  # broken rather than silently left behind.
+  # broken rather than silently left behind. A section no plugin reads any more is retired: it is
+  # deleted from the file on the same explicit run, and never stamped back.
 
   path = Path(path)
   result: dict[str, tuple[int, int]] = {}
 
+  # read the tracked file once, with any legacy root version already lifted into its sections
+  raw: dict | None = None
+  if path.exists():
+    # waiver: stdlib encoding idiom
+    raw = migrate_root_version_to_section_version(json.loads(path.read_text(encoding = "utf-8") or "{}"))
+
+  # the overlay merges back over the tracked layer on read, so it is migrated alongside it, against
+  # the tracked versions as they stand before this run moves them
+  _migrate_local_overlay(_local_overlay_path(path), _tracked_versions(raw))
+
   # guard: no file on disk → nothing to migrate; every section is implicitly at current
-  if not path.exists():
+  if raw is None:
     return result
-  # waiver: stdlib encoding idiom
-  raw = json.loads(path.read_text(encoding = "utf-8") or "{}")
-  raw = migrate_root_version_to_section_version(raw)
+
+  # drop every retired section the file still carries, whatever its version or content
   changed = False
-  for k, target in CURRENT_VERSIONS.items():
-    section = raw.get(k, {})
+  for key in RETIRED_SECTIONS:
+    if key in raw:
+      del raw[key]
+      changed = True
+
+  # walk every live section from its own version up to the current one
+  for key, target in CURRENT_VERSIONS.items():
+    section = raw.get(key, {})
 
     # guard: section missing from on-disk file — stamp a current-version stub and continue
     if not section:
-      raw[k] = { SettingsKey.VERSION: target }
+      raw[key] = { SettingsKey.VERSION: target }
       changed = True
       continue
+
+    # the version the section sits on, 1 when it carries no stamp
     cur = section.get(SettingsKey.VERSION, 1)
 
     # guard: section already at or beyond the current version — nothing to walk
     if cur >= target:
       continue
-    pre = cur
-    ladder = _migrations(k)
 
-    # walk the ladder one step at a time, stamping the new version after each migration
-    while cur < target:
-      # guard: a gap in the ladder cannot be walked — name the section and version rather
-      # than letting a bare KeyError reach the daemon
-      if cur not in ladder:
-        raise KeyError(f"section {k!r}: no migration step from version {cur} (target {target})")
-      section = ladder[cur](section)
-      cur += 1
-      section[SettingsKey.VERSION] = cur
-    raw[k] = section
-    result[k] = (pre, cur)
+    # a section below the current version walks its ladder up to it
+    raw[key] = _walk_ladder(key, section, cur, target)
+    result[key] = (cur, target)
     changed = True
+
+  # the file is rewritten only when a section was dropped, stamped or walked
   if changed:
     _atomic_write(path, raw)
   return result
 
 
-def save_section(path: Path | str, section_key: str, section: dict) -> None:
+def _walk_ladder(section_key: str, section: dict, cur: int, target: int) -> dict:
+  """
+  Walk one section through its migration ladder from `cur` up to `target`.
+
+  Args:
+    section_key: Name of the section whose ladder is walked.
+    section: Section content sitting on version `cur`.
+    cur: Version the section currently sits on.
+    target: Version the walk ends on.
+
+  Returns:
+    The migrated section, stamped with `target`.
+
+  Raises:
+    KeyError: If the ladder has no step for a version the walk passes through.
+  """
+  ladder = _migrations(section_key)
+
+  # walk the ladder one step at a time, stamping the new version after each migration
+  while cur < target:
+    # guard: a gap in the ladder cannot be walked — name the section and version rather
+    # than letting a bare KeyError reach the daemon
+    if cur not in ladder:
+      raise KeyError(f"section {section_key!r}: no migration step from version {cur} (target {target})")
+    section = ladder[cur](section)
+    cur += 1
+    section[SettingsKey.VERSION] = cur
+  return section
+
+
+def _tracked_versions(raw: dict | None) -> dict[str, int]:
+  """
+  Read the version every declared section of the tracked file sits on.
+
+  Args:
+    raw: Parsed tracked settings content with any legacy root version already lifted, or `None`
+      when the tracked file is missing.
+
+  Returns:
+    Mapping from every declared section key to its version: the section's own stamp, `1` for a
+    section without one, and the current version for a section the file does not carry.
+  """
+  versions = dict(CURRENT_VERSIONS)
+
+  # guard: no tracked file — every section is implicitly at current
+  if raw is None:
+    return versions
+
+  # a section the file carries sits on its own stamp, or on 1 when it has none, as the tracked walk assumes
+  for key in CURRENT_VERSIONS:
+    section = raw.get(key)
+    if isinstance(section, dict) and section:
+      versions[key] = section.get(SettingsKey.VERSION, 1)
+  return versions
+
+
+def _migrate_local_overlay(local_path: Path, tracked_versions: dict[str, int]) -> None:
+  """
+  Drop the retired sections from the local overlay and walk its sections forward through their ladders.
+
+  A stamped section walks from its own stamp, with the stamp advanced. An unstamped section walks from
+  the tracked file's version of the same section and stays unstamped.
+
+  Args:
+    local_path: Path to the local overlay file. The file may be missing.
+    tracked_versions: Mapping from section key to the version the tracked file's section sat on before
+      this run migrated it; it gives the starting version of each unstamped overlay section.
+
+  Raises:
+    OSError: If the migrated overlay cannot be written back to disk.
+    json.JSONDecodeError: If the overlay is not valid JSON.
+    KeyError: If an overlay section's ladder has no step for a version the walk passes through.
+  """
+  # guard: no overlay on disk — nothing to migrate, and the overlay is never created
+  if not local_path.exists():
+    return
+
+  # the overlay as stored, with no change recorded yet
+  # waiver: stdlib encoding idiom
+  raw = json.loads(local_path.read_text(encoding = "utf-8") or "{}")
+  changed = False
+
+  # drop every retired section the overlay still carries
+  for key in RETIRED_SECTIONS:
+    if key in raw:
+      del raw[key]
+      changed = True
+
+  # walk every section the overlay carries; an unstamped one sits on the tracked section's version
+  for key, target in CURRENT_VERSIONS.items():
+    section = raw.get(key)
+
+    # guard: section absent or not an object — the overlay gains no section
+    if not isinstance(section, dict):
+      continue
+    stamped = SettingsKey.VERSION in section
+    cur = section[SettingsKey.VERSION] if stamped else tracked_versions[key]
+
+    # guard: section already at or beyond the current version — nothing to walk
+    if cur >= target:
+      continue
+    walked = _walk_ladder(key, section, cur, target)
+
+    # an unstamped overlay section stays unstamped: the tracked layer owns its version
+    if not stamped:
+      walked.pop(SettingsKey.VERSION, None)
+    raw[key] = walked
+    changed = True
+
+  # the overlay is rewritten only when a section was walked
+  if changed:
+    _atomic_write(local_path, raw)
+
+
+def save_section(path: Path | str, section_key: str, section: dict, *, stamp: bool = True) -> None:
   """
   Persist one section to the tracked settings file.
 
-  The section is stamped with the current schema version when no section version is present,
-  and the file is rewritten atomically. The sibling local-overlay file is never touched. No
+  The file is rewritten atomically and the sibling local-overlay file is never touched. No
   migration is performed on the surrounding sections — schema-bridge work belongs in
   `migrate_all` (install / doctor-side), never as a side effect of save.
 
   Guarantees:
     - The sibling local-overlay file is never touched by this call.
 
+  Notes:
+    - A stamp claims that the migration ladder walked the content, so a section without its own
+      `_version` takes the version the file's existing section sits on: the on-disk stamp when it
+      has one, no stamp when the on-disk section is unstamped, and the current version only when
+      the file does not carry the section yet (absent or empty).
+    - A section that carries its own `_version` keeps it.
+    - With stamping switched off the section is written exactly as given.
+
   Args:
     path: Path to the tracked settings file.
     section_key: Name of the section to store under.
-    section: Section dict to persist.
+    section: Section dict to persist; a version key may be added to it in place.
+    stamp: Whether a section without its own `_version` receives the version described in Notes.
 
   Raises:
     OSError: If the tracked file or its parent directory cannot be written.
@@ -448,10 +644,31 @@ def save_section(path: Path | str, section_key: str, section: dict) -> None:
   # The sibling local-overlay file is never touched by this call; only the tracked
   # file is written.
 
+  # Domain(settings.versioning):
+  # # A version stamp claims the migrations have been applied
+  # A section's version stamp is a statement that the migration ladder has already carried its
+  # content up to that version. Storing a section therefore never invents that claim: content
+  # saved without a stamp of its own inherits the version of the section it replaces, and stays
+  # unstamped when the replaced section was unstamped, so the next explicit migration still walks
+  # it. Only a section the file does not hold yet, whether absent or empty, has nothing for the
+  # ladder to carry forward and is stamped with the current version. A section that arrives with
+  # its own stamp keeps it, and when stamping is switched off the content is stored exactly as
+  # given.
+
   path = Path(path)
   # waiver: stdlib encoding idiom
   raw = json.loads(path.read_text(encoding = "utf-8") or "{}") if path.exists() else {}
-  section.setdefault(SettingsKey.VERSION, CURRENT_VERSIONS.get(section_key, 1))
+
+  # an unstamped section takes the version the file's own section sits on: a stamp is a claim that the
+  # ladder walked the content, so only a section the file does not carry yet is stamped current
+  if stamp and SettingsKey.VERSION not in section:
+    on_disk = raw.get(section_key)
+    if not isinstance(on_disk, dict) or not on_disk:
+      section[SettingsKey.VERSION] = CURRENT_VERSIONS.get(section_key, 1)
+    elif SettingsKey.VERSION in on_disk:
+      section[SettingsKey.VERSION] = on_disk[SettingsKey.VERSION]
+
+  # the section replaces its predecessor in place, every other section stays as it was
   raw[section_key] = section
   _atomic_write(path, raw)
 
@@ -529,8 +746,8 @@ def _cli() -> None:
     print(f"migrated: 0 sections ({up_to_date} up-to-date)")
   else:
     print(f"migrated: {len(upgraded)} sections ({up_to_date} up-to-date)")
-    for k, (a, b) in upgraded.items():
-      print(f"  {k}: v{a} -> v{b}")
+    for key, (old, new) in upgraded.items():
+      print(f"  {key}: v{old} -> v{new}")
 
 
 if __name__ == "__main__":

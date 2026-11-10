@@ -23,20 +23,25 @@ import subprocess
 import sys
 from pathlib import Path
 
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import nodes as _nodes  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import plugin_registry as _plugin_registry  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import scope as _scope  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from markers import Markers  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from textfile import TextFile  # pylint: disable=import-error
-
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
+
+
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import axes as _axes  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import nodes as _nodes  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import scope as _scope  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+from markers import Markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+from textfile import TextFile  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # Scope-config keys of the nested `mirror` block.
@@ -84,7 +89,7 @@ _KEY_TAGS = "tags"
 
 # `remote-mirror` request `mode` this module ever sends — it always classifies, never writes;
 # `fetch()` uses the primitive purely to update the clone and discards the classification —
-# wiki's own `plan()`/`sync()` classify and apply through `source_files()` and `merge()`.
+# wiki's own `plan()`/`sync()` classify and apply through `find_all_source_files()` and `merge()`.
 _MODE_PLAN = "plan"
 
 # `remote-mirror` response key this module reads — duplicated from lazycortex-core's
@@ -93,65 +98,6 @@ _KEY_ERROR = "error"
 
 # Directory whose presence marks a git working copy.
 _GIT_DIR = ".git"
-
-# Env var the runtime daemon exports for every subprocess routine (dev.plugin-boundaries § 1c).
-_ENV_PLUGIN_DIRS = "LAZYCORTEX_PLUGIN_DIRS"
-
-# Path segments of the resolved `lazycortex-core` CLI binary, via the env lookup, the dev-vault
-# sibling fallback, and the registry fallback alike.
-_CORE_PLUGIN_NAME = "lazycortex-core"
-_CORE_BIN_SEGMENT = "bin"
-
-
-def _resolve_core_cli() -> Path:
-  """
-  Locate the `lazycortex-core` CLI binary this module dispatches `remote-mirror` to.
-
-  Walks `$LAZYCORTEX_PLUGIN_DIRS` first — set by the daemon for every subprocess routine it
-  spawns, per the inter-plugin boundary contract's § 1c CLI-subprocess pattern — then falls
-  back to the dev-vault sibling layout (`plugins/claude/lazycortex-core/bin/` next to this plugin's
-  own `plugins/claude/lazycortex-wiki/`), so the resolver also works from a plain shell or a test run
-  inside this repo, where the daemon never exported the env var — and finally to the install root
-  Claude Code's plugin registry (`~/.claude/plugins/installed_plugins.json`) records for core, for
-  a consumer install's own sessions.
-
-  Returns:
-    Resolved binary usable as a subprocess argument.
-
-  Raises:
-    RuntimeError: When none of the three stages finds one.
-  """
-  env_dirs = os.environ.get(_ENV_PLUGIN_DIRS, "").split(os.pathsep)
-  for dir_path in env_dirs:
-    # guard: skip an empty segment from a leading/trailing/double path separator
-    if not dir_path:
-      continue
-    cli = Path(dir_path) / _CORE_BIN_SEGMENT / _CORE_PLUGIN_NAME
-    if cli.is_file():
-      return cli
-
-  # dev-vault fallback — this file sits at plugins/claude/lazycortex-wiki/bin/mirror.py, so core's
-  # own bin/ is two levels up and back down into the sibling plugin tree
-  sibling = Path(__file__).resolve().parents[2] / _CORE_PLUGIN_NAME / _CORE_BIN_SEGMENT / _CORE_PLUGIN_NAME
-  if sibling.is_file():
-    return sibling
-
-  # registry fallback — a consumer install's own session has no daemon export; the install root
-  # Claude Code recorded for core's highest installed version
-  installed = _plugin_registry.installed_plugin_root(_CORE_PLUGIN_NAME)
-  if installed is not None:
-    cli = installed / _CORE_BIN_SEGMENT / _CORE_PLUGIN_NAME
-    if cli.is_file():
-      return cli
-
-  # no lookup found a binary — name what was searched so a misconfigured runner is diagnosable
-  searched = [ dir_path for dir_path in env_dirs if dir_path ] or [ "<unset>" ]
-  raise RuntimeError(
-    f"lazycortex-core CLI not resolvable: no {_CORE_BIN_SEGMENT}/{_CORE_PLUGIN_NAME} under any "
-    f"directory named by ${_ENV_PLUGIN_DIRS} (searched: {', '.join(searched)}), no dev-vault "
-    f"sibling at '{sibling}', and no {_CORE_PLUGIN_NAME} install recorded in Claude Code's plugin "
-    f"registry."
-  )
 
 
 def _run_remote_mirror(payload: dict) -> dict:
@@ -174,7 +120,7 @@ def _run_remote_mirror(payload: dict) -> dict:
   """
   # the CLI always prints a JSON body — {"error": ...} on failure, the response shape otherwise
   return json.loads(subprocess.run(
-    [ sys.executable, str(_resolve_core_cli()), "remote-mirror" ], input = json.dumps(payload),
+    [ sys.executable, str(_axes.resolve_core_cli()), "remote-mirror" ], input = json.dumps(payload),
     capture_output = True, text = True, check = False, encoding = "utf-8",
   ).stdout)
 
@@ -210,10 +156,8 @@ class MirrorSync:
     self._mirror_cfg: dict = cfg.get(CFG_MIRROR) or {}
     self._matcher = _scope.GlobMatcher()
 
-  # ── read properties ────────────────────────────────────────────────────────
-
   @property
-  def configured(self) -> bool:
+  def is_configured(self) -> bool:
     """
     True when the scope carries a usable `mirror` block (`url` + `mirror_path`).
     """
@@ -232,8 +176,6 @@ class MirrorSync:
     Repo-relative mirror directory from the `mirror` block, or empty string.
     """
     return str(self._mirror_cfg.get(CFG_MIRROR_PATH) or "")
-
-  # ── public ────────────────────────────────────────────────────────────────
 
   def fetch(self) -> str | None:
     """
@@ -255,11 +197,11 @@ class MirrorSync:
       `None` on success, or a one-line error message on failure.
     """
     # guard: no mirror block — nothing to fetch
-    if not self.configured:
+    if not self.is_configured:
       return f"scope '{self._scope_id}' has no mirror block configured"
 
     # Decision: reuse remote-mirror only for the clone-or-fast-forward step, not its classification.
-    # source_files()/plan() classify independently against whatever clone is on disk, so they keep
+    # find_all_source_files()/plan() classify independently against whatever clone is on disk, so they keep
     # working when called without a prior fetch() in the same process (doctor.py relies on this to
     # audit an already-fetched clone).
 
@@ -339,12 +281,12 @@ class MirrorSync:
     # wanted without churning the vault.
 
     # classify every current source file against its mirror twin
-    for source_rel in self.source_files():
+    for source_rel in self.find_all_source_files():
       mirror_rel = f"{self.mirror_path}/{source_rel}"
       expected.add(mirror_rel)
       mirror_abs = self._repo / mirror_rel
 
-      # guard: no mirror twin yet — the file is new to the mirror
+      # no mirror twin yet — the file is new to the mirror and lands in the synced bucket
       if not mirror_abs.is_file():
         synced.append(mirror_rel)
         continue
@@ -495,7 +437,7 @@ class MirrorSync:
     # pylint: enable=protected-access
     return merged
 
-  def source_files(self) -> list[str]:
+  def find_all_source_files(self) -> list[str]:
     """
     Enumerate the clone's markdown files under `source_paths` minus `exclude`.
 
@@ -555,7 +497,7 @@ class MirrorSync:
       result.append(rel)
     return sorted(result)
 
-  def consumer_stripped(self, text: str) -> str:
+  def to_source_remainder(self, text: str) -> str:
     """
     Reduce a document to the source-owned remainder for drift comparison.
 
@@ -577,7 +519,7 @@ class MirrorSync:
     """
 
     # Contract:
-    # Applying consumer_stripped() to the mirror side and to the source side of the same
+    # Applying to_source_remainder() to the mirror side and to the source side of the same
     # document MUST return byte-identical text when no source-owned edit was made in the
     # vault. Callers rely on this equality as the sole signal that a mirror body has not
     # drifted from its source.
@@ -599,8 +541,6 @@ class MirrorSync:
     result = _nodes._markdown_source_for_hash(out)
     # pylint: enable=protected-access
     return result
-
-  # ── helpers ───────────────────────────────────────────────────────────────
 
   def _mirror_files(self) -> list[str]:
     """

@@ -15,14 +15,20 @@ if TYPE_CHECKING:
   pass
 
 
-# hardcoded exclusions that should never be scanned
+# Hardcoded exclusions that should never be scanned
 HARDCODED_EXCLUDES = ['.venv', '__pycache__']
 
-# regex matching a valid waiver comment (non-empty explanation after the colon)
+# Regex matching a valid waiver comment (non-empty explanation after the colon)
 WAIVER_RE = re.compile(r'#\s*waiver:\s*\S')
 
-# regex matching a waiver marker regardless of whether a reason follows
+# Regex matching a waiver marker regardless of whether a reason follows
 WAIVER_MARKER_RE = re.compile(r'#\s*waiver:')
+
+# Note printed for an import used only in type hints; `{name}` is the imported name, `{mod}` its module
+TYPE_ONLY_NOTE = 'import {name} from {mod} is only used in type hints'
+
+# Verbose-mode note for a waiver marker without a reason; `{name}` / `{mod}` name the import it fails to waive
+INVALID_WAIVER_NOTE = 'invalid waiver (empty reason) for import {name} from {mod} — finding not suppressed'
 
 
 # ----------------------------------------------------------------------------------------
@@ -43,6 +49,7 @@ def load_config() -> dict:
   # never raises for either condition.
 
   config_path = 'pyproject.toml'
+  # guard: no pyproject.toml — no configuration to load
   if not os.path.exists(config_path):
     return {}
 
@@ -56,11 +63,14 @@ def load_config() -> dict:
 
 # ----------------------------------------------------------------------------------------
 
-# define alias for (module, import-statement line number, imported-name line number)
+# Define alias for (module, import-statement line number, imported-name line number)
 ImportInfo = tuple[str | None, int, int]
 
-# define alias for output structure: filepath -> list of suggestions
-SuggestionsMap = dict[str, list[tuple[int, str | None, str]]]
+# Define alias for one suggestion: (line number, module, imported name)
+Suggestion = tuple[int, str | None, str]
+
+# Define alias for output structure: filepath -> list of suggestions
+SuggestionsMap = dict[str, list[Suggestion]]
 
 
 class TypeOnlyImportAnalyzer(ast.NodeVisitor):
@@ -86,7 +96,7 @@ class TypeOnlyImportAnalyzer(ast.NodeVisitor):
   Attributes:
     imported_names: mapping of imported names to their source modules and line numbers.
     runtime_refs: set of names used in runtime expressions.
-    ann_refs: set of names used in type annotations only.
+    ann_refs: set of names used in type annotations, including names that are also used at runtime.
     has_future_annotations: whether `from __future__ import annotations` is present.
     has_type_checking_block: whether any `if TYPE_CHECKING`: block is used.
     in_type_checking: whether currently visiting inside a TYPE_CHECKING block.
@@ -112,7 +122,7 @@ class TypeOnlyImportAnalyzer(ast.NodeVisitor):
     # store names used in runtime expressions
     self.runtime_refs: set[str] = set()
 
-    # store names used in type annotations only
+    # store every name used in a type annotation, whether or not it also appears at runtime
     self.ann_refs: set[str] = set()
 
     # flag to track if `from __future__ import annotations` is present
@@ -143,7 +153,7 @@ class TypeOnlyImportAnalyzer(ast.NodeVisitor):
         if alias.name == 'annotations':
           self.has_future_annotations = True
 
-    # guard: skip imports inside TYPE_CHECKING — they are already type-only
+    # imports inside TYPE_CHECKING are already type-only and are not recorded
     if self.in_type_checking:
       return
 
@@ -163,7 +173,7 @@ class TypeOnlyImportAnalyzer(ast.NodeVisitor):
     Args:
       node: the Import AST node to process
     """
-    # guard: skip imports inside TYPE_CHECKING — they are already type-only
+    # imports inside TYPE_CHECKING are already type-only and are not recorded
     if self.in_type_checking:
       return
 
@@ -240,6 +250,10 @@ class TypeOnlyImportAnalyzer(ast.NodeVisitor):
     Args:
       node: the ClassDef AST node to process
     """
+    # visit class decorators (applied at runtime when the class is created)
+    for decorator in node.decorator_list:  # type: ast.AST
+      self.visit(decorator)
+
     # visit base classes (used at runtime)
     for base in node.bases:  # type: ast.AST
       self.visit(base)  # mark names like Generic[TypeVar] as runtime-used
@@ -251,13 +265,17 @@ class TypeOnlyImportAnalyzer(ast.NodeVisitor):
 
   # waiver: ast visitor methods must use `visit_<NodeType>` naming (PascalCase suffix required by ast.NodeVisitor)
   # pylint: disable=invalid-name
-  def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+  def visit_FunctionDef(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
     """
-    Visit FunctionDef nodes to handle function annotations and body.
-    
+    Visit sync and async function definition nodes to handle function annotations and body.
+
     Args:
-      node: the FunctionDef AST node to process
+      node: the FunctionDef or AsyncFunctionDef AST node to process
     """
+    # visit decorators (applied at runtime when the function is defined)
+    for decorator in node.decorator_list:  # type: ast.AST
+      self.visit(decorator)
+
     # visit return annotation
     self.visit_annotation(node.returns)
 
@@ -304,6 +322,19 @@ class TypeOnlyImportAnalyzer(ast.NodeVisitor):
 
   # waiver: ast visitor methods must use `visit_<NodeType>` naming (PascalCase suffix required by ast.NodeVisitor)
   # pylint: disable=invalid-name
+  def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+    """
+    Visit AsyncFunctionDef nodes to handle function annotations and body.
+
+    Args:
+      node: the AsyncFunctionDef AST node to process
+    """
+    # an async function's signature and body follow the same annotation rules as a plain one
+    self.visit_FunctionDef(node)
+
+
+  # waiver: ast visitor methods must use `visit_<NodeType>` naming (PascalCase suffix required by ast.NodeVisitor)
+  # pylint: disable=invalid-name
   def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
     """
     Visit AnnAssign nodes to handle annotated assignments.
@@ -342,7 +373,7 @@ class TypeOnlyImportAnalyzer(ast.NodeVisitor):
     if annotation is None:
       return
 
-    # guard: skip pure `TypeAlias` itself — it's never a type-only import
+    # the `TypeAlias` name itself is never a type-only import and is not tracked
     if isinstance(annotation, ast.Name) and annotation.id == 'TypeAlias':
       return
 
@@ -411,7 +442,7 @@ class TypeOnlyImportAnalyzer(ast.NodeVisitor):
       self.runtime_refs.add(node.attr)
 
 
-def _line_matches(source_lines: list[str], lineno: int, pattern: re.Pattern[str]) -> bool:
+def _has_pattern_near(source_lines: list[str], lineno: int, pattern: re.Pattern[str]) -> bool:
   """
   Check whether a waiver pattern applies to a given line.
 
@@ -437,7 +468,7 @@ def _line_matches(source_lines: list[str], lineno: int, pattern: re.Pattern[str]
   while prev >= 0:
     stripped = source_lines[prev].strip()
 
-    # guard: stop at the first non-comment line — the block ends here
+    # the comment block ends at the first non-comment line
     if not stripped.startswith('#'):
       break
     if pattern.search(source_lines[prev]):
@@ -470,27 +501,26 @@ def _waiver_status(source_lines: list[str], header_line: int, name_line: int) ->
   # # Waiver scope for a type-only import finding
   # A finding is silenced only by a waiver carrying a non-empty reason, placed either on the
   # imported name's own line (silencing that one name) or on the import statement's header line
-  # (silencing every name declared in that statement). A waiver marker present without a reason
+  # (silencing every name declared in that statement). Either position also accepts the waiver
+  # anywhere in the run of comment lines directly above that line. A waiver marker present without a reason
   # never silences the finding; it is instead reported separately as an invalid waiver so the
   # missing reason stays visible.
 
-  # guard: a valid waiver on the name line or the block header silences the finding
-  if _line_matches(source_lines, name_line, WAIVER_RE) \
-      or _line_matches(source_lines, header_line, WAIVER_RE):
+  # a valid waiver on the name line or the block header silences the finding
+  if _has_pattern_near(source_lines, name_line, WAIVER_RE) \
+      or _has_pattern_near(source_lines, header_line, WAIVER_RE):
     return 'waived'
 
-  # guard: an empty-reason waiver marker is present but does not silence
-  if _line_matches(source_lines, name_line, WAIVER_MARKER_RE) \
-      or _line_matches(source_lines, header_line, WAIVER_MARKER_RE):
+  # an empty-reason waiver marker is present but does not silence
+  if _has_pattern_near(source_lines, name_line, WAIVER_MARKER_RE) \
+      or _has_pattern_near(source_lines, header_line, WAIVER_MARKER_RE):
     return 'invalid'
 
   # no waiver of any kind covers this import, so the finding stands
   return 'active'
 
 
-def analyze_file(
-    path: str
-) -> tuple[list[tuple[int, str | None, str]], str | None, int, list[tuple[int, str | None, str]]]:
+def analyze_file(path: str) -> tuple[list[Suggestion], str | None, int, list[Suggestion]]:
   """
   Analyze a Python file to identify type-only import opportunities.
 
@@ -522,8 +552,8 @@ def analyze_file(
   runtime_required = {'InitVar'}
 
   # read and parse the file into an AST
-  with open(path, 'r', encoding = 'utf-8') as f:
-    source = f.read()
+  with open(path, 'r', encoding = 'utf-8') as handle:
+    source = handle.read()
   tree = ast.parse(source, filename = path)
   source_lines = source.splitlines()
 
@@ -542,11 +572,11 @@ def analyze_file(
 
   # partition type-only findings by waiver status; the note keeps the import
   # statement line (header) so output is unchanged for waiver-free files
-  suggestions: list[tuple[int, str | None, str]] = []
-  invalid: list[tuple[int, str | None, str]] = []
+  suggestions: list[Suggestion] = []
+  invalid: list[Suggestion] = []
   waived = 0
   for name, (mod, header_line, name_line) in analyzer.imported_names.items():
-    # guard: only names used solely in annotations are candidates
+    # only names used solely in annotations are candidates
     if name not in analyzer.ann_refs or name in analyzer.runtime_refs or name in runtime_required:
       continue
     status = _waiver_status(source_lines, header_line, name_line)
@@ -568,16 +598,14 @@ def analyze_file(
   # emit a warning if TYPE_CHECKING is used but future import is missing
   warning = None
   if analyzer.has_type_checking_block and not analyzer.has_future_annotations:
-    relpath = os.path.relpath(path, start = os.getcwd())
-    warning = f'{relpath}:1: warning: uses TYPE_CHECKING but lacks `from __future__ import annotations`'
+    warning = (f'{os.path.relpath(path, start = os.getcwd())}:1: warning: uses TYPE_CHECKING but lacks '
+               '`from __future__ import annotations`')
 
   # the caller aggregates all four channels across the tree, so none of them may be collapsed here
   return suggestions, warning, waived, invalid
 
 
-def walk_dir(
-    root: str, exclude_substrings: list[str]
-) -> tuple[SuggestionsMap, list[str], int, int, SuggestionsMap]:
+def walk_dir(root: str, exclude_substrings: list[str]) -> tuple[SuggestionsMap, list[str], int, int, SuggestionsMap]:
   """
   Walk the directory tree and analyze all Python files for type-only imports.
 
@@ -609,7 +637,7 @@ def walk_dir(
       if fname.endswith('.py'):
         path = os.path.join(dirpath, fname)
 
-        # guard: skip files matching any exclusion substring
+        # files matching any exclusion substring are left out of the scan
         if any(sub in path for sub in all_excludes):
           continue
 
@@ -629,8 +657,8 @@ def walk_dir(
             invalid_map[path].extend(invalid)
           if warning:
             warnings.append(warning)
-        except SyntaxError as e:
-          print(f'[!] Syntax error in {path}: {e}', file = sys.stderr)
+        except (SyntaxError, UnicodeDecodeError) as error:
+          print(f'[!] Cannot parse {path} ({type(error).__name__}): {error}', file = sys.stderr)
 
   # the processed count is reported even on a clean run, so it travels with the findings
   return all_suggestions, warnings, files_processed, total_waived, invalid_map
@@ -673,36 +701,36 @@ def main() -> None:
   # A baseline set of paths is always excluded from analysis and cannot be re-included by
   # configuration. Configured exclusions extend that baseline, and command-line exclusions extend
   # the configured set further; neither ever replaces what came before it. When a specific path is
-  # explicitly targeted for analysis, any configured exclusion matching a segment of that path is
-  # dropped first, so an explicitly requested location is never silently skipped by a broader
-  # configured rule.
+  # explicitly targeted for analysis, every configured exclusion that would hide the targeted
+  # location is dropped first: an exclusion counts as hiding it when its text appears anywhere in
+  # the target's full location, whether as a single directory name, a name with a trailing
+  # separator, a multi-segment fragment, or a directory above the working directory. An explicitly
+  # requested location is therefore never silently skipped by a broader configured rule.
 
   # get excludes from config, CLI args can extend the list
-  config_excludes = list(config.get('exclude', []))
+  scan_excludes = list(config.get('exclude', []))
 
   # when a specific path is targeted, drop config exclusions that match the target
   # so that explicitly requested directories (e.g. tests/) are not silently skipped
-  target_rel = os.path.relpath(base_path, start = os.getcwd())
-  if target_rel != '.':
-    target_parts = target_rel.rstrip('/').split('/')
-    config_excludes = [ e for e in config_excludes
-                        if e not in target_parts ]
+  if os.path.relpath(base_path, start = os.getcwd()) != '.':
+    target_path = base_path.rstrip(os.sep) + os.sep
+    scan_excludes = [ exclude for exclude in scan_excludes
+                      if exclude not in target_path ]
 
   # CLI exclusions extend the config list, they never replace it
-  exclude_substrings = config_excludes
   if args.exclude:
-    exclude_substrings.extend(args.exclude)
+    scan_excludes.extend(args.exclude)
 
   # run analysis over a directory
   results, warnings, files_processed, total_waived, invalid_map = walk_dir(
-      base_path, exclude_substrings
+      base_path, scan_excludes
   )
 
   # print all suggestions in file:line format
   for filepath, suggestions in results.items():
     relpath = os.path.relpath(filepath, start = os.getcwd())
     for lineno, mod, name in suggestions:
-      print(f'{relpath}:{lineno}: note: import {name} from {mod} is only used in type hints')
+      print(f'{relpath}:{lineno}: note: {TYPE_ONLY_NOTE.format(name = name, mod = mod)}')
 
   # print all file-level warnings
   for warning in warnings:
@@ -713,8 +741,7 @@ def main() -> None:
     for filepath, findings in invalid_map.items():
       relpath = os.path.relpath(filepath, start = os.getcwd())
       for lineno, mod, name in findings:
-        print(f'{relpath}:{lineno}: note: invalid waiver (empty reason) for import '
-              f'{name} from {mod} — finding not suppressed')
+        print(f'{relpath}:{lineno}: note: {INVALID_WAIVER_NOTE.format(name = name, mod = mod)}')
     print(f'waived: {total_waived}')
 
   # print success message if no issues found
@@ -722,6 +749,6 @@ def main() -> None:
     print(f'Success: no issues found in {files_processed} source files')
 
 
-# run main if this is the top-level script
+# entry point when executed as a script rather than imported as a module
 if __name__ == '__main__':
   main()

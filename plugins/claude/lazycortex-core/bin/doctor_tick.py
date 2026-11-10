@@ -41,16 +41,30 @@ from constants import (HaltKey, HaltReason, IncidentKey, JobArtifact, JobConfigK
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from frontmatter_parser import parse_frontmatter  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from expert_runtime import dispatch_job, retire_completed_jobs  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from job_response import is_job_bundle  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from lazy_settings import load_section  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import recover  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from routine_types import routine_protocols  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from runtime_state import get_halted  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
 
 
+# Repo-relative root of the expert job tree scanned for dead jobs
 JOBS_BASE = ".experts/.jobs"
-DEAD_HALT_AGE_SEC = 3600  # halt must be ≥1h old before doctor takes over
+# Minimum age of a halt, in seconds, before the doctor takes it over
+DEAD_HALT_AGE_SEC = 3600
+# Git remote probed to tell whether a remote-unreachable halt has cleared
 REMOTE_NAME = "origin"
+# Wall-clock cap, in seconds, on the remote reachability probe
 REMOTE_PROBE_TIMEOUT_SEC = 15
 # waiver: daemon trigger tokens as recorded in daemon_halted.triggered_by, not internal keys
 GIT_SYNC_ACTORS = ( "_git_pre", "_git_post" )
@@ -96,7 +110,7 @@ def _dead_jobs_needing_doctor(repo: Path) -> list[dict]:
       if not (jdir / JobMarker.DEAD).exists():
         continue
 
-      # guard: skip jobs that have already been triaged
+      # jobs already triaged are not collected again
       if (jdir / JobArtifact.DIAGNOSIS_JSON).exists():
         continue
       out.append({
@@ -123,12 +137,6 @@ def _clear_probe_recoverable_halt(repo: Path) -> bool:
     True when a halt was cleared and the daemon may resume, False when there was nothing to clear,
     the halt is younger than `DEAD_HALT_AGE_SEC`, or the remote is still unreachable.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-  import recover  # pylint: disable=import-error
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-  from runtime_state import get_halted  # pylint: disable=import-error
   halt = get_halted(repo)
 
   # guard: nothing to clear
@@ -155,9 +163,11 @@ def _clear_probe_recoverable_halt(repo: Path) -> bool:
   # outage — the repository itself is fine, only the connection to it failed at that moment —
   # so both self-recover once a probe of the remote answers again, and only after the halt has
   # aged past a one-hour gate that gives the operator and the daemon's own retry a fair chance
-  # first. Diverged history, rejected pushes, and invalid routine configuration describe real,
-  # persistent repository or configuration state instead of a passing outage; no probe of the
-  # remote changes what is true about them, so they always wait for the operator to resolve.
+  # first. Diverged history, rejected pushes, invalid routine configuration, and a post-tick
+  # publish whose rebase onto the remote refused to even start — an untracked file sits where an
+  # operator commit must land — describe real, persistent repository or configuration state
+  # instead of a passing outage; a reachable remote says nothing about the file in the way and no
+  # probe changes what is true about it, so they always wait for the operator to resolve.
 
   # guard: only an unreachable-remote or sync-step-local halt is self-checkable
   if reason != HaltReason.GIT_REMOTE_UNAVAILABLE and not sync_local:
@@ -197,9 +207,6 @@ def _stuck_halt(repo: Path) -> dict | None:
     `DEAD_HALT_AGE_SEC` seconds, otherwise `None`. Other halt reasons (git-related) require human
     investigation and stay out of doctor scope.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-  from runtime_state import get_halted  # pylint: disable=import-error
   halt = get_halted(repo)
 
   # guard: no halt block — daemon is not stuck
@@ -233,8 +240,7 @@ def _read_tail(path: Path, lines: int = 50) -> str:
     text = path.read_text(encoding = "utf-8")
   except (OSError, UnicodeDecodeError):
     return ""
-  parts = text.splitlines()
-  return "\n".join(parts[-lines:])
+  return "\n".join(text.splitlines()[-lines:])
 
 
 def _source_state(repo: Path, config_json: dict | None) -> list[dict]:
@@ -266,8 +272,10 @@ def _source_state(repo: Path, config_json: dict | None) -> list[dict]:
   # than silently skipped, because a target that vanished is exactly the situation where
   # retrying the job would only recreate work the operator already moved past.
 
-  # guard: an unreadable config leaves nothing to describe, and a missing key is not an error
+  # the job's recorded source paths are what gets described
   paths = (config_json or {}).get(JobConfigKey.SOURCE_PATHS)
+
+  # guard: an unreadable config leaves nothing to describe, and a missing key is not an error
   if not isinstance(paths, list):
     return []
 
@@ -332,7 +340,7 @@ def _build_context(repo: Path, halt: dict | None, dead_jobs: list[dict]) -> dict
   for entry in dead_jobs:
     # waiver: one-off dead-job context-schema field name, not a reusable domain key
     jdir = repo / entry["jdir_rel"]
-    e = dict(entry)
+    job_ctx = dict(entry)
     for key, fname in (
       ( "request_json", JobFile.REQUEST ),
       ( "config_json", JobFile.CONFIG ),
@@ -340,21 +348,21 @@ def _build_context(repo: Path, halt: dict | None, dead_jobs: list[dict]) -> dict
       ( "error_json", JobArtifact.ERROR_JSON ),
     ):
       try:
-        e[key] = json.loads((jdir / fname).read_text(encoding = "utf-8"))
+        job_ctx[key] = json.loads((jdir / fname).read_text(encoding = "utf-8"))
       except (OSError, json.JSONDecodeError):
-        e[key] = None
+        job_ctx[key] = None
     try:
       # waiver: one-off doctor-context-schema field name, not a reusable domain key
-      e["attempts"] = int((jdir / JobArtifact.ATTEMPTS).read_text(encoding = "utf-8").strip())
+      job_ctx["attempts"] = int((jdir / JobArtifact.ATTEMPTS).read_text(encoding = "utf-8").strip())
     except (OSError, ValueError):
       # waiver: one-off doctor-context-schema field name, not a reusable domain key
-      e["attempts"] = 0
+      job_ctx["attempts"] = 0
     # waiver: one-off doctor-context-schema field name and inline tail-length literal, not domain constants
-    e["transcript_tail"] = _read_tail(jdir / JobArtifact.TRANSCRIPT, 30)
+    job_ctx["transcript_tail"] = _read_tail(jdir / JobArtifact.TRANSCRIPT, 30)
     # waiver: one-off doctor-context-schema field name, not a reusable domain key
-    e["source_state"] = _source_state(repo, e["config_json"])
+    job_ctx["source_state"] = _source_state(repo, job_ctx["config_json"])
     # waiver: one-off doctor-context-schema field name, not a reusable domain key
-    context["dead_jobs"].append(e)
+    context["dead_jobs"].append(job_ctx)
 
   # capture a small slice of recent commit history for situational awareness
   try:
@@ -389,22 +397,16 @@ def _all_known_protocols(repo: Path) -> list[str]:
     The deduplicated list of protocol identifiers reachable from any registered routine, in first-seen
     order so prompts are byte-stable across runs.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-  from lazy_settings import load_section  # pylint: disable=import-error
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-  from routine_types import _routine_protocols  # pylint: disable=import-error
   routines = load_section(repo / SettingsFile.REL, SettingsKey.ROUTINES)
   seen: list[str] = []
   for name, cfg in routines.items():
     # guard: skip the version sentinel and any non-dict entries
     if name == SettingsKey.VERSION or not isinstance(cfg, dict):
       continue
-    for p in _routine_protocols(cfg):
+    for protocol in routine_protocols(cfg):
       # deduplicate while preserving first-seen order
-      if p not in seen:
-        seen.append(p)
+      if protocol not in seen:
+        seen.append(protocol)
   return seen
 
 
@@ -428,16 +430,16 @@ def doctor_tick(repo: Path) -> dict:
 
   # Domain(runtime.incidents):
   # # Doctor trigger conditions and single-flight dispatch
-  # The doctor is woken only by one of two conditions: a halt that has sat unresolved long
-  # enough that nobody is coming to fix it by hand, or a dead job that has never been given a
-  # retry-or-give-up judgment. Because the doctor never reports back to anything that consumes
+  # The doctor is woken only by one of two conditions: a halt caused by uncommitted changes that
+  # has sat unresolved for at least an hour, long enough that nobody is coming to fix it by
+  # hand, or a dead job that has never been given a retry-or-give-up judgment. A halt for any
+  # other reason is outside the doctor's scope: the remote-outage ones are cleared on their own
+  # once a probe answers, and the rest wait for the operator. Because the doctor never reports back to anything that consumes
   # its answer, a finished dispatch — successful or not — is recycled before a new one is
   # queued; otherwise the one dedicated doctor slot would stay occupied by old work and no
   # newly triggered condition could ever be looked at.
 
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-  from expert_runtime import dispatch_job, retire_completed_jobs  # pylint: disable=import-error
+  # gather both trigger conditions after letting a recovered remote lift its own halt
   repo = Path(repo)
   remote_halt_cleared = _clear_probe_recoverable_halt(repo)
   halt = _stuck_halt(repo)

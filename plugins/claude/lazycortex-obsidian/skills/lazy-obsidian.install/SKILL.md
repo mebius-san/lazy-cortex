@@ -10,7 +10,7 @@ Bootstrap the plugin in the right scope. What this skill does, in one pass:
 - Syncs rule templates shipped by the plugin into the matching rules directory — install-managed mirrors: stale copies are overwritten from the shipped source, orphans left in place.
 - Scaffolds the tag-page template consumed by the `lazy-obsidian.gen-tag-pages` agent — project scope only, seeded once and never touched again.
 - Neither path ever prompts.
-- At project scope this skill is the root entry point for the plugin family: after the rule/template work it installs Dataview (needed by tag pages), syncs and enables every CSS snippet the plugin ships (the one writer of `appearance.json`'s `enabledCssSnippets` array), and runs `/lazy-obsidian.iconize-install` and `/lazy-obsidian.diagram-install` so a fresh vault reaches a usable state.
+- At project scope this skill is the root entry point for the plugin family: after the rule/template work it installs Dataview (needed by tag pages), syncs and enables every CSS snippet the plugin ships (the plugin owns `appearance.json` through its `snippet-enable` verb, which `lazy-review.install` calls too), and runs `/lazy-obsidian.iconize-install` and `/lazy-obsidian.diagram-install` so a fresh vault reaches a usable state.
 
 The plugin currently ships **zero rules**. If you installed an earlier version of the plugin that shipped `lazy-obsidian.vault-hygiene.md`, this skill leaves it in place as a kept-orphan (it is never auto-deleted).
 
@@ -101,7 +101,7 @@ Rules are install-managed mirrors: the plugin owns every byte, and a consumer wh
 
 The verdict is a byte comparison, never an impression from reading the two files.
 
-With zero source rules, nothing is written and orphans are silently kept. Users upgrading from an earlier version see `lazy-obsidian.vault-hygiene.md` reported as **kept-orphan** (the rule was retired when `lazy-obsidian.config` was removed; vault-plugin setup now lives in `/lazy-obsidian.update-plugin` + `/lazy-obsidian.iconize-install`) — the report notes it is retired so the user can delete it by hand.
+With zero source rules, nothing is written and orphans are silently kept. Users upgrading from an earlier version see `lazy-obsidian.vault-hygiene.md` reported as **kept-orphan** (the rule was retired when `lazy-obsidian.config` was removed; vault-plugin setup now lives in the `plugin-install` verb + `/lazy-obsidian.iconize-install`) — the report notes it is retired so the user can delete it by hand.
 
 ### Namespace-scoped orphan handling
 
@@ -139,15 +139,15 @@ The agent itself (`lazy-obsidian.gen-tag-pages`) is shipped by the plugin at `<i
 
 Tag pages rely on the Dataview Obsidian plugin to render the `Index` section — it is a hard dependency for the vault setup, not an optional add-on. Skip this step entirely when scope is `user` — tag pages are a vault concern. No opt-in prompt: plugin enabled means full functionality, so the full vault setup installs Dataview unconditionally.
 
-Invoke `/lazy-obsidian.update-plugin dataview` unconditionally — it is version-aware and idempotent (installs if missing, updates if the remote is newer, no-ops when current) and re-enforces the opinionated override block from `plugin-settings.json` on every run. Record its state tuple (`binary=... overrides=... community=...`) for the final report. Outcome: state tuple.
+Run `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-obsidian" plugin-install dataview --vault <vault>)` unconditionally — the verb is version-aware and idempotent (installs if missing, updates if the source is newer, no-ops when current) and re-enforces the opinionated override block from `plugin-settings.json` on every run. It prints one JSON line; record the state tuple `binary=<binary> overrides=<overrides> community=<community>` from the fields of those names, plus any `warnings`, for the final report. Outcome: state tuple.
 
-If `update-plugin` returns FAIL (registry unreachable, id missing), surface the failure and record `failed:<reason>` — without Dataview the `Summary` section still renders but the `Index` DataviewJS block stays blank. Re-running this skill later picks Dataview up once the network is available.
+If the verb exits 1 (`status: refused`), surface the failure and record `failed:<reason>` with the JSON `reason` — without Dataview the `Summary` section still renders but the `Index` DataviewJS block stays blank. Re-running this skill later picks Dataview up once the network is available.
 
 ## Step 6: Run `/lazy-obsidian.iconize-install` (project scope only)
 
 Skip this step ONLY when scope is `user` — iconize-sync is a vault concern.
 
-No opt-in prompt: the full vault setup installs iconize-sync unconditionally (plugin enabled means full functionality). The child skill is itself quiet and idempotent — it installs Iconize + Folder Notes + iconize-reloader via `/lazy-obsidian.update-plugin`, scaffolds the icon-map + repaint routine, asserts Iconize frontmatter settings, manages its one `.gitignore` line, and version-checks its hard deps — silently re-running every state and prompting only on a genuine conflict. None of those states are observable from the icon-map file alone, so always run it; never short-circuit on a probe.
+No opt-in prompt: the full vault setup installs iconize-sync unconditionally (plugin enabled means full functionality). The child skill is itself quiet and idempotent — it installs Iconize + Folder Notes + iconize-reloader via the `plugin-install` verb, scaffolds the icon-map + repaint routine, asserts Iconize frontmatter settings, manages its one `.gitignore` line, and version-checks its hard deps — silently re-running every state and prompting only on a genuine conflict. None of those states are observable from the icon-map file alone, so always run it; never short-circuit on a probe.
 
 Invoke `/lazy-obsidian.iconize-install` as the next skill call, forwarding the target explicitly as `repo=<repo-root>` so the child mutates the target repo and not the coordinator's cwd. Record **chained** for the report.
 
@@ -155,7 +155,7 @@ Invoke `/lazy-obsidian.iconize-install` as the next skill call, forwarding the t
 
 Skip this step ONLY when scope is `user` — CSS snippets are a vault concern.
 
-Installs every CSS snippet the plugin ships and enables all of them with one `appearance.json` edit. This step used to live inside `/lazy-obsidian.diagram-install` (which owned only two of the snippets); now that `callouts.css` exists too, `install` owns the array so there's a single writer of `enabledCssSnippets` — `diagram-install` only declares its files, it no longer writes them.
+Installs every CSS snippet the plugin ships and enables all of them with one `appearance.json` edit. The plugin owns `appearance.json` through its `snippet-enable` verb, which `lazy-review.install` calls too — `diagram-install` only declares its files, it no longer writes them.
 
 ### Sync (file-sync policy)
 
@@ -187,20 +187,19 @@ Outcome: per-snippet status word from `installed` / `unchanged` / `merged` / `ke
 
 ### Enable in appearance.json
 
-Read `<vault>/appearance.json`. If missing or unparseable, treat its contents as `{}`.
+One call enables every snippet the Sync subsection enumerated, one `--name` per snippet (the name without `.css`):
 
-- Ensure `enabledCssSnippets` exists as an array (create empty `[]` if absent).
-- For each snippet `<name>` synced above:
-  - If `<vault>/snippets/<name>.css` does not exist on disk, do NOT add the entry — pointing `enabledCssSnippets` at a missing file is dead config. Record per-snippet outcome **deferred** in this case. (The sync above always writes the file unless a conflict was kept-local in a way that removed it — normally the file is present.)
-  - Otherwise, if the array does NOT contain `"<name>"`, append it.
-- Drop any entry naming a snippet **this plugin used to ship and no longer does** — the file is gone from `<vault>/snippets/` and the name is not in the enumeration above, yet it sits in the array pointing at nothing. Removal is limited to that case: an entry naming a snippet from another source, or one whose file exists, is the vault's and stays. Record the removal as **retired: `<name>`**.
-- Atomic write (`appearance.json.tmp` → `mv`) only when the array changed.
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-obsidian" snippet-enable --vault <vault> --name <name> --name <name> ...)
+```
 
-Per-snippet outcome:
+It prints one JSON line. Read the per-snippet outcome from its `snippets` map:
+
 - `enabled` — added to the array this run.
 - `already-enabled` — entry was already present.
-- `deferred` — snippet file absent on disk; refused to register a stale entry.
-- `retired` — a dead entry for a snippet this plugin withdrew was removed.
+- `deferred` — snippet file absent on disk; the verb never registers an entry pointing at a missing file.
+
+`status: no-vault` means `<vault>` does not exist; record **deferred** for every snippet. `status: refused` (exit 1) means `appearance.json` could not be edited safely and was left as it is; record **refused: `<reason>`** for every snippet, with the verb's `reason`, for Step 7.
 
 Reload note: Obsidian does not watch `appearance.json` for changes mid-session. Step 7 tells the user to reload Obsidian (or click ↻ next to each snippet in Settings → Appearance → CSS snippets) when any snippet's outcome this step was **enabled**.
 
@@ -210,7 +209,7 @@ Outcome: per-snippet sync status + per-snippet enable status. Record for Step 7.
 
 Skip this step ONLY when scope is `user` — diagram render glue is a vault concern.
 
-No opt-in prompt: the full vault setup installs the diagram render glue unconditionally (plugin enabled means full functionality). The child skill is quiet and idempotent — it installs `mermaid-popup` via `/lazy-obsidian.update-plugin` with the calibrated zoom-ratio override, and leaves the legacy `mermaid-no-bg.css` snippet in place as a kept-orphan — silently re-running every state and prompting only on a genuine conflict. None of those states are observable from a probe alone, so always run it; never short-circuit.
+No opt-in prompt: the full vault setup installs the diagram render glue unconditionally (plugin enabled means full functionality). The child skill is quiet and idempotent — it installs `mermaid-popup` via the `plugin-install` verb with the calibrated zoom-ratio override, and leaves the legacy `mermaid-no-bg.css` snippet in place as a kept-orphan — silently re-running every state and prompting only on a genuine conflict. None of those states are observable from a probe alone, so always run it; never short-circuit.
 
 Invoke `/lazy-obsidian.diagram-install` as the next skill call. Record **chained** for the report.
 
@@ -223,27 +222,24 @@ Invoke `/lazy-obsidian.diagram-install` as the next skill call. Record **chained
   - Plugin version/commit synced from: `<version>` / `<gitCommitSha>` (from `installed_plugins.json`)
   - For each rule: state (**installed**, **unchanged**, **refreshed**, **kept-orphan**, or **failed**) and target `<path>`
   - Tag-page template: state (**installed** or **kept-local**) and target `<path>` — omit when scope is `user`
-  - Dataview install: `update-plugin` state tuple (`binary=... overrides=... community=...`) or **failed:`<reason>`** — omit when scope is `user`
+  - Dataview install: `plugin-install` state tuple (`binary=... overrides=... community=...`) or **failed:`<reason>`** — omit when scope is `user`
   - iconize-install chain: **chained** — omit when scope is `user`. This line is mandatory in project scope; emit it unconditionally so a missing line is a visible gap in the report.
-  - Snippets (Step 6.5) — one bullet per snippet: sync state (**installed** / **unchanged** / **merged** / **kept-local**) and appearance.json state (**enabled** / **already-enabled** / **deferred**), with target `<path>` — omit when scope is `user`.
+  - Snippets (Step 6.5) — one bullet per snippet: sync state (**installed** / **unchanged** / **merged** / **kept-local**) and appearance.json state (**enabled** / **already-enabled** / **deferred** / **refused: `<reason>`**), with target `<path>` — omit when scope is `user`.
   - diagram-install chain: **chained** — omit when scope is `user`. This line is mandatory in project scope; emit it unconditionally so a missing line is a visible gap in the report.
 
 ## Step 8: Seed lazy.settings.json
 
-Seed the `agent_models.lazycortex` group with this plugin's shipped subagent (`lazy-obsidian.gen-tag-pages`) by dispatching the shared primitive — it owns the `default-tiers.json` locate, the `lazycortex-obsidian:`-prefix filter, and the non-destructive per-key semantics (absent→add, equal→unchanged, different→kept-local). There is no inline tier logic here.
+The `agent-models-seed` verb seeds the `agent_models.lazycortex` group with every `lazycortex-obsidian:` subagent the core tier table lists (`lazy-obsidian.gen-tag-pages`). The step is here so a dispatch of the tag-page agent resolves a model.
 
-Dispatch, passing the scope resolved in Step 1 (`project` | `user`):
+Run, passing the scope resolved in Step 1 (`project` | `user`):
 
 ```
-Skill(skill: "lazycortex-core:lazy-core.agent-models-seed", args: "prefix=lazycortex-obsidian scope=<scope>")
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> agent-models-seed --prefix lazycortex-obsidian --scope <scope>)
 ```
 
-Fold the primitive's returned report block verbatim into this skill's Step 7 report. Surface its terminal outcomes:
+The verb prints one JSON line: `outcome` is `seeded-N`, `unchanged`, or `no-entries` (exit 0), or a refusal — `sot-missing`, `missing-prefix`, `missing-scope`, `settings-unparseable` (exit 1, with a `message`); `entries` carries one `{dispatch, tier, state}` line per key, `state` being `added` / `unchanged` / `refreshed` / `kept-local`. Fold the `entries` lines into the Step 7 report; on a refusal relay its `message` and write no seed lines. `no-entries` is reported plainly (a maintainer must extend `default-tiers.json`), not an abort.
 
-- **`sot-missing`** — `lazycortex-core`'s `default-tiers.json` was not found → the primitive aborts; relay its message (`lazycortex-core not installed; install it before seeding lazycortex-obsidian tiers`) and do not fabricate seed lines.
-- **`no-entries`** — the SOT lists no `lazycortex-obsidian:` agents → report it plainly (a maintainer must extend `default-tiers.json`); not an abort.
-
-Step outcome: `seeded` (any entry added) or `unchanged`.
+Step outcome: `seeded` (the verb answered `seeded-N`) or `unchanged` (it answered `unchanged` or `no-entries`); never report a seed the verb did not answer.
 
 ## Failure modes
 

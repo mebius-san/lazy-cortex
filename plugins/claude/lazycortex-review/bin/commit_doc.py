@@ -33,9 +33,13 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import core_settings as _core_settings  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import git_ops as _git_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from keys import JobKey, Paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+from errors import SettingsReadError  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+from keys import JobKey  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # the coordinator's expert name and fallback identity — the registered settings entry wins
@@ -77,15 +81,8 @@ def _append_history(repo: Path, file_path: Path, lines: tuple[str, ...]) -> None
   # guard: nothing to journal this wake
   if not lines:
     return
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-  import collect_ops as _collect_ops  # pylint: disable=import-error
-  # waiver: the resolver is the collector's own copy of the § 1c lookup, reused rather than duplicated a fourth time
-  cli = _collect_ops._resolve_core_cli()  # pylint: disable=protected-access
-
-  # guard: no core CLI reachable — the line cannot land, and a silent skip would lose it
-  if cli is None:
-    raise RuntimeError("lazycortex-core CLI not resolvable — cannot append the history line")
+  # no core CLI reachable raises — the line cannot land, and a silent skip would lose it
+  cli = _git_ops.require_core_cli()
   for line in lines:
     proc = subprocess.run(
         [sys.executable, str(cli), _HistoryWire.VERB, str(file_path), _HistoryWire.LINE_FLAG, line],
@@ -102,20 +99,23 @@ def _coordinator_author(repo: Path) -> dict:
   Resolve the coordinator's git author identity from the consumer's settings.
 
   Args:
-    repo: Repository root to resolve `.claude/lazy.settings.json` against.
+    repo: Repository root whose settings are read.
 
   Returns:
     Mapping with `name` and `email` keys — the registered `git_author` of the
     `review.coordinator` expert, or the shipped fallback identity when the settings
-    file or the entry is absent or unreadable.
+    or the entry are absent or unreadable.
+
+  Raises:
+    RuntimeError: When no core CLI is resolvable.
   """
-  path = repo / Paths.CLAUDE_DIR / Paths.SETTINGS_FILE
+  # the identity core and the pump know the coordinator by — the merged view, local overlay included
   try:
-    settings = json.loads(path.read_text(encoding = "utf-8"))
-  except (OSError, json.JSONDecodeError):
-    settings = {}
-  # waiver: 'experts'/'git_author' are lazy.settings.json's own wire-shape keys, not keys.py-promoted constants
-  author = settings.get("experts", {}).get(_COORDINATOR_EXPERT, {}).get("git_author", {})
+    experts = _core_settings.read_merged_sections(repo, JobKey.EXPERTS)[JobKey.EXPERTS]
+  except SettingsReadError:
+    experts = {}
+  # waiver: 'git_author' is lazy.settings.json's own wire-shape key, not a keys.py-promoted constant
+  author = experts.get(_COORDINATOR_EXPERT, {}).get("git_author", {})
 
   # guard: an entry without both fields would half-apply — fall back whole
   if not isinstance(author, dict) or not author.get(JobKey.NAME) or not author.get(JobKey.EMAIL):

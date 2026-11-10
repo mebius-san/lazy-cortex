@@ -13,17 +13,26 @@ from typing import TypedDict
 
 import fcntl
 import json
+import os
+import signal
+import subprocess
 import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import error_ledger  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from job_response import classify_response, is_job_bundle, read_response  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from lazy_settings import (  # pylint: disable=import-error
+  load_section, load_tracked_section, resolve_agent_model_tier, save_section,
+)
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from lazy_install_phases import ensure_self_ignoring_dir  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from provider_env import resolve_provider  # pylint: disable=import-error
+from provider_env import resolve_provider, validate_expert_model  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import runtime_state  # pylint: disable=import-error
 
@@ -59,20 +68,125 @@ class _RoutineDefaults(TypedDict):
   Mirrors the keyword surface of `register_routine`; `ignore_halt` and
   `hooks_enabled` are optional because only some built-in routines declare them.
   """
+  # The routine's registry name.
   name: str
+  # The argv the daemon runs for each tick of the routine.
   command: list[str]
+  # Seconds between two runs of the routine.
   interval_sec: int
+  # Wall-clock cap, in seconds, on one run.
   timeout_sec: int
+  # Ascending execution order among routines due on the same tick; lower runs earlier.
   priority: int
+  # Whether the routine runs even while the daemon is halted or the tree is dirty.
   ignore_halt: NotRequired[bool]
+  # Short names of the lazycortex hooks allowed to run inside what the routine spawns.
   hooks_enabled: NotRequired[list[str]]
 
 # tier aliases the model-router recognizes; an agent_models value outside this
 # set (including the "default" sentinel and unknown strings) means "no pin"
-_MODEL_TIERS = frozenset({ "haiku", "sonnet", "opus" })
+_MODEL_TIERS = frozenset({ "haiku", "sonnet", "opus", "fable" })
+
+# Built-in routines the runtime cannot work without; only uninstalling the plugin removes them.
+PROTECTED_ROUTINES = { "lazy-expert.pump", "lazy-runtime.doctor" }
+
+# Default config of the expert pump, the routine that spawns one queued expert job per tick.
+DEFAULT_EXPERT_PUMP: _RoutineDefaults = {
+  "name":         "lazy-expert.pump",
+  "command":      [ "lazycortex-core", "expert-pump-once" ],
+  "interval_sec": 5,
+  # pump processes at most one Claude spawn per invocation; the daemon kills
+  # the pump (and the Claude child) after this many seconds. Subsequent jobs
+  # land on subsequent pump ticks. The 30-min ceiling accommodates long-running
+  # specialists (historian / interpreter on rich documents); raise further
+  # only when consistently hitting timeout in normal operation.
+  "timeout_sec":  1800,
+  # slow Claude spawns — runs last in each tick
+  "priority":     100,
+
+  # Decision: the secret scan runs in expert spawns, the rest of the hooks do not — the
+  # hermetic default exists because `check-public` and `git-guard` cost tens of seconds per
+  # tool call, but a secret an autonomous expert commits has nobody watching for it.
+
+  "hooks_enabled": [ HookName.SECRETS_GUARD ],
+}
+
+# Hourly trigger for the autonomous doctor: scans for DEAD job dirs OR a
+# halt-block ≥ 1h old, and dispatches a `runtime.doctor` expert job
+# when something needs attention. The Python tick is intentionally dumb —
+# all reasoning (revert vs commit vs permanent-fail) belongs to the agent.
+DEFAULT_DOCTOR_TICK: _RoutineDefaults = {
+  "name":         "lazy-runtime.doctor",
+  "command":      [ "lazycortex-core", "doctor-tick" ],
+  "interval_sec": 3600,
+  "timeout_sec":  60,
+  # fast, runs before pump
+  "priority":     30,
+  # MUST run during halt — exists to fix stuck state
+  "ignore_halt":  True,
+}
+
+# Five-minute index healer: restores a `.git/index` displaced by a cloud-sync conflict
+# resolution (the newest `index (…conflicted copy…)` wins) and removes the copy litter.
+# Cheap — one glob of the git dir on the quiet path — and it MUST run during halt, since a
+# displaced index is exactly the kind of stuck state a halt tends to accompany.
+DEFAULT_INDEX_GUARD: _RoutineDefaults = {
+  "name":         "lazy-core.index-guard",
+  "command":      [ "lazycortex-core", "index-guard" ],
+  "interval_sec": 300,
+  "timeout_sec":  30,
+  # fast, runs before doctor and pump
+  "priority":     20,
+  "ignore_halt":  True,
+}
+
+# Daily runtime sweep: removes job bundles past their retention window, job bundles sitting in the
+# queue root outside any expert folder, and ownerless `.runtime/` files, and opens an error-ledger
+# incident for a queued job nobody claimed. Pure file work with no Claude spawn, so it runs after
+# the doctor tick and before the pump.
+DEFAULT_RUNTIME_GC: _RoutineDefaults = {
+  "name":         "lazy-core.runtime-gc",
+  "command":      [ "lazycortex-core", "runtime-gc" ],
+  "interval_sec": 86400,
+  "timeout_sec":  300,
+  # after the doctor tick, before the pump
+  "priority":     40,
+}
+
+# Weekly LLM-tier sanitizer (state-sanitizers-design's second tier): dispatches one
+# `core.autocheckup` expert job that runs the domain doctors and applies only its
+# mechanically-derivable whitelist. Typed (`schedule` + `expert`) shape, which the legacy
+# `_RoutineDefaults` TypedDict cannot express; `repo` resolves against the job's own cwd —
+# the pump spawns every job inside the repository it serves.
+DEFAULT_AUTOCHECKUP_NAME = "lazy-core.autocheckup"
+
+# The routine key and the expert it dispatches are two different registries, so they carry two
+# different canonical shapes (`lazy-core.hygiene` § Naming): the routine belongs to this plugin and
+# wears its namespace, the expert key names a domain and a role and never does.
+DEFAULT_AUTOCHECKUP_EXPERT = "core.autocheckup"
+DEFAULT_AUTOCHECKUP_CFG: dict = {
+  "type":    "schedule",
+  "cron":    "0 6 * * 1",
+  "expert":  DEFAULT_AUTOCHECKUP_EXPERT,
+  "request": { "repo": "." },
+}
 
 
-def _job_dir(repo: Path, expert: str, job_id: str) -> Path:
+# Which keys of a built-in routine this plugin corrects on every bootstrap, and which it only
+# ever fills in when absent (`reconcile_routine`'s ownership split).
+#
+# The interval routines declared above declare nothing owned. Every key their defaults carry —
+# `interval_sec`, `timeout_sec`, `priority`, `hooks_enabled`, `ignore_halt` — is a cadence or a
+# posture the operator is expected to retune, and `command` is one the operator may repoint at a
+# wrapper of their own; correcting any of them would overwrite an answer rather than a stale
+# shape. The autocheckup owns only `type`: the typed dispatch shape is what the daemon reads to
+# decide how to run the entry at all, and an entry that predates the typed shape is unrunnable
+# without it. Its `cron` is the operator's cadence, and its `expert` / `request` stay theirs too.
+_BUILTIN_MANAGED: tuple[str, ...] = ()
+_AUTOCHECKUP_MANAGED = ( "type", )
+
+
+def job_dir(repo: Path, expert: str, job_id: str) -> Path:
   """
   Return the canonical job-bundle directory for a single dispatched job.
 
@@ -103,37 +217,34 @@ def _with_routine_protocols(protocols: list[str] | None) -> list[str]:
   Returns:
     Routine-declared references first, then caller-supplied ones, deduplicated with order preserved.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import os as _os
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: routine_types imports expert_runtime at module level; importing it here at call time breaks the
+  # load cycle a module-level import would close
   # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
   from routine_types import ROUTINE_PROTOCOLS_ENV, parse_routine_protocols_env  # pylint: disable=import-error
 
   # env first so the routine's own protocols lead the list a plugin dispatcher extends
   merged: list[str] = []
-  for ref in [ *parse_routine_protocols_env(_os.environ.get(ROUTINE_PROTOCOLS_ENV)), *(protocols or []) ]:
+  for ref in [ *parse_routine_protocols_env(os.environ.get(ROUTINE_PROTOCOLS_ENV)), *(protocols or []) ]:
     if ref not in merged:
       merged.append(ref)
   return merged
 
 
-def dispatch_job(
-  repo: Path,
-  expert: str,
-  payload: dict,
-  *,
-  protocols: list[str] | None = None,
-  source: list[str] | None = None,
-  context: list[str] | None = None,
-  source_inline: dict[str, str] | None = None,
-  context_inline: dict[str, str] | None = None,
-  result: list[str] | None = None,
-  job_id: str | None = None,
-  dedup_key: str | None = None,
-  dedup_fingerprint: str | None = None,
-  can_commit_in_repo: bool | None = None,
-  halt_exempt: bool = False,
-) -> dict:
+def dispatch_job(repo: Path,
+                 expert: str,
+                 payload: dict,
+                 *,
+                 protocols: list[str] | None = None,
+                 source: list[str] | None = None,
+                 context: list[str] | None = None,
+                 source_inline: dict[str, str] | None = None,
+                 context_inline: dict[str, str] | None = None,
+                 result: list[str] | None = None,
+                 job_id: str | None = None,
+                 dedup_key: str | None = None,
+                 dedup_fingerprint: str | None = None,
+                 can_commit_in_repo: bool | None = None,
+                 halt_exempt: bool = False) -> dict:
   """
   Create one job bundle atomically and queue it for the pump.
 
@@ -152,9 +263,10 @@ def dispatch_job(
     - The `source/` and `context/` buckets an expert reads carry the work tree as it stands when
       the pump claims the job, never as it stood at dispatch; only `source_inline` and
       `context_inline` are written at dispatch, for content that exists in no file.
-    - The expert's configured `provider` entry is resolved and validated before any job
-      bundle is written, so a misconfigured provider fails the dispatch loudly rather than
-      surfacing later inside the pump.
+    - The expert's configured `provider` entry, and the explicit `model` of a provider-bound
+      expert, are resolved and validated before any job bundle is written, so a misconfigured
+      provider or a non-tier `model` fails the dispatch loudly rather than surfacing later
+      inside the pump.
     - The job queue's root, `<repo>/.experts/`, gains its own self-ignoring `.gitignore` on
       first use, independent of any install phase having run.
 
@@ -204,7 +316,10 @@ def dispatch_job(
 
   Raises:
     ProviderConfigError: If the expert's configured `provider` entry is missing, incomplete,
-      or violates a naming constraint.
+      or violates a naming constraint, or if a provider-bound expert pins an explicit `model`
+      that is not a tier alias.
+    ValueError: If the expert's configured git author email lies outside the bot email domain.
+    json.JSONDecodeError: If the repository's tracked or local settings file is not valid JSON.
   """
 
   # Contract:
@@ -260,23 +375,25 @@ def dispatch_job(
 
   # resolve expert settings before any filesystem mutation so a misconfigured
   # expert surfaces at dispatch time rather than after partial setup
-  expert_entry = _resolve_expert_entry(repo, expert)
+  expert_entry = resolve_expert_entry(repo, expert)
 
   # Domain(runtime.bot-identity):
   # # A system identity is recognisable by its address
   # Whether a commit came from a person or from the system is decided across the runtime by
-  # looking at the committer's address, and the system commits under addresses in one reserved
+  # looking at the author's address, and the system commits under addresses in one reserved
   # domain that no person can receive mail at. An expert given an address outside that domain
   # is read as an operator by every one of those checks: the work it commits looks like a human
   # gesture, which wakes whatever watches for human gestures, which dispatches the expert again.
   # The address is typed into configuration by hand, so a dispatch refuses it rather than
   # queueing work that would answer its own answer.
 
-  # guard: an identity outside the reserved domain would read as an operator everywhere
+  # the commit identity the expert entry configures, empty when none is set
   # waiver: the expert-entry identity sub-key, owned by the lazy.settings contract, not a reusable domain key
   entry_author = expert_entry.get(JobConfigKey.GIT_AUTHOR)
   # waiver: the expert-entry identity sub-key, owned by the lazy.settings contract, not a reusable domain key
   author_email = str(entry_author.get("email", "")) if isinstance(entry_author, dict) else ""
+
+  # guard: an identity outside the reserved domain would read as an operator everywhere
   if author_email and not author_email.endswith(BOT_EMAIL_DOMAIN):
     raise ValueError(
       f"expert '{expert}': git_author.email {author_email!r} must end with "
@@ -285,26 +402,30 @@ def dispatch_job(
     )
 
   # Contract:
-  # The expert's configured `provider` entry MUST be resolved and validated before any job
-  # bundle filesystem mutation — a misconfigured provider raises `ProviderConfigError` here,
-  # with no bundle directory created and no `READY` marker touched.
+  # The expert's configured `provider` entry, and the explicit `model` of an expert bound to a
+  # provider, MUST be resolved and validated before any job bundle filesystem mutation — a
+  # misconfigured provider, or a provider-bound expert whose explicit `model` is not a tier alias,
+  # raises `ProviderConfigError` here, with no bundle directory created and no `READY` marker touched.
 
   # provider: resolved and validated NOW so a misconfigured endpoint fails the dispatch
   # loudly, before READY — never at spawn time inside the pump
   provider_name = expert_entry.get(JobConfigKey.PROVIDER)
   provider = resolve_provider(repo, provider_name) if provider_name else None
 
+  # a provider-bound expert's own model must be a tier alias, so the spawn's model passes the tier map
+  if provider_name:
+    validate_expert_model(provider_name, expert_entry.get(JobConfigKey.MODEL))
+
   # the bundle slot: a caller-supplied id keeps dispatches addressable, otherwise mint one
   job_id = job_id or uuid.uuid4().hex[:12]
-  d = _job_dir(repo, expert, job_id)
+  bundle_dir = job_dir(repo, expert, job_id)
 
   # park any prior DEAD bundle at the same slot before reusing it — without
   # this the new job would coexist with the stale DEAD marker and the pump
   # would skip it as a zombie
-  if d.exists() and (d / JobMarker.DEAD).exists():
-    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    d.rename(d.with_name(f"{job_id}.dead-{stamp}"))
-  d.mkdir(parents = True, exist_ok = True)
+  if bundle_dir.exists() and (bundle_dir / JobMarker.DEAD).exists():
+    bundle_dir.rename(bundle_dir.with_name(f"{job_id}.dead-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}"))
+  bundle_dir.mkdir(parents = True, exist_ok = True)
 
   # the job queue's own root gains a self-ignoring .gitignore on first use — no install
   # phase runs for a repo that only ever dispatches jobs
@@ -314,17 +435,17 @@ def dispatch_job(
   # the job, so the expert starts from the tree as it stands then rather than as it stood at
   # dispatch; the `_inline` buckets carry content that exists in no file and is written now
   if source_inline:
-    (d / JobIODir.SOURCE).mkdir(exist_ok = True)
+    (bundle_dir / JobIODir.SOURCE).mkdir(exist_ok = True)
     for fname, text in source_inline.items():
-      (d / JobIODir.SOURCE / fname).write_text(text, encoding = "utf-8")
+      (bundle_dir / JobIODir.SOURCE / fname).write_text(text, encoding = "utf-8")
   if context_inline:
-    (d / JobIODir.CONTEXT).mkdir(exist_ok = True)
+    (bundle_dir / JobIODir.CONTEXT).mkdir(exist_ok = True)
     for fname, text in context_inline.items():
-      (d / JobIODir.CONTEXT / fname).write_text(text, encoding = "utf-8")
+      (bundle_dir / JobIODir.CONTEXT / fname).write_text(text, encoding = "utf-8")
   if result:
-    (d / JobIODir.RESULT).mkdir(exist_ok = True)
+    (bundle_dir / JobIODir.RESULT).mkdir(exist_ok = True)
     for fname in result:
-      (d / JobIODir.RESULT / fname).touch()
+      (bundle_dir / JobIODir.RESULT / fname).touch()
 
   # agent: solely the expert entry — every dispatchable agent, built-ins like
   # the doctor included, is registered in settings by the installer
@@ -335,7 +456,7 @@ def dispatch_job(
   # is recorded loudly.
   model = expert_entry.get(JobConfigKey.MODEL) or resolve_agent_model(repo, agent_ref)
   if model is None:
-    _record_unpinned_model(repo, expert, agent_ref, d)
+    _record_unpinned_model(repo, expert, agent_ref, bundle_dir)
 
   # config.json derived purely from settings.experts[<expert>] plus the
   # protocols of the dispatching routine and the caller together; pump reads
@@ -364,11 +485,9 @@ def dispatch_job(
     # `dev.plugin-boundaries.md` § 3, same as every other operational key above. `main`
     # (the default) is today's behavior — the pump enforces nothing further.
     JobConfigKey.WORKSPACE:         expert_entry.get(JobConfigKey.WORKSPACE, WorkspaceMode.MAIN),
-    # `can_commit_in_repo` override (Bug 87): md-scan dispatches in-place
-    # (the consumer edits the file where it lies — see routine_types
-    # dispatch_md_scan) and pass True so the apply expert may write +
-    # commit in place; the pump (review writer) passes None and inherits
-    # the per-expert default (foreign-execution, no-commit clause injected).
+    # `can_commit_in_repo` override: an in-place dispatch (the consumer edits the file where it
+    # lies) passes True so the apply expert may write and commit in place; a caller passing None
+    # inherits the per-expert default (foreign execution, no-commit clause injected).
     JobConfigKey.CAN_COMMIT_IN_REPO: (
         can_commit_in_repo if can_commit_in_repo is not None
         else bool(expert_entry.get(JobConfigKey.CAN_COMMIT_IN_REPO, False))
@@ -380,7 +499,7 @@ def dispatch_job(
   # key is written only when claimed, so an ordinary bundle stays exactly as it was.
   if halt_exempt:
     cfg_blob[JobConfigKey.HALT_EXEMPT] = True
-  (d / JobFile.CONFIG).write_text(json.dumps(cfg_blob, indent = 2), encoding = "utf-8")
+  (bundle_dir / JobFile.CONFIG).write_text(json.dumps(cfg_blob, indent = 2), encoding = "utf-8")
 
   # request.json is the caller payload plus the dedup key, so a later dispatch can match against it
   out_payload = dict(payload)
@@ -393,25 +512,21 @@ def dispatch_job(
     out_payload[JobRequestKey.DEDUP_FINGERPRINT] = dedup_fingerprint
 
   # the payload is complete only once both reserved keys have had their say
-  (d / JobFile.REQUEST).write_text(json.dumps(out_payload, indent = 2), encoding = "utf-8")
+  (bundle_dir / JobFile.REQUEST).write_text(json.dumps(out_payload, indent = 2), encoding = "utf-8")
 
   # READY touched LAST — atomic activation marker; pump treats READY presence
   # as "every other file in this bundle is valid and you can spawn now"
-  (d / JobMarker.READY).touch()
+  (bundle_dir / JobMarker.READY).touch()
 
   # the caller gets the handle it needs to poll or consume this job later
-  return { "job_id": job_id, "queue_path": str(d) }
+  return { "job_id": job_id, "queue_path": str(bundle_dir) }
 
 
-def _resolve_expert_entry(repo: Path, expert_name: str) -> dict:
+def resolve_expert_entry(repo: Path, expert_name: str) -> dict:
   """
   Return the expert settings block from `<repo>/.claude/lazy.settings.json`.
 
-  An empty dict is returned when the expert is not registered — the
-  resulting `config.json` then carries `agent: null` and the pump rejects
-  the job with `config.json: missing agent`. Reporting the misconfiguration
-  through the pump's per-job error response surfaces it where operators
-  already expect to see job failures, rather than at dispatch time.
+  An empty dict is returned when the expert is not registered.
 
   Args:
     repo: Absolute path to the repository whose settings file is consulted.
@@ -421,9 +536,11 @@ def _resolve_expert_entry(repo: Path, expert_name: str) -> dict:
     The settings dict for the named expert, or an empty dict when the
     expert is absent or stored as a non-dict value.
   """
-  # waiver: deferred import — avoid module-load cycle with lazy_settings
-  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-  from lazy_settings import load_section  # pylint: disable=import-error
+
+  # Decision: return an empty dict for an unregistered expert, not raise at dispatch time — the missing agent
+  # then surfaces through the pump's per-job error response, where operators already expect job failures.
+
+  # look up the expert's registered settings block
   experts = load_section(Path(repo) / SettingsFile.REL, SettingsKey.EXPERTS)
   entry = experts.get(expert_name)
   return entry if isinstance(entry, dict) else {}
@@ -433,9 +550,10 @@ def resolve_agent_model(repo: Path, agent_ref: str | None) -> str | None:
   """
   Resolve the agent's model tier from the repository's project-scope settings only.
 
-  Reads `agent_models` from `<repo>/.claude/lazy.settings.json` — the same file the
-  expert block is read from, so the agent tier and expert entry always resolve from
-  one scope — and is deliberately not merged with any global or user-scope settings.
+  Reads `agent_models` from `<repo>/.claude/lazy.settings.json` with the repository's local
+  settings overlay applied on top, so a tier pinned in the local overlay wins over the tracked
+  file. The agent tier and the expert entry resolve from this same project scope, which is
+  deliberately not merged with any global or user-scope settings.
   A tier outside the recognized set — including the `default` sentinel and any
   unknown string — resolves to None so the expert subprocess inherits the CLI
   default rather than a bogus pin.
@@ -445,15 +563,17 @@ def resolve_agent_model(repo: Path, agent_ref: str | None) -> str | None:
     agent_ref: The expert's `agent` dispatch string, or None when unset.
 
   Returns:
-    The recognized tier (`haiku` / `sonnet` / `opus`) configured for the agent,
+    The recognized tier (`haiku` / `sonnet` / `opus` / `fable`) configured for the agent,
     or None when the agent is unconfigured, sentinel-routed, or `agent_ref` is
     None.
   """
 
   # Domain(settings.versioning):
   # # Agent model tier resolution stays project-scoped
-  # An agent's model tier resolves from the dispatching repository's own tracked configuration
-  # only, deliberately excluding any global or user-scope layer that might also define tiers —
+  # An agent's model tier resolves from the dispatching repository's own configuration — its
+  # tracked settings file with the repository's personal local overlay applied on top, so the
+  # operator's local file beside the tracked one also shapes the result — deliberately excluding
+  # any global or user-scope layer that might also define tiers —
   # the same expert dispatched from two different checkouts can legitimately run on two
   # different tiers, and neither overrides the other. When one agent name is pinned in more
   # than one configuration group inside that same file, the group read last wins, so the order
@@ -462,9 +582,6 @@ def resolve_agent_model(repo: Path, agent_ref: str | None) -> str | None:
   # guard: no agent ref — nothing to look up
   if not agent_ref:
     return None
-  # waiver: deferred import — avoid module-load cycle with lazy_settings
-  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-  from lazy_settings import load_section, resolve_agent_model_tier  # pylint: disable=import-error
   groups = load_section(Path(repo) / SettingsFile.REL, SettingsKey.AGENT_MODELS)
   tier: str | None = None
 
@@ -496,9 +613,6 @@ def _record_unpinned_model(repo: Path, expert: str, agent_ref: str | None, jdir:
     agent_ref: The expert's resolved agent dispatch string, or None when unset.
     jdir: Path to the job bundle the incident references.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-  import error_ledger  # pylint: disable=import-error
   error_ledger.record(Path(repo), {
     IncidentKey.INCIDENT: f"unpinned:{expert}",
     IncidentKey.PHASE: IncidentPhase.OPENED,
@@ -532,8 +646,7 @@ def lookup_expert(target_repo: Path, name: str) -> dict | None:
     The settings dict for the named expert, or None when the expert is
     absent or stored as a non-dict value.
   """
-  entry = _resolve_expert_entry(Path(target_repo), name)
-  return entry or None
+  return resolve_expert_entry(Path(target_repo), name) or None
 
 
 def collect_job(repo: Path, expert: str, job_id: str) -> dict:
@@ -547,31 +660,36 @@ def collect_job(repo: Path, expert: str, job_id: str) -> dict:
 
   Returns:
     `{status: "missing"}` when the bundle directory does not exist,
-    `{status: "pending"}` when the pump has not produced `DONE`,
+    `{status: "cancelled"}` when the job carries `CANCELLED`, even if it also carries `DONE` or `DEAD`,
+    `{status: "dead"}` when the job carries `DEAD` without `CANCELLED`,
+    `{status: "pending"}` when the job carries none of `CANCELLED`, `DEAD` or `DONE`,
     `{status: "done", response}` when the response explicitly reports a
     finished outcome, `{status: "deferred", response}` when it reports the
     reserved deferred outcome, or `{status: "failed", response}` otherwise —
     including a response that violates the envelope by omitting `outcome`.
   """
-  d = _job_dir(repo, expert, job_id)
+  bundle_dir = job_dir(repo, expert, job_id)
 
-  # guard: caller may poll before the bundle has been queued
-  if not d.exists():
+  # a caller may poll before the bundle has been queued
+  if not bundle_dir.exists():
     return { JobCollectKey.STATUS: JobStatus.MISSING }
 
-  # guard: pump has not finished processing yet
-  if not (d / JobMarker.DONE).exists():
+  # marker precedence is the queue's own: cancelled outranks dead, dead outranks a finished response
+  status = read_job_status(bundle_dir)
+
+  # cancelled and dead are terminal states that carry no response
+  if status in (JobStatus.CANCELLED, JobStatus.DEAD):
+    return { JobCollectKey.STATUS: status }
+
+  # the pump has not finished processing yet
+  if not (bundle_dir / JobMarker.DONE).exists():
     return { JobCollectKey.STATUS: JobStatus.PENDING }
-  resp = read_response(d)
-  return { JobCollectKey.STATUS: classify_response(resp), JobCollectKey.RESPONSE: resp }
+
+  # the job is finished: report the response with the status it classifies to
+  return { JobCollectKey.STATUS: status, JobCollectKey.RESPONSE: read_response(bundle_dir) }
 
 
-def list_jobs(
-  repo: Path,
-  *,
-  expert: str | None = None,
-  status: str | None = None,
-) -> list[dict]:
+def list_jobs(repo: Path, *, expert: str | None = None, status: str | None = None) -> list[dict]:
   """
   Enumerate jobs in a repository's queue.
 
@@ -598,9 +716,9 @@ def list_jobs(
   # guard: empty repo has no queue at all
   if not base.exists():
     return out
-  experts = [ expert ] if expert else [ d.name for d in base.iterdir() if d.is_dir() ]
-  for e in experts:
-    edir = base / e
+  experts = [ expert ] if expert else [ child.name for child in base.iterdir() if child.is_dir() ]
+  for expert_name in experts:
+    edir = base / expert_name
 
     # guard: expert filter may name a queue that has never seen a dispatch
     if not edir.exists():
@@ -609,22 +727,22 @@ def list_jobs(
       # guard: only real bundles are queue entries
       if not is_job_bundle(jdir):
         continue
-      entry_status = _job_status(jdir)
+      entry_status = read_job_status(jdir)
 
       # guard: bundle in an unrecognised shape is dropped from the listing
       if entry_status is None:
         continue
-      entry = { JobCollectKey.EXPERT: e, JobCollectKey.JOB_ID: jdir.name, JobCollectKey.PATH: str(jdir),
+      entry = { JobCollectKey.EXPERT: expert_name, JobCollectKey.JOB_ID: jdir.name, JobCollectKey.PATH: str(jdir),
                 JobCollectKey.STATUS: entry_status }
 
-      # guard: caller-supplied status filter eliminates non-matching bundles
+      # a caller-supplied status filter keeps only matching bundles
       if status and entry[JobCollectKey.STATUS] != status:
         continue
       out.append(entry)
   return out
 
 
-def _job_status(jdir: Path) -> str | None:
+def read_job_status(jdir: Path) -> str | None:
   """
   Classify a job-bundle directory into its current status value.
 
@@ -650,14 +768,22 @@ def _job_status(jdir: Path) -> str | None:
   # cancellation is a terminal operator decision — it outranks every other marker
   if (jdir / JobMarker.CANCELLED).exists():
     return JobStatus.CANCELLED
+
+  # a permanently failed bundle reads as dead even when it also carries a finished response
   if (jdir / JobMarker.DEAD).exists():
     return JobStatus.DEAD
+
+  # a finished bundle's status is the one its response reports, not a bare "done"
   if (jdir / JobMarker.DONE).exists():
     return classify_response(read_response(jdir))
+
+  # an unfinished armed bundle is active once a worker claimed it, queued until then
   if (jdir / JobMarker.READY).exists():
     if (jdir / JobMarker.PID).exists():
       return JobStatus.ACTIVE
     return JobStatus.QUEUED
+
+  # no recognised marker shape
   return None
 
 
@@ -689,16 +815,16 @@ def cancel_job(repo: Path, expert: str, job_id: str) -> None:
   # Cancelling a job MUST be idempotent: calling this on a non-existent or
   # already-cancelled bundle is a no-op, never an error.
 
-  d = _job_dir(repo, expert, job_id)
+  bundle_dir = job_dir(repo, expert, job_id)
 
   # guard: bundle never existed or was already removed
-  if not d.exists():
+  if not bundle_dir.exists():
     return
 
   # CANCELLED lands before the kill so a worker outcome-path racing the signal
   # finds the terminal marker already in place
-  (d / JobMarker.CANCELLED).touch()
-  pid_file = d / JobMarker.PID
+  (bundle_dir / JobMarker.CANCELLED).touch()
+  pid_file = bundle_dir / JobMarker.PID
   if pid_file.exists():
     try:
       pid = int(pid_file.read_text(encoding = "utf-8").strip())
@@ -706,7 +832,7 @@ def cancel_job(repo: Path, expert: str, job_id: str) -> None:
       pid = None
     if pid is not None:
       _stop_claimant(pid)
-  (d / JobMarker.READY).unlink(missing_ok = True)
+  (bundle_dir / JobMarker.READY).unlink(missing_ok = True)
 
 
 def _stop_claimant(pid: int) -> None:
@@ -723,10 +849,6 @@ def _stop_claimant(pid: int) -> None:
   Args:
     pid: OS process id recorded in the bundle's PID marker.
   """
-  # waiver: deferred / late-bound local imports per the plugin import style (avoids import cycles / optional deps)
-  import os
-  import subprocess
-
   # guard: claimant already gone — nothing left to signal (children were reparented; the
   # spawned executor exits on its own once its stdout consumer disappeared)
   try:
@@ -741,7 +863,7 @@ def _stop_claimant(pid: int) -> None:
     ).stdout
     child_pids = [ int(line) for line in out.split() if line.strip().isdigit() ]
   except (OSError, subprocess.TimeoutExpired):
-    # ponytail: no pgrep on this host — fall through to killing the worker group only
+    # no pgrep on this host: only the worker group itself is killed
     pass
   for target in [ *child_pids, pid ]:
     _kill_group(target)
@@ -754,10 +876,6 @@ def _kill_group(pid: int) -> None:
   Args:
     pid: Any process id inside the group to tear down.
   """
-  # waiver: deferred / late-bound local imports per the plugin import style (avoids import cycles / optional deps)
-  import os
-  import signal
-
   # PermissionError ranks with ProcessLookupError throughout: a group we may not signal
   # (or a zombie-only group, which macOS reports as EPERM) is one we are done with
   try:
@@ -785,9 +903,7 @@ def _kill_group(pid: int) -> None:
     pass
 
 
-def consume_job(
-  repo: Path, expert: str, job_id: str,
-) -> None:
+def consume_job(repo: Path, expert: str, job_id: str) -> None:
   """
   Mark a job's response as applied or explicitly discarded by its consumer.
 
@@ -840,18 +956,20 @@ def consume_job(
   # nobody has yet said the answer was used. Once the caller acknowledges it, the job stops
   # mattering for that lookup and a later dispatch under the same key is free to run again.
 
-  d = _job_dir(repo, expert, job_id)
+  bundle_dir = job_dir(repo, expert, job_id)
 
   # guard: caller may consume a job that no longer exists on disk
-  if not d.exists():
+  if not bundle_dir.exists():
     return
-  (d / JobMarker.CONSUMED).touch()
+  (bundle_dir / JobMarker.CONSUMED).touch()
 
   # the marker lands before the commit carrying the consumed result is published; the ledger is
   # what lets the daemon take the marker back off when that commit is discarded on a push conflict
-  ledger = Path(repo) / RuntimeFile.CONSUMED_UNPUSHED
   # waiver: stdlib file-mode / encoding literals, not domain constants
-  with _unpushed_consumes_lock(repo), ledger.open("a", encoding = "utf-8") as fh:
+  with (
+    _unpushed_consumes_lock(repo),
+    (Path(repo) / RuntimeFile.CONSUMED_UNPUSHED).open("a", encoding = "utf-8") as fh,
+  ):
     fh.write(f"{expert}/{job_id}\n")
 
 
@@ -875,8 +993,9 @@ def read_unpushed_consumes(repo: Path) -> list[str]:
   if not ledger.exists():
     return []
   # waiver: stdlib encoding literal, not a domain constant
-  lines = ledger.read_text(encoding = "utf-8").splitlines()
-  return list(dict.fromkeys(line.strip() for line in lines if line.strip()))
+  return list(dict.fromkeys(
+    line.strip() for line in ledger.read_text(encoding = "utf-8").splitlines() if line.strip()
+  ))
 
 
 def settle_unpushed_consumes(repo: Path, entries: list[str]) -> None:
@@ -891,7 +1010,7 @@ def settle_unpushed_consumes(repo: Path, entries: list[str]) -> None:
 
   # the read and the rewrite share one lock so an append from another process is never dropped
   with _unpushed_consumes_lock(repo):
-    _write_unpushed_consumes(repo, [ e for e in read_unpushed_consumes(repo) if e not in settled ])
+    _write_unpushed_consumes(repo, [ entry for entry in read_unpushed_consumes(repo) if entry not in settled ])
 
 
 def rollback_unpushed_consumes(repo: Path) -> list[str]:
@@ -915,10 +1034,10 @@ def rollback_unpushed_consumes(repo: Path) -> list[str]:
   with _unpushed_consumes_lock(repo):
     entries = read_unpushed_consumes(repo)
 
-    # a job whose bundle the pump already cleaned up has nothing left to unmark
+    # a job whose bundle the runtime sweep already removed has nothing left to unmark
     for entry in entries:
       expert, _, job_id = entry.partition("/")
-      (_job_dir(repo, expert, job_id) / JobMarker.CONSUMED).unlink(missing_ok = True)
+      (job_dir(repo, expert, job_id) / JobMarker.CONSUMED).unlink(missing_ok = True)
     _write_unpushed_consumes(repo, [])
   return entries
 
@@ -956,12 +1075,12 @@ def _write_unpushed_consumes(repo: Path, entries: list[str]) -> None:
     entries: The `<expert>/<job_id>` entries to write, one per line, replacing the previous contents.
   """
   # the crash-safe rewrite is the same one the daemon's own state file relies on
-  runtime_state.atomic_write_text(Path(repo) / RuntimeFile.CONSUMED_UNPUSHED, "".join(f"{e}\n" for e in entries))
+  runtime_state.atomic_write_text(
+    Path(repo) / RuntimeFile.CONSUMED_UNPUSHED, "".join(f"{entry}\n" for entry in entries),
+  )
 
 
-def retire_completed_jobs(
-  repo: Path, expert: str, dedup_key: str,
-) -> list[str]:
+def retire_completed_jobs(repo: Path, expert: str, dedup_key: str) -> list[str]:
   """
   Retire every completed job bundle that shares the given dedup key.
 
@@ -1021,25 +1140,10 @@ def completed_dedup_jobs(repo: Path, expert: str) -> list[dict]:
   """
   List finished, unconsumed bundles for an expert that carry a dedup key.
 
-  Returns one entry per bundle whose `DONE` marker is present, that has not
-  been consumed, and that is not marked dead, carrying its `job_id`, its
-  `dedup_key`, its `dedup_fingerprint` (the token recorded at dispatch, or
-  `None` for a bundle dispatched before the field existed), its `status`
-  (`done` only when the response explicitly reports a finished outcome,
-  `deferred` when it reports the reserved deferred outcome, `failed` for
-  every other response), the error `category` of a failed bundle, and the
-  `age_sec` elapsed since the bundle finished. In-flight bundles, dead
-  bundles, already-consumed bundles, and bundles without a dedup key are
-  omitted.
-
-  A dispatcher that keeps the source artifact outside the bundle (the inbox
-  routine) reconciles finished work against its input store with this: drain
-  the input whose job succeeded, leave the input whose job failed parked
-  behind its still-unconsumed bundle so the dedup key keeps it from being
-  re-dispatched. Success is never inferred from silence — a response that
-  omits its outcome counts as failed, so an input is destroyed only against
-  an explicit success. The category and the age let such a dispatcher
-  separate a permanent dead-letter from a spawn-level fault worth retrying.
+  Lets a dispatcher that keeps its source artifact outside the bundle reconcile finished work against its input
+  store: drain the input whose job succeeded, and leave the input whose job failed parked behind its
+  still-unconsumed bundle so the dedup key keeps it from being re-dispatched. Success is never inferred from
+  silence — a response that omits its outcome counts as failed.
 
   Args:
     repo: Absolute path to the repository that hosts the job queue.
@@ -1118,10 +1222,8 @@ def register_routine(repo: Path, name: str, cfg: dict | None = None, *,
   passes `command` + `interval_sec` keyword arguments and is treated as
   equivalent to `type = "subprocess"`.
 
-  Either way the cfg is validated via `validate_routine_entry` before
-  being written. The routine entry is persisted to the tracked
-  `lazy.settings.json` so local-overlay routine entries are not leaked
-  into the shared file on save.
+  An entry that fails schema validation is rejected and nothing is written. The entry lands in the tracked
+  `lazy.settings.json`, and local-overlay routine entries are never leaked into the shared file.
 
   Args:
     repo: Absolute path to the repository whose settings file is updated.
@@ -1141,8 +1243,10 @@ def register_routine(repo: Path, name: str, cfg: dict | None = None, *,
   Raises:
     TypeError: When neither a typed `cfg` nor the legacy
       `command` + `interval_sec` pair is supplied.
+    RoutineConfigError: When the resulting entry fails schema validation.
   """
-  # waiver: deferred import — avoid module-load cycle with routine_types
+  # waiver: routine_types imports expert_runtime at module level; importing it here at call time breaks the
+  # load cycle a module-level import would close
   # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
   from routine_types import validate_routine_entry  # pylint: disable=import-error
   if cfg is None:
@@ -1165,21 +1269,18 @@ def register_routine(repo: Path, name: str, cfg: dict | None = None, *,
 
   # load_tracked_section keeps local-overlay routine entries out of the
   # tracked file on save_section
-  # waiver: deferred import — avoid module-load cycle with lazy_settings
-  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-  from lazy_settings import load_tracked_section, save_section  # pylint: disable=import-error
   settings = Path(repo) / SettingsFile.REL
   routines = load_tracked_section(settings, SettingsKey.ROUTINES)
   routines[name] = cfg
   save_section(settings, SettingsKey.ROUTINES, routines)
 
 
-PROTECTED_ROUTINES = { "lazy-expert.pump", "lazy-runtime.doctor" }
-
-
-def reconcile_routine(
-    repo: Path, name: str, cfg: dict, managed_fields: Sequence[str], *, dry_run: bool = False
-) -> str:
+def reconcile_routine(repo: Path,
+                      name: str,
+                      cfg: dict,
+                      managed_fields: Sequence[str],
+                      *,
+                      dry_run: bool = False) -> str:
   """
   Register a routine, or bring an already registered one back to the shipped shape.
 
@@ -1215,12 +1316,10 @@ def reconcile_routine(
   # are the plugin's is what lets an update correct exactly those and leave the operator's
   # answers alone; anything the operator could reasonably have decided stays outside the list.
 
-  # waiver: deferred import — avoid module-load cycle with lazy_settings
-  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-  from lazy_settings import load_tracked_section  # pylint: disable=import-error
+  # the tracked registration is the only safe basis for a write-back
   existing = load_tracked_section(Path(repo) / SettingsFile.REL, SettingsKey.ROUTINES).get(name)
 
-  # guard: nothing on record — the shipped entry is written whole
+  # nothing on record — the shipped entry is written whole
   if not isinstance(existing, dict):
     if not dry_run:
       register_routine(repo, name, dict(cfg))
@@ -1234,7 +1333,7 @@ def reconcile_routine(
     if key in managed_fields or key not in merged:
       merged[key] = value
 
-  # guard: the registration already matches — no write, no churn in the settings file
+  # a registration that already matches needs no write, so the settings file never churns
   if merged == existing:
     # waiver: this function's own documented return vocabulary, not a reusable cross-module key
     return "unchanged"
@@ -1275,100 +1374,15 @@ def unregister_routine(repo: Path, name: str) -> None:
 
   # load_tracked_section: same reasoning as register_routine — only the
   # tracked layer participates in the load → modify → save round-trip
-  # waiver: deferred import — avoid module-load cycle with lazy_settings
-  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-  from lazy_settings import load_tracked_section, save_section  # pylint: disable=import-error
   settings = Path(repo) / SettingsFile.REL
   routines = load_tracked_section(settings, SettingsKey.ROUTINES)
   routines.pop(name, None)
   save_section(settings, SettingsKey.ROUTINES, routines)
 
 
-DEFAULT_EXPERT_PUMP: _RoutineDefaults = {
-  "name":         "lazy-expert.pump",
-  "command":      [ "lazycortex-core", "expert-pump-once" ],
-  "interval_sec": 5,
-  # pump processes at most one Claude spawn per invocation; the daemon kills
-  # the pump (and the Claude child) after this many seconds. Subsequent jobs
-  # land on subsequent pump ticks. The 30-min ceiling accommodates long-running
-  # specialists (historian / interpreter on rich documents); raise further
-  # only when consistently hitting timeout in normal operation.
-  "timeout_sec":  1800,
-  # slow Claude spawns — runs last in each tick
-  "priority":     100,
-
-  # Decision: the secret scan runs in expert spawns, the rest of the hooks do not — the
-  # hermetic default exists because `check-public` and `git-guard` cost tens of seconds per
-  # tool call, but a secret an autonomous expert commits has nobody watching for it.
-
-  "hooks_enabled": [ HookName.SECRETS_GUARD ],
-}
-
-# Hourly trigger for the autonomous doctor: scans for DEAD job dirs OR a
-# halt-block ≥ 1h old, and dispatches a `runtime.doctor` expert job
-# when something needs attention. The Python tick is intentionally dumb —
-# all reasoning (revert vs commit vs permanent-fail) belongs to the agent.
-DEFAULT_DOCTOR_TICK: _RoutineDefaults = {
-  "name":         "lazy-runtime.doctor",
-  "command":      [ "lazycortex-core", "doctor-tick" ],
-  "interval_sec": 3600,
-  "timeout_sec":  60,
-  # fast, runs before pump
-  "priority":     30,
-  # MUST run during halt — exists to fix stuck state
-  "ignore_halt":  True,
-}
-
-# Five-minute index healer: restores a `.git/index` displaced by a cloud-sync conflict
-# resolution (the newest `index (…conflicted copy…)` wins) and removes the copy litter.
-# Cheap — one glob of the git dir on the quiet path — and it MUST run during halt, since a
-# displaced index is exactly the kind of stuck state a halt tends to accompany.
-DEFAULT_INDEX_GUARD: _RoutineDefaults = {
-  "name":         "lazy-core.index-guard",
-  "command":      [ "lazycortex-core", "index-guard" ],
-  "interval_sec": 300,
-  "timeout_sec":  30,
-  # fast, runs before doctor and pump
-  "priority":     20,
-  "ignore_halt":  True,
-}
-
-# Weekly LLM-tier sanitizer (state-sanitizers-design's second tier): dispatches one
-# `core.autocheckup` expert job that runs the domain doctors and applies only its
-# mechanically-derivable whitelist. Typed (`schedule` + `expert`) shape, which the legacy
-# `_RoutineDefaults` TypedDict cannot express; `repo` resolves against the job's own cwd —
-# the pump spawns every job inside the repository it serves.
-DEFAULT_AUTOCHECKUP_NAME = "lazy-core.autocheckup"
-
-# The routine key and the expert it dispatches are two different registries, so they carry two
-# different canonical shapes (`lazy-core.hygiene` § Naming): the routine belongs to this plugin and
-# wears its namespace, the expert key names a domain and a role and never does.
-DEFAULT_AUTOCHECKUP_EXPERT = "core.autocheckup"
-DEFAULT_AUTOCHECKUP_CFG: dict = {
-  "type":    "schedule",
-  "cron":    "0 6 * * 1",
-  "expert":  DEFAULT_AUTOCHECKUP_EXPERT,
-  "request": { "repo": "." },
-}
-
-
-# Which keys of a built-in routine this plugin corrects on every bootstrap, and which it only
-# ever fills in when absent (`reconcile_routine`'s ownership split).
-#
-# The three interval routines below declare nothing owned. Every key their defaults carry —
-# `interval_sec`, `timeout_sec`, `priority`, `hooks_enabled`, `ignore_halt` — is a cadence or a
-# posture the operator is expected to retune, and `command` is one the operator may repoint at a
-# wrapper of their own; correcting any of them would overwrite an answer rather than a stale
-# shape. The autocheckup owns only `type`: the typed dispatch shape is what the daemon reads to
-# decide how to run the entry at all, and an entry that predates the typed shape is unrunnable
-# without it. Its `cron` is the operator's cadence, and its `expert` / `request` stay theirs too.
-_BUILTIN_MANAGED: tuple[str, ...] = ()
-_AUTOCHECKUP_MANAGED = ( "type", )
-
-
 def bootstrap_default_routines(repo: Path) -> str:
   """
-  Register the built-in expert-pump, doctor-tick, index-guard, and autocheckup routines when absent.
+  Register the built-in routines when absent.
 
   A key the defaults gained after the routine was first registered is filled in, since a
   repository installed before that key existed would otherwise never receive it. Intended to
@@ -1404,9 +1418,7 @@ def bootstrap_default_routines(repo: Path) -> str:
   # built-in declares as its own knowledge rather than the operator's, which is corrected to the
   # shipped value on every call.
 
-  # waiver: deferred import — avoid module-load cycle with lazy_settings
-  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-  from lazy_settings import load_section, load_tracked_section  # pylint: disable=import-error
+  # the repository's settings file both views below are read from
   settings = Path(repo) / SettingsFile.REL
 
   # two views, two questions: the merged one answers "is this routine configured at all",
@@ -1415,7 +1427,7 @@ def bootstrap_default_routines(repo: Path) -> str:
   merged = load_section(settings, SettingsKey.ROUTINES)
   tracked = load_tracked_section(settings, SettingsKey.ROUTINES)
   outcomes: list[str] = []
-  for entry in (DEFAULT_EXPERT_PUMP, DEFAULT_DOCTOR_TICK, DEFAULT_INDEX_GUARD):
+  for entry in (DEFAULT_EXPERT_PUMP, DEFAULT_DOCTOR_TICK, DEFAULT_INDEX_GUARD, DEFAULT_RUNTIME_GC):
     # waiver: TypedDict access requires string-literal keys; constants break mypy literal-required
     name = str(entry["name"])
 
@@ -1431,7 +1443,7 @@ def bootstrap_default_routines(repo: Path) -> str:
 
   # the weekly autocheckup rides the same reconcile discipline as the loop above, in the typed
   # (`schedule` + `expert`) shape the legacy `_RoutineDefaults` block cannot carry
-  # guard: configured only in the local overlay — writing the tracked layer would leave the
+  # unless configured only in the local overlay — writing the tracked layer would then leave the
   # repository carrying the routine twice, so the operator's own copy is left to them
   if not (DEFAULT_AUTOCHECKUP_NAME in merged and DEFAULT_AUTOCHECKUP_NAME not in tracked):
     outcomes.append(reconcile_routine(

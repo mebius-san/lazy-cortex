@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, knowledge markers, tests, and the checker stack.
-last_regen: 2026-10-24
+last_regen: 2026-11-10
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -21,8 +21,8 @@ source_skills:
   - review.py
   - lazy-python.coding-guidelines
   - lazy-python.checking-guidelines
-source_sha: 33e8a296cb2bda2f7c06945ca9d46e24ed4c1858
-surface_sha: c219377568500f251cb77bb1cdada3c0dc9c02d078314048b78283cb2ef6f4ad
+source_sha: 2a09f47e1d9e777cff05b9a3c2c3d132fe1c3555
+surface_sha: e499816c65aa252565680371dad0a6ec58ca4236f76a6d5bd8266a68729d5e64
 ---
 # Frequently asked questions
 
@@ -82,7 +82,7 @@ The PostToolUse hook runs `pcf.py` automatically on every `.py` edit and surface
 
 ## Can I run `mypy`, `pylint`, or `ruff` directly instead of `chk-py`?
 
-No. The plugin enforces running all style and type validation through `chk-py`. The aggregator runs `pcf`, `toi`, `cmp`, `mypy`, `ruff`, `pylint`, and `review` in the correct order with shared config from `pyproject.toml`; calling any one tool directly skips earlier phases and can produce misleading results. Similarly, use `tst-py` rather than raw `pytest` — the wrapper applies project-wide pytest args and uses the correct venv, and it takes the bare module name (`tst-py core -q`, `tst-py rpg -q`), never a file path or a `.py` filename.
+No. The plugin enforces running all style and type validation through `chk-py`. The aggregator runs `pcf`, `toi`, `cmp`, `mypy`, `ruff`, `pylint`, and `review` in the correct order with shared config from `pyproject.toml`; calling any one tool directly skips earlier phases and can produce misleading results. Similarly, use `tst-py` rather than raw `pytest` — the wrapper applies project-wide pytest args and uses the correct venv, and it takes the bare module name (`tst-py core -q`, `tst-py billing -q`), never a file path or a `.py` filename.
 
 ---
 
@@ -100,7 +100,7 @@ That is the guideline-review phase, `chk-py review` — its own command, deliber
 
 ## `chk-py all` is failing with `review: PENDING` even though every other check is clean. How do I clear it?
 
-A pending review now fails the gate instead of passing silently past it: `review.py` exits a distinct `PENDING` code (2) whenever the scope has changed since its last review and nobody has decided it yet. Dispatch the `lazy-python.code-reviewer` agent against the manifest path printed just above the `PENDING` line, then run `chk-py review --render <findings.json>` — that render step is what actually clears the gate, and it exits non-zero itself if the agent found a `FAIL`. `review.py` also takes a `--base <ref>` flag to resolve the scope against a landed range (a unit of work that shipped intermediate commits) instead of the current diff plus untracked files. For CI or automation where the `claude` CLI is installed but no one is present to dispatch manually, set `CHK_REVIEW=headless` — `review.py` dispatches the reviewer agent itself through the CLI and renders its findings in the same run. That is the only `CHK_REVIEW` value the script reads; there is no `skip`, and a context that cannot dispatch asks the operator rather than exiting 0 with nothing decided. A scope that has not changed since its last real review reuses those findings rather than re-manifesting.
+A pending review now fails the gate instead of passing silently past it: `review.py` exits a distinct `PENDING` code (2) whenever the scope has changed since its last review and nobody has decided it yet. Dispatch the `lazy-python.code-reviewer` agent against the manifest path printed just above the `PENDING` line, then run `chk-py review --render <findings.json>` — that render step is what actually clears the gate, and it exits non-zero itself if the agent found a `FAIL`. `review.py` also takes a `--base <ref>` flag to resolve the scope against a landed range (a unit of work that shipped intermediate commits) instead of the current diff plus untracked files. For CI or automation where the `claude` CLI is installed but no one is present to dispatch manually, set `CHK_REVIEW=headless` — `review.py` dispatches the reviewer agent itself through the CLI and renders its findings in the same run. That is the only `CHK_REVIEW` value the script reads; there is no `skip`, and a context that cannot dispatch asks the operator rather than exiting 0 with nothing decided. A scope that has not changed since its last real review — neither the reviewed files nor any guideline layer — reuses those findings rather than re-manifesting; editing the canon, your overlay, a Python-scoped rule, or `CLAUDE.md` re-manifests it.
 
 ---
 
@@ -192,7 +192,13 @@ Registering the section only tells `chk-py` where it belongs, its list style, an
 
 ## My classes used to get "Generation Rules" / "Value Ranges" docstring sections automatically. Now `chk-py` flags them as missing. What happened?
 
-As of the 2.0.0 release, `pcf`'s docstring-section and field-name defaults are project-neutral: those two sections, and the hardcoded `_field_filters` private-name escape hatch, no longer ship built in. If your repo relied on them, re-run `/lazy-python.install` to pick up the current `pyproject-defaults.toml` template, then find the commented-out `extra_docstring_sections`, `d2_exempt_marker_attrs`, and `private_name_allowlist` examples under `[tool.pcf]` in your `pyproject.toml` — uncomment and adapt them to your project's actual section names and field names. The install's merge step only appends checker sections that are missing; it never overwrites or removes a `[tool.pcf]` block you've already customised, so this migration is opt-in per repo and safe to run at any time.
+As of the 2.0.0 release, `pcf`'s docstring-section and field-name defaults are project-neutral: those two sections, and the hardcoded `_field_filters` private-name escape hatch, no longer ship built in. If your repo relied on them, re-run `/lazy-python.install` to pick up the current `pyproject-defaults.toml` template, then find the commented-out `extra_docstring_sections`, `d2_exempt_marker_attrs`, `d2_exempt_attr_names`, and `private_name_allowlist` examples under `[tool.pcf]` in your `pyproject.toml` — uncomment and adapt them to your project's actual section names and field names. The install's merge step only appends checker sections that are missing; it never overwrites or removes a `[tool.pcf]` block you've already customised, so this migration is opt-in per repo and safe to run at any time.
+
+---
+
+## `pcf` now flags a private label in `Attributes:` that it used to accept because it was a class constant. What changed?
+
+The D2 check no longer exempts a private label just because the class declares a constant of that name. A private label in a class's `Attributes:` section is accepted in two cases only: the class declares or mutates an attribute listed in `[tool.pcf] d2_exempt_marker_attrs` (which exempts the class's whole `Attributes:` section), or the label itself is listed in `[tool.pcf] d2_exempt_attr_names`. The lists are your project's deliberate choice, so propose the entry and get the user's approval rather than adding names on your own judgement. The check also no longer ships a rule against raw `__name__` access or a `typing.cast` hint pointing at a project-specific narrowing method: `typing.cast()` is flagged with a plain "use `isinstance()` narrowing" message.
 
 ---
 
@@ -204,7 +210,13 @@ As of the 2.0.0 release, `pcf`'s docstring-section and field-name defaults are p
 
 ## Should I write docstrings by hand, or always use the agent?
 
-Always use the `lazy-python.docstring-writer` agent. The canon enforces section ordering, a Zero-Tolerance Blocker list, an eight-point semantic Pre-Return Self-Check (checking for algorithm narration, private-internal references, tautological summaries, etc.), and an overlay merge from `docs/guidelines/documenting_guidelines.md`. Writing docstrings by hand from session memory of the canon reliably misses at least one of those checks. Dispatch the agent and let it own the result.
+Always use the `lazy-python.docstring-writer` agent. The canon enforces section ordering, a Zero-Tolerance Blocker list, a nine-point semantic Pre-Return Self-Check (checking for algorithm narration, private-internal references, tautological summaries, inventory sentences, etc.), and an overlay merge from `docs/guidelines/documenting_guidelines.md`. Writing docstrings by hand from session memory of the canon reliably misses at least one of those checks. Dispatch the agent and let it own the result.
+
+---
+
+## The docstring-writer agent shortened my class Scope sentence that listed every case. Why?
+
+A Summary or Scope that walks through the measures, fields, axes, or cases the body handles one by one is an inventory, and the docstring canon forbids it. The agent names the kind of answer the class gives and leaves the items to `Attributes:` and each method's own docstring. Its ninth Self-Check point treats a Scope with four or more parallel how/whether/what clauses, or one that would need a new clause whenever a method, field, or case is added, as an inventory and rewrites it. An existing inventory is compressed, never extended, and it is not counted as a caller-visible invariant that the agent must preserve.
 
 ---
 
@@ -226,7 +238,7 @@ If a new `__init__.py` in your project is not picking up the dedicated template,
 
 Always use `lazy-python.domain-writer` for a `Domain(…):` block and `lazy-python.contract-writer` for a `Contract:` block. Both agents read the documenting canon and the project's domain-groups dictionary (for domain-writer) on every dispatch, validate against them, and verify their own edits with `chk-py all <file>.py -q` before finishing — a hand-written block reliably drifts from the format canon or, for domain blocks, uses a group that is not in the project's dictionary. `lazy-python.contract-writer` also carries the one sanctioned exception to "docstrings go through `lazy-python.docstring-writer`": it syncs the owning docstring's `Guarantees` (or `Subclassing`) section in the same pass, since that section's content is authoritative from the contract block it was written for.
 
-A `Domain(…):` block opens with just the group name in parentheses — `# Domain(mechanics.skills):` — nothing after the colon. Neither agent invents a domain group: when no listed group in the dictionary fits a mechanic, `lazy-python.domain-writer` parks the block under the reserved `Domain(unfiled):` group and reports a candidate name and gloss for you to file. That parked block shows up as a checker finding on every run until it is filed — see the next question for the sweep that clears a backlog of them.
+A `Domain(…):` block opens with just the group name in parentheses — `# Domain(network.retries):` — nothing after the colon. Neither agent invents a domain group: when no listed group in the dictionary fits a mechanic, `lazy-python.domain-writer` parks the block under the reserved `Domain(unfiled):` group and reports a candidate name and gloss for you to file. That parked block shows up as a checker finding on every run until it is filed — see the next question for the sweep that clears a backlog of them.
 
 ---
 
@@ -278,6 +290,12 @@ Check 12 fires when your sources already carry `Domain(…):` blocks but no dict
 
 ---
 
+## `/lazy-python.audit` warns about the protected-access mypy plugin (Check 13). How do I fix it?
+
+Check 13 verifies three things: `cli/mypy/protected_access.py` is listed under `[tool.mypy]` `plugins` in your `pyproject.toml`, the shim file exists at that path, and its text matches the copy the plugin currently ships. A missing entry, a missing file, or a stale shim (the plugin updated since your last install, or the file was hand-edited) is a `WARN`; re-run `/lazy-python.install` and it merges the entry and redeploys the shim. Two cases install cannot repair, and the warning names the edit to make by hand: `plugins` written as a single string that lacks the entry, and a `tool` or `tool.mypy` that is not a table. A `pyproject.toml` that is absent or not valid TOML is a `FAIL`, as in Check 5.
+
+---
+
 ## Should I write tests by hand, or always use the agent?
 
 Always use the `lazy-python.test-writer` agent. The agent applies the Paranoid Testing Strategy (9 mandatory test categories per class), selects the correct base test class from your project overlay, enforces 2-space indentation and the 117-character line limit, derives expected values from docstring contracts rather than implementation, and runs `chk-py` plus `tst-py` as a verification gate. The last two categories come from the knowledge markers in the method bodies it reads, not the docstring: every `Contract:` block (including one inherited from an interface declaration) gets a test per guarantee, every `Domain(…):` block gets expected values worked out by hand from its formula or rule, and every `opt:` clause gets a test that violates the named assumption and checks the result stays correct or the cache is dropped. Hand-writing tests from session memory reliably skips categories or picks the wrong base class.
@@ -287,6 +305,12 @@ Always use the `lazy-python.test-writer` agent. The agent applies the Paranoid T
 ## The test-writer agent's class and method docstrings look longer than a plain one-liner. Is that right?
 
 Yes. `Test unit for X.` and `Test that Y.` docstrings are written in the multi-line quote form the format checker requires — `"""` on its own line, the summary line, then `"""` on its own line — never collapsed to a single-line `"""Test unit for X."""`, which `pcf`'s docstring checker flags as a D1 finding. The agent also matches its own import layout to the Python scaffold template (`from __future__ import annotations`, stdlib imports, an `if TYPE_CHECKING:` block, two blank lines before code) and annotates every test method (`tmp_path: Path`, `-> None`), since once a test file's directory is checked, it is held to the same `pcf` format and typing rules as production code.
+
+---
+
+## The test-writer agent wrote an empty test method under a `# TODO:` comment. Why no assertions?
+
+The testing canon forbids testing a stub. A method whose body is a placeholder under a `# TODO:` comment has no behaviour to prove, and a test asserting its placeholder value would restate the stub and have to be rewritten the day the method is implemented. So the agent writes no such test. When a test method has to exist anyway, it stays empty under a `# TODO:` comment naming the stub it waits for; fill it in once the method has real behaviour.
 
 ---
 
@@ -336,7 +360,7 @@ Check that each overlay file still opens with its canonical `# Project additions
 
 ## The `chk-py` wrapper is missing after install, or the bare `chk-py` command isn't found.
 
-Re-run `/lazy-python.install`. Step 2 deploys `cli/chk-py` and `cli/tst-py` into your project root — deliberately with no executable bit, since a mode-blind git client (obsidian-git on Android, some Windows checkouts) can strip the bit on pull and used to break the wrapper outright. Run it explicitly instead: `bash ./cli/chk-py all -q`. If the phase reports `wrappers-deployed-2` but the files are still absent, check that `cli/` exists in your project root; the phase creates it if missing.
+Re-run `/lazy-python.install`. Step 2 deploys `cli/chk-py` and `cli/tst-py` into your project root — deliberately with no executable bit, since a mode-blind git client (obsidian-git on Android, some Windows checkouts) can strip the bit on pull and used to break the wrapper outright. Run it explicitly instead: `bash ./cli/chk-py all -q`. Step 2 also deploys the protected-access mypy shim to `cli/mypy/protected_access.py`, which `pyproject.toml` references by that path. If the phase reports `wrappers-deployed-3` but the files are still absent, check that `cli/` exists in your project root; the phase creates it if missing.
 
 Step 2b is the separate step that gives you the bare `chk-py` / `tst-py` command from any directory: it deploys `~/.local/bin/chk-py` and `~/.local/bin/tst-py`, the only files this plugin ever marks executable, since they live outside every repo and no mode-blind client can reach them. Each walks up from your current directory to the nearest `<repo>/cli/chk-py` (or `tst-py`) and runs it through `bash`. If `command -v chk-py` fails after Step 2b runs, `~/.local/bin` is not on your `$PATH` — the install reports this as `path-warning` and never edits your shell rc files itself; add the directory to your `$PATH` by hand, or keep using `bash ./cli/chk-py`.
 
@@ -352,7 +376,7 @@ Run `/lazy-python.audit` Check 5 to confirm which of the six always-on sections 
 
 ## `/lazy-python.install` mentions registering a "code-reviewer expert". What is that for?
 
-Step 7 registers `lazy-python.code-reviewer` as an expert in `.claude/lazy.settings.json`. This makes the review phase dispatchable two ways: directly (as `chk-py review` already names the agent) and through the expert runtime, the same dispatch path other plugins use for background or queued work.
+Step 7.6 registers `lazy-python.code-reviewer` as an expert in `.claude/lazy.settings.json`. This makes the review phase dispatchable two ways: directly (as `chk-py review` already names the agent) and through the expert runtime, the same dispatch path other plugins use for background or queued work.
 
 The entry never overwrites a value you configured yourself, but it does complete or correct the two install-managed fields — `agent` and `aspects` — when a previous install left them out or an update changed the agent this plugin ships. A key merely being present on record is not proof the entry is whole: an entry that is `{}`, or one whose `agent` name has gone stale, resolves to nothing at dispatch time, so a re-run repairs exactly those two fields rather than treating "already on record" as "already correct". Everything else you set on the entry — anything beyond `agent` / `aspects` — is left untouched either way. The outcome you see is `expert-registered` (added from scratch), `expert-refreshed` (an install-managed field was completed or corrected), or `expert-already-registered` (the entry was already whole).
 

@@ -5,9 +5,7 @@ DONE-and-not-CONSUMED job bundles and, per target document, clears the runtime `
 marker, raises the `job-done` pending wake, and dispatches the coordinator directly — the
 sweep itself no longer lands payloads and no longer commits.
 The landing happens inside the coordinator's own wake, via `collect-job --no-commit`:
-payloads are applied to the working tree via `reapply.reapply` (mirrors `dispatcher.py`'s
-`_collect_one_barrier_section`, copied rather than imported — per the lazycortex-review
-coordinator migration's own-verbs-only boundary, `dispatcher.py` is being retired), each
+payloads are applied to the working tree via `reapply.reapply`, each
 applied job is marked `CONSUMED`, and the coordinator's single `commit-doc` carries payload
 and settle together. The standalone `collect-job` (without `--no-commit`) keeps the old
 one-mechanical-bot-commit shape for hand runs. This module carries no scheduling judgment:
@@ -85,7 +83,7 @@ import coordinator_dispatch as _coordinator_dispatch  # noqa: E402
 import reapply as _reapply  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from keys import (  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-    BotIdentity, CoreCommand, EnvVar, JobFile, JobKey, JobMarker, JobStatus, Outcome, Paths, Phase, Plugin, Tag,
+    BotIdentity, CoreCommand, EnvVar, JobFile, JobKey, JobMarker, JobStatus, Outcome, Phase, Tag,
 )
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from errors import PayloadError  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -95,8 +93,8 @@ from errors import PayloadError  # noqa: E402  # pylint: disable=import-error,wr
 # an attachment it is returning alongside the document. Four shapes carry such a target: an inline
 # link `(result/x)`, a titled inline link `(result/x "t")`, a reference definition `[a]: result/x`,
 # and an HTML source attribute `src="result/x"`. Only the opening delimiter is captured and
-# replayed, so whatever closes each shape is left exactly as the writer spelled it. Mirrors
-# `lazycortex-specs/bin/land_result.py`'s own copy across the plugin boundary.
+# replayed, so whatever closes each shape is left exactly as the writer spelled it.
+# ref: lazycortex-specs/bin/land_result.py
 _RESULT_LINK_RE = re.compile(
     r"""(?P<open>\(|\]:[ \t]*|src[ \t]*=[ \t]*["'])result/(?P<name>[^)"'\s]+)""")
 
@@ -111,6 +109,15 @@ _RESULT_DIR = "result"
 # Frontmatter key marking a spec catalog's own canonical or status note — a file a landing
 # may never overwrite, whoever else's plugin owns it.
 _SPEC_ROLE_KEY = "spec_role"
+
+# Log line for attachment entries a non-main mode drops, filled with the job, the entry count and the mode.
+DROPPED_ATTACHMENTS_TEMPLATE = (
+    "collect-job: {job}: {count} attachment entry(ies) dropped — mode {mode!r} accepts none\n"
+)
+# Log line for a `result/` link naming a file the response never delivered, filled with the job and the name.
+MISSING_NEIGHBOUR_TEMPLATE = "collect-job: {job}: link to missing neighbour {name!r}\n"
+# Log line for a delivered attachment no link references, filled with the job and the name.
+UNLINKED_ATTACHMENT_TEMPLATE = "collect-job: {job}: attachment {name!r} is not linked from the document\n"
 
 
 # ------------------------------------------------------------- job discovery
@@ -135,7 +142,7 @@ def _job_target(repo: Path, jdir: Path, data: dict) -> Path | None:
     return Path(target)
 
   # fallback: the mark-job marker written before dispatch still links doc to job
-  key = _job_markers.doc_for_job(repo, jdir.name)
+  key = _job_markers.find_doc_for_job(repo, jdir.name)
 
   # guard: no payload field and no marker entry — the job is unaddressable
   if key is None:
@@ -162,16 +169,16 @@ def _job_dirs_for_file(repo: Path, file_path: Path) -> list[Path]:
   target = str(file_path)
   out: list[Path] = []
   for expert_dir in jobs_root.iterdir():
-    # guard: only expert subdirectories hold job bundles
+    # only expert subdirectories hold job bundles
     if not expert_dir.is_dir():
       continue
     for jdir in expert_dir.iterdir():
-      # guard: only job subdirectories carry a request.json
+      # only job subdirectories carry a request.json
       if not jdir.is_dir():
         continue
       req = jdir / JobFile.REQUEST
 
-      # guard: job dir without a request.json carries no target to match
+      # a job dir without a request.json carries no target to match
       if not req.is_file():
         continue
       try:
@@ -187,7 +194,7 @@ def _job_dirs_for_file(repo: Path, file_path: Path) -> list[Path]:
   return out
 
 
-def _job_status(jdir: Path) -> str:
+def read_job_status(jdir: Path) -> str:
   """
   Classify a job bundle by its terminal marker files.
 
@@ -238,7 +245,7 @@ def _is_spec_document(path: Path) -> bool:
     `False` for every other path, including one that cannot be read.
   """
   # guard: only an existing markdown file can carry the frontmatter that marks a spec note
-  # waiver: the markdown suffix, spelled as start.py / submit.py / lazy_review.py already spell it
+  # waiver: `.md` is the fixed markdown file suffix, a file-format fact rather than tunable data
   if path.suffix.lower() != ".md" or not path.is_file():
     return False
   try:
@@ -266,10 +273,10 @@ def _require_entry_lands(source: Path, dest: Path | None, document: Path) -> Non
   """
 
   # Domain(review.dispatch):
-  # # A landing overwrites its own kind, never someone else's document
+  # # A landing replaces a same-named attachment, never the document or a spec note
   # A response's entries are files the collector copies into a directory full of documents it
-  # did not write. Re-landing an attachment the same expert produced before is the ordinary
-  # regenerate case and overwrites freely. Everything else is off limits: the reviewed document
+  # did not write. Re-landing an attachment under the same name is the ordinary regenerate case
+  # and replaces the earlier file. Only two destinations are off limits: the reviewed document
   # itself is the round's own output and is never an attachment's destination, and a spec
   # catalog's canonical or status note belongs to a pipeline this collector knows nothing about.
   # A symlink is refused at both ends before anything is read or written, because what it names
@@ -284,7 +291,7 @@ def _require_entry_lands(source: Path, dest: Path | None, document: Path) -> Non
   if not source.is_file():
     raise PayloadError(f"result entry declared but not delivered: {source.name!r}")
 
-  # guard: the job's own result document is read, never copied — it has no destination to check
+  # the job's own result document is read, never copied — it has no destination to check
   if dest is None:
     return
 
@@ -322,12 +329,12 @@ def _attachment_names(request: dict, response: dict, jdir: Path, document: Path)
   """
   entries = response[JobKey.RESULT][1:]
 
-  # guard: only a main-writer payload may carry attachments — every other mode drops the extras
+  # only a main-writer payload may carry attachments — every other mode drops the extras
   if request.get(JobKey.MODE) != Phase.MAIN:
     if entries:
-      sys.stderr.write(
-          f"collect-job: {jdir.name}: {len(entries)} attachment entry(ies) dropped — "
-          f"mode {request.get(JobKey.MODE)!r} accepts none\n")
+      sys.stderr.write(DROPPED_ATTACHMENTS_TEMPLATE.format(
+          job = jdir.name, count = len(entries), mode = request.get(JobKey.MODE),
+      ))
     return []
   names = [_payload.attachment_basename(entry) for entry in entries]
 
@@ -365,9 +372,9 @@ def _fix_attachment_links(body: str, names: list[str], jdir: Path) -> str:
     name = match.group(_GROUP_NAME)
     linked.add(name)
 
-    # guard: the document points at a neighbour this response never delivered
+    # warn when the document points at a neighbour this response never delivered
     if name not in delivered:
-      sys.stderr.write(f"collect-job: {jdir.name}: link to missing neighbour {name!r}\n")
+      sys.stderr.write(MISSING_NEIGHBOUR_TEMPLATE.format(job = jdir.name, name = name))
     return f"{match.group(_GROUP_OPEN)}{name}"
 
   # rewrite every result/ link in one pass, then report the two mismatch directions
@@ -375,7 +382,7 @@ def _fix_attachment_links(body: str, names: list[str], jdir: Path) -> str:
 
   # an attachment nobody references is still landed — the operator is told, the job is not failed
   for name in sorted(delivered - linked):
-    sys.stderr.write(f"collect-job: {jdir.name}: attachment {name!r} is not linked from the document\n")
+    sys.stderr.write(UNLINKED_ATTACHMENT_TEMPLATE.format(job = jdir.name, name = name))
   return out
 
 
@@ -416,7 +423,7 @@ def _build_agent_body(
   result_text = _atomic_io.read_text(result_source).replace("\r\n", "\n")
   _result_meta, result_body = _fm.parse(result_text)
 
-  # guard: a main-writer payload is the full document body, no owned section
+  # a main-writer payload is the full document body, no owned section
   if request.get(JobKey.MODE) == Phase.MAIN:
     return _fix_attachment_links(result_body, attachments, jdir), Phase.MAIN, None, attachments
 
@@ -455,10 +462,9 @@ def _apply_one_job(
   # guard: only a completed edit carries content to land; empty/error responses are left uncollected
   if response.get(JobKey.OUTCOME) != Outcome.EDITED:
     return None
-  result = response.get(JobKey.RESULT)
 
   # guard: outcome=edited without a result payload is a malformed response — leave it uncollected
-  if not isinstance(result, list) or not result:
+  if not isinstance(result := response.get(JobKey.RESULT), list) or not result:
     return None
 
   # a malformed request (e.g. `section_id` without a matching `expert`) or a malformed
@@ -491,52 +497,16 @@ def _apply_one_job(
   # an answered question or decision-candidate is a settled decision the round just folded —
   # the callout must not survive it, or the next wake reads the same tick as fresh operator
   # input and reopens forever, and finalize refuses a document still carrying the candidate
-  landed = reapply_result.text
-  _landed_meta, landed_body = _fm.parse(landed)
+  _landed_meta, landed_body = _fm.parse(reapply_result.text)
   stripped_body = _body.strip_answered_questions(landed_body)
 
-  # guard: nothing answered in this round — the landed text is already final
+  # nothing answered in this round — the landed text is already final
   if stripped_body == landed_body:
-    return landed, attachments
-  return landed[:len(landed) - len(landed_body)] + stripped_body, attachments
+    return reapply_result.text, attachments
+  return reapply_result.text[:len(reapply_result.text) - len(landed_body)] + stripped_body, attachments
 
 
 # ------------------------------------------------------------- consume (§1c)
-
-
-def _resolve_core_cli() -> Path | None:
-  """
-  Find the `lazycortex-core` CLI binary.
-
-  Returns:
-    Absolute path to the resolved binary, taking `$LAZYCORTEX_PLUGIN_DIRS` over the dev-vault
-    sibling tree and that over the install registry, or `None` when no lookup finds one.
-  """
-  # waiver: matches dispatcher.py's own literal — not a keys.py-promoted constant there either
-  dirs = os.environ.get("LAZYCORTEX_PLUGIN_DIRS", "").split(os.pathsep)
-  for d in dirs:
-    # guard: empty path segment (from a trailing/double pathsep) — skip it
-    if not d:
-      continue
-    cli = Path(d) / Paths.BIN_DIR / Plugin.CORE
-    if cli.is_file():
-      return cli
-
-  # dev-vault stage — this file sits at plugins/claude/lazycortex-review/bin/, so core's own bin/ is two
-  # levels up and back down the sibling tree; it must precede the registry (§ 2b) so a checkout
-  # runs the sources at hand rather than whatever version happens to be installed
-  sibling = Path(__file__).resolve().parents[2] / Plugin.CORE / Paths.BIN_DIR / Plugin.CORE
-  if sibling.is_file():
-    return sibling
-
-  # registry stage — the install root Claude Code's plugin registry records for core
-  root = _git_ops.installed_plugin_root(Plugin.CORE)
-
-  # guard: core was never installed on this machine — nothing further to try
-  if root is None:
-    return None
-  cli = root / Paths.BIN_DIR / Plugin.CORE
-  return cli if cli.is_file() else None
 
 
 def _consume_job(repo: Path, jdir: Path) -> None:
@@ -552,7 +522,7 @@ def _consume_job(repo: Path, jdir: Path) -> None:
     jdir: Job-bundle directory to consume; its parent/own directory names are the expert
       and job id the `consume-job` CLI call needs.
   """
-  cli = _resolve_core_cli()
+  cli = _git_ops.resolve_core_cli()
   if cli is not None:
     env = os.environ.copy()
     env[EnvVar.LAZY_REPO_ROOT] = str(repo)
@@ -563,7 +533,7 @@ def _consume_job(repo: Path, jdir: Path) -> None:
           capture_output = True, text = True, env = env, check = False, encoding = "utf-8",
       )
 
-      # guard: the core CLI consumed the job — the local fallback marker is not needed
+      # the core CLI consumed the job — the local fallback marker is not needed
       if proc.returncode == 0:
         return
     # waiver: consume is fire-and-forget (error-ledger reporting is best-effort) — a failed
@@ -571,8 +541,8 @@ def _consume_job(repo: Path, jdir: Path) -> None:
     except OSError:
       pass
 
-  # fallback: same-repo direct marker touch when the CLI is unresolved, fails, or errors —
-  # mirroring dispatcher.py's own `_core_consume_job` fallback path
+  # fallback: the CLI is unresolved, failed, or errored — touch the local marker directly so the
+  # job ends up consumed either way
   (jdir / Outcome.CONSUMED).touch()
 
 
@@ -613,7 +583,7 @@ def collect_for_file(repo: Path, file_path: Path, *, commit: bool = True) -> dic
   # still closes within the same sweep, but nothing new enters the document's history.
 
   # every DONE bundle targeting the document is a landing candidate
-  candidates = [jdir for jdir in _job_dirs_for_file(repo, file_path) if _job_status(jdir) == JobStatus.DONE]
+  candidates = [jdir for jdir in _job_dirs_for_file(repo, file_path) if read_job_status(jdir) == JobStatus.DONE]
 
   # the document text accumulates payloads across the batch; `applied` collects what to consume
   # the ending is decided once from the file as read; every payload is applied to the LF text
@@ -644,7 +614,7 @@ def collect_for_file(repo: Path, file_path: Path, *, commit: bool = True) -> dic
       continue
     outcome_applied = _apply_one_job(text, jdir, request, response, file_path, ending)
 
-    # guard: nothing to apply for this job — leave it uncollected
+    # a job with nothing to apply stays uncollected
     if outcome_applied is None:
       continue
     text, attachments = outcome_applied
@@ -652,10 +622,11 @@ def collect_for_file(repo: Path, file_path: Path, *, commit: bool = True) -> dic
 
     # the attachments ride the document: each lands beside it under its declared basename
     for name in attachments:
+      # limit: overwrites any same-named file, authorship unchecked — record the writer per attachment if strays appear
       shutil.copyfile(jdir / _RESULT_DIR / name, file_path.parent / name)
       landed.append(str((file_path.parent / name).relative_to(repo)))
 
-  # guard: nothing landed — the document and the queue stay exactly as found
+  # nothing landed — the document and the queue stay exactly as found
   if not applied:
     return {"collected": 0}
 
@@ -758,17 +729,17 @@ def collect_tick(repo: Path) -> dict:
   targets: dict[Path, list[str]] = {}
   broken: list[str] = []
   for expert_dir in sorted(jobs_root.iterdir()):
-    # guard: only expert subdirectories hold job bundles
+    # only expert subdirectories hold job bundles
     if not expert_dir.is_dir():
       continue
     for jdir in sorted(expert_dir.iterdir()):
-      # guard: only DONE-and-not-CONSUMED job dirs are due for this sweep
-      if not jdir.is_dir() or _job_status(jdir) != JobStatus.DONE:
+      # only DONE-and-not-CONSUMED job dirs are due for this sweep
+      if not jdir.is_dir() or read_job_status(jdir) != JobStatus.DONE:
         continue
       try:
         data = json.loads((jdir / JobFile.REQUEST).read_text(encoding = "utf-8"))
-      except (OSError, json.JSONDecodeError) as exc:
-        sys.stderr.write(f"collect-tick: {jdir}: {exc}\n")
+      except (OSError, json.JSONDecodeError) as error:
+        sys.stderr.write(f"collect-tick: {jdir}: {error}\n")
         broken.append(str(jdir))
         continue
       resolved = _job_target(repo, jdir, data)
@@ -781,19 +752,19 @@ def collect_tick(repo: Path) -> dict:
       # batch. Every review-system dispatch writes `_target_file` or a sidecar row, so an
       # unresolvable bundle is, by construction, foreign.
 
-      # guard: no `_target_file` and no marker link — the job belongs to another plugin's
+      # no `_target_file` and no marker link — the job belongs to another plugin's
       # pipeline (every review dispatch writes one or the other), so it is skipped silently
       if resolved is None:
         continue
 
-      # guard: only an outcome `collect-job` consumes is deliverable — everything else stays
+      # only an outcome `collect-job` consumes is deliverable — everything else stays
       # for the pump's retry ladder or the daily sanitizer to judge
       try:
         outcome = json.loads((jdir / JobFile.RESPONSE).read_text(encoding = "utf-8")).get(JobKey.OUTCOME)
       except (OSError, json.JSONDecodeError):
         continue
 
-      # guard: a counted-but-never-consumed bundle would re-raise this wake every sweep
+      # a counted-but-never-consumed bundle would re-raise this wake every sweep
       if outcome not in (Outcome.EDITED, Outcome.EMPTY):
         continue
       targets.setdefault(resolved, []).append(jdir.name)
@@ -812,8 +783,8 @@ def collect_tick(repo: Path) -> dict:
           repo, doc, "+".join(sorted(job_ids)),
       )
     # waiver: this sweep's per-target error boundary — one bad target must not stop the rest
-    except Exception as exc:
-      sys.stderr.write(f"collect-tick: {doc}: {exc}\n")
+    except Exception as error:
+      sys.stderr.write(f"collect-tick: {doc}: {error}\n")
       failed.append(str(doc))
       continue
     # waiver: 'action' matches coordinator_dispatch's own wire-shape key, not a keys.py-promoted constant
@@ -849,8 +820,7 @@ def main_tick(argv: list[str]) -> int:
   args = parser.parse_args(argv)
 
   # resolve --repo then run the sweep; the CLI's whole contract is this one summary line
-  repo = Path(args.repo).resolve()
-  summary = collect_tick(repo)
+  summary = collect_tick(Path(args.repo).resolve())
   # waiver: 'files'/'dispatched' are collect_tick's own wire-shape keys, not keys.py-promoted constants
   print(json.dumps({"files": summary["files"], "dispatched": summary["dispatched"]}))
   return 1 if JobKey.ERROR in summary else 0
@@ -876,9 +846,11 @@ def main(argv: list[str]) -> int:
   parser.add_argument("--no-commit", action = "store_true")
   args = parser.parse_args(argv)
 
-  # `file` resolves against `--repo` unless it's already absolute, mirroring the other verbs
+  # `file` resolves against `--repo` unless it's already absolute
   repo = Path(args.repo).resolve()
   file_path = (repo / args.file).resolve()
+
+  # guard: the named document does not exist, nothing to collect for
   if not file_path.is_file():
     sys.stderr.write(f"file not found: {file_path}\n")
     return 2

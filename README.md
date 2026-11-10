@@ -25,7 +25,7 @@ Each plugin addresses one of these pains without forcing you to adopt the others
 
 Core skills, agents, and runtime daemon for Claude Code (expert runtime + agent-model routing + settings management)
 
-33 skills, 7 agents, 6 hooks.
+34 skills, 7 agents, 6 hooks.
 
 See [`plugins/claude/lazycortex-core/`](plugins/claude/lazycortex-core/) for details.
 
@@ -93,7 +93,7 @@ See [`plugins/claude/lazycortex-review/`](plugins/claude/lazycortex-review/) for
 
 Specification and design skills for Claude Code
 
-26 skills, 2 agents.
+24 skills, 3 agents.
 
 Requires: lazycortex-core, lazycortex-diagram, lazycortex-review
 

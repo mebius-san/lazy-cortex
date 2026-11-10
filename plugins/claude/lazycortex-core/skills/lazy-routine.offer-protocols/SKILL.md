@@ -19,14 +19,14 @@ Passed as `keyword=value` / flags in the dispatch prompt:
 
 ### Discover candidates
 
-Glob both source roots and `Read` each match's frontmatter:
+List both source roots and `Read` each match's frontmatter:
 
 - `plugins/claude/*/references/*.md` — monorepo plugin sources (present only inside the marketplace repo; absent in a consumer install).
-- `~/.claude/plugins/cache/**/references/*.md` — installed plugins.
+- `<installPath>/references/*.md` for each record in `~/.claude/plugins/installed_plugins.json` — installed plugins, one root per plugin: the `installPath` of its highest recorded version. The plugin cache itself is never globbed: it keeps every version ever installed, so a cache-wide glob offers protocols from stale copies.
 
 Keep every file whose frontmatter carries `routine_protocol_candidate: true`. For each, record:
 
-- `id` = `<plugin>:<stem>` — `<plugin>` is the path segment under `plugins/claude/` (monorepo) or under `…/cache/<registry>/<plugin>/<version>/` (cache); `<stem>` is the filename without `.md`. This is the same string `reference_resolver` resolves.
+- `id` = `<plugin>:<stem>` — `<plugin>` is the path segment under `plugins/claude/` (monorepo) or the registry record's plugin name, the part of its key before `@` (installed); `<stem>` is the filename without `.md`. This is the same string `reference_resolver` resolves.
 - `description` = the file's `description` frontmatter (its essence).
 
 Dedupe by `id`, preferring the monorepo hit when the same id appears in both.

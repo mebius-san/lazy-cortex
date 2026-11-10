@@ -1,22 +1,34 @@
 """
-Centralized frontmatter key names, value tokens, and outcome tokens for the
-mechanical request opt-in transition.
+Shared vocabulary of the plugin: frontmatter keys, value tokens, and related literals used across its workers.
 
-The opt-in handler reads and writes a fixed set of `spec_*` / `review_*`
-frontmatter keys and compares a fixed set of status / state / outcome tokens as
-strings. Defining them once here means a mistyped key surfaces as an
-`AttributeError` at import time rather than as silent state corruption in the
-running md-scan routine.
+Defining each literal once here means a mistyped name surfaces as an `AttributeError` at import time rather than as
+silent state corruption in a running worker.
 
-Each container below holds plain `str` constants whose values are byte-identical
-to the literals they replace — they are NOT enums, so `value == Container.X`
-stays a string comparison and parsed strings keep matching.
+The containers below hold plain `str` constants, not enums, so `value == Container.X` stays a string comparison and
+parsed strings keep matching. The one exception is `LangId`, a `StrEnum` whose members still compare equal to the
+plain code strings.
 """
 from __future__ import annotations
+
+from enum import StrEnum
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
+
+
+# ----------------------------------------------------------------------------------------
+class LangId(StrEnum):
+  """
+  The ISO 639-1 codes the specs plugin carries texts in.
+
+  Attributes:
+    EN: English — the floor every lookup falls back to.
+    RU: Russian.
+  """
+
+  EN = "en"
+  RU = "ru"
 
 
 # ----------------------------------------------------------------------------------------
@@ -221,7 +233,8 @@ class Gate:
     PLAN_DONE: The plan-accepted gate.
     DEVELOP_DONE: The development-complete gate.
     TESTS_PASSING: The tests-passing gate.
-    RELEASED: The released gate.
+    BUILT: A release's built gate — its tests pass and its build is merged, not yet published.
+    RELEASED: The released gate — published and ready for a downstream consumer.
     SPEC_CANCELLED: The asset-cancelled flag that refuses every gate flip.
     VISION_DONE: The level ladder's vision-accepted gate.
     USE_CASES_DONE: The level ladder's use-cases-accepted gate.
@@ -232,13 +245,12 @@ class Gate:
   # Domain(spec.lifecycle):
   # # Derived gates versus human-confirmed gates
   # A checkpoint closes one of two ways. Every checkpoint of a product's or the catalog's ladder,
-  # and the first two checkpoints of an asset's five-step ladder, are settled entirely by a
-  # sibling document's own approval — once that document is accepted, the checkpoint simply
-  # reflects it, with no separate confirmation of its own. The remaining three checkpoints of the
-  # asset ladder —
-  # the deliverable being built, its tests passing, its release — answer a question no document
-  # approval can settle by itself, so each one waits for an explicit confirmation from outside
-  # the automation before it closes.
+  # and the first two checkpoints of a release note's six-step ladder (design accepted, plan
+  # accepted), are settled entirely by a sibling document's own approval — once that document is
+  # accepted, the checkpoint simply reflects it, with no separate confirmation of its own. The
+  # remaining four checkpoints of the release ladder — development complete, tests passing, built,
+  # released — answer a question no document approval can settle by itself, so each one waits for
+  # a signal from outside the automation before it closes; released is the operator's publish.
 
   # The design-accepted gate.
   DESIGN_DONE = "spec_design_done"
@@ -248,7 +260,9 @@ class Gate:
   DEVELOP_DONE = "spec_develop_done"
   # The tests-passing gate.
   TESTS_PASSING = "spec_tests_passing"
-  # The released gate.
+  # A release's built gate — its tests pass and its build is merged, not yet published.
+  BUILT = "spec_built"
+  # The released gate — published and ready for a downstream consumer.
   RELEASED = "spec_released"
   # The asset-cancelled flag that refuses every gate flip.
   SPEC_CANCELLED = "spec_cancelled"
@@ -323,7 +337,8 @@ class AssetState:
       an operator anyone is waiting on. Judged ahead of `WAITS_OPERATOR`, whose hanging-checkbox
       condition those `Review` rows would otherwise satisfy.
     WAITS_OPERATOR: A launch checkbox or a `[!question]` callout is hanging; automation stands.
-    BLOCKED: An asset named in `spec_depends_on` has not reached the state this one needs.
+    AWAITING_RELEASE: The start document is approved and no open release carries the asset yet.
+    IN_RELEASE: The asset sits in the `spec_includes` of the product's open release.
     DONE: `spec_released` is true.
   """
 
@@ -351,8 +366,10 @@ class AssetState:
   DEFERRED = "deferred"
   # A launch checkbox or a `[!question]` callout is hanging; automation stands.
   WAITS_OPERATOR = "waits-operator"
-  # An asset named in `spec_depends_on` has not reached the state this one needs.
-  BLOCKED = "blocked"
+  # The start document is approved and no open release carries the asset yet.
+  AWAITING_RELEASE = "awaiting-release"
+  # The asset sits in the `spec_includes` of the product's open release.
+  IN_RELEASE = "in-release"
   # `spec_released` is true.
   DONE = "done"
 
@@ -365,7 +382,8 @@ ASSET_STATES = frozenset({
     AssetState.TESTING,
     AssetState.DEFERRED,
     AssetState.WAITS_OPERATOR,
-    AssetState.BLOCKED,
+    AssetState.AWAITING_RELEASE,
+    AssetState.IN_RELEASE,
     AssetState.DONE,
 })
 
@@ -382,25 +400,25 @@ LEVEL_GATE_ORDER = [
 # Every gate a level note carries; the asset ladder's `GATE_ORDER` is a separate set.
 LEVEL_GATES = frozenset(LEVEL_GATE_ORDER)
 
-# Gates whose precondition is strictly derivable from per-file approval stages — every level
-# gate is one of these: the level ladder has no human-signal gate at all.
-DERIVED_GATES = frozenset({Gate.DESIGN_DONE, Gate.PLAN_DONE}) | LEVEL_GATES
-
-# Gates whose flip depends on an out-of-band human signal, not a derivable stage.
-HUMAN_GATES = frozenset({Gate.DEVELOP_DONE, Gate.TESTS_PASSING, Gate.RELEASED})
-
 # Linear precedence order — each gate's precondition references the one before it.
 GATE_ORDER = [
     Gate.DESIGN_DONE,
     Gate.PLAN_DONE,
     Gate.DEVELOP_DONE,
     Gate.TESTS_PASSING,
+    Gate.BUILT,
     Gate.RELEASED,
 ]
 
-# Every gate an asset's own status folder-note carries: the five-rung ladder plus the terminal
-# cancellation flag that freezes it.
+# The full asset ladder: the six rungs plus the cancellation flag that freezes it until it is cleared. A `release`
+# note carries all of them; every other asset type is design-only and carries only `spec_design_done`,
+# `spec_released` and `spec_cancelled`.
 ASSET_GATES = frozenset(GATE_ORDER) | { Gate.SPEC_CANCELLED }
+
+# The four middle rungs of the ladder, which belong to a release alone: a design-only note does not carry them.
+# Turning one of them on is refused on every note whose `spec_asset_type` is not `release`, an untyped note
+# included; turning one off is never refused, so a note still carrying one can have it cleared.
+DESIGN_ONLY_GATES = frozenset({ Gate.PLAN_DONE, Gate.DEVELOP_DONE, Gate.TESTS_PASSING, Gate.BUILT })
 
 # Every gate name the flip primitive accepts at all. A name outside this set is a caller typo,
 # refused before the folder-note is touched — `Gate.DESIGN_DONE` is the one member both ladders
@@ -438,9 +456,6 @@ class SiblingDoc:
   Attributes:
     DESIGN: The feature/change design doc (asset-level; also product-level, loose at the
       product root).
-    ARCHITECTURE: The asset-level architecture doc (feature/change only, never a bug) — the
-      mandatory step between design and planning for a code-bearing asset, written by the
-      architect and reviewed through its own `architecture` review class.
     BUG: The bug-layout design-side doc.
     CODE_PLAN: The code-plan sibling doc.
     TEST_PLAN: The test-plan sibling doc.
@@ -454,20 +469,8 @@ class SiblingDoc:
       wakes no coordinator, whatever the git-watch filter delivers.
   """
 
-  # Domain(spec.lifecycle):
-  # # Architecture is a mandatory step only for code-bearing work
-  # Once a design is accepted for an asset that will ship its own code, the code's own shape —
-  # its module boundaries and where responsibility sits — is settled as its own separate step
-  # before any plan is written, never folded into planning itself and never skipped. A bug
-  # carries no such step: fixing an already-shaped system needs no shape of its own to settle
-  # first.
-
   # The feature/change design doc (asset-level; also product-level, loose at the product root).
   DESIGN = "design.md"
-  # The asset-level architecture doc (feature/change only, never a bug) — the mandatory step between design and
-  # planning for a code-bearing asset, written by the architect and reviewed through its own `architecture` review
-  # class.
-  ARCHITECTURE = "architecture.md"
   # The bug-layout design-side doc.
   BUG = "bug.md"
   # The code-plan sibling doc.
@@ -503,9 +506,14 @@ class LevelDoc:
     USE_CASES: The level use-cases doc.
     DESIGN: The level design doc.
     UI_DESIGN: The level ui-design doc.
+    ARCHITECTURE: The product architecture doc — how the product's code is arranged; it closes no level gate.
+    TEST_PLAN: The product test-plan doc — the standing instructions for testing the product; it closes no
+      level gate.
     TECH: The level tech doc.
-    CHAIN: The ladder as `(filename, doc_type, gate)` triples, in writing order.
-    BASENAMES: The five filenames, for deciding whether a changed file is a level document.
+    CHAIN: The ladder as `(filename, doc_type, gate)` triples, in writing order; `gate` is `None` for a document
+      that closes no gate.
+    GATED_CHAIN: The triples of `CHAIN` whose document closes a gate, in the same order.
+    BASENAMES: The seven filenames, for deciding whether a changed file is a level document.
   """
 
   # The level vision doc.
@@ -516,18 +524,27 @@ class LevelDoc:
   DESIGN = "design.md"
   # The level ui-design doc.
   UI_DESIGN = "ui-design.md"
+  # The product architecture doc — how the product's code is arranged; it closes no level gate.
+  ARCHITECTURE = "architecture.md"
+  # The product test-plan doc — the standing instructions for testing the product; it closes no level gate.
+  TEST_PLAN = "test-plan.md"
   # The level tech doc.
   TECH = "tech.md"
-  # The ladder as `(filename, doc_type, gate)` triples, in writing order.
+  # The ladder as `(filename, doc_type, gate)` triples, in writing order; `gate` is `None` for a document that closes
+  # no gate.
   CHAIN = [
       ( VISION, "system-vision", Gate.VISION_DONE ),
       ( USE_CASES, "system-use-cases", Gate.USE_CASES_DONE ),
       ( DESIGN, "system-design", Gate.DESIGN_DONE ),
       ( UI_DESIGN, "system-ui-design", Gate.UI_DESIGN_DONE ),
+      ( ARCHITECTURE, "system-architecture", None ),
+      ( TEST_PLAN, "system-test-plan", None ),
       ( TECH, "system-tech", Gate.TECH_DONE ),
   ]
-  # The five filenames, for deciding whether a changed file is a level document.
-  BASENAMES = frozenset({ VISION, USE_CASES, DESIGN, UI_DESIGN, TECH })
+  # The triples of `CHAIN` whose document closes a gate, in the same order.
+  GATED_CHAIN = [ triple for triple in CHAIN if triple[2] is not None ]
+  # The seven filenames, for deciding whether a changed file is a level document.
+  BASENAMES = frozenset({ VISION, USE_CASES, DESIGN, UI_DESIGN, ARCHITECTURE, TEST_PLAN, TECH })
 
 
 # ----------------------------------------------------------------------------------------
@@ -583,6 +600,16 @@ class HistoryEvent:
     JOB_CANCELLED: A launch-checkbox expert job was cancelled.
     JOB_DEAD: A coordinator job died and its marker was cleared.
     REQUEST_PROCESSED: An upstream request reached its processed state.
+    DEPLOYED: A release was deployed to one of the product's targets.
+    DEPLOY_FAILED: A release's deploy command exited non-zero.
+    PUBLISHED: A release was published — its version frozen and its assets released.
+    VERSION_SET: An operator set a release's version outright.
+    COHERENCE_CHECKED: A coherence check of a document finished and its conflicts were hung.
+    COHERENCE_FAILED: A coherence check of a document died or delivered no usable result.
+    COHERENCE_TRIMMED: A coherence check of a document left neighbours out over its text budget.
+    COHERENCE_CHECKED_TRIMMED: A coherence check that left neighbours out over its text budget finished and its
+      conflicts were hung.
+    STAGE_LAG: A coordinator job finished twice without promoting an approved document still at `draft`.
   """
 
   # An asset folder-note was scaffolded by `lazy-spec.create-asset`.
@@ -599,6 +626,24 @@ class HistoryEvent:
   JOB_DEAD = "job-dead"
   # An upstream request reached its processed state.
   REQUEST_PROCESSED = "request-processed"
+  # A release was deployed to one of the product's targets.
+  DEPLOYED = "deployed"
+  # A release's deploy command exited non-zero.
+  DEPLOY_FAILED = "deploy-failed"
+  # A release was published — its version frozen and its assets released.
+  PUBLISHED = "published"
+  # An operator set a release's version outright.
+  VERSION_SET = "version-set"
+  # A coherence check of a document finished and its conflicts were hung.
+  COHERENCE_CHECKED = "coherence-checked"
+  # A coherence check of a document died or delivered no usable result.
+  COHERENCE_FAILED = "coherence-failed"
+  # A coherence check of a document left neighbours out over its text budget.
+  COHERENCE_TRIMMED = "coherence-trimmed"
+  # A coherence check that left neighbours out over its text budget finished and its conflicts were hung.
+  COHERENCE_CHECKED_TRIMMED = "coherence-checked-trimmed"
+  # A coordinator job finished twice without promoting an approved document still at `draft`.
+  STAGE_LAG = "stage-lag"
 
 
 # Protected-owner tags marking the coordinator's own sections (`#protected/<owner>/<region>`).
@@ -648,9 +693,6 @@ class PlanReview:
     REVIEW_ACTIVE_KEY: The `code-plan.md` frontmatter key marking active review.
     REVIEW_CLI: The `lazycortex-review` CLI binary name resolved under a plugin dir.
     START_VERB: The review CLI subcommand that opts a document into review.
-    SUBMIT_VERB: The review CLI subcommand that opts a document straight to a reviewer,
-      skipping the opening writer round.
-    PLUGIN_DIRS_ENV: The env var listing plugin dirs to walk for the CLI.
     BIN_DIR: The per-plugin `bin/` subdir holding the CLI binary.
     START_TIMEOUT_S: Seconds the best-effort `start` subprocess may run.
   """
@@ -684,10 +726,6 @@ class PlanReview:
   REVIEW_CLI = "lazycortex-review"
   # The review CLI subcommand that opts a document into review.
   START_VERB = "start"
-  # The review CLI subcommand that opts a document straight to a reviewer, skipping the opening writer round.
-  SUBMIT_VERB = "submit"
-  # The env var listing plugin dirs to walk for the CLI.
-  PLUGIN_DIRS_ENV = "LAZYCORTEX_PLUGIN_DIRS"
   # The per-plugin `bin/` subdir holding the CLI binary.
   BIN_DIR = "bin"
   # Seconds the best-effort `start` subprocess may run.
@@ -743,6 +781,9 @@ class TickAction:
     EXPERT: The result-dict key carrying the expert a dispatch went to.
     JOB_ID: The result-dict key carrying the job id a dispatch queued or retired.
     WARNINGS: The result-dict key carrying the dispatch warnings landed in `# History`.
+    REFUSED: The call named a wake the note cannot take (a release-start on a note that is not a release);
+      nothing was dispatched or written.
+    REASON: The result-dict key carrying a refusal's reason.
   """
 
   # The action-field key in the result dict.
@@ -755,6 +796,11 @@ class TickAction:
   JOB_ID = "job_id"
   # The result-dict key carrying the dispatch warnings landed in `# History`.
   WARNINGS = "warnings"
+  # The call named a wake the note cannot take (a release-start on a note that is not a release); nothing was
+  # dispatched or written.
+  REFUSED = "refused"
+  # The result-dict key carrying a refusal's reason.
+  REASON = "reason"
   # A derived gate was auto-flipped in-process.
   AUTO_FLIPPED = "auto-flipped"
   # A human-signal gate's readiness callout was appended.
@@ -800,17 +846,16 @@ class GateCheckbox:
   Attributes:
     WRITE_CODE_PLAN: Label for the code-plan-readiness checkbox.
     WRITE_TEST_PLAN: Label for the test-plan-readiness checkbox.
-    WRITE_ARCHITECTURE: Label for the architecture-readiness checkbox on a
-      code-bearing asset (playbook Chapter 8's architecture step; also used
-      reflexively by a code-free decomposer asset against its own ladder).
-    START_IMPLEMENTATION: Label for the implementation-readiness checkbox.
-    START_TESTING: Label for the testing-readiness checkbox.
-    PUBLISH: Label for the release-readiness checkbox the coordinator hangs once an asset's
-      terminal gate closes — unlike the other five, its tick never dispatches an expert job
-      (it clears `spec_draft` directly via `note-set-key`) and so never carries an `active_job`
-      entry of its own.
+    WRITE_ARCHITECTURE: Label for the product note's checkbox that writes the product's
+      `architecture.md`.
+    START_RESEARCH: Label for the `research` tool's launch checkbox.
+    START_RELEASE: Label for the product note's checkbox that creates a release from the current delta.
+    REBUILD: Label for the release note's checkbox that pulls new approvals in and builds again.
+    PUBLISH: Label for the publish checkbox the coordinator hangs on a release note once its `spec_built`
+      closes — unlike the other fixed labels, its tick never dispatches an expert job (it runs
+      `release-publish` directly) and so never carries an `active_job` entry of its own.
     REVIEW_PREFIX: Prefix of the parameterised review-launch label — the full label is this
-      prefix followed by the reviewable markdown file's basename. Unlike the six fixed
+      prefix followed by the reviewable markdown file's basename. Unlike the fixed
       labels, its tick opens a review rather than dispatching an expert job, so it never
       carries an `active_job` entry.
     GATE_CALLOUT_MARK: Markdown callout prefix marking a gate-readiness block.
@@ -820,23 +865,144 @@ class GateCheckbox:
   WRITE_CODE_PLAN = "Write code-plan"
   # Label for the test-plan-readiness checkbox.
   WRITE_TEST_PLAN = "Write test-plan"
-  # Label for the architecture-readiness checkbox on a code-bearing asset (playbook Chapter 8's architecture step;
-  # also used reflexively by a code-free decomposer asset against its own ladder).
+  # Label for the product note's checkbox that writes the product's `architecture.md`.
   WRITE_ARCHITECTURE = "Write architecture"
-  # Label for the implementation-readiness checkbox.
-  START_IMPLEMENTATION = "Start implementation"
-  # Label for the testing-readiness checkbox.
-  START_TESTING = "Start testing"
-  # Label for the release-readiness checkbox the coordinator hangs once an asset's terminal gate closes — unlike the
-  # other five, its tick never dispatches an expert job (it clears `spec_draft` directly via `note-set-key`) and so
-  # never carries an `active_job` entry of its own.
+  # Launch label of the `research` tool, declared by its playbook and never parameterised.
+  START_RESEARCH = "Start research"
+  # Label for the product note's checkbox that creates a release from the current delta.
+  START_RELEASE = "Start release"
+  # Label for the release note's checkbox that pulls new approvals in and builds again.
+  REBUILD = "Rebuild"
+  # Label for the publish checkbox the release coordinator hangs on a release note once its `spec_built` closes —
+  # its tick runs `release-publish` (the production deploy, then every included asset's release and tag, the manifest
+  # and one commit) and never dispatches an expert job, so it never carries an `active_job` entry of its own.
   PUBLISH = "Publish"
   # Prefix of the parameterised review-launch label — the full label is this prefix followed by the reviewable
-  # markdown file's basename. Unlike the six fixed labels, its tick opens a review rather than dispatching an expert
+  # markdown file's basename. Unlike the fixed labels, its tick opens a review rather than dispatching an expert
   # job, so it never carries an `active_job` entry.
   REVIEW_PREFIX = "Review "
   # Markdown callout prefix marking a gate-readiness block.
   GATE_CALLOUT_MARK = "[!gate]"
+
+
+# ----------------------------------------------------------------------------------------
+class GateRowGroup:
+  """
+  The groups the `review-rows` verb lays a `# Gates` section out into.
+
+  Attributes:
+    NEXT: Rows that move the asset forward — every `Write`, `Start`, `Rebuild`, `Revise` and `Publish` row,
+      and a `Review` row whose document is not approved yet.
+    REREVIEW: `Review` rows of documents already approved, where a tick re-opens a settled review.
+    CONFLICTS: The coherence check's conflict callouts, laid out last.
+  """
+
+  # Rows that move the asset forward.
+  NEXT = "next"
+  # `Review` rows of already approved documents.
+  REREVIEW = "re-review"
+  # The coherence check's conflict callouts, laid out after both row groups.
+  CONFLICTS = "conflicts"
+
+
+# ----------------------------------------------------------------------------------------
+class ConflictKey:
+  """
+  Frontmatter keys the coherence verbs keep on a folder-note, and the fields of one dismissal entry.
+
+  Attributes:
+    CONFLICTED: The `spec_conflicted` flag, true while the note holds at least one conflict callout.
+    DISMISSED: The `spec_conflict_dismissed` list of pairs the operator marked as no conflict, kept as one-line JSON.
+    INNER: The dismissal entry field naming the document on this note's side of the pair.
+    WITH: The dismissal entry field naming the document on the other side of the pair.
+    INNER_APPROVED_AT: The dismissal entry field holding the inner document's `spec_approved_at` at dismissal.
+    WITH_APPROVED_AT: The dismissal entry field holding the other document's `spec_approved_at` at dismissal.
+  """
+
+  # The `spec_conflicted` flag, true while the note holds at least one conflict callout.
+  CONFLICTED = "spec_conflicted"
+  # The `spec_conflict_dismissed` list of pairs the operator marked as no conflict, kept as one-line JSON.
+  DISMISSED = "spec_conflict_dismissed"
+  # The dismissal entry field naming the document on this note's side of the pair.
+  INNER = "inner"
+  # The dismissal entry field naming the document on the other side of the pair.
+  WITH = "with"
+  # The dismissal entry field holding the inner document's `spec_approved_at` at dismissal.
+  INNER_APPROVED_AT = "inner_approved_at"
+  # The dismissal entry field holding the other document's `spec_approved_at` at dismissal.
+  WITH_APPROVED_AT = "with_approved_at"
+
+
+# ----------------------------------------------------------------------------------------
+class ConflictCallout:
+  """
+  The fixed English pieces of a conflict callout in the `# Gates` section of a folder-note.
+
+  Attributes:
+    MARK: The callout type a conflict callout opens with.
+    TITLE_PREFIX: The title text before the links to the conflicting documents.
+    RESOLVE: The label of the box that sends the inner document back to its writer.
+    DISMISS: The label of the box that records the pair as no conflict.
+    MARKER_PREFIX: The text opening the trailing comment that names the callout's inner document.
+  """
+
+  # The callout type a conflict callout opens with.
+  MARK = "[!warning]"
+  # The title text before the links to the conflicting documents.
+  TITLE_PREFIX = "Conflict with "
+  # The label of the box that sends the inner document back to its writer.
+  RESOLVE = "Resolve here"
+  # The label of the box that records the pair as no conflict.
+  DISMISS = "Not a conflict"
+  # The text opening the trailing comment that names the callout's inner document.
+  MARKER_PREFIX = "coherence: inner="
+
+
+# ----------------------------------------------------------------------------------------
+class CoherenceJob:
+  """
+  The fixed pieces of the coherence check's expert job.
+
+  Attributes:
+    EXPERT: The expert the check is dispatched to.
+    KIND: The request kind the check's payload carries.
+    PROTOCOL: The protocol reference the check's expert reads.
+    DEDUP_SUFFIX: The suffix the job's dedup key puts after the checked document's path.
+    RESULT: The result file the expert writes into its job's `result/`.
+    NEIGHBOUR_BUDGET: The most neighbour text one check names, in bytes on disk (150 KB).
+  """
+
+  # The expert the check is dispatched to.
+  EXPERT = "spec.coherence-checker"
+  # The request kind the check's payload carries.
+  KIND = "check"
+  # The protocol reference the check's expert reads.
+  PROTOCOL = "lazycortex-specs:lazy-spec.coherence-protocol"
+  # The suffix the job's dedup key puts after the checked document's path.
+  DEDUP_SUFFIX = ":coherence"
+  # The result file the expert writes into its job's `result/`.
+  RESULT = "conflicts.json"
+  # The most neighbour text one check names, in bytes on disk (150 KB).
+  NEIGHBOUR_BUDGET = 153600
+
+
+# The ladder order the `review-rows` verb sorts gate rows by inside a group: the reading chain of documents first,
+# then the tool launches, then publication. A row whose document or label is not listed keeps its place after the
+# listed ones.
+GATE_ROW_ORDER = [
+    LevelDoc.VISION,
+    LevelDoc.USE_CASES,
+    SiblingDoc.DESIGN,
+    LevelDoc.UI_DESIGN,
+    LevelDoc.ARCHITECTURE,
+    SiblingDoc.TEST_PLAN,
+    SiblingDoc.TECH,
+    SiblingDoc.CODE_PLAN,
+    GateCheckbox.START_RESEARCH,
+    GateCheckbox.START_RELEASE,
+    GateCheckbox.REBUILD,
+    GateCheckbox.PUBLISH,
+]
 
 
 # ----------------------------------------------------------------------------------------
@@ -845,31 +1011,32 @@ class SpecHaltKey:
   Halt-state frontmatter key for assets awaiting resolution.
 
   Attributes:
-    HALTED: The `spec_halted` frontmatter key marking a blocked asset.
+    HALTED: The `spec_halted` frontmatter key marking a halted asset.
   """
 
-  # The `spec_halted` frontmatter key marking a blocked asset.
+  # The `spec_halted` frontmatter key marking a halted asset.
   HALTED = "spec_halted"
 
 
 # ----------------------------------------------------------------------------------------
 class SpecMomentKey:
   """
-  Frontmatter keys recording WHEN a state was reached, for the staleness rule to compare.
+  Frontmatter keys recording WHEN a state was reached, read by the coordinator.
 
   A moment is an ISO 8601 UTC datetime (`2026-09-19T08:11:19Z`). These keys replace the dates
   the coordinator used to read out of `# History` lines: the journal is for the operator, the
   moments are for the code.
 
   Attributes:
-    APPROVED_AT: The `spec_approved_at` key on a stage-bearing document — the last moment it
-      entered `approved`, written by `lazy-spec.set-stage`.
+    APPROVED_AT: The `spec_approved_at` key on a stage-bearing document — the moment it last entered
+      `approved`, present only while the document is `approved`; `lazy-spec.set-stage` writes it on entry
+      and removes it on every move out of `approved`.
     AT_SUFFIX: The suffix that turns a gate key into its moment key (`spec_design_done_at`),
       written by `flip-gate` when the gate turns true and dropped when it turns false.
   """
 
-  # The `spec_approved_at` key on a stage-bearing document — the last moment it entered `approved`, written by `lazy-
-  # spec.set-stage`.
+  # The `spec_approved_at` key on a stage-bearing document — the moment it last entered `approved`, present only
+  # while the document is `approved`; `lazy-spec.set-stage` writes it on entry and removes it on every move out.
   APPROVED_AT = "spec_approved_at"
   # The suffix that turns a gate key into its moment key (`spec_design_done_at`), written by `flip-gate` when the
   # gate turns true and dropped when it turns false.
@@ -907,15 +1074,14 @@ class AttachmentKey:
 # ----------------------------------------------------------------------------------------
 class JobMarker:
   """
-  Per-note job-marker field names in the runtime sidecar, their sub-fields, and the wake token
-  one carries.
+  Field names of the per-note job markers in the runtime sidecar.
 
-  These name fields of `.runtime/lazy-specs.jobs.json`, not frontmatter: the markers are runtime
-  state the spec system owns, invisible in the folder-note and unreachable by a hand-edit
-  (`spec_job_markers.py`). Each of the two job fields carries a dict — `{trigger, expert, job_id}` for
-  the coordinator's own one-job-per-asset slot, `{checkbox, expert, job_id}` for the asset's
-  launch-checkbox job slot — kept in separate fields so a coordinator job never collides with a
-  ladder job.
+  The names cover each marker's sub-fields and the wake token one carries. They name fields of
+  `.runtime/lazy-specs.jobs.json`, not frontmatter: the markers are runtime state the spec system owns,
+  invisible in the folder-note and unreachable by a hand-edit (`spec_job_markers.py`). Each of the two
+  job fields carries a dict — `{trigger, expert, job_id}` for the coordinator's own one-job-per-asset
+  slot, `{checkbox, expert, job_id}` for the asset's launch-checkbox job slot — kept in separate fields
+  so a coordinator job never collides with a ladder job.
 
   Attributes:
     COORDINATOR_JOB: The coordinator job currently in flight on the asset.
@@ -933,6 +1099,9 @@ class JobMarker:
     KIND_COORDINATOR: The `mark-job` CLI token selecting `COORDINATOR_JOB`.
     KIND_ACTIVE: The `mark-job` CLI token selecting `ACTIVE_JOB`.
     KIND_WAKE: The `mark-job` CLI token selecting `PENDING_WAKE`.
+    COHERENCE_JOBS: The coherence checks in flight for the note's documents, one per checked document.
+    DOC: The checked-document field of one coherence-job member.
+    DROPPED: The optional field of one coherence-job member counting the neighbours dropped over the text budget.
   """
 
   # The coordinator job currently in flight on the asset.
@@ -961,6 +1130,30 @@ class JobMarker:
   KIND_ACTIVE = "active"
   # The `mark-job` CLI token selecting `PENDING_WAKE`.
   KIND_WAKE = "wake"
+  # The coherence checks in flight for the note's documents, one per checked document.
+  COHERENCE_JOBS = "coherence_jobs"
+  # The checked-document field of one coherence-job member.
+  DOC = "doc"
+  # The optional field of one coherence-job member counting the neighbours dropped over the text budget.
+  DROPPED = "dropped"
+
+
+# ----------------------------------------------------------------------------------------
+class PluginErrorCause:
+  """
+  Stable `--cause` tokens the specs plugin reports to the core error ledger.
+
+  Attributes:
+    RELEASE_OWNER_WAKE_FAILED: A best-effort wake of a release owner's level note raised after the change that
+      triggered it had already landed.
+    ICON_REPAINT_FAILED: A best-effort icon repaint of the notes a commit carries that failed; the commit went
+      ahead without the repaint.
+  """
+
+  # A best-effort wake of a release owner's level note raised after the change that triggered it had already landed.
+  RELEASE_OWNER_WAKE_FAILED = "release-owner-wake-failed"
+  # A best-effort icon repaint of the notes a commit carries failed; the commit went ahead without the repaint.
+  ICON_REPAINT_FAILED = "icon-repaint-failed"
 
 
 # ----------------------------------------------------------------------------------------
@@ -993,21 +1186,16 @@ class CoordinatorTrigger:
       it never fires this trigger without any author check needed (model-audit.md C3, the
       deferred half — `lazy-spec.coordination-playbook.md` § 1 trigger 1's own scope only ever
       covered the status folder-note itself).
-    ASSET_RELEASED: An asset's `Gate.RELEASED` crossed to true, dispatched upward onto the
-      product's own level note so the catalog coordinator can reconcile the released asset
-      against the product design. One hop, best-effort, raised on the same asset wake that
-      already scans reverse dependencies; no gate of the asset's own is touched.
-    DEPENDENCY_READY: A wake resolved on a dependency asset — one this asset itself names in
-      its own `spec_depends_on` — reached this asset as a one-hop reverse-edge dispatch
-      (`coordinator_dispatch.scan_dependents`). Carries `payload["dep"]` naming the ready
-      dependency's product-relative path token, of any depth. Synthetic: never derived from
-      `item`, so it
-      carries no author of its own to check (C2). Listed as the playbook's eighth wake trigger
-      (`lazy-spec.coordination-playbook.md` § 1).
-    CHILD_REAPPROVED: A nested product's `vision.md` or `design.md` reaches `approved`,
-      dispatched one hop upward onto the enclosing product's level note so it can compare its
-      own design against the child's. Carries `payload["child"]` naming the child product's
-      key. Synthetic, never derived from `item`.
+    ASSET_APPROVED: An asset's start document reached `approved` (or was re-approved, or the
+      asset was cancelled), dispatched one hop upward onto the level note of the product that
+      owns releases, so it can rehang `Start release` and rewrite its brief. Carries
+      `payload["asset"]` naming the asset's token relative to the root of the product that owns
+      releases, not to the asset's own product. Synthetic, never derived from `item`; it creates
+      and launches nothing.
+    RELEASE_START: A release's own coordinator is woken one hop downward after `Start release`, and again after a
+      verdict on the revised `architecture.md` of the build's first step. Synthetic, never derived from `item`.
+    RELEASE_PUBLISHED: A release was published; raised on the release owner's level note. Synthetic, never
+      derived from `item`.
   """
 
   # A non-`@bot.`-authored commit that changed the asset note, or — on a grouped tick — a sibling doc not carrying
@@ -1034,20 +1222,18 @@ class CoordinatorTrigger:
   # any author check needed (model-audit.md C3, the deferred half — `lazy-spec.coordination-playbook.md` § 1 trigger
   # 1's own scope only ever covered the status folder-note itself).
   DOC_TRANSITION = "doc-transition"
-  # A wake resolved on a dependency asset — one this asset itself names in its own `spec_depends_on` — reached this
-  # asset as a one-hop reverse-edge dispatch (`coordinator_dispatch.scan_dependents`). Carries `payload["dep"]`
-  # naming the ready dependency's product-relative path token, of any depth. Synthetic: never derived from `item`, so
-  # it carries no author of its own to check (C2). Listed as the playbook's eighth wake trigger (`lazy-
-  # spec.coordination-playbook.md` § 1).
-  DEPENDENCY_READY = "dependency-ready"
-  # An asset's `Gate.RELEASED` crossed to true, dispatched upward onto the product's own level note so the catalog
-  # coordinator can reconcile the released asset against the product design. One hop, best-effort, raised on the same
-  # asset wake that already scans reverse dependencies; no gate of the asset's own is touched.
-  ASSET_RELEASED = "asset-released"
-  # A nested product's `vision.md` or `design.md` reaches `approved`, dispatched one hop upward onto the enclosing
-  # product's level note so it can compare its own design against the child's. Carries `payload["child"]` naming the
-  # child product's key. Synthetic, never derived from `item`.
-  CHILD_REAPPROVED = "child-reapproved"
+  # An asset's start document reached `approved` (or was re-approved, or the asset was cancelled), dispatched one hop
+  # upward onto the level note of the product that owns releases, so it can rehang `Start release` and rewrite its
+  # brief. Carries `payload["asset"]` naming the asset's token relative to the root of the product that owns releases,
+  # not to the asset's own product. Synthetic, never derived from `item`; it creates and launches nothing.
+  ASSET_APPROVED = "asset-approved"
+  # A release's own coordinator is woken one hop downward after `Start release`, and again after a verdict on the
+  # revised `architecture.md` of the build's first step. Synthetic, never derived from `item`.
+  RELEASE_START = "release-start"
+  # A release of the product that owns releases was published, dispatched one hop upward onto that product's level
+  # note after the publish commit, so it can recompute the delta, hang or take down `Start release` and rewrite its
+  # brief. Synthetic, never derived from `item`; it creates and launches nothing.
+  RELEASE_PUBLISHED = "release-published"
 
 
 # ----------------------------------------------------------------------------------------
@@ -1099,56 +1285,28 @@ class SpecCoordinatorDocStateKey:
 
 
 # ----------------------------------------------------------------------------------------
-class SpecCoordinatorChildWakeStateKey:
-  """
-  Frontmatter key recording, on a PRODUCT level note, which of its own system documents this
-  worker has already forwarded upward as a `CoordinatorTrigger.CHILD_REAPPROVED` wake of the
-  enclosing product, per document basename.
-
-  Worker-internal bookkeeping, same convention as `SpecCoordinatorDocStateKey` — only
-  `coordinator_dispatch.py`'s own direct write path ever sets it, so the persona can't clear or
-  game it through `note-set-key`. It is a SECOND marker rather than a reuse of the doc-state
-  one because the two edges fire on different ticks: the upward edge is resolved outside the
-  trigger ladder, so a command or a ticked answer winning the tick forwards the child hop while
-  leaving the level's own `DOC_TRANSITION` still to come. Stamping the doc-state marker there
-  would consume that transition and lose the level's own stage promotion with it.
-
-  Attributes:
-    STATE: The `spec_coordinator_child_wake_state` frontmatter key. Its value is a JSON object
-      mapping a level-document basename (`vision.md`, `design.md`) to the `review_result` value
-      the wake it last forwarded for that document carried.
-  """
-
-  # The `spec_coordinator_child_wake_state` frontmatter key. Its value is a JSON object mapping a level-document
-  # basename (`vision.md`, `design.md`) to the `review_result` value the wake it last forwarded for that document
-  # carried.
-  STATE = "spec_coordinator_child_wake_state"
-
-
-# ----------------------------------------------------------------------------------------
 class SpecCoordinatorReadyStateKey:
   """
-  Frontmatter key recording this asset's own readiness-gate values as last observed by this
-  worker, so a later wake can tell whether `spec_develop_done` / `spec_tests_passing` actually
-  crossed to true rather than fired for an unrelated reason.
+  Frontmatter key recording this asset's own approval-gate values as last observed by this
+  worker, so a later wake can tell whether `spec_design_done` / `spec_cancelled` actually changed
+  value rather than fired for an unrelated reason.
 
   Worker-internal bookkeeping, same convention as `SpecCoordinatorDocStateKey` — only
   `coordinator_dispatch.py`'s own direct write path ever sets it. Content-shaped rather than
   sha-keyed (`model-audit.md` I-A): the value is the gates' own booleans, not a commit
-  reference, so it keeps meaning across a rewritten or destroyed commit. Any OTHER asset that
-  names this one in its own `spec_depends_on` is woken (`CoordinatorTrigger.DEPENDENCY_READY`)
-  only when a wake here crosses one of these gates against this marker's prior value — a wake
-  that leaves both gates unchanged has nothing for a dependent to react to.
+  reference, so it keeps meaning across a rewritten or destroyed commit.
 
   Attributes:
     STATE: The `spec_coordinator_ready_state` frontmatter key. Its value is a JSON object
-      `{Gate.DEVELOP_DONE: bool, Gate.TESTS_PASSING: bool}` snapshotting the two gates this
-      worker's reverse-dependency scan watches for a crossing.
+      `{Gate.DESIGN_DONE: bool, Gate.SPEC_CANCELLED: bool}` snapshotting the gates this worker watches for a
+      crossing, for the upward wake of the release owner's level note. Only these approval gates are tracked;
+      a release's publication wakes the owner through its own path, not through this marker.
   """
 
-  # The `spec_coordinator_ready_state` frontmatter key. Its value is a JSON object `{Gate.DEVELOP_DONE: bool,
-  # Gate.TESTS_PASSING: bool}` snapshotting the two gates this worker's reverse-dependency scan watches for a
-  # crossing.
+  # The `spec_coordinator_ready_state` frontmatter key. Its value is a JSON object `{Gate.DESIGN_DONE: bool,
+  # Gate.SPEC_CANCELLED: bool}` snapshotting the gates this worker watches for a crossing, for the upward wake of the
+  # release owner's level note. Only these approval gates are tracked; a release's publication wakes the owner
+  # through its own path, not through this marker.
   STATE = "spec_coordinator_ready_state"
 
 
@@ -1164,23 +1322,6 @@ class SpecTargetsKey:
 
   # The `spec_targets` frontmatter key naming the feature assets a change's design cascades into.
   TARGETS = "spec_targets"
-
-
-# ----------------------------------------------------------------------------------------
-class SpecDependsOnKey:
-  """
-  Frontmatter key for an asset's dependency graph (`lazy-spec.coordination-playbook.md` § 8).
-
-  Attributes:
-    DEPENDS_ON: The `spec_depends_on` frontmatter key naming the assets this asset needs —
-      either an ordinary implementation-order dependency, or (for a code-free decomposer asset)
-      the children its own `architecture.md` proposed and the coordinator materialized.
-  """
-
-  # The `spec_depends_on` frontmatter key naming the assets this asset needs — either an ordinary implementation-
-  # order dependency, or (for a code-free decomposer asset) the children its own `architecture.md` proposed and the
-  # coordinator materialized.
-  DEPENDS_ON = "spec_depends_on"
 
 
 # ----------------------------------------------------------------------------------------
@@ -1240,38 +1381,6 @@ class SpecCascadeKey:
   TARGETS_DONE = "spec_cascade_targets_done"
 
 
-# Decision: `spec_draft` (negative gate) replaces `spec_handoff_ready` (positive gate), not a
-# same-semantics rename — a fresh asset needs no flag written to read as ready, and a downstream
-# consumer written before an asset canonizes still reads it correctly (missing key = ready).
-
-# ----------------------------------------------------------------------------------------
-class DraftKey:
-  """
-  Frontmatter key for an asset's draft (not-yet-ready-for-downstream-pickup) state.
-
-  Attributes:
-    DRAFT: The `spec_draft` frontmatter key — this asset is still a draft, not yet ready for
-      a downstream consumer to pick up, where the downstream repo mirrors this spec repo as
-      its own upstream (read by `upstream_tick.py`'s own draft-gate when a consuming repo's
-      `spec.upstream` source happens to be another canon repo carrying this same key). A
-      negative gate: absent or false means ready. Set true by the coordinator when it
-      canonizes a fresh full-mode asset. On a spec-only-mode asset
-      (`lazy-spec.coordination-playbook.md` Chapter 14) the coordinator clears it once `design.md`
-      is approved AND the operator gives their own word; on a full-mode asset it clears only
-      when the operator ticks the `GateCheckbox.PUBLISH` checkbox the coordinator hangs once
-      `spec_released` closes.
-  """
-
-  # The `spec_draft` frontmatter key — this asset is still a draft, not yet ready for a downstream consumer to pick
-  # up, where the downstream repo mirrors this spec repo as its own upstream (read by `upstream_tick.py`'s own draft-
-  # gate when a consuming repo's `spec.upstream` source happens to be another canon repo carrying this same key). A
-  # negative gate: absent or false means ready. Set true by the coordinator when it canonizes a fresh full-mode
-  # asset. On a spec-only-mode asset (`lazy-spec.coordination-playbook.md` Chapter 14) the coordinator clears it once
-  # `design.md` is approved AND the operator gives their own word; on a full-mode asset it clears only when the
-  # operator ticks the `GateCheckbox.PUBLISH` checkbox the coordinator hangs once `spec_released` closes.
-  DRAFT = "spec_draft"
-
-
 # ----------------------------------------------------------------------------------------
 class AssetTypeKey:
   """
@@ -1305,6 +1414,73 @@ class AssetTypeKey:
   TOOLS = "spec_tools"
 
 
+# The one shipped asset type that has no implementation at all: its report is the deliverable, so it never enters a
+# release delta and keeps its own `spec_released` on the report's approval.
+RESEARCH_ASSET_TYPE = "research"
+
+
+# ----------------------------------------------------------------------------------------
+class ReleaseKey:
+  """
+  Keys and names of the release asset — the product's unit of implementation.
+
+  Attributes:
+    VERSION: The `spec_version` frontmatter key on a release note, a bare SemVer string.
+    INCLUDES: The `spec_includes` frontmatter key — wikilinks to the status notes of the assets the release carries.
+    TAG_PREFIX: Prefix of the mirror tag of a version, written with the dots replaced by hyphens.
+    ASSET_TYPE: The asset type name a release note carries in `spec_asset_type`.
+    FOLDER: The reserved folder under a product root where releases live.
+    SLUG_WIDTH: Width of a release folder's zero-padded sequence number.
+  """
+
+  # The `spec_version` frontmatter key on a release note, a bare SemVer string.
+  VERSION = "spec_version"
+  # The `spec_includes` frontmatter key — wikilinks to the status notes of the assets the release carries.
+  INCLUDES = "spec_includes"
+  # Prefix of the mirror tag of a version, written with the dots replaced by hyphens.
+  TAG_PREFIX = "release/"
+  # The asset type name a release note carries in `spec_asset_type`.
+  ASSET_TYPE = "release"
+  # The reserved folder under a product root where releases live.
+  FOLDER = "releases"
+  # Width of a release folder's zero-padded sequence number.
+  SLUG_WIDTH = 3
+
+
+# ----------------------------------------------------------------------------------------
+class ReleaseConfigKey:
+  """
+  Keys of the `release` section of a product record in `lazy.settings.json`.
+
+  Attributes:
+    SECTION: The section key on the product record.
+    IMPLEMENTER: The expert key that drives a release build.
+    MANIFEST: Repo-relative path of the file whose version field a published release writes.
+    DEPLOY: The deploy-targets object.
+    STAGING: The target a built release is deployed to before its tests run.
+    PRODUCTION: The target `Publish` deploys to.
+    COMMAND: A target's command, an argv list.
+    URL: A target's address, shown beside `Publish` as the place to check the build.
+  """
+
+  # The section key on the product record.
+  SECTION = "release"
+  # The expert key that drives a release build.
+  IMPLEMENTER = "implementer"
+  # Repo-relative path of the file whose version field a published release writes.
+  MANIFEST = "manifest"
+  # The deploy-targets object.
+  DEPLOY = "deploy"
+  # The target a built release is deployed to before its tests run.
+  STAGING = "staging"
+  # The target `Publish` deploys to.
+  PRODUCTION = "production"
+  # A target's command, an argv list.
+  COMMAND = "command"
+  # A target's address, shown beside `Publish` as the place to check the build.
+  URL = "url"
+
+
 # ----------------------------------------------------------------------------------------
 class HaltReason:
   """
@@ -1322,7 +1498,7 @@ class HaltReason:
       taking `job_id` and `label`.
     MERGE_CONFLICT: A cascade job reported a merge conflict while folding its
       result into the target document.
-    PLAN_DROP_PARTIAL: A plan-dropping step (pre-launch rollback, or cascade
+    PLAN_DROP_PARTIAL: A plan-dropping step (an attach drop, or cascade
       code-plan removal) failed partway, leaving asset state half-dropped.
     GATE_PRECEDENCE: The doctor found a gate flipped true out of the
       documented precedence order.
@@ -1332,7 +1508,7 @@ class HaltReason:
   JOB_DIED = "job {job_id} ({label}) died"
   # A cascade job reported a merge conflict while folding its result into the target document.
   MERGE_CONFLICT = "change delta could not be applied cleanly to the feature docs"
-  # A plan-dropping step (pre-launch rollback, or cascade code-plan removal) failed partway, leaving asset state
+  # A plan-dropping step (an attach drop, or cascade code-plan removal) failed partway, leaving asset state
   # half-dropped.
   PLAN_DROP_PARTIAL = "plan drop left the asset half-cleaned"
   # The doctor found a gate flipped true out of the documented precedence order.
@@ -1482,9 +1658,8 @@ class UpstreamAction:
   POSTPONE = "Postpone"
 
 
-# Closed label set `UpstreamAction` declares — the doctor (`docs/tasks/lazycortex-specs.upstream.md`
-# § 13) reads this to FAIL an unrecognized checkbox label under a unit note's `# Actions` section,
-# the same "closed set, unknown value is FAIL" shape `GateCheckbox`'s six labels use.
+# Closed label set `UpstreamAction` declares — the doctor reads it to FAIL any checkbox label under a
+# unit note's `# Actions` section that the set does not hold.
 UPSTREAM_ACTION_LABELS = frozenset({
     UpstreamAction.TAKE_INTO_WORK, UpstreamAction.PROCESS_UPDATE, UpstreamAction.POSTPONE,
 })

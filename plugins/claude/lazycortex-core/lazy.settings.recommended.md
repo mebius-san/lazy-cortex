@@ -29,11 +29,11 @@ Groups:
 - `_project` — user-authored agents under `./.claude/agents/*.md`. Keys = bare stems.
 - `<domain>` — vendor prefix of the plugin name (up to the first `-`). Keys = full plugin-qualified dispatch strings (`<plugin>:<stem>`).
 
-Values: `"haiku" | "sonnet" | "opus" | "default"`. Unknown values log a warning and are treated as `default`.
+Values: `"haiku" | "sonnet" | "opus" | "fable" | "default"`. Unknown values log a warning and are treated as `default`.
 
 ## Floor cap
 
-`LAZY_AGENT_MODEL_FLOOR=haiku|sonnet|opus` env var caps every dispatch at that tier. Floor wins over caller-supplied `model` and over config. Caller-supplied `"default"` is passed through (the floor only affects `{haiku, sonnet, opus}`).
+`LAZY_AGENT_MODEL_FLOOR=haiku|sonnet|opus|fable` env var caps every dispatch at that tier (order `haiku < sonnet < opus < fable`). Floor wins over caller-supplied `model` and over config. Caller-supplied `"default"` is passed through (the floor only affects `{haiku, sonnet, opus, fable}`).
 
 ## Filling the file
 

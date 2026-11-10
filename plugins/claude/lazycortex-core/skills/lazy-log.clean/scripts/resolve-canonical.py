@@ -321,13 +321,13 @@ def global_root() -> Path:
   return HOME / ".claude"
 
 
-def main() -> int:
+def find_all_canonical_names() -> dict:
   """
-  Aggregate canonical artifact names across every configured root and write the merged JSON.
+  Collect the canonical artifact names visible to this session.
 
   Returns:
-    Process exit code; always `0`. The aggregated result is written to stdout as a single
-    JSON object followed by a trailing newline.
+    A mapping with the sorted canonical names, the per-kind name lists, the names of artifacts that write a run
+    log, and the per-root counters of what was scanned.
   """
   counters = {
     "in_repo_plugin_roots": 0,
@@ -373,7 +373,7 @@ def main() -> int:
   canonical = sorted(set().union(*aggregate.values()))
 
   # assemble the wire payload: the merged names plus a per-root tally the caller can sanity-check
-  output = {
+  return {
     "canonical": canonical,
     "by_kind": by_kind,
     "logged": sorted(logged),
@@ -390,7 +390,18 @@ def main() -> int:
       "files_scanned": counters["files"],
     },
   }
-  json.dump(output, sys.stdout, indent = 2)
+
+
+def main() -> int:
+  """
+  Aggregate canonical artifact names across every configured root and write the merged JSON.
+
+  Returns:
+    Process exit code; always `0`. The aggregated result is written to stdout as a single
+    JSON object followed by a trailing newline.
+  """
+  # the merged names are written as one indented JSON object
+  json.dump(find_all_canonical_names(), sys.stdout, indent = 2)
   sys.stdout.write("\n")
   return 0
 

@@ -49,20 +49,25 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import core_settings as _core_settings  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import git_ops as _git_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import job_markers as _job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import note_ops as _note_ops  # type: ignore # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import parser as _parser  # noqa: E402  # pylint: disable=wrong-import-position,deprecated-module,import-error
+# pylint: disable-next=import-error,wrong-import-position
+import note_ops as _note_ops  # type: ignore[import-not-found] # noqa: E402
 # waiver: `plugins/claude/lazycortex-specs/bin/note_ops.py` shares this basename; in a whole-project mypy run the bare
 # `import note_ops` above resolves to that unrelated module instead (this dir's `__init__.py` makes review's
 # own copy package-qualified as `bin.note_ops`), so mypy checks the attribute against the wrong file's shape
+# waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import parser as _parser  # noqa: E402  # pylint: disable=wrong-import-position,deprecated-module,import-error
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+from errors import SettingsReadError  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from keys import (  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-    CoreCommand, EnvVar, JobFile, JobKey, JobMarker, Paths, Plugin, ReviewKey, Tag, Trailer,
+    CoreCommand, EnvVar, JobFile, JobKey, JobMarker, Paths, ReviewKey, Tag, Trailer,
 )
 
 
@@ -75,7 +80,7 @@ _COORDINATOR_EXPERT = "review.coordinator"
 # § 1c) — see `lazy-review.coordination-playbook.md` (Task 9).
 _COORDINATION_PLAYBOOK_PROTOCOL = "lazycortex-review:lazy-review.coordination-playbook"
 
-# `[!todo] #review/command` callout detection — trigger 4 (`lazy-review.coordination-playbook.md` §
+# `[!todo] #review/command` callout detection — trigger 3 (`lazy-review.coordination-playbook.md` §
 # 5's "Coordinator commands" contract, ported narrowly from `lazy-spec.coordination-playbook.md`'s
 # analogous `# Coordinator commands` section).
 _COMMAND_MARKER = "todo"
@@ -104,6 +109,11 @@ _WINDOW_SCAN_CAP = 50
 # stopped running, whatever the sidecar's `coordinator_job` still claims.
 _TERMINAL_MARKERS = (JobFile.DONE, JobFile.DEAD, JobFile.CANCELLED)
 
+# Error raised for a settings layer that is not valid JSON, filled with the repo's `.claude` dir and core's own report.
+UNPARSEABLE_SETTINGS_TEMPLATE = "unparseable settings under {path}: {detail}"
+# Stderr line for a git-watch item argument that is not valid JSON, filled with the raw argument.
+MALFORMED_ITEM_TEMPLATE = "malformed git-watch item JSON: {item!r}\n"
+
 
 # ----------------------------------------------------------------------------------------
 class _Trigger:
@@ -113,18 +123,18 @@ class _Trigger:
   Attributes:
     REVIEW_ENTRY: A document was just opted into review.
     JOB_DONE: The postman landed a dispatched job's payload and raised the pending wake.
-    OPERATOR_EDIT: A non-bot commit landed on an already-active document.
     COMMAND: A non-empty `[!todo] #review/command` callout is present.
+    OPERATOR_EDIT: A non-bot commit landed on an already-active document.
   """
 
   # A document was just opted into review.
   REVIEW_ENTRY = "review-entry"
   # The postman landed a dispatched job's payload and raised the pending wake.
   JOB_DONE = "job-done"
-  # A non-bot commit landed on an already-active document.
-  OPERATOR_EDIT = "operator-edit"
   # A non-empty `[!todo] #review/command` callout is present.
   COMMAND = "command"
+  # A non-bot commit landed on an already-active document.
+  OPERATOR_EDIT = "operator-edit"
 
 
 # --------------------------------------------------------------- settings + bot-identity
@@ -145,7 +155,7 @@ def _rel_to_repo(asset_note: Path, repo: Path) -> Path:
   Raises:
     ValueError: The document lies outside the repository under both spellings.
   """
-  # guard: a relative note is already repo-relative
+  # a relative note is already repo-relative
   if not asset_note.is_absolute():
     return asset_note
 
@@ -160,44 +170,41 @@ def _rel_to_repo(asset_note: Path, repo: Path) -> Path:
 
 def _load_settings(repo: Path) -> dict:
   """
-  Read `<repo>/.claude/lazy.settings.json`.
-
-  Ported from `dispatcher.py`'s own `load_settings` (that module is being retired — see
-  `collect_ops.py`'s module docstring) rather than imported, per the coordinator migration's
-  own-verbs-only boundary.
+  Read the `experts` and `routines` sections of `repo`'s settings as core sees them, overlay merged.
 
   Args:
-    repo: Repository root to resolve the settings path against.
+    repo: Repository root whose settings are read.
 
   Returns:
-    Parsed settings dict, or `{}` when the file is absent.
+    Settings-shaped dict holding the merged `experts` and `routines` sections.
 
   Raises:
-    RuntimeError: When the file exists but is not valid JSON.
+    RuntimeError: When a settings layer is not valid JSON, or no core CLI is resolvable.
   """
-  path = repo / Paths.CLAUDE_DIR / Paths.SETTINGS_FILE
 
-  # guard: no settings file at all — nothing registered
-  if not path.exists():
-    return {}
+  # Decision: one reader of the merged view, core's `settings-get --scope merged` through `core_settings`,
+  # replacing the module-local file reader — the local overlay is honoured and every reader sees the same values
+
+  # the bot identities live in the same merged view core and the pump commit under; a broken
+  # settings layer must fail the tick loudly (the error-ledger contract): returning `{}` here would
+  # empty the bot-identity set and reclassify every system commit as an operator wake
   try:
-    return json.loads(path.read_text(encoding = "utf-8"))
-  except json.JSONDecodeError as err:
-    # a broken settings file must fail the tick loudly (the error-ledger contract): returning `{}`
-    # here would empty the bot-identity set and reclassify every system commit as an operator wake
-    raise RuntimeError(f"unparseable settings file: {path}") from err
+    return _core_settings.read_merged_sections(repo, JobKey.EXPERTS, JobKey.ROUTINES)
+  except SettingsReadError as error:
+    raise RuntimeError(
+        UNPARSEABLE_SETTINGS_TEMPLATE.format(path = repo / Paths.CLAUDE_DIR, detail = error)
+    ) from error
 
 
 def _bot_emails(settings: dict) -> set[str]:
   """
   Collect every registered `git_author.email` from the experts and the routines tables alike.
 
-  Unlike `dispatcher.py`'s `_participating_bot_emails` (scoped to one review class's writer
-  groups), this worker has no class context for a bare git-watch item — every registered
-  system identity counts here. A deterministic routine carries the same `git_author` block an
-  expert does and commits under it, so a routine's own commits are system-authored exactly as
-  an expert's are; reading only the experts table would classify them as operator edits and
-  wake this coordinator on every one of them.
+  Every registered system identity counts, whatever review class a document belongs to. A
+  deterministic routine carries the same `git_author` block an expert does and commits under
+  it, so a routine's own commits are system-authored exactly as an expert's are; reading only
+  the experts table would classify them as operator edits and wake this coordinator on every
+  one of them.
 
   Args:
     settings: Parsed `lazy.settings.json` contents.
@@ -219,11 +226,11 @@ def _bot_emails(settings: dict) -> set[str]:
   return emails
 
 
-def _email_is_bot(email: str, bot_emails: set[str]) -> bool:
+def _is_bot_email(email: str, bot_emails: set[str]) -> bool:
   """
   Return True when `email` belongs to a registered bot or a dotted-prefix subsystem it owns.
 
-  Ported verbatim from `dispatcher.py:497-511`.
+  A bot-owned subsystem is a sender whose email ends with a dot followed by a registered bot email.
 
   Args:
     email: The commit's author email.
@@ -241,10 +248,9 @@ def _is_system_commit(repo: Path, asset_note: Path, item: dict, bot_emails: set[
   """
   Classify the git-watch item's own commit as bot-authored or operator-authored.
 
-  Mirrors `dispatcher.py`'s `_chain_state` author-identity fallback: a commit carrying a
-  `Doc-Review-Phase` trailer was written by a bot regardless of its author email; a trailerless
-  commit is bot-authored only when its email matches (exactly, or as a dotted-prefix subsystem
-  of) a registered expert's `git_author.email`.
+  A commit carrying a `Doc-Review-Phase` trailer was written by a bot regardless of its author
+  email; a trailerless commit is bot-authored only when its email matches (exactly, or as a
+  dotted-prefix subsystem of) a registered `git_author.email`.
 
   Args:
     repo: Repository root to walk file history in.
@@ -256,13 +262,13 @@ def _is_system_commit(repo: Path, asset_note: Path, item: dict, bot_emails: set[
     True when the commit is bot-authored, False when it is the operator's own edit.
   """
   sha = item.get(_ITEM_SHA, "")
-  for record in _git_ops.history_for_file(repo, asset_note):
+  for record in _git_ops.read_history_for_file(repo, asset_note):
     if record.sha == sha:
       # a `Doc-Review-Phase` trailer alone proves a bot wrote this commit, regardless of email
       if Trailer.PHASE in record.trailers:
         return True
       break
-  return _email_is_bot(item.get(_ITEM_AUTHOR_EMAIL, ""), bot_emails)
+  return _is_bot_email(item.get(_ITEM_AUTHOR_EMAIL, ""), bot_emails)
 
 
 def _has_buried_operator_commit(repo: Path, asset_note: Path, item: dict, bot_emails: set[str],
@@ -296,10 +302,13 @@ def _has_buried_operator_commit(repo: Path, asset_note: Path, item: dict, bot_em
   # round, and has received neither a main-writer contribution nor a tracked job fires its
   # entry wake from its current state alone, since the entry transition itself may have been
   # shadowed. Separately, a buried operator edit is recovered by scanning the document's own
-  # history between the previous wake's cursor and the current commit: any commit strictly
-  # inside that window authored by someone other than a recognized system identity proves an
-  # operator touched the document during the window, even though the watch item itself points
-  # at a later, system-authored commit.
+  # history between the previous wake's cursor and the current commit, newest first: the first
+  # commit strictly inside that window that carries no phase trailer and is authored by someone
+  # other than a recognized system identity proves an operator touched the document during the
+  # window, even though the watch item itself points at a later, system-authored commit. The
+  # scan is conservative: it stops without a finding at the first phase-trailered commit, since
+  # that commit's own wake already judged everything older, and after a fixed number of commits
+  # examined, so an unusually deep window is never walked in full.
 
   sha = item.get(_ITEM_SHA, "")
 
@@ -310,13 +319,13 @@ def _has_buried_operator_commit(repo: Path, asset_note: Path, item: dict, bot_em
   # walk the document's history from the item's commit down to the cursor, newest first
   in_window = False
   scanned = 0
-  for record in _git_ops.history_for_file(repo, asset_note):
-    # guard: skip everything newer than the item; its own commit is _is_system_commit's call
+  for record in _git_ops.read_history_for_file(repo, asset_note):
+    # advance past everything newer than the item; its own commit is _is_system_commit's call
     if not in_window:
       in_window = record.sha == sha
       continue
 
-    # guard: reached the cursor — everything older was judged by an earlier invocation
+    # reached the cursor — everything older was judged by an earlier invocation
     if record.sha == last_seen:
       return False
     scanned += 1
@@ -325,12 +334,12 @@ def _has_buried_operator_commit(repo: Path, asset_note: Path, item: dict, bot_em
     if scanned > _WINDOW_SCAN_CAP:
       return False
 
-    # guard: a coordinator commit proves everything older in the window was already handled
+    # a coordinator commit proves everything older in the window was already handled
     if Trailer.PHASE in record.trailers:
       return False
 
     # a trailerless non-bot author inside the window is the buried operator edit
-    if not _email_is_bot(record.author_email, bot_emails):
+    if not _is_bot_email(record.author_email, bot_emails):
       return True
   return False
 
@@ -400,7 +409,7 @@ def _coordinator_job_id(markers: dict) -> str:
   return raw.strip()
 
 
-def _is_job_live(repo: Path, job_id: str) -> bool:
+def is_job_live(repo: Path, job_id: str) -> bool:
   """
   Report whether the coordinator job bundle named by `job_id` is still running.
 
@@ -506,6 +515,7 @@ def _resolve_trigger(current_report: dict, blob_report: dict, is_operator_edit: 
   # this one on the very wake that carries the command (found live in an end-to-end review run).
   # waiver: 'callouts'/'type'/'tag'/'body' are note_ops.build_report's own wire-shape keys, not keys.py-promoted constants
   for callout in current_report["callouts"]:
+    # waiver: 'type'/'tag'/'body' are note_ops.build_report's own callout wire-shape keys, not keys.py constants
     if callout["type"] == _COMMAND_MARKER and callout["tag"] == _COMMAND_TAG and callout["body"].strip():
       return _Trigger.COMMAND
 
@@ -514,48 +524,11 @@ def _resolve_trigger(current_report: dict, blob_report: dict, is_operator_edit: 
   if is_operator_edit:
     return _Trigger.OPERATOR_EDIT
 
-  # guard: none of the four triggers fired this tick
+  # none of the four triggers fired this tick
   return None
 
 
 # --------------------------------------------------------------------------------- core dispatch
-
-
-def _resolve_core_cli() -> Path | None:
-  """
-  Find the `lazycortex-core` CLI binary.
-
-  Mirrors `collect_ops.py`'s own copy of this lookup (`dev.plugin-boundaries.md` § 1c) — each
-  bin/ worker resolves it independently rather than importing a sibling plugin's Python.
-
-  Returns:
-    Absolute path to the resolved binary, taking `$LAZYCORTEX_PLUGIN_DIRS` over the dev-vault
-    sibling tree and that over the install registry, or None when no lookup finds one.
-  """
-  dirs = os.environ.get("LAZYCORTEX_PLUGIN_DIRS", "").split(os.pathsep)
-  for d in dirs:
-    # guard: empty path segment (from a trailing/double pathsep) — skip it
-    if not d:
-      continue
-    cli = Path(d) / Paths.BIN_DIR / Plugin.CORE
-    if cli.is_file():
-      return cli
-
-  # dev-vault stage — this file sits at plugins/claude/lazycortex-review/bin/, so core's own bin/ is two
-  # levels up and back down the sibling tree; it must precede the registry (§ 2b) so a checkout
-  # runs the sources at hand rather than whatever version happens to be installed
-  sibling = Path(__file__).resolve().parents[2] / Plugin.CORE / Paths.BIN_DIR / Plugin.CORE
-  if sibling.is_file():
-    return sibling
-
-  # registry stage — the install root Claude Code's plugin registry records for core
-  root = _git_ops.installed_plugin_root(Plugin.CORE)
-
-  # guard: core was never installed on this machine — nothing further to try
-  if root is None:
-    return None
-  cli = root / Paths.BIN_DIR / Plugin.CORE
-  return cli if cli.is_file() else None
 
 
 def _core_dispatch_job(repo: Path, bundle: dict) -> dict:
@@ -575,15 +548,7 @@ def _core_dispatch_job(repo: Path, bundle: dict) -> dict:
   Raises:
     RuntimeError: When the CLI can't be resolved or exits non-zero.
   """
-  cli = _resolve_core_cli()
-
-  # guard: no lookup stage found a binary
-  if cli is None:
-    raise RuntimeError(
-        "lazycortex-core CLI not resolvable: $LAZYCORTEX_PLUGIN_DIRS yields no match, no "
-        "dev-vault sibling tree carries bin/lazycortex-core, and the plugin registry records no "
-        "lazycortex-core install with a bin/lazycortex-core entry."
-    )
+  cli = _git_ops.require_core_cli()
   env = os.environ.copy()
   env[EnvVar.LAZY_REPO_ROOT] = str(repo)
   proc = subprocess.run(
@@ -607,6 +572,11 @@ def coordinator_dispatch(repo: Path, asset_note: Path, item: dict) -> dict:
   """
   Dispatch a coordinator job for one document when its wake trigger fires.
 
+  Guarantees:
+    - At most one coordinator job runs per document: a `coordinator_job` marker naming a bundle
+      that is still running blocks a new dispatch, while one naming a finished, dead, cancelled,
+      or vanished bundle is cleared before the trigger is resolved.
+
   Notes:
     - Stamps the item's commit sha as the document's `last_seen_sha` cursor on every call,
       dispatched or not, so the next invocation's buried-operator rescue has an accurate cursor.
@@ -622,9 +592,15 @@ def coordinator_dispatch(repo: Path, asset_note: Path, item: dict) -> dict:
     `{"action": "dispatched", "trigger", "job_id"}` on a fresh dispatch.
 
   Raises:
-    RuntimeError: When the settings file exists but is not valid JSON, or when the
-      `lazycortex-core` CLI cannot be resolved or its dispatch call exits non-zero.
+    RuntimeError: When a settings layer is not valid JSON, or when the `lazycortex-core` CLI
+      cannot be resolved or its dispatch call exits non-zero.
   """
+
+  # Contract:
+  # At most one coordinator job runs per document: a `coordinator_job` marker naming a bundle
+  # that is still running blocks a new dispatch, while one naming a finished, dead, cancelled,
+  # or vanished bundle is cleared before the trigger is resolved.
+
   result = _resolve_and_dispatch(repo, asset_note, item)
 
   # stamp the cursor last, so this invocation's own window scan used the previous value
@@ -638,12 +614,9 @@ def _resolve_and_dispatch(repo: Path, asset_note: Path, item: dict) -> dict:
   """
   Dispatch a coordinator job for one document's git-watch item when its wake trigger fires.
 
-  Guarantees:
-    - At most one coordinator job runs per document: a `coordinator_job` marker naming a bundle
-      that is still running blocks a new dispatch, while one naming a finished, dead, cancelled,
-      or vanished bundle is cleared before the trigger is resolved.
-
   Notes:
+    - A `coordinator_job` marker naming a still-running bundle blocks a new dispatch; one naming a
+      finished, dead, cancelled, or vanished bundle is cleared before the trigger is resolved.
     - Clearing a stale job marker and stamping a fresh dispatch never touch the document itself,
       so neither action costs a commit.
 
@@ -658,11 +631,6 @@ def _resolve_and_dispatch(repo: Path, asset_note: Path, item: dict) -> dict:
     `{"action": "dispatched", "trigger", "job_id"}` on a fresh dispatch.
   """
 
-  # Contract:
-  # At most one coordinator job runs per document. A `coordinator_job` marker naming a bundle
-  # that is still running blocks a new dispatch; a marker naming a finished, dead, cancelled,
-  # or vanished bundle is cleared before the trigger is resolved.
-
   markers = _job_markers.read(repo, asset_note)
 
   # one active coordinator job per document — but only while that job is genuinely live. A marker
@@ -670,14 +638,15 @@ def _resolve_and_dispatch(repo: Path, asset_note: Path, item: dict) -> dict:
   # invocation falls through to trigger resolution, so a dead job can never brick the document.
   tracked_job = _coordinator_job_id(markers)
   if tracked_job:
-    # guard: the bundle is still running — the turn belongs to it and no trigger is read
-    if _is_job_live(repo, tracked_job):
+    # a still-running bundle keeps its turn — the turn belongs to it and no trigger is read
+    if is_job_live(repo, tracked_job):
       return {"action": "noop"}
     markers = _job_markers.update(repo, asset_note, { JobMarker.COORDINATOR_JOB: None })
 
   # resolve the trigger from the pre-commit blob vs. the current state, and who committed it
   current_text = asset_note.read_text(encoding = "utf-8")
-  # waiver: type: ignore — note_ops is a deferred/late-bound sibling import; mypy cannot resolve it
+  # waiver: type: ignore — a whole-project mypy run binds `note_ops` to
+  # `lazycortex-specs/bin/note_ops.py`, so this review module's attributes are unknown to it
   current_report = _note_ops.build_report(current_text, markers)  # type: ignore[attr-defined]
 
   # guard: the document is not under review and nothing is waiting to land on it — no trigger
@@ -698,13 +667,14 @@ def _resolve_and_dispatch(repo: Path, asset_note: Path, item: dict) -> dict:
       or _has_buried_operator_commit(repo, asset_note, item, bot_emails,
                                     markers.get(JobMarker.LAST_SEEN_SHA))
   )
-  # waiver: type: ignore — note_ops is a deferred/late-bound sibling import; mypy cannot resolve it
+  # waiver: type: ignore — a whole-project mypy run binds `note_ops` to
+  # `lazycortex-specs/bin/note_ops.py`, so this review module's attributes are unknown to it
   blob_report = _note_ops.build_report(blob_text or "")  # type: ignore[attr-defined]
 
   # check the four triggers in order; the first that fires wins
   trigger = _resolve_trigger(current_report, blob_report, is_operator_edit, markers)
 
-  # guard: nothing wakes the coordinator this tick
+  # nothing wakes the coordinator this tick
   if trigger is None:
     return {"action": "noop"}
 
@@ -806,7 +776,6 @@ def dispatch_job_done(repo: Path, asset_note: Path, dedup_hint: str) -> dict:
     RuntimeError: When the `lazycortex-core` CLI cannot be resolved or its dispatch call
       exits non-zero — the caller's sweep boundary decides what a failed dispatch means.
   """
-  markers = _job_markers.read(repo, asset_note)
 
   # Contract:
   # At most one coordinator job runs per document across both dispatch paths: a
@@ -816,16 +785,15 @@ def dispatch_job_done(repo: Path, asset_note: Path, dedup_hint: str) -> dict:
 
   # same one-live-job mutex as the git path: a running bundle keeps the turn, a terminal
   # one is cleared and this same call goes on to dispatch
-  tracked_job = _coordinator_job_id(markers)
+  tracked_job = _coordinator_job_id(_job_markers.read(repo, asset_note))
   if tracked_job:
-    # guard: the bundle is still running — the pending wake stays raised for a later tick
-    if _is_job_live(repo, tracked_job):
+    # a still-running bundle keeps its turn — the pending wake stays raised for a later tick
+    if is_job_live(repo, tracked_job):
       return {"action": "noop"}
     _job_markers.update(repo, asset_note, { JobMarker.COORDINATOR_JOB: None })
 
   # dedup on the DONE job set so a retry of the same landing folds into one queued job
-  rel = _rel_to_repo(asset_note, repo)
-  dedup_key = f"{rel}:{_Trigger.JOB_DONE}:{dedup_hint}"
+  dedup_key = f"{_rel_to_repo(asset_note, repo)}:{_Trigger.JOB_DONE}:{dedup_hint}"
   return _dispatch(repo, asset_note, _Trigger.JOB_DONE, dedup_key)
 
 
@@ -843,8 +811,8 @@ def _dispatch_path(repo: Path, raw_path: str, item: dict) -> dict:
     `{"action": "dispatched", "trigger", "job_id"}` on a fresh dispatch.
 
   Raises:
-    RuntimeError: When the settings file exists but is not valid JSON, or when the
-      `lazycortex-core` CLI cannot be resolved or its dispatch call exits non-zero.
+    RuntimeError: When a settings layer is not valid JSON, or when the `lazycortex-core` CLI
+      cannot be resolved or its dispatch call exits non-zero.
   """
   asset_note = (repo / raw_path).resolve()
 
@@ -906,10 +874,6 @@ def _dispatch_grouped(repo: Path, item: dict, paths: list) -> int:
   """
   Fan a grouped git-watch unit out per path, reporting the paths whose dispatch raised.
 
-  Guarantees:
-    - When at least one path's dispatch raised, the last stdout line is a JSON object whose
-      `failed_paths` names exactly the failed member paths, and the exit code is 1.
-
   Notes:
     - Prints one JSON result line per handled path to stdout, in member order.
     - Writes one diagnostic line per failed path to stderr; a member that is not a non-empty
@@ -937,14 +901,9 @@ def _dispatch_grouped(repo: Path, item: dict, paths: list) -> int:
       sys.stderr.write(f"coordinator-dispatch: {raw_path}: {error}\n")
       failed.append(raw_path)
 
-  # guard: every path handled — a clean exit retries nothing
+  # every path handled — a clean exit retries nothing
   if not failed:
     return 0
-
-  # Contract:
-  # When at least one path's dispatch raised, the LAST line on stdout is a JSON object whose
-  # `failed_paths` names exactly the member paths that failed, and the exit code is 1; the
-  # daemon narrows its retry to those paths.
 
   # the LAST stdout line narrows the daemon's retry to the paths that actually failed
   print(json.dumps({_FAILED_PATHS: failed}))
@@ -964,6 +923,11 @@ def main(argv: list[str]) -> int:
   matches to documents with `review_active: true`; a watch registered without the clause still
   works and costs one cheap read per document instead of a coordinator turn.
 
+  Guarantees:
+    - For a grouped unit in which at least one member path's dispatch raised, the last stdout line
+      is a JSON object whose `failed_paths` names exactly the failed member paths, and the exit
+      code is 1.
+
   Notes:
     - Writes a diagnostic line to stderr for malformed input and for every path whose dispatch
       raised.
@@ -976,6 +940,12 @@ def main(argv: list[str]) -> int:
     (the last stdout line is then `{"failed_paths": [...]}`); 2 when the item JSON is malformed
     or carries neither a usable `path` nor a non-empty `paths` list.
   """
+
+  # Contract:
+  # For a grouped unit in which at least one member path's dispatch raised, the LAST stdout
+  # line MUST be a JSON object whose `failed_paths` names exactly the failed member paths,
+  # and the exit code MUST be 1; the daemon narrows its retry to those paths.
+
   # waiver: argparse CLI signature, not a domain key
   parser = argparse.ArgumentParser(prog = "lazycortex-review coordinator-dispatch")
   # waiver: argparse CLI signature, not a domain key
@@ -984,11 +954,11 @@ def main(argv: list[str]) -> int:
   parser.add_argument("--repo", default = ".")
   args = parser.parse_args(argv)
 
-  # parse the git-watch item — a grouped unit fans out per path, a file-level item is one unit
+  # guard: a git-watch item that is not valid JSON names nothing to dispatch
   try:
     item = json.loads(args.item_json)
   except json.JSONDecodeError:
-    sys.stderr.write(f"malformed git-watch item JSON: {args.item_json!r}\n")
+    sys.stderr.write(MALFORMED_ITEM_TEMPLATE.format(item = args.item_json))
     return 2
 
   # the daemon spawns this command with cwd = repo root, so a relative item path resolves

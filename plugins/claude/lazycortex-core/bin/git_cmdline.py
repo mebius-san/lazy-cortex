@@ -6,8 +6,7 @@ cannot be answered by a leading-verb regex: `git commit -m "fix -- stuff"` carri
 a quoted message, `git add x && git commit` hides the commit behind a chain, and `-am` bundles a
 message option into a short-flag cluster.
 
-Public surface: parse_segments, is_indexful_commit, adds_content. A command this module cannot
-tokenize yields None so callers can fail closed.
+A command this module cannot tokenize yields None so callers can fail closed.
 """
 from __future__ import annotations
 
@@ -81,7 +80,9 @@ class GitSegment:
       repository the command actually targets. None when the invocation runs against the caller's
       working directory.
   """
+  # The git subcommand; empty when the invocation carried none.
   verb: str
+  # The subcommand's option tokens, bundled short clusters split and `--long=value` reduced to `--long`.
   flags: tuple[str, ...]
 
   # Contract:
@@ -89,7 +90,9 @@ class GitSegment:
   # here verbatim regardless of its own shape, and a short option that does not accept a value
   # never consumes the token after it as that value — that token stays a pathspec.
 
+  # Positional arguments left after option consumption, in command order.
   pathspecs: tuple[str, ...]
+  # The global `-C <dir>` target repository, or None when the command runs in the caller's directory.
   repo_dir: str | None = None
 
 
@@ -116,11 +119,13 @@ def _elide_substitutions(command: str) -> str:
 
   # Domain(guard.git-staging):
   # # Command substitution is opaque to the invoking command
-  # A command substitution is expanded by the shell before the invoked program ever sees it, and the
-  # result always arrives as a single word regardless of the punctuation, quoting, or newlines the
-  # substitution's own body contains. Any analysis of a command line for the invocations it carries can
-  # treat a substitution as one opaque placeholder word without losing information relevant to
-  # classifying the invocation — only its presence matters, never its contents. This covers the common
+  # A command substitution is expanded by the shell before the invoked program ever sees it. A quoted
+  # substitution arrives as a single word regardless of the punctuation, quoting, or newlines the
+  # substitution's own body contains; an unquoted one may be split by the shell, but its expansion is
+  # unknowable from the command line either way. Any analysis of a command line for the invocations it
+  # carries therefore treats every substitution, quoted or not, as one opaque placeholder word without
+  # losing information relevant to classifying the invocation — only its presence matters, never its
+  # contents. This covers the common
   # pattern of building a long message from a substituted here-document, which would otherwise defeat
   # any attempt to split the command line into words.
 
@@ -173,7 +178,7 @@ def _matching_paren(command: str, start: int) -> int | None:
     elif command[i] == ")":
       depth -= 1
 
-      # guard: this parenthesis closes the outermost substitution
+      # this parenthesis closes the outermost substitution
       if depth == 0:
         return i
     i += 1
@@ -203,7 +208,7 @@ def _split_unquoted_lines(command: str) -> list[str]:
   while i < len(command):
     ch = command[i]
 
-    # guard: a backslash escapes the next character outside single quotes
+    # a backslash escapes the next character outside single quotes
     if ch == "\\" and quote != "'" and i + 1 < len(command):
       current.append(command[i:i + 2])
       i += 2
@@ -213,7 +218,7 @@ def _split_unquoted_lines(command: str) -> list[str]:
     elif ch == quote:
       quote = None
 
-    # guard: an unquoted newline ends the line; a quoted one is part of the word
+    # an unquoted newline ends the line; a quoted one is part of the word
     if ch == "\n" and quote is None:
       lines.append("".join(current))
       current = []
@@ -255,14 +260,14 @@ def _chunks(command: str) -> list[list[str]] | None:
       return None
     current: list[str] = []
     for tok in tokens:
-      # guard: a punctuation-only token ends this invocation
+      # a punctuation-only token ends this invocation
       if tok and set(tok) <= _SEPARATOR_CHARS:
         out.append(current)
         current = []
         continue
       current.append(tok)
     out.append(current)
-  return [ c for c in out if c ]
+  return [ invocation for invocation in out if invocation ]
 
 
 def _strip_global_options(tokens: list[str]) -> tuple[list[str], str | None]:
@@ -288,10 +293,12 @@ def _strip_global_options(tokens: list[str]) -> tuple[list[str], str | None]:
 
   # Domain(guard.git-staging):
   # # Explicit repository targeting overrides the working directory
-  # When an invocation names an explicit target repository or working tree, it operates against that
-  # named location instead of the directory the caller currently stands in. Any judgment about what the
-  # invocation actually affects, including whether it touches a shared index at all, must be made
-  # against the named target, never assumed to be the caller's own working directory.
+  # When an invocation names an explicit target directory with the change-directory option, it operates
+  # against that named location instead of the directory the caller currently stands in. Any judgment
+  # about what the invocation actually affects, including whether it touches a shared index at all,
+  # must be made against the named target, never assumed to be the caller's own working directory.
+  # Only that option is recorded as a target: an explicitly named git directory or working tree is
+  # skipped together with its value and does not change the target.
 
   rest = tokens[1:]
   repo_dir: str | None = None
@@ -299,9 +306,11 @@ def _strip_global_options(tokens: list[str]) -> tuple[list[str], str | None]:
   while i < len(rest):
     tok = rest[i]
 
-    # guard: reached the subcommand
+    # the first non-option token is the subcommand
     if not tok.startswith("-"):
       return rest[i:], repo_dir
+
+    # an explicit `-C` target is recorded, its value attached with `=` or in the next token
     name = tok.split("=", 1)[0]
     attached = "=" in tok
     # waiver: git CLI vocabulary, not a domain constant
@@ -341,12 +350,12 @@ def _consume_options(tokens: list[str]) -> tuple[tuple[str, ...], tuple[str, ...
   while i < len(tokens):
     tok = tokens[i]
 
-    # guard: end-of-options marker — every remaining token is a pathspec
+    # end-of-options marker — every remaining token is a pathspec
     if tok == "--":
       paths.extend(tokens[i + 1:])
       break
 
-    # guard: positional argument
+    # a positional argument is a pathspec
     if not tok.startswith("-") or tok == "-":
       paths.append(tok)
       i += 1
@@ -386,7 +395,7 @@ def _consume_short_cluster(tok: str, flags: list[str]) -> int:
   for pos, ch in enumerate(tok[1:], start = 1):
     flags.append(f"-{ch}")
 
-    # guard: this option takes a value — attached remainder, else the following token
+    # an option taking a value consumes the attached remainder, else the following token
     if ch in _SHORT_WITH_ARG:
       return 1 if tok[pos + 1:] else 2
   return 1
@@ -439,7 +448,7 @@ def parse_segments(command: str) -> list[GitSegment] | None:
       continue
     rest, repo_dir = _strip_global_options(tokens)
 
-    # guard: bare `git` with no subcommand
+    # a bare `git` with no subcommand is recorded with an empty verb
     if not rest:
       segments.append(GitSegment(verb = "", flags = (), pathspecs = (), repo_dir = repo_dir))
       continue
@@ -487,17 +496,17 @@ def is_indexful_commit(segment: GitSegment) -> bool:
   # reword against an already-clean index, and only the caller, not the command line alone, can know
   # whether the index was clean beforehand.
 
-  # guard: -a / -i fold the whole index or worktree into the snapshot
-  if any(f in _INDEXFUL_COMMIT_FLAGS for f in segment.flags):
+  # -a / -i fold the whole index or worktree into the snapshot
+  if any(flag in _INDEXFUL_COMMIT_FLAGS for flag in segment.flags):
     return True
 
-  # guard: a whole-tree pathspec is an indexful commit in disguise
-  if any(p in WHOLE_TREE_PATHSPECS for p in segment.pathspecs):
+  # a whole-tree pathspec is an indexful commit in disguise
+  if any(pathspec in WHOLE_TREE_PATHSPECS for pathspec in segment.pathspecs):
     return True
   return not segment.pathspecs
 
 
-def adds_content(segment: GitSegment) -> bool:
+def is_content_add(segment: GitSegment) -> bool:
   """
   Report whether a `git add` segment stages file content rather than only registering a path.
 
@@ -518,7 +527,7 @@ def adds_content(segment: GitSegment) -> bool:
   # registration-only form is safe to perform freely, while every other form commits real bytes that
   # another party did not necessarily intend to share yet.
 
-  return not any(f in _INTENT_TO_ADD_FLAGS for f in segment.flags)
+  return not any(flag in _INTENT_TO_ADD_FLAGS for flag in segment.flags)
 
 
 def is_amend(segment: GitSegment) -> bool:
@@ -541,5 +550,5 @@ def is_amend(segment: GitSegment) -> bool:
   # judgment MUST call `is_indexful_commit` separately — the two judgments are independent and
   # neither implies the other.
 
-  # report whether the amend flag is present
-  return any(f in AMEND_FLAGS for f in segment.flags)
+  # any spelling of the amend flag rewrites the previous commit, wherever it sits among the options
+  return any(flag in AMEND_FLAGS for flag in segment.flags)

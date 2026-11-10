@@ -10,18 +10,9 @@ first item collected for each real test function and de-selects the rest, so a
 doubly-collected suite runs each test exactly once and stays free of order-dependent
 failures caused by shared state between the repeated instances.
 
-The de-duplication key is built from the *collected class* (its defining module and
-qualified name) plus the item name, never from the node id: a duplicate's node id
-differs because it is reached through a different shim file, whereas the class object
-is shared by reference across every shim, so its `__module__` / `__qualname__` always
-point at the module where the class is defined. Keying on the class rather than the
-test function is essential — an inherited test method is a single function object
-shared by every subclass, so a function-based key would wrongly collapse distinct
-subclasses into one; the collected class differs per subclass, so it does not. Tests
-defined as module-level functions (no class) fall back to a function-based key. The
-item name already carries any parametrization suffix, so distinct parameters stay
-distinct. In a repository without re-export shims no key ever repeats, so the plugin
-is a no-op and prints nothing.
+Distinct tests are never merged: inherited tests of different subclasses and differently
+parametrized tests stay separate. In a repository without re-export shims the plugin is a
+no-op and prints nothing.
 """
 from __future__ import annotations
 
@@ -34,10 +25,10 @@ if TYPE_CHECKING:
   from _pytest.terminal import TerminalReporter
 
 
-# alias for a de-duplication key: (defining module, qualified name, item name)
+# Alias for a de-duplication key: (defining module, qualified name, item name)
 DedupKey = tuple[str | None, str | None, str | None]
 
-# stash key holding the count of de-selected duplicate items, read back in the summary
+# Stash key holding the count of de-selected duplicate items, read back in the summary
 DEDUP_COUNT: pytest.StashKey[int] = pytest.StashKey()
 
 
@@ -98,28 +89,26 @@ def pytest_collection_modifyitems(config: Config, items: list[Item]) -> None:
     func = getattr(item, "function", None)
     cls = getattr(item, "cls", None)
 
-    # guard: items that are neither a class method nor a plain function (e.g. DoctestItem) — never dedup them
+    # items that are neither a class method nor a plain function (e.g. DoctestItem) are always kept
     if cls is None and func is None:
       kept.append(item)
       continue
 
     # Domain(pytool.pipeline-idempotency):
     # # Test-item dedup key
-    # A duplicated test is identified by the class or function that defines it plus its
-    # collected name, never by its node id: two collections of the same real test always reach
-    # it through different re-export shims, so their node ids differ even though the underlying
-    # class or function object is identical. The key is built from the defining class when one
-    # exists, because an inherited test method is a single function object shared by every
-    # subclass; keying on the function alone would wrongly treat distinct subclasses as the same
-    # duplicated test. A test defined without an owning class falls back to a key built from the
+    # A duplicated test is identified by the class or function it was collected through plus
+    # its collected name, never by its node id: two collections of the same real test always
+    # reach it through different re-export shims, so their node ids differ even though the
+    # underlying class or function object is identical. The key is built from the collected
+    # class when one exists; for an inherited test method that is the subclass the test was
+    # collected through, not the base class that defines the method. An inherited test method
+    # is a single function object shared by every subclass, so keying on the function alone
+    # would wrongly treat distinct subclasses as the same duplicated test. A test collected
+    # without an owning class falls back to a key built from the
     # function itself. The collected name already carries any parametrization suffix, so distinct
     # parameter sets of the same test remain distinct under this key.
 
-    # Key on the *collected* class, not the function: an inherited method is one function
-    # object shared across subclasses, so a function-based key would wrongly collapse
-    # distinct subclasses. A re-export shim collects the same class object by reference, so
-    # its duplicates still share a key. `item.name` already carries the parametrization
-    # suffix, so distinct parameters stay distinct without a separate callspec id.
+    # build the dedup key from the collected class when there is one, else from the function
     if cls is not None:
       key: DedupKey = (cls.__module__, cls.__qualname__, item.name)
     else:
@@ -170,8 +159,7 @@ def pytest_terminal_summary(terminalreporter: TerminalReporter, config: Config) 
   # during this run's collection phase.
 
   # guard: no duplicates were removed this run — print nothing
-  count = config.stash.get(DEDUP_COUNT, 0)
-  if not count:
+  if not (count := config.stash.get(DEDUP_COUNT, 0)):
     return
 
   # the summary line tells the reader why the collected count dropped

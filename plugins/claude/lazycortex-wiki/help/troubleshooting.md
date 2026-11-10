@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-wiki skills — symptoms, likely causes, and fixes.
-last_regen: 2026-10-21
+last_regen: 2026-11-10
 no_diagram: true
 source_skills:
   - lazy-wiki.install
@@ -13,8 +13,8 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: 21763ae2fa16878b13efb42b047e99dfe583b898
-surface_sha: c8343827e5f8d23cc22afc46155bc75d6381b3247a9370eaf9bf672cd69c409e
+source_sha: da1672544263b333bcb2e2d1f69a8a3b386bcafc
+surface_sha: 62f0f6d4014185453f5691d154552f13ccbf9c0e1d24caab6d618037efe4ffb9
 ---
 # Troubleshooting
 
@@ -330,13 +330,23 @@ surface_sha: c8343827e5f8d23cc22afc46155bc75d6381b3247a9370eaf9bf672cd69c409e
 
 ---
 
-## `/lazy-wiki.domains` group query reports "not a section of this doc"
+## `/lazy-wiki.domains` group query reports "not a document of"
 
-**Symptom**: Asking for a specific section (e.g. `Contracts`) of a group's generated doc returns that the section isn't present.
+**Symptom**: Asking for a specific document of a group (`/lazy-wiki.domains group <group-key> <doc-slug>`) returns that the slug is not a document of that group.
 
-**Likely cause**: `Terms`, `Principles`, and `Mechanics` always exist on a generated group doc, but `Contracts` exists only when the code's `Domain(…)` blocks for that group carry attributed `Contract:` annotations. Asking for `Contracts` on a group with none legitimately fails.
+**Likely cause**: A group is a folder holding a folder note plus one document per `Domain(…)` block, and the slug must be the file stem of one of those documents. The slug is misspelled, or the document has not been generated yet.
 
-**Fix**: Re-query with a section that's actually present on that doc — the failure names the sections it does have, so check that list first.
+**Fix**: Query the group without a slug — the folder note's `Documents` list names every document — then re-query with a slug taken from that list. If the block is new in code, run `/lazy-wiki.domain-sync` first.
+
+---
+
+## `/lazy-wiki.domains` group query reports "not a section of this document"
+
+**Symptom**: Asking for a specific section (e.g. `Contracts`) of a group's document returns that the section isn't present.
+
+**Likely cause**: Only `Principles`, `Mechanics`, and `Related` always exist on a block document. `Terms`, `Contracts`, and `Discrepancies` appear only when that document has such content — for example, `Contracts` only when its `Domain(…)` block carries attributed `Contract:` annotations. A section is also meaningful only together with a document slug.
+
+**Fix**: Re-query with a section that's actually present on that document — the failure names the sections it does have, so check that list first.
 
 ---
 
@@ -394,9 +404,9 @@ surface_sha: c8343827e5f8d23cc22afc46155bc75d6381b3247a9370eaf9bf672cd69c409e
 
 **Symptom**: During `/lazy-wiki.domain-sync`, a group is reported as refused with a reason on stderr, and no doc is written for it this run.
 
-**Likely cause**: The landing step rejected what the writer returned: either the writer left the output path empty, or the planned doc path is not a group doc inside the configured output tree.
+**Likely cause**: The landing step rejected what the writer returned. It refuses a return that is empty, a return missing its `domain_hash` frontmatter key or its H1 heading, a doc path for which the group's payload names no digest, or a doc path that is not a group doc inside the configured output tree.
 
-**Fix**: The remaining groups in the run are unaffected. Note the reason the run printed, then re-run `/lazy-wiki.domain-sync` to regenerate the group. If the refusal repeats, check that the output tree set through `/lazy-wiki.configure domains` is the one you expect.
+**Fix**: The remaining groups in the run are unaffected. Note the reason the run printed; files of that group already landed this run are restored, and nothing is left half-written. Re-run `/lazy-wiki.domain-sync` to regenerate the group. If the refusal repeats, check that the output tree set through `/lazy-wiki.configure domains` is the one you expect.
 
 ---
 

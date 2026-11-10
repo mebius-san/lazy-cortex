@@ -21,7 +21,7 @@ from constants import SettingsKey  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from lazy_settings import load_tracked_section, save_section  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from settings_cli import _resolve_settings_path  # pylint: disable=import-error
+from settings_cli import resolve_settings_path  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -102,7 +102,7 @@ def ensure_routine_filter(repo: Path, name: str, filter_frontmatter: dict) -> di
   # merged into, or reordered, and a routine that has not been registered yet is never created
   # as a side effect of seeding.
 
-  path = _resolve_settings_path(repo)
+  path = resolve_settings_path(repo)
   routines = load_tracked_section(path, SettingsKey.ROUTINES)
   entry = routines.get(name)
 
@@ -170,7 +170,7 @@ def cmd_routine_ensure_filter(argv: list[str]) -> int:
     return 1
 
   # seed against the explicit root, or the same LAZY_REPO_ROOT-or-cwd convention every verb uses
-  repo = Path(args.cwd) if args.cwd is not None else _resolve_settings_path(None).parent.parent
+  repo = Path(args.cwd) if args.cwd is not None else resolve_settings_path(None).parent.parent
   result = ensure_routine_filter(repo, args.name, predicates)
   print(json.dumps(result))
   return 1 if result.get(_K.STATUS) == _K.ERROR else 0

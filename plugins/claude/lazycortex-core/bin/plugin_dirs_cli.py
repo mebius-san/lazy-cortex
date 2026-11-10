@@ -19,7 +19,7 @@ from pathlib import Path
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from repo_root import resolve_repo_root  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from runtime_daemon import installed_plugin_roots  # pylint: disable=import-error
+from plugin_dirs import read_installed_plugin_roots  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -68,7 +68,7 @@ def derive_plugin_dirs(repo: Path, *, home: Path | None = None) -> tuple[str, bo
 
   # the joined value, and whether any plugin is reachable at all — an installed plugin still counts
   registry_home = Path.home() if home is None else home
-  return os.pathsep.join(dirs), bool(dirs) or bool(installed_plugin_roots(registry_home))
+  return os.pathsep.join(dirs), bool(dirs) or bool(read_installed_plugin_roots(registry_home))
 
 
 def cmd_plugin_dirs(argv: list[str]) -> int:

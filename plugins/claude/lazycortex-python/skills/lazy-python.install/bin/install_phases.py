@@ -15,9 +15,9 @@ Phases:
   phase7 — register the code-reviewer agent as an expert in lazy.settings.json
 
 Scaffold-template sync (formerly phase6) is no longer a phase here — the install
-skill's Step 6 dispatches `lazycortex-core:lazy-core.scaffold-sync`, which copies
-the template into the consumer's `.claude/templates/python/` and upserts the
-registry entry pointing at that consumer-local path.
+skill's Step 6 runs the core CLI verb `scaffold sync-plugin` directly via Bash, which
+copies the templates into the consumer's `.claude/templates/python/` and upserts the
+registry entries pointing at that consumer-local path.
 
 The PostToolUse check-style hook (formerly phase8) is no longer registered by
 install — it auto-registers from the plugin's `hooks/hooks.json` manifest when the
@@ -40,6 +40,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   from collections.abc import Callable
+
+
+# The plugin's own `bin/`, home of the shared TOML array editor.
+_PLUGIN_BIN = Path(__file__).resolve().parents[3] / "bin"
+if str(_PLUGIN_BIN) not in sys.path:
+  sys.path.insert(0, str(_PLUGIN_BIN))
+# waiver: operator-approved exception to the same-`bin/` sibling scheme — the install skill launches this file from
+# the skill directory, and the shared TOML array editor lives in the plugin `bin/`; ruff E402 by design
+from toml_array import append_to_array  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # location of the plugin tree (this file lives at .../skills/lazy-python.install/bin/install_phases.py)
@@ -518,7 +527,7 @@ class Phase3Pyproject:
     expected = tomllib.loads(toml_text)
     expected["tool"][self.PLUGINS_SECTION][self.PLUGINS_KEY] = current + absent
     return self._try_edit(
-      toml_text, self._append_to_array(toml_text, self.PLUGINS_SECTION, self.PLUGINS_KEY, absent),
+      toml_text, append_to_array(toml_text, self.PLUGINS_SECTION, self.PLUGINS_KEY, values = absent),
       expected.__eq__, manual,
     )
 
@@ -570,193 +579,6 @@ class Phase3Pyproject:
     """
     section = data["tool"][top_name]
     return isinstance(section, dict) and all(key in section for key in keys)
-
-  @classmethod
-  def _append_to_array(cls, toml_text: str, top_name: str, key: str, values: list[str]) -> str:
-    """
-    Append string values to an array a key holds directly under `[tool.<top_name>]`, keeping
-    the array's existing entries, comments and layout.
-
-    Notes:
-      - A multi-line array whose closing bracket stands on its own line gains one new line per
-        call, indented like its first entry; any other array gains the values inline after its
-        last entry.
-
-    Args:
-      toml_text: Full TOML document to edit.
-      top_name: Name of the top-level tool section holding the key.
-      key: Bare key whose array value is extended.
-      values: String values to append, in order.
-
-    Returns:
-      The edited document, or `toml_text` unchanged when the key's array cannot be located.
-    """
-    opening = cls._find_array_start(toml_text, top_name, key)
-
-    # guard: no `key = [` line directly under the section's own header
-    if opening is None:
-      return toml_text
-
-    # where the array closes, where its last entry ends, and whether a comma already follows that entry
-    close, last_end, has_comma = cls._scan_array(toml_text, opening)
-
-    # guard: an array that never closes cannot be extended
-    if close is None:
-      return toml_text
-
-    # the new entries as TOML strings, and the start of the line holding the closing bracket
-    quoted = ", ".join(json.dumps(value) for value in values)
-    line_start = toml_text.rfind("\n", 0, close) + 1
-
-    # a closing bracket alone on its line marks a one-entry-per-line array: the last entry gets its missing comma and
-    # the new entries go on a line of their own, indented like the first entry
-    if "\n" in toml_text[opening:close] and not toml_text[line_start:close].strip():
-      indent = re.search(r"\n([ \t]*)\S", toml_text[opening:close])
-
-      # an empty array keeps the text before the closing line as is
-      before_close = toml_text[:line_start]
-
-      # an existing last entry gets its missing comma before the new line is added
-      if last_end is not None:
-        before_close = toml_text[:last_end] + ("" if has_comma else ",") + toml_text[last_end:line_start]
-      return before_close + (indent.group(1) if indent else "  ") + quoted + ",\n" + toml_text[line_start:]
-
-    # an empty inline array takes the values as its only entries
-    if last_end is None:
-      return toml_text[:opening] + quoted + toml_text[opening:]
-    return toml_text[:last_end] + ", " + quoted + toml_text[last_end:]
-
-  @classmethod
-  def _find_array_start(cls, toml_text: str, top_name: str, key: str) -> int | None:
-    """
-    Locate the opening bracket of an array a bare key holds directly under `[tool.<top_name>]`.
-
-    Args:
-      toml_text: Full TOML document to scan.
-      top_name: Name of the top-level tool section holding the key.
-      key: Bare key whose array value is located.
-
-    Returns:
-      The offset just past the opening `[`, or `None` when the section header or a
-      `key = [` line under it is missing.
-    """
-    header = f"[tool.{top_name}]"
-    key_line = re.compile(rf"^[ \t]*{re.escape(key)}[ \t]*=[ \t]*\[")
-    offset = 0
-    in_section = False
-    for line in toml_text.splitlines(keepends = True):
-      stripped = line.strip()
-
-      # the section's own header switches scanning on
-      if stripped == header:
-        in_section = True
-      # a nested sub-table or the next section ends the section's own keys
-      elif in_section and stripped.startswith("["):
-        return None
-      # the key's `key = [` line inside the section yields the offset just past its opening bracket
-      elif in_section and (match := key_line.match(line)):
-        return offset + match.end()
-
-      # track the offset of the next line for the match arithmetic above
-      offset += len(line)
-    return None
-
-  @classmethod
-  def _scan_array(cls, toml_text: str, opening: int) -> tuple[int | None, int | None, bool]:
-    """
-    Walk a TOML array from just past its opening bracket to its closing one.
-
-    Args:
-      toml_text: Full TOML document.
-      opening: Offset just past the array's opening `[`.
-
-    Returns:
-      The offset of the closing `]` (or `None` when the array never closes), the offset just
-      past the last entry (or `None` for an empty array), and whether a comma follows that entry.
-    """
-    depth = 1
-    last_end: int | None = None
-    has_comma = False
-    pos = opening
-    while pos < len(toml_text):
-      char = toml_text[pos]
-
-      # a comment runs to the end of its line and holds no entry
-      if char == "#":
-        pos = toml_text.find("\n", pos)
-        # guard: a comment that runs to the end of the document leaves the array unterminated
-        if pos == -1:
-          return None, None, False
-
-        # resume scanning on the line that follows the comment
-        continue
-
-      # a string is skipped whole, so brackets and commas inside it are not structure
-      if char in "\"'":
-        end = cls._find_string_end(toml_text, pos)
-        # guard: a string that never closes leaves the array unterminated
-        if end is None:
-          return None, None, False
-
-        # a string directly in the array is an entry: it becomes the last one and no comma follows it yet
-        if depth == 1:
-          last_end, has_comma = end, False
-
-        # resume scanning just past the closing quote
-        pos = end
-        continue
-
-      # brackets nest; the bracket that returns to depth 0 closes the array
-      if char == "[":
-        depth += 1
-      elif char == "]":
-        depth -= 1
-        if depth == 0:
-          return pos, last_end, has_comma
-        # a nested array closing back to depth 1 is itself an entry, so it becomes the last one
-        if depth == 1:
-          last_end, has_comma = pos + 1, False
-      # a depth-1 comma separates entries: the entry before it already has its comma
-      elif char == "," and depth == 1:
-        has_comma = True
-      # any other depth-1 token (a number, a bare word) is an entry, so it becomes the last one
-      elif not char.isspace() and depth == 1:
-        last_end, has_comma = pos + 1, False
-      pos += 1
-    return None, None, False
-
-  @staticmethod
-  def _find_string_end(toml_text: str, start: int) -> int | None:
-    """
-    Find where a TOML string starting at `start` ends.
-
-    Args:
-      toml_text: Full TOML document.
-      start: Offset of the string's opening quote.
-
-    Returns:
-      The offset just past the closing quote, or `None` when the string never closes.
-    """
-    quote = toml_text[start]
-
-    # a multi-line string ends at the next triple quote
-    if toml_text.startswith(quote * 3, start):
-      end = toml_text.find(quote * 3, start + 3)
-      return None if end == -1 else end + 3
-
-    # a single-line string ends at its quote; a basic string skips escaped characters
-    pos = start + 1
-    while pos < len(toml_text) and toml_text[pos] != "\n":
-      # an escape hides the next character, so an escaped quote does not end the string
-      if quote == '"' and toml_text[pos] == "\\":
-        pos += 2
-        continue
-
-      # an unescaped quote of the opening kind closes the string
-      if toml_text[pos] == quote:
-        return pos + 1
-      pos += 1
-    return None
 
   @classmethod
   def _extract_section_block(cls, toml_text: str, top_name: str) -> str:

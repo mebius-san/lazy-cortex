@@ -5,7 +5,7 @@ Reads `wiki.scopes` from `.claude/lazy.settings.json` in the target repo
 and provides two public operations:
 
 - `resolve_scope_by_path` — map a file path to the first matching scope.
-- `iter_nodes` — enumerate all files that belong to a given scope config.
+- `find_all_nodes` — enumerate all files that belong to a given scope config.
 """
 
 from __future__ import annotations
@@ -13,14 +13,20 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from pathlib import Path, PurePath
-
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import nodes as _nodes  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
+
+
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import nodes as _nodes  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # `wiki.tags.dictionary` section keys and default — lives here (not in `tags.py`) so both
@@ -31,7 +37,7 @@ _DEFAULT_TAG_DICTIONARY = "docs/tags.md"
 
 
 # ----------------------------------------------------------------------------------------
-def dictionary_rel(repo: Path) -> str:
+def read_dictionary_rel(repo: Path) -> str:
   """
   Return the repo-relative path of the tag-values dictionary.
 
@@ -57,13 +63,8 @@ class GlobMatcher:
   """
   Shell-style glob matcher with path-aware separator semantics.
 
-  `PurePath.match` in Python 3.12 has inconsistent `**` semantics across
-  versions and does not reliably match zero path components.  `fnmatch.fnmatch`
-  treats every `*` as crossing `/`, so `src/*.py` wrongly matches `src/sub/a.py`.
-  This class compiles each pattern to a regex where a single `*` → `[^/]*`
-  (does NOT cross `/`) and `**` → zero or more full path components.
-
-  Every pattern (with or without `**`) is compiled to a regex once and cached.
+  A single `*` stays within one path component and never crosses `/`, so `src/*.py` does not match `src/sub/a.py`.
+  A `**` matches zero or more whole path components.
   """
 
   def __init__(self) -> None:
@@ -107,6 +108,7 @@ class GlobMatcher:
     # describe a shallow directory and a whole subtree without either reading as the other.
 
     # compile once per pattern — the same globs are re-tested for every walked file
+    # opt: memo keyed by the pattern string — valid while the compiled regex depends on nothing but that string
     if pattern not in self._cache:
       self._cache[pattern] = self._compile(pattern)
     return bool(self._cache[pattern].match(rel_posix))
@@ -188,12 +190,13 @@ def _coerce_scalar(s: str) -> bool | int | float | str | None:
   Returns:
     A `bool`, `None`, `int`, `float`, or `str` value depending on the literal shape.
   """
-  # guard: a quoted scalar is a string by definition — never retyped
+  # a quoted scalar is a string by definition — never retyped
   if len(s) >= 2 and s[0] == s[-1] and s[0] in ('"', "'"):
     return _unquote(s)
   low = s.lower()
   # waiver: YAML scalar keywords, external-format tokens, not internal keys
   if low in ("true", "false"):
+    # waiver: YAML scalar keyword, external-format token, not an internal key
     return low == "true"
   if low in ("null", "~"):
     return None
@@ -302,13 +305,14 @@ def _match_frontmatter_filter(flt: dict, frontmatter: dict) -> bool:
     actual = frontmatter.get(key)
     # waiver: predicate-filter schema subkeys, not reusable domain keys
     include = pred.get("in") or []
+    # waiver: predicate-filter schema subkey, not a reusable domain key
     exclude = pred.get("not_in") or []
 
-    # guard: allow-list declared and value outside it
+    # allow-list declared and value outside it
     if include and actual not in include:
       return False
 
-    # guard: deny-list declared and value inside it
+    # deny-list declared and value inside it
     if exclude and actual in exclude:
       return False
   return True
@@ -337,21 +341,21 @@ def _match_filter(flt: dict, frontmatter: dict, path: object = None) -> bool:
   # waiver: routine-config schema field name, single source in the filter schema
   fm = flt.get("frontmatter")
 
-  # guard: a frontmatter sub-filter is declared — it must pass
+  # a frontmatter sub-filter is declared — it must pass
   if isinstance(fm, dict) and not _match_frontmatter_filter(fm, frontmatter):
     return False
   # waiver: routine-config schema field name, single source in the filter schema
   want = flt.get("folder_note")
   if isinstance(want, bool):
-    _p = Path(str(path)) if path is not None else None
-    is_fn = _p is not None and _p.stem == _p.parent.name
+    node_path = Path(str(path)) if path is not None else None
+    is_folder_note = node_path is not None and node_path.stem == node_path.parent.name
 
-    # guard: want only folder-notes but this isn't one
-    if want and not is_fn:
+    # want only folder-notes but this isn't one
+    if want and not is_folder_note:
       return False
 
-    # guard: forbid folder-notes but this is one
-    if (not want) and is_fn:
+    # forbid folder-notes but this is one
+    if (not want) and is_folder_note:
       return False
   return True
 
@@ -433,7 +437,7 @@ class ScopeResolver:
     return wiki
 
   # ------------------------------------------------------------------
-  def global_excludes(self) -> list[str]:
+  def read_global_excludes(self) -> list[str]:
     """
     Return the exclude globs that apply to every scope of this repository.
 
@@ -464,8 +468,7 @@ class ScopeResolver:
 
     # the operator's own list contributes first
     wiki = self.load_wiki()
-    declared = wiki.get(self._EXCLUDE_KEY) or []
-    globs: list[str] = [ g for g in declared if isinstance(g, str) and g ]
+    globs: list[str] = [ g for g in wiki.get(self._EXCLUDE_KEY) or [] if isinstance(g, str) and g ]
 
     # the domain tree is derived, never declared — a moved output directory carries its own exclusion
     domains = wiki.get(self._DOMAINS_KEY)
@@ -476,7 +479,7 @@ class ScopeResolver:
     return globs
 
   # ------------------------------------------------------------------
-  def tag_axes(self, cfg: dict) -> list[str]:
+  def read_tag_axes(self, cfg: dict) -> list[str]:
     """
     Return the classification axes a scope may use.
 
@@ -508,11 +511,10 @@ class ScopeResolver:
     # scope can never widen the vocabulary, only narrow it.
 
     # the repository's declaration is the whole universe of axes
-    declared = self.load_wiki().get(self._TAG_AXES_KEY) or []
-    axes: list[str] = [ a for a in declared if isinstance(a, str) and a ]
+    axes: list[str] = [ a for a in self.load_wiki().get(self._TAG_AXES_KEY) or [] if isinstance(a, str) and a ]
     narrowing = cfg.get(self._TAG_AXES_KEY) or []
 
-    # guard: the scope declares no narrowing — it speaks the full vocabulary
+    # the scope declares no narrowing — it speaks the full vocabulary
     if not narrowing:
       return axes
     wanted = { a for a in narrowing if isinstance(a, str) }
@@ -541,11 +543,10 @@ class ScopeResolver:
     }
 
   # ------------------------------------------------------------------
-  def resolve_scope_by_path(
-    self,
-    path: Path | str,
-    apply_filter: bool = True,
-  ) -> tuple[str, dict] | None:
+  def resolve_scope_by_path(self,
+                            path: Path | str,
+                            *,
+                            apply_filter: bool = True) -> tuple[str, dict] | None:
     """
     Return the first scope whose `paths` globs match and no `exclude_paths` glob matches.
 
@@ -557,16 +558,10 @@ class ScopeResolver:
     `review_active: true` and the filter denies it), this returns `None` — the node is treated
     as out of scope for now and re-enters once the frontmatter flag clears.
 
-    Path normalisation: an absolute input is resolved first (so macOS symlink
-    prefixes like `/var`→`/private/var` line up with the resolved repo root)
-    then made repo-relative; a relative input is read as already repo-relative.
-    The result is a POSIX string, so absolute and relative paths both work.
-    If the path is not under the repo root at all, it cannot match any scope.
+    The path may be absolute or repo-relative; a path outside the repo matches no scope.
 
-    When multiple scopes match the same file this method returns the first
-    matching scope (dict iteration order = insertion order in Python 3.7+).
-    Overlapping scopes are a configuration error that `/wiki.doctor` flags
-    separately; this method does not resolve them.
+    When several scopes match the same file the first declared one wins.  Overlapping scopes
+    are a configuration error that `/wiki.doctor` flags separately.
 
     Guarantees:
       - When several scopes match the same path, the first declared match owns it.
@@ -630,18 +625,17 @@ class ScopeResolver:
     # and the topics-index exclusion.
 
     # first scope whose globs claim the path owns it
-    scopes = self.load_scopes()
-    for scope_id, cfg in scopes.items():
-      # guard: path does not belong to this scope
+    for scope_id, cfg in self.load_scopes().items():
+      # path does not belong to this scope
       if not self._matches_scope(rel_posix, cfg):
         continue
 
-      # guard: the node is a generated topics index, not a curated document — it belongs to
+      # the node is a generated topics index, not a curated document — it belongs to
       # build-index, which rewrites it wholesale, so no curator may ever be dispatched on it
       if self._is_topics_index(cfg, rel_posix, abs_path):
         return None
 
-      # guard: the home scope's frontmatter filter rejects this node (e.g. it carries
+      # the home scope's frontmatter filter rejects this node (e.g. it carries
       # review_active: true) — treat it as out of scope so process-file skips it without
       # dispatching the curator. First path-match wins, mirroring the no-filter path.
       if apply_filter and not self._passes_filter(cfg, abs_path):
@@ -650,13 +644,9 @@ class ScopeResolver:
     return None
 
   # ------------------------------------------------------------------
-  def iter_nodes(self, cfg: dict) -> list[Path]:
+  def find_all_nodes(self, cfg: dict) -> list[Path]:
     """
     Enumerate all files in the repo that belong to the given scope config.
-
-    Uses `os.walk` + `GlobMatcher` — stdlib `glob`/`rglob` are banned
-    per the project tech conventions.  Results are deduped by resolved
-    absolute path and returned sorted for determinism.
 
     Guarantees:
       - The enumeration is sorted and duplicate-free, so the same repository and scope config
@@ -690,20 +680,20 @@ class ScopeResolver:
         full = Path(base) / fname
         rel = full.relative_to(self._repo).as_posix()
         for pat in paths_globs:
-          # guard: pattern does not match this file
+          # only a pattern matching this file selects it
           if not self._matcher.match(rel, pat):
             continue
           ap = full.resolve()
 
-          # guard: already collected under a different glob — skip duplicate
+          # already collected under a different glob — skip duplicate
           if ap in seen_abs:
             break
 
-          # guard: excluded by an exclude_paths pattern
+          # excluded by an exclude_paths pattern
           if any(self._matcher.match(rel, ep) for ep in exclude_globs):
             break
 
-          # guard: the scope's own generated topics index is never one of its nodes
+          # the scope's own generated topics index is never one of its nodes
           if self._is_topics_index(cfg, rel, full):
             break
           seen_abs.add(ap)
@@ -731,8 +721,6 @@ class ScopeResolver:
     never depends on the operator remembering to list the index in `exclude_paths`.
 
     Notes:
-      - The path signal costs nothing; the marker signal reads the file, so every markdown
-        candidate of a repo walk is opened once.
       - A node that also faces a scope `filter` is read twice per walk. Both reads are
         frontmatter-only in intent but pull the whole file.
 
@@ -758,15 +746,16 @@ class ScopeResolver:
     # The marker is what keeps the exclusion working after the catalogue is moved or renamed, and for a
     # neighbouring scope's catalogue that happens to fall inside this scope's coverage.
 
-    # guard: the scope's own index path — no read needed
+    # the scope's own index path — no read needed
     if PurePath(cfg.get(self._TOPICS_INDEX_KEY) or self._DEFAULT_TOPICS_INDEX).as_posix() == rel_posix:
       return True
 
-    # guard: only markdown carries the role marker
+    # only markdown carries the role marker
     if abs_path.suffix != self._MD_SUFFIX:
       return False
 
-    # ponytail: one frontmatter read per markdown candidate; cache by mtime if a walk ever drags
+    # the role marker lives in the frontmatter, so the file has to be read
+    # limit: one frontmatter read per markdown candidate, cache by mtime if a walk ever drags
     try:
       text = abs_path.read_text(encoding = self._ENCODING)
     except OSError:
@@ -812,8 +801,7 @@ class ScopeResolver:
     Returns:
       The scope's own `exclude_paths` globs followed by the repository-wide ones.
     """
-    own: list[str] = cfg.get(self._EXCLUDE_PATHS_KEY) or []
-    return [ *own, *self.global_excludes() ]
+    return [ *(cfg.get(self._EXCLUDE_PATHS_KEY) or []), *self.read_global_excludes() ]
 
   # ------------------------------------------------------------------
   def _matches_scope(self, rel_posix: str, cfg: dict) -> bool:
@@ -828,15 +816,14 @@ class ScopeResolver:
       True on a match, False otherwise.
     """
     paths_globs: list[str] = cfg.get(self._PATHS_KEY) or []
-    exclude_globs = self._effective_excludes(cfg)
 
     # guard: no paths globs means the scope can never match
     if not paths_globs:
       return False
-    matched = any(self._matcher.match(rel_posix, pat) for pat in paths_globs)
 
-    # guard: file does not match any include glob
-    if not matched:
+    # file does not match any include glob
+    if not any(self._matcher.match(rel_posix, pat) for pat in paths_globs):
       return False
-    excluded = any(self._matcher.match(rel_posix, ep) for ep in exclude_globs)
-    return not excluded
+
+    # an include match still loses to any exclude glob
+    return not any(self._matcher.match(rel_posix, ep) for ep in self._effective_excludes(cfg))

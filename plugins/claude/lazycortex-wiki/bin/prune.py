@@ -95,7 +95,7 @@ class NodePruner:
     # referring node MUST survive untouched, and no node file is ever created, renamed, or deleted.
 
     # sweep every node in the scope, recording the ones that lost a link
-    for node_path in self._resolver.iter_nodes(self._cfg):
+    for node_path in self._resolver.find_all_nodes(self._cfg):
       node = _nodes.node_for(node_path)
 
       # guard: unrecognised file type — skip

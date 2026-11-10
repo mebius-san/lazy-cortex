@@ -13,22 +13,13 @@ spec_source_requests: []
 spec_source_docs: []
 ---
 # {{slug}} — test-plan
-<!-- How the asset is accepted: what is under test, the mechanisms the repository ships, the criteria for finishing, and the tests themselves. It is written against the sibling design. What the run returned lives in the test-report. -->
+<!-- The test cases that prove this asset does what its design says. It is written against the sibling design and read by the tester of every release that carries the asset, who folds the cases into the release's own test-plan. The mechanisms, the environment and the exit criteria of a run live in the product's test-plan, and what a run returned lives in the release's test-report. -->
 
 ## Scope
-<!-- What is under test and what is deliberately left out of this run. One bullet per item in and per item out. What proves the run complete lives in Exit criteria. -->
-
-## Mechanisms
-<!-- The testing mechanisms this repository actually ships: runners, fixtures, harnesses, CI targets. One bullet per mechanism, verified present before the tests below were written. A mechanism the repository does not ship does not belong here. -->
-
-## Preconditions
-<!-- Optional. When the document has nothing to say here, the section is removed together with its heading. The state the test item and its environment must be in before any test runs. One bullet per condition. A condition specific to one test lives in that test's block. -->
-
-## Exit criteria
-<!-- The conditions under which the run counts as complete. One bullet per condition, checkable from the report. What is in or out of the run lives in Scope. -->
+<!-- What the cases below cover and what they deliberately leave out. One bullet per item in and per item out. How a run is set up and when it counts as complete lives in the product's test-plan. -->
 
 ## Tests
-<!-- The test cases, in three shapes: one procedure with its expected outcome, one procedure over many inputs, and a checklist over one area. One block per test in the shapes below, with type, risk and priority. The mechanisms the tests use live in Mechanisms. -->
+<!-- The test cases, in three shapes: one procedure with its expected outcome, one procedure over many inputs, and a checklist over one area. One block per test in the shapes below, with type, risk and priority. The mechanisms the tests use live in the product's test-plan. -->
 
 ### _Test name_
 - **Type**: _one of the tester's test types._

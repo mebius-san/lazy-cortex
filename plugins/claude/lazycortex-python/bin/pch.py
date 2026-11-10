@@ -24,10 +24,10 @@ if TYPE_CHECKING:
   pass
 
 
-# hardcoded exclusions that should never be scanned
+# Hardcoded exclusions that should never be scanned
 HARDCODED_EXCLUDES = [ '.venv', '__pycache__' ]
 
-# candidate paths for PyCharm inspect.sh (searched in order)
+# Candidate paths for PyCharm inspect.sh (searched in order)
 INSPECT_SH_CANDIDATES = [
   os.path.expanduser('~/Applications/PyCharm.app/Contents/bin/inspect.sh'),
   '/Applications/PyCharm.app/Contents/bin/inspect.sh',
@@ -35,16 +35,16 @@ INSPECT_SH_CANDIDATES = [
   '/Applications/PyCharm Professional.app/Contents/bin/inspect.sh',
 ]
 
-# system path entries that must NOT be symlinked (locked by the running IDE instance)
+# System path entries that must NOT be symlinked (locked by the running IDE instance)
 SYSTEM_SKIP = { '.pid', '.port', '.appinfo', 'index', 'caches' }
 
-# config path entries that must NOT be symlinked (lock file held by the running IDE instance)
+# Config path entries that must NOT be symlinked (lock file held by the running IDE instance)
 CONFIG_SKIP = { '.lock' }
 
-# prefix used by PyCharm in XML output file paths
+# Prefix used by PyCharm in XML output file paths
 PROJECT_DIR_PREFIX = 'file://$PROJECT_DIR$/'
 
-# map PyCharm severity levels to standard linter levels (mypy/pcf style)
+# Map PyCharm severity levels to standard linter levels (mypy/pcf style)
 SEVERITY_MAP = {
   'error': 'error',
   'warning': 'warning',
@@ -74,6 +74,7 @@ def load_config() -> dict:
   # empty mapping.
 
   config_path = 'pyproject.toml'
+  # guard: no pyproject.toml — no configuration to load
   if not os.path.exists(config_path):
     return {}
 
@@ -149,13 +150,16 @@ def find_system_path() -> str | None:
   # Domain(pytool.inspection-sandbox):
   # # Selecting among several installed IDE versions
   # A host may carry data directories from more than one installed IDE version at once, left behind
-  # by upgrades. Directory names sort lexicographically in the same order as the version numbers they
-  # embed, so picking the last name in descending order reliably selects the most recently used version
-  # without parsing a version string.
+  # by upgrades. The choice is made on the directory name alone: among the directories whose name starts
+  # with the product prefix, the one whose name compares highest as plain text wins, without parsing a
+  # version string and without regard to which version was used last. That order follows the embedded
+  # version numbers only while the names share one shape; an edition letter after the prefix sorts above
+  # any digit, so a community-edition directory outranks a professional-edition directory of a newer
+  # version.
 
-  # find PyCharm directories, pick the newest by version
+  # find PyCharm directories, pick the highest name in plain-text order
   candidates = sorted(
-      (d for d in os.listdir(caches_base) if d.startswith('PyCharm')),
+      (entry for entry in os.listdir(caches_base) if entry.startswith('PyCharm')),
       reverse = True
   )
   for name in candidates:
@@ -188,9 +192,9 @@ def find_config_path() -> str | None:
   if not os.path.isdir(config_base):
     return None
 
-  # find PyCharm directories, pick the newest by version
+  # find PyCharm directories, pick the highest name in plain-text order
   candidates = sorted(
-      (d for d in os.listdir(config_base) if d.startswith('PyCharm')),
+      (entry for entry in os.listdir(config_base) if entry.startswith('PyCharm')),
       reverse = True
   )
   for name in candidates:
@@ -243,7 +247,7 @@ def prepare_sandbox_config(sandbox_dir: str, real_config: str | None) -> str:
 
   # mirror the real config so the inspection inherits SDK and interpreter settings
   for entry in os.listdir(real_config):
-    # guard: skip lock file
+    # the directory lock file is left out of the mirror
     if entry in CONFIG_SKIP:
       continue
     src = os.path.join(real_config, entry)
@@ -295,7 +299,7 @@ def prepare_sandbox_system(sandbox_dir: str, real_system: str | None) -> str:
 
   # mirror the real system dir so the inspection inherits Python stubs and SDK data
   for entry in os.listdir(real_system):
-    # guard: skip exclusively-locked entries
+    # exclusively-locked entries are left out of the mirror
     if entry in SYSTEM_SKIP:
       continue
     src = os.path.join(real_system, entry)
@@ -307,14 +311,12 @@ def prepare_sandbox_system(sandbox_dir: str, real_system: str | None) -> str:
 
 
 # ----------------------------------------------------------------------------------------
-def run_inspection(
-    inspect_sh: str,
-    project_dir: str,
-    profile_path: str,
-    output_dir: str,
-    module_path: str,
-    sandbox_dir: str
-) -> int:
+def run_inspection(inspect_sh: str,
+                   project_dir: str,
+                   profile_path: str,
+                   output_dir: str,
+                   module_path: str,
+                   sandbox_dir: str) -> int:
   """
   Invoke PyCharm inspect.sh on the project.
 
@@ -333,7 +335,8 @@ def run_inspection(
     sandbox_dir: temporary directory for JVM config, system, and log paths.
 
   Returns:
-    The subprocess return code.
+    Zero when at least one XML result file was produced, whatever inspect.sh's own exit code was. Otherwise
+    inspect.sh's exit code when it is non-zero, or 1 when inspect.sh reported success without producing results.
   """
 
   # Contract:
@@ -378,25 +381,26 @@ def run_inspection(
   result = subprocess.run(cmd, capture_output = True, text = True, check = False, env = env, encoding = "utf-8")
 
   # check whether the output directory has any XML results
-  has_results = any(f.endswith('.xml') for f in os.listdir(output_dir)) if os.path.isdir(output_dir) else False
+  has_results = any(name.endswith('.xml') for name in os.listdir(output_dir)) if os.path.isdir(output_dir) else False
 
   # Domain(pytool.inspection-sandbox):
-  # # Two-valued meaning of a non-zero return code
-  # A non-zero return code from an inspection run is ambiguous on its own and must be read together
-  # with whether any results were produced. A non-zero code accompanied by results means the inspection
-  # completed and found issues to report — the expected outcome of an inspection with findings. A
-  # non-zero code with no results at all means the inspection engine itself failed to run to completion.
+  # # Completion of an inspection is judged by its results, not by the return code
+  # Whether an inspection run completed is decided by whether any results were produced, never by the
+  # engine's own return code. Results present means the inspection completed; with a non-zero code that
+  # is the expected outcome of an inspection that found issues. No results at all means the engine failed
+  # to run to completion, whatever its return code, including a zero (success) code: even a clean run
+  # with no findings still writes a descriptions result file, so an empty result set never means "clean".
+  # The run then reports failure with the engine's own code, or with a generic failure code when the
+  # engine claimed success. Verified on PyCharm 2026.2.
 
-  # exit code 1 with results means "issues found" — that is normal operation;
-  # non-zero without results means inspect.sh itself failed;
-  # only surface stderr/stdout on fatal failures (PyCharm dumps noisy JVM warnings on every run)
-  # guard: only treat as fatal when no output was produced
-  if result.returncode != 0 and not has_results:
+  # no results means inspect.sh did not complete, whatever its exit code; only then surface its
+  # stdout/stderr (PyCharm dumps noisy JVM warnings on every run) and report the failure code
+  if not has_results:
     if result.stdout:
       print(result.stdout.rstrip())
     if result.stderr:
       print(result.stderr.rstrip(), file = sys.stderr)
-    return result.returncode
+    return result.returncode or 1
 
   # results exist, so report success — the caller reads the findings, not the exit code
   return 0
@@ -424,13 +428,13 @@ def parse_results(output_dir: str) -> list[tuple[str, int, str, str, str]]:
 
   problems: list[tuple[str, int, str, str, str]] = []
 
-  # guard: skip if output directory has no files
+  # guard: no output directory, so there are no reports to parse
   if not os.path.isdir(output_dir):
     return problems
 
   # one XML file per inspection; sorted so findings come out in a stable order
   for filename in sorted(os.listdir(output_dir)):
-    # guard: skip non-XML files
+    # only XML files are inspection reports
     if not filename.endswith('.xml'):
       continue
 
@@ -445,13 +449,12 @@ def parse_results(output_dir: str) -> list[tuple[str, int, str, str, str]]:
     filepath = os.path.join(output_dir, filename)
     try:
       tree = ET.parse(filepath)
-    except ET.ParseError as exc:
-      print(f'pch: warning: failed to parse {filename}: {exc}', file = sys.stderr)
+    except ET.ParseError as error:
+      print(f'pch: warning: failed to parse {filename}: {error}', file = sys.stderr)
       continue
 
     # each report holds one `problem` element per finding
-    root = tree.getroot()
-    for problem in root.iter('problem'):
+    for problem in tree.getroot().iter('problem'):
       file_elem = problem.find('file')
       line_elem = problem.find('line')
       problem_class_elem = problem.find('problem_class')
@@ -480,24 +483,19 @@ def parse_results(output_dir: str) -> list[tuple[str, int, str, str, str]]:
         severity = problem_class_elem.get('severity', '').lower()
         inspection_name = problem_class_elem.text or ''
 
-      # the description carries the message the user reads
-      description = description_elem.text
-
-      # one tuple per finding, in the shape the filtering pass consumes
-      problems.append((raw_path, line, severity, inspection_name, description))
+      # one tuple per finding, in the shape the filtering pass consumes; the description is the message
+      problems.append((raw_path, line, severity, inspection_name, description_elem.text))
 
   # every XML file merged into one flat list, ready for the filtering pass
   return problems
 
 
 # ----------------------------------------------------------------------------------------
-def filter_results(
-    problems: list[tuple[str, int, str, str, str]],
-    module_path: str,
-    exclude_substrings: list[str],
-    include_extensions: list[str],
-    ignore_inspections: list[str]
-) -> list[tuple[str, int, str, str, str]]:
+def filter_results(problems: list[tuple[str, int, str, str, str]],
+                   module_path: str,
+                   exclude_substrings: list[str],
+                   include_extensions: list[str],
+                   ignore_inspections: list[str]) -> list[tuple[str, int, str, str, str]]:
   """
   Filter inspection results by module path, exclusion list, and ignored inspections.
 
@@ -514,24 +512,21 @@ def filter_results(
   filtered = []
   for item in problems:
     filepath = item[0]
-    inspection_name = item[3]
 
-    # apply module path filter (skip when scanning everything)
-    # guard: only filter by prefix when a specific module is targeted
+    # a targeted module keeps only findings under its path prefix; '.' scans everything
     if module_path != '.' and not filepath.startswith(module_path):
       continue
 
-    # apply exclusion filter
-    # guard: skip files matching any exclusion substring
+    # files matching any exclusion substring are dropped
     if any(sub in filepath for sub in exclude_substrings):
       continue
 
-    # guard: skip files not matching any included extension
+    # files outside the included extensions are dropped
     if include_extensions and not any(filepath.endswith(ext) for ext in include_extensions):
       continue
 
-    # guard: skip ignored inspections
-    if inspection_name in ignore_inspections:
+    # findings of ignored inspections are dropped
+    if item[3] in ignore_inspections:
       continue
 
     # the finding cleared every filter, so it survives into the report
@@ -565,8 +560,7 @@ def format_problem(filepath: str, line: int, severity: str, inspection: str, des
   # alongside findings from every other checker in the same report. A native level absent from the
   # mapping is treated as a note, and an empty severity also falls back to note.
 
-  level = SEVERITY_MAP.get(severity, severity or 'note')
-  return f'{filepath}:{line}: {level}: {description}  [{inspection}]'
+  return f'{filepath}:{line}: {SEVERITY_MAP.get(severity, "note")}: {description}  [{inspection}]'
 
 
 # ----------------------------------------------------------------------------------------
@@ -589,7 +583,7 @@ def main() -> None:
   # inspection run fails to produce results; findings that inspect.sh reports are NEVER treated as a
   # failure exit, no matter how many are found.
 
-  # load configuration from pyproject.toml
+  # project settings supply the excludes, extensions and ignored inspections applied below
   config = load_config()
 
   # setup CLI parser
@@ -603,8 +597,9 @@ def main() -> None:
   # normalize module path: strip leading ./ so it matches XML output paths
   module_path = args.path.removeprefix('./')
 
-  # locate inspect.sh
+  # the inspection runs through PyCharm's own launcher script
   inspect_sh = find_inspect_sh()
+  # guard: no inspect.sh on this machine — nothing can run the inspection
   if inspect_sh is None:
     print('pch: PyCharm inspect.sh not found. Set PYCHARM_HOME or install PyCharm.', file = sys.stderr)
     sys.exit(1)
@@ -614,6 +609,7 @@ def main() -> None:
 
   # resolve inspection profile
   profile_path = os.path.join(project_dir, '.idea', 'inspectionProfiles', 'Project_Default.xml')
+  # guard: no project inspection profile — fall back to PyCharm's defaults
   if not os.path.isfile(profile_path):
     print('pch: warning: inspection profile not found, using PyCharm defaults', file = sys.stderr)
     profile_path = ''
@@ -633,9 +629,9 @@ def main() -> None:
   # when a specific path is targeted, drop config exclusions that match the target
   # so that explicitly requested directories (e.g. tests/) are not silently skipped
   if module_path != '.':
-    target_parts = module_path.rstrip('/').split('/')
-    config_excludes = [ e for e in config_excludes
-                        if e not in target_parts ]
+    target_path = module_path.rstrip('/') + '/'
+    config_excludes = [ exclude for exclude in config_excludes
+                        if exclude not in target_path ]
 
   # the hardcoded excludes always apply; config and CLI only widen the list
   exclude_substrings = HARDCODED_EXCLUDES + config_excludes
@@ -649,20 +645,20 @@ def main() -> None:
   ignore_inspections = list(config.get('ignore', []))
 
   # prepare sandbox: symlink real config (SDK settings) and system (stubs) minus locked entries
-  real_config = find_config_path()
-  real_system = find_system_path()
   sandbox_dir = tempfile.mkdtemp(prefix = 'pch_')
-  prepare_sandbox_config(sandbox_dir, real_config)
-  prepare_sandbox_system(sandbox_dir, real_system)
-  output_dir = os.path.join(sandbox_dir, 'out')
-  os.makedirs(output_dir)
 
   # Contract:
   # The sandbox directory is ALWAYS removed before this function returns or the process exits, even when
   # the inspection run fails.
 
-  # run the inspection with the sandbox cleanup guaranteed by the finally clause below
+  # fill the sandbox and run the inspection with the cleanup guaranteed by the finally clause below
   try:
+    prepare_sandbox_config(sandbox_dir, find_config_path())
+    prepare_sandbox_system(sandbox_dir, find_system_path())
+    output_dir = os.path.join(sandbox_dir, 'out')
+    os.makedirs(output_dir)
+
+    # the run is slow, so the operator is told it started
     print(f'pch: running PyCharm inspections on \'{module_path}\' (this may take a while)...')
 
     # the inspector writes its XML reports into the output dir as a side effect
@@ -673,25 +669,24 @@ def main() -> None:
       print('pch: inspect.sh failed', file = sys.stderr)
       sys.exit(1)
 
-    # parse and filter results
+    # keep only the findings inside the target that no exclusion or ignore rule removes
     problems = parse_results(output_dir)
     problems = filter_results(problems, module_path, exclude_substrings, include_extensions, ignore_inspections)
 
   finally:
     shutil.rmtree(sandbox_dir, ignore_errors = True)
 
-  # print findings grouped by file
+  # report each finding in the order the inspection reports listed it
   for filepath, line, severity, inspection, description in problems:
     print(format_problem(filepath, line, severity, inspection, description))
 
   # print summary (same style as pcf)
   if problems:
-    file_count = len({ p[0] for p in problems })
-    print(f'Found issues in {file_count} source files')
+    print(f'Found issues in {len({ problem[0] for problem in problems })} source files')
   else:
     print('Success: no issues found')
 
 
-# run main if this is the top-level script
+# entry point when executed as a script rather than imported as a module
 if __name__ == '__main__':
   main()

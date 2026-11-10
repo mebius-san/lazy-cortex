@@ -5,7 +5,7 @@ allowed-tools: Read, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), B
 ---
 # Expert List Jobs
 
-List all jobs in the expert queue, sorted oldest-first by age. Supports optional filters for expert name and status (`queued`, `active`, `cancelled`, `dead`, `done`, `failed`). Output is a tabular summary of `{expert, job_id, status, age_sec}`.
+List all jobs in the expert queue, sorted oldest-first by age. Supports optional filters for expert name and status (`queued`, `active`, `cancelled`, `dead`, `done`, `deferred`, `failed`). Output is a tabular summary of `{expert, job_id, status, age_sec}`.
 
 ### Job status enum
 
@@ -15,10 +15,11 @@ List all jobs in the expert queue, sorted oldest-first by age. Supports optional
 | `READY` + `PID` (no `DEAD`, no `response.json`) | `active` |
 | `CANCELLED` exists (outranks every other marker) | `cancelled` |
 | `DEAD` exists | `dead` |
-| `DONE` + `response.json` (outcome ≠ error) | `done` |
-| `DONE` + `response.json` (outcome == error) | `failed` |
+| `DONE` + `response.json` (outcome reports finished work — neither `error` nor `deferred`) | `done` |
+| `DONE` + `response.json` (outcome is the reserved `deferred` token — work postponed, input untouched) | `deferred` |
+| `DONE` + `response.json` (outcome == error, or missing / malformed) | `failed` |
 
-Use the `--status` filter with any of these values to scope the listing.
+Use the `--status` filter with any of these values to scope the listing. A `deferred` job answers neither the `done` nor the `failed` filter — ask for `deferred` explicitly to list postponed work.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -36,15 +37,15 @@ This skill has 3 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 All inputs are optional:
 - `expert` (string) — filter to one expert.
-- `status` (string) — filter to one of `queued`, `active`, `cancelled`, `dead`, `done`, or `failed`.
+- `status` (string) — filter to one of `queued`, `active`, `cancelled`, `dead`, `done`, `deferred`, or `failed`.
 
-If `status` is provided but not one of these six values → abort: "status must be one of: queued, active, cancelled, dead, done, failed. Got: `<value>`."
+If `status` is provided but not one of these seven values → abort: "status must be one of: queued, active, cancelled, dead, done, deferred, failed. Got: `<value>`."
 
 Outcome: `validated` or `aborted`.
 
 ## Step 2 — List jobs
 
-Run the core `list-jobs` verb, passing each filter as a flag and omitting a flag whose filter is empty (all six enum values are handled natively):
+Run the core `list-jobs` verb, passing each filter as a flag and omitting a flag whose filter is empty (all seven enum values are handled natively):
 
 ```
 Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" list-jobs --expert '<expert>' --status '<status>')
@@ -72,6 +73,6 @@ expert                  job_id          status   age_sec
 
 ## Failure modes
 
-- **"status must be one of: queued, active, cancelled, dead, done, failed"** — caller passed an unsupported status value → use one of the six valid values.
+- **"status must be one of: queued, active, cancelled, dead, done, deferred, failed"** — caller passed an unsupported status value → use one of the seven valid values.
 - **"No jobs found"** — the jobs base directory is absent or empty → confirm that jobs have been dispatched and `.experts/.jobs/` exists.
 - **`.experts/.jobs/` missing** — expert runtime not bootstrapped in this repo → run `/lazy-core.install`.

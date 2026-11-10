@@ -69,14 +69,14 @@ def glob_root(pattern: str) -> str:
   # document at any depth in the repository. A pattern with one is anchored at the repository
   # root, so its matches all lie under the literal folders it opens with.
 
-  # guard: a right-anchored pattern can match anywhere in the repository
+  # a right-anchored pattern can match anywhere in the repository
   if "**" not in pattern:
     return _REPO_ROOT
 
   # the literal prefix ends at the first segment that globs
   parts: list[str] = []
   for segment in pattern.split("/"):
-    # guard: the first globbing segment ends the literal prefix
+    # the first globbing segment ends the literal prefix
     if any(mark in segment for mark in _GLOB_CHARS):
       break
     parts.append(segment)
@@ -104,7 +104,7 @@ def _rel_for(repo: Path, file_path: Path) -> PurePosixPath | None:
   return rel if fp.is_file() else None
 
 
-def glob_matches(pattern: str, rel: PurePosixPath) -> bool:
+def is_glob_match(pattern: str, rel: PurePosixPath) -> bool:
   """
   Match one class glob against a repo-relative path.
 
@@ -120,9 +120,14 @@ def glob_matches(pattern: str, rel: PurePosixPath) -> bool:
   Returns:
     True when the glob covers the path.
   """
-  # guard: no `**` — the plain right-anchored match every existing class relies on
+  # no `**` — the plain right-anchored match every existing class relies on
   if "**" not in pattern:
     return rel.match(pattern)
+
+  # translate the glob segment by segment into one regex anchored at both ends: a `**` segment
+  # becomes a group of zero or more whole segments, while `*` / `?` inside a segment never cross `/`;
+  # every segment ends with its separator, and the trailing one is trimmed so the last segment
+  # matches the file name itself
   parts = []
   for segment in pattern.split("/"):
     if segment == "**":
@@ -134,7 +139,7 @@ def glob_matches(pattern: str, rel: PurePosixPath) -> bool:
   return re.fullmatch(regex, rel.as_posix()) is not None
 
 
-def _paths_match(class_cfg: dict, rel: PurePosixPath) -> bool:
+def _has_path_match(class_cfg: dict, rel: PurePosixPath) -> bool:
   """
   Check whether any of a class's `paths` globs cover a repo-relative path.
 
@@ -145,7 +150,7 @@ def _paths_match(class_cfg: dict, rel: PurePosixPath) -> bool:
   Returns:
     True when at least one glob matches; False otherwise.
   """
-  return any(glob_matches(pat, rel) for pat in class_cfg.get(JobKey.PATHS) or [])
+  return any(is_glob_match(pat, rel) for pat in class_cfg.get(JobKey.PATHS) or [])
 
 
 def _scope_depth(class_cfg: dict) -> int:
@@ -186,6 +191,7 @@ def class_for_file(settings: dict, repo: Path, file_path: Path) -> dict | None:
       `paths` cover the document always outranks the bare, type-only class.
     - Among the product-scoped classes covering a typed document, the one whose globs anchor
       deepest — the innermost product's — wins; equal depth falls back to configuration order.
+    - A `spec_doc_type` with no matching class resolves to `None`.
     - A document carrying no `spec_doc_type` resolves to the first configured class whose
       `paths` cover it, in configuration order.
 
@@ -209,15 +215,16 @@ def class_for_file(settings: dict, repo: Path, file_path: Path) -> dict | None:
   # run of literal path segments a class anchors on before its first wildcard, so a deeper
   # tree is never served by the broader product that merely contains it. Only when two scopes
   # anchor equally deep does the order they were configured in settle the match. A type with no matching class at all resolves to no review class,
-  # by design. A document carrying no recognized type is not a typed catalog document, and
-  # instead resolves to the first configured class whose paths cover it.
+  # by design, even when some class's paths cover the document. Only a document carrying no
+  # type value at all is not a typed catalog document, and it instead resolves to the first
+  # configured class whose paths cover it.
 
   # Contract:
   # Among the classes serving a document's `spec_doc_type`, a product-scoped class whose
   # `paths` cover the document always outranks the bare, type-only class, and among several
   # such scoped classes the one with the deepest literal path prefix wins, configuration order
-  # breaking an equal-depth tie; a type with no matching class resolves to `None`. A document carrying no `spec_doc_type` resolves to
-  # the first configured class whose `paths` cover it, in configuration order.
+  # breaking an equal-depth tie; a type with no matching class resolves to `None`. A document carrying no
+  # `spec_doc_type` resolves to the first configured class whose `paths` cover it, in configuration order.
 
   rel = _rel_for(repo, file_path)
 
@@ -233,7 +240,7 @@ def class_for_file(settings: dict, repo: Path, file_path: Path) -> dict | None:
   # an untyped document keeps the historical first-match glob behaviour
   if not doc_type:
     for class_cfg in classes:
-      if _paths_match(class_cfg, rel):
+      if _has_path_match(class_cfg, rel):
         return class_cfg
     return None
 
@@ -244,10 +251,10 @@ def class_for_file(settings: dict, repo: Path, file_path: Path) -> dict | None:
     label = str(class_cfg.get(JobKey.CLASS) or "")
     type_part, _, scope = label.partition(_SCOPE_SEP)
 
-    # guard: a class serving some other type has nothing to say about this document
+    # a class serving some other type has nothing to say about this document
     if type_part != doc_type:
       continue
-    if scope and _paths_match(class_cfg, rel):
+    if scope and _has_path_match(class_cfg, rel):
       scoped.append((-_scope_depth(class_cfg), index, class_cfg))
     if not scope and fallback is None:
       fallback = class_cfg

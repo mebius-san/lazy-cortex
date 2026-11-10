@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, configuring, and running the lazycortex-review document-review loop.
-last_regen: 2026-10-24
+last_regen: 2026-11-10
 no_diagram: true
 source_skills:
   - lazy-review.install
@@ -12,8 +12,8 @@ source_skills:
   - lazy-review.stop
   - lazy-review.finalize
   - lazy-review.audit
-source_sha: 0cbb304c09be643556113a3f1265c34f907dcb12
-surface_sha: 27047efb2f35f7f2c089d8a9540b7fe568fd031020583bbf589b032a9fc971aa
+source_sha: 2abf80046eef55ba4f805c6dfcc9c95f40ef997c
+surface_sha: f1caf5daf46f7c6a7f3c2766d818a723715c25547cb63e1a1bfe85cb4f195be8
 ---
 # Frequently asked questions
 
@@ -72,6 +72,8 @@ Yes. A token of the form `<type>@<product>` (e.g. `design@my-widget`) scopes a c
 
 `/lazy-review.submit` opens the document and skips the main-writer round, landing it directly on the operator's Ready banner. Use it when the document already has your edits in place and you want the review to assess the current text rather than re-draft it. The optional `--expert` flag pins a per-document main-writer override for the submit path.
 
+Submitting starts a new review cycle: `review_approved` is reset to `false` whatever a stopped cycle left behind, and the commit carries a `Doc-Review-Phase: initial` trailer. One exception to "straight to Ready": if the document carries a non-empty `[!todo] #review/command` callout when you submit it, the command is treated as the opening round's input, so the document enters in the writer state (`Waiting: writer` banner) and the coordinator carries the command out first. You never see the Ready banner while a writer round is still owed.
+
 Both operations are idempotent — re-running on an already-opted-in document is a no-op.
 
 ---
@@ -124,7 +126,7 @@ A review class references an expert name that is not registered in the top-level
 
 ## `/lazy-review.audit` reports `settings_present FAIL`. What does that mean?
 
-The audit script could not find `.claude/lazy.settings.json`. Run `/lazy-review.install` first to create and seed it, then re-run the audit.
+The audit script could not find `.claude/lazy.settings.json`. Run `/lazy-review.install` first to create and seed it, then re-run the audit. Note that the audit reads the merged settings — the tracked `.claude/lazy.settings.json` with the local overlay `.claude/lazy.settings.local.json` merged on top — so a class or expert defined only in the local overlay counts as configured.
 
 ---
 
@@ -136,7 +138,7 @@ A review class's `paths` glob can match documents that sit outside `review.watch
 
 ## `/lazy-review.audit` reports `override_glob_depth WARN`. What does that mean?
 
-A product-scoped `<type>@<product>` class carries a glob that fixes the asset's depth in the path — so an asset that sits at the product root, or one nested deeper than the glob expects, falls outside the class and loses that product's own experts. This is a class configuration drift rather than a missing setting, and the fix lives in the plugin that owns the product-scoped classes: re-run `/lazy-spec.product-config <key>` in edit mode to regenerate the class's globs against the product's current shape.
+A product-scoped `<type>@<product>` class carries a glob that fixes the asset's depth in the path — so an asset that sits at the product root, or one nested deeper than the glob expects, falls outside the class and loses that product's own experts. This is a class configuration drift rather than a missing setting, and fix the class's `paths` through `/lazy-review.configure` (a `**` segment below the product root reaches every depth).
 
 ---
 

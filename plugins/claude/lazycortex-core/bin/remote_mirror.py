@@ -42,6 +42,9 @@ MODE_SYNC = "sync"
 # Default per-file size ceiling (bytes) above which a file is classified skipped.
 DEFAULT_MAX_BYTES = 1_048_576
 
+# Error returned when the first shallow clone fails; `{url}` is the source URL, `{stderr}` git's stripped stderr.
+CLONE_FAILED_MSG = "remote-mirror clone failed for '{url}': {stderr}"
+
 # Byte window read from a candidate file's head to decide binary vs text.
 _BINARY_SNIFF_BYTES = 8192
 
@@ -149,6 +152,7 @@ class GlobMatcher:
       True on a match, False otherwise.
     """
     # compile once per pattern — the same globs are re-tested for every walked file
+    # opt: compiled once per pattern — valid while compiling depends on the pattern string alone
     if pattern not in self._cache:
       self._cache[pattern] = self._compile(pattern)
     return bool(self._cache[pattern].match(rel_posix))
@@ -183,7 +187,7 @@ class GlobMatcher:
     # normalise trailing /.* → optional trailing slash+anything
     if regex.endswith("/.*"):
       regex = regex[:-3] + "(?:/.*)?"
-    return re.compile("^" + regex + "$")
+    return re.compile("^" + regex + r"\Z")
 
 
 # ----------------------------------------------------------------------------------------
@@ -200,8 +204,8 @@ class RemoteMirror:
       classified changes on request.
 
   Guarantees:
-    - Running a sync twice against an unchanged source produces an all-`unchanged` plan on
-      the second run.
+    - Running a sync twice against an unchanged source produces a second plan of only `unchanged`
+      and `skipped` items — nothing to apply, nothing written.
     - A failure never touches the destination tree; an existing clone may be left mid-update
       only if the failure occurs after local objects were fetched but before the working
       copy is reset to them.
@@ -290,10 +294,10 @@ class RemoteMirror:
 
     # guard: clone failed — report it and leave everything untouched
     if proc.returncode != 0:
-      return f"remote-mirror clone failed for '{self._url}': {proc.stderr.strip()}"
+      return CLONE_FAILED_MSG.format(url = self._url, stderr = proc.stderr.strip())
     return None
 
-  def fetched_sha(self) -> str:
+  def read_fetched_sha(self) -> str:
     """
     Return the commit SHA the clone currently points at.
 
@@ -312,7 +316,8 @@ class RemoteMirror:
 
     Guarantees:
       - A destination file already byte-identical to its source classifies as unchanged, so a
-        second `sync` against an unchanged source plans all-unchanged and writes nothing.
+        second `sync` against an unchanged source plans only `unchanged` and `skipped` items —
+        nothing to apply, nothing written.
 
     Returns:
       Plan items sorted by path, one per included or removed file. Each item carries the
@@ -336,7 +341,7 @@ class RemoteMirror:
     # every included source file classifies as skipped, added, updated, or unchanged
     for rel in filtered:
       src_abs = self._cache_dir / rel
-      reason = self._skip_reason(src_abs)
+      reason = self._read_skip_reason(src_abs)
       if reason is not None:
         items.append({ _Key.PATH: rel, _Key.ACTION: ACTION_SKIPPED, _Key.REASON: reason })
         continue
@@ -347,8 +352,8 @@ class RemoteMirror:
 
         # Contract:
         # A destination file already identical to its source once both are read with LF line
-        # endings classifies as unchanged, so
-        # a second `sync` against an unchanged source plans all-unchanged and writes nothing.
+        # endings classifies as unchanged, so a second `sync` against an unchanged source
+        # plans only `unchanged` and `skipped` items — nothing to apply, nothing written.
 
         # file content matches — nothing for sync to do here
         items.append({ _Key.PATH: rel, _Key.ACTION: ACTION_UNCHANGED })
@@ -421,17 +426,17 @@ class RemoteMirror:
     )
     result: list[str] = []
     for rel in proc.stdout.splitlines():
-      # guard: include configured and this tracked file matches none of its patterns — drop it
+      # with an include list configured, a tracked file matching none of its patterns is dropped
       if self._include and not any(self._matcher.match(rel, pat) for pat in self._include):
         continue
 
-      # guard: named by an exclude glob
+      # a file named by an exclude glob is dropped
       if any(self._matcher.match(rel, pat) for pat in self._exclude):
         continue
       result.append(rel)
     return sorted(result)
 
-  def _skip_reason(self, path: Path) -> str | None:
+  def _read_skip_reason(self, path: Path) -> str | None:
     """
     Classify a source file as skip-worthy: symlink, oversized, or binary.
 
@@ -442,17 +447,17 @@ class RemoteMirror:
       One of `"symlink"`, `"too-large"`, `"binary"`, or `None` when the file
       is eligible to be synced.
     """
-    # guard: a symlinked entry is never dereferenced and copied
+    # a symlinked entry is never dereferenced and copied
     if path.is_symlink():
       return REASON_SYMLINK
 
-    # guard: over the configured per-file ceiling
+    # a file over the configured per-file ceiling is classified too large
     if path.stat().st_size > self._max_bytes:
       return REASON_TOO_LARGE
     with path.open(_READ_BINARY) as fh:
       chunk = fh.read(_BINARY_SNIFF_BYTES)
 
-    # guard: a NUL byte in the head window marks the file as non-text
+    # a NUL byte in the head window marks the file as non-text
     if b"\x00" in chunk:
       return REASON_BINARY
     return None
@@ -524,7 +529,7 @@ def run(payload: dict) -> dict:
 
   # sync applies the plan as a side effect; plan mode only classifies
   plan = mirror.sync() if mode == MODE_SYNC else mirror.plan()
-  return { _Key.FETCHED_SHA: mirror.fetched_sha(), _Key.PLAN: plan, _Key.APPLIED: mode == MODE_SYNC }
+  return { _Key.FETCHED_SHA: mirror.read_fetched_sha(), _Key.PLAN: plan, _Key.APPLIED: mode == MODE_SYNC }
 
 
 def main(argv: list[str]) -> int:

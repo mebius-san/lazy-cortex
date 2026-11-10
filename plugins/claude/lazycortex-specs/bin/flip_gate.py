@@ -5,7 +5,9 @@ An asset is a folder under `<spec_path>` at any depth — `<spec_path>/<slug>/`,
 or `<spec_path>/<folder>/<slug>/` when the type or the caller named a folder —
 holding a status folder-note `<slug>/<slug>.md` whose frontmatter carries flat boolean
 gates (`spec_design_done`, `spec_plan_done`, `spec_develop_done`,
-`spec_tests_passing`, `spec_released`) plus a `spec_cancelled` flag.
+`spec_tests_passing`, `spec_built`, `spec_released`) plus a `spec_cancelled` flag. The four middle gates
+(plan, develop, tests, built) belong to a release note alone; on every other asset `spec_released` is the
+only readiness a downstream consumer reads.
 
 A level note — a product's `<spec_path>/<leaf>.md` or the catalog root's
 `<vault_root>/<root>.md` — carries the level ladder instead
@@ -19,9 +21,9 @@ role at all is read as an asset status note.
 false). The flip is unconditional on call — `spec.coordinator` (per
 `lazy-spec.coordination-playbook.md`) is the sole judge of when a gate is ready
 to move, so this primitive no longer gates the mutation on a precondition
-table of its own. A cancelled asset still refuses every flip, on or off —
-that check is not a sequencing decision, it is the asset's own terminal
-state.
+table of its own. A cancelled asset refuses every flip except `spec_cancelled`
+turned off — that check is not a sequencing decision, it is the asset's own
+cancelled state. The bare primitive moves no document when it clears the flag.
 
 Design choice — the `auto` flag only marks the run log's reason as the
 coordinator's own; the primitive always performs the mutation when called.
@@ -38,13 +40,15 @@ from pathlib import Path
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  pass
+  from collections.abc import Iterable
 
 
 _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import error_report  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import history_journal  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
@@ -59,6 +63,7 @@ import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-pos
 from spec_keys import (  # noqa: E402  # pylint: disable=import-error,wrong-import-position
     BOOL_FALSE,
     BOOL_TRUE,
+    DESIGN_ONLY_GATES,
     FLIP_GATE_NAME,
     FLIPPABLE_GATES,
     LEVEL_ROLES,
@@ -66,10 +71,12 @@ from spec_keys import (  # noqa: E402  # pylint: disable=import-error,wrong-impo
     LOG_NO_GIT,
     LOG_ROOT,
     ROLE_GATES,
+    PluginErrorCause,
+    AssetTypeKey,
     FlipResult,
     Gate,
     HistoryEvent,
-    PlanReview,
+    ReleaseKey,
     Section,
     SpecHaltKey,
     SpecKey,
@@ -85,6 +92,13 @@ from summary_render import parent_container_note, apply_container_stats, is_shel
 _MOMENT_MIDNIGHT = "T00:00:00Z"
 _UTC_OFFSET = "+00:00"
 _UTC_SUFFIX = "Z"
+
+# the markdown suffix the icon repaint reads, and the text encoding git output is decoded with
+_MD_SUFFIX = ".md"
+_ENCODING = "utf-8"
+
+# Error-ledger incident key a failed icon repaint opens; every failed repaint of the repo folds into it
+_REPAINT_INCIDENT = "spec-icon-repaint"
 
 # the bot identity a flip commit lands under, and the default one for a halt commit
 _FLIP_AUTHOR_NAME = FLIP_GATE_NAME
@@ -182,28 +196,7 @@ def set_bool(fm_text: str, key: str, value: bool) -> str:
   Returns:
     The updated frontmatter text.
   """
-  return _set_scalar(fm_text, key, BOOL_TRUE if value else BOOL_FALSE)
-
-
-def _set_scalar(fm_text: str, key: str, literal: str) -> str:
-  """
-  Set or insert `key: <literal>` in a frontmatter block.
-
-  Replaces the existing line in place when the key is present; inserts before
-  the closing `---` when absent.
-
-  Args:
-    fm_text: The frontmatter block text, fences included.
-    key: The frontmatter key to write.
-    literal: The value text written verbatim after the colon.
-
-  Returns:
-    The updated frontmatter text.
-  """
-  pat = re.compile(rf"(?m)^{re.escape(key)}\s*:.*$")
-  if pat.search(fm_text):
-    return pat.sub(f"{key}: {literal}", fm_text, count = 1)
-  return spec_frontmatter.insert_before_close(fm_text, f"{key}: {literal}\n")
+  return spec_frontmatter.set_scalar(fm_text, key, BOOL_TRUE if value else BOOL_FALSE)
 
 
 def _drop_scalar(fm_text: str, key: str) -> str:
@@ -273,7 +266,7 @@ def append_under_heading(body: str, heading: str, line: str) -> str:
 
 
 
-def _note_role(fm_values: dict) -> str:
+def note_role(fm_values: dict) -> str:
   """
   Report which folder-note role the frontmatter declares.
 
@@ -294,7 +287,7 @@ def _role_refusal(role: str, gate: str) -> str | None:
   Report why a folder-note's role forbids this gate, or nothing when it allows it.
 
   Args:
-    role: The folder-note's own role, as `_note_role` resolves it.
+    role: The folder-note's own role, as `note_role` resolves it.
     gate: The gate key the caller asked to flip.
 
   Returns:
@@ -308,6 +301,41 @@ def _role_refusal(role: str, gate: str) -> str | None:
   if gate not in allowed:
     return f"gate {gate} is not on the '{role}' ladder"
   return None
+
+
+def _design_only_refusal(fm_values: dict, gate: str, *, off: bool) -> str | None:
+  """
+  Report why any non-release note forbids opening this gate, or nothing when it allows it.
+
+  Only a release note may open the plan, build, tests and built gates; a note that declares no asset type counts as a
+  non-release note. Turning a gate off, and any gate outside those four, is never refused.
+
+  Args:
+    fm_values: The folder-note's parsed frontmatter values.
+    gate: The gate key the caller asked to flip.
+    off: Whether the caller turns the gate off rather than on.
+
+  Returns:
+    A message naming the refused middle gate, or None when the flip may proceed.
+  """
+
+  # Domain(spec.lifecycle):
+  # # Only a release builds
+  # Every asset type but the release has stopped carrying its own implementation: its ladder
+  # ends when its start document is approved, and the release that later ships it closes its
+  # release checkpoint. The four middle checkpoints — plan, development, tests, built — therefore
+  # belong to a release note alone, and asking to open one on any other asset note — a note that
+  # declares no type at all included — is refused. Turning such a checkpoint off is never refused, because a
+  # note that still carries one from before the rule only needs it cleared.
+
+  # only opening one of the four middle gates is release-only; every other flip stays allowed
+  if off or gate not in DESIGN_ONLY_GATES:
+    return None
+
+  # a release note runs the full ladder by design; every other note, untyped included, is design-only
+  if fm_values.get(AssetTypeKey.TYPE, "").strip() == ReleaseKey.ASSET_TYPE:
+    return None
+  return f"gate {gate} is not on a design-only ladder"
 
 
 def _write_log(asset_dir: Path, gate: str, value: bool, reason: str) -> None:
@@ -382,43 +410,342 @@ def repo_root(cwd: Path) -> Path:
   return Path(top)
 
 
-def _resolve_review_cli() -> Path | None:
+def committable_paths(repo: Path, paths: Iterable[Path | str]) -> list[str]:
   """
-  Resolve the `lazycortex-review` CLI binary, or report that it is unavailable.
+  Select the paths a pathspec commit can carry, registering brand-new files for it.
 
-  Returns:
-    Absolute path to the resolved binary, or None when no plugin directory on the env path
-    carries a `bin/lazycortex-review` entry.
-  """
-  return spec_paths.resolve_plugin_cli(PlanReview.REVIEW_CLI)
+  Guarantees:
+    - Each returned path keeps the caller's spelling and the caller's order.
+    - No content is added to the shared git index: a new file is registered as intent-to-add only.
 
-
-def _stage_reachable_paths(repo: Path, paths: list[Path] | None) -> list[str]:
-  """
-  Stage each caller-named path, best-effort, returning only the ones that actually staged.
-
-  A path that was never tracked by git (and no longer exists, having just been deleted from the
-  worktree) has nothing for `git add` to stage; that call exits non-zero and the path is
-  dropped from the result rather than failing the caller's whole commit.
+  Notes:
+    - A path that is untracked and gone from disk is dropped from the result.
+    - Every other untracked path is registered with `git add -N` so a pathspec can name it.
 
   Args:
-    repo: The repo root to run `git` in.
-    paths: Caller-named extra paths to stage, or None.
+    repo: The repository root the paths are resolved against.
+    paths: The candidate paths, repo-relative or absolute.
 
   Returns:
-    The subset of `paths`, as strings, that staged successfully.
+    The subset of `paths` that can join a pathspec commit, as strings.
+
+  Raises:
+    subprocess.CalledProcessError: If registering a new file with `git add -N` fails.
   """
-  staged = []
-  for path in (paths or []):
-    result = subprocess.run(
-        ["git", "add", "--", str(path)], cwd = str(repo), capture_output = True, check = False,
+
+  # Contract:
+  # Each returned path keeps the caller's spelling, and the result keeps the caller's order.
+
+  # Contract:
+  # No file content is ever added to the shared git index;
+  # a brand-new file is registered as intent-to-add only.
+
+  # the registrations themselves are the caller's to keep; only the committable set is returned
+  return _register_paths(repo, paths)[0]
+
+
+def _register_paths(repo: Path, paths: Iterable[Path | str]) -> tuple[list[str], list[str]]:
+  """
+  Select the paths a pathspec commit can carry and report which of them this call registered.
+
+  Notes:
+    - A path that is untracked and gone from disk is dropped.
+    - Every other untracked path is registered with `git add -N`, which stages no content.
+
+  Args:
+    repo: The repository root the paths are resolved against.
+    paths: The candidate paths, repo-relative or absolute.
+
+  Returns:
+    The kept paths as strings, in the caller's spelling and order, and the subset of them this call registered
+    as intent-to-add.
+
+  Raises:
+    subprocess.CalledProcessError: If registering a new file with `git add -N` fails.
+  """
+  # the paths that may join a pathspec commit, each kept in the caller's own spelling, and the
+  # brand-new ones among them this call registered
+  kept = []
+  registered = []
+  for path in paths:
+    tracked = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", "--", str(path)],
+        cwd = str(repo), capture_output = True, check = False,
+    ).returncode == 0
+
+    # guard: a path gone from the worktree and unknown to git has nothing to commit
+    if not (repo / path).exists() and not tracked:
+      continue
+
+    # a brand-new file is registered as intent-to-add, which stages none of its content, so the
+    # pathspec commit can name it at all
+    if not tracked:
+      subprocess.run(["git", "add", "-N", "--", str(path)], cwd = str(repo), check = True, capture_output = True)
+      registered.append(str(path))
+    kept.append(str(path))
+  return kept, registered
+
+
+def commit_exact(repo: Path, paths: Iterable[Path | str], *, author_name: str | None, author_email: str | None,
+                 subject: str) -> None:
+  """
+  Commit exactly the committable subset of `paths` under the given author identity.
+
+  Guarantees:
+    - The operator's staged entries stay staged and out of the commit.
+    - A rejected commit resets exactly the intent-to-add entries this call registered, leaving the shared git
+      index as it was found.
+    - No commit is made when no path is committable, so an empty pathspec never commits the whole index.
+
+  Notes:
+    - Commit signing is off for this commit.
+    - Brand-new files among `paths` are registered as intent-to-add, which stages no content.
+    - An identity half given as None keeps the ambient git identity for that half.
+
+  Args:
+    repo: The repository root.
+    paths: The candidate paths; those that are untracked and gone from disk drop out.
+    author_name: The `user.name` the commit lands under, or None for the ambient one.
+    author_email: The `user.email` the commit lands under, or None for the ambient one.
+    subject: The commit subject.
+
+  Raises:
+    subprocess.CalledProcessError: If the commit fails.
+  """
+
+  # Contract:
+  # The operator's staged entries MUST stay staged and out of the commit;
+  # the commit carries the named paths and nothing else.
+
+  # Contract:
+  # A rejected commit resets exactly the intent-to-add entries this call registered
+  # and leaves the shared git index as it was found; the failure is re-raised unchanged.
+
+  # Contract:
+  # When no path is committable, NO commit is made;
+  # an empty pathspec NEVER falls through to committing the whole index.
+
+  # the pathspec the commit carries, new files registered and vanished strangers dropped
+  pathspec, registered = _register_paths(repo, paths)
+
+  # guard: an empty pathspec would commit the whole shared index, the operator's staging included
+  if not pathspec:
+    return
+
+  # a pathspec commit takes these paths' worktree content and nothing else from the index; the
+  # operator's staged entries stay staged, and git itself rolls the index back on a rejection
+  try:
+    subprocess.run(
+        [
+            "git",
+            *_identity_config(author_name, author_email),
+            "-c", "commit.gpgsign=false",
+            "commit", "-q", "-m", subject, "--", *pathspec,
+        ],
+        cwd = str(repo), check = True, capture_output = True,
     )
-    if result.returncode == 0:
-      staged.append(str(path))
-  return staged
+
+  # a rejected commit takes back the intent-to-add entries this call made, so the index is left
+  # exactly as found; the failure itself is re-raised as it arrived
+  except subprocess.CalledProcessError:
+    if registered:
+      subprocess.run(
+          ["git", "reset", "-q", "--", *registered], cwd = str(repo), check = False, capture_output = True,
+      )
+    raise
 
 
-def _containers_above(asset_dir: Path) -> list[Path]:
+def _identity_config(author_name: str | None, author_email: str | None) -> list[str]:
+  """
+  Build the per-command git config flags that pin a commit's identity.
+
+  Args:
+    author_name: The `user.name` to pin, or None to keep the ambient one.
+    author_email: The `user.email` to pin, or None to keep the ambient one.
+
+  Returns:
+    The `-c user.*` flag pairs for the values given; empty when both are None.
+  """
+  # each pinned value becomes one `-c` pair; an absent one leaves git's own identity in force
+  flags: list[str] = []
+  if author_name is not None:
+    flags.extend([ "-c", f"user.name={author_name}" ])
+  if author_email is not None:
+    flags.extend([ "-c", f"user.email={author_email}" ])
+  return flags
+
+
+def _query_untracked_under(repo: Path, rel_paths: list[str]) -> list[str]:
+  """
+  List the untracked, non-ignored files inside the directories among `rel_paths`.
+
+  Args:
+    repo: The repository root.
+    rel_paths: Repo-relative paths, some of which may be directories.
+
+  Returns:
+    The untracked files under those directories, repo-relative; empty when none is a directory.
+  """
+  dirs = [ path for path in rel_paths if (repo / path).is_dir() ]
+
+  # guard: a pathspec of files alone names every file it carries already
+  if not dirs:
+    return []
+
+  # a tracked directory's brand-new files are invisible to a pathspec commit until registered
+  listed = subprocess.run(
+      [ "git", "ls-files", "--others", "--exclude-standard", "-z", "--", *dirs ],
+      cwd = str(repo), check = True, capture_output = True, text = True, encoding = _ENCODING,
+  )
+  return [ entry for entry in listed.stdout.split("\0") if entry ]
+
+
+def commit_paths_detail(repo: Path, paths: Iterable[Path | str], *,
+                        subject: str,
+                        author_name: str | None,
+                        author_email: str | None,
+                        repaint: bool = True,
+                        deferred_write: tuple[Path, str] | None = None) -> tuple[bool, list[str], list[str]]:
+  """
+  Commit exactly `paths`, the icon repaint optionally folded in, and report what the commit carried.
+
+  A directory among the paths carries every file under it, brand-new ones included.
+
+  Guarantees:
+    - No commit is made when `repo` is not a git repository or a path lies outside `repo`.
+    - No commit is made when the paths hold no change against the last commit.
+    - The operator's staged entries never ride along; the commit carries the named paths and nothing else.
+    - An empty pathspec never commits the whole index.
+    - A repaint failure never raises and is reported to the error ledger; a later repaint that runs without failing
+      closes that incident.
+    - The path of a `deferred_write` always joins the commit set, so the write is carried by the commit and never
+      left behind as a dirty path.
+
+  Notes:
+    - New files under the paths are registered as intent-to-add only, which stages no content.
+    - A `deferred_write` lands after the repaint, so a process death during the repaint leaves the previously
+      committed file untouched.
+
+  Args:
+    repo: The repository root.
+    paths: The paths to commit, absolute or repo-relative; a directory carries every file under it.
+    subject: The commit subject.
+    author_name: The `user.name` the commit lands under, or None for the ambient identity.
+    author_email: The `user.email` the commit lands under, or None for the ambient identity.
+    repaint: Whether the icon repaint of the markdown paths joins the commit.
+    deferred_write: An optional `(path, text)` written after the repaint; its path always joins the commit set.
+
+  Returns:
+    Whether a commit was made, the repo-relative paths it carried, and the repainted paths among them.
+
+  Raises:
+    subprocess.CalledProcessError: If the commit fails.
+  """
+
+  # Contract:
+  # The operator's staged entries MUST stay staged and out of the commit;
+  # the commit carries the named paths and nothing else.
+
+  # Contract:
+  # An empty pathspec NEVER falls through to committing the whole index.
+
+  # Contract:
+  # When `repo` is not a git repository, or a named path lies outside `repo`, NO commit is made.
+
+  # Contract:
+  # When the paths hold no change against the last commit, NO commit is made.
+
+  # Contract:
+  # A failing icon repaint NEVER raises out of this call and is NEVER silent: the failure is reported
+  # to the error ledger, and the commit proceeds without the repainted paths.
+  # A later repaint that runs without failing closes that incident.
+
+  # Contract:
+  # The path of a `deferred_write` ALWAYS joins the commit set,
+  # so the write is carried by the commit and never left behind as a dirty path.
+
+  # the held-back write's own path joins the commit set, so the write it makes is always carried
+  named = [ *paths, *( [ deferred_write[0] ] if deferred_write is not None else [] ) ]
+  candidates = [ Path(path) if Path(path).is_absolute() else repo / path for path in named ]
+
+  # guard: no git repository, or a path outside it, means nothing to commit into
+  if not git_field(repo, [ "rev-parse", "--show-toplevel" ], "") or any(
+      not path.resolve().is_relative_to(repo.resolve()) for path in candidates):
+    return False, [], []
+
+  # the repaint of the markdown paths rides the same commit so no second, foreign-identity commit follows
+  rel_paths = list(dict.fromkeys(path.resolve().relative_to(repo.resolve()).as_posix() for path in candidates))
+  notes = [ path for path in rel_paths if path.endswith(_MD_SUFFIX) ]
+  try:
+    repainted = iconize_inline.repaint_paths_checked(repo, notes) if repaint and notes else []
+  # waiver: best-effort boundary — a cosmetic repaint never gates the commit it rides with, so a failed one is
+  # reported to the error ledger and drops the repainted paths only
+  except (OSError, RuntimeError, ValueError) as error:
+    # waiver: a stdlib exception carries no class_name accessor; its class name is the varying detail of the report
+    error_report.report_marked_warning(repo, cause = PluginErrorCause.ICON_REPAINT_FAILED,
+                                       incident = _REPAINT_INCIDENT, detail = f"{type(error).__name__}: {error}")
+    repainted = []
+  else:
+    # a repaint that ran proves an earlier failed one cleared
+    if repaint and notes:
+      error_report.resolve_marked(repo, _REPAINT_INCIDENT)
+  all_paths = list(dict.fromkeys([ *rel_paths, *repainted ]))
+
+  # the held-back write lands here, past the slow repaint step and one step away from the commit
+  if deferred_write is not None:
+    spec_paths.write_text_atomic(deferred_write[0], deferred_write[1])
+
+  # guard: an empty pathspec would reach the whole tree
+  if not all_paths:
+    return False, [], []
+
+  # what the paths carry against the last commit
+  status = subprocess.run([ "git", "status", "--porcelain", "--", *all_paths ], cwd = str(repo), check = True,
+                          capture_output = True, text = True, encoding = _ENCODING)
+
+  # guard: a run that changed no byte commits nothing
+  if not status.stdout.strip():
+    return False, [], []
+
+  # the commit, under the given identity and these paths alone, the shared index left to the operator
+  commit_exact(repo, [ *all_paths, *_query_untracked_under(repo, all_paths) ], author_name = author_name,
+               author_email = author_email, subject = subject)
+  return True, all_paths, repainted
+
+
+def commit_paths(repo: Path, paths: Iterable[Path | str], *,
+                 subject: str,
+                 author_name: str | None,
+                 author_email: str | None,
+                 repaint: bool = True,
+                 deferred_write: tuple[Path, str] | None = None) -> bool:
+  """
+  Commit exactly `paths` under the given identity, the icon repaint optionally folded in.
+
+  The bool form of `commit_paths_detail`, with the same guarantees.
+
+  Args:
+    repo: The repository root.
+    paths: The paths to commit, absolute or repo-relative; a directory carries every file under it.
+    subject: The commit subject.
+    author_name: The `user.name` the commit lands under, or None for the ambient identity.
+    author_email: The `user.email` the commit lands under, or None for the ambient identity.
+    repaint: Whether the icon repaint of the markdown paths joins the commit.
+    deferred_write: An optional `(path, text)` written after the repaint; its path always joins the commit set.
+
+  Returns:
+    True when a commit was made.
+
+  Raises:
+    subprocess.CalledProcessError: If the commit fails.
+  """
+  return commit_paths_detail(
+      repo, paths, subject = subject, author_name = author_name, author_email = author_email,
+      repaint = repaint, deferred_write = deferred_write,
+  )[0]
+
+
+def containers_above(asset_dir: Path) -> list[Path]:
   """
   List the container notes whose stats region an asset's flip moved, innermost first.
 
@@ -465,11 +792,11 @@ def _commit_flip(
   """
   Atomically commit the folder-note flip under the `lazy-spec.flip-gate` bot identity.
 
-  Stages the folder-note (plus the stats line of every container note that counted this asset —
-  the enclosing group note, every shelf above it, and the product note that reads through them —
-  when the flip changed a count and the note is an asset's own, plus any caller-supplied
-  `extra_paths`) and commits that exact set
-  with a deterministic subject naming the gate and its new value. Skipped silently when the
+  Commits the folder-note by pathspec (plus the stats line of every container note that counted
+  this asset — the enclosing group note, every shelf above it, and the product note that reads
+  through them — when the flip changed a count and the note is an asset's own, plus any
+  caller-supplied `extra_paths`), leaving the operator's staged entries untouched, with a
+  deterministic subject naming the gate and its new value. Skipped silently when the
   asset does not live inside a git repository (the unit-test fixture path, where the worker is
   exercised against a bare tmp dir). The daemon always runs the routine inside the operator's
   repo, so production reaches the commit branch every time. Any subprocess error inside the
@@ -488,8 +815,9 @@ def _commit_flip(
       an asset's flip does refresh the product root it sits in, but a product's own flip moves
       nothing in the count of products above it.
     extra_paths: Additional paths to fold into this same commit, named explicitly by the caller
-      (e.g. sibling files a rollback already deleted from the worktree). None commits the note
-      (and the container note, when refreshed) alone.
+      (e.g. sibling files a rollback already deleted from the worktree). A path that was never
+      tracked and is gone from disk drops out. None commits the note (and the container note,
+      when refreshed) alone.
   """
   # an empty toplevel means there is no repo to commit into
   top = git_field(asset_dir, ["rev-parse", "--show-toplevel"], "")
@@ -508,7 +836,7 @@ def _commit_flip(
   # the product note that reads through them; a level note's own flip refreshes nothing, since
   # its stats are its children's flips to recompute and the level above it counts products by
   # role, which no gate flip on this note moves
-  for container in (() if role in LEVEL_ROLES else _containers_above(asset_dir)):
+  for container in (() if role in LEVEL_ROLES else containers_above(asset_dir)):
     if apply_container_stats(container):
       add_paths.append(str(container))
 
@@ -517,28 +845,13 @@ def _commit_flip(
       repo, [str(Path(path).resolve().relative_to(repo.resolve())) for path in add_paths],
   ))
 
-  # the note and container note always exist on disk, so staging them is not best-effort
-  subprocess.run(
-      ["git", "add", "--", *add_paths],
-      cwd = str(repo), check = True, capture_output = True,
-  )
-
-  # the caller's own paths (e.g. a rollback's already-deleted plan siblings) join the same
-  # commit, best-effort — a caller-named path that was never tracked has nothing to stage
-  add_paths.extend(_stage_reachable_paths(repo, extra_paths))
-
-  # commit under the dedicated bot identity so the operator's authorship stays untouched; an
-  # explicit pathspec means a stray parked index entry never rides along by accident
+  # commit under the dedicated bot identity so the operator's authorship stays untouched; the
+  # caller's own paths (e.g. a rollback's already-deleted plan siblings) join the same commit,
+  # and one that was never tracked and is gone from disk drops out
   subject = f"{FLIP_GATE_NAME}: {gate} → {str(value).lower()} on {asset_dir.name}"
-  subprocess.run(
-      [
-          "git",
-          "-c", f"user.name={_FLIP_AUTHOR_NAME}",
-          "-c", f"user.email={_FLIP_AUTHOR_EMAIL}",
-          "-c", "commit.gpgsign=false",
-          "commit", "-q", "-m", subject, "--", *add_paths,
-      ],
-      cwd = str(repo), check = True, capture_output = True,
+  commit_exact(
+      repo, [ *add_paths, *(extra_paths or []) ],
+      author_name = _FLIP_AUTHOR_NAME, author_email = _FLIP_AUTHOR_EMAIL, subject = subject,
   )
 
 
@@ -555,11 +868,11 @@ def flip_gate(
   """
   Flip one boolean gate on an asset's status folder-note or on a level note.
 
-  The flip is unconditional on call, `off` or forward alike, except for three refusals: a gate
-  name belonging to neither ladder, a gate the note's own `spec_role` does not carry, and any
-  flip at all while the asset is cancelled. Each refuses before anything is written, leaving the
-  folder-note byte-identical. On success the folder-note frontmatter is rewritten and a run-log
-  file is written — a level note takes the same treatment an asset note does. Nothing is
+  The flip is unconditional on call, `off` or forward alike, except for refusals of a gate the
+  note may not carry or may not move in its current state. Each refuses before anything is
+  written, leaving the folder-note byte-identical. On success the folder-note
+  frontmatter is rewritten and a run-log file is written — a level note takes the same
+  treatment an asset note does. Nothing is
   written to `# History` or `# Gates`: the gate's state is its frontmatter boolean, the flip's
   reason lives in the run log, and a gate flip is the mechanics of the ladder, not an event the
   operator reads the journal for. Halting an asset (`main`'s `--halt`) is a separate primitive,
@@ -568,6 +881,8 @@ def flip_gate(
   Guarantees:
     - A refusal leaves the folder-note file byte-identical; nothing is written until every
       refusal check has passed.
+    - A cancelled asset accepts exactly one flip, `spec_cancelled` turned off; every other flip, on or off, is
+      refused.
 
   Args:
     asset_dir: The asset or level folder holding `<asset_dir.name>.md` and siblings.
@@ -587,22 +902,25 @@ def flip_gate(
 
   # Contract:
   # A refusal — an unknown gate name, a gate outside the note's own role ladder, or a flip
-  # attempted on a cancelled asset — leaves the folder-note file byte-identical; nothing is
+  # refused on a cancelled asset — leaves the folder-note file byte-identical; nothing is
   # written until every refusal check has passed.
+
+  # Contract:
+  # A cancelled asset accepts exactly one flip, `spec_cancelled` turned off;
+  # every other flip, on or off, is refused.
 
   # Domain(spec.lifecycle):
   # # Two gate ladders, one shared checkpoint
-  # An asset that ships its own deliverable moves through five yes/no checkpoints — design,
-  # plan, build, tests passing, and release — plus a cancelled flag that, once raised, ends its
-  # life to any further sequencing regardless of which checkpoints were already met. A product,
-  # or the whole catalog, runs a different five-checkpoint ladder instead — vision, use cases,
-  # design, UI design, and technical readiness — because it accumulates approved decisions rather than
-  # shipping one deliverable. Which ladder a note runs is the note's own declared stance, not a
-  # guess from its position in the tree; a checkpoint belonging to the other ladder is refused
-  # outright. Design readiness is the one checkpoint both ladders share, which is why it means
-  # the same thing wherever it appears. Moving a checkpoint, forward or back, is never
-  # conditioned on a readiness check of its own — that judgement is made once, elsewhere, by
-  # whatever decided the move belongs on the ladder now; this mechanic only records the outcome.
+  # An asset that ships its own deliverable moves through six yes/no checkpoints — design, plan, development, tests
+  # passing, built, and release — plus a cancelled flag that, while raised, freezes the ladder: no checkpoint moves,
+  # whichever were already met, until the cancellation itself is cleared again. A product, or the whole catalog, runs
+  # a different five-checkpoint ladder instead — vision, use cases, design, UI design, and technical readiness —
+  # because it accumulates approved decisions rather than shipping one deliverable. Which ladder a note runs is the
+  # note's own declared stance, not a guess from its position in the tree; a checkpoint belonging to the other ladder
+  # is refused outright. Design readiness is the one checkpoint both ladders share, which is why it means the same
+  # thing wherever it appears. Moving a checkpoint, forward or back, is never conditioned on a readiness check of its
+  # own — that judgement is made once, elsewhere, by whatever decided the move belongs on the ladder now; this
+  # mechanic only records the outcome.
 
   # guard: a name outside the two ladders is a caller typo, refused before the note is read —
   # writing it would leave an invented boolean in the frontmatter that nothing ever reads
@@ -615,15 +933,19 @@ def flip_gate(
   fm_values, fm_end = parse_frontmatter(text)
 
   # the note's own role decides which of the two ladders it runs
-  role = _note_role(fm_values)
+  role = note_role(fm_values)
 
   # guard: a gate off the note's own ladder is refused before anything is written
   if (role_refusal := _role_refusal(role, gate)) is not None:
     return {FlipResult.STATUS: FlipResult.REFUSED, "gate": gate, "reason": role_refusal}
 
-  # guard: a cancelled asset refuses every flip, on or off — the asset's own terminal state,
-  # not a sequencing precondition
-  if is_true(fm_values, Gate.SPEC_CANCELLED):
+  # guard: a middle gate on a typed design-only asset is refused — only a release note runs the full ladder
+  if (design_only_refusal := _design_only_refusal(fm_values, gate, off = off)) is not None:
+    return {FlipResult.STATUS: FlipResult.REFUSED, "gate": gate, "reason": design_only_refusal}
+
+  # guard: a cancelled asset refuses every flip, on or off, but the un-cancel itself — the asset's
+  # own state, not a sequencing precondition
+  if is_true(fm_values, Gate.SPEC_CANCELLED) and not (off and gate == Gate.SPEC_CANCELLED):
     return {FlipResult.STATUS: FlipResult.REFUSED, "gate": gate, "reason": "asset is cancelled"}
 
   # the flip lands in the frontmatter together with its moment: a gate turning true records
@@ -632,7 +954,10 @@ def flip_gate(
   value = not off
   fm_text = set_bool(text[:fm_end], gate, value)
   moment_key = f"{gate}{SpecMomentKey.AT_SUFFIX}"
-  fm_text = _set_scalar(fm_text, moment_key, _moment(today)) if value else _drop_scalar(fm_text, moment_key)
+  fm_text = (
+      spec_frontmatter.set_scalar(fm_text, moment_key, _moment(today)) if value
+      else _drop_scalar(fm_text, moment_key)
+  )
 
   # the run-log line for this flip: an automatic flip names itself, and carries the caller's
   # reason behind that name when there is one; a manual flip carries the reason alone
@@ -679,8 +1004,9 @@ def _commit_halt(
   """
   Atomically commit the asset-halt mutation under the given bot identity.
 
-  Mirrors `_commit_flip`'s shape: stage the status folder-note (plus any caller-supplied
-  `extra_paths`), commit that exact set under the given bot identity, skip silently when the
+  Mirrors `_commit_flip`'s shape: commit the status folder-note (plus any caller-supplied
+  `extra_paths`) by pathspec under the given bot identity, leaving the operator's staged
+  entries untouched, skip silently when the
   asset is not inside a git repository (the unit-test fixture path). Unlike `_commit_flip`, this
   never refreshes the parent container's stats line — `summary_render.classify` buckets an
   asset by `spec_cancelled` / `spec_released` / the `GATE_ORDER` booleans only, never
@@ -693,7 +1019,8 @@ def _commit_halt(
     author_name: The `user.name` the commit lands under.
     author_email: The `user.email` the commit lands under.
     extra_paths: Additional paths to fold into this same commit, named explicitly by the
-      caller. None commits the note alone.
+      caller. A path that was never tracked and is gone from disk drops out. None commits the
+      note alone.
   """
   # an empty toplevel means there is no repo to commit into
   top = git_field(asset_dir, ["rev-parse", "--show-toplevel"], "")
@@ -703,30 +1030,13 @@ def _commit_halt(
   if not top:
     return
 
-  # the halted folder-note always exists on disk, so staging it is not best-effort
-  repo = Path(top)
-  add_paths = [str(note)]
-  subprocess.run(
-      ["git", "add", "--", *add_paths],
-      cwd = str(repo), check = True, capture_output = True,
-  )
-
-  # the caller's own paths join the same commit, best-effort — a caller-named path that was
-  # never tracked has nothing to stage
-  add_paths.extend(_stage_reachable_paths(repo, extra_paths))
-
-  # commit under the caller's bot identity so the operator's authorship stays untouched; an
-  # explicit pathspec means a stray parked index entry never rides along by accident
-  subject = f"{author_name}: halt {asset_dir.name} — {reason}"
-  subprocess.run(
-      [
-          "git",
-          "-c", f"user.name={author_name}",
-          "-c", f"user.email={author_email}",
-          "-c", "commit.gpgsign=false",
-          "commit", "-q", "-m", subject, "--", *add_paths,
-      ],
-      cwd = str(repo), check = True, capture_output = True,
+  # commit the halted folder-note under the caller's bot identity so the operator's authorship
+  # stays untouched; the caller's own paths join the same commit, and one that was never
+  # tracked and is gone from disk drops out
+  commit_exact(
+      Path(top), [ note, *(extra_paths or []) ],
+      author_name = author_name, author_email = author_email,
+      subject = f"{author_name}: halt {asset_dir.name} — {reason}",
   )
 
 
@@ -801,7 +1111,7 @@ def halt_asset(
     extra_paths: list[Path] | None = None,
 ) -> dict:
   """
-  Halt an asset, marking it blocked pending operator resolution.
+  Halt an asset pending operator resolution.
 
   Un-halting is a manual operator act, out of scope here — the callout is never auto-removed on
   a later tick. Mirrors `flip_gate`'s own shape — the mutation is written and committed here,
@@ -835,13 +1145,12 @@ def halt_asset(
 
   # Domain(spec.lifecycle):
   # # Halting a stuck asset
-  # When the automation carrying an asset forward cannot make progress — a dependency it was
-  # waiting on failed, a change could not be folded in cleanly, a cleanup step left the asset
-  # half-finished — the asset is marked halted instead of retried silently. A halted asset
-  # stops being picked up as more work to sequence until an operator has looked at it; nothing
-  # automated clears the mark on its own. Recording the same failure a second time changes
-  # nothing — the mark and its explanation are written once and left alone, so retrying the
-  # same broken condition does not pile up duplicate records of it.
+  # When the automation carrying an asset forward cannot make progress — a change could not be
+  # folded in cleanly, a cleanup step left the asset half-finished — the asset is marked halted
+  # instead of retried silently. A halted asset stops being picked up as more work to sequence until
+  # an operator has looked at it; nothing automated clears the mark on its own. Recording the same
+  # failure a second time changes nothing — the mark and its explanation are written once and left
+  # alone, so retrying the same broken condition does not pile up duplicate records of it.
 
   # the status folder-note's frontmatter carries the halt flag this function sets
   note = asset_dir / f"{asset_dir.name}.md"

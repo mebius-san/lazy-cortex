@@ -1,11 +1,11 @@
 ---
 name: lazy-spec.add-asset-type
-description: "Use when a product must grow a new kind of asset beyond the shipped feature / change / bug / content / research set — characters, scenes, chapters, endpoints, whatever the operator names — or when `lazy-spec.request-classify` has no type to route a request into. Writes the type declaration into `products[<key>].asset_types.<name>` and settles the playbook the coordinator will work assets of that type under; review coverage is automatic, so it never touches `review.classes`."
+description: "Use when a product must grow a new kind of asset beyond the shipped feature / change / bug / content / research / release set — characters, scenes, chapters, endpoints, whatever the operator names — or when `lazy-spec.request-classify` has no type to route a request into. Writes the type declaration into `products[<key>].asset_types.<name>` and settles the playbook the coordinator will work assets of that type under; review coverage is automatic, so it never touches `review.classes`."
 allowed-tools: Read, Glob, Grep, Bash, Edit, Write, AskUserQuestion, Agent
 ---
 # Add Asset Type
 
-Declare one asset type on a product and wire it into the system end to end. Resolves the product from `lazy.settings.json[products][<key>]`, collects the type's identity through a one-question-at-a-time wizard, writes the declaration into the product's `asset_types`, and settles the playbook the coordinator loads whenever it works an asset of that type. Review coverage is automatic: the shared behavior-keyed review classes (`design` / `code-plan` / `test-plan`, written by `lazy-spec.product-config` Step 10 with right-anchored `*/<doc>.md` globs — or a product's `<kind>@<key>` override) already span every asset folder, so this skill writes NO review classes and syncs NO routine globs. Asset types are an open set — a type declared here is recognised by `lazy-spec.request-classify`, `lazy-spec.create-asset`, the coordinator, and the review daemon on their next run, with no rubric, class, or code edit.
+Declare one asset type on a product and wire it into the system end to end. Resolves the product from `lazy.settings.json[products][<key>]`, collects the type's identity through a one-question-at-a-time wizard, writes the declaration into the product's `asset_types`, and settles the playbook the coordinator loads whenever it works an asset of that type. Review coverage is automatic: the shared behavior-keyed review classes (`design` / `code-plan` / `test-plan`, seeded by `lazy-spec.install` with right-anchored `*/<doc>.md` globs — or a product's `<kind>@<key>` class added through `/lazy-review.configure`) already span every asset folder, so this skill writes NO review classes and syncs NO routine globs. Asset types are an open set — a type declared here is recognised by `lazy-spec.request-classify`, `lazy-spec.create-asset`, the coordinator, and the review daemon on their next run, with no rubric, class, or code edit.
 
 The type's per-block config is `{ "icon": <icon>, "color"?: <hex>, "playbook": <ref>, "alias_of"?: <base>, "default_path"?: <dir>, "start_doc": "<file>:<doc_type>", "default_tools"?: [<tool>, ...] }` under `products[<key>].asset_types.<name>`. A product's declarations merge key-by-key over the plugin's shipped ones (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.asset-types.json`), so a product may replace a single field of a shipped type without restating the rest. The type's human explanation does NOT live in config — it is the playbook's own opening chapter (Step 8).
 
@@ -60,16 +60,16 @@ Outcome: `resolved`.
 
 ## Step 2 — Ask the type name
 
-If `<type-name>` was passed as an argument, validate it against `^[a-z][a-z0-9-]*$`, confirm it is not already a key in the product's own `asset_types` (refuse and stop if it is — suggest editing the existing declaration instead), and skip the question (outcome `taken-from-arg`). A name that collides with a SHIPPED type, or with one this product only **inherits** from an ancestor product, is not a refusal — it is a per-field override of that type for this product, and the wizard says so plainly before continuing. Only a key already in `products[<product>].asset_types` itself refuses.
+If `<type-name>` was passed as an argument, validate it against `^[a-z][a-z0-9-]*$`, confirm it is not already a key in the product's own `asset_types`, and skip the question (outcome `taken-from-arg`). A name that collides with a SHIPPED type, or with one this product only **inherits** from an ancestor product, is not a refusal — it is a per-field override of that type for this product, and the wizard says so plainly before continuing. A key already in `products[<product>].asset_types` itself refuses and stops — suggest editing the existing declaration instead — with one exception: a declaration carrying neither `playbook` nor `alias_of` is a run that stopped between Step 7 and Step 8, and the skill resumes it. Say so plainly, mark Steps 3–7 `skipped` with outcome `kept-existing` (the declaration they would write is already on record and is not touched), and go straight to Step 8, which appends the missing `playbook`. Outcome `resumed-at-playbook`.
 
 Otherwise ask for the type's key:
 
 ```
 Context (print before asking):
 - Where: /lazy-spec.add-asset-type · Step 2 — Ask the type name; target products[<product>].asset_types
-- Found: no <type-name> argument; the product already declares <its own asset_types keys, or "none"> over the shipped feature / change / bug / content / research
+- Found: no <type-name> argument; the product already declares <its own asset_types keys, or "none"> over the shipped feature / change / bug / content / research / release
 - Why asking: the name is the stable identity of the type — written into every instance's `spec_asset_type` and into `products[<key>].asset_types.<name>`; `lazy-spec.create-asset <product> <name> <slug>` scaffolds by it, `lazy-spec.request-classify` routes by it, the coordinator resolves the asset's law through it; renaming later means rewriting `spec_asset_type` on every instance
-- Answers: `<example>` (e.g. `characters`, `scenes`, `chapters`) — that key is declared in Step 7, never re-asked; `other (type your own)` — a key matching `^[a-z][a-z0-9-]*$`; a regex failure or a collision re-asks. See: `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`
+- Answers: `<example>` (e.g. `characters`, `scenes`, `chapters`) — that key is declared in Step 7, never re-asked; `other (type your own)` — a key matching `^[a-z][a-z0-9-]*$`; a regex failure or a collision with a declared key re-asks, except a declaration carrying neither `playbook` nor `alias_of`, which resumes at Step 8 exactly as the argument path above does. See: `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`
 AskUserQuestion: header "Type name", question "What is the key of the new asset type on product <product>?", options: the example labels plus `other (type your own)`, each with a description.
 ```
 
@@ -78,7 +78,7 @@ Then ask whether the type is standalone or an alias:
 ```
 Context (print before asking):
 - Where: /lazy-spec.add-asset-type · Step 2 — Ask the type name; target products[<product>].asset_types.<name>.alias_of
-- Found: legal bases in scope — the shipped feature / change / bug / content / research plus <every product-declared type that carries no alias_of>; aliases never chain
+- Found: legal bases in scope — the shipped feature / change / bug / content / research plus <every product-declared type that carries no alias_of>; aliases never chain, and `release` is never a base (a release note is created only by the product's `Start release` tick, and its gate ladder belongs to the literal `release` type alone)
 - Why asking: an alias borrows exactly ONE thing from its base — the base's playbook, and only when the alias declares no `playbook` of its own; folder, icon, colour, start document and default tools stay the alias's own. This decides whether the type gets a law of its own to maintain (Step 8) or rides the base's
 - Answers: `standalone (own playbook)` — no `alias_of` written, Step 8 asks for the playbook; `<base>` — Step 7 writes `alias_of: <base>` and Step 8 is skipped (`skipped-alias`). Never re-asked
 AskUserQuestion: header "Alias or standalone", question "Is `<name>` on <product> a standalone type with its own playbook, or an alias of an existing type?", options: `standalone (own playbook)` first, then one per legal base, each with a description.
@@ -86,7 +86,7 @@ AskUserQuestion: header "Alias or standalone", question "Is `<name>` on <product
 
 Capture `<alias-base>` when an alias is chosen.
 
-Outcome: `named` or `taken-from-arg` (append `alias-of-<base>` when an alias base was captured).
+Outcome: `named` or `taken-from-arg` (append `alias-of-<base>` when an alias base was captured), or `resumed-at-playbook` for a declaration that lacks both `playbook` and `alias_of`.
 
 ## Step 3 — Ask the icon + color
 
@@ -169,21 +169,17 @@ Outcome: `path-set` or `path-default`.
 
 ## Step 7 — Write the type block
 
-Each settings mutation is an atomic read-modify-write. Read the current products section, edit the in-memory object, write it back:
+Each settings mutation is one keyed write: `settings-set products --key <a>/<b>/…` replaces exactly the value at that path, creating the missing maps on the way, and leaves every other product, every other type and every other field as it is.
 
 **Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file; `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" core-cli)` prints its absolute path — this plugin's own resolver tries the daemon's `$LAZYCORTEX_PLUGIN_DIRS`, then the dev-vault sibling `plugins/claude/lazycortex-core/`, then the install `~/.claude/plugins/installed_plugins.json` records; exit 1 with an `error:` line means core is not installed — abort and say so. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
 
-```bash
-"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get products
-```
-
-In the parsed object, set `products[<key>].asset_types.<name>` to `{ "icon": <icon>, "start_doc": "<file>:<doc_type>" }` — and add, ONLY when the corresponding step captured a value: `"color": <color>` (Step 3), `"alias_of": <alias-base>` (Step 2), `"default_tools": [...]` (Step 5 — write `[]` for the explicit "never builds anything" answer, omit the key entirely for "the coordinator determines"), `"default_path": <dir>` (Step 6). **Do NOT write `playbook` here** — Step 8 appends it with a second read-modify-write of its own, so a run that aborts between the two leaves a declaration the coordinator reports rather than a wrong law it obeys. Preserve every other product, every other type under this product, and every other field on this product's record. Create the `asset_types` map if the product has none yet. Then write the whole products object back via stdin:
+Compose the type block `{ "icon": <icon>, "start_doc": "<file>:<doc_type>" }` — and add, ONLY when the corresponding step captured a value: `"color": <color>` (Step 3), `"alias_of": <alias-base>` (Step 2), `"default_tools": [...]` (Step 5 — write `[]` for the explicit "never builds anything" answer, omit the key entirely for "the coordinator determines"), `"default_path": <dir>` (Step 6). **Do NOT write `playbook` here** — Step 8 appends it with a second write of its own, so a run that aborts between the two leaves a declaration the coordinator reports rather than a wrong law it obeys. Write the block at its own key:
 
 ```bash
-printf '%s' '<edited-products-json>' | "${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set products
+"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set products --key <key>/asset_types/<name> --value '<block-json>'
 ```
 
-`settings-set` performs the atomic write. Do NOT touch any other settings section in this step.
+`settings-set` performs the atomic write and creates the product's `asset_types` map when it has none yet. Do NOT touch any other settings section in this step.
 
 Outcome: `registered`.
 
@@ -204,9 +200,9 @@ Context (print before asking):
 AskUserQuestion: header "Type playbook", question "Which playbook should spec.coordinator work `<name>` assets on <product> under?", options: the shipped type playbooks plus the own-playbook path, each with the description below.
 ```
 
-- **`lazycortex-specs:lazy-spec.feature-playbook`** — a capability defined design-first, with an architecture step inserted when the asset bears code and the tool set determined once the design is approved.
+- **`lazycortex-specs:lazy-spec.feature-playbook`** — a capability defined design-first, with an opt-in vision and the tool set determined once the design is approved; its plan and code live on the release that ships it.
 - **`lazycortex-specs:lazy-spec.change-playbook`** — a modification of assets that already exist, defined as current-state versus target-state, whose approved design cascades into the assets it targets.
-- **`lazycortex-specs:lazy-spec.bug-playbook`** — a defect whose report IS its definition: no architecture step, and the tools follow from where the defect actually lives.
+- **`lazycortex-specs:lazy-spec.bug-playbook`** — a defect whose report IS its definition, with its own test cases as an opt-in `test-plan.md`, and the tools follow from where the defect actually lives.
 - **`lazycortex-specs:lazy-spec.content-playbook`** — one unit of content described by a single design document, tools preset to `data` at creation, no planning step.
 - **`lazycortex-specs:lazy-spec.research-playbook`** — an asset whose deliverable is the answer itself: a research design approved, then the research tool's report accepted; it closes on an answer, not on shipped code.
 - **own playbook (I will write it)** — the type's flow matches none of the above closely enough to borrow.
@@ -218,13 +214,13 @@ AskUserQuestion: header "Type playbook", question "Which playbook should spec.co
 - `## What this type is` — what an asset of this type covers, and what it is not.
 - `## The definition documents` — which documents define the asset beyond the `start_doc`, and what each is for.
 - `## Tool determination` — how and when the asset's `spec_tools` list is settled.
-- `## The gates of the definition half` — what closes `spec_design_done` and `spec_plan_done` for this type.
+- `## The gates of the definition half` — what closes `spec_design_done` for this type (every type except `release` is design-only: it carries `spec_design_done` / `spec_released` / `spec_cancelled`, and its plan and implementation live on a release).
 - `## The checkboxes of the definition half` — which launch checkboxes hang on the folder-note before work starts, and what each dispatches.
 - `## Typical judgments` — the calls the coordinator makes on this type without asking, and the ones it must ask about.
 
 State in the stub, above the headings, that until a heading is filled the coordinator raises a `[!question]` on the asset rather than guessing the missing rule. Outcome sub-tag `stub-written`.
 
-**Append the field.** Whichever branch ran, write `playbook: <playbook-ref>` into `products[<key>].asset_types.<name>` with the same atomic read-modify-write as Step 7 (`settings-get products` → edit → `settings-set products`), preserving every field Step 7 already wrote.
+**Append the field.** Whichever branch ran, write `playbook: <playbook-ref>` into `products[<key>].asset_types.<name>` with one keyed write, which leaves every field Step 7 wrote in place: `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set products --key <key>/asset_types/<name>/playbook --value '"<playbook-ref>"')`.
 
 Outcome: `playbook-set` (carrying the `shipped` / `stub-written` sub-tag) or `skipped-alias`.
 
@@ -235,7 +231,7 @@ One line per task in the canonical list, with its outcome word. A missing line i
 ## Failure modes
 
 - **`/lazy-spec.add-asset-type` refuses naming an unknown product** — `<product>` has no record in `lazy.settings.json[products]` → register it via `/lazy-spec.product-config`, then re-invoke.
-- **`/lazy-spec.add-asset-type` refuses because the type already exists** — `<name>` is already a key in the product's own `asset_types` → pick a different name, or edit the existing declaration directly.
+- **`/lazy-spec.add-asset-type` refuses because the type already exists** — `<name>` is already a key in the product's own `asset_types` and carries a `playbook` or an `alias_of` → pick a different name, or edit the existing declaration directly. A declaration with neither is not refused: the skill resumes it at Step 8.
 - **`/lazy-spec.add-asset-type` aborts saying an icon is required** — the operator declined every icon option without typing one → re-invoke and supply an iconize name or emoji; the type is not declared without an icon.
 - **`/lazy-spec.add-asset-type` re-asks the start document** — the typed token is not `<file>.md:<doc_type>`, or the doc type is declared nowhere → supply a declared doc type, or declare it first under the product's `doc_types`.
 - **The coordinator raises a `[!question]` saying the type has no playbook** — the declaration carries neither `playbook` nor `alias_of`, usually because a run aborted between Step 7 and Step 8 → re-invoke this skill on the same type to append the missing field; the coordinator picks it up on the asset's next wake.

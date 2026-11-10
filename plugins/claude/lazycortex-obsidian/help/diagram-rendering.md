@@ -1,12 +1,12 @@
 ---
 chapter_type: block
 summary: Install click-to-zoom for mermaid diagram fences in Obsidian; fit-CSS lives in the shared install step, not here.
-last_regen: 2026-09-24
+last_regen: 2026-11-10
 no_diagram: true
 source_skills:
   - lazy-obsidian.diagram-install
-source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
-surface_sha: 3ba506157ab7b9bad0f7385d478328cef9df8df972083eadc563e28a8e72db8c
+source_sha: d4efb669d9f495da116ef0ded12c90451a44794f
+surface_sha: d6b0e2a5f10b82536e24f37226580abb342031fd652342db77d73876f73452f7
 ---
 # Diagram rendering
 
@@ -26,7 +26,7 @@ You do not need the lazycortex-diagram engine installed for this to be useful. A
 
 Running `/lazy-obsidian.diagram-install` takes care of click-to-zoom in a single command. It first locates your repo root via `git rev-parse --show-toplevel` and verifies that `.obsidian/` is present — if Obsidian has never been opened in this repo, it tells you to open it once first, then re-run.
 
-With the vault confirmed, it invokes `/lazy-obsidian.update-plugin mermaid-popup`. That primitive resolves the plugin from the Obsidian community registry, fetches the latest release binaries, deep-merges the opinionated override block (10% zoom step per scroll wheel tick, calibrated for diagram fences), and registers the plugin in `community-plugins.json`. `update-plugin` is version-aware and idempotent, so this step runs unconditionally on every call — "manifest present" doesn't mean "already current". If the registry is unreachable or the plugin isn't found, the skill notes the failure and continues rather than aborting: mermaid SVG fit and theme color still work via the CSS snippets alone (once `/lazy-obsidian.install` has enabled them). You can re-run `/lazy-obsidian.update-plugin mermaid-popup` later, or install the plugin via Obsidian's Community Plugins UI.
+With the vault confirmed, it runs the `plugin-install` verb of the plugin's own command-line tool for `mermaid-popup`. That verb resolves the plugin from the Obsidian community registry, fetches the latest release binaries, applies the opinionated override block (10% zoom step per scroll wheel tick, calibrated for diagram fences), and registers the plugin as a community plugin. The verb is version-aware and idempotent, so this step runs unconditionally on every call — "manifest present" doesn't mean "already current". The run report shows the outcome as three states, `binary`, `overrides`, and `community`, plus any warnings the verb raised. If the registry is unreachable or the plugin isn't found, the skill reports the verb's reason as a failure and continues rather than aborting: mermaid SVG fit and theme color still work via the CSS snippets alone (once `/lazy-obsidian.install` has enabled them). You can re-run `/lazy-obsidian.update-plugin mermaid-popup` later, or install the plugin via Obsidian's Community Plugins UI.
 
 Finally, it checks for a legacy `mermaid-no-bg.css` snippet left behind by an earlier diagram skill. The current engine ships every mermaid fence with a transparent-background theme directive, making that snippet redundant — the skill leaves it in place (it does no harm) and notes it in the run report so you can remove it manually if you want a clean snippets directory.
 
@@ -34,7 +34,7 @@ Finally, it checks for a legacy `mermaid-no-bg.css` snippet left behind by an ea
 
 **Re-running after a plugin update.** `/lazy-obsidian.install` chains into this skill unconditionally. If you update lazycortex-obsidian and want to pick up revised `mermaid-popup` overrides without re-running the full install, run `/lazy-obsidian.diagram-install` directly — it is idempotent and safe to re-run at any time.
 
-**Installing or refreshing the popup plugin independently.** Use `/lazy-obsidian.update-plugin mermaid-popup` directly. It is version-aware and no-ops when the vault already has the current release.
+**Installing or refreshing the popup plugin independently.** Use `/lazy-obsidian.update-plugin mermaid-popup` directly — this is also the route the skill's report points you to when its install step failed. It is version-aware and no-ops when the vault already has the current release.
 
 **Legacy `mermaid-no-bg.css`.** Vaults that previously used an earlier diagram skill may have a `mermaid-no-bg.css` snippet in `.obsidian/snippets/`. The engine's built-in transparent-background directive makes it redundant. The skill detects it, leaves it in place, and notes it in the run report so you can remove it manually if you want a clean snippets directory.
 

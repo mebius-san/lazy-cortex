@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Common questions about installing lazycortex-experts, the class map, composing specialists, auditing the composition, and the sixteen generic agents' lane boundaries.
-last_regen: 2026-10-24
+last_regen: 2026-11-10
 no_diagram: true
 source_skills:
   - lazy-experts.install
@@ -22,8 +22,8 @@ source_skills:
   - lazy-experts.researcher
   - lazy-experts.editor
   - lazy-experts.fiction-editor
-source_sha: 33e8a296cb2bda2f7c06945ca9d46e24ed4c1858
-surface_sha: 830a292079eea6b57c08abb6938fc4252dcf20f304a6b228e752a281a2f9abd8
+source_sha: 94bcae6d8529797e085b2e53adf9c9593919fb13
+surface_sha: e8067df971778384259f4152e4f03ad6957b38002cc23134e62bbc076073f4dc
 ---
 # Frequently asked questions
 
@@ -117,7 +117,7 @@ Nothing in the agent itself — both keys compose the same `lazy-experts.designe
 
 ## Where does the architect fit between the designer and the planner?
 
-The architect turns an approved design — behavior already settled — into a code-structure document: which modules exist, which way the dependencies point, what is public contract versus internals, what data has to migrate, and what it costs the callers that already exist. It answers *how the code is shaped*, which sits between the designer's *what and why* and the planner's *in what order*. Dispatch it over the designer when the behavior is decided and only the shape of the code is open, and over the planner when nothing should be sequenced into tasks yet. Like the other technical-lifecycle agents, it's independently dispatchable — hand it an approved design spec and a target `architecture.md` path directly, without going through the expert runtime. The architecture document it writes carries five sections — overview, module boundaries, data & contracts, dependencies & children, and migration & cost — and the last two are optional: the architect drops them whole, heading included, when the change pulls in no dependency, proposes no child module, and migrates no data, rather than padding them with content that isn't there. When the design leaves a behavioural question open, the architect derives it from the design's principles and builds on it as stated input; only a gap those principles don't cover goes back as a `[!question]` in the architecture document, and any other call about the structure or the document it settles silently.
+The architect turns approved designs — behavior already settled — into the product's code-structure document, `architecture.md`: a single document at the product root rather than one per asset. It revises that document as the first step of every release build, reading the current one plus the designs of the assets the release includes, and returns it unchanged when it already covers what those designs need. The document records which modules exist, which way the dependencies point, what is public contract versus internals, what data has to migrate, and what it costs the callers that already exist. It answers *how the code is shaped*, which sits between the designer's *what and why* and the planner's *in what order*. Dispatch it over the designer when the behavior is decided and only the shape of the code is open, and over the planner when nothing should be sequenced into tasks yet. Like the other technical-lifecycle agents, it's independently dispatchable — hand it an approved design spec and a target `architecture.md` path directly, without going through the expert runtime. The architecture document it writes carries seven sections — Overview, Terms, Module boundaries, Data & contracts, Dependencies, Migration & cost, and Proposed assets — and four of them are optional: Terms, Dependencies, Migration & cost, and Proposed assets are dropped whole, heading included, when the document has nothing to say there, rather than padded with content that isn't there. Proposed assets is where it records a capability the spec tree is missing — one proposal per asset — and it only proposes; it never creates the asset itself. When the design leaves a behavioural question open, the architect derives it from the design's principles and builds on it as stated input; only a gap those principles don't cover goes back as a `[!question]` in the architecture document, and any other call about the structure or the document it settles silently.
 
 ---
 

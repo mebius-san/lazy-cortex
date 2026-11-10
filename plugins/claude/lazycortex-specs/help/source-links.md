@@ -1,98 +1,89 @@
 ---
 chapter_type: block
-summary: Resolve repos, dependencies, and build forge-correct source URLs so every spec link stays accurate regardless of where code is hosted.
-last_regen: 2026-10-06
+summary: Build root links from spec documents to the product's code files and resolve product dependencies, so every spec link opens the file it names.
+last_regen: 2026-11-10
 diagram_spec:
-  anchor: "How the three skills compose"
-  request: "Show how lazy-spec.resolve-repo, lazy-spec.resolve-dependency, and lazy-spec.source-url call each other: lazy-spec.source-url calls lazy-spec.resolve-repo to get RepoInfo; lazy-spec.resolve-dependency calls lazy-spec.resolve-repo internally for internal-product and internal-repo entries; lazy-spec.resolve-repo reads lazy.settings.json[repos] and inspects the git remote. Output is a URL or a dep record."
+  anchor: "How the two skills compose"
+  request: "Show how lazy-spec.source-url and lazy-spec.resolve-dependency work: lazy-spec.source-url takes a repo-relative path, returns a root link [name](/path) for a file or the backticked path for a folder; lazy-spec.resolve-dependency classifies an entry as product or external, reads the product record from lazy.settings.json[products] for a product entry and returns a spec wikilink, and returns the spec_url and dev_url of an external entry as-is. Output is a link or a dep record."
 source_skills:
-  - lazy-spec.resolve-repo
   - lazy-spec.resolve-dependency
   - lazy-spec.source-url
-source_sha: 2b8e9e79da15a0e25e187f4c05ae6011a36f0740
-surface_sha: c442cd3c1e28656ef26a5512980127472666fd0fbb6616a9ea22e0f0e5374d1a
+source_sha: 1242c53133a1bcc792827f679b54f13e19208c06
+surface_sha: 3f74c618ec5a6192144f466a79225e444c30031c8eef7870c72f779ce9858424
 ---
-# Source links — repos, dependencies, and forge-correct URLs
+# Source links — root links and dependencies
 
-When a spec document links to source code or records a dependency on another product, it needs to know which git forge hosts the code and what path scheme that forge uses. GitHub uses `/blob/<branch>/<path>`, GitLab uses `/-/blob/<branch>/<path>`, Bitbucket uses `/src/<branch>/<path>`, and the list goes on. Baking that knowledge into every skill that emits a link is fragile; the source-links block centralises it in three focused primitives so the rest of the spec system never has to think about forge differences.
+A product's code lives in the same repository as its spec catalog, so a spec document links to code with a plain in-repo link written from the repository root: `[flip_gate.py](/plugins/claude/lazycortex-specs/bin/flip_gate.py)`. Obsidian opens such a link to a code or markdown file directly. The source-links block keeps every emitter on that one form through two small primitives.
 
-`/lazy-spec.resolve-repo` is the foundation: given a repo key from your settings, it reads the git remote, normalises the URL, and identifies the forge. `/lazy-spec.source-url` sits above it and builds one correct URL for any file or directory in that repo, handling branch pinning transparently. `/lazy-spec.resolve-dependency` sits beside them and turns the three flavours of dependency entry — internal product, internal repo, external — into a ready-to-use record containing both a spec wikilink and a dev URL.
+`/lazy-spec.source-url` builds the link: give it a repo-relative path and it returns `[<basename>](/<path>)` for a file, or the path in backticks for a folder. `/lazy-spec.resolve-dependency` turns one entry of a product's `dependencies` array — another product, or an external tool — into a record with a spec link and, for an external tool, its source URL.
 
 ## When you'd use this
 
-- A skill such as `/lazy-spec.create-from-code` or `/lazy-spec.sync-with-code` aborts with a forge or repo error, and you need to diagnose or fix the registration.
-- You're looking at a spec document with a broken or stale source link and want to understand where the configuration gap is.
-- You've registered a product hosted on a self-hosted GitLab or Gitea instance and want to confirm the forge override is resolving correctly.
-- You're running `/lazy-spec.product-config` and it asks about dependencies — the wizard calls `/lazy-spec.resolve-dependency` to classify each entry, so understanding the three entry shapes (`product:`, `repo:`, `external:`) helps you answer the wizard accurately.
-- A spec doc's `## Sources` section has incorrect or missing links after a branch merge and you need to trace which part of the resolution chain produced the wrong URL.
+- A spec document carries a code link that opens nothing, or a folder link that made Obsidian create an empty note, and you want to know what the right form is.
+- `/lazy-spec.audit` reports a root link to a folder or a root link to a missing file, and you want to fix it by hand. The audit does not report forge links into this repository: the catalog migration rewrites those into root links.
+- You're running `/lazy-spec.product-config` and it asks about dependencies — the wizard calls `/lazy-spec.resolve-dependency` to classify each entry, so knowing the two entry shapes (`product:`, `external:`) helps you answer accurately.
 
 ## How it fits together
 
-Everything flows through `/lazy-spec.resolve-repo`. You give it a repo key — a string you chose when you ran `/lazy-spec.product-config` to register the repo, such as `backend` or `shared`. The skill reads that record from `lazy.settings.json[repos]`, runs `git remote get-url origin` on the local checkout, normalises the URL from SSH to HTTPS if needed, and identifies the forge by matching the hostname against the known-forges table. What comes back is a `RepoInfo` record: `local_path`, `branch`, `remote_url`, `host`, `owner`, `repo`, `forge`, and `base_url`. Each skill run caches the record for its duration, so building hundreds of source URLs for a large codebase doesn't shell out on every call.
+`/lazy-spec.source-url` is the only place that writes a code link. A link always starts with `/` and is relative to the repository root, never to the document holding it. It points at a file, never at a folder: Obsidian reads a link to a folder as a new note and creates it, so the skill hands back a folder as `` `path/to/folder/` `` text instead. The link always opens the file in the current tree — there is no branch in it and nothing to rewrite after a branch merges. A spec mirror in another repository carries the link as written, and there it does not resolve, because the code is not copied along.
 
-A repo's `local_path` is usually an absolute path to a separate checkout, but when the product's spec lives in the same repo as its code, you can register `local_path: "."` instead — the skill expands it to the current checkout's root at resolve time, so the same registration works whether you're running from a dev checkout or a runtime checkout in a different location.
+Source links belong in the product `tech.md`, in `code-plan.md` and `test-plan.md`, and in the `## Related code / logs` section of a `bug.md`. Design, vision, use-cases, ui-design and architecture documents describe behaviour and shape and carry no code links.
 
-`/lazy-spec.source-url` calls `/lazy-spec.resolve-repo` first, then picks up the forge key and looks up the URL template for the requested kind — `blob` for a file link, `tree` for a directory link. It substitutes `base_url`, branch, and path into the template and returns the complete URL. When the calling doc pins a branch via `spec_source_branches`, you pass it as the optional `branch` argument and the URL points at the feature branch instead of the default. The skill is stateless and idempotent: same inputs, same URL, every time.
-
-`/lazy-spec.resolve-dependency` handles the dependency side. A product's `dependencies` array in `lazy.settings.json` accepts three entry shapes. A `product:` entry names another product by compound key; the skill looks that product up, calls `/lazy-spec.resolve-repo` on its source repo, and returns a wikilink to its design doc (at the product's flattened spec root — no `docs/` subfolder) plus a `dev_link` pointing at the repo root. A `repo:` entry names a repo key directly; the skill resolves it the same way and finds whichever product declares that repo as its source. An `external:` entry already has `spec_url` and `dev_url` spelled out — the skill validates the fields are present and returns them as-is. The output is always `{kind, spec_link, dev_link, local_spec_path?}` — one consistent shape regardless of entry flavour, which is what callers like `/lazy-spec.product-config` import classification expect.
+`/lazy-spec.resolve-dependency` handles the dependency side. A product's `dependencies` array in `lazy.settings.json` accepts two entry shapes. A `product:` entry names another product by compound key; the skill looks it up and returns a wikilink to its design doc — that product's code is in this repository too, so the wikilink is all the navigation the record carries. The record also lists the product's own code locations as `code_paths`, each one a backticked path and never a link, because a link to a folder makes Obsidian create a note there; a design-only product has no `source` and so no `code_paths`. An `external:` entry already has `spec_url` and `dev_url` spelled out — the skill validates that all three fields (`name`, `spec_url`, `dev_url`) are present and returns them as-is, with the spec link as a plain markdown link. The output is always `{kind, spec_link, dev_link?, local_spec_path?}`, with `dev_link` present only for an external tool and `code_paths` present only for a product that has a `source`.
 
 ## Common adjustments
 
-**Registering a repo** — if `/lazy-spec.resolve-repo` aborts because a key is not registered, run `/lazy-spec.product-config` to add or edit the product that owns that repo. The wizard writes `lazy.settings.json[repos][<key>]` with `local_path` and `branch`. For a product whose spec and code share one repo, the wizard can set `local_path` to `"."` rather than an absolute path. Do not edit the settings file by hand.
+**Linking to a file by hand** — write `[<name>](/<repo-relative path>)`. Any display text works; the target must start with `/` and name a file.
 
-**Adding a forge override for a self-hosted instance** — if the hostname is not in the known-forges table (for example, `gitlab.internal.company.example`), `/lazy-spec.resolve-repo` aborts with a message naming the missing key. Run `/lazy-spec.product-config`, find the repo record, and set `forge` to one of the supported keys (`github`, `gitlab`, `bitbucket`, `gitea`, `forgejo`, `sourcehut`) — whichever matches the instance's URL scheme. The skill writes the override.
+**Naming a folder** — write its path in backticks, `` `src/chapter/` ``, without a link.
 
-**Changing the default branch** — the `branch` field in the repo record controls which branch source URLs default to. If your project has moved its default branch, run `/lazy-spec.product-config` to update the record. Existing spec docs that had the old branch pinned via `spec_source_branches` are reconciled by `/lazy-spec.rebase-pins` once the old branch merges or is deleted.
+**Adding or editing a product dependency** — run `/lazy-spec.product-config` in edit mode to extend the `dependencies` array. The wizard accepts both entry shapes (`product:`, `external:`) and calls `/lazy-spec.resolve-dependency` to validate each entry before writing. A dependency on code of this repository is a `product:` entry naming the product that owns that code. You do not edit the `products` section by hand.
 
-**Adding or editing a product dependency** — run `/lazy-spec.product-config` in edit mode to extend the `dependencies` array. The wizard accepts all three entry shapes (`product:`, `repo:`, `external:`) interactively and calls `/lazy-spec.resolve-dependency` to validate each entry before writing. You do not edit the `products` section by hand.
+## When resolution stops
 
-## How the three skills compose
+- **Malformed dependency entry, or product not found** — each `dependencies` entry must match exactly one of the two shapes, and a `product:` key must be registered. Correct the entry or register the missing product through `/lazy-spec.product-config`. Entries are resolved one per call; the primitive never fetches the links it returns.
+
+`/lazy-spec.source-url` refuses nothing and does not check that a file exists; `/lazy-spec.audit` reports a link whose target is missing.
+
+## How the two skills compose
 
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
   callerSourceUrl[lazy-spec.source-url]
+  pathKind{File or folder?}
+  returnLink[Return root link]
+  returnBackticked[Return backticked path]
   callerResolveDep[lazy-spec.resolve-dependency]
-  resolveRepo[lazy-spec.resolve-repo]
-  readSettings[Read lazy.settings.json repos]
-  inspectRemote[Inspect git remote]
   entryType{Entry type?}
-  buildRepoInfo[Build RepoInfo]
-  returnUrl[Return URL]
+  readProducts[Read lazy.settings.json products]
   returnDepRecord[Return dep record]
 
-  callerSourceUrl -->|calls| resolveRepo
-  callerResolveDep -->|calls internally| entryType
-  entryType -->|internal-product or internal-repo| resolveRepo
+  callerSourceUrl -->|classifies| pathKind
+  pathKind -->|file| returnLink
+  pathKind -->|folder| returnBackticked
+  callerResolveDep -->|classifies| entryType
+  entryType -->|product| readProducts
+  readProducts -->|spec wikilink| returnDepRecord
   entryType -->|external| returnDepRecord
-  resolveRepo -->|reads| readSettings
-  resolveRepo -->|inspects| inspectRemote
-  readSettings -->|provides repos map| buildRepoInfo
-  inspectRemote -->|provides remote URL| buildRepoInfo
-  buildRepoInfo -->|returns RepoInfo| callerSourceUrl
-  callerSourceUrl -->|produces| returnUrl
-  buildRepoInfo -->|returns RepoInfo| callerResolveDep
-  callerResolveDep -->|produces| returnDepRecord
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
-  classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
   classDef store fill:#5f3a1e,stroke:#e2904a,color:#fff
 
   class callerSourceUrl entry
   class callerResolveDep entry
+  class pathKind guard
   class entryType guard
-  class resolveRepo action
-  class readSettings store
-  class inspectRemote action
-  class buildRepoInfo action
-  class returnUrl success
+  class readProducts store
+  class returnLink success
+  class returnBackticked success
   class returnDepRecord success
 ```
 
 ## See also
 
-- [install-and-audit](install-and-audit.md) — register products and repos via `/lazy-spec.product-config`, which is the only writer for the settings this block reads.
-- [code-sync](code-sync.md) — `/lazy-spec.sync-with-code` and `/lazy-spec.rebase-pins` are the primary callers of `/lazy-spec.source-url` in normal operation.
+- [install-and-audit](install-and-audit.md) — register products via `/lazy-spec.product-config`, the only writer for the settings this block reads, and run `/lazy-spec.audit`, which reports broken code links.
+- [code-sync](code-sync.md) — `/lazy-spec.sync-with-code` is the primary caller of `/lazy-spec.source-url` in normal operation.
 - [asset-to-release](walkthroughs/asset-to-release.md) — walkthrough that exercises source-link generation as part of the full gate journey.

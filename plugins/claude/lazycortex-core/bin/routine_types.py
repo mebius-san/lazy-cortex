@@ -13,9 +13,33 @@ from __future__ import annotations
 
 from typing import overload
 
+import fnmatch
+import hashlib
+import json
+import os
+import re
 import subprocess
 import sys
+import time
+from datetime import UTC, datetime
+from pathlib import Path, PurePath
 
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import cron  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import expert_runtime  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import external_dirs  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import frontmatter_parser  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import plugin_dirs  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import repo_walk  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import runtime_state  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import settings_cli  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from constants import (  # pylint: disable=import-error
   BOT_EMAIL_DOMAIN, EnvVar, JobCollectKey, JobConfigKey, JobErrorCategory, JobStatus, RoutineKey,
@@ -24,15 +48,23 @@ from constants import (  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  import re
-  from pathlib import Path
+  pass
 
 
 VALID_TYPES = { "subprocess", "inbox", "schedule", "git", "md-scan" }
 
+# default per-routine subprocess timeout; overridable per-routine via routines[<name>].timeout_sec
+DEFAULT_TIMEOUT_SEC = 300
+
 # (routine name, flag) pairs whose retired-key warning already went out this process — the
 # registry is re-validated every daemon iteration, so the warning must not repeat per pass
+# waiver: module-level mutable state, one per process by design — it must outlive every validation pass of the daemon
 _RETIRED_FLAGS_WARNED: set[tuple[str, str]] = set()
+# stderr warning for a retired routine key, filled with the routine name and the flag
+RETIRED_FLAG_WARNING_TEMPLATE = (
+  "routine '{name}': '{flag}' is retired and ignored — remove it "
+  "(lazy-core.doctor offers the prune)\n"
+)
 
 # how long a transient-error inbox bundle stays parked before it is retired for a retry —
 # matches the doctor's dead-job takeover threshold so both retry paths age out together
@@ -128,8 +160,30 @@ COMMON_ALLOWED = {
   RoutineKey.HOOKS_ENABLED, RoutineKey.GIT_AUTHOR,
 }
 
+# Separator used inside `LAZYCORTEX_ROUTINE_PROTOCOLS`. Cannot be `:`
+# because protocol IDs are `<plugin-name>:<artifact-name>` and already
+# contain colons. Semicolon is safe — no current protocol ID carries one
+# and the convention is single-token-with-namespace.
+ROUTINE_PROTOCOLS_ENV = "LAZYCORTEX_ROUTINE_PROTOCOLS"
+_ROUTINE_PROTOCOLS_SEP = ";"
 
-def _routine_protocols(cfg: dict) -> list[str]:
+# The flat sub-keys a composite filter block accepts — reused for the top-level
+# `filter` dict, each `filter.any_of[i]` member, and the any_of/flat-key exclusion check
+_FILTER_COMPOSITE_SUBKEYS = { "frontmatter", "folder_note", "basename" }
+
+# Walk-list cache shared by every md-scan routine of one daemon iteration: sibling
+# routines tick back-to-back, and each RepoWalk costs git subprocesses. TTL sits
+# below the minimum routine interval (60s) so every tick still re-walks once.
+# opt: no tracked file is added or removed between two md-scan routines of one iteration closer
+# than the TTL apart; a consumer that creates files only adds them to the next tick's walk.
+# waiver: module-level mutable cache — the daemon main loop is serial by contract, no locking needed
+_WALK_CACHE: dict[str, tuple[float, list[Path]]] = {}
+_WALK_CACHE_TTL_SEC = 30.0
+# waiver: filesystem sentinel path under the gitignored runtime log tree, not a reusable cross-module key
+_MD_SCAN_STATE_DIR = ".logs/lazy-core/runtime/md-scan-state"
+
+
+def routine_protocols(cfg: dict) -> list[str]:
   """
   Return the routine's declared protocols list.
 
@@ -144,9 +198,9 @@ def _routine_protocols(cfg: dict) -> list[str]:
   Returns:
     The declared protocol IDs, or an empty list when none were declared.
   """
-  p = cfg.get(RoutineKey.PROTOCOLS)
-  if isinstance(p, list):
-    return list(p)
+  declared = cfg.get(RoutineKey.PROTOCOLS)
+  if isinstance(declared, list):
+    return list(declared)
   # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
   single = cfg.get("protocol")
   if isinstance(single, str):
@@ -154,15 +208,7 @@ def _routine_protocols(cfg: dict) -> list[str]:
   return []
 
 
-# Separator used inside `LAZYCORTEX_ROUTINE_PROTOCOLS`. Cannot be `:`
-# because protocol IDs are `<plugin-name>:<artifact-name>` and already
-# contain colons. Semicolon is safe — no current protocol ID carries one
-# and the convention is single-token-with-namespace.
-ROUTINE_PROTOCOLS_ENV = "LAZYCORTEX_ROUTINE_PROTOCOLS"
-_ROUTINE_PROTOCOLS_SEP = ";"
-
-
-def routine_protocols_env(cfg: dict) -> dict[str, str]:
+def build_routine_protocols_env(cfg: dict) -> dict[str, str]:
   """
   Build the environment overlay that propagates declared protocols to a subprocess.
 
@@ -181,17 +227,17 @@ def routine_protocols_env(cfg: dict) -> dict[str, str]:
     `{LAZYCORTEX_ROUTINE_PROTOCOLS: "<id1>;<id2>;..."}` when the routine declared
     any protocols, else an empty dict.
   """
-  protocols = _routine_protocols(cfg)
+  protocols = routine_protocols(cfg)
 
   # guard: routine declared no protocols — overlay is empty
   if not protocols:
     return {}
 
   # encode the declared list
-  return protocols_env(protocols)
+  return build_protocols_env(protocols)
 
 
-def protocols_env(protocols: list[str]) -> dict[str, str]:
+def build_protocols_env(protocols: list[str]) -> dict[str, str]:
   """
   Build the environment overlay that hands an explicit protocol list to a subprocess.
 
@@ -218,7 +264,7 @@ def protocols_env(protocols: list[str]) -> dict[str, str]:
   return { ROUTINE_PROTOCOLS_ENV: _ROUTINE_PROTOCOLS_SEP.join(protocols) }
 
 
-def routine_hooks_env(cfg: dict) -> dict[str, str]:
+def build_routine_hooks_env(cfg: dict) -> dict[str, str]:
   """
   Build the environment overlay that gates lazycortex hooks inside a routine's subprocess.
 
@@ -248,7 +294,7 @@ def routine_hooks_env(cfg: dict) -> dict[str, str]:
   }
 
 
-def routine_git_author_env(cfg: dict) -> dict[str, str]:
+def build_routine_git_author_env(cfg: dict) -> dict[str, str]:
   """
   Build the environment overlay that stamps the routine's git identity on its commits.
 
@@ -286,9 +332,8 @@ def routine_git_author_env(cfg: dict) -> dict[str, str]:
   # The overlay carries the author pair alone; a committer variable is NEVER exported —
   # the committer stays the spawning process's own identity.
 
-  # Decision: export the author pair only, never the committer — both identity consumers read the author
-  # the daemon's loop-detect and the coordinators' operator-vs-bot check both attribute an
-  # automatic commit by its author, so touching the committer would change nothing they see
+  # Decision: export the author pair only, not the committer too — loop-detect and the operator-vs-bot check both
+  # attribute an automatic commit by its author, so a committer overlay would change nothing they see
 
   # stamp the declared identity onto every commit the subprocess makes
   # waiver: environment-variable names and small internal subkeys, not reusable domain keys
@@ -299,7 +344,7 @@ def routine_git_author_env(cfg: dict) -> dict[str, str]:
   }
 
 
-def routine_subprocess_env(cfg: dict) -> dict[str, str]:
+def build_routine_subprocess_env(cfg: dict) -> dict[str, str]:
   """
   Build the full environment overlay a routine's spawned subprocess inherits.
 
@@ -314,12 +359,12 @@ def routine_subprocess_env(cfg: dict) -> dict[str, str]:
     The merged overlay: the declared-protocols entry when the routine has any, the git-author
     pair when the routine declares one, plus the hook allow-list entry, which is always present.
   """
-  return { **routine_protocols_env(cfg), **routine_git_author_env(cfg), **routine_hooks_env(cfg) }
+  return { **build_routine_protocols_env(cfg), **build_routine_git_author_env(cfg), **build_routine_hooks_env(cfg) }
 
 
 def parse_routine_protocols_env(env_value: str | None) -> list[str]:
   """
-  Parse the env-var value produced by `routine_protocols_env` back into a list.
+  Parse the env-var value produced by `build_routine_protocols_env` back into a list.
 
   Args:
     env_value: Raw value of the `LAZYCORTEX_ROUTINE_PROTOCOLS` env var, or None.
@@ -331,18 +376,13 @@ def parse_routine_protocols_env(env_value: str | None) -> list[str]:
   # guard: env var is empty or unset — nothing to parse
   if not env_value:
     return []
-  return [ p for p in env_value.split(_ROUTINE_PROTOCOLS_SEP) if p ]
+  return [ entry for entry in env_value.split(_ROUTINE_PROTOCOLS_SEP) if entry ]
 
 
 class RoutineConfigError(ValueError):
   """
   Raised when a routine entry's config does not conform to its type schema.
   """
-
-
-# the flat sub-keys a composite filter block accepts — reused for the top-level
-# `filter` dict, each `filter.any_of[i]` member, and the any_of/flat-key exclusion check
-_FILTER_COMPOSITE_SUBKEYS = { "frontmatter", "folder_note", "basename" }
 
 
 def _validate_filter_composite(name: str, flt: dict, ctx: str) -> None:
@@ -484,7 +524,9 @@ def validate_routine_entry(name: str, cfg: dict) -> None:
   # markdown-scan routine walks a configured set of path globs looking for matching documents. Every
   # type accepts only its own declared fields plus a small shared vocabulary; a field outside that
   # closed set, or a type outside this fixed list, is rejected outright rather than silently ignored,
-  # so a mistyped configuration key surfaces immediately instead of quietly doing nothing.
+  # so a mistyped configuration key surfaces immediately instead of quietly doing nothing. The one
+  # exception is the retired worktree flags: they stay in the shared vocabulary of every type so an
+  # older settings file keeps validating, and are ignored with a warning.
 
   # Contract:
   # An entry that passes this call carries a recognised type, every field that type's
@@ -508,8 +550,7 @@ def validate_routine_entry(name: str, cfg: dict) -> None:
   # waiver: internal schema-dict subkey, single-source set in SCHEMAS
   required = schema["required"]
   # waiver: internal schema-dict subkey, single-source set in SCHEMAS
-  optional = schema["optional"]
-  allowed = required | optional | COMMON_ALLOWED
+  allowed = required | schema["optional"] | COMMON_ALLOWED
 
   # the declared fields are checked against the schema in both directions
   keys = set(cfg)
@@ -546,9 +587,11 @@ def validate_routine_entry(name: str, cfg: dict) -> None:
   # # Retired config field tolerance
   # A configuration field a later version drops must never break a consumer still carrying it in an
   # older settings file — an already-working setup does not start refusing to run just because the
-  # schema moved on. Such a field is silently ignored rather than rejected, with a warning surfaced
-  # once per process so an operator eventually notices, rather than repeated on every validation
-  # pass for the life of the process; removing the field from the file is left to a maintenance pass.
+  # schema moved on. Such a field is ignored rather than rejected, with a warning surfaced once per
+  # process for each routine that carries it, so an operator eventually notices, rather than
+  # repeated on every validation pass for the life of the process; several routines carrying the
+  # field each produce their own warning. Removing the field from the file is left to a
+  # maintenance pass.
 
   # Orphaned keys of the retired routine-side worktree path: still ALLOWED (a consumer's config
   # must not start failing validation over a dead flag) but ignored with a warning, until
@@ -558,10 +601,7 @@ def validate_routine_entry(name: str, cfg: dict) -> None:
   for flag in ( "isolate", "allow_merge" ):
     if flag in cfg and (name, flag) not in _RETIRED_FLAGS_WARNED:
       _RETIRED_FLAGS_WARNED.add((name, flag))
-      sys.stderr.write(
-        f"routine '{name}': '{flag}' is retired and ignored — remove it "
-        f"(lazy-core.doctor offers the prune)\n"
-      )
+      sys.stderr.write(RETIRED_FLAG_WARNING_TEMPLATE.format(name = name, flag = flag))
 
   # the hook allow-list reaches a subprocess environment as a joined string, where a bare string
   # would expand character by character into a list of nonsense hook names
@@ -588,7 +628,7 @@ def validate_routine_entry(name: str, cfg: dict) -> None:
   # Domain(runtime.bot-identity):
   # # A system identity is recognisable by its address
   # Several parts of the runtime decide whether a commit was made by a person or by the system,
-  # and they decide it from the committer's address. The system therefore commits under addresses
+  # and they decide it from the author's address. The system therefore commits under addresses
   # in one reserved domain that no person can receive mail at, and membership of that domain is
   # what the question actually asks. An address outside it, given to a part of the system, makes
   # that part indistinguishable from an operator: everything it commits reads as a human gesture,
@@ -712,13 +752,88 @@ def validate_routine_entry(name: str, cfg: dict) -> None:
       )
 
 
+def dispatch_subprocess(repo_root: Path, name: str, cfg: dict) -> dict:
+  """
+  Run a `type='subprocess'` routine on the current tick and produce its result record.
+
+  Supports two shapes, exactly one of which a routine declares:
+    - `command`: run the plugin binary synchronously and report its exit code and the tails of its
+      standard output and error.
+    - `expert + request`: queue one job for the named expert, deduplicated by the routine name, so a
+      still-active job from a prior tick blocks re-queueing on the next tick.
+
+  Args:
+    repo_root: Absolute path to the repository the daemon is driving.
+    name: Registered routine name as it appears in `lazy.settings.json[routines]`.
+    cfg: Routine configuration sub-section, carrying either `command` or `expert` + `request`.
+
+  Returns:
+    A result record with `name`, `exit`, `duration_sec`, and shape-specific fields. The `command`
+    shape includes `stdout_tail` and `stderr_tail`; the `expert` shape includes `dispatched_count`.
+    Failures populate an `error` field and set `exit` to `-1`.
+  """
+  started = time.time()
+
+  # an expert routine queues a job instead of running a subprocess
+  if RoutineKey.EXPERT in cfg:
+    try:
+      result = expert_runtime.dispatch_job(
+        # waiver: small internal subkey, not a reusable domain key
+        Path(repo_root).resolve(), cfg[RoutineKey.EXPERT], dict(cfg["request"]),
+        protocols = routine_protocols(cfg),
+        dedup_key = name,
+      )
+      return {
+        TickResultKey.NAME: name, TickResultKey.EXIT: 0,
+        TickResultKey.DURATION_SEC: time.time() - started,
+        # waiver: small internal subkey, not a reusable domain key
+        "dispatched_count": 0 if result.get("status") == "already-queued" else 1,
+      }
+    # any dispatch fault is reported in the tick result — the daemon must not die on one routine
+    except Exception as error:
+      return {
+        TickResultKey.NAME: name, TickResultKey.EXIT: -1,
+        TickResultKey.DURATION_SEC: time.time() - started,
+        TickResultKey.ERROR: f"dispatch_job failed: {error}",
+      }
+
+  # a command routine resolves its binary through the plugin-dir registry and blocks on it
+  try:
+    argv = plugin_dirs.resolve_routine_command(cfg[RoutineKey.COMMAND])
+    subprocess_env = { **os.environ, **build_routine_subprocess_env(cfg) }
+    proc = subprocess.run(
+      argv, cwd = repo_root, timeout = cfg.get(RoutineKey.TIMEOUT_SEC, DEFAULT_TIMEOUT_SEC),
+      capture_output = True, text = True, env = subprocess_env, check = False, encoding = "utf-8",
+    )
+    return {
+      TickResultKey.NAME: name, TickResultKey.EXIT: proc.returncode,
+      TickResultKey.DURATION_SEC: time.time() - started,
+      "stdout_tail": proc.stdout[-2000:], "stderr_tail": proc.stderr[-2000:],
+    }
+  except subprocess.TimeoutExpired:
+    return {
+      TickResultKey.NAME: name, TickResultKey.EXIT: -1,
+      TickResultKey.DURATION_SEC: time.time() - started, TickResultKey.ERROR: "timeout",
+    }
+  except FileNotFoundError as error:
+    return {
+      TickResultKey.NAME: name, TickResultKey.EXIT: -1,
+      TickResultKey.DURATION_SEC: time.time() - started, TickResultKey.ERROR: f"resolve: {error}",
+    }
+  except Exception as error:  # broad catch — daemon must not die on a single routine failure
+    return {
+      TickResultKey.NAME: name, TickResultKey.EXIT: -1,
+      TickResultKey.DURATION_SEC: time.time() - started, TickResultKey.ERROR: f"unexpected: {error}",
+    }
+
+
 def dispatch_routine(repo: Path, name: str, cfg: dict) -> dict:
   """
   Dispatch one routine tick and return the standard tick result dict.
 
   Switches on `cfg["type"]` (default `subprocess`). For non-default types,
   delegates to the per-type handler in this module. For `subprocess`, delegates
-  to `runtime_daemon.dispatch_subprocess` (lazy import to avoid module cycle).
+  to `dispatch_subprocess`.
 
   Args:
     repo: Path-like reference to the repository the tick runs in.
@@ -734,10 +849,8 @@ def dispatch_routine(repo: Path, name: str, cfg: dict) -> dict:
   """
   # waiver: routine-type token, single-source set in VALID_TYPES/SCHEMAS, not a reusable cross-module key
   rtype = cfg.get(RoutineKey.TYPE, "subprocess")
+  # waiver: routine-type token, single-source set in VALID_TYPES/SCHEMAS, not a reusable cross-module key
   if rtype == "subprocess":
-    # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-    # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-    from runtime_daemon import dispatch_subprocess  # pylint: disable=import-error
     return dispatch_subprocess(repo, name, cfg)
   # waiver: routine-type token, single-source set in VALID_TYPES/SCHEMAS, not a reusable cross-module key
   if rtype == "inbox":
@@ -752,13 +865,9 @@ def dispatch_routine(repo: Path, name: str, cfg: dict) -> dict:
   if rtype == "md-scan":
     return dispatch_md_scan(repo, name, cfg)
 
-  # guard: validator should have caught this — defensive last-resort
+  # defensive last resort: the validator rejects an unknown type before dispatch
   raise RoutineConfigError(f"routine '{name}': unknown type '{rtype}' at dispatch time")
 
-
-# Per-type handlers — implementations land in their own phases (C/D/E).
-# Until then, calling these returns a clean error result so the daemon's
-# tick loop doesn't crash; just logs and moves on.
 
 def _check_inout(pred: dict, actual: object) -> bool:
   """
@@ -779,11 +888,11 @@ def _check_inout(pred: dict, actual: object) -> bool:
   # waiver: predicate-filter schema subkey, not a reusable domain key
   exclude = pred.get("not_in") or []
 
-  # guard: allow-list declared and value outside it
+  # a declared allow-list rejects a value outside it
   if include and actual not in include:
     return False
 
-  # guard: deny-list declared and value inside it
+  # a declared deny-list rejects a value inside it
   if exclude and actual in exclude:
     return False
   return True
@@ -825,11 +934,6 @@ def _match_filter(flt: dict, frontmatter: dict, path: object = None) -> bool:
   `basename` matches `Path(path).name`. When `path` is `None` the item is
   treated as not a folder note and as having no basename (`None`).
 
-  Guarantees:
-    - An item with no declared sub-condition in the filter block passes unconditionally.
-    - Every declared flat sub-condition must all pass; under `any_of`, passing any one alternative
-      composite is sufficient.
-
   Args:
     flt: Composite filter block from the routine config — may be empty.
     frontmatter: Parsed frontmatter dict from the item under evaluation.
@@ -853,12 +957,6 @@ def _match_filter(flt: dict, frontmatter: dict, path: object = None) -> bool:
   # allow-list and a deny-list that both must accept the value, so a field can be constrained from
   # either or both directions independently.
 
-  # Contract:
-  # An item with no declared sub-condition in `flt` passes unconditionally — an empty or absent
-  # filter block never rejects anything. Every declared flat sub-condition (`frontmatter`,
-  # `folder_note`, `basename`) must all pass for the item to pass; under `any_of`, the item passes
-  # when at least one alternative composite passes.
-
   # an OR-composite delegates to its members instead of the flat sub-keys below
   # waiver: filter-block sub-key literal, not a reusable cross-module key
   any_of = flt.get("any_of")
@@ -869,25 +967,23 @@ def _match_filter(flt: dict, frontmatter: dict, path: object = None) -> bool:
   # waiver: filter-block sub-key literal, single-source set in _FILTER_COMPOSITE_SUBKEYS, not a reusable cross-module key
   frontmatter_flt = flt.get("frontmatter")
 
-  # guard: a frontmatter sub-filter is declared — it must pass
+  # a declared frontmatter sub-filter must pass
   if isinstance(frontmatter_flt, dict) and not _match_frontmatter_filter(frontmatter_flt, frontmatter):
     return False
 
-  # folder_note (tri-state) constrains matches by folder-note status; path_str/_Path below
-  # are shared setup for both this block and the basename block that follows it
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from pathlib import Path as _Path
+  # folder_note (tri-state) constrains matches by folder-note status; path_str below is shared
+  # setup for both this block and the basename block that follows it
   path_str = str(path) if path is not None else None
   # waiver: filter-block sub-key literal, single-source set in _FILTER_COMPOSITE_SUBKEYS, not a reusable cross-module key
   want_folder_note = flt.get("folder_note")
   if want_folder_note is not None:
-    is_folder_note = path_str is not None and _Path(path_str).stem == _Path(path_str).parent.name
+    is_folder_note = path_str is not None and Path(path_str).stem == Path(path_str).parent.name
 
-    # guard: want only folder-notes but this isn't one
+    # a folder-notes-only filter rejects any other file
     if want_folder_note and not is_folder_note:
       return False
 
-    # guard: forbid folder-notes but this is one
+    # a no-folder-notes filter rejects a folder-note
     if (not want_folder_note) and is_folder_note:
       return False
 
@@ -895,31 +991,12 @@ def _match_filter(flt: dict, frontmatter: dict, path: object = None) -> bool:
   # waiver: filter-block sub-key literal, single-source set in _FILTER_COMPOSITE_SUBKEYS, not a reusable cross-module key
   basename_flt = flt.get("basename")
 
-  # guard: a basename sub-filter is declared — it must pass
+  # a declared basename sub-filter must pass too
   if isinstance(basename_flt, dict) and not _check_inout(
-    basename_flt, _Path(path_str).name if path_str is not None else None
+    basename_flt, Path(path_str).name if path_str is not None else None
   ):
     return False
   return True
-
-
-def _not_implemented(name: str, rtype: str) -> dict:
-  """
-  Build a clean error result for a routine type whose handler is not yet implemented.
-
-  Args:
-    name: Routine name.
-    rtype: Routine type for which no handler exists.
-
-  Returns:
-    A tick result dict with `exit = -1` and a human-readable error message.
-  """
-  return {
-    TickResultKey.NAME: name,
-    TickResultKey.EXIT: -1,
-    TickResultKey.DURATION_SEC: 0.0,
-    TickResultKey.ERROR: f"type {rtype!r} not yet implemented",
-  }
 
 
 @overload
@@ -951,9 +1028,9 @@ def _render_template(template: object, values: dict) -> object:
     KeyError: When a string leaf references a placeholder absent from `values`.
   """
   if isinstance(template, dict):
-    return { k: _render_template(v, values) for k, v in template.items() }
+    return { key: _render_template(value, values) for key, value in template.items() }
   if isinstance(template, list):
-    return [ _render_template(v, values) for v in template ]
+    return [ _render_template(value, values) for value in template ]
   if isinstance(template, str):
     # a lone placeholder carries the value itself — `"{paths}"` must reach the request as a
     # list, not as the string `"['a', 'b']"`; `"{{paths}}"` is an escaped literal and is
@@ -980,8 +1057,7 @@ def _is_retryable_transient(done_job: dict) -> bool:
   Returns:
     `True` when the bundle should be retired so its input re-dispatches.
   """
-  # ponytail: unbounded retry — one re-dispatch per TRANSIENT_RETRY_AGE_SEC for as long as the
-  # spawn keeps faulting; add an attempt counter in the bundle if the churn ever costs anything
+  # limit: unbounded retry, one per TRANSIENT_RETRY_AGE_SEC; add a bundle attempt counter if the churn costs
   return (
     done_job[JobCollectKey.STATUS] != JobStatus.DONE
     and done_job.get(JobCollectKey.CATEGORY) == JobErrorCategory.TRANSIENT
@@ -1121,6 +1197,9 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
       identity no longer matches the file at that path, or a file whose identity could not be read
       at dispatch time all leave the file untouched.
     - In the `command` shape, the routine never removes the input file itself.
+    - A file is dispatched only when it passes the routine's composite `filter`: an absent or empty
+      filter accepts every file, declared sub-conditions must all pass, and under `any_of` passing
+      any one alternative suffices.
 
   Notes:
     - On every tick over an existing inbox directory, removes empty harness bookkeeping
@@ -1146,10 +1225,11 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
   # at dispatch time all leave the file untouched. In the `command` shape, the routine NEVER removes
   # the input file itself — the spawned command owns moving or deleting it.
 
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import time
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from pathlib import Path
+  # Contract:
+  # A file is dispatched only when it passes the routine's composite `filter`. An absent or empty
+  # filter accepts every file; every declared sub-condition (`frontmatter`, `folder_note`,
+  # `basename`) must pass; under `any_of`, passing any one alternative composite suffices.
+
   started = time.time()
   repo = Path(repo)
   inbox_rel = cfg[RoutineKey.INBOX_DIR]
@@ -1157,13 +1237,10 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
 
   # guard: configured inbox dir does not exist — nothing to scan
   if not inbox_dir.exists():
-    # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-    # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-    from external_dirs import is_declared  # pylint: disable=import-error
 
     # guard: a declared external dir that is absent or dangling is a real failure, not an idle tick —
     # the daemon opens one folded `routine:<name>` incident from the non-zero exit
-    if is_declared(repo, inbox_rel):
+    if external_dirs.is_declared(repo, inbox_rel):
       return {
         TickResultKey.NAME: name, TickResultKey.EXIT: -1,
         TickResultKey.DURATION_SEC: time.time() - started,
@@ -1185,15 +1262,15 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
   # sorted for deterministic dispatch order
   candidates = []
   for entry in sorted(inbox_dir.iterdir()):
-    # guard: hidden entry — skip
+    # only visible entries are collected
     if entry.name.startswith("."):
       continue
 
-    # guard: symlink — operator state, never moved
+    # a symlink is operator state and is never collected or moved
     if entry.is_symlink():
       continue
 
-    # guard: not a regular file — skip subdirs etc.
+    # only regular files are collected, never subdirectories
     if not entry.is_file():
       continue
     candidates.append(entry)
@@ -1204,9 +1281,6 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
   # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
   flt = cfg.get("filter", {})
   if flt:
-    # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-    # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-    from frontmatter_parser import parse_frontmatter  # pylint: disable=import-error
     kept = []
     for entry in candidates:
       try:
@@ -1215,8 +1289,8 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
       except OSError:
         text = ""
 
-      # guard: item failed the composite filter — drop it
-      if not _match_filter(flt, parse_frontmatter(text), entry):
+      # only items passing the composite filter are kept
+      if not _match_filter(flt, frontmatter_parser.parse_frontmatter(text), entry):
         continue
       kept.append(entry)
     candidates = kept
@@ -1224,30 +1298,22 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
   # a command routine runs a subprocess, an expert routine dispatches a job per file
   use_command = RoutineKey.COMMAND in cfg
   if use_command:
-    # waiver: inline numeric/default literal, not a domain constant
-    timeout_sec = cfg.get(RoutineKey.TIMEOUT_SEC, 300)
+    timeout_sec = cfg.get(RoutineKey.TIMEOUT_SEC, DEFAULT_TIMEOUT_SEC)
     try:
-      # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-      # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-      from runtime_daemon import resolve_routine_command  # pylint: disable=import-error
-      resolved_cmd = list(resolve_routine_command(list(cfg[RoutineKey.COMMAND])))
-    except Exception as e:
+      resolved_cmd = list(plugin_dirs.resolve_routine_command(list(cfg[RoutineKey.COMMAND])))
+    except Exception as error:
       return {
         TickResultKey.NAME: name, TickResultKey.EXIT: -1,
         TickResultKey.DURATION_SEC: time.time() - started,
-        TickResultKey.ERROR: f"inbox command resolution failed: {e}",
+        TickResultKey.ERROR: f"inbox command resolution failed: {error}",
       }
-    # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-    import os as _os
-    # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-    import subprocess as _subprocess
-    subprocess_env = { **_os.environ, **routine_subprocess_env(cfg) }
+    subprocess_env = { **os.environ, **build_routine_subprocess_env(cfg) }
     dispatched = 0
-    for f in candidates:
+    for candidate in candidates:
       try:
         # blocking — one process at a time, no parallel spawns
-        _subprocess.run(
-          [ *resolved_cmd, str(f.resolve()) ],
+        subprocess.run(
+          [ *resolved_cmd, str(candidate.resolve()) ],
           cwd = str(repo),
           timeout = timeout_sec,
           capture_output = True,
@@ -1256,12 +1322,12 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
           check = False, encoding = "utf-8"
         )
         dispatched += 1
-      except Exception as e:
+      except Exception as error:
         return {
           TickResultKey.NAME: name, TickResultKey.EXIT: -1,
           TickResultKey.DURATION_SEC: time.time() - started,
           "dispatched_count": dispatched,
-          TickResultKey.ERROR: f"inbox subprocess dispatch failed at {f.name}: {e}",
+          TickResultKey.ERROR: f"inbox subprocess dispatch failed at {candidate.name}: {error}",
         }
     return {
       TickResultKey.NAME: name, TickResultKey.EXIT: 0,
@@ -1271,11 +1337,9 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
 
   # the expert branch renders one request per candidate file
   expert = cfg[RoutineKey.EXPERT]
+  # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
   request_template = cfg["request"]
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-  from expert_runtime import completed_dedup_jobs, consume_job, dispatch_job  # pylint: disable=import-error
-  protocols = _routine_protocols(cfg)
+  protocols = routine_protocols(cfg)
 
   # the dispatch surface takes a real path; symlinks are resolved so a daemon started through a
   # symlinked checkout writes the same bundle paths as one started through the canonical one
@@ -1305,7 +1369,8 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
   # against, the item's identity at that path is checked against the identity recorded at dispatch
   # time; a mismatch means a different file has since taken that name, so the completed result is
   # discarded without touching the file, leaving the fresh arrival to be picked up as its own unit
-  # of work on a later tick.
+  # of work on a later tick. A job dispatched before identities were recorded has nothing to
+  # compare against, so its input is taken to be the same file and is drained as before.
 
   # Reconcile finished work against the inbox. The input file is never copied
   # into the job bundle (only its path is passed), so the inbox is the single
@@ -1318,27 +1383,27 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
   # faulted rather than the work) and a deferral (the expert postponed the work
   # and left the input alone). Both are retired without draining the input, so
   # the loop below re-dispatches the same file on this very tick.
-  for done_job in completed_dedup_jobs(target_repo, expert):
-    # guard: stale transient failure — retire the bundle so the input re-dispatches
+  for done_job in expert_runtime.completed_dedup_jobs(target_repo, expert):
+    # stale transient failure — retire the bundle so the input re-dispatches
     if _is_retryable_transient(done_job):
-      consume_job(target_repo, expert, done_job[JobCollectKey.JOB_ID])
+      expert_runtime.consume_job(target_repo, expert, done_job[JobCollectKey.JOB_ID])
       continue
 
-    # guard: the deferral has waited out its window — offer the input to the queue again
+    # the deferral has waited out its window — offer the input to the queue again
     if _is_returnable_deferral(done_job, window_sec = deferred_window):
-      consume_job(target_repo, expert, done_job[JobCollectKey.JOB_ID])
+      expert_runtime.consume_job(target_repo, expert, done_job[JobCollectKey.JOB_ID])
       continue
 
-    # guard: failed or still-waiting deferred job — leave the input parked behind its bundle
+    # a failed or still-waiting deferred job leaves the input parked behind its bundle
     if done_job[JobCollectKey.STATUS] != JobStatus.DONE:
       continue
     src = Path(done_job[JobCollectKey.DEDUP_KEY])
 
-    # guard: the path now holds a different file than the one the job processed — an
+    # the path now holds a different file than the one the job processed — an
     # operator dropped a fresh file under a name the inbox has seen before (bank
     # exports reuse names), and draining it here would destroy work never done
     if not _is_same_file(src, done_job.get(JobCollectKey.DEDUP_FINGERPRINT)):
-      consume_job(target_repo, expert, done_job[JobCollectKey.JOB_ID])
+      expert_runtime.consume_job(target_repo, expert, done_job[JobCollectKey.JOB_ID])
       continue
     try:
       # the expert may have filed the input away itself on success; a missing
@@ -1346,38 +1411,38 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
       src.unlink()
     except OSError:
       pass
-    consume_job(target_repo, expert, done_job[JobCollectKey.JOB_ID])
+    expert_runtime.consume_job(target_repo, expert, done_job[JobCollectKey.JOB_ID])
 
   # every surviving candidate becomes one dispatched job
   dispatched = 0
-  for f in candidates:
+  for candidate in candidates:
     # guard: reconcile (or an external actor) drained this file — nothing to send
-    if not f.exists():
+    if not candidate.exists():
       continue
-    fingerprint = _file_fingerprint(f)
+    fingerprint = _file_fingerprint(candidate)
 
     # guard: the file's identity cannot be read, so the retire pass would have nothing to
     # check the path against before deleting it — leave it for a later tick rather than
     # dispatch work whose input can be swapped out underneath it unnoticed
     if fingerprint is None:
       continue
-    request = _render_template(request_template, { "file": str(f) })
+    request = _render_template(request_template, { "file": str(candidate) })
     try:
-      result = dispatch_job(
+      result = expert_runtime.dispatch_job(
         target_repo, expert, request,
         protocols = protocols,
-        dedup_key = str(f),
+        dedup_key = str(candidate),
         dedup_fingerprint = fingerprint,
       )
-    except Exception as e:
+    except Exception as error:
       return {
         TickResultKey.NAME: name, TickResultKey.EXIT: -1,
         TickResultKey.DURATION_SEC: time.time() - started,
         "dispatched_count": dispatched,
-        TickResultKey.ERROR: f"inbox dispatch failed at {f.name}: {e}",
+        TickResultKey.ERROR: f"inbox dispatch failed at {candidate.name}: {error}",
       }
 
-    # guard: an in-flight or parked (dead-letter) bundle already owns this file
+    # an in-flight or parked (dead-letter) bundle already owns this file
     if result.get(JobCollectKey.STATUS) == JobStatus.ALREADY_QUEUED:
       continue
     dispatched += 1
@@ -1392,12 +1457,12 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
 
 def dispatch_schedule(repo: Path, name: str, cfg: dict) -> dict:
   """
-  Fire one dispatch when the cron expression has crossed a boundary since last_run.
+  Dispatch the routine's work once on every invocation, without checking any schedule.
 
   The daemon-level `due_routines` decides when this handler runs; the handler
   itself just dispatches. Two sub-shapes (validator enforces exactly-one):
 
-    - `command`: spawn subprocess (delegates to `runtime_daemon.dispatch_subprocess`).
+    - `command`: spawn subprocess (delegates to `dispatch_subprocess`).
     - `expert + request`: dispatch a single job to the named expert.
 
   Args:
@@ -1409,26 +1474,17 @@ def dispatch_schedule(repo: Path, name: str, cfg: dict) -> dict:
     The standard tick result dict — `exit = 0` and `dispatched_count = 1` on
     success.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import time
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from datetime import UTC, datetime
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from pathlib import Path
   started = time.time()
 
   # a command routine delegates straight to the subprocess dispatcher
   if RoutineKey.COMMAND in cfg:
-    # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-    # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-    from runtime_daemon import dispatch_subprocess  # pylint: disable=import-error
     sub_cfg = { RoutineKey.COMMAND: cfg[RoutineKey.COMMAND] }
     if RoutineKey.TIMEOUT_SEC in cfg:
       sub_cfg[RoutineKey.TIMEOUT_SEC] = cfg[RoutineKey.TIMEOUT_SEC]
 
     # the delegate builds the subprocess environment from the config it is handed, so every field
     # that reaches that environment has to survive the prune
-    for carried in ( "protocol", RoutineKey.PROTOCOLS, RoutineKey.HOOKS_ENABLED ):
+    for carried in ( "protocol", RoutineKey.PROTOCOLS, RoutineKey.HOOKS_ENABLED, RoutineKey.GIT_AUTHOR ):
       if carried in cfg:
         sub_cfg[carried] = cfg[carried]
     return dispatch_subprocess(Path(repo), name, sub_cfg)
@@ -1442,16 +1498,13 @@ def dispatch_schedule(repo: Path, name: str, cfg: dict) -> dict:
     "cron_fire_ts": now.isoformat(),
     "cron_fire_unix": str(int(now.timestamp())),
   })
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-  from expert_runtime import dispatch_job  # pylint: disable=import-error
 
   # the dispatch surface takes a real path; symlinks are resolved so a daemon started through a
   # symlinked checkout writes the same bundle paths as one started through the canonical one
   target_repo = Path(repo).resolve()
-  dispatch_job(
+  expert_runtime.dispatch_job(
     target_repo, expert, request,
-    protocols = _routine_protocols(cfg),
+    protocols = routine_protocols(cfg),
   )
   return {
     TickResultKey.NAME: name, TickResultKey.EXIT: 0,
@@ -1460,7 +1513,7 @@ def dispatch_schedule(repo: Path, name: str, cfg: dict) -> dict:
   }
 
 
-def due_for_schedule(name: str, cfg: dict, now_unix: float, last_run_unix: float) -> bool:
+def is_schedule_due(name: str, cfg: dict, now_unix: float, last_run_unix: float) -> bool:
   # waiver: `name` kept for symmetry with other routine helpers (see docstring); unused here
   # pylint: disable=unused-argument
   """
@@ -1480,12 +1533,7 @@ def due_for_schedule(name: str, cfg: dict, now_unix: float, last_run_unix: float
     True if the cron expression has fired at least once since `last_run_unix`;
     False otherwise.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from datetime import UTC, datetime
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-  from cron import parse, due_since  # pylint: disable=import-error
-  spec = parse(cfg["cron"])
+  spec = cron.parse(cfg["cron"])
   # waiver: inline numeric/default literal, not a domain constant
   epoch = datetime(1970, 1, 1, tzinfo = UTC)
   last_run_dt = (
@@ -1493,7 +1541,7 @@ def due_for_schedule(name: str, cfg: dict, now_unix: float, last_run_unix: float
     if last_run_unix > 0 else epoch
   )
   now_dt = datetime.fromtimestamp(now_unix, tz = UTC)
-  return due_since(spec, last_run_dt, now_dt)
+  return cron.due_since(spec, last_run_dt, now_dt)
 
 
 def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
@@ -1528,10 +1576,16 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
       current HEAD as the baseline and dispatches nothing.
     - A commit whose message carries the `Lazy-Watch: skip` trailer contributes no item to any
       watch; a path it changed is judged by the newest ordinary commit of the range that changed the
-      path the same way, or not at all.
+      path the same way, or not at all. A path whose history cannot be read is never dropped for it.
     - An item a worker subprocess failed on is retried on a later tick, ahead of any fresh item, for
       as long as its commit stays reachable from HEAD; once history rewrites it away it is dropped
       rather than redelivered.
+    - When a worker reports the members of a multi-path unit it did not handle, the retry carries
+      only those members; without such a report the unit is retried whole. A narrowed rename unit
+      keeps `old_paths` aligned index by index with `paths`.
+    - A fresh item is dispatched only when it passes the routine's composite `filter`: an absent or
+      empty filter accepts every item, declared sub-conditions must all pass, and under `any_of`
+      passing any one alternative suffices.
 
   Args:
     repo: Path-like reference to the repository.
@@ -1551,14 +1605,24 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
   # on is retried on a later tick, ahead of any fresh item, for as long as its commit stays reachable
   # from HEAD; once history rewrites it away it is dropped rather than redelivered.
 
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import json as _json
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import subprocess
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import time
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from pathlib import Path
+  # Contract:
+  # A commit whose message carries the `Lazy-Watch: skip` trailer contributes no item to any watch.
+  # A path it changed is judged by the newest ordinary commit of the range that changed the path
+  # the same way, or not at all when there is none. A path whose history cannot be read is never
+  # dropped on account of the trailer.
+
+  # Contract:
+  # When a command worker fails on a multi-path unit and reports the members it did not handle
+  # under `failed_paths` in a JSON object on the last non-blank line of its stdout, only those
+  # members are retried. With no such report, or a report naming none of the unit's members, the
+  # unit is retried whole. A narrowed rename unit keeps `old_paths` aligned index by index with
+  # `paths`.
+
+  # Contract:
+  # A fresh item is dispatched only when it passes the routine's composite `filter`. An absent or
+  # empty filter accepts every item; every declared sub-condition (`frontmatter`, `folder_note`,
+  # `basename`) must pass; under `any_of`, passing any one alternative composite suffices.
+
   started = time.time()
   repo = Path(repo)
 
@@ -1566,10 +1630,8 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
   # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
   work_dir = (repo / cfg.get("repo_dir", ".")).resolve()
 
-  # remote is vestigial — read but unused (remote sync is daemon-level)
-  # waiver: the read is the point — it documents the config field this routine consumes, and the subscript validates its presence
-  _remote = cfg.get("remote", "origin")  # noqa: F841
-  # waiver: the read is the point — it documents the config field this routine consumes, and the subscript validates its presence
+  # the branch key is required by the schema; the subscript fails loudly on a config that lacks it
+  # waiver: the read is the point — the subscript validates the field's presence, and its value is unused here
   _branch = cfg[RoutineKey.BRANCH]  # noqa: F841
   watch = cfg["watch"]
   # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
@@ -1587,15 +1649,12 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
       [ "git", "rev-parse", "HEAD" ],
       cwd = str(work_dir), text = True, encoding = "utf-8",
     ).strip()
-  except subprocess.CalledProcessError as e:
+  except subprocess.CalledProcessError as error:
     # waiver: one-off routine-outcome note/reason token, not an internal key
-    return _err(name, started, "rev_parse_failed", str(e))
+    return _err(name, started, "rev_parse_failed", str(error))
 
   # the last-seen sha, and any items a previous tick's worker failed on, are per-routine
   # state carried across ticks
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-  import runtime_state  # pylint: disable=import-error
   state = runtime_state.load(repo)
   git_state = state.setdefault(StateKey.GIT_WATCH, {}).setdefault(name, {})
   last_seen = git_state.get(StateKey.LAST_SEEN_SHA)
@@ -1618,7 +1677,9 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
   if last_seen is None:
     runtime_state.update(
       repo,
-      lambda s: s.setdefault(StateKey.GIT_WATCH, {}).setdefault(name, {}).update({StateKey.LAST_SEEN_SHA: head_sha})
+      lambda stored: stored.setdefault(StateKey.GIT_WATCH, {}).setdefault(name, {}).update(
+        {StateKey.LAST_SEEN_SHA: head_sha}
+      )
     )
     # waiver: one-off routine-outcome note/reason token, not an internal key
     return _ok(name, started, dispatched_count = 0, note = "first_run_baseline_recorded")
@@ -1645,9 +1706,8 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
   fresh_items: list[dict] = []
   force_pushed = last_seen != head_sha and not _is_ancestor(work_dir, last_seen, head_sha)
 
-  # force-push detected — no fresh items are computed over the discarded range; the
-  # unconditional cursor write at the end of this tick already advances LAST_SEEN_SHA to
-  # head_sha regardless of this branch, so a separate reset write here was dead code (M11)
+  # an ordinary forward range is scanned for fresh items; a force-pushed range was discarded
+  # and contributes none
   if not force_pushed and last_seen != head_sha:
     # the watch mode decides what a single item is (a commit, a path, a rename pair)
     fresh_items = _compute_git_items(
@@ -1669,15 +1729,12 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
     # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
     flt = cfg.get("filter", {})
     if flt:
-      # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-      # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-      from frontmatter_parser import parse_frontmatter  # pylint: disable=import-error
       kept = []
       for item in fresh_items:
         # waiver: small internal subkey, not a reusable domain key
         rel = item.get("path")
 
-        # guard: item carries no file path — match against {} / path=None so the
+        # an item with no file path is matched against {} / path=None so the
         # folder_note (and any) predicate decides; not-a-folder-note by definition.
         if rel is None:
           if _match_filter(flt, {}, None):
@@ -1689,8 +1746,8 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
         except OSError:
           text = ""
 
-        # guard: file failed the composite filter — drop this item
-        if not _match_filter(flt, parse_frontmatter(text), rel):
+        # only items passing the composite filter are kept
+        if not _match_filter(flt, frontmatter_parser.parse_frontmatter(text), rel):
           continue
         kept.append(item)
       fresh_items = kept
@@ -1707,37 +1764,29 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
     # wants a unit per file, per directory, or per declared directory glob says so.
     # waiver: git watch-mode token, single-source set in VALID_GIT_WATCH, not a reusable cross-module key
     mode = cfg.get(GROUP_KEY, GROUP_ALL)
+    # waiver: git watch-mode token, single-source set in VALID_GIT_WATCH, not a reusable cross-module key
     if fresh_items and watch != "new_commits" and mode != GROUP_FILE:
       fresh_items = _group_git_items(work_dir, fresh_items, mode, f"{last_seen}..{head_sha}")
 
   # a command routine receives the items as a subprocess payload, not as jobs; retries go
   # first, so a broken item gets its next attempt before any fresh item is even tried
-  # limit: a retried item is dispatched as-is, never re-matched against `cfg`'s composite
-  # filter (that filter only ever ran over `fresh_items`, above) — a filter edited between
-  # the failing tick and the retry tick has no effect on items already queued for retry;
-  # upgrade path is re-running the same filter pass over `retry_items` here if that drift
-  # ever needs to be closed
+  # limit: retried items skip the composite filter re-match; re-run it over `retry_items` if filter drift matters
   next_failed_items = retry_items
   if RoutineKey.COMMAND in cfg:
-    # waiver: inline numeric/default literal, not a domain constant
-    timeout_sec = cfg.get(RoutineKey.TIMEOUT_SEC, 300)
+    timeout_sec = cfg.get(RoutineKey.TIMEOUT_SEC, DEFAULT_TIMEOUT_SEC)
     try:
-      # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-      # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-      from runtime_daemon import resolve_routine_command  # pylint: disable=import-error
-      resolved_cmd = list(resolve_routine_command(list(cfg[RoutineKey.COMMAND])))
-    except Exception as e:
-      return _err(name, started, "command_resolution_failed", str(e))
-    # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-    import os as _os
-    subprocess_env = { **_os.environ, **routine_subprocess_env(cfg) }
+      resolved_cmd = list(plugin_dirs.resolve_routine_command(list(cfg[RoutineKey.COMMAND])))
+    except Exception as error:
+      # waiver: one-off routine-outcome note/reason token, not an internal key
+      return _err(name, started, "command_resolution_failed", str(error))
+    subprocess_env = { **os.environ, **build_routine_subprocess_env(cfg) }
     still_failing = []
     for item in retry_items + fresh_items:
       # a retried item carries its own `reason` from a prior failure — strip it before
       # resending the item-json payload; the worker only ever expects the raw item shape
       # waiver: this module's own FAILED_ITEMS entry key, not a reusable domain key
-      clean_item = { k: v for k, v in item.items() if k != "reason" }
-      payload = _json.dumps(clean_item, sort_keys = True)
+      clean_item = { key: value for key, value in item.items() if key != "reason" }
+      payload = json.dumps(clean_item, sort_keys = True)
       try:
         # blocking — one process at a time, no parallel spawns
         proc = subprocess.run(
@@ -1749,14 +1798,13 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
           env = subprocess_env,
           check = False, encoding = "utf-8",
         )
-      except Exception as e:
+      except Exception as error:
         # the spawn itself faulted (e.g. TimeoutExpired) rather than the worker reporting a
         # clean non-zero exit — bail out before the `failed_items` write below, so this item
         # (and the rest of `retry_items + fresh_items`) is retried from scratch next tick
-        # instead of the tick crashing mid-loop with that write abandoned; same as
-        # `dispatch_inbox`'s command-shape handles the same fault
+        # instead of the tick crashing mid-loop with that write abandoned
         # waiver: one-off routine-outcome note/reason token, not an internal key
-        return _err(name, started, "command_dispatch_failed", str(e))
+        return _err(name, started, "command_dispatch_failed", str(error))
 
       # worker failed on this item — keep it for the next tick's retry pass; the cursor
       # still advances below so one broken item never stalls the whole conveyor
@@ -1771,28 +1819,27 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
     next_failed_items = still_failing
   else:
     expert = cfg[RoutineKey.EXPERT]
+    # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
     request_template = cfg["request"]
-    # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-    # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-    from expert_runtime import completed_dedup_jobs, consume_job, dispatch_job  # pylint: disable=import-error
-    protocols = _routine_protocols(cfg)
+    protocols = routine_protocols(cfg)
+
+    # the dispatch surface takes a real path; symlinks are resolved so a daemon started through a
+    # symlinked checkout writes the same bundle paths as one started through the canonical one
+    target_repo = Path(repo).resolve()
 
     # a dedup key stays held until the asker says it is done with the answer, and a git watch
     # has no result to collect — so release this routine's own finished bundles first, or the
     # first change to a place would be the last one that ever dispatched for it
-    # the dispatch surface takes a real path; symlinks are resolved so a daemon started through a
-    # symlinked checkout writes the same bundle paths as one started through the canonical one
-    target_repo = Path(repo).resolve()
-    for done_job in completed_dedup_jobs(target_repo, expert):
+    for done_job in expert_runtime.completed_dedup_jobs(target_repo, expert):
       done_key = done_job.get(JobCollectKey.DEDUP_KEY)
       if isinstance(done_key, str) and done_key.startswith(f"{name}:"):
-        consume_job(target_repo, expert, done_job[JobCollectKey.JOB_ID])
+        expert_runtime.consume_job(target_repo, expert, done_job[JobCollectKey.JOB_ID])
 
     # every surviving item becomes one dispatched job, folded into any live job for its place
     for item in fresh_items:
       try:
         rendered = _render_template(request_template, item)
-      except KeyError as e:
+      except KeyError as error:
         # a template naming a field the item does not carry (a `{path}` kept from before the
         # routine moved to a grouped `group` mode, whose items carry `paths`) is a config defect
         # of this routine — reported as its failed tick, with the cursor left where it was so
@@ -1800,9 +1847,9 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
         # waiver: one-off routine-outcome note/reason token, not an internal key
         return _err(
           name, started, "request_template_invalid",
-          f"placeholder {{{e.args[0]}}} not among item keys {sorted(item)}",
+          f"placeholder {{{error.args[0]}}} not among item keys {sorted(item)}",
         )
-      dispatch_job(
+      expert_runtime.dispatch_job(
         target_repo, expert, rendered, protocols = protocols,
         dedup_key = _git_dedup_key(name, item),
       )
@@ -1811,7 +1858,7 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
   # (or clear) alongside it so the next tick knows what to retry
   runtime_state.update(
     repo,
-    lambda s: s.setdefault(StateKey.GIT_WATCH, {}).setdefault(name, {}).update({
+    lambda stored: stored.setdefault(StateKey.GIT_WATCH, {}).setdefault(name, {}).update({
       StateKey.LAST_SEEN_SHA: head_sha,
       StateKey.FAILED_ITEMS: next_failed_items,
     })
@@ -1845,8 +1892,6 @@ def _ok(name: str, started: float, **extra: object) -> dict:
   Returns:
     A tick result dict with `exit = 0`, `duration_sec`, and any extra fields.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import time
   return {
     TickResultKey.NAME: name, TickResultKey.EXIT: 0,
     TickResultKey.DURATION_SEC: time.time() - started,
@@ -1868,8 +1913,6 @@ def _err(name: str, started: float, error_kind: str, detail: str) -> dict:
     A tick result dict with `exit = -1`, `duration_sec`, and a combined
     `error` field.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import time
   return {
     TickResultKey.NAME: name, TickResultKey.EXIT: -1,
     TickResultKey.DURATION_SEC: time.time() - started,
@@ -1879,7 +1922,7 @@ def _err(name: str, started: float, error_kind: str, detail: str) -> dict:
 
 def _is_git_dir(path: Path) -> bool:
   """
-  Check whether the given path is inside a git working tree.
+  Check whether the given path is inside a git repository, working tree or bare.
 
   Uses `git rev-parse --git-dir` rather than just `.git` existence so worktrees
   and bare repos are recognised correctly.
@@ -1890,8 +1933,6 @@ def _is_git_dir(path: Path) -> bool:
   Returns:
     True when `git rev-parse --git-dir` succeeds at `path`; False otherwise.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import subprocess
   rc = subprocess.run(
     [ "git", "rev-parse", "--git-dir" ],
     cwd = str(path), capture_output = True, check = False,
@@ -1912,8 +1953,6 @@ def _is_ancestor(work_dir: Path, ancestor: str, descendant: str) -> bool:
     True when `ancestor` is an ancestor of `descendant`; False otherwise (also
     False when either SHA is unknown to git).
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import subprocess
   rc = subprocess.run(
     [ "git", "merge-base", "--is-ancestor", ancestor, descendant ],
     cwd = str(work_dir), capture_output = True, check = False,
@@ -1949,9 +1988,9 @@ def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str, watch: str
   Raises:
     RoutineConfigError: When `watch` is not a recognised watch mode.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import subprocess
+  # the commit range every watch mode enumerates
   rng = f"{last_seen}..{head_sha}"
+
   # a list narrows the watch by several patterns at once; git reads them as one pathspec, so
   # a set of `:(exclude)<glob>` entries subtracts every one of them from the whole tree
   if not path_filter:
@@ -1994,14 +2033,14 @@ def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str, watch: str
         parts = line.split("\t")
         # waiver: inline numeric/default literal, not a domain constant
         if len(parts) >= 6:
-          sha, short_sha, subj, an, ae, ct = parts[:6]
+          sha, short_sha, subj, commit_author, commit_email, commit_time = parts[:6]
           items.append({
             "sha": sha,
             "short_sha": short_sha,
             "subject": subj,
-            "author_name": an,
-            "author_email": ae,
-            "commit_ts": ct,
+            "author_name": commit_author,
+            "author_email": commit_email,
+            "commit_ts": commit_time,
           })
     return items
 
@@ -2029,12 +2068,12 @@ def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str, watch: str
         # strip percent for renames etc.
         status = parts[0][:1]
 
-        # guard: status not in the requested set
+        # only the requested statuses are collected
         if status not in wanted:
           continue
         path = parts[1]
-        sha = _last_change_sha(work_dir, path, rng, status)
-        author_name, author_email = _last_change_author(work_dir, path, rng, status)
+        sha = _query_last_change_sha(work_dir, path, rng, status)
+        author_name, author_email = _query_last_change_author(work_dir, path, rng, status)
         file_item: dict[str, object] = {
           "path": path, "status": status, "sha": sha,
           # the one-member list shape a grouped watch also emits, so a request template
@@ -2060,8 +2099,9 @@ def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str, watch: str
         if len(parts) >= 3 and parts[0].startswith("R"):
           old_path, new_path = parts[1], parts[2]
           # waiver: git CLI/output vocabulary, not a domain constant
-          sha = _last_change_sha(work_dir, new_path, rng, "R")
-          author_name, author_email = _last_change_author(work_dir, new_path, rng, "R")
+          sha = _query_last_change_sha(work_dir, new_path, rng, "R")
+          # waiver: git CLI/output vocabulary, not a domain constant
+          author_name, author_email = _query_last_change_author(work_dir, new_path, rng, "R")
           rename_item: dict[str, object] = {
             "old_path": old_path,
             "new_path": new_path,
@@ -2134,20 +2174,19 @@ def _drop_self_authored(repo: Path, expert: str, items: list[dict]) -> list[dict
   # own source of work, and the cycle ends only when a quota runs out. Whether the watch should
   # have been looking at the changed path at all is a separate, configurable question; that an
   # expert must not answer for its own output is not configurable, because no configuration can
-  # make it useful. Each expert commits under an identity of its own, which is what lets its own
-  # work be told apart from everyone else's and left alone.
+  # make it useful. An expert that has a recorded identity of its own commits under it, which is
+  # what lets its own work be told apart from everyone else's and left alone. An expert with no
+  # recorded author address, or whose registry cannot be read, has nothing to be told apart by:
+  # everything is kept, and its own commit wakes it again.
 
   # guard: nothing to judge
   if not items:
     return items
 
   # the registry is read fresh each tick, so an identity corrected mid-run takes effect at once
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-  from settings_cli import settings_get  # pylint: disable=import-error
   try:
     # waiver: the settings section name, owned by the lazy.settings contract, not a reusable domain key
-    experts = settings_get("experts", cwd = repo)
+    experts = settings_cli.load_settings_section("experts", cwd = repo)
   except Exception:
     return items
   entry = experts.get(expert) if isinstance(experts, dict) else None
@@ -2157,6 +2196,7 @@ def _drop_self_authored(repo: Path, expert: str, items: list[dict]) -> list[dict
     return items
   # waiver: the expert-entry identity keys, owned by the lazy.settings contract, not reusable domain keys
   author = entry.get("git_author")
+  # waiver: the expert-entry identity keys, owned by the lazy.settings contract, not reusable domain keys
   email = author.get("email") if isinstance(author, dict) else None
 
   # guard: no registered email — nothing can be attributed, so nothing is skipped
@@ -2215,20 +2255,18 @@ def _group_dir_for(path: str, mode: str | list) -> str | None:
     return path.rsplit("/", 1)[0] if "/" in path else None
 
   # with a glob set declared, the deepest one that matches claims the file
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import fnmatch
   parts = path.split("/")
   best: str | None = None
   best_depth = -1
   for pattern in mode:
     pat = pattern.split("/")
 
-    # guard: the file must sit strictly below the glob's depth — a path at or above it has no group dir
+    # the file must sit strictly below the glob's depth — a path at or above it has no group dir
     if len(parts) <= len(pat):
       continue
 
-    # guard: a non-matching glob claims no group dir for this file
-    if not all(fnmatch.fnmatch(seg, p) for seg, p in zip(parts[: len(pat)], pat, strict = True)):
+    # a non-matching glob claims no group dir for this file
+    if not all(fnmatch.fnmatch(seg, pattern_seg) for seg, pattern_seg in zip(parts[: len(pat)], pat, strict = True)):
       continue
 
     # the deepest matching glob claims the file; equal-depth globs name the same prefix anyway
@@ -2262,8 +2300,6 @@ def _group_git_items(work_dir: Path, items: list[dict], mode: str | list, rng: s
     member `paths`, and the `sha` / `author_name` / `author_email` of the last commit
     touching the unit in range (the range's last commit for the whole-tick unit).
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import subprocess
 
   # split the stream: path-less or unmatched items pass through, the rest bucket by unit dir
   singles: list[dict] = []
@@ -2303,7 +2339,7 @@ def _group_git_items(work_dir: Path, items: list[dict], mode: str | list, rng: s
 
     # the group item — dir identity plus sorted member paths
     # waiver: `_compute_git_items`'s per-watch item-shape keys, not reusable domain keys
-    ordered = sorted(members, key = lambda m: str(m.get("path") or m.get("new_path")))
+    ordered = sorted(members, key = lambda grouped: str(grouped.get("path") or grouped.get("new_path")))
     group_item = {
       "dir": gdir,
       # waiver: `_compute_git_items`'s per-watch item-shape keys, not reusable domain keys
@@ -2316,6 +2352,7 @@ def _group_git_items(work_dir: Path, items: list[dict], mode: str | list, rng: s
     # a rename group carries both sides, aligned index by index with `paths`
     # waiver: `_compute_git_items`'s per-watch item-shape keys, not reusable domain keys
     if any(member.get("old_path") for member in ordered):
+      # waiver: `_compute_git_items`'s per-watch item-shape keys, not reusable domain keys
       group_item["old_paths"] = [ str(member.get("old_path", "")) for member in ordered ]
 
     # a status is carried only when every member shares it — the whole-tick unit of a
@@ -2336,12 +2373,6 @@ def _narrow_failed_item(item: dict, stdout: str) -> dict:
   on the last line of its stdout; the retry entry then carries only those members, so the
   paths that succeeded are not replayed.
 
-  Guarantees:
-    - The retry entry is narrowed to the reported members only when the last non-blank stdout
-      line is a JSON object whose `failed_paths` names at least one member of the unit; the
-      unit is retried whole otherwise.
-    - A narrowed rename unit keeps `old_paths` aligned index by index with `paths`.
-
   Args:
     item: The unit item the worker was spawned with, as sent.
     stdout: The worker's captured stdout.
@@ -2350,15 +2381,6 @@ def _narrow_failed_item(item: dict, stdout: str) -> dict:
     The item narrowed to the reported paths (with `old_paths` narrowed index-aligned), or the
     item unchanged.
   """
-
-  # Contract:
-  # The retry entry is narrowed to the reported members ONLY when the last non-blank stdout
-  # line is a JSON object whose `failed_paths` names at least one member of the unit; with no
-  # such line, a non-JSON line, or a report naming none of the members, the unit is retried
-  # whole. A narrowed rename unit keeps `old_paths` aligned index by index with `paths`.
-
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import json as _json
 
   # the last non-blank stdout line is where the protocol puts the object; anything else is noise
   lines = [ line for line in (stdout or "").splitlines() if line.strip() ]
@@ -2369,7 +2391,7 @@ def _narrow_failed_item(item: dict, stdout: str) -> dict:
 
   # the protocol object is whatever the last line parses to; a non-JSON line is not the protocol
   try:
-    reported = _json.loads(lines[-1])
+    reported = json.loads(lines[-1])
   except ValueError:
     # guard: the last line is not JSON — the worker did not speak the protocol
     return item
@@ -2390,7 +2412,7 @@ def _narrow_failed_item(item: dict, stdout: str) -> dict:
   unhandled = set(reported[FAILED_PATHS_KEY])
   keep = [ index for index, member in enumerate(members) if member in unhandled ]
 
-  # guard: the report names none of the unit's members — the whole unit failed as far as we know
+  # a report naming none of the unit's members leaves the whole unit failed as far as we know
   if not keep:
     return item
 
@@ -2443,13 +2465,6 @@ def _drop_skipped_commits(work_dir: Path, items: list[dict], rng: str) -> list[d
   """
   Remove the work a skip-marked commit contributed to a tick's items.
 
-  Guarantees:
-    - An item whose commit is not marked is returned unchanged, in its original position.
-    - A commit-level item of a marked commit is dropped.
-    - A path-level item whose commit is marked is re-keyed to the newest unmarked commit of
-      the range that changed the path the same way, and dropped when there is none.
-    - A path-level item whose fallback lookup fails is returned unchanged rather than dropped.
-
   Notes:
     - Spawns one `git log` subprocess over the range, plus one per path item a marked commit
       owns.
@@ -2463,13 +2478,6 @@ def _drop_skipped_commits(work_dir: Path, items: list[dict], rng: str) -> list[d
     The items minus those a marked commit owns, the re-keyed survivors in their original
     positions.
   """
-
-  # Contract:
-  # An item whose `sha` is not a marked commit is returned unchanged, in its original position.
-  # A commit-level item of a marked commit is dropped. A path-level item whose `sha` is a marked
-  # commit is re-keyed to the newest unmarked commit of the range that changed its path with the
-  # same diff status (added / modified / deleted / renamed), and dropped when no such commit
-  # exists. A path-level item whose fallback lookup fails is returned unchanged, never dropped.
 
   # Domain(runtime.routines):
   # # A commit the author declared invisible to the watches
@@ -2489,9 +2497,7 @@ def _drop_skipped_commits(work_dir: Path, items: list[dict], rng: str) -> list[d
   if not marked:
     return items
 
-  # limit: one `git log` per path item a marked commit owns — a marked sweep over N files costs N
-  # log calls on the tick that sees it; upgrade path is one `git log --name-status` over the
-  # range, bucketed by path, if such sweeps become frequent enough to measure
+  # limit: one `git log` per marked path item; one range-wide `git log --name-status` if sweeps grow
   kept: list[dict] = []
   for item in items:
     # waiver: `_compute_git_items`'s per-watch item-shape keys, not reusable domain keys
@@ -2503,7 +2509,7 @@ def _drop_skipped_commits(work_dir: Path, items: list[dict], rng: str) -> list[d
     # waiver: `_compute_git_items`'s per-watch item-shape keys, not reusable domain keys
     path = item.get("path") or item.get("new_path")
 
-    # guard: a commit item of a marked commit has no path to fall back on — it is gone
+    # a commit item of a marked commit has no path to fall back on — it is gone
     if not path:
       continue
 
@@ -2521,7 +2527,7 @@ def _drop_skipped_commits(work_dir: Path, items: list[dict], rng: str) -> list[d
       continue
     fallback = next((line for line in log.splitlines() if line.split("\t", 1)[0] not in marked), None)
 
-    # guard: only marked commits changed the path that way in range — the item is gone
+    # only marked commits changed the path that way in range — the item is gone
     if fallback is None:
       continue
 
@@ -2532,7 +2538,7 @@ def _drop_skipped_commits(work_dir: Path, items: list[dict], rng: str) -> list[d
   return kept
 
 
-def _last_change_sha(work_dir: Path, path: str, rng: str, status: str) -> str:
+def _query_last_change_sha(work_dir: Path, path: str, rng: str, status: str) -> str:
   """
   Return the most recent commit SHA in `rng` matching the status filter for `path`.
 
@@ -2546,8 +2552,6 @@ def _last_change_sha(work_dir: Path, path: str, rng: str, status: str) -> str:
     The matching commit SHA, or the literal string `unknown` when no such
     commit can be located.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import subprocess
 
   # resolve the diff-filter flag and query the most recent matching commit's sha
   # waiver: "R" here is the same rename status letter documented on the `status` param above, not a domain constant
@@ -2565,7 +2569,7 @@ def _last_change_sha(work_dir: Path, path: str, rng: str, status: str) -> str:
     return "unknown"
 
 
-def _last_change_author(work_dir: Path, path: str, rng: str, status: str) -> tuple[str, str]:
+def _query_last_change_author(work_dir: Path, path: str, rng: str, status: str) -> tuple[str, str]:
   """
   Return the author name and email of the most recent commit in `rng` matching the status filter for `path`.
 
@@ -2579,8 +2583,6 @@ def _last_change_author(work_dir: Path, path: str, rng: str, status: str) -> tup
     A tuple `(author_name, author_email)` from the matching commit, or a pair of empty
     strings when no such commit can be located.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import subprocess
 
   # resolve the diff-filter flag and query the author of the matching commit in range
   # waiver: "R" here is the same rename status letter documented on the `status` param above, not a domain constant
@@ -2625,31 +2627,19 @@ def _compile_recursive_glob(pat: str) -> re.Pattern[str]:
   Returns:
     The compiled pattern; use `.match(rel_posix_path)`.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import re
   segs = pat.split("/")
   parts = [ "^" ]
-  for i, seg in enumerate(segs):
-    last = i == len(segs) - 1
+  for index, seg in enumerate(segs):
+    last = index == len(segs) - 1
     if seg == "**":
       parts.append(".*" if last else "(?:[^/]+/)*")
       continue
     piece = "".join(
-      "[^/]*" if ch == "*" else "[^/]" if ch == "?" else re.escape(ch)
-      for ch in seg
+      "[^/]*" if char == "*" else "[^/]" if char == "?" else re.escape(char)
+      for char in seg
     )
     parts.append(piece if last else piece + "/")
   return re.compile("".join(parts) + r"\Z")
-
-
-# Walk-list cache shared by every md-scan routine of one daemon iteration: sibling
-# routines tick back-to-back, and each RepoWalk costs git subprocesses. TTL sits
-# below the minimum routine interval (60s) so every tick still re-walks once.
-# waiver: module-level mutable cache — the daemon main loop is serial by contract, no locking needed
-_WALK_CACHE: dict[str, tuple[float, list[Path]]] = {}
-_WALK_CACHE_TTL_SEC = 30.0
-# waiver: filesystem sentinel path under the gitignored runtime log tree, not a reusable cross-module key
-_MD_SCAN_STATE_DIR = ".logs/lazy-core/runtime/md-scan-state"
 
 
 def _walk_repo_files(repo: Path, now: float) -> list[Path]:
@@ -2664,21 +2654,18 @@ def _walk_repo_files(repo: Path, now: float) -> list[Path]:
     Absolute file paths from `RepoWalk`, possibly served from the per-repo
     cache when a walk younger than the TTL exists.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-  from repo_walk import RepoWalk  # pylint: disable=import-error
   key = str(repo.resolve())
   cached = _WALK_CACHE.get(key)
 
-  # guard: a fresh-enough walk already exists for this repo — share it
+  # a fresh-enough walk already cached for this repo is shared
   if cached is not None and now - cached[0] < _WALK_CACHE_TTL_SEC:
     return cached[1]
-  files = list(RepoWalk(repo).iter_files())
+  files = list(repo_walk.RepoWalk(repo).iter_files())
   _WALK_CACHE[key] = ( now, files )
   return files
 
 
-def _dir_signature(d: Path, walk_files: list[Path], memo: dict[str, str]) -> str:
+def _dir_signature(directory: Path, walk_files: list[Path], memo: dict[str, str]) -> str:
   """
   Fingerprint a directory subtree by file paths, mtimes, and sizes.
 
@@ -2689,12 +2676,12 @@ def _dir_signature(d: Path, walk_files: list[Path], memo: dict[str, str]) -> str
   (runtime journals, job bundles) can never invalidate a signature.
 
   Args:
-    d: Directory to fingerprint.
+    directory: Directory to fingerprint.
     walk_files: The tick's ignore-filtered absolute file list.
     memo: Per-tick cache mapping directory path to its computed signature.
 
   Returns:
-    Hex digest stable while no walked file under `d` changes.
+    Hex digest stable while no walked file under `directory` changes.
   """
 
   # Domain(runtime.routines):
@@ -2708,35 +2695,39 @@ def _dir_signature(d: Path, walk_files: list[Path], memo: dict[str, str]) -> str
   # previously clean signature. The recorded fingerprint of a clean run also covers which program
   # answers the command and which version of the plugin providing it is installed, plus the
   # routine's whole configuration, so upgrading the consumer or editing the routine invalidates
-  # every candidate and re-runs each of them exactly once. A routine whose work depends on state
+  # every candidate and re-runs each of them. The fingerprint is taken before the run, so a run
+  # that itself changes files in its candidate's directory is run once more on the next tick,
+  # which then settles on a no-op. A routine whose work depends on state
   # living outside the candidate's own directory — which no directory fingerprint can ever see —
   # opts out of the skip entirely and runs its command against every matching candidate on every
   # tick. A candidate whose directory signature matches the one recorded after its last clean run
   # is skipped entirely; a failed run is never recorded as clean, so it is retried on the very
   # next tick rather than silently going stale.
 
-  key = str(d)
+  key = str(directory)
 
-  # guard: already fingerprinted this directory during this tick
+  # opt: no walked file under `directory` changes within one tick; a consumer spawned earlier in the tick
+  # that edits a sibling is seen on the next tick, when the memo is rebuilt.
+  # a directory already fingerprinted during this tick answers from the memo
   if key in memo:
     return memo[key]
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import hashlib
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import os
   prefix = key.rstrip(os.sep) + os.sep
   entries = []
-  for p in walk_files:
-    sp = str(p)
+  for path in walk_files:
+    path_text = str(path)
 
-    # guard: file lives outside the fingerprinted directory
-    if not sp.startswith(prefix):
+    # only files inside the fingerprinted directory feed its signature
+    if not path_text.startswith(prefix):
       continue
+
+    # guard: a walked file that vanished or cannot be stat-ed contributes nothing
     try:
-      st = os.stat(sp)
+      stat_result = os.stat(path_text)
     except OSError:
       continue
-    entries.append(( sp, st.st_mtime_ns, st.st_size ))
+    entries.append(( path_text, stat_result.st_mtime_ns, stat_result.st_size ))
+
+  # an order-independent digest of the entries, memoised for the rest of the tick
   entries.sort()
   sig = hashlib.sha256(repr(entries).encode()).hexdigest()
   memo[key] = sig
@@ -2755,12 +2746,6 @@ def _hash_gate_identity(resolved_cmd: list[str], cfg: dict) -> str:
     Hex digest that changes when the resolved command, the resolved plugin's version, or the
     routine configuration changes.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import hashlib
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import json
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from pathlib import Path
 
   # a resolved script sits in `<plugin>/bin/`; its plugin's manifest names the version it runs
   versions: list[object] = []
@@ -2790,8 +2775,6 @@ def _scan_state_path(repo: Path, name: str) -> Path:
   Returns:
     Path under the gitignored runtime log tree.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from pathlib import Path
   return Path(repo) / _MD_SCAN_STATE_DIR / f"{name}.json"
 
 
@@ -2806,8 +2789,6 @@ def _load_scan_state(repo: Path, name: str) -> dict:
   Returns:
     Mapping of absolute candidate path to its last clean-run signature.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import json
   try:
     loaded = json.loads(_scan_state_path(repo, name).read_text(encoding = "utf-8"))
   except (OSError, ValueError):
@@ -2824,14 +2805,12 @@ def _save_scan_state(repo: Path, name: str, state: dict) -> None:
     name: Routine name.
     state: Mapping of absolute candidate path to signature.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import json
   path = _scan_state_path(repo, name)
   try:
     path.parent.mkdir(parents = True, exist_ok = True)
     path.write_text(json.dumps(state, indent = 1, sort_keys = True), encoding = "utf-8")
   except OSError:
-    # guard: state persistence is an optimization — never fail the tick over it
+    # state persistence is an optimization — never fail the tick over it
     pass
 
 
@@ -2858,16 +2837,18 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
 
   In-place semantics: never moves the source file; the consumer reads and edits
   the file where it lies. Per-file errors accumulate; one bad file does NOT
-  abort the scan tick for the remaining files. Shared-state errors
-  (`frontmatter_parser` missing, command resolution failure) DO abort early —
-  those are not per-file conditions and retrying them per file is wasteful
-  noise.
+  abort the scan tick for the remaining files. A command resolution failure is
+  a shared-state error and DOES abort early — it is not a per-file condition
+  and retrying it per file is wasteful noise.
 
   Guarantees:
     - Never moves or deletes a candidate file; the dispatched expert or command reads and edits
       it in place at its original path.
     - A single candidate's failure never aborts the tick for the remaining candidates; only a
       shared-state setup failure aborts the tick before any candidate is attempted.
+    - A candidate is dispatched only when it passes the routine's composite `filter`: an absent or
+      empty filter accepts every candidate, declared sub-conditions must all pass, and under
+      `any_of` passing any one alternative suffices.
 
   Args:
     repo: Path-like reference to the repository.
@@ -2889,14 +2870,15 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
 
   # Contract:
   # A single candidate's failure never aborts the tick for the remaining candidates; every
-  # candidate is still attempted and its error recorded. Only a shared-state setup failure (an
-  # unavailable frontmatter parser, or a failed command resolution) aborts the tick before any
-  # candidate is attempted.
+  # candidate is still attempted and its error recorded. Only a shared-state setup failure (a
+  # failed command resolution) aborts the tick before any candidate is attempted.
 
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import time
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from pathlib import Path, PurePath
+  # Contract:
+  # A candidate is dispatched only when it passes the routine's composite `filter`. An absent or
+  # empty filter accepts every candidate; every declared sub-condition (`frontmatter`,
+  # `folder_note`, `basename`) must pass; under `any_of`, passing any one alternative composite
+  # suffices.
+
   started = time.time()
   repo = Path(repo)
 
@@ -2926,23 +2908,23 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
   walk_files = _walk_repo_files(repo, started)
   for full in walk_files:
     rel = full.relative_to(repo).as_posix()
-    for pat, rx in compiled:
-      matched = rx.match(rel) is not None if rx is not None else PurePath(rel).match(pat)
+    for pat, regex in compiled:
+      matched = regex.match(rel) is not None if regex is not None else PurePath(rel).match(pat)
 
-      # guard: pattern does not match this file
+      # only files the pattern matches are collected
       if not matched:
         continue
-      ap = full.resolve()
+      abs_path = full.resolve()
 
-      # guard: already collected under a different glob — skip duplicate
-      if ap in seen_abs:
+      # a path already collected under a different glob is not collected twice
+      if abs_path in seen_abs:
         break
-      seen_abs.add(ap)
-      if ap.is_file():
-        candidates.append(ap)
+      seen_abs.add(abs_path)
+      if abs_path.is_file():
+        candidates.append(abs_path)
       break
 
-  # Deterministic order (was implicit via `sorted(glob(...))` before).
+  # candidates dispatch in path order, so the tally and the dedup keys are stable from tick to tick
   candidates.sort()
 
   # per-outcome tallies the tick reports back to the daemon
@@ -2951,28 +2933,15 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
   unchanged = 0
 
   # Per-file errors accumulate; one bad file does NOT abort the scan tick
-  # for the remaining files (Bug 59). Shared-state errors (frontmatter_parser
-  # missing, command resolution failure) DO abort early — those are not
-  # per-file conditions and retrying them per file is wasteful noise.
+  # for the remaining files (Bug 59). A shared-state error (command resolution
+  # failure) DOES abort early — it is not a per-file condition and retrying it
+  # per file is wasteful noise.
   errors: list[dict] = []
-  try:
-    # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-    # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-    from frontmatter_parser import parse_frontmatter  # pylint: disable=import-error
-  except ImportError:
-    return {
-      TickResultKey.NAME: name, TickResultKey.EXIT: -1,
-      TickResultKey.DURATION_SEC: time.time() - started,
-      TickResultKey.ERROR: "frontmatter_parser module unavailable",
-    }
 
   # the two dispatch paths need different setup — an expert job, or a resolved consumer command
   use_command = RoutineKey.COMMAND in cfg
   if not use_command:
-    # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-    # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-    from expert_runtime import dispatch_job, retire_completed_jobs  # pylint: disable=import-error
-    protocols = _routine_protocols(cfg)
+    protocols = routine_protocols(cfg)
     expert = cfg[RoutineKey.EXPERT]
 
     # the dispatch surface takes a real path; symlinks are resolved so a daemon started through a
@@ -2981,33 +2950,28 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
     # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
     request_template = cfg["request"]
   else:
-    # waiver: inline numeric/default literal, not a domain constant
-    timeout_sec = cfg.get(RoutineKey.TIMEOUT_SEC, 300)
+    timeout_sec = cfg.get(RoutineKey.TIMEOUT_SEC, DEFAULT_TIMEOUT_SEC)
 
     # Resolve `command[0]` (plugin name) to the actual bin path once per
     # tick — same resolver `dispatch_subprocess` (subprocess routine type)
     # uses. Without this, `subprocess.run` tries to find the plugin name
     # on `$PATH` and fails with `No such file or directory`.
     try:
-      # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-      # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-      from runtime_daemon import resolve_routine_command  # pylint: disable=import-error
-      resolved_cmd = list(resolve_routine_command(list(cfg[RoutineKey.COMMAND])))
-    except Exception as e:
+      resolved_cmd = list(plugin_dirs.resolve_routine_command(list(cfg[RoutineKey.COMMAND])))
+    except Exception as error:
       return {
         TickResultKey.NAME: name, TickResultKey.EXIT: -1,
         TickResultKey.DURATION_SEC: time.time() - started,
-        TickResultKey.ERROR: f"md-scan command resolution failed: {e}",
+        TickResultKey.ERROR: f"md-scan command resolution failed: {error}",
       }
-    # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-    import os as _os
-    # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-    import subprocess as _subprocess
-    subprocess_env = { **_os.environ, **routine_subprocess_env(cfg) }
+    subprocess_env = { **os.environ, **build_routine_subprocess_env(cfg) }
 
     # Change-detection state: a candidate whose parent-dir signature is unchanged
     # since the last clean run is skipped instead of re-spawning the consumer
     # every tick. Failed runs are never recorded, so they retry next tick.
+    # opt: the consumer's work depends only on files under the candidate's folder, the resolved
+    # command, its plugin version and the routine config — a routine that reads state elsewhere
+    # turns the gate off with the change-gate key.
     scan_state = _load_scan_state(repo, name)
     next_state: dict = {}
     sig_memo: dict[str, str] = {}
@@ -3018,35 +2982,40 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
     gate_identity = _hash_gate_identity(resolved_cmd, cfg)
 
   # each candidate is re-read and re-filtered here — the glob only narrowed the field
-  for f in candidates:
+  for candidate in candidates:
     try:
       # waiver: stdlib idiom, not a domain constant
-      text = f.read_text(errors = "replace", encoding = "utf-8")
-    except OSError:
+      text = candidate.read_text(errors = "replace", encoding = "utf-8")
+    except OSError as error:
+      errors.append({
+        "file": str(candidate),
+        TickResultKey.EXIT: -1,
+        "stderr_tail": f"read failed: {error}",
+      })
       continue
-    fm = parse_frontmatter(text)
+    frontmatter = frontmatter_parser.parse_frontmatter(text)
 
-    # guard: candidate failed the composite filter — skip
-    if not _match_filter(flt, fm, f):
+    # only candidates passing the composite filter are scanned
+    if not _match_filter(flt, frontmatter, candidate):
       continue
     try:
       if use_command:
-        # waiver: resolved_cmd/timeout_sec/_subprocess/subprocess_env/scan_state/next_state/sig_memo/gate_on/gate_identity are set in the use_command else-branch, used under the same guard
+        # waiver: resolved_cmd/timeout_sec/subprocess_env/scan_state/next_state/sig_memo/gate_on/gate_identity are set in the use_command else-branch, used under the same guard
         # pylint: disable=possibly-used-before-assignment
-        sig = _dir_signature(f.parent, walk_files, sig_memo) + gate_identity
+        sig = _dir_signature(candidate.parent, walk_files, sig_memo) + gate_identity
 
-        # guard: nothing under this candidate's directory, the resolved command, or the routine
+        # nothing under this candidate's directory, the resolved command, or the routine
         # config changed since the last clean run — the consumer would re-derive the same no-op
-        if gate_on and scan_state.get(str(f)) == sig:
-          next_state[str(f)] = sig
+        if gate_on and scan_state.get(str(candidate)) == sig:
+          next_state[str(candidate)] = sig
           unchanged += 1
           continue
 
         # Blocking — one process at a time per tick. The daemon's main loop is
         # intentionally serial: parallel spawns are a strict no-no across the
         # runtime.
-        proc = _subprocess.run(
-          [ *resolved_cmd, str(f) ],
+        proc = subprocess.run(
+          [ *resolved_cmd, str(candidate) ],
           cwd = str(repo),
           timeout = timeout_sec,
           capture_output = True,
@@ -3057,7 +3026,7 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
         if proc.returncode != 0:
           tail = (proc.stderr or "")[-500:].strip()
           errors.append({
-            "file": str(f),
+            "file": str(candidate),
             TickResultKey.EXIT: proc.returncode,
             "stderr_tail": tail,
           })
@@ -3065,11 +3034,13 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
 
         # Record the pre-run signature: the consumer's own edits shift the dir
         # signature, so the next tick re-runs once more and settles on a no-op.
-        next_state[str(f)] = sig
+        next_state[str(candidate)] = sig
         dispatched += 1
+        # the suppression above covers the command branch only; the expert branch below stays checked
+        # pylint: enable=possibly-used-before-assignment
       else:
         request = _render_template(
-          request_template, { "file": str(f) },
+          request_template, { "file": str(candidate) },
         )
 
         # Domain(runtime.routines):
@@ -3087,13 +3058,13 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
         # The candidate still matches the filter here, so the transition the
         # prior job was meant to drive did not take → retry. In-flight bundles
         # are left intact so a live job is never duplicated.
-        retire_completed_jobs(
-          target_repo, expert, str(f),
+        expert_runtime.retire_completed_jobs(
+          target_repo, expert, str(candidate),
         )
-        result = dispatch_job(
+        result = expert_runtime.dispatch_job(
           target_repo, expert, request,
           protocols = protocols,
-          dedup_key = str(f),
+          dedup_key = str(candidate),
           # md-scan is in-place by contract (the consumer edits the file
           # where it lies) → the dispatched expert may write + commit in
           # place (Bug 87). Default True; a routine opts out of in-place
@@ -3105,17 +3076,17 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
           skipped += 1
         else:
           dispatched += 1
-    except Exception as e:
+    except Exception as error:
       errors.append({
-        "file": str(f),
+        "file": str(candidate),
         TickResultKey.EXIT: -1,
-        "stderr_tail": f"dispatch raised: {e}",
+        "stderr_tail": f"dispatch raised: {error}",
       })
       continue
 
   # persist the change-detection state on the command path, and only when it actually moved
   # waiver: scan_state/next_state are set in the use_command else-branch, used under the same guard
-  # pylint: disable=possibly-used-before-assignment
+  # pylint: disable-next=possibly-used-before-assignment
   if use_command and next_state != scan_state:
     _save_scan_state(repo, name, next_state)
 
@@ -3123,8 +3094,7 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
   # non-zero only when EVERY candidate failed (= the whole tick was lost) so
   # operators can distinguish "one fixture broken" from "the routine is
   # down". A mixed pass returns exit=0 with `errors=[…]` for visibility.
-  total_handled = dispatched + skipped + unchanged
-  if errors and total_handled == 0:
+  if errors and dispatched + skipped + unchanged == 0:
     first = errors[0]
     return {
       TickResultKey.NAME: name,

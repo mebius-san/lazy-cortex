@@ -1,63 +1,49 @@
 ---
 name: lazy-spec.source-url
-description: "Dispatched by every `spec.*` skill and generator agent that emits a link to a file or directory in a source repo — `lazy-spec.create-from-code`, `lazy-spec.sync-with-code`, `lazy-spec.audit`, `lazy-spec.product-config`, `lazy-spec.rebase-pins`. Not for direct use except when a human is debugging a wrong URL. Nobody inlines a forge path scheme (GitHub `/blob/`, GitLab `/-/blob/`, Bitbucket `/src/`) anywhere else."
-execution-discipline-waiver: "Single-purpose primitive — wraps the known-forges table; no multi-phase orchestration where step-skip can hide."
+description: "Dispatched by every `spec.*` skill and generator agent that emits a link to a file of the product's code — `lazy-spec.create-from-code`, `lazy-spec.sync-with-code`, `lazy-spec.audit`, `lazy-spec.product-config`. Not for direct use except when a human is debugging a wrong link. Nobody writes a code link by hand anywhere else."
+execution-discipline-waiver: "Single-purpose primitive — formats one root link; no multi-phase orchestration where step-skip can hide."
 ---
 # Source URL
 
-Primitive skill that builds one forge-correct source URL. Every emitter in the system (skills + agents) goes through this call; nobody inlines GitHub-style `/blob/<branch>/<path>` anywhere else.
+Primitive skill that builds one link from a spec doc to the product's code. A product's code lives in the same repository as the spec catalog, so the link is a plain in-repo markdown link written from the repository root with a leading `/`. Every emitter in the system (skills + agents) goes through this call.
 
-The authoritative known-forges table (URL template per forge, per kind) lives in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.sources-protocol.md` → "Known-forges table". This skill never restates those templates — it reads them.
+The contract (root form, files only, where source links may appear) lives in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.sources-protocol.md` → "Part 2 — Source-code links". This skill applies it.
 
 ## Input
 
-1. **Repo key** — a key in the `lazy.settings.json[repos]` section (e.g., `backend`).
-2. **Path** — repo-root-relative path to the target file or directory (e.g., `myapp/chapter.py`). No leading slash.
-3. **Kind** (optional, default `"blob"`) — `"blob"` for a file URL, `"tree"` for a directory URL.
-4. **Branch** (optional, default `None`) — branch override for branch-pinned files. When `None`, the repo's default branch (from the `repos` record) is used.
+1. **Path** — repo-root-relative path to the target file or folder (e.g., `myapp/chapter.py`). No leading slash.
 
 ## Process
 
-### 1. Resolve the repo
+### 1. Classify the path
 
-Call `lazy-spec.resolve-repo(repo_key)` (using the run-scoped cache if available). Get back `RepoInfo` with `base_url`, `forge`, and default `branch`.
+The path names a folder when it ends in `/` or when it is a directory in the working tree; otherwise it names a file.
 
-### 2. Pick the branch
+### 2. Build the result
 
-- If the caller passed `branch`, use that string.
-- Else use `RepoInfo.branch`.
-
-### 3. Look up the URL template
-
-Read the known-forges table in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.sources-protocol.md` → "Known-forges table". Find the row matching `RepoInfo.forge`, and pick the template for the requested `kind` column (`File URL` for `blob`, `Tree URL` for `tree`).
-
-Templates are expressed in terms of `<base>`, `<branch>`, and `<path>`. Substitute:
-
-- `<base>` → `RepoInfo.base_url`
-- `<branch>` → the branch chosen in step 2
-- `<path>` → the caller-supplied path
+- **File** → `[<basename>](/<path>)`, where `<basename>` is the last path segment (e.g., `[chapter.py](/myapp/chapter.py)`).
+- **Folder** → the path in backticks with no link (e.g., `` `myapp/` ``). Obsidian reads a link to a folder as a new note and creates it, so a folder is never linked.
 
 No URL encoding is performed on `<path>` — callers pass paths whose segments are already safe (standard source files). If the target file has spaces in its path, the caller must encode them.
 
-### 4. Return
+### 3. Return
 
-The concatenated URL string.
+The link or the backticked folder path. The skill refuses no input and does not check that the file exists — `lazy-spec.audit` reports a link whose target is missing.
 
 ## Output
 
-A single forge-correct URL, e.g., `https://github.com/acme/acme-backend/blob/master/myapp/chapter.py` for a GitHub-hosted `backend`.
-
-For a GitLab-hosted repo, the same call would produce `https://gitlab.com/<owner>/<repo>/-/blob/master/myapp/chapter.py`. For Bitbucket, `…/src/master/myapp/chapter.py`. The shape is decided by the known-forges table, not by the caller.
+`[chapter.py](/myapp/chapter.py)` for a file; `` `myapp/` `` for a folder.
 
 ## Usage patterns
 
-- **Default branch, blob**: `lazy-spec.source-url("backend", "myapp/chapter.py")` — most common; skills emitting source links in `tech` files.
-- **Default branch, tree**: `lazy-spec.source-url("backend", "myapp/", kind="tree")` — directory references.
-- **Pinned branch**: `lazy-spec.source-url("backend", "myapp/chapter.py", branch="feat/foo")` — when a `tech` or feature `tasks` file pins a branch via `source_branches: backend: feat/foo`.
+- **File**: `lazy-spec.source-url("myapp/chapter.py")` — most common; skills emitting source links in `tech`, `code-plan` and `test-plan` files.
+- **Folder**: `lazy-spec.source-url("myapp/")` — a directory named in prose, returned as backticked text.
+- **Own display text**: a caller that wants other display text keeps the target and swaps the bracketed part — `[the chapter model](/myapp/chapter.py)`.
 
 ## Key Rules
 
-- **Never inline forge-specific path schemes.** All of `/blob/…`, `/-/blob/…`, `/src/…`, `/src/branch/…`, `/tree/…/item/…` variants live in the known-forges table — this skill is the only consumer.
-- **Never guess the forge.** Delegate to `lazy-spec.resolve-repo`, which either detects from hostname or reads the explicit `forge:` override.
-- **Never strip or mutate the caller's `path`.** Pass it through verbatim (beyond template substitution).
-- **Idempotent** — given the same inputs, always returns the same URL.
+- **Root form only.** The target starts with `/` and is relative to the repository root — never relative to the doc, never a forge URL.
+- **Files only.** A folder is backticked text, never a link.
+- **Never strip or mutate the caller's `path`.** Pass it through verbatim.
+- **No line fragments.** Never append `#L<line>`.
+- **Idempotent** — given the same input and tree, always returns the same result.

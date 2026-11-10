@@ -1,0 +1,154 @@
+"""
+lazy-memory.index — rebuild .memory/.tags/ + every .memory/<expert>/.tags/
+from the notes' frontmatter. Recovery / operator tool. No commit.
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  pass
+
+
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# pylint: disable-next=import-error,wrong-import-position
+from memory_runtime import (  # noqa: E402
+  _read_note_frontmatter, _iter_notes, topic_from_tag,
+  regen_local_tag_file, regen_global_tag_file,
+)
+
+
+def reindex(repo: Path) -> dict:
+  """
+  Rebuild the tag index for the repository's `.memory/` tree from current note frontmatter.
+
+  Stale tag files that no longer have a backing note are removed; tag files for live notes
+  are written in their canonical form.
+
+  Guarantees:
+    - After the call, the tag index exactly reflects current note frontmatter: every
+      referenced topic has a regenerated tag file, and every tag file with no backing
+      note is removed.
+
+  Args:
+    repo: Absolute path to the repository whose `.memory/` tree should be reindexed.
+
+  Returns:
+    A summary dict with `experts`, `notes`, and `tags` counts covered by the rebuild.
+  """
+
+  # Contract:
+  # After the call, the tag index MUST exactly reflect current note frontmatter: every
+  # topic still referenced by a live note has a regenerated tag file, and every tag file
+  # with no such reference is removed.
+
+  # Domain(runtime.memory):
+  # # Memory tag index is a two-level derived projection of note tags
+  # A note's own frontmatter tags are the single source of truth for its topics; every tag
+  # file is a disposable projection that can always be rebuilt from them. Each topic a note
+  # carries is indexed twice: once in the tag file scoped to that note's own expert, and once
+  # in the tag file shared across every expert, so a topic is discoverable both from one
+  # expert's own memory and across the whole repository. A full rebuild must also read the
+  # topics already present in existing tag files, not only what live notes currently carry —
+  # otherwise a topic whose last reference vanished from every note would keep a stale tag
+  # file forever instead of being dropped.
+
+  repo = Path(repo)
+  # waiver: filesystem path/filename idiom, not a domain constant
+  memory_root = repo / ".memory"
+  summary = { "experts": 0, "notes": 0, "tags": 0 }
+
+  # guard: no .memory tree — nothing to reindex
+  if not memory_root.is_dir():
+    return summary
+
+  # Pass 1: discover every topic anywhere in the tree (across notes
+  # and existing tag files so we delete stale entries too).
+  all_topics: set[str] = set()
+  experts: list[Path] = []
+  for entry in sorted(memory_root.iterdir()):
+    if entry.is_dir() and not entry.name.startswith("."):
+      experts.append(entry)
+      # waiver: internal counter/summary dict subkey, single-source set in this script
+      summary["experts"] += 1
+    # waiver: filesystem path/filename idiom, not a domain constant
+    if entry.is_dir() and entry.name == ".tags":
+      for f in entry.iterdir():
+        # waiver: filesystem path/filename idiom, not a domain constant
+        if f.is_file() and f.suffix == ".md":
+          all_topics.add(f.stem)
+
+  # Pass 2: harvest topics from every note's frontmatter tags, plus each expert's
+  # own .tags/ files so stale per-expert entries are seen too.
+  for expert_dir in experts:
+    for note in _iter_notes(expert_dir):
+      # waiver: internal counter/summary dict subkey, single-source set in this script
+      summary["notes"] += 1
+      fm = _read_note_frontmatter(note)
+
+      # guard: note has no parseable frontmatter — skip
+      if not fm:
+        continue
+      # waiver: memory-note frontmatter key (canonical home is the note format), not a reusable cross-module key
+      tags = fm.get("tags") or []
+      if isinstance(tags, str):
+        tags = [ tags ]
+      for tag in tags:
+        try:
+          all_topics.add(topic_from_tag(tag))
+        except ValueError:
+          continue
+
+    # Also fold in existing local .tags/ files so stale ones are seen.
+    # waiver: filesystem path/filename idiom, not a domain constant
+    local_tags_dir = expert_dir / ".tags"
+    if local_tags_dir.is_dir():
+      for f in local_tags_dir.iterdir():
+        # waiver: filesystem path/filename idiom, not a domain constant
+        if f.is_file() and f.suffix == ".md":
+          all_topics.add(f.stem)
+
+  # Pass 3: regenerate every (expert, topic) pair and every global topic.
+  for topic in sorted(all_topics):
+    for expert_dir in experts:
+      regen_local_tag_file(expert_dir, topic)
+    regen_global_tag_file(memory_root, topic)
+
+  # report the topic count the caller sees as the rebuild's coverage
+  # waiver: internal counter/summary dict subkey, single-source set in this script
+  summary["tags"] = len(all_topics)
+  return summary
+
+
+def _main(argv: list[str]) -> int:
+  """
+  Command-line entry point for the reindex skill.
+
+  Emits the rebuild summary as a single JSON line on stdout.
+
+  Args:
+    argv: Argument list without the program name. Supports `--repo <path>` (default `.`).
+
+  Returns:
+    The process exit code (`0` on success).
+  """
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  import argparse
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  import json
+  parser = argparse.ArgumentParser()
+  # waiver: argparse CLI signature, not a domain key
+  parser.add_argument("--repo", default = ".")
+  args = parser.parse_args(argv)
+  print(json.dumps(reindex(Path(args.repo))))
+  return 0
+
+
+if __name__ == "__main__":
+  raise SystemExit(_main(sys.argv[1:]))

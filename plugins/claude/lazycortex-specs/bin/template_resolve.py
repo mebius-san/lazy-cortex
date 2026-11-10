@@ -56,6 +56,9 @@ def _alias_for(repo: Path, context: str, product: str) -> str:
   Returns:
     `product` for the vault context, the declared alias base for a product-scoped asset type,
     otherwise an empty string.
+
+  Raises:
+    ScaffoldRefusal: When the product is unregistered or the asset type's `alias_of` is invalid.
   """
   # guard: the catalog root shares the level note with the product context
   if context == _CONTEXT_VAULT:
@@ -67,6 +70,7 @@ def _alias_for(repo: Path, context: str, product: str) -> str:
   return scaffold_asset.resolve_alias_base(context, scaffold_asset.resolve_product(repo, product))
 
 
+@scaffold_asset.refusal_exits
 def main(argv: list[str]) -> int:
   """
   Run the `template` subcommand from the command line, printing the resolution as JSON.

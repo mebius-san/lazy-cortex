@@ -87,7 +87,7 @@ HISTORY_HEADING = HistoryShape.HEADING
 _PROG = "lazycortex-core history-append"
 _UTF8 = "utf-8"
 _EXIT_USAGE = 2
-_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\Z")
 _DAY_HEADING_RE = re.compile(r"^#### (\d{4}-\d{2}-\d{2})\s*$")
 # a CommonMark fence line: up to three spaces of indent, then a run of 3+ backticks or tildes
 _FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
@@ -191,10 +191,6 @@ def _scan_fences(lines: list[str]) -> tuple[set[int], str | None]:
 def _section_bounds(lines: list[str], heading: str) -> tuple[int, int] | None:
   """
   Find the history section as a half-open line range.
-
-  Guarantees:
-    - A line inside a fenced code block is never treated as the section heading or as the
-      boundary that closes the section.
 
   Args:
     lines: The note split into lines.
@@ -420,8 +416,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.stdin:
       return _run_stdin(args.heading)
     return _run_file(args.file, args.line, args.date, args.heading)
-  except ValueError as exc:
-    print(f"history-append: {exc}", file = sys.stderr)
+  except ValueError as error:
+    print(f"history-append: {error}", file = sys.stderr)
     return _EXIT_USAGE
 
 

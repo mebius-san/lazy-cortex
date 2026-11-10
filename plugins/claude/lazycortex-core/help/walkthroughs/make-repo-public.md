@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Step-by-step guide to making a repo public safely — audit, fix secrets, set your public author identity, create the waiver file, and flip GitHub visibility.
-last_regen: 2026-09-24
+last_regen: 2026-11-10
 diagram_spec:
   anchor: "How the flow works"
   request: "End-to-end participant exchange when /lazy-repo.mark-public runs: user invokes the skill, skill checks git and GitHub visibility (preflight), determines scope (whole-repo vs. subtree), dispatches four parallel security scans (secrets, PII, infra, local paths) via /lazy-guard.check-public, presents unified findings table, loops per FAIL for resolution (encrypt/template/redact) and per WARN for fix/waive/skip, writes .guard-public.json with public_author and accepted waivers activating the pre-commit hook, then in whole-repo mode flips visibility via gh repo edit. Five participants: User, /lazy-repo.mark-public, /lazy-guard.check-public, Security Scan Agents, GitHub."
@@ -9,8 +9,8 @@ diagram_spec:
 source_skills:
   - lazy-repo.mark-public
   - lazy-guard.check-public
-source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
-surface_sha: ed8de8ccbb1c06a1a467bad48eab4e0deb5f8e45ef467a9d72485dbd52a83243
+source_sha: 3fadd77433a2100975275f22c7c7e8cb8e544c9d
+surface_sha: b19ebbf4620e3d9bcfd2f66d23b44eccef06dd43c09b411a3bbbc299b94da9e4
 ---
 # Making a Repo Public Safely
 
@@ -51,6 +51,8 @@ The skill confirms you are in a git repo, reads the current GitHub visibility, a
 
 If the repo is already public and you passed no scope arguments, the skill asks whether you want to re-audit with `/lazy-guard.check-public` instead of repeating the full setup flow.
 
+The skill confirms its reading back to you in one line before continuing (for example, that it is auditing only the listed paths and that repo visibility will not change). In subtree-public mode it also records your globs as the public scopes right away, creating `.guard-public.json` if it does not exist yet, so the audit and the hook see the scope immediately. The file is completed with your accepted waivers in step 5.
+
 ### 3 — Security audit
 
 The skill invokes `/lazy-guard.check-public`, which dispatches four parallel scan agents — one each for secrets, PII, infrastructure details, and hardcoded local paths. The full findings table appears before any fix work begins.
@@ -60,6 +62,8 @@ Findings come back in three severities:
 - **FAIL** (secrets) — private keys, AWS access keys, API tokens, high-entropy base64 on secret-context lines, connection strings with credentials, bearer token literals. These block going public and must be resolved.
 - **WARN** (PII, infrastructure, local paths) — email addresses, internal hostnames, Tailscale or public IPs, hardcoded `/Users/…` paths, home-subdirectory refs like `~/Dropbox/`, author identity in manifests. You decide whether to fix or waive each one.
 - **INFO** — lower-confidence signals such as personal names in git config inside dotfiles. Shown for awareness; auto-waive or skip as you prefer.
+
+Before scanning, the audit builds its file list from the tracked files: when public scopes are set it keeps only files inside them, and it always drops encrypted `*.age` files, paths listed as globally skipped (vendored or third-party code), and binary files. The report opens with how many files were scanned and how many each filter excluded, plus how many waivers were loaded. Findings already covered by a waiver are counted but not listed unless you ask.
 
 Verification gate: review the findings table before moving on. If a finding looks like a false positive, flag it — the skill can waive it in the next step.
 
@@ -73,25 +77,15 @@ Verification gate: review the findings table before moving on. If a finding look
 
 You pick one and the skill applies it. The next step will not proceed until every FAIL is resolved.
 
-**For each WARN finding** you choose: fix it, waive it, or skip it for now. Waiving adds an entry to `.guard-public.json` with your justification. Skipping leaves the finding unresolved but does not block the next step.
+**For each WARN finding** you choose: fix it, waive it, or skip it for now. Waiving adds an entry to `.guard-public.json` with your justification. Skipping leaves the finding unresolved, and the skill holds it against the visibility flip in step 6. A waiver can carry an optional expiry date; after that day it stops applying. After the fixes are applied, the audit re-scans so you see the updated summary.
 
 **Author identity findings (check B4)**: if the same name appears in multiple manifests, setting a `public_author` record once is better than writing one waiver per file. When you confirm your intended public name, the skill records it as a top-level `public_author` block in `.guard-public.json`. That single record auto-waives every B4 finding whose captured match equals your public name — including in files added later — without scattering individual waiver entries across the file.
 
 ### 5 — Create `.guard-public.json`
 
-The skill writes the waiver file to the repo root with all accepted waivers from the previous step and commits it. The file structure the skill produces:
+The skill writes the waiver file to the repo root in one pass: every accepted waiver from the previous step, your public scopes (subtree-public mode) or a whole-repo marker (whole-repo mode), and any vendored or third-party directories the audit identified as safe to skip. Waivers and skip paths merge into what the file already holds, so re-running never drops earlier entries. It then commits the file for you with the message `chore: mark repo public (lazy-guard)`; the step counts as done only when git reports the commit. You never write or edit this file by hand.
 
-```
-{
-  "version": 1,
-  "public_author": { "name": "...", "email": "...", "notes": "..." },
-  "public_scopes": [ ...glob list in subtree-public mode; omitted in whole-repo mode... ],
-  "waivers": [ ...one entry per accepted exception... ],
-  "global_skip_paths": [ ...vendored or third-party directories identified as safe to skip... ]
-}
-```
-
-The `public_author` block is a top-level key separate from `waivers[]`. It governs every B4 author-field finding under the declared scopes automatically — no per-file waiver entry needed.
+Your public author identity lives in the same file as a record separate from the waiver list. It governs every author-field finding under the declared scopes automatically — no per-file waiver entry needed.
 
 Creating this file activates the PII/infrastructure/local-paths pre-commit hook: from this point forward, that hook scans staged changes and blocks on new PII, infrastructure, or local-path findings that are not waived, whenever a `git commit` shows up in a command you run — not just a bare `git commit` at the start. It also catches `git commit` buried in a chained command (`git add … && git commit … && git push`) and `git commit` invoked with flags before the subcommand (`git -C <dir> commit`), so there is no accidental gap between "the hook is on" and "the command I actually type gets scanned". This is on top of, not instead of, the secrets-blocking hook — that one runs in every repo unconditionally and does not depend on this file existing. To disable the PII/infrastructure/local-paths scanning, delete `.guard-public.json` via a tracked commit; secrets scanning stays on regardless. To add new accepted exceptions later, re-run `/lazy-guard.check-public` and choose the waiver option for any finding you want to accept — the skill appends the entry.
 
@@ -109,7 +103,7 @@ If `gh` is not on PATH or is unauthenticated, install the GitHub CLI and run `gh
 
 ### 7 — Post-flight
 
-The skill confirms the pre-commit hook is active and reminds you to run `/lazy-guard.check-public` periodically or after major configuration changes. In subtree-public mode it confirms which `public_scopes` the hook is protecting on every commit.
+The skill reports one outcome line per step, so a step that was skipped shows up as skipped rather than silently missing. It confirms the pre-commit hook is active and reminds you to run `/lazy-guard.check-public` periodically or after major configuration changes. In subtree-public mode it confirms which `public_scopes` the hook is protecting on every commit.
 
 ## After you're done
 

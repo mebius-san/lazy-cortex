@@ -61,7 +61,7 @@ A **versioned** section is a flat top-level key whose dict carries an `_version:
 }
 ```
 
-Sections are **owned by individual plugins** and migrate independently. There is no global settings version — the root `version` field is legacy (written by pre-A1 code). On first `load_section` call, any root `version` present is migrated to per-section `_version` on all existing sections, then the root key is removed. This migration is automatic and transparent.
+Sections are **owned by individual plugins** and migrate independently. There is no global settings version — the root `version` field is legacy (written by pre-A1 code). `load_section` is a pure read and never migrates: it returns the section exactly as it sits on disk, a stale `_version` or a legacy root `version` included. Migration is an explicit install / doctor-side step — `migrate_all`, reached through the `lazy_settings.py migrate` subcommand that `/lazy-core.setup` runs as its Step 0 — and it is there that a root `version` is pushed down to per-section `_version` on all existing sections and the root key removed. The daemon's read path never migrates or writes the settings file.
 
 **Which sections are versioned.** Only the keys listed in `CURRENT_VERSIONS` (`bin/lazy_settings.py`) — `migrate_all` iterates that constant and nothing else, so a key absent from it is never stamped with an `_version` on disk and can never acquire a migration ladder. `load_section` itself is indifferent: it reads and merges any top-level key it is handed, versioned or not. Three live sections are read that way without appearing in the constant:
 
@@ -70,6 +70,8 @@ Sections are **owned by individual plugins** and migrate independently. There is
 | `providers` | `provider_env.resolve_provider` | `{<name>: {base_url, token_env, models}}` — see `lazy-core.expert-runtime-schema` § Providers |
 | `hooks` | `hook_gate` | `{disabled: [<hook short name>, ...]}` — see `lazy-core.expert-runtime-schema` § Lazycortex hooks |
 | `sandbox` | `sandbox_scope.load_declared` | Claude Code's own `sandbox` object (`network.allowedDomains` above all), laid over the expert-spawn sandbox file — see `lazy-core.expert-runtime-schema` § Sandbox |
+
+**Retired sections.** A section no plugin reads any more is listed in `RETIRED_SECTIONS` (`bin/lazy_settings.py`) instead: `migrate_all` deletes it from the file whatever its `_version` or content, and never stamps it back. `repos` is retired — a product's code always lives in the repository that holds its spec catalog.
 
 A third root key is not a section at all: `language` is a bare string (`"language": "ru"`), read straight off the parsed JSON document by consumer plugins and never through `load_section`. The `_version` invariant does not reach it.
 
@@ -84,7 +86,7 @@ A third root key is not a section at all: `language` is a bare string (`"languag
 | `wiki.language` | `wiki` section | `lazycortex-wiki`'s `resolve-language` | `/lazy-wiki.configure vault` |
 | `wiki.domains.language` | `wiki.domains` section | the domain index caption and the domain-spec writer payload | `/lazy-wiki.configure domains` |
 
-Each chain resolves first non-empty wins, ending at the floor `en`: specs walks document frontmatter → product → `spec` section → root → `en`; wiki walks `wiki.language` → root → `en`; core reads root → `en`. `wiki.domains.language` is not part of a chain — the generated domain docs may be authored in a language of their own, so the key stands alone with `en` as its floor.
+Each chain resolves first non-empty wins, ending at the floor `en`: specs walks document frontmatter → product → `spec` section → root → `en`; wiki walks `wiki.language` → root → `en`; core reads root → `en`. The section → root → `en` part belongs to core's `resolve-language`: called with `--section <name>` it reads `<name>.language`, then the root `language`, then `en`; without the flag it reads the root and the floor only. `wiki.domains.language` is not part of a chain — the generated domain docs may be authored in a language of their own, so the key stands alone with `en` as its floor.
 
 `review.language` was read by `lazycortex-review` and written by nothing; it is **no longer read** anywhere. Review works in the language of the document it reviews, and takes its own fixed operator-facing strings from the root `language`. A leftover key in a settings file is inert.
 
@@ -121,18 +123,19 @@ The helper discovers migration modules via `importlib.import_module`. A `ModuleN
 
 ## 4. Idempotency on read
 
-`load_section` is safe to call repeatedly. It only writes back to disk if a migration actually fired:
+`load_section` is safe to call repeatedly. It is always a pure read — no migration, no write, no lock, no side effect — whatever version the section or the root carries.
+
+The write-back belongs to `migrate_all` (install / doctor-side, see § 2). It writes the file only when something changed:
 
 - A root `version` field was migrated to per-section `_version`, **or**
-- The section's `_version` was below `CURRENT_VERSIONS[section_key]` and a migration step ran.
-
-Otherwise the call is a pure read — no write, no lock, no side effect.
+- A section's `_version` was below `CURRENT_VERSIONS[section_key]` and a migration step ran, **or**
+- A retired section was deleted.
 
 ---
 
 ## 5. Atomic write semantics
 
-All writes (both `load_section` migration write-back and `save_section`) go through `_atomic_write`:
+All writes (both `migrate_all` migration write-back and `save_section`) go through `_atomic_write`:
 
 1. `tempfile.mkstemp(dir=<same directory as target>)` — ensures the temp file is on the same filesystem.
 2. Write the full JSON document to the temp file.

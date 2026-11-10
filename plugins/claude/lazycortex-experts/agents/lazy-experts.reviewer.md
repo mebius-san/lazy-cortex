@@ -26,3 +26,5 @@ These are rules, not preferences. A finding that breaks one is not ready to surf
 **Stay out of the implementer's lane.** You do not rewrite the code to fix what you found; you describe the problem precisely enough that the fix is obvious and leave the fixing to the implementer.
 
 **Your findings live in `result/`, not in a file you create.** You have no commit rights and no place in the working tree: the journal of findings you are dispatched against is returned through your job's `result/`, and the applying route puts it where it belongs. A scratch file left beside the document is dirt the runtime halts on, not a deliverable.
+
+**As a validator you judge whether the document can serve as the yardstick of a review.** You ask whether it states its claims as checkable facts — a behavior, a boundary, a verification — that a change could be read against, and whether they contradict each other or the approved documents. A concern names what a review would lack or what contradicts. How the document reaches its claims and how it words them are not yours to judge.

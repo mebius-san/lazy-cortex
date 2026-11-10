@@ -1,18 +1,18 @@
 ---
 name: lazy-spec.request-find-candidates
-description: "Dispatched by the `spec.coordinator` agent, after `lazy-spec.request-classify` has settled the class, to find the existing features / changes / bugs a request could attach to; not for direct use. Read-only — returns a ranked list with rationale that the coordinator turns into its attach-vs-spawn decision."
+description: "Dispatched by the `spec.catalog-coordinator` agent in its routing mode, after `lazy-spec.request-classify` has settled the class, to find the existing features / changes / bugs a request could attach to; not for direct use. Read-only — returns a ranked list with rationale that the coordinator turns into its attach-vs-spawn decision."
 execution-discipline-waiver: "Single-purpose primitive — read-only search; no multi-phase orchestration."
 ---
 # Find candidate entities for a request
 
-Given a request body and inferred `request_class`, search the vault for existing entities that are plausible attach targets. Used by `spec.coordinator` when deciding clear-path attach vs spawn vs ambiguous-path multi-select routing.
+Given a request body and inferred `request_class`, search the vault for existing entities that are plausible attach targets. Used by `spec.catalog-coordinator`'s routing mode when drafting the routing proposal — a clear attach candidate, a spawn, or an ambiguous multi-select — that the operator then confirms, picking attach or change per existing asset.
 
 The class taxonomy + per-class allowed attach targets live in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.request-protocol.md` → "Class taxonomy". This skill never restates them.
 
 ## Input
 
 - **`body`** — request body text (after frontmatter stripped)
-- **`request_class`** — one of `feature` | `change` | `bug` | `task` | `spec` | `plan` | `feedback`. The `unknown` class is rejected — caller should clarify class first.
+- **`request_class`** — the token `lazy-spec.request-classify` returned: a closed meta class (`task` | `spec` | `plan` | `feedback`) or any asset type visible on the product — the shipped `feature` | `change` | `bug` | `content` | `research`, or an operator-declared type. The `unknown` class is rejected — caller should clarify class first.
 - **`product`** (optional) — product compound-key (e.g. `dashboards`) when extractable from body. When absent, search all products.
 
 ## Search scope (filtered by class)
@@ -28,6 +28,7 @@ Per the class → routing table in `lazy-spec.request-protocol.md`:
 | `spec` | `<product>/<slug>/<slug>.md` |
 | `plan` | `<product>/<slug>/<slug>.md`, `<product>/changes/<slug>/<slug>.md` |
 | `feedback` | `<product>/<slug>/<slug>.md`, `<product>/{changes,bugs}/<slug>/<slug>.md` |
+| any other asset type (`content`, `research`, operator-declared) | `<product>/<default_path>/<slug>/<slug>.md` — the type's own `default_path` from the product's effective `asset_types`; `"."` is the product root |
 
 The folder-note filename matches its parent folder basename (per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md` — `csv-export/csv-export.md`, not `csv-export/folder-note.md`). To enumerate candidates, walk each `<product>/<kind>/` directory for a category with its own folder (`changes/`, `bugs/`); for a feature, walk `<product>/` itself — any subdirectory that is not one of the product's declared group folders is a candidate. For each subdir `<slug>/`, the folder-note is the file `<slug>/<slug>.md` if present — **keep only notes whose `spec_role` is `status`**: the root glob's shape (`<slug>/<slug>.md`) also matches a nested product's own level note (`spec_role: product`), which is never a candidate.
 
@@ -64,9 +65,9 @@ Rationale string is one sentence, names the strongest signal.
 
 ## Caller decision rules
 
-The caller (`spec.coordinator`) interprets the output:
+The caller (`spec.catalog-coordinator`, routing mode) interprets the output:
 
-- **Top score ≥ 0.7 with significant gap (≥ 0.2) to the second** ⇒ clear attach (single obvious target).
+- **Top score ≥ 0.7 with significant gap (≥ 0.2) to the second** ⇒ clear attach candidate (single obvious target) — proposed in the routing `[!question]`, where the operator still picks `attach` or a change that targets it; never applied without that tick.
 - **Multiple candidates ≥ 0.5** ⇒ ambiguous — write multi-select `# Routing` checkboxes.
 - **No candidates ≥ 0.3 AND class allows spawn** ⇒ spawn new entity.
 - **No candidates ≥ 0.3 AND class is attach-only** (`task` / `plan` / `feedback`) ⇒ ask via `[!question]` to disambiguate or reject.

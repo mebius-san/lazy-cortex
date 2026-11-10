@@ -1,7 +1,7 @@
 ---
 name: lazy-review.configure
 description: "Run when the operator wants a new kind of document to go through review, wants to change which paths a review class matches, or wants to reassign who writes / validates / closes out / narrates it. Wizard over `review.classes` in `.claude/lazy.settings.json`, one question per turn via AskUserQuestion; read-first, so an already-configured class is re-validated without a single prompt. Requires `/lazy-review.install` to have run."
-allowed-tools: Read, Edit, Write, AskUserQuestion, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Agent
+allowed-tools: Read, Edit, Write, AskUserQuestion, Bash(test -f *), Bash(mktemp), Bash(rm -f *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Agent
 ---
 # lazy-review.configure
 
@@ -29,13 +29,22 @@ Every collecting phase first inspects the in-memory settings loaded in Phase 1. 
 
 ## Phase 1 — Verify install + load settings
 
-`Read` `.claude/lazy.settings.json`. If absent, abort with the message *"run `/lazy-review.install` first"* and stop. Otherwise hold the parsed object in memory for the wizard.
+Probe the settings file with `Bash(test -f .claude/lazy.settings.json)`. If it is absent, abort with the message *"run `/lazy-review.install` first"* and stop.
+
+Otherwise resolve `<core-cli>` — the core plugin's `bin/lazycortex-core` file — with `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-review" core-cli)`, which prints its absolute path (exit 1 means core is not installed: abort and say so). Read the two sections the wizard works on through the core CLI and hold them in memory:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get review --verbatim)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get experts --verbatim)
+```
+
+Each prints the section as the file carries it, or `null` when it carries none.
 
 Outcome: `verified`.
 
 ## Phase 2 — Collect class paths
 
-Every class entry carries a `class` identity token — a short unique slug (`design`, `request`, `meeting-notes`) tooling addresses the entry by; globs stay routing-only. Read-first: an entry the operator means to extend is found by its token. For a new class, derive the token from the document kind and confirm it in the same question as the globs; refuse a token another entry already carries.
+Every class entry carries a `class` identity token — a short unique slug (`design`, `request`, `meeting-notes`), or `<type>@<product>` for a product-scoped class, that tooling addresses the entry by; globs stay routing-only. Read-first: an entry the operator means to extend is found by its token. For a new class, derive the token from the document kind and confirm it in the same question as the globs; refuse a token another entry already carries.
 
 A token of the form `<type>@<product>` scopes the class to one product. When several such classes cover the same typed document, the one whose globs anchor on the most **leading literal segments** — the innermost product's — takes it, so a nested product's own class outranks the ancestor's whatever the list order is; list order only breaks an equal-depth tie, and it is the whole matcher for a document carrying no type.
 
@@ -167,30 +176,33 @@ AskUserQuestion: header "Edit markers", question "Which edit-marker style should
 - `html` — inline `<ins>`, `<del>`, `<mark>`, `<!-- note -->`.
 ```
 
-Write the chosen value into `review.edit_marker_style`.
+Hold the chosen value for Phase 5, which writes it to `review.edit_marker_style`.
 
 Outcome: `picked` (asked) or `read-from-record` (reused the persisted style).
 
 ## Phase 5 — Write back + run /lazy-review.audit
 
-Serialize the updated settings via `Write` to `.claude/lazy.settings.json`. Then widen the coordinator's watch scope so this class's documents actually reach it — but only when `routines["lazy-review.coordinator-watch"]` is present. The routine may be absent on a repo where `/lazy-review.install` has not run yet; if it is missing, skip this normalization silently — there is no watch to feed.
+Hand the collected class to the `configure-apply` verb as one JSON document — `class` is the full class entry from Phases 2–3a (its `class` token, `paths`, and `experts.main`), `section_experts` maps each Phase 3b section as `"<umbrella>/<section-id>": {name, repo, role, section, position}` (`{}` when the loop added none or reused the record), and `edit_marker_style` is the Phase 4 pick (`null` when it was read from record). The document travels in a scratch file outside the repository, never inline on the command line — an operator-typed value such as a section heading may hold a quote that breaks shell quoting. Create the file with `Bash(mktemp)` and hold the printed path as `<payload-file>`, write the JSON document to it with `Write`, then:
 
-The watch carries **one** pathspec, not a list — core's git-watch takes a single `path_filter` — so the scope is one directory root that must contain every class:
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-review" configure-apply --payload-file <payload-file>)
+```
 
-1. Reduce each of this class's `paths` globs to the root it can match under, the way the class matcher reads it. A glob without `**` is right-anchored — `requests/*.md` matches `specs/requests/x.md` as well — so it reduces to `.`. A glob with `**` is anchored at the repo root and reduces to its longest leading wildcard-free directory prefix, or to `.` when its first component already wildcards.
-2. The new `review.watch_root` is the common directory of those roots and the current `review.watch_root`. Roots sharing no common directory make it `.` (the whole repo).
-3. Write `routines["lazy-review.coordinator-watch"].path_filter` as `:(glob)<watch_root>/**/*.md`, collapsing to `:(glob)**/*.md` when the root is `.`. That mask is a value the install owns and re-derives from `review.watch_root` on every run, by this same rule. Writing it here is the shortcut that makes the widening take effect before the next install, not a second source of truth — if the two derivations ever disagree, the install's is the one that survives, and this step is the one to correct.
+Delete the scratch file with `Bash(rm -f <payload-file>)` once the verb has answered, whatever it answered.
 
-Class `paths` stay precise — they are the dispatch-time routing the broad watch deliberately delegates to, and the routine's `review_active` frontmatter filter is what keeps the broad pathspec cheap. Widening is monotonic and idempotent: a root already covering the class changes nothing, and the scope is never narrowed (that would silently drop a class configured earlier). Then invoke `/lazy-review.audit` and surface its findings.
+The verb writes the class into `review.classes` (a recorded entry with the same token is replaced and keeps its `protocols`), never overwrites a recorded `edit_marker_style`, and then runs the install bootstrap, which widens `review.watch_root` until this class's documents reach the coordinator's watch — it never narrows it — and re-derives the watch's `path_filter`. It prints one JSON line: `status` (`written` / `unchanged`), `class_token`, `watch_root`, `path_filter`, `written_sections`. `status: "refused"` (exit 1) carries a `reason` — relay it and stop.
 
-Outcome: `written`.
+Then invoke `/lazy-review.audit` and surface its findings.
+
+Outcome: `written` (the verb answered `written`) or `unchanged`.
 
 ## Report
 
-One line per task with its outcome word, followed by `configured: <paths>; experts={main: <count>, validation: <count>, terminal: <count>}; style=<style>; watch_root=<root>; audit=<level>`.
+One line per task with its outcome word, followed by `configured: <paths>; experts={main: <count>, validation: <count>, terminal: <count>}; style=<style>; watch_root=<root>; audit=<level>`, where `<root>` is the `watch_root` the `configure-apply` verb answered.
 
 ## Failure modes
 
 - **Phase 1 aborts on missing settings** — operator hasn't installed → run `/lazy-review.install` first, then re-run.
 - **section-id fails validation loop** — operator keeps entering a string that doesn't match `^[a-z][a-z0-9_-]*$` or collides with an existing id → wizard re-asks until a valid unique id is provided.
+- **Phase 5 prints `status: "refused"`** — the settings file does not parse, or the collected document was malformed; the `reason` names which → fix `.claude/lazy.settings.json` by hand (or re-enter the wizard), re-run.
 - **Phase 5 audit reports FAIL** — wizard wrote inconsistent state (e.g. section-id in `validation` or `terminal` not matching the allowed alphabet, or expert name missing from top-level experts dict) → re-enter the wizard and complete the missing pieces.

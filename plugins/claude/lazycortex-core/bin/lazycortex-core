@@ -1,13 +1,37 @@
 #!/usr/bin/env python3
-"""lazycortex-core CLI dispatcher."""
-import os, sys
+
+"""
+lazycortex-core CLI dispatcher.
+"""
+
+# waiver: module name matches the installed CLI binary name; renaming breaks the PATH contract.
+# pylint: disable=invalid-name
+
+from __future__ import annotations
+
+import argparse
+import importlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
 from pathlib import Path
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  from collections.abc import Callable
+
+
+# Put the CLI's own directory first on sys.path so its sibling bin-modules resolve by bare name.
 sys.path.insert(0, str(Path(__file__).parent))
 
 # Claude Code puts `<installPath>/bin` of every installed plugin on the session's PATH at
 # startup and never refreshes it, so after `/plugin update` a long-lived session — and every
 # headless spawn inheriting its environment — keeps resolving the bare `lazycortex-core` to the
 # version that was installed when the session began.
+
 # Decision: the stale-PATH problem is corrected here, inside the binary, not in its callers — a
 # cache-resident copy forwards to the version the install registry
 # (`~/.claude/plugins/installed_plugins.json`) names before dispatching. The cache is never
@@ -17,985 +41,2130 @@ sys.path.insert(0, str(Path(__file__).parent))
 # the `Bash(lazycortex-core *)` allow pattern consumers carry: an absolute-path invocation does
 # not match it, so headless spawns under `dontAsk` would be denied. A dev-vault copy never
 # forwards — its source tree is the live one.
+
+# Path fragment that marks a copy running from inside the Claude Code plugin cache.
 _PLUGIN_CACHE_REL = ".claude/plugins/cache"
+# Environment variable a forwarded process carries so it never forwards a second time.
 _FORWARDED_ENV = "LAZYCORTEX_CORE_FORWARDED"
+# Value the forwarding copy sets the forwarded marker to.
+_FORWARDED_ON = "1"
+# Plugin name the install registry records this CLI under.
+_PLUGIN_NAME = "lazycortex-core"
+# Directory under a plugin root that holds its executables.
+_BIN_DIRNAME = "bin"
+# File name of this CLI inside a plugin's bin directory.
+_CLI_FILENAME = "lazycortex-core"
+# Program name every subcommand's argparse `prog` starts with.
+_PROG = "lazycortex-core"
+# Text encoding of every subprocess pipe and runtime file this CLI reads or writes.
+_ENCODING = "utf-8"
+
+# Top-level usage text printed when no subcommand, or an unknown one, is given.
+USAGE = ("usage: lazycortex-core <subcommand> [args...]\n"
+         "Subcommands: expert-pump-once, doctor-tick, runtime-tick, runtime, resume, memory-reflect-all, "
+         "dispatch-job, collect-job, consume-job, retire-jobs, cancel-job, lookup-expert, scaffold, file-sync, "
+         "remote-mirror, safe-pull, error-record, error-list, settings-get, settings-set, resolve-language, "
+         "routine-ensure-filter, permission-allow, add-protocols, detect-scope, daemon-pause, daemon-resume, "
+         "daemon-list, metrics-alloc-port, metrics-scrape-file, sandbox-sync, sandbox-audit, index-guard, "
+         "history-append, reconcile-routine, plugin-root, resolve-ref, external-dirs, inbox-check, "
+         "protocol-audit, provider-validate, provider-token, routine-validate, routine-register, "
+         "routine-unregister, routine-show, routine-migrate, install-phase, daemon-run-here, git-lock, recover, "
+         "list-jobs, routines-bootstrap, memory-reflect, plugin-dirs, agent-models-seed, permission-edit, "
+         "guard-public-write, guard-public-files, mcp-config-drop, context-scan, gitignore-ensure, runtime-gc, "
+         "migrate-plan, migrate-stamp, migrate-release, settings-rungs")
 
 
-def _newer_cached_cli() -> Path | None:
-    """Return the registry-installed CLI when this cache-resident copy is not the one it names."""
-    here = Path(__file__).resolve().parent
-    if _PLUGIN_CACHE_REL not in here.as_posix():
-        return None
-    from lazy_setup import installed_plugin_root
-    installed = installed_plugin_root("lazycortex-core")
-    if installed is None or installed.resolve() == here.parent:
-        return None
-    cli = installed / "bin" / "lazycortex-core"
-    return cli if cli.is_file() else None
+
+# ----------------------------------------------------------------------------------------
+class _Verb:
+  """
+  Subcommand names this CLI implements itself, as spelled on the command line.
+
+  Attributes:
+    EXPERT_PUMP_ONCE: Run one expert-pump pass and print its counters.
+    DOCTOR_TICK: Run one doctor tick and print its result.
+    RUNTIME_TICK: Run daemon iterations by hand.
+    RUNTIME: Run the runtime daemon in the foreground.
+    RESUME: Clear the daemon's halt block.
+    MEMORY_REFLECT_ALL: Dispatch a reflect job for every persona-marked expert.
+    DISPATCH_JOB: Queue an expert job.
+    COLLECT_JOB: Read an expert job's status.
+    CONSUME_JOB: Retire an expert job.
+    RETIRE_JOBS: Retire an expert's finished jobs under one dedup key.
+    CANCEL_JOB: Abort an expert job.
+    LOOKUP_EXPERT: Look up an expert's settings entry.
+    ERROR_RECORD: Record or resolve an error-ledger event.
+    ERROR_LIST: List error-ledger incidents.
+    DETECT_SCOPE: Print a plugin's install scope.
+    PLUGIN_ROOT: Print a plugin's source root.
+    MIGRATE_PLAN: Print a repository's migration plan, or check one migration step file.
+    MIGRATE_STAMP: Record the version a plugin's migrations are complete for.
+    MIGRATE_RELEASE: Set the release version on a plugin's unreleased migration steps.
+    SETTINGS_RUNGS: List the settings-ladder rungs a plugin gained since a git revision.
+    DAEMON_PAUSE: Create the daemon pause semaphore.
+    DAEMON_RESUME: Remove the daemon pause semaphore.
+    DAEMON_LIST: List the runtime daemons installed on this host.
+    METRICS_ALLOC_PORT: Allocate a metrics port for a repo.
+    METRICS_SCRAPE_FILE: Write the Prometheus scrape-targets file.
+    SANDBOX_SYNC: Record a repo's expert-spawn sandbox scope.
+    SANDBOX_AUDIT: Report what the recorded sandbox scope fails to grant.
+    HISTORY_APPEND: Append one bullet to a note's history section.
+    RECONCILE_ROUTINE: Register or refresh one routine registration.
+    RUNTIME_GC: Sweep the runtime garbage and print the summary.
+  """
+
+  # Run one expert-pump pass and print its counters.
+  EXPERT_PUMP_ONCE = "expert-pump-once"
+  # Run one doctor tick and print its result.
+  DOCTOR_TICK = "doctor-tick"
+  # Run daemon iterations by hand.
+  RUNTIME_TICK = "runtime-tick"
+  # Run the runtime daemon in the foreground.
+  RUNTIME = "runtime"
+  # Clear the daemon's halt block.
+  RESUME = "resume"
+  # Dispatch a reflect job for every persona-marked expert.
+  MEMORY_REFLECT_ALL = "memory-reflect-all"
+  # Queue an expert job.
+  DISPATCH_JOB = "dispatch-job"
+  # Read an expert job's status.
+  COLLECT_JOB = "collect-job"
+  # Retire an expert job.
+  CONSUME_JOB = "consume-job"
+  # Retire an expert's finished jobs under one dedup key.
+  RETIRE_JOBS = "retire-jobs"
+  # Abort an expert job.
+  CANCEL_JOB = "cancel-job"
+  # Look up an expert's settings entry.
+  LOOKUP_EXPERT = "lookup-expert"
+  # Record or resolve an error-ledger event.
+  ERROR_RECORD = "error-record"
+  # List error-ledger incidents.
+  ERROR_LIST = "error-list"
+  # Print a plugin's install scope.
+  DETECT_SCOPE = "detect-scope"
+  # Print a plugin's source root.
+  PLUGIN_ROOT = "plugin-root"
+  # Print a repository's migration plan, or check one migration step file.
+  MIGRATE_PLAN = "migrate-plan"
+  # Record the version a plugin's migrations are complete for.
+  MIGRATE_STAMP = "migrate-stamp"
+  # Set the release version on a plugin's unreleased migration steps.
+  MIGRATE_RELEASE = "migrate-release"
+  # List the settings-ladder rungs a plugin gained since a git revision.
+  SETTINGS_RUNGS = "settings-rungs"
+  # Create the daemon pause semaphore.
+  DAEMON_PAUSE = "daemon-pause"
+  # Remove the daemon pause semaphore.
+  DAEMON_RESUME = "daemon-resume"
+  # List the runtime daemons installed on this host.
+  DAEMON_LIST = "daemon-list"
+  # Allocate a metrics port for a repo.
+  METRICS_ALLOC_PORT = "metrics-alloc-port"
+  # Write the Prometheus scrape-targets file.
+  METRICS_SCRAPE_FILE = "metrics-scrape-file"
+  # Record a repo's expert-spawn sandbox scope.
+  SANDBOX_SYNC = "sandbox-sync"
+  # Report what the recorded sandbox scope fails to grant.
+  SANDBOX_AUDIT = "sandbox-audit"
+  # Append one bullet to a note's history section.
+  HISTORY_APPEND = "history-append"
+  # Register or refresh one routine registration.
+  RECONCILE_ROUTINE = "reconcile-routine"
+  # Sweep the runtime garbage and print the summary.
+  RUNTIME_GC = "runtime-gc"
+
+
+# ----------------------------------------------------------------------------------------
+class _Arg:
+  """
+  Argparse flags, positional names, actions, choices, defaults, and help strings of the subcommands.
+
+  Attributes:
+    STORE_TRUE: Boolean-flag action.
+    APPEND: Repeatable-flag action.
+    OPTIONAL: Optional single positional.
+    DRY_RUN: Report-only flag of memory-reflect-all, reconcile-routine, and runtime-gc.
+    DAYS: Log-window flag of memory-reflect-all.
+    DAYS_DEFAULT: Default log window of memory-reflect-all, in days.
+    INCIDENT: Incident-key flag of error-record.
+    KIND: Event-kind flag of error-record and error-list.
+    KIND_DEFAULT: Default event kind of error-record.
+    CAUSE: Cause flag of error-record.
+    SEVERITY: Severity flag of error-record.
+    SEVERITY_DEFAULT: Default severity of error-record.
+    SEVERITY_CHOICES: Severities error-record accepts.
+    DETAIL: Detail flag of error-record.
+    EXPERT: Expert flag of error-record.
+    JOB_ID: Job-id flag of error-record.
+    ROUTINE: Routine flag of error-record.
+    RESOLVE: Close-the-incident flag of error-record.
+    RESOLUTION: Resolution flag of error-record.
+    RESOLUTION_DEFAULT: Default resolution of error-record.
+    NAME: Routine-name positional of reconcile-routine.
+    CFG_JSON: Shipped-config flag of reconcile-routine.
+    CFG_JSON_HELP: Help of --cfg-json.
+    MANAGED: Owned-keys flag of reconcile-routine.
+    MANAGED_HELP: Help of --managed.
+    CWD: Root-override flag of reconcile-routine, detect-scope, and plugin-root.
+    REPO_ROOT_HELP: Help of a repository-root override that falls back to the environment, then the cwd.
+    RECONCILE_DRY_RUN_HELP: Help of reconcile-routine's --dry-run.
+    RUNTIME_GC_DRY_RUN_HELP: Help of runtime-gc's --dry-run.
+    REPO: Repository positional of resume.
+    STATE: Incident-state flag of error-list.
+    STATE_DEFAULT: Default incident state of error-list.
+    STATE_CHOICES: Incident states error-list accepts.
+    SINCE: Cursor flag of error-list.
+    SINCE_HELP: Help of --since.
+    PLUGIN_KEY: Plugin-key positional of detect-scope.
+    PLUGIN_KEY_HELP: Help of the plugin-key positional.
+    DETECT_CWD_HELP: Help of detect-scope's --cwd.
+    PLUGIN: Plugin positional of plugin-root.
+    PLUGIN_HELP: Help of the plugin positional.
+    PLUGIN_ROOT_CWD_HELP: Help of plugin-root's --cwd.
+    JSON: Call-site-clarity flag of daemon-list.
+    JSON_HELP: Help of --json.
+    REPO_ROOT: Repo-root flag of the metrics and sandbox subcommands.
+    ALLOC_REPO_ROOT_HELP: Help of metrics-alloc-port's --repo-root.
+    OUT: Output-path flag of metrics-scrape-file.
+    OUT_HELP: Help of --out.
+    SYNC_REPO_ROOT_HELP: Help of sandbox-sync's --repo-root.
+    ALLOW_READ: Extra-readable-path flag of sandbox-sync.
+    ALLOW_READ_HELP: Help of --allow-read.
+    ALLOW_WRITE: Extra-writable-path flag of sandbox-sync.
+    ALLOW_WRITE_HELP: Help of --allow-write.
+    AUDIT_REPO_ROOT_HELP: Help of sandbox-audit's --repo-root.
+    DRAIN: Drain flag of runtime-tick.
+    FLAG_PREFIX: Prefix that marks a runtime-tick argument as a flag.
+    MANAGED_SEP: Separator of reconcile-routine's --managed key list.
+  """
+
+  # Boolean-flag action.
+  STORE_TRUE = "store_true"
+  # Repeatable-flag action.
+  APPEND = "append"
+  # Optional single positional.
+  OPTIONAL = "?"
+  # Report-only flag of memory-reflect-all and reconcile-routine.
+  DRY_RUN = "--dry-run"
+  # Log-window flag of memory-reflect-all.
+  DAYS = "--days"
+  # Default log window of memory-reflect-all, in days.
+  DAYS_DEFAULT = 30
+  # Incident-key flag of error-record.
+  INCIDENT = "--incident"
+  # Event-kind flag of error-record and error-list.
+  KIND = "--kind"
+  # Default event kind of error-record.
+  KIND_DEFAULT = "plugin_error"
+  # Cause flag of error-record.
+  CAUSE = "--cause"
+  # Severity flag of error-record.
+  SEVERITY = "--severity"
+  # Default severity of error-record.
+  SEVERITY_DEFAULT = "error"
+  # Severities error-record accepts.
+  SEVERITY_CHOICES = [ "error", "warn" ]
+  # Detail flag of error-record.
+  DETAIL = "--detail"
+  # Expert flag of error-record.
+  EXPERT = "--expert"
+  # Job-id flag of error-record.
+  JOB_ID = "--job-id"
+  # Routine flag of error-record.
+  ROUTINE = "--routine"
+  # Close-the-incident flag of error-record.
+  RESOLVE = "--resolve"
+  # Resolution flag of error-record.
+  RESOLUTION = "--resolution"
+  # Default resolution of error-record.
+  RESOLUTION_DEFAULT = "manual"
+  # Routine-name positional of reconcile-routine.
+  NAME = "name"
+  # Shipped-config flag of reconcile-routine.
+  CFG_JSON = "--cfg-json"
+  # Help of --cfg-json.
+  CFG_JSON_HELP = "JSON object: the shipped routine config"
+  # Owned-keys flag of reconcile-routine.
+  MANAGED = "--managed"
+  # Help of --managed.
+  MANAGED_HELP = "Comma-separated keys the caller's plugin owns"
+  # Root-override flag of reconcile-routine, detect-scope, and plugin-root.
+  CWD = "--cwd"
+  # Help of a repository-root override that falls back to the environment, then the cwd.
+  REPO_ROOT_HELP = "Repository root (default: $LAZY_REPO_ROOT or cwd)"
+  # Help of reconcile-routine's --dry-run.
+  RECONCILE_DRY_RUN_HELP = "Report the status the call would return; write nothing"
+  # Help of runtime-gc's --dry-run.
+  RUNTIME_GC_DRY_RUN_HELP = "List what the sweep would remove; delete and record nothing"
+  # Repository positional of resume.
+  REPO = "repo"
+  # Incident-state flag of error-list.
+  STATE = "--state"
+  # Default incident state of error-list.
+  STATE_DEFAULT = "all"
+  # Incident states error-list accepts.
+  STATE_CHOICES = [ "all", "open", "needs_operator", "closed" ]
+  # Cursor flag of error-list.
+  SINCE = "--since"
+  # Help of --since.
+  SINCE_HELP = "ULID cursor; only incidents whose latest event id is strictly greater are returned"
+  # Plugin-key positional of detect-scope.
+  PLUGIN_KEY = "plugin_key"
+  # Help of the plugin-key positional.
+  PLUGIN_KEY_HELP = "e.g. lazycortex-diagram@lazycortex"
+  # Help of detect-scope's --cwd.
+  DETECT_CWD_HELP = "Project root (default: the git toplevel of the cwd, else the cwd)"
+  # Plugin positional of plugin-root.
+  PLUGIN = "plugin"
+  # Help of the plugin positional.
+  PLUGIN_HELP = "e.g. lazycortex-experts or lazycortex-experts@lazycortex"
+  # Help of plugin-root's --cwd.
+  PLUGIN_ROOT_CWD_HELP = "Checkout root (default: the git toplevel of the cwd, else the cwd)"
+  # Call-site-clarity flag of daemon-list.
+  JSON = "--json"
+  # Help of --json.
+  JSON_HELP = "accepted for call-site clarity; output is always JSON"
+  # Repo-root flag of the metrics and sandbox subcommands.
+  REPO_ROOT = "--repo-root"
+  # Help of metrics-alloc-port's --repo-root.
+  ALLOC_REPO_ROOT_HELP = "absolute path of the repo the port is for"
+  # Output-path flag of metrics-scrape-file.
+  OUT = "--out"
+  # Help of --out.
+  OUT_HELP = "override the output path"
+  # Help of sandbox-sync's --repo-root.
+  SYNC_REPO_ROOT_HELP = "absolute path of the repo whose sandbox scope is recorded"
+  # Extra-readable-path flag of sandbox-sync.
+  ALLOW_READ = "--allow-read"
+  # Help of --allow-read.
+  ALLOW_READ_HELP = "extra readable path (repeatable)"
+  # Extra-writable-path flag of sandbox-sync.
+  ALLOW_WRITE = "--allow-write"
+  # Help of --allow-write.
+  ALLOW_WRITE_HELP = "extra writable path (repeatable)"
+  # Help of sandbox-audit's --repo-root.
+  AUDIT_REPO_ROOT_HELP = "absolute path of the repo whose sandbox scope is audited"
+  # Drain flag of runtime-tick.
+  DRAIN = "--drain"
+  # Prefix that marks a runtime-tick argument as a flag.
+  FLAG_PREFIX = "--"
+  # Separator of reconcile-routine's --managed key list.
+  MANAGED_SEP = ","
+
+
+# ----------------------------------------------------------------------------------------
+class _Field:
+  """
+  JSON keys of the stdin requests the subcommands read and the stdout replies they print.
+
+  Attributes:
+    ERROR: Error message of a failed call.
+    STATUS: Outcome status of a call.
+    EXPERT: Expert name of a job request.
+    JOB_ID: Job identifier of a job request.
+    CANCELLED: Whether cancel-job cancelled the job.
+    PAYLOAD: Request payload of a dispatch bundle.
+    PROTOCOLS: Protocol refs of a dispatch bundle.
+    SOURCE: Source path manifest of a dispatch bundle.
+    CONTEXT: Context path manifest of a dispatch bundle.
+    SOURCE_INLINE: Inline source texts of a dispatch bundle.
+    CONTEXT_INLINE: Inline context texts of a dispatch bundle.
+    RESULT: Result file names of a dispatch bundle.
+    DEDUP_KEY: Dedup key of a dispatch bundle.
+    NAME: Expert name of a lookup-expert request.
+    FOUND: Whether lookup-expert found the expert.
+    ENTRY: Settings entry lookup-expert found.
+    DISPATCHED: Experts memory-reflect-all dispatched a reflect job for.
+    SKIPPED_NOT_PERSONA: Experts memory-reflect-all skipped as not persona-marked.
+    WOULD_DISPATCH: Experts memory-reflect-all would dispatch on a dry run.
+    ERRORS: Per-expert dispatch failures of memory-reflect-all, and failed deletions or lost records of runtime-gc.
+    ASPECTS: Aspect list of an expert's settings entry.
+    PATH: Path of a reflect-job source entry.
+    DESCRIPTION: Description of a reflect-job source entry.
+    KIND: Payload kind of a reflect job.
+    ROLE: Payload role of a reflect job.
+    REQUEST: Payload request text of a reflect job.
+    RECORDED: Whether error-record recorded the event.
+    ID: Event identifier error-record recorded.
+    INCIDENT: Incident-folding key of an error-ledger event.
+    PHASE: Lifecycle phase of an error-ledger event.
+    CAUSE: Closed-set cause of an error-ledger event.
+    SEVERITY: Severity of an error-ledger event.
+    DETAIL: One-line description of an error-ledger event.
+    ACTOR: Component that recorded an error-ledger event.
+    REASON: Rejection reason of reconcile-routine.
+    RETIRED: Job ids retire-jobs retired.
+    RESUMED: Whether resume cleared a halt.
+    HALT: Halt block resume found.
+    NOTE: Explanatory note of a no-op resume.
+    PAUSED: Whether the daemon pause semaphore is present after the call.
+    SEMAPHORE: Path of the daemon pause semaphore.
+    DAEMONS: Daemon list of daemon-list.
+    ROOT: Source root plugin-root prints.
+    TICKS: Number of iterations runtime-tick ran.
+    ROUTINE: Routine runtime-tick was asked to run.
+    READY_LEFT: READY jobs left after runtime-tick.
+    STOPPED: Signal that stopped runtime-tick's drain loop.
+    HALTED: Whether the daemon is halted after runtime-tick.
+    PUMP_EXPERTS: Experts expert-pump-once visited.
+    PUMP_PROCESSED: Jobs expert-pump-once processed.
+    PUMP_DEFERRED: Whether expert-pump-once deferred on a rate limit.
+    RESETS_AT: Reset time of the rate-limit window expert-pump-once deferred on.
+    SETTINGS_VERSION: Version key of a settings section, never an entry.
+    SETTINGS_EXPERTS: Settings section holding the expert registry.
+  """
+
+  # Error message of a failed call.
+  ERROR = "error"
+  # Outcome status of a call.
+  STATUS = "status"
+  # Expert name of a job request.
+  EXPERT = "expert"
+  # Job identifier of a job request.
+  JOB_ID = "job_id"
+  # Whether cancel-job cancelled the job.
+  CANCELLED = "cancelled"
+  # Request payload of a dispatch bundle.
+  PAYLOAD = "payload"
+  # Protocol refs of a dispatch bundle.
+  PROTOCOLS = "protocols"
+  # Source path manifest of a dispatch bundle.
+  SOURCE = "source"
+  # Context path manifest of a dispatch bundle.
+  CONTEXT = "context"
+  # Inline source texts of a dispatch bundle.
+  SOURCE_INLINE = "source_inline"
+  # Inline context texts of a dispatch bundle.
+  CONTEXT_INLINE = "context_inline"
+  # Result file names of a dispatch bundle.
+  RESULT = "result"
+  # Dedup key of a dispatch bundle.
+  DEDUP_KEY = "dedup_key"
+  # Expert name of a lookup-expert request.
+  NAME = "name"
+  # Whether lookup-expert found the expert.
+  FOUND = "found"
+  # Settings entry lookup-expert found.
+  ENTRY = "entry"
+  # Experts memory-reflect-all dispatched a reflect job for.
+  DISPATCHED = "dispatched"
+  # Experts memory-reflect-all skipped as not persona-marked.
+  SKIPPED_NOT_PERSONA = "skipped_not_persona"
+  # Experts memory-reflect-all would dispatch on a dry run.
+  WOULD_DISPATCH = "would_dispatch"
+  # Per-expert dispatch failures of memory-reflect-all, and failed deletions or lost records of runtime-gc.
+  ERRORS = "errors"
+  # Aspect list of an expert's settings entry.
+  ASPECTS = "aspects"
+  # Path of a reflect-job source entry.
+  PATH = "path"
+  # Description of a reflect-job source entry.
+  DESCRIPTION = "description"
+  # Payload kind of a reflect job.
+  KIND = "kind"
+  # Payload role of a reflect job.
+  ROLE = "role"
+  # Payload request text of a reflect job.
+  REQUEST = "request"
+  # Whether error-record recorded the event.
+  RECORDED = "recorded"
+  # Event identifier error-record recorded.
+  ID = "id"
+  # Incident-folding key of an error-ledger event.
+  INCIDENT = "incident"
+  # Lifecycle phase of an error-ledger event.
+  PHASE = "phase"
+  # Closed-set cause of an error-ledger event.
+  CAUSE = "cause"
+  # Severity of an error-ledger event.
+  SEVERITY = "severity"
+  # One-line description of an error-ledger event.
+  DETAIL = "detail"
+  # Component that recorded an error-ledger event.
+  ACTOR = "actor"
+  # Rejection reason of reconcile-routine.
+  REASON = "reason"
+  # Job ids retire-jobs retired.
+  RETIRED = "retired"
+  # Whether resume cleared a halt.
+  RESUMED = "resumed"
+  # Halt block resume found.
+  HALT = "halt"
+  # Explanatory note of a no-op resume.
+  NOTE = "note"
+  # Whether the daemon pause semaphore is present after the call.
+  PAUSED = "paused"
+  # Path of the daemon pause semaphore.
+  SEMAPHORE = "semaphore"
+  # Daemon list of daemon-list.
+  DAEMONS = "daemons"
+  # Source root plugin-root prints.
+  ROOT = "root"
+  # Number of iterations runtime-tick ran.
+  TICKS = "ticks"
+  # Routine runtime-tick was asked to run.
+  ROUTINE = "routine"
+  # READY jobs left after runtime-tick.
+  READY_LEFT = "ready_left"
+  # Signal that stopped runtime-tick's drain loop.
+  STOPPED = "stopped"
+  # Whether the daemon is halted after runtime-tick.
+  HALTED = "halted"
+  # Experts expert-pump-once visited.
+  PUMP_EXPERTS = "experts"
+  # Jobs expert-pump-once processed.
+  PUMP_PROCESSED = "processed"
+  # Whether expert-pump-once deferred on a rate limit.
+  PUMP_DEFERRED = "deferred"
+  # Reset time of the rate-limit window expert-pump-once deferred on.
+  RESETS_AT = "resets_at"
+  # Version key of a settings section, never an entry.
+  SETTINGS_VERSION = "_version"
+  # Settings section holding the expert registry.
+  SETTINGS_EXPERTS = "experts"
+
+
+# ----------------------------------------------------------------------------------------
+class _Token:
+  """
+  JSON values and token strings the subcommands write or compare against.
+
+  Attributes:
+    OK: Status of a successful consume-job.
+    PERSONA_ASPECT: Aspect ref that marks an expert as persona-carrying.
+    REFLECT: Payload kind and role of a reflect job.
+    REFLECT_REQUEST: Request text of a reflect job.
+    RECENT_RUN_LOG: Source description of a recent run log.
+    CURRENT_MEMORY_NOTE: Source description of a current memory note.
+    PHASE_OPENED: Phase of a newly opened error-ledger event.
+    ACTOR_PLUGIN_CLI: Actor error-record stamps on the events it records.
+    STATUS_ERROR: Reconcile-routine status of a rejected call.
+    STOP_HALTED: Drain-loop stop reason: the daemon is halted.
+    STOP_DIRTY_TREE: Drain-loop stop reason: the working tree is dirty.
+    STOP_RATE_LIMITED: Drain-loop stop reason: the rate-limit flag is raised.
+    STOP_NO_PROGRESS: Drain-loop stop reason: a pass changed nothing.
+    PUMP_DEFERRED_LINE: Line fragment expert-pump-once appends on the first deferral of a rate-limit window.
+    PUMP_LINE: Counter line expert-pump-once prints.
+  """
+
+  # Status of a successful consume-job.
+  OK = "ok"
+  # Aspect ref that marks an expert as persona-carrying.
+  PERSONA_ASPECT = "lazycortex-core:lazy-memory.persona-aspect"
+  # Payload kind and role of a reflect job.
+  REFLECT = "reflect"
+  # Request text of a reflect job.
+  REFLECT_REQUEST = (
+    "Consolidate recent runs into memory per lazy-memory.persona-aspect "
+    "§Obligations. Use /lazy-memory.write for any new or updated notes. "
+    "Return outcome=empty if nothing is worth consolidating."
+  )
+  # Source description of a recent run log.
+  RECENT_RUN_LOG = "recent run log"
+  # Source description of a current memory note.
+  CURRENT_MEMORY_NOTE = "current memory note"
+  # Phase of a newly opened error-ledger event.
+  PHASE_OPENED = "opened"
+  # Actor error-record stamps on the events it records.
+  ACTOR_PLUGIN_CLI = "plugin-cli"
+  # Reconcile-routine status of a rejected call.
+  STATUS_ERROR = "error"
+  # Drain-loop stop reason: the daemon is halted.
+  STOP_HALTED = "halted"
+  # Drain-loop stop reason: the working tree is dirty.
+  STOP_DIRTY_TREE = "dirty_tree"
+  # Drain-loop stop reason: the rate-limit flag is raised.
+  STOP_RATE_LIMITED = "rate_limited"
+  # Drain-loop stop reason: a pass changed nothing.
+  STOP_NO_PROGRESS = "no_progress"
+  # Line fragment expert-pump-once appends on the first deferral of a rate-limit window.
+  PUMP_DEFERRED_LINE = " deferred=rate_limit resets_at={}"
+  # Counter line expert-pump-once prints.
+  PUMP_LINE = "experts={} processed={}"
+
+
+# ----------------------------------------------------------------------------------------
+class _RepoPath:
+  """
+  Repository-relative paths and file suffixes the subcommands read or write.
+
+  Attributes:
+    SETTINGS: The repo's lazycortex settings file.
+    RUN_LOGS: Root of the per-artifact run logs.
+    MEMORY: Root of the per-expert memory notes.
+    MD_SUFFIX: Suffix of a run log or memory note.
+    RUNTIME: Directory of the daemon's per-machine runtime files.
+    RATE_LIMIT_DEFERRED: Marker file remembering which rate-limit window expert-pump-once last announced.
+  """
+
+  # The repo's lazycortex settings file.
+  SETTINGS = ".claude/lazy.settings.json"
+  # Root of the per-artifact run logs.
+  RUN_LOGS = ".logs/claude"
+  # Root of the per-expert memory notes.
+  MEMORY = ".memory"
+  # Suffix of a run log or memory note.
+  MD_SUFFIX = ".md"
+  # Directory of the daemon's per-machine runtime files.
+  RUNTIME = ".runtime"
+  # Marker file remembering which rate-limit window expert-pump-once last announced.
+  RATE_LIMIT_DEFERRED = "rate-limit-deferred.json"
+
+
+# ----------------------------------------------------------------------------------------
+class _Probe:
+  """
+  Command words of the git and supervisor probes, plus the answers they are read against.
+
+  Attributes:
+    ENV_REPO_ROOT: Environment variable naming the repository root.
+    ENV_GIT_OPTIONAL_LOCKS: git environment variable that turns optional locks off.
+    GIT_OPTIONAL_LOCKS_OFF: Value that turns git's optional locks off.
+    GIT: git executable.
+    GIT_REV_PARSE: git sub-verb resolving refs and paths.
+    GIT_SHOW_TOPLEVEL: rev-parse flag printing the checkout's top-level directory.
+    DARWIN: `sys.platform` value of macOS.
+    LAUNCHCTL: macOS supervisor executable.
+    LAUNCHCTL_LIST: launchctl sub-verb describing one unit.
+    LAUNCHD_LABEL: launchd unit label of this checkout's runtime daemon.
+    LAUNCHD_PID: Key a launchd listing carries only while the unit runs a process.
+    SYSTEMCTL: Linux supervisor executable.
+    SYSTEMCTL_USER: systemctl flag addressing the user instance.
+    SYSTEMCTL_IS_ACTIVE: systemctl sub-verb printing one unit's state.
+    SYSTEMD_UNIT: systemd unit name of this checkout's runtime daemon.
+    SYSTEMD_ACTIVE: State systemctl prints for a running unit.
+    SECONDS_PER_DAY: Seconds in one day, for the reflect log window.
+    POLLING_DEFAULT_SEC: Daemon polling interval runtime-tick falls back to, in seconds.
+  """
+
+  # Environment variable naming the repository root.
+  ENV_REPO_ROOT = "LAZY_REPO_ROOT"
+  # git environment variable that turns optional locks off.
+  ENV_GIT_OPTIONAL_LOCKS = "GIT_OPTIONAL_LOCKS"
+  # Value that turns git's optional locks off.
+  GIT_OPTIONAL_LOCKS_OFF = "0"
+  # git executable.
+  GIT = "git"
+  # git sub-verb resolving refs and paths.
+  GIT_REV_PARSE = "rev-parse"
+  # rev-parse flag printing the checkout's top-level directory.
+  GIT_SHOW_TOPLEVEL = "--show-toplevel"
+  # `sys.platform` value of macOS.
+  DARWIN = "darwin"
+  # macOS supervisor executable.
+  LAUNCHCTL = "launchctl"
+  # launchctl sub-verb describing one unit.
+  LAUNCHCTL_LIST = "list"
+  # launchd unit label of this checkout's runtime daemon.
+  LAUNCHD_LABEL = "com.lazycortex.runtime.{}"
+  # Key a launchd listing carries only while the unit runs a process.
+  LAUNCHD_PID = '"PID"'
+  # Linux supervisor executable.
+  SYSTEMCTL = "systemctl"
+  # systemctl flag addressing the user instance.
+  SYSTEMCTL_USER = "--user"
+  # systemctl sub-verb printing one unit's state.
+  SYSTEMCTL_IS_ACTIVE = "is-active"
+  # systemd unit name of this checkout's runtime daemon.
+  SYSTEMD_UNIT = "lazy-core-runtime-{}.service"
+  # State systemctl prints for a running unit.
+  SYSTEMD_ACTIVE = "active"
+  # Seconds in one day, for the reflect log window.
+  SECONDS_PER_DAY = 86400
+  # Daemon polling interval runtime-tick falls back to, in seconds.
+  POLLING_DEFAULT_SEC = 5
+
+
+# ----------------------------------------------------------------------------------------
+class _Msg:
+  """
+  Diagnostic and reply texts the subcommands print.
+
+  Attributes:
+    REQUEST_PARSE: A job request that is not JSON.
+    REQUEST_MISSING: A job request without an expert or a job id.
+    CONSUME_FAILED: consume-job's call into the runtime raised.
+    RETIRE_REQUEST_MISSING: A retire request without an expert or a dedup key.
+    RETIRE_FAILED: retire-jobs' call into the runtime raised.
+    CANCEL_FAILED: cancel-job's call into the runtime raised.
+    COLLECT_FAILED: collect-job's call into the runtime raised.
+    BUNDLE_PARSE: A dispatch bundle that is not JSON.
+    BUNDLE_MISSING: A dispatch bundle without a field the runtime requires.
+    DISPATCH_FAILED: dispatch-job's call into the runtime raised.
+    REPO_ROOT_UNSET: lookup-expert run without the repository root in the environment.
+    STDIN_NOT_JSON: lookup-expert's stdin is not JSON.
+    STDIN_MISSING_NAME: lookup-expert's stdin carries no expert name.
+    EMPTY_JSON: Empty JSON object lookup-expert reads an empty stdin as.
+    CAUSE_REQUIRED: error-record asked to open an event without a cause.
+    CFG_PARSE: reconcile-routine's --cfg-json is not JSON.
+    CFG_NOT_OBJECT: reconcile-routine's --cfg-json is not an object.
+    NOT_HALTED: resume found no halt block.
+    TICK_BAD_ARGS: runtime-tick got a flag it does not know or a second routine name.
+    TICK_DAEMON_ALIVE: runtime-tick found the daemon running on this checkout.
+    TICK_UNKNOWN_ROUTINE: runtime-tick was named a routine the registry does not hold.
+    TICK_NO_ROUTINES: Placeholder for an empty routine registry.
+    TICK_NOT_DISPATCHED: runtime-tick's named routine never dispatched.
+    UNKNOWN_SUBCOMMAND: The subcommand is not one this CLI knows.
+    LIST_SEP: Separator of the registered-routine list in the unknown-routine refusal.
+  """
+
+  # A job request that is not JSON.
+  REQUEST_PARSE = "request parse: {}"
+  # A job request without an expert or a job id.
+  REQUEST_MISSING = "request missing 'expert' or 'job_id'"
+  # consume-job's call into the runtime raised.
+  CONSUME_FAILED = "consume failed: {}"
+  # A retire request without an expert or a dedup key.
+  RETIRE_REQUEST_MISSING = "request missing 'expert' or 'dedup_key'"
+  # retire-jobs' call into the runtime raised.
+  RETIRE_FAILED = "retire failed: {}"
+  # cancel-job's call into the runtime raised.
+  CANCEL_FAILED = "cancel failed: {}"
+  # collect-job's call into the runtime raised.
+  COLLECT_FAILED = "collect failed: {}"
+  # A dispatch bundle that is not JSON.
+  BUNDLE_PARSE = "bundle parse: {}"
+  # A dispatch bundle without a field the runtime requires.
+  BUNDLE_MISSING = "missing required bundle field: {}"
+  # dispatch-job's call into the runtime raised.
+  DISPATCH_FAILED = "dispatch failed: {}"
+  # lookup-expert run without the repository root in the environment.
+  REPO_ROOT_UNSET = "LAZY_REPO_ROOT not set"
+  # lookup-expert's stdin is not JSON.
+  STDIN_NOT_JSON = "stdin not JSON: {}"
+  # lookup-expert's stdin carries no expert name.
+  STDIN_MISSING_NAME = 'stdin missing "name"'
+  # Empty JSON object lookup-expert reads an empty stdin as.
+  EMPTY_JSON = "{}"
+  # error-record asked to open an event without a cause.
+  CAUSE_REQUIRED = "error-record: --cause is required when opening an event"
+  # reconcile-routine's --cfg-json is not JSON.
+  CFG_PARSE = "cfg-json parse: {}"
+  # reconcile-routine's --cfg-json is not an object.
+  CFG_NOT_OBJECT = "cfg-json must be a JSON object"
+  # resume found no halt block.
+  NOT_HALTED = "daemon not halted"
+  # runtime-tick got a flag it does not know or a second routine name.
+  TICK_BAD_ARGS = ("refused: unrecognised arguments {!r}; "
+                   "usage: runtime-tick [<routine-name>] [--drain]")
+  # runtime-tick found the daemon running on this checkout.
+  TICK_DAEMON_ALIVE = ("refused: the runtime daemon is running on this checkout — a concurrent manual "
+                       "tick would race it over the tree, index, and job queue. Stop the unit first.")
+  # runtime-tick was named a routine the registry does not hold.
+  TICK_UNKNOWN_ROUTINE = "refused: unknown routine {!r}; registered: {}"
+  # Placeholder for an empty routine registry.
+  TICK_NO_ROUTINES = "(none)"
+  # runtime-tick's named routine never dispatched.
+  TICK_NOT_DISPATCHED = ("refused: routine {!r} did not dispatch — the runtime is stuck "
+                         "(dirty tree or halt); see /lazy-runtime.recover")
+  # The subcommand is not one this CLI knows.
+  UNKNOWN_SUBCOMMAND = "unknown subcommand: {}\n{}"
+  # Separator of the registered-routine list in the unknown-routine refusal.
+  LIST_SEP = ", "
+
+
+# Subcommands whose whole handler lives in a sibling bin-module, as (module, entry function).
+_DELEGATED = {
+  "scaffold":              ( "scaffold_registry", "main" ),
+  "file-sync":             ( "file_sync", "main" ),
+  "remote-mirror":         ( "remote_mirror", "main" ),
+  "safe-pull":             ( "safe_pull", "main" ),
+  "settings-get":          ( "settings_cli", "cmd_settings_get" ),
+  "settings-set":          ( "settings_cli", "cmd_settings_set" ),
+  _Verb.MIGRATE_PLAN:      ( "migration_cli", "cmd_migrate_plan" ),
+  _Verb.MIGRATE_STAMP:     ( "migration_cli", "cmd_migrate_stamp" ),
+  _Verb.MIGRATE_RELEASE:   ( "migration_cli", "cmd_migrate_release" ),
+  _Verb.SETTINGS_RUNGS:    ( "migration_cli", "cmd_settings_rungs" ),
+  "resolve-language":      ( "language_resolver", "main" ),
+  "routine-ensure-filter": ( "routine_filter", "cmd_routine_ensure_filter" ),
+  "permission-allow":      ( "permission_cli", "cmd_permission_allow" ),
+  "add-protocols":         ( "protocol_attach", "cmd_add_protocols" ),
+  "index-guard":           ( "index_guard", "main" ),
+  "resolve-ref":           ( "reference_cli", "cmd_resolve_ref" ),
+  "external-dirs":         ( "external_dirs_cli", "cmd_external_dirs" ),
+  "inbox-check":           ( "inbox_cli", "cmd_inbox_check" ),
+  "protocol-audit":        ( "protocol_cli", "cmd_protocol_audit" ),
+  "provider-validate":     ( "provider_cli", "cmd_provider_validate" ),
+  "provider-token":        ( "provider_cli", "cmd_provider_token" ),
+  "routine-validate":      ( "routine_cli", "cmd_routine_validate" ),
+  "routine-register":      ( "routine_cli", "cmd_routine_register" ),
+  "routine-unregister":    ( "routine_cli", "cmd_routine_unregister" ),
+  "routine-show":          ( "routine_cli", "cmd_routine_show" ),
+  "routine-migrate":       ( "routine_cli", "cmd_routine_migrate" ),
+  "install-phase":         ( "install_cli", "cmd_install_phase" ),
+  "daemon-run-here":       ( "install_cli", "cmd_daemon_run_here" ),
+  "git-lock":              ( "git_lock_cli", "cmd_git_lock" ),
+  "recover":               ( "recover_cli", "cmd_recover" ),
+  "list-jobs":             ( "jobs_cli", "cmd_list_jobs" ),
+  "routines-bootstrap":    ( "jobs_cli", "cmd_routines_bootstrap" ),
+  "memory-reflect":        ( "memory_cli", "cmd_memory_reflect" ),
+  "plugin-dirs":           ( "plugin_dirs_cli", "cmd_plugin_dirs" ),
+  "agent-models-seed":     ( "agent_models_seed", "cmd_agent_models_seed" ),
+  "permission-edit":       ( "permission_cli", "cmd_permission_edit" ),
+  "guard-public-write":    ( "guard_public_cli", "cmd_guard_public_write" ),
+  "guard-public-files":    ( "guard_public_cli", "cmd_guard_public_files" ),
+  "mcp-config-drop":       ( "settings_cli", "cmd_mcp_config_drop" ),
+  "context-scan":          ( "context_scan", "cmd_context_scan" ),
+  "gitignore-ensure":      ( "install_cli", "cmd_gitignore_ensure" ),
+}
+
+
+
+# ----------------------------------------------------------------------------------------
+def _env_repo_root() -> Path:
+  """
+  Return the repository root the environment names, else the process working directory.
+
+  Returns:
+    The repository root.
+  """
+  return Path(os.environ.get(_Probe.ENV_REPO_ROOT, os.getcwd()))
+
+
+def _query_git_toplevel() -> str:
+  """
+  Return the top-level directory of the checkout the process runs in.
+
+  Returns:
+    The checkout's top-level directory, or an empty string outside a checkout.
+  """
+  return subprocess.run([ _Probe.GIT, _Probe.GIT_REV_PARSE, _Probe.GIT_SHOW_TOPLEVEL ],
+                        capture_output = True, text = True, check = False, encoding = _ENCODING).stdout.strip()
+
+
+def _print_error(message: str) -> int:
+  """
+  Report a failure as an error JSON on stdout.
+
+  Every job verb reports a failure this way.
+
+  Args:
+    message: Human-readable failure text.
+
+  Returns:
+    The process exit code 1.
+  """
+  print(json.dumps({ _Field.ERROR: message }))
+  return 1
+
+
+def _find_newer_cached_cli() -> Path | None:
+  """
+  Return the registry-installed CLI when this cache-resident copy is not the one it names.
+
+  Returns:
+    The installed version's CLI path, or `None` when this copy is the live one or nothing newer is installed.
+  """
+  # the directory this copy runs from
+  here = Path(__file__).resolve().parent
+
+  # guard: only a copy running from the plugin cache can be stale; a source-tree copy is the live one
+  if _PLUGIN_CACHE_REL not in here.as_posix():
+    return None
+
+  # the install the registry names for this plugin
+  # waiver: lazy sibling import -- the registry reader is needed only on the cache-resident path, before forwarding
+  from lazy_setup import installed_plugin_root
+  installed = installed_plugin_root(_PLUGIN_NAME)
+
+  # guard: no install record, or the record names this very copy — nothing newer to forward to
+  if installed is None or installed.resolve() == here.parent:
+    return None
+
+  # the installed version's CLI, when that install still carries one
+  cli = installed / _BIN_DIRNAME / _CLI_FILENAME
+  return cli if cli.is_file() else None
 
 
 def _forward_if_stale() -> None:
-    """Re-exec into the registry-installed version, once; a forwarded process never forwards again."""
-    if os.environ.get(_FORWARDED_ENV):
-        return
-    newer = _newer_cached_cli()
-    if newer is None:
-        return
-    os.environ[_FORWARDED_ENV] = "1"
-    os.execv(sys.executable, [sys.executable, str(newer), *sys.argv[1:]])
+  """
+  Re-exec into the registry-installed version, once.
+  """
+  # guard: a forwarded process dispatches itself, so a registry mismatch can never loop
+  if os.environ.get(_FORWARDED_ENV):
+    return
 
-USAGE = ("usage: lazycortex-core <subcommand> [args...]\n"
-         "Subcommands: expert-pump-once, doctor-tick, runtime-tick, runtime, resume, memory-reflect-all, dispatch-job, collect-job, consume-job, cancel-job, lookup-expert, scaffold, file-sync, remote-mirror, safe-pull, error-record, error-list, settings-get, settings-set, resolve-language, routine-ensure-filter, permission-allow, add-protocols, detect-scope, daemon-pause, daemon-resume, daemon-list, metrics-alloc-port, metrics-scrape-file, sandbox-sync, sandbox-audit, index-guard, history-append, reconcile-routine, plugin-root, resolve-ref, external-dirs, inbox-check, protocol-audit, provider-validate, provider-token, routine-validate, routine-register, routine-unregister, routine-show, routine-migrate, install-phase, daemon-run-here, git-lock, recover, list-jobs, routines-bootstrap, memory-reflect, plugin-dirs")
+  # guard: nothing newer is installed, so this copy dispatches itself
+  if (newer := _find_newer_cached_cli()) is None:
+    return
+
+  # hand the whole invocation to the installed version, marked so it does not forward again
+  os.environ[_FORWARDED_ENV] = _FORWARDED_ON
+  os.execv(sys.executable, [ sys.executable, str(newer), *sys.argv[1:] ])
 
 
-def _cmd_consume_job(argv: list[str]) -> int:
-    """Inter-plugin job-consume entrypoint. Reads ``{expert, job_id}``
-    JSON from stdin, marks the job as consumed via
-    ``expert_runtime.consume_job``, prints ``{"status": "ok"}`` on
-    success.
+def _read_job_request() -> tuple[str, str] | None:
+  """
+  Read the `{expert, job_id}` address of a job from a JSON request on stdin.
 
-    Idempotent: re-consuming an already-consumed job is a no-op.
-    Missing job dir is also a no-op (already cleaned up).
+  A malformed or incomplete request is reported as an error JSON on stdout before returning.
 
-    This is the contract sibling plugins use to retire a job after
-    they have applied or explicitly discarded its response.
-    """
-    import json
-    from pathlib import Path as _Path
-    from expert_runtime import consume_job as _consume
-    repo = _Path(os.environ.get("LAZY_REPO_ROOT", os.getcwd()))
-    try:
-        req = json.load(sys.stdin)
-    except json.JSONDecodeError as e:
-        print(json.dumps({"error": f"request parse: {e}"})); return 1
-    expert = req.get("expert")
-    job_id = req.get("job_id")
-    if not expert or not job_id:
-        print(json.dumps({"error": "request missing 'expert' or 'job_id'"})); return 1
-    try:
-        _consume(repo, expert, job_id)
-    except Exception as e:
-        print(json.dumps({"error": f"consume failed: {e}"})); return 1
-    print(json.dumps({"status": "ok"}))
+  Returns:
+    The expert name and job id, or `None` when the request is not JSON or lacks either half of the address.
+  """
+  # guard: a request that is not JSON names no job
+  try:
+    req = json.load(sys.stdin)
+  except json.JSONDecodeError as error:
+    _print_error(_Msg.REQUEST_PARSE.format(error))
+    return None
+
+  # the job is addressed by its expert and its id
+  expert = req.get(_Field.EXPERT)
+  job_id = req.get(_Field.JOB_ID)
+
+  # guard: both halves of the address are required
+  if not expert or not job_id:
+    _print_error(_Msg.REQUEST_MISSING)
+    return None
+
+  # the addressed job
+  return expert, job_id
+
+
+def _cmd_consume_job() -> int:
+  """
+  Retire an expert job on behalf of a sibling plugin.
+
+  Reads `{expert, job_id}` JSON from stdin and prints `{"status": "ok"}` on success. This is the contract sibling
+  plugins use to retire a job after they have applied or explicitly discarded its response.
+
+  Guarantees:
+    - Idempotent: re-consuming an already-consumed job, or one whose job directory is gone, is a no-op that still
+      reports success.
+
+  Returns:
+    Process exit code: 0 on success, 1 with an error JSON on stdout on a malformed request or a runtime failure.
+  """
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from expert_runtime import consume_job
+
+  # Contract:
+  # Consuming a job that is already consumed, or whose job directory no longer exists, is a no-op
+  # that still reports success, so a sibling plugin may retry the call safely.
+
+  # guard: a malformed request was already reported
+  if (request := _read_job_request()) is None:
+    return 1
+
+  # retire the job; any runtime failure is reported, never raised at the caller
+  # noinspection PyBroadException
+  try:
+    consume_job(_env_repo_root(), *request)
+  except Exception as error:
+    return _print_error(_Msg.CONSUME_FAILED.format(error))
+  print(json.dumps({ _Field.STATUS: _Token.OK }))
+  return 0
+
+
+def _cmd_retire_jobs() -> int:
+  """
+  Retire every finished job of one expert that carries a given dedup key.
+
+  Reads `{expert, dedup_key}` JSON from stdin and prints `{"retired": [<job_id>, ...]}` on success. This is the
+  contract a sibling plugin that never consumes its own jobs uses before it re-dispatches under the same key, so a
+  finished earlier attempt stops answering `already-queued`.
+
+  Guarantees:
+    - Only finished jobs (`DONE`, whatever their outcome) are retired; a queued or running job under the same key is
+      never touched, so a live job is never duplicated.
+    - Idempotent: a second call finds nothing left to retire and prints an empty list.
+
+  Returns:
+    Process exit code: 0 on success, 1 with an error JSON on stdout on a malformed request or a runtime failure.
+  """
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from expert_runtime import retire_completed_jobs
+
+  # Contract:
+  # Only finished jobs (`DONE`, whatever their outcome) of the named expert whose dedup key matches are
+  # marked consumed; a queued or running job is NEVER touched, so retiring before a re-dispatch can never
+  # duplicate a live job. A repeated call retires nothing and still succeeds.
+
+  # guard: a request that is not JSON names no key
+  try:
+    req = json.load(sys.stdin)
+  except json.JSONDecodeError as error:
+    return _print_error(_Msg.REQUEST_PARSE.format(error))
+
+  # the jobs are addressed by their expert and their dedup key
+  expert = req.get(_Field.EXPERT) if isinstance(req, dict) else None
+  dedup_key = req.get(_Field.DEDUP_KEY) if isinstance(req, dict) else None
+
+  # guard: both halves of the address are required
+  if not expert or not dedup_key:
+    return _print_error(_Msg.RETIRE_REQUEST_MISSING)
+
+  # retire the finished jobs; any runtime failure is reported, never raised at the caller
+  # noinspection PyBroadException
+  try:
+    retired = retire_completed_jobs(_env_repo_root(), expert, dedup_key)
+  except Exception as error:
+    return _print_error(_Msg.RETIRE_FAILED.format(error))
+  print(json.dumps({ _Field.RETIRED: retired }))
+  return 0
+
+
+def _cmd_cancel_job() -> int:
+  """
+  Cancel an expert job on behalf of a sibling plugin.
+
+  Reads `{expert, job_id}` JSON from stdin and prints `{"cancelled": true|false, "job_id": ...}` to stdout. This is
+  the contract sibling plugins use to abort a running expert job headlessly, e.g. the specs apply worker
+  cancelling an asset's running job before it deletes the documents an attach line's `drop=` names.
+
+  Guarantees:
+    - Sequentially idempotent: a job that is already terminal (done, failed, deferred, dead, cancelled) or whose
+      bundle is absent reports `cancelled: false` with exit code 0 and its bundle is left untouched, so a later
+      cancel call never clobbers a finished bundle's terminal marker. A job that finishes while a cancel is in
+      flight may still end up cancelled.
+
+  Returns:
+    Process exit code: 0 with the cancellation report, 1 with an error JSON on stdout on a malformed request or a
+    runtime failure.
+  """
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from constants import JobStatus
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from expert_runtime import cancel_job, job_dir, read_job_status
+
+  # guard: a malformed request was already reported
+  if (request := _read_job_request()) is None:
+    return 1
+
+  # the job's repository and address
+  repo = _env_repo_root()
+  expert, job_id = request
+
+  # Contract:
+  # A job that is already terminal (done, failed, deferred, dead or cancelled), or whose bundle is absent,
+  # reports `cancelled: false` with exit code 0 and its bundle is left untouched, so a later cancel call
+  # never clobbers a finished bundle's terminal marker. The promise holds for sequential calls only; a job
+  # that finishes while a cancel is in flight may still end up cancelled.
+
+  # limit: check-then-act, a job finishing before cancel_job still gets CANCELLED; move the re-check into cancel_job
+  terminal = { JobStatus.DONE, JobStatus.FAILED, JobStatus.DEFERRED, JobStatus.DEAD, JobStatus.CANCELLED }
+  jdir = job_dir(repo, expert, job_id)
+  # guard: a terminal or absent bundle is already done — don't re-mark it
+  if not (jdir.exists() and read_job_status(jdir) not in terminal):
+    print(json.dumps({ _Field.CANCELLED: False, _Field.JOB_ID: job_id }))
     return 0
 
-
-def _cmd_cancel_job(argv: list[str]) -> int:
-    """Inter-plugin job-cancellation entrypoint. Reads ``{expert, job_id}``
-    JSON from stdin, cancels the job via ``expert_runtime.cancel_job``,
-    prints ``{"cancelled": true|false, "job_id": ...}`` to stdout.
-
-    Sequentially idempotent: a job that is already terminal (done, failed,
-    deferred, dead, cancelled) or whose bundle is absent reports
-    ``cancelled: false`` without touching the bundle again — this is the
-    CLI-side guard that keeps a second, later cancel call from clobbering
-    a finished bundle's terminal marker, since ``cancel_job`` itself does
-    not re-check status. A job that finishes between this guard's read and
-    the ``cancel_job`` call below is a separate race window, not covered
-    by this guard — see the ``# limit:`` comment at the check.
-
-    This is the contract sibling plugins use to abort a running expert
-    job headlessly, e.g. a pre-launch rollback across the plugin boundary.
-    """
-    import json
-    from pathlib import Path as _Path
-    from constants import JobStatus
-    from expert_runtime import cancel_job as _cancel, _job_dir, _job_status
-    repo = _Path(os.environ.get("LAZY_REPO_ROOT", os.getcwd()))
-    try:
-        req = json.load(sys.stdin)
-    except json.JSONDecodeError as e:
-        print(json.dumps({"error": f"request parse: {e}"})); return 1
-    expert = req.get("expert")
-    job_id = req.get("job_id")
-    if not expert or not job_id:
-        print(json.dumps({"error": "request missing 'expert' or 'job_id'"})); return 1
-    # guard: a terminal or absent bundle is already done — don't re-mark it
-    # limit: check-then-act — a job finishing between this status read and the
-    # cancel_job call below still gets CANCELLED stamped over its marker; closing
-    # it means moving the re-check inside cancel_job's contract
-    terminal = {JobStatus.DONE, JobStatus.FAILED, JobStatus.DEFERRED, JobStatus.DEAD, JobStatus.CANCELLED}
-    jdir = _job_dir(repo, expert, job_id)
-    cancellable = jdir.exists() and _job_status(jdir) not in terminal
-    if not cancellable:
-        print(json.dumps({"cancelled": False, "job_id": job_id}))
-        return 0
-    try:
-        _cancel(repo, expert, job_id)
-    except Exception as e:
-        print(json.dumps({"error": f"cancel failed: {e}"})); return 1
-    print(json.dumps({"cancelled": True, "job_id": job_id}))
-    return 0
+  # cancel the job; any runtime failure is reported, never raised at the caller
+  # noinspection PyBroadException
+  try:
+    cancel_job(repo, expert, job_id)
+  except Exception as error:
+    return _print_error(_Msg.CANCEL_FAILED.format(error))
+  print(json.dumps({ _Field.CANCELLED: True, _Field.JOB_ID: job_id }))
+  return 0
 
 
-def _cmd_collect_job(argv: list[str]) -> int:
-    """Inter-plugin job-collection entrypoint. Reads ``{expert, job_id}``
-    JSON from stdin, queries ``expert_runtime.collect_job``, prints the
-    status dict to stdout.
+def _cmd_collect_job() -> int:
+  """
+  Report the status of a queued expert job to a sibling plugin.
 
-    Output JSON:
-      ``{"status": "pending|done|failed|missing", "response": {...}}``
-      (``response`` is present only when ``status`` is ``done`` or ``failed``.)
+  Reads `{expert, job_id}` JSON from stdin and prints the status object
+  `{"status": "missing|dead|cancelled|pending|done|deferred|failed", "response": {...}}` to stdout; `response` is
+  present only when `status` is `done`, `deferred` or `failed`. This is the read-side companion to `dispatch-job`
+  and the contract sibling plugins use to inspect a job they queued earlier.
 
-    This is the read-side companion to ``dispatch-job`` — the contract
-    sibling plugins use to inspect a job they earlier queued. Same
-    rationale: no filesystem-walk imports across plugin boundaries.
-    """
-    import json
-    from pathlib import Path as _Path
-    from expert_runtime import collect_job as _collect
-    repo = _Path(os.environ.get("LAZY_REPO_ROOT", os.getcwd()))
-    try:
-        req = json.load(sys.stdin)
-    except json.JSONDecodeError as e:
-        print(json.dumps({"error": f"request parse: {e}"})); return 1
-    expert = req.get("expert")
-    job_id = req.get("job_id")
-    if not expert or not job_id:
-        print(json.dumps({"error": "request missing 'expert' or 'job_id'"})); return 1
-    try:
-        out = _collect(repo, expert, job_id)
-    except Exception as e:
-        print(json.dumps({"error": f"collect failed: {e}"})); return 1
-    print(json.dumps(out))
-    return 0
+  Returns:
+    Process exit code: 0 on success, 1 with an error JSON on stdout on a malformed request or a runtime failure.
+  """
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from expert_runtime import collect_job
+
+  # guard: a malformed request was already reported
+  if (request := _read_job_request()) is None:
+    return 1
+
+  # read the job's status; any runtime failure is reported, never raised at the caller
+  # noinspection PyBroadException
+  try:
+    out = collect_job(_env_repo_root(), *request)
+  except Exception as error:
+    return _print_error(_Msg.COLLECT_FAILED.format(error))
+  print(json.dumps(out))
+  return 0
 
 
-def _cmd_dispatch_job(argv: list[str]) -> int:
-    """Inter-plugin job-creation entrypoint. Reads a JSON job-bundle
-    from stdin, atomically creates the job dir via
-    ``expert_runtime.dispatch_job``, prints the result JSON to stdout.
+def _cmd_dispatch_job() -> int:
+  """
+  Queue an expert job for a sibling plugin from a JSON job bundle.
 
-    Input bundle (stdin, JSON):
-      ``{ "expert": "<name>", "payload": {...}, "protocols": [...],
-          "source": [repo-relative path, ...], "context": [repo-relative path, ...],
-          "source_inline": {filename: text}, "context_inline": {filename: text},
-          "result": [filename, ...], "job_id": "...", "dedup_key": "..." }``
+  Reads the bundle from stdin as
+  `{ "expert": "<name>", "payload": {...}, "protocols": [...], "source": [repo-relative path, ...],
+  "context": [repo-relative path, ...], "source_inline": {filename: text}, "context_inline": {filename: text},
+  "result": [filename, ...], "job_id": "...", "dedup_key": "..." }`.
+  `source` and `context` name working-tree paths that the pump copies into the job's buckets when it claims the job;
+  `source_inline` and `context_inline` carry text that no file holds and are written at dispatch.
 
-    ``source`` / ``context`` name paths in the working tree that the pump copies
-    into the job's buckets when it claims the job; ``source_inline`` /
-    ``context_inline`` carry text that no file holds and are written at dispatch.
+  Prints `{"job_id": "...", "queue_path": "..."}` on a fresh dispatch and
+  `{"job_id": "...", "status": "already-queued"}` on a dedup hit. This is the contract sibling plugins MUST use to
+  queue jobs.
 
-    Output (stdout, JSON):
-      ``{"job_id": "...", "queue_path": "..."}`` on fresh dispatch,
-      ``{"job_id": "...", "status": "already-queued"}`` on dedup hit.
+  Returns:
+    Process exit code: 0 on success, 1 with an error JSON on stdout on a bundle parse or dispatch error.
+  """
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from expert_runtime import dispatch_job
 
-    Exit codes: 0 on success, 1 on bundle parse / dispatch error
-    (error JSON on stdout).
+  # guard: a bundle that is not JSON describes no job
+  try:
+    bundle = json.load(sys.stdin)
+  except json.JSONDecodeError as error:
+    return _print_error(_Msg.BUNDLE_PARSE.format(error))
 
-    This is the contract sibling plugins MUST use to queue jobs —
-    never reach into ``expert_runtime`` directly via filesystem-walk
-    imports.
-    """
-    import json
-    from pathlib import Path as _Path
-    from expert_runtime import dispatch_job as _dispatch
-    repo = _Path(os.environ.get("LAZY_REPO_ROOT", os.getcwd()))
-    try:
-        bundle = json.load(sys.stdin)
-    except json.JSONDecodeError as e:
-        print(json.dumps({"error": f"bundle parse: {e}"})); return 1
-    try:
-        out = _dispatch(
-            repo,
-            bundle.get("expert") or "",
-            bundle.get("payload") or {},
-            protocols=bundle.get("protocols"),
-            source=bundle.get("source"),
-            context=bundle.get("context"),
-            source_inline=bundle.get("source_inline"),
-            context_inline=bundle.get("context_inline"),
-            result=bundle.get("result"),
-            job_id=bundle.get("job_id"),
-            dedup_key=bundle.get("dedup_key"),
-        )
-    except KeyError as e:
-        print(json.dumps({"error": f"missing required bundle field: {e}"})); return 1
-    except Exception as e:
-        print(json.dumps({"error": f"dispatch failed: {e}"})); return 1
-    print(json.dumps(out))
-    return 0
+  # queue the job; a missing field or any runtime failure is reported, never raised at the caller
+  # noinspection PyBroadException
+  try:
+    out = dispatch_job(
+      _env_repo_root(),
+      bundle.get(_Field.EXPERT) or "",
+      bundle.get(_Field.PAYLOAD) or {},
+      protocols = bundle.get(_Field.PROTOCOLS),
+      source = bundle.get(_Field.SOURCE),
+      context = bundle.get(_Field.CONTEXT),
+      source_inline = bundle.get(_Field.SOURCE_INLINE),
+      context_inline = bundle.get(_Field.CONTEXT_INLINE),
+      result = bundle.get(_Field.RESULT),
+      job_id = bundle.get(_Field.JOB_ID),
+      dedup_key = bundle.get(_Field.DEDUP_KEY),
+    )
+  except KeyError as error:
+    return _print_error(_Msg.BUNDLE_MISSING.format(error))
+  except Exception as error:
+    return _print_error(_Msg.DISPATCH_FAILED.format(error))
+  print(json.dumps(out))
+  return 0
 
 
-def _cmd_lookup_expert(argv: list[str]) -> int:
-    """Read ``{"name": "..."}`` from stdin; print
-    ``{"found": true, "entry": {...}}`` or ``{"found": false}`` to stdout.
-    Exit 0 in both cases; non-zero only on settings I/O / parse error.
-    """
-    import json
-    from pathlib import Path as _Path
-    repo = os.environ.get("LAZY_REPO_ROOT")
-    if not repo:
-        print("LAZY_REPO_ROOT not set", file=sys.stderr)
-        return 2
-    try:
-        body = json.loads(sys.stdin.read() or "{}")
-    except json.JSONDecodeError as e:
-        print(f"stdin not JSON: {e}", file=sys.stderr)
-        return 2
-    name = body.get("name")
-    if not name:
-        print('stdin missing "name"', file=sys.stderr)
-        return 2
-    from expert_runtime import _resolve_expert_entry
-    entry = _resolve_expert_entry(_Path(repo), name)
-    if entry:
-        print(json.dumps({"found": True, "entry": entry}))
-    else:
-        print(json.dumps({"found": False}))
-    return 0
+def _cmd_lookup_expert() -> int:
+  """
+  Look up an expert's settings entry by name.
+
+  Reads `{"name": "..."}` from stdin and prints `{"found": true, "entry": {...}}` or `{"found": false}` to stdout.
+
+  Returns:
+    Process exit code: 0 whether or not the expert was found, 2 when the repository root is not in the environment
+    or the request is not JSON or names no expert.
+  """
+  # guard: the lookup reads the repo's own settings, so the root must be named
+  if not (repo := os.environ.get(_Probe.ENV_REPO_ROOT)):
+    print(_Msg.REPO_ROOT_UNSET, file = sys.stderr)
+    return 2
+
+  # guard: a request that is not JSON names no expert
+  try:
+    body = json.loads(sys.stdin.read() or _Msg.EMPTY_JSON)
+  except json.JSONDecodeError as error:
+    print(_Msg.STDIN_NOT_JSON.format(error), file = sys.stderr)
+    return 2
+
+  # guard: there is nothing to look up without a name
+  if not (name := body.get(_Field.NAME)):
+    print(_Msg.STDIN_MISSING_NAME, file = sys.stderr)
+    return 2
+
+  # report the resolved entry, or that there is none
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from expert_runtime import resolve_expert_entry
+  if entry := resolve_expert_entry(Path(repo), name):
+    print(json.dumps({ _Field.FOUND: True, _Field.ENTRY: entry }))
+  else:
+    print(json.dumps({ _Field.FOUND: False }))
+  return 0
+
+
+def _collect_reflect_sources(repo: Path, name: str, cutoff: float) -> list[dict[str, str]]:
+  """
+  Collect the source manifest of a reflect job for one expert.
+
+  Args:
+    repo: Repository root.
+    name: Expert name.
+    cutoff: Earliest modification time, in seconds since the epoch, a run log must have to be included.
+
+  Returns:
+    The recent run logs, then the current memory notes, of the expert, each as a path and a description.
+  """
+  # recent run logs: the runs the reflect job consolidates
+  sources = []
+  log_root = repo / _RepoPath.RUN_LOGS / name
+  if log_root.is_dir():
+    for path in sorted(log_root.iterdir()):
+      if path.is_file() and path.suffix == _RepoPath.MD_SUFFIX and path.stat().st_mtime >= cutoff:
+        sources.append({ _Field.PATH: str(path), _Field.DESCRIPTION: _Token.RECENT_RUN_LOG })
+
+  # current memory notes: what the consolidation updates
+  mem_root = repo / _RepoPath.MEMORY / name
+  if mem_root.is_dir():
+    for path in sorted(mem_root.iterdir()):
+      if path.is_file() and path.suffix == _RepoPath.MD_SUFFIX:
+        sources.append({ _Field.PATH: str(path), _Field.DESCRIPTION: _Token.CURRENT_MEMORY_NOTE })
+  return sources
 
 
 def _cmd_memory_reflect_all(argv: list[str]) -> int:
-    """Dispatch a kind=reflect job for every persona-marked expert.
-    Flags: --dry-run (list targets but don't dispatch), --days N (log window)."""
-    import argparse, json, time
-    parser = argparse.ArgumentParser(prog="lazycortex-core memory-reflect-all")
-    parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--days", type=int, default=30)
-    args = parser.parse_args(argv)
+  """
+  Dispatch a reflect job for every persona-marked expert.
 
-    from lazy_settings import load_section
-    from expert_runtime import dispatch_job
+  Prints the counters of dispatched, skipped, would-dispatch, and failed experts as JSON.
 
-    repo = Path(os.environ.get("LAZY_REPO_ROOT", os.getcwd()))
-    experts = load_section(repo / ".claude/lazy.settings.json", "experts")
-    PERSONA = "lazycortex-core:lazy-memory.persona-aspect"
+  Args:
+    argv: Argument tail: `--dry-run` lists the targets without dispatching, `--days N` sets the run-log window.
 
-    summary = {"dispatched": 0, "skipped_not_persona": 0,
-               "would_dispatch": 0, "errors": []}
+  Returns:
+    Process exit code 0.
+  """
+  # parse the flags
+  parser = argparse.ArgumentParser(prog = f"{_PROG} {_Verb.MEMORY_REFLECT_ALL}")
+  parser.add_argument(_Arg.DRY_RUN, action = _Arg.STORE_TRUE)
+  parser.add_argument(_Arg.DAYS, type = int, default = _Arg.DAYS_DEFAULT)
+  args = parser.parse_args(argv)
 
-    for name, entry in experts.items():
-        if name == "_version" or not isinstance(entry, dict):
-            continue
-        aspects = entry.get("aspects") or []
-        if PERSONA not in aspects:
-            summary["skipped_not_persona"] += 1
-            continue
-        if args.dry_run:
-            summary["would_dispatch"] += 1
-            continue
+  # load the expert registry
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from lazy_settings import load_section
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from expert_runtime import dispatch_job
+  repo = _env_repo_root()
+  experts = load_section(repo / _RepoPath.SETTINGS, _Field.SETTINGS_EXPERTS)
 
-        # Gather sources: recent logs + memory notes
-        sources = []
-        log_root = repo / ".logs/claude" / name
-        cutoff = time.time() - args.days * 86400
-        if log_root.is_dir():
-            for p in sorted(log_root.iterdir()):
-                if p.is_file() and p.suffix == ".md" and p.stat().st_mtime >= cutoff:
-                    sources.append({"path": str(p), "description": "recent run log"})
-        mem_root = repo / ".memory" / name
-        if mem_root.is_dir():
-            for p in sorted(mem_root.iterdir()):
-                if p.is_file() and p.suffix == ".md":
-                    sources.append({"path": str(p), "description": "current memory note"})
+  # dispatch one reflect job per persona-marked expert, counting every skip and failure
+  dispatched = 0
+  skipped_not_persona = 0
+  would_dispatch = 0
+  errors: list[dict[str, str]] = []
+  for name, entry in experts.items():
+    # guard: skip the settings version key and any entry that is not an expert mapping
+    if name == _Field.SETTINGS_VERSION or not isinstance(entry, dict):
+      continue
 
-        payload = {
-            "kind": "reflect",
-            "role": "reflect",
-            "request": (
-                "Consolidate recent runs into memory per lazy-memory.persona-aspect "
-                "§Obligations. Use /lazy-memory.write for any new or updated notes. "
-                "Return outcome=empty if nothing is worth consolidating."
-            ),
-            "source": sources,
-        }
-        try:
-            dispatch_job(repo, name, payload)
-            summary["dispatched"] += 1
-        except Exception as e:
-            summary["errors"].append({"expert": name, "error": str(e)})
+    # an expert without the persona aspect keeps no memory to reflect on, so it is counted and passed over
+    if _Token.PERSONA_ASPECT not in (entry.get(_Field.ASPECTS) or []):
+      skipped_not_persona += 1
+      continue
 
-    print(json.dumps(summary))
-    return 0
+    # a dry run only counts the experts a real run would dispatch to
+    if args.dry_run:
+      would_dispatch += 1
+      continue
+
+    # the reflect job carries the expert's sources from the requested look-back window
+    payload = {
+      _Field.KIND: _Token.REFLECT,
+      _Field.ROLE: _Token.REFLECT,
+      _Field.REQUEST: _Token.REFLECT_REQUEST,
+      _Field.SOURCE: _collect_reflect_sources(repo, name, time.time() - args.days * _Probe.SECONDS_PER_DAY),
+    }
+
+    # one expert's failed dispatch is recorded and the loop moves on to the next expert
+    # noinspection PyBroadException
+    try:
+      dispatch_job(repo, name, payload)
+      dispatched += 1
+    except Exception as error:
+      errors.append({ _Field.EXPERT: name, _Field.ERROR: str(error) })
+
+  # report the counters
+  print(json.dumps({ _Field.DISPATCHED: dispatched, _Field.SKIPPED_NOT_PERSONA: skipped_not_persona,
+                     _Field.WOULD_DISPATCH: would_dispatch, _Field.ERRORS: errors }))
+  return 0
 
 
 def _cmd_error_record(argv: list[str]) -> int:
-    """Record one error event (or resolve an incident) from CLI flags.
+  """
+  Record one error event, or resolve an incident, from command-line flags.
 
-    Other plugins call this over the published CLI to register an error the
-    runtime did not capture as a job/routine failure. Best-effort: the underlying
-    ``error_ledger.record`` never raises. On open, prints ``{"recorded": true, "id": "<ulid>"}``
-    so the caller can correlate; ``--cause`` is required (closed-set) so a plugin can't drop a
-    causeless event into the ledger.
-    """
-    import argparse, json
-    import error_ledger
-    p = argparse.ArgumentParser(prog="lazycortex-core error-record")
-    p.add_argument("--incident", required=True)
-    p.add_argument("--kind", default="plugin_error")
-    p.add_argument("--cause")
-    p.add_argument("--severity", default="error", choices=["error", "warn"])
-    p.add_argument("--detail", default="")
-    p.add_argument("--expert")
-    p.add_argument("--job-id")
-    p.add_argument("--routine")
-    p.add_argument("--resolve", action="store_true")
-    p.add_argument("--resolution", default="manual")
-    a = p.parse_args(argv)
-    repo = Path.cwd()
-    # guard: --resolve closes an incident instead of opening one; cause is meaningless for the close path
-    if a.resolve:
-        event_id = error_ledger.new_id()
-        error_ledger.resolve(repo, a.incident, resolution=a.resolution, id=event_id)
-    else:
-        # guard: opening an event without a cause violates the closed-set contract — refuse the call
-        if not a.cause:
-            print("error-record: --cause is required when opening an event", file=sys.stderr)
-            return 2
-        event_id = error_ledger.new_id()
-        error_ledger.record(repo, {
-            "id": event_id,
-            "incident": a.incident, "phase": "opened", "kind": a.kind, "cause": a.cause,
-            "severity": a.severity, "detail": a.detail, "actor": "plugin-cli",
-            "expert": a.expert, "job_id": a.job_id, "routine": a.routine,
-        })
-    print(json.dumps({"recorded": True, "id": event_id}))
-    return 0
+  Other plugins call this over the published CLI to register an error the runtime did not capture as a job or
+  routine failure. Opening an event prints `{"recorded": true, "id": "<ulid>"}` so the caller can correlate;
+  `--cause` is required when opening, so a plugin cannot drop a causeless event into the ledger.
+
+  Notes:
+    - Best-effort: the underlying ledger write never raises.
+
+  Args:
+    argv: Argument tail with the incident key and the event flags.
+
+  Returns:
+    Process exit code: 0 on success, 2 when opening an event without `--cause`.
+  """
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  import error_ledger
+
+  # parse the flags
+  parser = argparse.ArgumentParser(prog = f"{_PROG} {_Verb.ERROR_RECORD}")
+  parser.add_argument(_Arg.INCIDENT, required = True)
+  parser.add_argument(_Arg.KIND, default = _Arg.KIND_DEFAULT)
+  parser.add_argument(_Arg.CAUSE)
+  parser.add_argument(_Arg.SEVERITY, default = _Arg.SEVERITY_DEFAULT, choices = _Arg.SEVERITY_CHOICES)
+  parser.add_argument(_Arg.DETAIL, default = "")
+  parser.add_argument(_Arg.EXPERT)
+  parser.add_argument(_Arg.JOB_ID)
+  parser.add_argument(_Arg.ROUTINE)
+  parser.add_argument(_Arg.RESOLVE, action = _Arg.STORE_TRUE)
+  parser.add_argument(_Arg.RESOLUTION, default = _Arg.RESOLUTION_DEFAULT)
+  args = parser.parse_args(argv)
+  repo = Path.cwd()
+
+  # --resolve closes an incident instead of opening one; cause is meaningless for the close path
+  if args.resolve:
+    event_id = error_ledger.new_id()
+    error_ledger.resolve(repo, args.incident, resolution = args.resolution, id = event_id)
+  else:
+    # guard: opening an event without a cause violates the closed-set contract — refuse the call
+    if not args.cause:
+      print(_Msg.CAUSE_REQUIRED, file = sys.stderr)
+      return 2
+    event_id = error_ledger.new_id()
+    error_ledger.record(repo, {
+      _Field.ID: event_id,
+      _Field.INCIDENT: args.incident, _Field.PHASE: _Token.PHASE_OPENED, _Field.KIND: args.kind,
+      _Field.CAUSE: args.cause, _Field.SEVERITY: args.severity, _Field.DETAIL: args.detail,
+      _Field.ACTOR: _Token.ACTOR_PLUGIN_CLI,
+      _Field.EXPERT: args.expert, _Field.JOB_ID: args.job_id, _Field.ROUTINE: args.routine,
+    })
+
+  # report the event id so the caller can correlate
+  print(json.dumps({ _Field.RECORDED: True, _Field.ID: event_id }))
+  return 0
 
 
 def _cmd_history_append(argv: list[str]) -> int:
-    """Append one bullet to a note's `# History` day-group section.
+  """
+  Append one bullet to a note's `# History` day-group section.
 
-    File mode rewrites the note in place; `--stdin` transforms a JSON-carried
-    text and touches no file. Delegates to `history.main`.
+  File mode rewrites the note in place; `--stdin` transforms a JSON-carried text and touches no file.
 
-    Returns:
-      Process exit code — 0 on success; 2 with a one-line stderr message on a
-      missing file, an empty or multi-line line, a bad date, or malformed stdin JSON.
-    """
-    from history import main as _history_main
-    return _history_main(argv)
+  Args:
+    argv: Argument tail of the history-append subcommand.
+
+  Returns:
+    Process exit code: 0 on success; 2 with a one-line stderr message on a missing file, an empty or multi-line
+    line, a bad date, or malformed stdin JSON.
+  """
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from history import main as history_main
+  return history_main(argv)
 
 
 def _cmd_reconcile_routine(argv: list[str]) -> int:
-    """Register a routine, or bring an already registered one back to the shipped shape.
+  """
+  Register a routine, or bring an already registered one back to the shipped shape.
 
-    The boundary-legal way (`dev.plugin-boundaries.md` § 1c) for a sibling plugin's
-    installer to keep its own routine registrations current in a consumer repo:
-    every key named by `--managed` is set to the shipped value, every other shipped
-    key is filled in only when the entry never carried it, and everything else the
-    entry carries is left exactly as the operator wrote it.
+  The boundary-legal way for a sibling plugin's installer to keep its own routine registrations current in a
+  consumer repo: every key named by `--managed` is set to the shipped value, every other shipped key is filled in
+  only when the entry never carried it, and everything else the entry carries is left exactly as the operator wrote
+  it.
 
-    Flags: the routine name, `--cfg-json` with the shipped config object,
-    `--managed` with a comma-separated owned-key list (empty = own nothing),
-    and an optional `--cwd` repository root. `--dry-run` reports the status the
-    call would return and writes nothing.
+  Args:
+    argv: Argument tail: the routine name, `--cfg-json` with the shipped config object, `--managed` with a
+      comma-separated owned-key list (empty owns nothing), an optional `--cwd` repository root, and `--dry-run` to
+      report the status the call would return and write nothing.
 
-    Returns:
-      Process exit code — 0 with `{"status": "registered|refreshed|unchanged"}` on
-      stdout, 1 with `{"status": "error", "reason": ...}` on malformed cfg JSON or a
-      config the routine schema rejects, 2 on argument error.
-    """
-    import argparse, json
-    from pathlib import Path as _Path
-    parser = argparse.ArgumentParser(prog="lazycortex-core reconcile-routine")
-    parser.add_argument("name")
-    parser.add_argument("--cfg-json", required=True, help="JSON object: the shipped routine config")
-    parser.add_argument("--managed", default="", help="Comma-separated keys the caller's plugin owns")
-    parser.add_argument("--cwd", default=None, help="Repository root (default: $LAZY_REPO_ROOT or cwd)")
-    parser.add_argument("--dry-run", action="store_true", help="Report the status the call would return; write nothing")
-    a = parser.parse_args(argv)
-    try:
-        cfg = json.loads(a.cfg_json)
-    except json.JSONDecodeError as e:
-        print(json.dumps({"status": "error", "reason": f"cfg-json parse: {e}"}))
-        return 1
-    # guard: a scalar or array is not a routine config body
-    if not isinstance(cfg, dict):
-        print(json.dumps({"status": "error", "reason": "cfg-json must be a JSON object"}))
-        return 1
-    from settings_cli import _resolve_settings_path
-    repo = _Path(a.cwd) if a.cwd is not None else _resolve_settings_path(None).parent.parent
-    managed = [k for k in a.managed.split(",") if k]
-    from expert_runtime import reconcile_routine
-    from routine_types import RoutineConfigError
-    try:
-        status = reconcile_routine(repo, a.name, cfg, managed, dry_run=a.dry_run)
-    except RoutineConfigError as e:
-        print(json.dumps({"status": "error", "reason": str(e)}))
-        return 1
-    print(json.dumps({"status": status}))
-    return 0
+  Returns:
+    Process exit code: 0 with `{"status": "registered|refreshed|unchanged"}` on stdout, 1 with
+    `{"status": "error", "reason": ...}` on malformed cfg JSON or a config the routine schema rejects, 2 on
+    argument error.
+  """
+  # parse the flags
+  parser = argparse.ArgumentParser(prog = f"{_PROG} {_Verb.RECONCILE_ROUTINE}")
+  parser.add_argument(_Arg.NAME)
+  parser.add_argument(_Arg.CFG_JSON, required = True, help = _Arg.CFG_JSON_HELP)
+  parser.add_argument(_Arg.MANAGED, default = "", help = _Arg.MANAGED_HELP)
+  parser.add_argument(_Arg.CWD, default = None, help = _Arg.REPO_ROOT_HELP)
+  parser.add_argument(_Arg.DRY_RUN, action = _Arg.STORE_TRUE, help = _Arg.RECONCILE_DRY_RUN_HELP)
+  args = parser.parse_args(argv)
+
+  # guard: a shipped config that is not JSON cannot be reconciled
+  try:
+    cfg = json.loads(args.cfg_json)
+  except json.JSONDecodeError as error:
+    print(json.dumps({ _Field.STATUS: _Token.STATUS_ERROR, _Field.REASON: _Msg.CFG_PARSE.format(error) }))
+    return 1
+
+  # guard: a scalar or array is not a routine config body
+  if not isinstance(cfg, dict):
+    print(json.dumps({ _Field.STATUS: _Token.STATUS_ERROR, _Field.REASON: _Msg.CFG_NOT_OBJECT }))
+    return 1
+
+  # resolve the repository root: the explicit --cwd, else the root the settings path resolves under
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from settings_cli import resolve_settings_path
+  repo = Path(args.cwd) if args.cwd is not None else resolve_settings_path(None).parent.parent
+
+  # reconcile the registration; a config the routine schema rejects is reported, never raised
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from expert_runtime import reconcile_routine
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from routine_types import RoutineConfigError
+  managed = [ key for key in args.managed.split(_Arg.MANAGED_SEP) if key ]
+  try:
+    status = reconcile_routine(repo, args.name, cfg, managed, dry_run = args.dry_run)
+  except RoutineConfigError as error:
+    print(json.dumps({ _Field.STATUS: _Token.STATUS_ERROR, _Field.REASON: str(error) }))
+    return 1
+  print(json.dumps({ _Field.STATUS: status }))
+  return 0
 
 
-def _daemon_alive(repo: Path) -> bool:
-    """Return True when this checkout's supervisor unit is currently running a daemon process."""
-    import shutil
-    import subprocess
-    if sys.platform == "darwin":
-        # a host without launchctl has no supervisor that could be running the unit
-        if shutil.which("launchctl") is None:
-            return False
-        probe = subprocess.run(["launchctl", "list", f"com.lazycortex.runtime.{repo.name}"],
-                               capture_output=True, text=True, check=False, encoding = "utf-8")
-        return probe.returncode == 0 and '"PID"' in probe.stdout
-    # same reasoning for a non-systemd host
-    if shutil.which("systemctl") is None:
-        return False
-    probe = subprocess.run(
-        ["systemctl", "--user", "is-active", f"lazy-core-runtime-{repo.name}.service"],
-        capture_output=True, text=True, check=False, encoding = "utf-8",
-    )
-    return probe.returncode == 0 and probe.stdout.strip() == "active"
+def _is_daemon_alive(repo: Path) -> bool:
+  """
+  Report whether this checkout's supervisor unit is currently running a daemon process.
+
+  Args:
+    repo: Repository root whose runtime unit is probed.
+
+  Returns:
+    `True` when the unit is running, `False` when it is not or the host has no supervisor.
+  """
+  # macOS: a launchd listing carries a PID only while the unit runs a process
+  if sys.platform == _Probe.DARWIN:
+    # guard: a host without launchctl has no supervisor that could be running the unit
+    if shutil.which(_Probe.LAUNCHCTL) is None:
+      return False
+    probe = subprocess.run([ _Probe.LAUNCHCTL, _Probe.LAUNCHCTL_LIST, _Probe.LAUNCHD_LABEL.format(repo.name) ],
+                           capture_output = True, text = True, check = False, encoding = _ENCODING)
+    return probe.returncode == 0 and _Probe.LAUNCHD_PID in probe.stdout
+
+  # guard: same reasoning for a non-systemd host
+  if shutil.which(_Probe.SYSTEMCTL) is None:
+    return False
+
+  # Linux: the systemd user unit reports `active` only while it runs
+  probe = subprocess.run(
+    [ _Probe.SYSTEMCTL, _Probe.SYSTEMCTL_USER, _Probe.SYSTEMCTL_IS_ACTIVE, _Probe.SYSTEMD_UNIT.format(repo.name) ],
+    capture_output = True, text = True, check = False, encoding = _ENCODING,
+  )
+  return probe.returncode == 0 and probe.stdout.strip() == _Probe.SYSTEMD_ACTIVE
 
 
 def _cmd_runtime_tick(repo: Path, argv: list[str]) -> int:
-    """Manual daemon iterations by hand — same primitives, full bookkeeping, push deferred."""
-    import json
-    import time
-    from runtime_daemon import (
-        _check_working_tree, _run_iteration, compute_sleep, due_routines, time_until_next_due,
-    )
-    from lazy_settings import load_section
-    from constants import (
-        DaemonKey, JobMarker, RepoDir, SettingsFile, SettingsKey, StateKey,
-    )
-    import rate_limit_flag
-    import runtime_state
+  """
+  Run daemon iterations by hand and print a JSON summary of the run.
 
-    drain = "--drain" in argv
-    unknown_flags = [a for a in argv if a.startswith("--") and a != "--drain"]
-    names = [a for a in argv if not a.startswith("--")]
-    # the command's contract is refuse-rather-than-surprise: a typo'd flag or a second
-    # positional must not be silently dropped
-    if unknown_flags or len(names) > 1:
-        print(f"refused: unrecognised arguments {unknown_flags + names[1:]!r}; "
-              "usage: runtime-tick [<routine-name>] [--drain]", file=sys.stderr)
-        return 2
-    routine = names[0] if names else None
+  Each pass is a full daemon iteration with the push deferred. An optional routine name forces that routine due for
+  a single pass; `--drain` keeps iterating until the queue empties or a stop signal fires.
 
-    # a live daemon and a manual tick would race over the tree, the index, and the job queue
-    if _daemon_alive(repo):
-        print("refused: the runtime daemon is running on this checkout — a concurrent manual "
-              "tick would race it over the tree, index, and job queue. Stop the unit first.",
-              file=sys.stderr)
-        return 2
+  Args:
+    repo: Repository root.
+    argv: Argument tail: an optional routine name and the `--drain` flag.
 
-    registry = load_section(repo / SettingsFile.REL, SettingsKey.ROUTINES)
-    registry.pop(SettingsKey.VERSION, None)
-    if routine is not None and routine not in registry:
-        print(f"refused: unknown routine {routine!r}; registered: {', '.join(sorted(registry)) or '(none)'}",
-              file=sys.stderr)
-        return 2
+  Returns:
+    Process exit code: 0 on success, 2 on a refusal (unrecognised arguments, a running daemon, an unknown routine,
+    or a named routine that never dispatched).
+  """
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from runtime_daemon import (
+    check_working_tree, run_iteration, compute_sleep, due_routines, time_until_next_due,
+  )
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from lazy_settings import load_section
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from constants import (
+    DaemonKey, JobMarker, RepoDir, SettingsFile, SettingsKey, StateKey,
+  )
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  import rate_limit_flag
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  import runtime_state
 
-    def ready_jobs() -> int:
-        jobs_root = repo / RepoDir.EXPERTS / RepoDir.JOBS
-        if not jobs_root.is_dir():
-            return 0
-        n = 0
-        for edir in jobs_root.iterdir():
-            if not edir.is_dir():
-                continue
-            for jdir in edir.iterdir():
-                if not jdir.is_dir():
-                    continue
-                if (jdir / JobMarker.READY).exists() and not any(
-                    (jdir / m).exists() for m in (JobMarker.DONE, JobMarker.DEAD, JobMarker.CANCELLED)
-                ):
-                    n += 1
-        return n
+  # split the arguments into the drain flag, unknown flags, and routine names
+  drain = _Arg.DRAIN in argv
+  unknown_flags = [ arg for arg in argv if arg.startswith(_Arg.FLAG_PREFIX) and arg != _Arg.DRAIN ]
+  names = [ arg for arg in argv if not arg.startswith(_Arg.FLAG_PREFIX) ]
 
-    def last_run_snapshot() -> dict:
-        return dict(runtime_state.load(repo).get(StateKey.LAST_RUN, {}))
+  # guard: the command's contract is refuse-rather-than-surprise: a typo'd flag or a second
+  # positional must not be silently dropped
+  if unknown_flags or len(names) > 1:
+    print(_Msg.TICK_BAD_ARGS.format(unknown_flags + names[1:]), file = sys.stderr)
+    return 2
 
-    polling = load_section(repo / SettingsFile.REL, SettingsKey.DAEMON).get(
-        DaemonKey.POLLING_INTERVAL_SEC, 5)
+  # the one routine the operator named, if any
+  routine = names[0] if names else None
 
-    # Every pass is one REAL daemon iteration — dispatch, journal, ledger, commit all included;
-    # the READY queue drains through the registered pump routine like it would under the daemon.
-    # The loop stops on the same signals the daemon would stop dispatching on (halt, dirty tree,
-    # rate-limit flag), on empty queues, or on a pass that made no progress — never on a count.
-    ticks = 0
-    stopped = None
-    while True:
-        before = (last_run_snapshot(), ready_jobs())
-        _run_iteration(repo, push=False, only=routine, force_due=routine is not None)
-        ticks += 1
-        state = runtime_state.load(repo)
-        if state.get(StateKey.DAEMON_HALTED):
-            stopped = "halted"
-            break
-        if routine is not None or not drain:
-            break
-        if _check_working_tree(repo) is not None:
-            # the iteration dispatched nothing on a dirty tree and wrote no halt — looping
-            # would spin forever on the same state
-            stopped = "dirty_tree"
-            break
-        if rate_limit_flag.is_raised():
-            stopped = "rate_limited"
-            break
-        last_run = last_run_snapshot()
-        due = due_routines(time.time(), registry, last_run, system_stuck=False)
-        if not due and ready_jobs() == 0:
-            break
-        if (last_run, ready_jobs()) == before:
-            # nothing advanced and nothing drained — whatever is left cannot be drained by
-            # looping; stop instead of spinning
-            stopped = "no_progress"
-            break
-        # wait for the next due routine exactly as the daemon would
-        time.sleep(compute_sleep(time_until_next_due(time.time(), registry, last_run), polling))
+  # guard: a live daemon and a manual tick would race over the tree, the index, and the job queue
+  if _is_daemon_alive(repo):
+    print(_Msg.TICK_DAEMON_ALIVE, file = sys.stderr)
+    return 2
 
-    # named mode: the operator asked for one routine by name — a run where it never dispatched
-    # (stuck-system filter, say) must not look like success
-    dispatched = None
-    if routine is not None:
-        dispatched = last_run_snapshot().get(routine) != before[0].get(routine)
-    print(json.dumps({"ticks": ticks, "routine": routine, "dispatched": dispatched,
-                      "ready_left": ready_jobs(), "stopped": stopped,
-                      "halted": bool(runtime_state.load(repo).get(StateKey.DAEMON_HALTED))}))
-    if routine is not None and not dispatched:
-        print(f"refused: routine {routine!r} did not dispatch — the runtime is stuck "
-              "(dirty tree or halt); see /lazy-runtime.recover", file=sys.stderr)
-        return 2
-    return 0
+  # the routine registry, without its version key
+  registry = load_section(repo / SettingsFile.REL, SettingsKey.ROUTINES)
+  registry.pop(SettingsKey.VERSION, None)
+
+  # guard: a named routine must be one the registry holds
+  if routine is not None and routine not in registry:
+    print(_Msg.TICK_UNKNOWN_ROUTINE.format(routine, _Msg.LIST_SEP.join(sorted(registry)) or _Msg.TICK_NO_ROUTINES),
+          file = sys.stderr)
+    return 2
+
+  def count_ready_jobs() -> int:
+    # count the job bundles still READY and not yet finished, dead, or cancelled
+    jobs_root = repo / RepoDir.EXPERTS / RepoDir.JOBS
+    # guard: no jobs tree yet — nothing is queued
+    if not jobs_root.is_dir():
+      return 0
+    count = 0
+    for edir in jobs_root.iterdir():
+      # guard: skip stray files beside the per-expert directories
+      if not edir.is_dir():
+        continue
+      for jdir in edir.iterdir():
+        # guard: skip stray files beside the job bundles
+        if not jdir.is_dir():
+          continue
+        if (jdir / JobMarker.READY).exists() and not any(
+          (jdir / marker).exists() for marker in (JobMarker.DONE, JobMarker.DEAD, JobMarker.CANCELLED)
+        ):
+          count += 1
+    return count
+
+  def load_last_run() -> dict:
+    # a copy of the per-routine last-run ledger, so later reads compare against a frozen value
+    return dict(runtime_state.load(repo).get(StateKey.LAST_RUN, {}))
+
+  # the polling interval the daemon would sleep at least
+  polling = load_section(repo / SettingsFile.REL, SettingsKey.DAEMON).get(
+    DaemonKey.POLLING_INTERVAL_SEC, _Probe.POLLING_DEFAULT_SEC)
+
+  # Every pass is one REAL daemon iteration — dispatch, journal, ledger, commit all included;
+  # the READY queue drains through the registered pump routine like it would under the daemon.
+  # The loop stops on the same signals the daemon would stop dispatching on (halt, dirty tree,
+  # rate-limit flag), on empty queues, or on a pass that made no progress — never on a count.
+  ticks = 0
+  stopped = None
+  while True:
+    # snapshot the ledger and the queue, then run one real iteration with the push deferred
+    before = (load_last_run(), count_ready_jobs())
+    run_iteration(repo, push = False, only = routine, force_due = routine is not None)
+    ticks += 1
+
+    # a halt the iteration wrote stops the run exactly as it stops the daemon
+    if runtime_state.load(repo).get(StateKey.DAEMON_HALTED):
+      stopped = _Token.STOP_HALTED
+      break
+
+    # a named routine and a plain tick are single-pass; only `--drain` keeps going
+    if routine is not None or not drain:
+      break
+
+    # the iteration dispatched nothing on a dirty tree and wrote no halt — looping
+    # would spin forever on the same state
+    if check_working_tree(repo) is not None:
+      stopped = _Token.STOP_DIRTY_TREE
+      break
+
+    # a raised rate-limit flag blocks every dispatch the next pass would make
+    if rate_limit_flag.is_raised():
+      stopped = _Token.STOP_RATE_LIMITED
+      break
+
+    # the drain is complete once no routine is due and the queue is empty
+    last_run = load_last_run()
+    if not due_routines(time.time(), registry, last_run, system_stuck = False) and count_ready_jobs() == 0:
+      break
+
+    # nothing advanced and nothing drained — whatever is left cannot be drained by
+    # looping; stop instead of spinning
+    if (last_run, count_ready_jobs()) == before:
+      stopped = _Token.STOP_NO_PROGRESS
+      break
+
+    # wait for the next due routine exactly as the daemon would
+    time.sleep(compute_sleep(time_until_next_due(time.time(), registry, last_run), polling))
+
+  # named mode: whether the one routine the operator named actually dispatched; None for a plain tick
+  dispatched = None
+  if routine is not None:
+    dispatched = load_last_run().get(routine) != before[0].get(routine)
+
+  # the run summary is printed whatever the outcome
+  print(json.dumps({ _Field.TICKS: ticks, _Field.ROUTINE: routine, _Field.DISPATCHED: dispatched,
+                     _Field.READY_LEFT: count_ready_jobs(), _Field.STOPPED: stopped,
+                     _Field.HALTED: bool(runtime_state.load(repo).get(StateKey.DAEMON_HALTED)) }))
+
+  # a named routine that never dispatched (stuck-system filter, say) must not look like success
+  if routine is not None and not dispatched:
+    print(_Msg.TICK_NOT_DISPATCHED.format(routine), file = sys.stderr)
+    return 2
+
+  # the run did what was asked
+  return 0
 
 
 def _cmd_resume(argv: list[str]) -> int:
-    """Clear the daemon's halt block so the runtime resumes work.
+  """
+  Clear the daemon's halt block so the runtime resumes work.
 
-    Reason-aware (see ``recover.resume``): ``uncommitted_changes`` requires a
-    clean working tree; other reasons (``suspected_loop``, ``git_pull_diverged``,
-    ``git_push_failed``, ``git_remote_unavailable``, future) clear unconditionally.
-    If the underlying cause still holds, the daemon will re-halt on the next
-    iteration — clearing is always safe, never destructive.
+  Halt reasons are handled individually: `uncommitted_changes` requires a clean working tree, while every other
+  reason clears unconditionally. If the underlying cause still holds, the daemon re-halts on its next iteration, so
+  clearing is always safe and never destructive.
 
-    Idempotent: if the daemon is not halted, exits 0 with ``resumed: false``.
-    """
-    import argparse, json
-    import recover
-    p = argparse.ArgumentParser(prog="lazycortex-core resume")
-    p.add_argument("repo", nargs="?", default=None,
-                   help="Repository root (default: $LAZY_REPO_ROOT or cwd)")
-    a = p.parse_args(argv)
-    repo_path = Path(a.repo) if a.repo else Path(os.environ.get("LAZY_REPO_ROOT", os.getcwd()))
-    halt_before = recover.read_halt(repo_path)
-    # guard: daemon is not halted — idempotent no-op
-    if halt_before is None:
-        print(json.dumps({"resumed": False, "halt": None, "note": "daemon not halted"}))
-        return 0
-    try:
-        recover.resume(repo_path)
-    except recover.RecoverError as e:
-        print(json.dumps({"resumed": False, "halt": halt_before, "error": str(e)}), file=sys.stderr)
-        return 1
-    print(json.dumps({"resumed": True, "halt": halt_before}))
+  Guarantees:
+    - Idempotent: if the daemon is not halted, nothing changes and the verb exits 0 with `resumed: false`.
+
+  Args:
+    argv: Argument tail: an optional repository positional.
+
+  Returns:
+    Process exit code: 0 on a clear or a no-op, 1 when the halt cannot be cleared (still-dirty tree).
+  """
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  import recover
+
+  # resolve the repository: the positional, else the environment, else the cwd
+  parser = argparse.ArgumentParser(prog = f"{_PROG} {_Verb.RESUME}")
+  parser.add_argument(_Arg.REPO, nargs = _Arg.OPTIONAL, default = None, help = _Arg.REPO_ROOT_HELP)
+  args = parser.parse_args(argv)
+  repo_path = Path(args.repo) if args.repo else _env_repo_root()
+
+  # Contract:
+  # Resuming a daemon that is not halted changes nothing and exits 0 with `resumed: false`,
+  # so the verb may be called repeatedly without checking the halt first.
+
+  # guard: daemon is not halted — idempotent no-op
+  if (halt_before := recover.read_halt(repo_path)) is None:
+    print(json.dumps({ _Field.RESUMED: False, _Field.HALT: None, _Field.NOTE: _Msg.NOT_HALTED }))
     return 0
+
+  # clear the halt; a refusal (still-dirty tree) is reported on stderr with exit 1
+  try:
+    recover.resume(repo_path)
+  except recover.RecoverError as error:
+    print(json.dumps({ _Field.RESUMED: False, _Field.HALT: halt_before, _Field.ERROR: str(error) }),
+          file = sys.stderr)
+    return 1
+  print(json.dumps({ _Field.RESUMED: True, _Field.HALT: halt_before }))
+  return 0
 
 
 def _cmd_error_list(argv: list[str]) -> int:
-    """Print error-ledger incidents as JSON, optionally filtered by state / kind / since-cursor."""
-    import argparse, json
-    import error_ledger
-    p = argparse.ArgumentParser(prog="lazycortex-core error-list")
-    p.add_argument("--state", default="all", choices=["all", "open", "needs_operator", "closed"])
-    p.add_argument("--kind", default=None)
-    p.add_argument("--since", default=None,
-                   help="ULID cursor; only incidents whose latest event id is strictly greater are returned")
-    a = p.parse_args(argv)
-    rows = error_ledger.incidents(Path.cwd(), state=a.state, since=a.since)
-    # guard: optional kind filter
-    if a.kind:
-        rows = [r for r in rows if r.get("kind") == a.kind]
-    print(json.dumps(rows, ensure_ascii=False))
-    return 0
+  """
+  Print error-ledger incidents as JSON, optionally filtered by state, kind, and since-cursor.
+
+  Args:
+    argv: Argument tail with the `--state`, `--kind`, and `--since` filters.
+
+  Returns:
+    Process exit code 0.
+  """
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  import error_ledger
+
+  # parse the filters
+  parser = argparse.ArgumentParser(prog = f"{_PROG} {_Verb.ERROR_LIST}")
+  parser.add_argument(_Arg.STATE, default = _Arg.STATE_DEFAULT, choices = _Arg.STATE_CHOICES)
+  parser.add_argument(_Arg.KIND, default = None)
+  parser.add_argument(_Arg.SINCE, default = None, help = _Arg.SINCE_HELP)
+  args = parser.parse_args(argv)
+
+  # read the incidents, narrowed to one kind when asked
+  rows = error_ledger.read_incidents(Path.cwd(), state = args.state, since = args.since)
+  if args.kind:
+    rows = [ row for row in rows if row.get(_Field.KIND) == args.kind ]
+  print(json.dumps(rows, ensure_ascii = False))
+  return 0
 
 
 def _cmd_detect_scope(argv: list[str]) -> int:
-    """Print the install scope (``project`` / ``user`` / ``not-installed``) for a plugin key.
+  """
+  Print the install scope (`project`, `user`, or `not-installed`) for a plugin key.
 
-    Resolves the scope from where the plugin is actually *enabled* (``enabledPlugins``
-    in the project then the user ``settings.json`` / ``settings.local.json``), falling
-    back to the install record's own ``scope`` in ``installed_plugins.json`` only when
-    neither settings file enables it. ``project_root`` defaults to the git toplevel of
-    the cwd, so a call from any subdirectory resolves the same scope.
+  Resolves the scope from where the plugin is actually enabled (`enabledPlugins` in the project, then the user,
+  `settings.json` and `settings.local.json`), falling back to the install record's own scope only when neither
+  settings file enables it. The project root defaults to the git toplevel of the cwd, so a call from any
+  subdirectory resolves the same scope. This is the boundary-legal path for sibling install skills to detect their
+  own scope without importing lazycortex-core Python.
 
-    This is the boundary-legal path (dev.plugin-boundaries § 1c) for sibling install
-    skills to detect their own scope without importing lazycortex-core Python.
-    """
-    import argparse, subprocess
-    from lazy_install_phases import detect_install_scope
-    p = argparse.ArgumentParser(prog="lazycortex-core detect-scope")
-    p.add_argument("plugin_key", help="e.g. lazycortex-diagram@lazycortex")
-    p.add_argument("--cwd", default=None, help="Project root (default: the git toplevel of the cwd, else the cwd)")
-    a = p.parse_args(argv)
-    # guard: an explicit root is used as given, the git probe is for the cwd-driven default only
-    if a.cwd is not None:
-        print(detect_install_scope(a.plugin_key, project_root=a.cwd))
-        return 0
-    toplevel = subprocess.run(["git", "rev-parse", "--show-toplevel"],
-                              capture_output=True, text=True, encoding = "utf-8").stdout.strip()
-    print(detect_install_scope(a.plugin_key, project_root=toplevel or os.getcwd()))
+  Args:
+    argv: Argument tail: the plugin key and an optional `--cwd` project root.
+
+  Returns:
+    Process exit code 0.
+  """
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from lazy_install_phases import detect_install_scope
+
+  # parse the plugin key and the optional root
+  parser = argparse.ArgumentParser(prog = f"{_PROG} {_Verb.DETECT_SCOPE}")
+  parser.add_argument(_Arg.PLUGIN_KEY, help = _Arg.PLUGIN_KEY_HELP)
+  parser.add_argument(_Arg.CWD, default = None, help = _Arg.DETECT_CWD_HELP)
+  args = parser.parse_args(argv)
+
+  # an explicit root is used as given, the git probe is for the cwd-driven default only
+  if args.cwd is not None:
+    print(detect_install_scope(args.plugin_key, project_root = args.cwd))
     return 0
+
+  # default root: the cwd's git toplevel, else the cwd itself
+  print(detect_install_scope(args.plugin_key, project_root = _query_git_toplevel() or os.getcwd()))
+  return 0
 
 
 def _cmd_plugin_root(argv: list[str]) -> int:
-    """Print the directory a plugin's sources are read from: the authoring
-    repo's ``plugins/claude/<plugin>/`` when this checkout ships the plugin, else the
-    daemon's ``LAZYCORTEX_PLUGIN_DIRS`` entry, else the install ``installed_plugins.json`` records.
-    One path on stdout; exit 1 with an ``error:`` line when nothing resolves.
+  """
+  Print the directory a plugin's sources are read from.
 
-    The single implementation every install / audit / seed skill points at
-    instead of reading ``installed_plugins.json`` itself — reading the cache
-    first in a repo that authors the plugin silently runs the previous
-    publish instead of the sources at hand.
-    """
-    import argparse, subprocess
-    from lazy_setup import plugin_root
-    p = argparse.ArgumentParser(prog="lazycortex-core plugin-root")
-    p.add_argument("plugin", help="e.g. lazycortex-experts or lazycortex-experts@lazycortex")
-    p.add_argument("--cwd", default=None, help="Checkout root (default: the git toplevel of the cwd, else the cwd)")
-    a = p.parse_args(argv)
-    if a.cwd is not None:
-        root = Path(a.cwd)
-    else:
-        toplevel = subprocess.run(["git", "rev-parse", "--show-toplevel"],
-                                  capture_output=True, text=True, encoding = "utf-8").stdout.strip()
-        root = Path(toplevel or os.getcwd())
-    report = plugin_root(a.plugin, root, Path.home())
-    if report is None:
-        print(f"error: {a.plugin} not installed: no authored, exported, or cached sources", file=sys.stderr)
-        return 1
-    print(report["root"])
-    return 0
+  The directory is the daemon's `LAZYCORTEX_PLUGIN_DIRS` entry, else the dev-vault sibling plugin tree, else the
+  authoring repo's `plugins/claude/<plugin>/` when this checkout ships the plugin, else the install that
+  `installed_plugins.json` records. This is the single implementation every install, audit, and seed skill
+  points at instead of reading `installed_plugins.json` itself.
+
+  Args:
+    argv: Argument tail: the plugin and an optional `--cwd` checkout root.
+
+  Returns:
+    Process exit code: 0 with one path on stdout, 1 with an `error:` line on stderr when nothing resolves.
+  """
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from lazy_setup import plugin_root, format_plugin_root_miss
+
+  # parse the plugin and the optional checkout root
+  parser = argparse.ArgumentParser(prog = f"{_PROG} {_Verb.PLUGIN_ROOT}")
+  parser.add_argument(_Arg.PLUGIN, help = _Arg.PLUGIN_HELP)
+  parser.add_argument(_Arg.CWD, default = None, help = _Arg.PLUGIN_ROOT_CWD_HELP)
+  args = parser.parse_args(argv)
+
+  # the checkout root: the explicit --cwd, else the cwd's git toplevel, else the cwd itself
+  root = Path(args.cwd) if args.cwd is not None else Path(_query_git_toplevel() or os.getcwd())
+
+  # guard: no stage resolves this plugin; the error line names every stage searched
+  if (report := plugin_root(args.plugin, root, Path.home())) is None:
+    print(format_plugin_root_miss(args.plugin, root, Path.home()), file = sys.stderr)
+    return 1
+
+  # the resolved source root
+  print(report[_Field.ROOT])
+  return 0
 
 
 def _cmd_daemon_pause(argv: list[str]) -> int:
-    """Create the local pause semaphore so the daemon skips work until resumed.
+  """
+  Create the local pause semaphore so the daemon skips work until resumed.
 
-    Touches ``.runtime/daemon.pause`` under the repo root (git toplevel of the
-    cwd, or the cwd itself outside a checkout) and prints
-    ``{"paused": true, "semaphore": "<path>"}``. Idempotent: an already-present
-    semaphore is left in place. Purely local — no settings edit, no commit; the
-    daemon keeps serving metrics and reports itself paused.
-    """
-    import argparse, json, subprocess
-    from constants import RuntimeFile
-    p = argparse.ArgumentParser(prog="lazycortex-core daemon-pause")
-    p.parse_args(argv)
-    toplevel = subprocess.run(["git", "rev-parse", "--show-toplevel"],
-                              capture_output=True, text=True, encoding = "utf-8").stdout.strip()
-    semaphore = Path(toplevel or os.getcwd()) / RuntimeFile.PAUSE
-    semaphore.parent.mkdir(parents=True, exist_ok=True)
-    semaphore.touch(exist_ok=True)
-    print(json.dumps({"paused": True, "semaphore": str(semaphore)}))
-    return 0
+  Creates `.runtime/daemon.pause` under the repo root (git toplevel of the cwd, or the cwd itself outside a
+  checkout) and prints `{"paused": true, "semaphore": "<path>"}`. Purely local: no settings edit, no commit; the
+  daemon keeps serving metrics and reports itself paused.
+
+  Guarantees:
+    - Idempotent: pausing an already-paused daemon succeeds and leaves the existing semaphore in place.
+
+  Args:
+    argv: Argument tail; the verb takes no arguments.
+
+  Returns:
+    Process exit code 0.
+  """
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from constants import RuntimeFile
+
+  # the verb takes no arguments; argparse still answers --help and refuses extras
+  argparse.ArgumentParser(prog = f"{_PROG} {_Verb.DAEMON_PAUSE}").parse_args(argv)
+
+  # Contract:
+  # Pausing a daemon that is already paused succeeds and leaves the existing semaphore in place.
+
+  # touch the semaphore under the checkout root
+  semaphore = Path(_query_git_toplevel() or os.getcwd()) / RuntimeFile.PAUSE
+  semaphore.parent.mkdir(parents = True, exist_ok = True)
+  semaphore.touch(exist_ok = True)
+  print(json.dumps({ _Field.PAUSED: True, _Field.SEMAPHORE: str(semaphore) }))
+  return 0
 
 
 def _cmd_daemon_resume(argv: list[str]) -> int:
-    """Remove the local pause semaphore so the daemon resumes on its next wakeup.
+  """
+  Remove the local pause semaphore so the daemon resumes on its next wakeup.
 
-    Deletes ``.runtime/daemon.pause`` under the repo root and prints
-    ``{"paused": false, "semaphore": "<path>"}``. Idempotent: an absent
-    semaphore is a no-op.
-    """
-    import argparse, json, subprocess
-    from constants import RuntimeFile
-    p = argparse.ArgumentParser(prog="lazycortex-core daemon-resume")
-    p.parse_args(argv)
-    toplevel = subprocess.run(["git", "rev-parse", "--show-toplevel"],
-                              capture_output=True, text=True, encoding = "utf-8").stdout.strip()
-    semaphore = Path(toplevel or os.getcwd()) / RuntimeFile.PAUSE
-    semaphore.unlink(missing_ok=True)
-    print(json.dumps({"paused": False, "semaphore": str(semaphore)}))
-    return 0
+  Deletes `.runtime/daemon.pause` under the repo root and prints `{"paused": false, "semaphore": "<path>"}`.
+
+  Guarantees:
+    - Idempotent: resuming a daemon that is not paused is a no-op that still reports success.
+
+  Args:
+    argv: Argument tail; the verb takes no arguments.
+
+  Returns:
+    Process exit code 0.
+  """
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from constants import RuntimeFile
+
+  # the verb takes no arguments; argparse still answers --help and refuses extras
+  argparse.ArgumentParser(prog = f"{_PROG} {_Verb.DAEMON_RESUME}").parse_args(argv)
+
+  # Contract:
+  # Resuming a daemon that is not paused is a no-op that still reports success.
+
+  # remove the semaphore under the checkout root
+  semaphore = Path(_query_git_toplevel() or os.getcwd()) / RuntimeFile.PAUSE
+  semaphore.unlink(missing_ok = True)
+  print(json.dumps({ _Field.PAUSED: False, _Field.SEMAPHORE: str(semaphore) }))
+  return 0
 
 
 def _cmd_daemon_list(argv: list[str]) -> int:
-    """Print every lazycortex runtime daemon installed on this host as JSON.
+  """
+  Print every lazycortex runtime daemon installed on this host as JSON.
 
-    Enumerates supervisor units (launchd plists / systemd user units), joins each
-    with its repo's ``daemon.metrics`` settings, and prints
-    ``{"daemons": [{"repo_id", "repo_root", "repo_label", "metrics_enabled",
-    "bind", "port"}, ...]}``.
+  Each daemon carries its repo's `daemon.metrics` settings, printed as
+  `{"daemons": [{"repo_id", "repo_root", "repo_label", "metrics_enabled", "bind", "port"}, ...]}`. This is the
+  boundary-legal path for sibling plugins (lazycortex-observe) to learn the host's scrape-target set without
+  importing lazycortex-core Python.
 
-    This is the boundary-legal path (dev.plugin-boundaries § 1c) for sibling
-    plugins (lazycortex-observe) to learn the host's scrape-target set without
-    importing lazycortex-core Python.
-    """
-    import argparse, json
-    from daemon_registry import enumerate_local_daemons
-    p = argparse.ArgumentParser(prog="lazycortex-core daemon-list")
-    p.add_argument("--json", action="store_true", default=True,
-                   help="accepted for call-site clarity; output is always JSON")
-    p.parse_args(argv)
-    print(json.dumps({"daemons": enumerate_local_daemons()}, ensure_ascii=False))
-    return 0
+  Args:
+    argv: Argument tail; only the call-site-clarity `--json` flag is accepted.
+
+  Returns:
+    Process exit code 0.
+  """
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from daemon_registry import enumerate_local_daemons
+
+  # --json is accepted for call-site clarity only; the output is JSON either way
+  parser = argparse.ArgumentParser(prog = f"{_PROG} {_Verb.DAEMON_LIST}")
+  parser.add_argument(_Arg.JSON, action = _Arg.STORE_TRUE, default = True, help = _Arg.JSON_HELP)
+  parser.parse_args(argv)
+
+  # list the installed daemons
+  print(json.dumps({ _Field.DAEMONS: enumerate_local_daemons() }, ensure_ascii = False))
+  return 0
 
 
 def _cmd_metrics_alloc_port(argv: list[str]) -> int:
-    """Allocate a metrics port for a repo and print ``{"port": N, "reused": bool}``.
+  """
+  Allocate a metrics port for a repo and print `{"port": N, "reused": bool}`.
 
-    Sequential allocation from 9464: the repo's already-recorded port is reused
-    verbatim; otherwise the first port that is neither recorded by another local
-    daemon nor currently bindable-blocked is returned. Exits 1 with an ``error``
-    JSON when the whole range is exhausted.
-    """
-    import argparse, json
-    from port_alloc import allocate_port
-    p = argparse.ArgumentParser(prog="lazycortex-core metrics-alloc-port")
-    p.add_argument("--repo-root", required=True, help="absolute path of the repo the port is for")
-    a = p.parse_args(argv)
-    try:
-        print(json.dumps(allocate_port(Path(a.repo_root))))
-    except RuntimeError as e:
-        print(json.dumps({"error": str(e)})); return 1
-    return 0
+  Allocation is sequential from 9464: the repo's already-recorded port is reused verbatim; otherwise the first port
+  that is neither recorded by another local daemon nor currently blocked is returned.
+
+  Args:
+    argv: Argument tail with the required `--repo-root`.
+
+  Returns:
+    Process exit code: 0 on success, 1 with an `error` JSON when the whole range is exhausted.
+  """
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from port_alloc import allocate_port
+
+  # parse the repo root
+  parser = argparse.ArgumentParser(prog = f"{_PROG} {_Verb.METRICS_ALLOC_PORT}")
+  parser.add_argument(_Arg.REPO_ROOT, required = True, help = _Arg.ALLOC_REPO_ROOT_HELP)
+  args = parser.parse_args(argv)
+
+  # allocate the port; an exhausted range is reported as error JSON with exit 1
+  try:
+    print(json.dumps(allocate_port(Path(args.repo_root))))
+  except RuntimeError as error:
+    return _print_error(str(error))
+  return 0
 
 
 def _cmd_metrics_scrape_file(argv: list[str]) -> int:
-    """Write the Prometheus file_sd scrape-targets file and print ``{"path", "count", "targets"}``.
+  """
+  Write the Prometheus file_sd scrape-targets file and print `{"path", "count", "targets"}`.
 
-    Covers every metrics-enabled daemon on this host, one file_sd entry per daemon
-    (``{"targets": ["127.0.0.1:<port>"], "labels": {"repo": "<label>"}}``). The file
-    is server-blind — no repo paths, hostnames, or credentials. Default location:
-    ``${XDG_CONFIG_HOME:-~/.config}/lazycortex/scrape-targets.json``.
-    """
-    import argparse, json
-    from daemon_registry import write_scrape_targets_file
-    p = argparse.ArgumentParser(prog="lazycortex-core metrics-scrape-file")
-    p.add_argument("--out", default=None, help="override the output path")
-    a = p.parse_args(argv)
-    out = Path(a.out) if a.out else None
-    print(json.dumps(write_scrape_targets_file(out), ensure_ascii=False))
-    return 0
+  Covers every metrics-enabled daemon on this host, one file_sd entry per daemon
+  (`{"targets": ["127.0.0.1:<port>"], "labels": {"repo": "<label>"}}`). The file is server-blind: no repo paths,
+  hostnames, or credentials. The default location is `${XDG_CONFIG_HOME:-~/.config}/lazycortex/scrape-targets.json`.
+
+  Args:
+    argv: Argument tail with the optional `--out` path override.
+
+  Returns:
+    Process exit code 0.
+  """
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from daemon_registry import write_scrape_targets_file
+
+  # parse the optional output path
+  parser = argparse.ArgumentParser(prog = f"{_PROG} {_Verb.METRICS_SCRAPE_FILE}")
+  parser.add_argument(_Arg.OUT, default = None, help = _Arg.OUT_HELP)
+  args = parser.parse_args(argv)
+
+  # write the file at the override, else at its default location
+  print(json.dumps(write_scrape_targets_file(Path(args.out) if args.out else None), ensure_ascii = False))
+  return 0
 
 
 def _cmd_sandbox_sync(argv: list[str]) -> int:
-    """Record the expert-spawn sandbox scope for a repo and print the sync result.
+  """
+  Record the expert-spawn sandbox scope for a repo and print the sync result.
 
-    The repo root is always granted read+write. Every entry — recorded, passed,
-    or the root itself — also contributes the location it resolves to through
-    symlinks, plus the targets of the symlinks directly inside it: macOS checks
-    the resolved path, so an unresolved entry grants nothing where the data lives.
-    The ``sandbox`` section of the repo's ``lazy.settings.json`` (Claude Code's own
-    ``sandbox`` shape — ``network.allowedDomains`` above all) becomes the file's
-    ``sandbox`` block; only ``enabled``, ``allowUnsandboxedCommands`` and the two path
-    allowlists survive undeclared, and declared path entries fold into the recorded lists.
+  The repo root is always granted read and write. Every entry (recorded, passed, or the root itself) also
+  contributes the location it resolves to through symlinks, plus the targets of the symlinks directly inside it:
+  macOS checks the resolved path, so an unresolved entry grants nothing where the data lives. The `sandbox` section
+  of the repo's `lazy.settings.json` (Claude Code's own `sandbox` shape, `network.allowedDomains` above all) becomes
+  the file's `sandbox` block; only `enabled`, `allowUnsandboxedCommands` and the two path allowlists survive
+  undeclared, and declared path entries fold into the recorded lists.
 
-    Output JSON: ``{"path", "present", "enabled", "added_read", "added_write",
-    "removed_read", "changed"}``. A recorded ``enabled`` is never overwritten —
-    a ``false`` comes back in the result for the caller to act on. ``removed_read``
-    names any recorded read grant for a plugin-cache version no longer on disk.
-    """
-    import argparse, json
-    from sandbox_scope import sync
-    p = argparse.ArgumentParser(prog="lazycortex-core sandbox-sync")
-    p.add_argument("--repo-root", required=True, help="absolute path of the repo whose sandbox scope is recorded")
-    p.add_argument("--allow-read", action="append", default=[], help="extra readable path (repeatable)")
-    p.add_argument("--allow-write", action="append", default=[], help="extra writable path (repeatable)")
-    a = p.parse_args(argv)
-    print(json.dumps(sync(Path(a.repo_root), read=a.allow_read, write=a.allow_write), ensure_ascii=False))
-    return 0
+  Prints `{"path", "present", "enabled", "added_read", "added_write", "removed_read", "removed_write", "changed"}`.
+  `removed_read` and `removed_write` name any recorded grant for a plugin-cache version no longer on disk, pruned
+  from that allowlist.
+
+  Args:
+    argv: Argument tail: the required `--repo-root` and repeatable `--allow-read` and `--allow-write` grants.
+
+  Returns:
+    Process exit code 0.
+  """
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from sandbox_scope import sync
+
+  # parse the repo root and the extra grants
+  parser = argparse.ArgumentParser(prog = f"{_PROG} {_Verb.SANDBOX_SYNC}")
+  parser.add_argument(_Arg.REPO_ROOT, required = True, help = _Arg.SYNC_REPO_ROOT_HELP)
+  parser.add_argument(_Arg.ALLOW_READ, action = _Arg.APPEND, default = [], help = _Arg.ALLOW_READ_HELP)
+  parser.add_argument(_Arg.ALLOW_WRITE, action = _Arg.APPEND, default = [], help = _Arg.ALLOW_WRITE_HELP)
+  args = parser.parse_args(argv)
+
+  # record the scope and report what changed
+  print(json.dumps(sync(Path(args.repo_root), read = args.allow_read, write = args.allow_write),
+                   ensure_ascii = False))
+  return 0
 
 
 def _cmd_sandbox_audit(argv: list[str]) -> int:
-    """Report which resolved locations the recorded sandbox scope fails to grant.
+  """
+  Report which resolved locations the recorded sandbox scope fails to grant.
 
-    Read-only companion to ``sandbox-sync``: prints ``{"path", "present", "enabled",
-    "allow_unsandboxed", "missing_read", "missing_write", "drift"}``. A non-empty
-    ``missing_write`` means confined spawns will fail every write through that
-    symlink with ``Operation not permitted``; ``drift`` lists the dotted keys on which
-    the settings' ``sandbox`` section and the file disagree. Exits 0 either way — the
-    verdict travels in the JSON.
-    """
-    import argparse, json
-    from sandbox_scope import audit
-    p = argparse.ArgumentParser(prog="lazycortex-core sandbox-audit")
-    p.add_argument("--repo-root", required=True, help="absolute path of the repo whose sandbox scope is audited")
-    a = p.parse_args(argv)
-    print(json.dumps(audit(Path(a.repo_root)), ensure_ascii=False))
-    return 0
+  Read-only companion to `sandbox-sync`: prints
+  `{"path", "present", "enabled", "allow_unsandboxed", "missing_read", "missing_write", "drift"}`. A non-empty
+  `missing_write` means confined spawns will fail every write through that symlink with `Operation not permitted`;
+  `drift` lists the dotted keys on which the settings' `sandbox` section and the file disagree.
+
+  Args:
+    argv: Argument tail with the required `--repo-root`.
+
+  Returns:
+    Process exit code 0 either way; the verdict travels in the JSON.
+  """
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from sandbox_scope import audit
+
+  # parse the repo root
+  parser = argparse.ArgumentParser(prog = f"{_PROG} {_Verb.SANDBOX_AUDIT}")
+  parser.add_argument(_Arg.REPO_ROOT, required = True, help = _Arg.AUDIT_REPO_ROOT_HELP)
+  args = parser.parse_args(argv)
+
+  # audit the scope
+  print(json.dumps(audit(Path(args.repo_root)), ensure_ascii = False))
+  return 0
+
+
+def _cmd_expert_pump_once(repo: Path) -> int:
+  """
+  Run one expert-pump pass and print its counter line.
+
+  The line reports the experts visited and jobs processed. A rate-limit deferral is announced on the
+  line only the first time per rate-limit window, so repeated idle ticks stay quiet.
+
+  Args:
+    repo: Repository root.
+
+  Returns:
+    Process exit code 0.
+  """
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from expert_pump import pump
+
+  # one pump pass and its counter line
+  result = pump(repo)
+  line = _Token.PUMP_LINE.format(result[_Field.PUMP_EXPERTS], result[_Field.PUMP_PROCESSED])
+
+  # A deferral is otherwise invisible: the tick looks idle, and on a checkout with no halt
+  # of its own nothing else would ever say the queue is waiting on a rate-limit window.
+  # Only the FIRST deferral of a window (and a window change) carries the marker — repeats
+  # are elided by the daemon's quiet-tick filter, else a 5s-polling checkout would write
+  # one journal line per tick for the whole window. The gitignored marker file remembers
+  # which resets_at was last announced; a non-deferred tick clears it.
+  marker = repo / _RepoPath.RUNTIME / _RepoPath.RATE_LIMIT_DEFERRED
+  if result.get(_Field.PUMP_DEFERRED):
+    # read which window was last announced; a missing or unreadable marker counts as none announced,
+    # so the worst outcome is one repeated announcement, never a lost one
+    resets = result.get(_Field.RESETS_AT)
+    announced = None
+    try:
+      announced = json.loads(marker.read_text(encoding = _ENCODING)).get(_Field.RESETS_AT)
+    except (OSError, ValueError):
+      pass
+
+    # a new window is announced and remembered; a failed write only means the next tick announces it again
+    if announced != resets:
+      line += _Token.PUMP_DEFERRED_LINE.format(resets)
+      try:
+        marker.parent.mkdir(parents = True, exist_ok = True)
+        marker.write_text(json.dumps({ _Field.RESETS_AT: resets }), encoding = _ENCODING)
+      except OSError:
+        pass
+  else:
+    # a non-deferred tick forgets the announced window; an absent marker is the usual case and a failed
+    # delete costs at most one skipped announcement, so neither may fail the pump pass
+    try:
+      marker.unlink()
+    except OSError:
+      pass
+
+  # the counter line, with the deferral fragment when this tick announced one
+  print(line)
+  return 0
+
+
+def _cmd_runtime_gc(argv: list[str]) -> int:
+  """
+  Sweep the repository's runtime garbage and print the summary as JSON.
+
+  Args:
+    argv: Argument tail with the optional `--dry-run`.
+
+  Returns:
+    Process exit code 1 when any deletion failed or any journal record was lost, else 0.
+  """
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from runtime_gc import sweep
+
+  # parse the report-only flag
+  parser = argparse.ArgumentParser(prog = f"{_PROG} {_Verb.RUNTIME_GC}")
+  parser.add_argument(_Arg.DRY_RUN, action = _Arg.STORE_TRUE, help = _Arg.RUNTIME_GC_DRY_RUN_HELP)
+  args = parser.parse_args(argv)
+
+  # one sweep, its summary, and a failing exit when any deletion failed or any journal record was lost
+  summary = sweep(_env_repo_root(), dry_run = args.dry_run)
+  print(json.dumps(summary, ensure_ascii = False))
+  return 1 if summary[_Field.ERRORS] else 0
+
+
+def _cmd_doctor_tick(repo: Path) -> int:
+  """
+  Run one doctor tick and print its result as JSON.
+
+  Args:
+    repo: Repository root.
+
+  Returns:
+    Process exit code 0.
+  """
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from doctor_tick import doctor_tick
+  print(json.dumps(doctor_tick(repo)))
+  return 0
+
+
+def _cmd_runtime(repo: Path) -> int:
+  """
+  Run the runtime daemon in the foreground for the repository.
+
+  Args:
+    repo: Repository root.
+
+  Returns:
+    Process exit code 0 once the daemon exits.
+  """
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from runtime_daemon import run
+  run(repo)
+  return 0
+
+
+# Subcommands this CLI implements itself, each taking the argument tail after the verb.
+_LOCAL = {
+  _Verb.RESUME:              _cmd_resume,
+  _Verb.MEMORY_REFLECT_ALL:  _cmd_memory_reflect_all,
+  _Verb.ERROR_RECORD:        _cmd_error_record,
+  _Verb.ERROR_LIST:          _cmd_error_list,
+  _Verb.DETECT_SCOPE:        _cmd_detect_scope,
+  _Verb.PLUGIN_ROOT:         _cmd_plugin_root,
+  _Verb.DAEMON_PAUSE:        _cmd_daemon_pause,
+  _Verb.DAEMON_RESUME:       _cmd_daemon_resume,
+  _Verb.DAEMON_LIST:         _cmd_daemon_list,
+  _Verb.METRICS_ALLOC_PORT:  _cmd_metrics_alloc_port,
+  _Verb.METRICS_SCRAPE_FILE: _cmd_metrics_scrape_file,
+  _Verb.SANDBOX_SYNC:        _cmd_sandbox_sync,
+  _Verb.SANDBOX_AUDIT:       _cmd_sandbox_audit,
+  _Verb.HISTORY_APPEND:      _cmd_history_append,
+  _Verb.RECONCILE_ROUTINE:   _cmd_reconcile_routine,
+  _Verb.RUNTIME_GC:          _cmd_runtime_gc,
+}
+
+# Subcommands that take no arguments and read their whole request as JSON from stdin.
+_STDIN_VERBS = {
+  _Verb.DISPATCH_JOB:  _cmd_dispatch_job,
+  _Verb.COLLECT_JOB:   _cmd_collect_job,
+  _Verb.CONSUME_JOB:   _cmd_consume_job,
+  _Verb.RETIRE_JOBS:   _cmd_retire_jobs,
+  _Verb.CANCEL_JOB:    _cmd_cancel_job,
+  _Verb.LOOKUP_EXPERT: _cmd_lookup_expert,
+}
+
+# Subcommands that act on the repository root rather than on an argument tail.
+_REPO_VERBS = {
+  _Verb.EXPERT_PUMP_ONCE: _cmd_expert_pump_once,
+  _Verb.DOCTOR_TICK:      _cmd_doctor_tick,
+  _Verb.RUNTIME:          _cmd_runtime,
+}
 
 
 def main() -> int:
-    _forward_if_stale()
-    if len(sys.argv) < 2:
-        print(USAGE, file=sys.stderr); return 2
-    sub = sys.argv[1]
-    repo = Path(os.environ.get("LAZY_REPO_ROOT", os.getcwd()))
-    if sub == "expert-pump-once":
-        import json
-        from expert_pump import pump
-        result = pump(repo)
-        line = f"experts={result['experts']} processed={result['processed']} cleaned={result['cleaned']}"
-        # A deferral is otherwise invisible: the tick looks idle, and on a checkout with no halt
-        # of its own nothing else would ever say the queue is waiting on a rate-limit window.
-        # Only the FIRST deferral of a window (and a window change) carries the marker — repeats
-        # are elided by the daemon's quiet-tick filter, else a 5s-polling checkout would write
-        # one journal line per tick for the whole window. The gitignored marker file remembers
-        # which resets_at was last announced; a non-deferred tick clears it.
-        marker = repo / ".runtime" / "rate-limit-deferred.json"
-        if result.get("deferred"):
-            resets = result.get("resets_at")
-            announced = None
-            try:
-                announced = json.loads(marker.read_text(encoding = "utf-8")).get("resets_at")
-            except (OSError, ValueError):
-                pass
-            if announced != resets:
-                line += f" deferred=rate_limit resets_at={resets}"
-                try:
-                    marker.parent.mkdir(parents=True, exist_ok=True)
-                    marker.write_text(json.dumps({"resets_at": resets}), encoding = "utf-8")
-                except OSError:
-                    pass
-        else:
-            try:
-                marker.unlink()
-            except OSError:
-                pass
-        print(line)
-        return 0
-    elif sub == "doctor-tick":
-        import json
-        from doctor_tick import doctor_tick
-        result = doctor_tick(repo)
-        print(json.dumps(result))
-        return 0
-    elif sub == "runtime-tick":
-        # optional git locks off for the tick and everything it spawns — a background
-        # `git status` must not rewrite the shared index (see runtime_daemon.run)
-        os.environ.setdefault("GIT_OPTIONAL_LOCKS", "0")
-        return _cmd_runtime_tick(repo, sys.argv[2:])
-    elif sub == "runtime":
-        from runtime_daemon import run
-        run(repo); return 0
-    elif sub == "resume":
-        return _cmd_resume(sys.argv[2:])
-    elif sub == "memory-reflect-all":
-        return _cmd_memory_reflect_all(sys.argv[2:])
-    elif sub == "dispatch-job":
-        return _cmd_dispatch_job(sys.argv[2:])
-    elif sub == "collect-job":
-        return _cmd_collect_job(sys.argv[2:])
-    elif sub == "consume-job":
-        return _cmd_consume_job(sys.argv[2:])
-    elif sub == "cancel-job":
-        return _cmd_cancel_job(sys.argv[2:])
-    elif sub == "lookup-expert":
-        return _cmd_lookup_expert(sys.argv[2:])
-    elif sub == "scaffold":
-        from scaffold_registry import main as _scaffold_main
-        return _scaffold_main(sys.argv[2:])
-    elif sub == "file-sync":
-        from file_sync import main as _file_sync_main
-        return _file_sync_main(sys.argv[2:])
-    elif sub == "remote-mirror":
-        from remote_mirror import main as _remote_mirror_main
-        return _remote_mirror_main(sys.argv[2:])
-    elif sub == "safe-pull":
-        from safe_pull import main as _safe_pull_main
-        return _safe_pull_main(sys.argv[2:])
-    elif sub == "error-record":
-        return _cmd_error_record(sys.argv[2:])
-    elif sub == "error-list":
-        return _cmd_error_list(sys.argv[2:])
-    elif sub == "settings-get":
-        from settings_cli import cmd_settings_get
-        return cmd_settings_get(sys.argv[2:])
-    elif sub == "settings-set":
-        from settings_cli import cmd_settings_set
-        return cmd_settings_set(sys.argv[2:])
-    elif sub == "resolve-language":
-        from language_resolver import main as _resolve_language_main
-        return _resolve_language_main(sys.argv[2:])
-    elif sub == "routine-ensure-filter":
-        from routine_filter import cmd_routine_ensure_filter
-        return cmd_routine_ensure_filter(sys.argv[2:])
-    elif sub == "permission-allow":
-        from permission_cli import cmd_permission_allow
-        return cmd_permission_allow(sys.argv[2:])
-    elif sub == "add-protocols":
-        from protocol_attach import cmd_add_protocols
-        return cmd_add_protocols(sys.argv[2:])
-    elif sub == "detect-scope":
-        return _cmd_detect_scope(sys.argv[2:])
-    elif sub == "plugin-root":
-        return _cmd_plugin_root(sys.argv[2:])
-    elif sub == "daemon-pause":
-        return _cmd_daemon_pause(sys.argv[2:])
-    elif sub == "daemon-resume":
-        return _cmd_daemon_resume(sys.argv[2:])
-    elif sub == "daemon-list":
-        return _cmd_daemon_list(sys.argv[2:])
-    elif sub == "metrics-alloc-port":
-        return _cmd_metrics_alloc_port(sys.argv[2:])
-    elif sub == "metrics-scrape-file":
-        return _cmd_metrics_scrape_file(sys.argv[2:])
-    elif sub == "sandbox-sync":
-        return _cmd_sandbox_sync(sys.argv[2:])
-    elif sub == "sandbox-audit":
-        return _cmd_sandbox_audit(sys.argv[2:])
-    elif sub == "index-guard":
-        from index_guard import main as _index_guard_main
-        return _index_guard_main(sys.argv[2:])
-    elif sub == "history-append":
-        return _cmd_history_append(sys.argv[2:])
-    elif sub == "reconcile-routine":
-        return _cmd_reconcile_routine(sys.argv[2:])
-    elif sub == "resolve-ref":
-        from reference_cli import cmd_resolve_ref
-        return cmd_resolve_ref(sys.argv[2:])
-    elif sub == "external-dirs":
-        from external_dirs_cli import cmd_external_dirs
-        return cmd_external_dirs(sys.argv[2:])
-    elif sub == "inbox-check":
-        from inbox_cli import cmd_inbox_check
-        return cmd_inbox_check(sys.argv[2:])
-    elif sub == "protocol-audit":
-        from protocol_cli import cmd_protocol_audit
-        return cmd_protocol_audit(sys.argv[2:])
-    elif sub == "provider-validate":
-        from provider_cli import cmd_provider_validate
-        return cmd_provider_validate(sys.argv[2:])
-    elif sub == "provider-token":
-        from provider_cli import cmd_provider_token
-        return cmd_provider_token(sys.argv[2:])
-    elif sub == "routine-validate":
-        from routine_cli import cmd_routine_validate
-        return cmd_routine_validate(sys.argv[2:])
-    elif sub == "routine-register":
-        from routine_cli import cmd_routine_register
-        return cmd_routine_register(sys.argv[2:])
-    elif sub == "routine-unregister":
-        from routine_cli import cmd_routine_unregister
-        return cmd_routine_unregister(sys.argv[2:])
-    elif sub == "routine-show":
-        from routine_cli import cmd_routine_show
-        return cmd_routine_show(sys.argv[2:])
-    elif sub == "routine-migrate":
-        from routine_cli import cmd_routine_migrate
-        return cmd_routine_migrate(sys.argv[2:])
-    elif sub == "install-phase":
-        from install_cli import cmd_install_phase
-        return cmd_install_phase(sys.argv[2:])
-    elif sub == "daemon-run-here":
-        from install_cli import cmd_daemon_run_here
-        return cmd_daemon_run_here(sys.argv[2:])
-    elif sub == "git-lock":
-        from git_lock_cli import cmd_git_lock
-        return cmd_git_lock(sys.argv[2:])
-    elif sub == "recover":
-        from recover_cli import cmd_recover
-        return cmd_recover(sys.argv[2:])
-    elif sub == "list-jobs":
-        from jobs_cli import cmd_list_jobs
-        return cmd_list_jobs(sys.argv[2:])
-    elif sub == "routines-bootstrap":
-        from jobs_cli import cmd_routines_bootstrap
-        return cmd_routines_bootstrap(sys.argv[2:])
-    elif sub == "memory-reflect":
-        from memory_cli import cmd_memory_reflect
-        return cmd_memory_reflect(sys.argv[2:])
-    elif sub == "plugin-dirs":
-        from plugin_dirs_cli import cmd_plugin_dirs
-        return cmd_plugin_dirs(sys.argv[2:])
-    else:
-        print(f"unknown subcommand: {sub}\n{USAGE}", file=sys.stderr); return 2
+  """
+  Dispatch the subcommand named on the command line.
+
+  A cache-resident copy that is not the registry-installed version hands the invocation to the installed version
+  first. An unknown subcommand, or none, is refused with the usage text on stderr.
+
+  Guarantees:
+    - An invocation handed over to the installed version is dispatched by that version and never handed over
+      again.
+
+  Returns:
+    Process exit code of the subcommand, or 2 when the subcommand is missing or unknown.
+  """
+
+  # Contract:
+  # An invocation that was handed over to the installed version is dispatched by that version itself
+  # and never handed over again, so a registry mismatch can never loop the hand-over forever.
+
+  # a stale cache-resident copy hands the whole invocation to the installed version first
+  _forward_if_stale()
+
+  # guard: without a subcommand there is nothing to dispatch
+  if len(sys.argv) < 2:
+    print(USAGE, file = sys.stderr)
+    return 2
+
+  # the subcommand, its argument tail, and the repository it acts on
+  sub = sys.argv[1]
+  rest = sys.argv[2:]
+  repo = _env_repo_root()
+
+  # verbs acting on the repository root
+  if (repo_verb := _REPO_VERBS.get(sub)) is not None:
+    return repo_verb(repo)
+  if sub == _Verb.RUNTIME_TICK:
+    # optional git locks off for the tick and everything it spawns — a background
+    # `git status` must not rewrite the shared index (see runtime_daemon.run)
+    os.environ.setdefault(_Probe.ENV_GIT_OPTIONAL_LOCKS, _Probe.GIT_OPTIONAL_LOCKS_OFF)
+    return _cmd_runtime_tick(repo, rest)
+
+  # verbs this CLI implements itself
+  if (stdin_verb := _STDIN_VERBS.get(sub)) is not None:
+    return stdin_verb()
+  if (local := _LOCAL.get(sub)) is not None:
+    return local(rest)
+
+  # verbs a sibling module implements, loaded on demand so one broken module never takes the
+  # others down and a call never pays for modules it does not use
+  if (target := _DELEGATED.get(sub)) is not None:
+    module, func = target
+    handler: Callable[[list[str]], int] = getattr(importlib.import_module(module), func)
+    return handler(rest)
+
+  # anything else is refused with the usage text
+  print(_Msg.UNKNOWN_SUBCOMMAND.format(sub, USAGE), file = sys.stderr)
+  return 2
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+  sys.exit(main())

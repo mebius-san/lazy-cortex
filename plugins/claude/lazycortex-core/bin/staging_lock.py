@@ -2,13 +2,12 @@
 Staging-window mutex for concurrent Claude Code sessions sharing one checkout.
 
 The lock file lives under `<repo>/.git/lazy-git.lock` and is written atomically as JSON.
-Public surface: resolve_session_id, load_config, inspect, acquire, release_if_index_empty,
-break_lock. Defaults are module-level constants; consumer overrides go through
-`.claude/lazy.settings.json[lazy-core.git]`.
+Public surface: session and holder identification, config loading, lock inspection, and acquire, release and break
+operations. Defaults are module-level constants; consumer overrides go through `.claude/lazy.settings.json[git]`.
 """
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, TypeAlias
 
 import json
 import os
@@ -45,6 +44,34 @@ _KERNEL32 = "kernel32"
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _ERROR_ACCESS_DENIED = 5
 _STILL_ACTIVE = 259
+
+# Repo-relative settings file and the section of it this module reads its configuration from.
+_SETTINGS_REL = ".claude/lazy.settings.json"
+_SECTION = "git"
+
+# Refusal diagnostic for an acquire blocked by a live peer, filled with the peer's branch, pid,
+# lock age in seconds and the seconds left before the lock passes the age threshold.
+REFUSAL_TEMPLATE = (
+  "Another Claude session is staging on branch {branch} "
+  "(PID {pid}, started {age}s ago). Wait briefly and retry, "
+  "or run `/lazy-core.git-unlock` to break the lock manually. "
+  "(Auto-break in {age_left}s if the index stays idle.)"
+)
+
+# --- Type aliases -------------------------------------------------------------
+
+# Categorical outcome of an acquire attempt.
+AcquireStatus: TypeAlias = Literal[
+  "acquired",
+  "reentered",
+  "waited_then_acquired",
+  "broke_then_acquired",
+  "refused",
+]
+# Why a conditional release did or did not remove the lock.
+ReleaseReason: TypeAlias = Literal["released", "index_not_empty", "not_our_lock", "no_lock"]
+# Why a peer's lock may be broken, or `held` when it may not.
+BreakReason: TypeAlias = Literal["dead_pid", "different_host", "stale_and_idle", "held"]
 
 # --- Types --------------------------------------------------------------------
 
@@ -96,7 +123,7 @@ class LockState:
 
   Attributes:
     session_id: Identifier of the Claude Code session that holds the lock.
-    pid: Process id of the holder, used by the dead-pid break rule.
+    pid: Process id of the holding Claude Code session, used by the dead-pid break rule.
     host: Hostname of the holder, used by the different-host break rule.
     branch: Branch the holder is staging onto, surfaced in refusal messages.
     started_at: Wall-clock epoch seconds (UTC) when the lock was first acquired.
@@ -108,15 +135,6 @@ class LockState:
   branch: str
   started_at: float          # epoch seconds (UTC)
   last_index_mtime: float    # epoch seconds
-
-
-AcquireStatus = Literal[
-  "acquired",
-  "reentered",
-  "waited_then_acquired",
-  "broke_then_acquired",
-  "refused",
-]
 
 
 @dataclass(frozen = True)
@@ -138,9 +156,6 @@ class AcquireResult:
   break_reason: str | None = None
   waited_seconds: float = 0.0
   message: str = ""
-
-
-ReleaseReason = Literal["released", "index_not_empty", "not_our_lock", "no_lock"]
 
 
 @dataclass(frozen = True)
@@ -172,17 +187,25 @@ def _lock_path(repo_root: Path) -> Path:
 
 # --- Session ID ---------------------------------------------------------------
 
-def resolve_session_id() -> str:
+def resolve_session_id(hook_session_id: str | None = None) -> str:
   """
   Resolve a stable identifier for the current Claude Code session.
 
   The identifier is opaque and is only ever compared for equality between sessions sharing
-  the same lock file. Resolution prefers the `CLAUDE_SESSION_ID` environment variable, then
-  falls back to a process-tree probe, then to the parent process id.
+  the same lock file. A non-empty session id from a Claude Code hook payload wins; callers with
+  no hook payload get an identifier derived from their Claude Code session process.
 
   Guarantees:
     - The returned identifier is a non-empty string, compared only for equality between
       sessions sharing the same lock file.
+    - A non-empty `hook_session_id` is returned verbatim, ahead of every other source, so every hook
+      event of one session resolves to the same owner and only that session releases the lock.
+    - With `hook_session_id` set to `None` or an empty string, the result is `pid:<N>`, where `<N>` is
+      the pid of the Claude Code session process the caller runs in; the environment is never read.
+
+  Args:
+    hook_session_id: The `session_id` from a Claude Code hook payload; `None` or empty when the caller has no
+      hook payload.
 
   Returns:
     A non-empty string identifying the current session.
@@ -191,28 +214,60 @@ def resolve_session_id() -> str:
   # Contract:
   # The returned identifier is opaque and MUST only be compared for equality between
   # sessions sharing the same lock file; it is always a non-empty string.
+  # A non-empty session id taken from a hook payload MUST be returned verbatim, ahead of
+  # every other source, so that every hook event of one session resolves to the same
+  # owner and only that session releases the lock. With no session id or an empty one,
+  # the result is `pid:<N>`, where `<N>` is the pid of the Claude Code session process the
+  # caller runs in; the environment is never read.
 
   # Domain(runtime.git-safety):
   # # Staging lock holder identity
   # A staging lock records its holder as an opaque identifier that is only ever compared
   # for equality between sessions sharing one lock file; it carries no meaning beyond
-  # "the same session or not". The identifier favors one supplied directly by the hosting
-  # harness, falls back to locating the nearest ancestor process that is itself a Claude
-  # Code process, and only then falls back to the immediate parent process. A session that
-  # already holds the lock and requests it again is recognized purely by this identity
-  # match and re-enters without waiting or contending.
+  # "the same session or not". The identifier favors the session identifier the hosting
+  # harness hands to a hook along with each event; every lifecycle-hook event carries it.
+  # No identifier is ever read from the environment. A caller that has no such event gets an
+  # identity derived from the session's own process: the nearest ancestor process that is
+  # itself a Claude Code process, and only when there is none, the immediate parent process.
+  # Because every hook event of one session carries the same identifier, the session that
+  # opened the staging window is the only one that can close it, and two sessions contend
+  # even when they share an ancestor process. A session that already holds the lock and
+  # requests it again is recognized purely by this identity match and re-enters without
+  # waiting or contending.
 
-  env = os.environ.get("CLAUDE_SESSION_ID", "")
+  # the session id a hook payload carries names the session directly and wins
+  if hook_session_id:
+    return hook_session_id
 
-  # guard: explicit session id provided by the harness
-  if env:
-    return env
+  # without a payload, the session's own process names it
+  return f"pid:{resolve_holder_pid()}"
+
+
+def resolve_holder_pid() -> int:
+  """
+  Return the process id of the Claude Code session the caller runs in.
+
+  Guarantees:
+    - The result is the pid of the Claude Code session process the caller runs in, so a hook and a Bash
+      tool call of one session both get the same value, and it can be compared with the pid a lock
+      records for its holder.
+
+  Returns:
+    The pid of the nearest Claude Code ancestor process, or the parent process id when none is found.
+  """
+
+  # Contract:
+  # The result is the pid of the Claude Code session process the caller runs in, never the
+  # short-lived process that made the call. A hook and a Bash tool call of one session MUST
+  # both get the same value, so that the status report can match a lock's recorded holder
+  # against its own session and the dead-holder rule can judge the session itself.
+
   ancestor = _find_claude_ancestor_pid()
 
-  # guard: a Claude Code ancestor process was located
+  # a located Claude Code ancestor process outlives every hook and tool call of its session
   if ancestor is not None:
-    return f"pid:{ancestor}"
-  return f"pid:{os.getppid()}"
+    return ancestor
+  return os.getppid()
 
 
 def _find_claude_ancestor_pid() -> int | None:
@@ -239,7 +294,7 @@ def _find_claude_ancestor_pid() -> int | None:
         text = True, stderr = subprocess.DEVNULL, encoding = "utf-8",
       ).strip().split()
 
-      # guard: ancestor argv[0] resolves to a Claude Code binary
+      # the ancestor whose argv[0] resolves to a Claude Code binary is the one sought
       if argv0 and Path(argv0[0]).name in ("claude", "claude-code"):
         return pid
       parent = subprocess.check_output(
@@ -422,10 +477,7 @@ def inspect(repo_root: Path) -> LockState | None:
 
 # --- Break-the-lock rules -----------------------------------------------------
 
-BreakReason = Literal["dead_pid", "different_host", "stale_and_idle", "held"]
-
-
-def _pid_alive(pid: int) -> bool:
+def is_pid_alive(pid: int) -> bool:
   """
   Report whether the given process id refers to a running process.
 
@@ -440,7 +492,7 @@ def _pid_alive(pid: int) -> bool:
   Returns:
     True when the process is reachable, False otherwise.
   """
-  # guard: on Windows os.kill with a non-CTRL signal terminates the process instead of probing it
+  # on Windows os.kill with a non-CTRL signal terminates the process instead of probing it
   if os.name == _WINDOWS_OS_NAME:
     return _pid_alive_windows(pid)
   try:
@@ -469,7 +521,8 @@ def _pid_alive_windows(pid: int) -> bool:
     True when the process is reachable, False otherwise.
   """
   # open a query-only handle; ctypes is imported here so the POSIX hot path never loads it
-  # waiver: deferred Windows-only import keeps ctypes off the per-git-command POSIX path
+  # waiver: this probe runs only on Windows; a module-level ctypes import would load it on every git command
+  # the POSIX hook path handles
   import ctypes  # pylint: disable=import-outside-toplevel
   # waiver: type: ignore — typeshed declares WinDLL only for win32; this branch runs only there
   kernel32 = ctypes.WinDLL(_KERNEL32, use_last_error = True)  # type: ignore[attr-defined]
@@ -492,7 +545,7 @@ def _pid_alive_windows(pid: int) -> bool:
     kernel32.CloseHandle(handle)
 
 
-def _is_breakable(
+def evaluate_break(
   repo_root: Path,
   state: LockState,
   cfg: StagingConfig,
@@ -518,8 +571,9 @@ def _is_breakable(
   # Domain(runtime.git-safety):
   # # Auto-break rules for a held staging lock
   # A held lock is broken automatically under three conditions, tried in a fixed order,
-  # where the first match decides the outcome. A lock whose holder process no longer runs
-  # on this machine is broken immediately. A lock recorded by a different machine than the
+  # where the first match decides the outcome. A lock whose holding session no longer runs
+  # on this machine is broken immediately; the session is judged by its long-lived process,
+  # never by the short-lived hook process that happened to write the lock. A lock recorded by a different machine than the
   # one now asking is broken immediately too, since a dead-process check only means
   # something on the machine that owns the process table. Otherwise a lock becomes
   # breakable only once it has both been held past a configured age threshold and shows no
@@ -527,37 +581,34 @@ def _is_breakable(
   # observed, and has stayed unchanged past a configured idle threshold — so a holder that
   # is still actively staging keeps its lock no matter how long the staging window is open.
 
-  # Rule 1: dead PID
-  # guard: holder process no longer exists on this host
-  if not _pid_alive(state.pid):
+  # rule 1, dead PID: the holder process no longer exists on this host
+  if not is_pid_alive(state.pid):
     return True, "dead_pid"
 
-  # Rule 2: different host
-  # guard: holder recorded a different host than the current one
+  # rule 2, different host: the holder recorded a different host than the current one
   if state.host != socket.gethostname():
     return True, "different_host"
 
-  # Rule 3: stale-and-idle
+  # rule 3, stale-and-idle: the lock's age decides whether idleness is examined at all
   age = now - state.started_at
 
-  # guard: holder has exceeded the configured max-hold age
+  # only a holder past the configured max-hold age can be stale
   if age > cfg.max_hold_seconds:
     current_index_mtime = _index_mtime(repo_root)
 
-    # The index has not moved past last_index_mtime AND mtime itself is stale.
+    # the index has not moved past last_index_mtime AND mtime itself is stale
     index_idle = (
       current_index_mtime <= state.last_index_mtime
       and (now - max(current_index_mtime, state.last_index_mtime)) > cfg.max_idle_seconds
     )
 
-    # guard: index has been idle long enough to declare the holder abandoned
+    # an index idle long enough declares the holder abandoned
     if index_idle:
       return True, "stale_and_idle"
   return False, "held"
 
 
-# waiver: `reason` kept for the caller-facing API (audit/diagnostics); not consumed by the break itself
-def break_lock(repo_root: Path, reason: str) -> bool:  # pylint: disable=unused-argument
+def break_lock(repo_root: Path) -> bool:
   """
   Force-delete the staging lock file for the given repository.
 
@@ -569,7 +620,6 @@ def break_lock(repo_root: Path, reason: str) -> bool:  # pylint: disable=unused-
 
   Args:
     repo_root: Absolute path to the root of the repository.
-    reason: Human-readable reason for the manual break, surfaced by callers in diagnostics.
 
   Returns:
     True when a lock file existed and was removed, False when no lock file was present.
@@ -579,8 +629,8 @@ def break_lock(repo_root: Path, reason: str) -> bool:  # pylint: disable=unused-
   # The lock file is deleted unconditionally, regardless of which session holds it, its
   # staleness, or the auto-break eligibility rules — ownership is never checked.
 
-  path = _lock_path(repo_root)
-  existed = path.exists()
+  # whether a lock existed is recorded before the delete makes it unanswerable
+  existed = _lock_path(repo_root).exists()
   _delete_lock(repo_root)
   return existed
 
@@ -589,18 +639,31 @@ def break_lock(repo_root: Path, reason: str) -> bool:  # pylint: disable=unused-
 
 def _new_lock_state(repo_root: Path, session_id: str) -> LockState:
   """
-  Build a fresh lock state describing the current process for the given session.
+  Build a fresh lock state describing the holding session.
 
   Args:
     repo_root: Absolute path to the root of the repository.
     session_id: Identifier of the Claude Code session that will own the lock.
 
   Returns:
-    A `LockState` populated with the current process id, hostname, branch, and index mtime.
+    A `LockState` populated with the session process id, hostname, branch, and index mtime.
   """
+
+  # Domain(runtime.git-safety):
+  # # Staging lock holder process
+  # A staging lock records, as its holder process, the long-lived process of the session
+  # that took it, never the short-lived process that performed the acquisition. The
+  # acquiring process exits before the session's next call, so recording it would make the
+  # dead-holder rule fire on every peer at once and the lock would never hold. Judging the
+  # session's own process keeps the dead-holder rule meaning what it says: the lock is
+  # broken only when the holding session itself is gone. A status report run inside a
+  # session has no hook event to read the session identifier from, so it recognizes the
+  # lock as its own by matching the recorded host and holder process against its own
+  # session process.
+
   return LockState(
     session_id = session_id,
-    pid = os.getpid(),
+    pid = resolve_holder_pid(),
     host = socket.gethostname(),
     branch = _current_branch(repo_root),
     started_at = time.time(),
@@ -621,10 +684,13 @@ def acquire(
   expires. Re-entry from the same session is a no-op that returns immediately.
 
   Guarantees:
-    - When the mutex is disabled, the call succeeds immediately without reading or writing
-      the lock file on disk.
+    - When the guard's master switch (`enabled`) is off, the call succeeds immediately without
+      reading or writing the lock file on disk. `mutex_enabled` and `pathspec_enabled` are not
+      consulted here; the caller decides whether the mutex row applies before asking.
     - A session that already holds the lock re-enters immediately without waiting or
       rewriting the lock file.
+    - A lock written by a successful acquisition records as its holder pid the pid of the caller's Claude
+      Code session process, never the short-lived process that performed the acquisition.
     - A refused attempt never modifies the lock file; the peer's lock is left exactly as
       observed.
 
@@ -638,15 +704,21 @@ def acquire(
   """
 
   # Contract:
-  # When the mutex is disabled, the call succeeds immediately without reading or writing
-  # the lock file on disk.
+  # When the guard's master switch (`enabled`) is off, the call succeeds immediately without
+  # reading or writing the lock file on disk. `mutex_enabled` and `pathspec_enabled` are not
+  # consulted here; the caller decides whether the mutex row applies before asking.
 
-  # guard: mutex is disabled in this repository — fast-path success
+  # Contract:
+  # A lock written by a successful acquisition records as its holder pid the pid of the
+  # caller's Claude Code session process, never the short-lived process that performed the
+  # acquisition, so that the dead-holder rule judges the session itself.
+
+  # guard: the guard's master switch is off in this repository — fast-path success
   if not cfg.enabled:
     # waiver: AcquireStatus token, single-source set in the AcquireStatus Literal, not a reusable cross-module key
     return AcquireResult(status = "acquired", held_by_us = True,
                          # waiver: one-off human-facing message
-                         message = "staging lock disabled (lazy-core.git.enabled=false)")
+                         message = "staging lock disabled (git.enabled=false)")
 
   # Domain(runtime.git-safety):
   # # Waiting for a live staging lock
@@ -654,9 +726,10 @@ def acquire(
   # session does not fail immediately; it polls with a short randomized delay between
   # attempts for up to a configured wait budget. Only once that budget runs out, with the
   # peer still live and still not stale, does the request come back refused instead of
-  # acquired — and the refusal names how much longer the peer would have to sit idle
-  # before it becomes eligible for automatic breaking, so a caller can decide whether to
-  # wait it out or break the lock by hand.
+  # acquired — and the refusal names how much longer the lock has to be held before it passes
+  # the age threshold, after which it is broken automatically if the index also stays idle.
+  # The idle threshold is not part of that figure, so a caller can decide whether to wait it
+  # out or break the lock by hand.
 
   # poll-loop bookkeeping: when to give up, how long we have waited, and whether this is the first look
   deadline = time.time() + cfg.wait_seconds
@@ -667,8 +740,7 @@ def acquire(
   while True:
     existing = _read_lock(repo_root)
 
-    # No lock — take it.
-    # guard: no current holder, claim the lock immediately
+    # no current holder, claim the lock immediately
     if existing is None:
       _write_lock(repo_root, _new_lock_state(repo_root, session_id))
       status: AcquireStatus = "acquired" if first_pass else "waited_then_acquired"
@@ -678,16 +750,15 @@ def acquire(
     # A session that already holds the lock re-enters it immediately without waiting or
     # rewriting the lock file.
 
-    # Lock is ours — re-entry.
-    # guard: lock is already held by the requesting session
+    # a lock already held by the requesting session is re-entered
     if existing.session_id == session_id:
       # waiver: AcquireStatus token, single-source set in the AcquireStatus Literal, not a reusable cross-module key
       return AcquireResult(status = "reentered", held_by_us = True, waited_seconds = waited)
 
-    # Held by peer — check if breakable.
-    breakable, reason = _is_breakable(repo_root, existing, cfg, now = time.time())
+    # held by a peer — check whether it is breakable
+    breakable, reason = evaluate_break(repo_root, existing, cfg, now = time.time())
 
-    # guard: peer lock qualifies for auto-break under the configured rules
+    # a peer lock that qualifies for auto-break under the configured rules is broken and claimed
     if breakable:
       _delete_lock(repo_root)
       _write_lock(repo_root, _new_lock_state(repo_root, session_id))
@@ -701,10 +772,10 @@ def acquire(
     # A refused attempt never modifies the lock file; the peer's lock is left exactly as
     # observed.
 
-    # Held by live peer; check deadline.
+    # held by a live peer — check the deadline
     now = time.time()
 
-    # guard: wait deadline reached without acquiring the lock
+    # a wait deadline reached without acquiring the lock refuses the attempt
     if now >= deadline:
       return AcquireResult(
         # waiver: AcquireStatus token, single-source set in the AcquireStatus Literal, not a reusable cross-module key
@@ -712,10 +783,9 @@ def acquire(
         message = _refusal_message(existing, cfg, now),
       )
 
-    # Sleep with jitter, then retry.
-    sleep_ms = random.randint(POLL_MIN_MS, POLL_MAX_MS)
+    # sleep with jitter, then retry
     # waiver: inline numeric/default literal, not a domain constant
-    sleep_s = min(sleep_ms / 1000.0, max(0.0, deadline - now))
+    sleep_s = min(random.randint(POLL_MIN_MS, POLL_MAX_MS) / 1000.0, max(0.0, deadline - now))
     time.sleep(sleep_s)
     waited += sleep_s
     first_pass = False
@@ -732,16 +802,11 @@ def _refusal_message(peer: LockState, cfg: StagingConfig, now: float) -> str:
 
   Returns:
     A single-line message naming the peer branch, pid, age, and the time remaining until
-    the stale-and-idle rule would auto-break the lock.
+    the lock passes the age threshold.
   """
   age = int(now - peer.started_at)
   age_left = max(0, int(cfg.max_hold_seconds - age))
-  return (
-    f"Another Claude session is staging on branch {peer.branch} "
-    f"(PID {peer.pid}, started {age}s ago). Wait briefly and retry, "
-    f"or run `/lazy-core.git-unlock` to break the lock manually. "
-    f"(Auto-break in {age_left}s if the index stays idle.)"
-  )
+  return REFUSAL_TEMPLATE.format(branch = peer.branch, pid = peer.pid, age = age, age_left = age_left)
 
 
 # --- Release ------------------------------------------------------------------
@@ -781,17 +846,17 @@ def release_if_index_empty(repo_root: Path, session_id: str) -> ReleaseResult:
 
   state = _read_lock(repo_root)
 
-  # guard: no lock file currently exists for this repository
+  # no lock file currently exists for this repository
   if state is None:
     # waiver: release-outcome reason token, not an internal key
     return ReleaseResult(released = False, reason = "no_lock")
 
-  # guard: lock is held by a different session and must not be released
+  # a lock held by a different session must not be released
   if state.session_id != session_id:
     # waiver: release-outcome reason token, not an internal key
     return ReleaseResult(released = False, reason = "not_our_lock")
 
-  # guard: index still has staged entries — staging window is not closed
+  # an index that still has staged entries keeps the staging window open
   if not _index_is_empty(repo_root):
     # waiver: release-outcome reason token, not an internal key
     return ReleaseResult(released = False, reason = "index_not_empty")
@@ -801,10 +866,6 @@ def release_if_index_empty(repo_root: Path, session_id: str) -> ReleaseResult:
 
 
 # --- Config -------------------------------------------------------------------
-
-_SETTINGS_REL = ".claude/lazy.settings.json"
-_SECTION = "git"
-
 
 def load_config(repo_root: Path) -> StagingConfig:
   """
@@ -833,15 +894,16 @@ def load_config(repo_root: Path) -> StagingConfig:
   settings_path = repo_root / _SETTINGS_REL
   section: dict = {}
 
-  # guard: settings file exists for this repository
+  # a settings file present for this repository supplies the staging section
   if settings_path.exists():
-    # Inline the lazy_settings import so the helper has zero hard dependency on
+    # inline the lazy_settings import so the helper has zero hard dependency on
     # lazy_settings being importable. Hooks are short-lived and import latency matters;
     # defer to first use.
     # noinspection PyBroadException
     try:
       sys.path.insert(0, str(Path(__file__).parent))
-      # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+      # waiver: lazy_settings is imported inside this try so any failure to load it falls back to the raw
+      # JSON read below; a module-level import would break this never-raising loader at load time
       # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
       import lazy_settings  # type: ignore  # pylint: disable=import-error
       section = lazy_settings.load_section(settings_path, _SECTION)
@@ -856,6 +918,30 @@ def load_config(repo_root: Path) -> StagingConfig:
         sys.path.remove(str(Path(__file__).parent))
       except ValueError:
         pass
+  # a section of the wrong shape (a list, a scalar) carries no readable key
+  if not isinstance(section, dict):
+    section = {}
+  try:
+    return _config_from_section(section)
+  except (TypeError, ValueError):
+    # a key holding a value of the wrong type falls the whole section back to defaults
+    return _config_from_section({})
+
+
+def _config_from_section(section: dict) -> StagingConfig:
+  """
+  Build a `StagingConfig` from one settings section, defaulting each absent key.
+
+  Args:
+    section: The `git` section of the settings file.
+
+  Returns:
+    A `StagingConfig` with every field populated.
+
+  Raises:
+    TypeError: A key holds a value that cannot convert to its field type.
+    ValueError: A key holds a string that cannot convert to its field type.
+  """
   return StagingConfig(
     # waiver: lock config-section field name, paired with its DEFAULT_* constant
     enabled = bool(section.get("enabled", DEFAULT_ENABLED)),

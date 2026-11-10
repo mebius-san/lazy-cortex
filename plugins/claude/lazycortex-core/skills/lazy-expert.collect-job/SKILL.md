@@ -1,11 +1,11 @@
 ---
 name: lazy-expert.collect-job
-description: "Run when the operator asks for the result of an expert job already dispatched, naming the expert and job_id. Reports pending / done / deferred / failed and, when the job finished, the result file paths to read."
+description: "Run when the operator asks for the result of an expert job already dispatched, naming the expert and job_id. Reports pending / done / deferred / failed / dead / cancelled and, when the job finished, the result file paths to read."
 allowed-tools: Read, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date -u *), Write, AskUserQuestion, Agent
 ---
 # Expert Collect Job
 
-Poll a named expert's job for its result. Returns `{status, response}` where `status` is `pending`, `done`, or `failed`. When `done`, prints the `result` file paths from `response.json` so the caller can `Read` them.
+Poll a named expert's job for its result. Returns `{status, response}` where `status` is `pending`, `done`, `deferred`, `failed`, `dead`, `cancelled`, or `missing`. When `done`, prints the `result` file paths from `response.json` so the caller can `Read` them.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -42,10 +42,13 @@ EOF
 
 Capture and parse the JSON output: `{status, response?}` (`{"error": "…"}` with exit 1 when the request is malformed or the read fails).
 
-- `status == "pending"` — job is queued; DONE marker not yet written.
-- `status == "done"` — DONE marker present and `response.outcome != "error"`.
-- `status == "failed"` — DONE marker present and `response.outcome == "error"`.
-- `status == "missing"` — job directory does not exist.
+- `status == "pending"` — job is queued or running; no DONE, DEAD or CANCELLED marker written yet.
+- `status == "done"` — DONE marker present and `response.outcome` reports finished work (neither `error` nor `deferred`).
+- `status == "deferred"` — DONE marker present and `response.outcome` is the reserved `deferred` token: the work was left undone on purpose, its input untouched.
+- `status == "failed"` — DONE marker present and `response.outcome` is `error`, or is missing or malformed.
+- `status == "dead"` — DEAD marker present and no CANCELLED marker: the pump killed the job as stuck. No DONE marker and no `response` come with it; the forensic record is `dead.json` in the job directory.
+- `status == "cancelled"` — CANCELLED marker present: the job was cancelled. Cancellation wins over every other marker, so a job that also carries DONE or DEAD still reports `cancelled`. No `response` comes with it.
+- `status == "missing"` — job directory does not exist (only that; a cancelled job whose directory is still there is `cancelled`).
 
 Outcome: `collected`.
 
@@ -69,11 +72,15 @@ result files (Read these to retrieve output):
 
 If `status == "failed"`, print `response.error` (or `response.message`) if present.
 
+If `status == "dead"`, `Read` `.experts/.jobs/<expert_name>/<job_id>/dead.json` and print it — it records when the job was queued and claimed, the claimant PID, the partial output files, and the likely cause.
+
+If `status == "cancelled"`, print: "Job `<job_id>` for expert `<expert_name>` was cancelled; it has no result to collect."
+
 If `status == "missing"`, print: "Job `<job_id>` not found for expert `<expert_name>`. Check the job_id or expert_name."
 
 ## Failure modes
 
 - **"job_id is required"** — caller omitted the job_id argument → supply the job_id returned by `/lazy-expert.dispatch-job`.
-- **status == "missing"** — the job directory was never created or was already cancelled → verify the job_id and expert_name are correct; re-dispatch if needed.
+- **status == "missing"** — the job directory does not exist (never created, or already removed) → verify the job_id and expert_name are correct; re-dispatch if needed.
 - **Malformed response.json** — `collect-job` reads `response.json` and prints `{"error": "collect failed: …"}` if the expert wrote invalid JSON → inspect the file at `.experts/.jobs/<expert>/<job_id>/response.json` directly.
 - **Python `ModuleNotFoundError`** — plugin not installed or `${CLAUDE_PLUGIN_ROOT}` not set → run `/lazy-core.install`.

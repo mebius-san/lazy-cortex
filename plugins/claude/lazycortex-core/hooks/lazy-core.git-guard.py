@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-Pre/PostToolUse + Stop/SubagentStop hook guarding the shared git index against agent sessions.
+Pre/PostToolUse/PostToolUseFailure + Stop/SubagentStop hook guarding the shared git index against agent sessions.
 
 Two independent behaviours, selected per repo by `lazy.settings.json["git"]`:
 
@@ -20,9 +20,15 @@ Two independent behaviours, selected per repo by `lazy.settings.json["git"]`:
 `pathspec_enabled` supersedes the mutex rather than composing with it — an intent-to-add entry
 would otherwise hold a lock the "index empty after commit" release check can never clear.
 
+A call that started and failed reaches the hook as `PostToolUseFailure` and takes the post
+phase exactly like a successful one. The staging-lock owner is the session id the hook payload carries.
+
 Fires on:
-- `Bash` tool calls invoking `git`.
-- `mcp__git__git_add|reset|commit` MCP tool calls.
+- `Bash` tool calls invoking `git`, at `PreToolUse`, `PostToolUse` and `PostToolUseFailure`.
+- `mcp__git__git_reset|commit` MCP tool calls, at the same three events — the post phase is where
+  either may release the staging lock.
+- `mcp__git__git_add` MCP tool calls, at `PreToolUse` only — adding never releases the lock, so
+  the post phase has nothing to do for it.
 - `Stop` and `SubagentStop` lifecycle events.
 
 Hook satisfies the lazy-core.hook-writing § 1-8 contract:
@@ -32,9 +38,6 @@ Hook satisfies the lazy-core.hook-writing § 1-8 contract:
 """
 
 from __future__ import annotations
-# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# deferred imports below module code; position intentional (ruff E402 noqa guards it)
-# pylint: disable=import-error,wrong-import-position
 
 import json
 import os
@@ -55,15 +58,15 @@ _HOOK_DIR = Path(__file__).resolve().parent
 _BIN_DIR = _HOOK_DIR.parent / "bin"
 sys.path.insert(0, str(_BIN_DIR))
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import staging_lock  # noqa: E402
+import staging_lock  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import git_cmdline  # noqa: E402
+import git_cmdline  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import index_guard  # noqa: E402
+import index_guard  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import hook_gate  # noqa: E402
+import hook_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from constants import HookKey, HookName  # noqa: E402
+from constants import HookKey, HookName  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # --- Tool / command gating ----------------------------------------------------
@@ -86,6 +89,15 @@ _MCP_INDEX_TOOLS = {
 _DIAGNOSTIC_ONLY_VERBS = { "commit" }
 # PostToolUse: maybe release.
 _RELEASE_VERBS = { "commit", "reset" }
+
+# --- Lifecycle phases ---------------------------------------------------------
+
+# Claude Code event names that select the tool-call phase; a call that started and failed fires
+# `PostToolUseFailure` instead of `PostToolUse`, and both close the call the same way.
+# waiver: external Claude Code hook-event names, not domain keys
+_PRE_EVENTS = { "PreToolUse" }
+# waiver: external Claude Code hook-event names, not domain keys
+_POST_EVENTS = { "PostToolUse", "PostToolUseFailure" }
 
 # --- Pathspec-row vocabulary --------------------------------------------------
 
@@ -176,19 +188,19 @@ def _gate(tool_name: str, tool_input: dict) -> tuple[bool, str]:
     `verb` is one of `add`, `rm`, `mv`, `reset`, `commit`, `checkout`, `restore` (empty string
     when irrelevant).
   """
-  # Bash branch: match the command against the index-verb regex.
+  # the Bash branch matches the command against the index-verb regex
   # waiver: external Claude Code tool name, not a domain key
   if tool_name == "Bash":
     # waiver: external-format tool-input field name, not an internal key
     cmd = tool_input.get("command", "")
     m = _GIT_INDEX_VERBS_RE.match(cmd)
 
-    # guard: command does not invoke an index-mutating git verb
+    # a command invoking no index-mutating git verb is not relevant
     if not m:
       return False, ""
     return True, m.group(1)
 
-  # MCP branch: derive the verb from the trailing segment of the tool name.
+  # the MCP branch derives the verb from the trailing segment of the tool name
   if tool_name in _MCP_INDEX_TOOLS:
     return True, tool_name.rsplit("_", 1)[-1]
   return False, ""
@@ -251,51 +263,56 @@ def main() -> int:
   """
   Entry point for the hook script.
 
-  Reads the Claude Code hook payload from stdin, dispatches to the Pre/PostToolUse or
-  Stop/SubagentStop branch based on the event name (and the presence of `tool_response`), and
-  writes any resulting decision or context to stdout. Tolerates malformed input and unsupported
-  tool calls by silently returning 0 so the hook never crashes the trigger.
+  Reads the Claude Code hook payload from stdin and dispatches by its event name: `PreToolUse`
+  takes the pre phase, `PostToolUse` and `PostToolUseFailure` the post phase, `Stop` and
+  `SubagentStop` the stop branch; any other event, or none, is a no-op. The session id passed to
+  the staging lock comes from the payload. Writes any resulting decision or context to stdout.
+  Tolerates malformed input and unsupported tool calls by silently returning 0 so the hook never
+  crashes the trigger.
 
   Returns:
     The process exit code; always 0 for this hook (denials and stop-blocks are signaled via the
     JSON payload, not the exit status).
   """
-  # Enablement gate — first action, before stdin/git. An expert spawn short-circuits here via a
-  # pure env check; an interactive session skips only when the operator disabled this hook.
+  # enablement gate — first action, before stdin/git. An expert spawn short-circuits here via a
+  # pure env check; an interactive session skips only when the operator disabled this hook
   # guard: hook disabled in the current context
   if not hook_gate.is_enabled(HookName.GIT_GUARD):
     return 0
 
-  # § 1 — defensive JSON parse; never crash.
+  # § 1 — defensive JSON parse; never crash
   try:
     hook_input = json.load(sys.stdin)
   except (json.JSONDecodeError, ValueError):
     return 0
 
-  # Stop / SubagentStop branch — separate event family, no tool_name.
+  # the Stop / SubagentStop branch — separate event family, no tool_name
   event_name = hook_input.get(HookKey.HOOK_EVENT_NAME, "")
   if event_name in ("Stop", "SubagentStop"):
     return _handle_stop(hook_input)
 
-  # Extract the fields we care about from the hook payload.
-  tool_name = hook_input.get(HookKey.TOOL_NAME, "")
-  tool_input = hook_input.get(HookKey.TOOL_INPUT, {})
-  # waiver: external-format hook-payload field name, not an internal key
-  is_post = "tool_response" in hook_input
-
-  # § 2 — trigger gating. Coarse here (any git invocation); each branch narrows it further.
-  # guard: tool call cannot touch the git index
-  if not _invokes_git(tool_name, tool_input):
+  # guard: only the tool-call events carry a phase this hook acts on
+  if event_name not in _PRE_EVENTS and event_name not in _POST_EVENTS:
     return 0
 
-  # Resolve the repository root; bail when not inside a repo.
+  # extract the fields we care about from the hook payload; a failed call is still a post phase
+  tool_name = hook_input.get(HookKey.TOOL_NAME, "")
+  tool_input = hook_input.get(HookKey.TOOL_INPUT, {})
+  is_post = event_name in _POST_EVENTS
+
+  # § 2 — trigger gating, coarse here (any git invocation); each branch narrows it further
+  # guard: tool call cannot touch the git index
+  if not _can_reach_git(tool_name, tool_input):
+    return 0
+
+  # resolve the repository root; bail when not inside a repo
   repo = _repo_root()
 
   # guard: not inside a git repository
   if repo is None:
     return 0
 
-  # Load the per-repo config and respect the master kill-switch.
+  # load the per-repo config and respect the master kill-switch
   cfg = staging_lock.load_config(repo)
 
   # guard: guard disabled for this repo
@@ -308,24 +325,24 @@ def main() -> int:
   if _in_linked_worktree(repo):
     return 0
 
-  # Pathspec row: the index belongs to the operator, the lock machinery stays dormant.
+  # pathspec row: the index belongs to the operator, the lock machinery stays dormant
   if cfg.pathspec_enabled:
     # after a commit ran, verify the index survived it; before, apply the discipline
     if is_post:
-      return _handle_post_pathspec(repo, tool_name, tool_input)
+      return _handle_post_pathspec(repo, tool_name, tool_input, event = event_name)
     return _handle_pre_pathspec(repo, tool_name, tool_input)
 
   # guard: mutex row disabled too — guard silent
   if not cfg.mutex_enabled:
     return 0
 
-  # Mutex row: classify by leading verb and dispatch by lifecycle phase.
+  # mutex row: classify by leading verb and dispatch by lifecycle phase
   relevant, verb = _gate(tool_name, tool_input)
 
   # guard: tool call does not touch the git index
   if not relevant:
     return 0
-  session_id = staging_lock.resolve_session_id()
+  session_id = staging_lock.resolve_session_id(hook_input.get(HookKey.SESSION_ID))
 
   # dispatch by lifecycle phase — Pre takes the lock, Post may release it
   if is_post:
@@ -333,7 +350,7 @@ def main() -> int:
   return _handle_pre(repo, session_id, verb, cfg)
 
 
-def _invokes_git(tool_name: str, tool_input: dict) -> bool:
+def _can_reach_git(tool_name: str, tool_input: dict) -> bool:
   """
   Report whether a tool call could reach git at all.
 
@@ -369,7 +386,7 @@ def _handle_pre(repo: Path, session_id: str, verb: str, cfg: staging_lock.Stagin
   Returns:
     Always 0; refusals are signaled via the emitted JSON payload.
   """
-  # Diagnostic-only verbs: never block; emit context if peer holds.
+  # diagnostic-only verbs never block; they emit context when a peer holds the lock
   if verb in _DIAGNOSTIC_ONLY_VERBS:
     peer = staging_lock.inspect(repo)
     if peer and peer.session_id != session_id:
@@ -382,7 +399,7 @@ def _handle_pre(repo: Path, session_id: str, verb: str, cfg: staging_lock.Stagin
       )
     return 0
 
-  # Acquiring verbs: try the lock.
+  # acquiring verbs try the lock
   res = staging_lock.acquire(repo, session_id, cfg)
   # waiver: cross-module AcquireStatus token (staging_lock Literal), not an internal key
   if res.status == "refused":
@@ -411,22 +428,23 @@ def _handle_pre_pathspec(repo: Path, tool_name: str, tool_input: dict) -> int:
   # no-op when no conflicted copy exists, and never touches a mid-operation repository
   try:
     index_guard.guard_index(repo)
+
+  # a heal failure must never block the tool call the hook is judging
   except OSError:
-    # guard: a heal failure must never block the tool call the hook is judging
     pass
 
   # MCP branch: these tools cannot carry a pathspec, so only the harmless verb survives
   if tool_name in _MCP_INDEX_TOOLS:
     verb = tool_name.rsplit("_", 1)[-1]
 
-    # guard: reset only ever removes entries — the operator may need it mid-session
+    # reset only ever removes entries — the operator may need it mid-session
     # waiver: git CLI vocabulary, not a domain constant
     if verb == "reset":
       return 0
     _emit_deny(_DENY_MCP)
     return 0
 
-  # Bash branch: every git invocation in the command line is judged on its own
+  # the Bash branch judges every git invocation in the command line on its own
   # waiver: external-format tool-input field name, not an internal key
   command = tool_input.get("command", "")
   segments = git_cmdline.parse_segments(command)
@@ -442,16 +460,18 @@ def _handle_pre_pathspec(repo: Path, tool_name: str, tool_input: dict) -> int:
   for segment in segments:
     reason = _pathspec_violation(repo, segment)
 
-    # guard: this segment breaks the discipline — refuse the whole command
+    # a segment that breaks the discipline refuses the whole command
     if reason:
       _emit_deny(reason)
       return 0
   return 0
 
 
-def _handle_post_pathspec(repo: Path, tool_name: str, tool_input: dict) -> int:
+def _handle_post_pathspec(repo: Path, tool_name: str, tool_input: dict, *, event: str) -> int:
   """
-  Apply the PostToolUse branch of the pathspec discipline — the index-health alarm.
+  Apply the post-call branch of the pathspec discipline — the index-health alarm.
+
+  Runs after a successful call (`PostToolUse`) and after a failed one (`PostToolUseFailure`).
 
   The clean-index precondition guarantees a session commit started over an index free of staged
   content, so staged content present right after one is the signature of the shared index being
@@ -464,6 +484,7 @@ def _handle_post_pathspec(repo: Path, tool_name: str, tool_input: dict) -> int:
     repo: Absolute path to the repository root.
     tool_name: The Claude Code tool identifier.
     tool_input: The tool's input payload as delivered by Claude Code.
+    event: The lifecycle event name (`PostToolUse` or `PostToolUseFailure`) the alarm context is attached to.
 
   Returns:
     Always 0; the alarm is signaled via the emitted JSON payload.
@@ -491,13 +512,13 @@ def _handle_post_pathspec(repo: Path, tool_name: str, tool_input: dict) -> int:
     return 0
   # waiver: git CLI vocabulary, not a domain constant
   commit_ran = any(
-    seg.verb == "commit" and (seg.repo_dir is None or _targets_this_repo(repo, seg.repo_dir))
+    seg.verb == "commit" and (seg.repo_dir is None or _is_this_repo_target(repo, seg.repo_dir))
     for seg in segments
   )
   # waiver: git CLI vocabulary, not a domain constant
   sync_ran = any(
     seg.verb in ("pull", "merge", "rebase")
-    and (seg.repo_dir is None or _targets_this_repo(repo, seg.repo_dir))
+    and (seg.repo_dir is None or _is_this_repo_target(repo, seg.repo_dir))
     for seg in segments
   )
 
@@ -507,7 +528,7 @@ def _handle_post_pathspec(repo: Path, tool_name: str, tool_input: dict) -> int:
   git_dir = _git_dir(repo)
 
   # guard: mid merge / rebase / cherry-pick a full index is legitimate (the verb may have failed)
-  if git_dir is not None and _mid_operation(git_dir):
+  if git_dir is not None and _is_mid_operation(git_dir):
     return 0
   staged = _content_staged_paths(repo)
 
@@ -517,20 +538,20 @@ def _handle_post_pathspec(repo: Path, tool_name: str, tool_input: dict) -> int:
 
   # a commit runs over a precondition-checked index, so any leftover is the swap signature
   if commit_ran:
-    _emit_context(_POST_SWAP_ALARM)
+    _emit_context(_POST_SWAP_ALARM, event = event)
     return 0
 
   # a sync verb alarms only on the lag signature — worktree identical to HEAD for every staged
   # path; anything else may be the operator's parked stage riding across the sync
-  if _worktree_matches_head(repo, staged):
-    _emit_context(_POST_LAG_ALARM)
+  if _is_worktree_at_head(repo, staged):
+    _emit_context(_POST_LAG_ALARM, event = event)
     return 0
 
   # parked operator content rode across the sync verb — none of the session's business
   return 0
 
 
-def _targets_this_repo(repo: Path, repo_dir: str) -> bool:
+def _is_this_repo_target(repo: Path, repo_dir: str) -> bool:
   """
   Report whether a `git -C <dir>` invocation still targets the repository this hook guards.
 
@@ -553,7 +574,7 @@ def _targets_this_repo(repo: Path, repo_dir: str) -> bool:
   return Path(probe.stdout.strip()).resolve() == repo.resolve()
 
 
-def _names_existing_path(repo: Path, segment: git_cmdline.GitSegment) -> bool:
+def _has_existing_path(repo: Path, segment: git_cmdline.GitSegment) -> bool:
   """
   Report whether any positional argument names a path that exists in the repository.
 
@@ -586,54 +607,55 @@ def _pathspec_violation(repo: Path, segment: git_cmdline.GitSegment) -> str | No
   """
   # guard: `git -C <dir>` targets a different checkout — that repository's own settings govern
   # it, not this one's. A publish mirror or a sibling clone is not this operator's index.
-  if segment.repo_dir is not None and not _targets_this_repo(repo, segment.repo_dir):
+  if segment.repo_dir is not None and not _is_this_repo_target(repo, segment.repo_dir):
     return None
   # waiver: git CLI vocabulary, not a domain constant
   if segment.verb == "add":
-    # guard: an `add` is legal as intent-to-add, or — mid merge / rebase / cherry-pick — when
+    # an `add` is legal as intent-to-add, or — mid merge / rebase / cherry-pick — when
     # every path it names is an unmerged entry: `git add` is git's only verb for recording a
     # resolved conflict, so denying it strands the operation; any other path still parks content
-    if not git_cmdline.adds_content(segment) or _resolves_conflicts_only(repo, segment):
+    if not git_cmdline.is_content_add(segment) or _is_conflict_resolution_only(repo, segment):
       return None
     return _DENY_ADD
 
-  # guard: both verbs stage as a side effect
+  # both verbs stage as a side effect
   if segment.verb in _AUTO_STAGING_VERBS:
     return _DENY_AUTO_STAGING
 
-  # guard: a file-targeting checkout rewrites the index entry alongside the worktree file. A
+  # a file-targeting checkout rewrites the index entry alongside the worktree file. A
   # branch-targeting one does not name a path at all, so an existing path among the positionals is
   # what separates the two — `git checkout main` passes, `git checkout HEAD -- a.md` does not.
   # waiver: git CLI vocabulary, not a domain constant
   if segment.verb == "checkout":
-    return _DENY_FILE_CHECKOUT if _names_existing_path(repo, segment) else None
+    return _DENY_FILE_CHECKOUT if _has_existing_path(repo, segment) else None
 
-  # guard: `--staged` alone un-stages (the operator's own escape hatch, like `reset`); paired with
+  # `--staged` alone un-stages (the operator's own escape hatch, like `reset`); paired with
   # `--source` it writes a revision's content INTO the index, which is staging.
   # waiver: git CLI vocabulary, not a domain constant
   if segment.verb == "restore":
+    # waiver: git CLI flag names, not domain constants
     staged_from_source = "--staged" in segment.flags and "--source" in segment.flags
     return _DENY_RESTORE_STAGED_SOURCE if staged_from_source else None
 
-  # guard: every other verb (reset, push, status, ...) leaves the index to the operator
+  # every other verb (reset, push, status, ...) leaves the index to the operator
   # waiver: git CLI vocabulary, not a domain constant
   if segment.verb != "commit":
     return None
   git_dir = _git_dir(repo)
 
   # guard: mid merge / rebase / cherry-pick — git itself refuses a partial commit there
-  if git_dir is not None and _mid_operation(git_dir):
+  if git_dir is not None and _is_mid_operation(git_dir):
     return None
 
-  # guard: a directory pathspec sweeps in whatever is parked beneath it
+  # a directory pathspec sweeps in whatever is parked beneath it
   if any((repo / p).is_dir() for p in segment.pathspecs):
     return _DENY_COMMIT_DIR
 
-  # guard: every committed path is named explicitly — the clean-index precondition still applies
+  # every committed path is named explicitly — the clean-index precondition still applies
   if not git_cmdline.is_indexful_commit(segment):
     return _await_clean_index(repo)
 
-  # guard: an amend against a clean index only rewrites the previous commit
+  # an amend against a clean index only rewrites the previous commit
   if git_cmdline.is_amend(segment) and not _staged_paths(repo):
     return None
   return _DENY_COMMIT
@@ -726,7 +748,7 @@ def _git_dir(cwd: Path) -> Path | None:
   return p if p.is_absolute() else (cwd / p).resolve()
 
 
-def _resolves_conflicts_only(repo: Path, segment: git_cmdline.GitSegment) -> bool:
+def _is_conflict_resolution_only(repo: Path, segment: git_cmdline.GitSegment) -> bool:
   """
   Report whether a content-staging `git add` only records resolved conflicts of an operation in flight.
 
@@ -742,7 +764,7 @@ def _resolves_conflicts_only(repo: Path, segment: git_cmdline.GitSegment) -> boo
   git_dir = _git_dir(repo)
 
   # guard: outside a transactional operation there are no conflicts to resolve
-  if git_dir is None or not _mid_operation(git_dir) or not segment.pathspecs:
+  if git_dir is None or not _is_mid_operation(git_dir) or not segment.pathspecs:
     return False
   # waiver: git CLI vocabulary, not domain constants
   r = _git_at(repo, "ls-files", "--unmerged")
@@ -756,7 +778,7 @@ def _resolves_conflicts_only(repo: Path, segment: git_cmdline.GitSegment) -> boo
   return all(os.path.normpath(p) in unmerged for p in segment.pathspecs)
 
 
-def _mid_operation(git_dir: Path) -> bool:
+def _is_mid_operation(git_dir: Path) -> bool:
   """
   Return True when the repo is in the middle of a merge / rebase / cherry-pick / revert.
 
@@ -801,8 +823,8 @@ def _content_staged_paths(cwd: Path) -> list[str]:
   # entry counts as staged content instead. The fallback is stricter, never looser, than the
   # intended rule.
 
-  # Modern git omits intent-to-add entries from `diff --cached` by itself; the flag pins that
-  # behaviour on the 2.11..2.27 range where they would otherwise appear.
+  # modern git omits intent-to-add entries from `diff --cached` by itself; the flag pins that
+  # behaviour on the 2.11..2.27 range where they would otherwise appear
   # waiver: git CLI vocabulary, not domain constants
   r = _git_at(cwd, "diff", "--cached", "--name-only", "--ita-invisible-in-index")
 
@@ -813,7 +835,7 @@ def _content_staged_paths(cwd: Path) -> list[str]:
   return [ line for line in r.stdout.splitlines() if line.strip() ]
 
 
-def _worktree_matches_head(cwd: Path, paths: list[str]) -> bool:
+def _is_worktree_at_head(cwd: Path, paths: list[str]) -> bool:
   """
   Report whether every given path's worktree file is identical to its `HEAD` version.
 
@@ -873,21 +895,21 @@ def _await_clean_index(repo: Path) -> str | None:
   # cure is to rebuild the index from the last commit, which leaves the worktree untouched — but that
   # recovery is the operator's move alone; a session only raises the alarm and never runs it.
 
-  # Resolve the wait window, honouring the test-harness override.
+  # resolve the wait window, honouring the operator-facing override
   try:
     wait = float(os.environ.get(_DIRTY_INDEX_WAIT_ENV, _DIRTY_INDEX_WAIT_SECONDS))
   except ValueError:
     wait = _DIRTY_INDEX_WAIT_SECONDS
 
-  # Poll until the index frees up or the window closes.
+  # poll until the index frees up or the window closes
   deadline = time.monotonic() + wait
   while True:
-    # guard: no staged content — the precondition holds
+    # no staged content — the precondition holds
     if not _content_staged_paths(repo):
       return None
     remaining = deadline - time.monotonic()
 
-    # guard: window closed with content still staged
+    # the window closed with content still staged
     if remaining <= 0:
       return _DENY_DIRTY_INDEX
     time.sleep(min(_DIRTY_INDEX_POLL_SECONDS, remaining))
@@ -922,8 +944,9 @@ def _handle_stop(payload: dict) -> int:
   inside a linked worktree (whose index is private), when the repo is mid-transaction (merge /
   rebase / cherry-pick / revert), when the per-repo kill-switch is off, when the pathspec row is
   active, when the index is already clean, or when the staged content belongs to another
-  session. Otherwise emits a `decision: block` payload with a preview of the
-  staged paths and the three recovery commands the operator can run.
+  session — the Stop payload's session id is the one compared against the lock owner. Otherwise
+  emits a `decision: block` payload with a preview of the staged paths and the three recovery
+  commands the operator can run.
 
   Args:
     payload: The Claude Code Stop hook payload parsed from stdin.
@@ -944,10 +967,10 @@ def _handle_stop(payload: dict) -> int:
     return 0
 
   # guard: mid merge / rebase / cherry-pick / revert
-  if _mid_operation(git_dir):
+  if _is_mid_operation(git_dir):
     return 0
 
-  # Respect the same per-repo kill-switch as the PreTool / PostTool branches.
+  # resolve the repository root whose config holds the per-repo kill-switch
   # waiver: git CLI vocabulary, not domain constants
   r = _git_at(cwd, "rev-parse", "--show-toplevel")
 
@@ -983,7 +1006,7 @@ def _handle_stop(payload: dict) -> int:
   # guard: staged content isn't this session's — a peer session or a manual/terminal stage owns
   # it, so ending this turn isn't leaving OUR work hanging. The Stop nag only fires when the
   # session that staged is the one about to stop.
-  if lock is None or lock.session_id != staging_lock.resolve_session_id():
+  if lock is None or lock.session_id != staging_lock.resolve_session_id(payload.get(HookKey.SESSION_ID)):
     return 0
 
   # bounded preview so a large index doesn't flood the operator-facing message
@@ -1009,8 +1032,9 @@ def _handle_stop(payload: dict) -> int:
 
 def _handle_post(repo: Path, session_id: str, verb: str) -> int:
   """
-  Apply the PostToolUse branch of the lock contract for one index-mutating tool call.
+  Apply the post-call branch of the lock contract for one index-mutating tool call.
 
+  Applies after a successful call (`PostToolUse`) and after a failed one (`PostToolUseFailure`).
   Releases the lock when the verb is `commit` or `reset` and the resulting index is empty.
   Other verbs are no-ops at this phase.
 

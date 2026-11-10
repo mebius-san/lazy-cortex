@@ -8,13 +8,9 @@ wiki_pinned_topics:
   - wiki/product/{{product}}
   - wiki/category/{{category}}
 spec_design_done: false
-spec_plan_done: false
-spec_develop_done: false
-spec_tests_passing: false
 spec_released: false
 spec_cancelled: false
 spec_state: draft
-spec_draft: true
 ---
 # Summary
 #protected/spec/summary

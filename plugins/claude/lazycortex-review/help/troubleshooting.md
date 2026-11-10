@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-review skills — symptoms, likely causes, and fixes.
-last_regen: 2026-10-06
+last_regen: 2026-11-10
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree routing on observed symptom. Top-level branches: install/bootstrap failures (settings missing, permission error, malformed JSON), configure failures (audit FAIL after wizard, section-id loop), start/submit problems (file not opted in, no-op on re-run when unexpected), status reporting nothing useful, stop/resume confusion, finalize blocked or partial, audit FAIL findings. Each leaf names the troubleshooting entry that resolves it."
@@ -15,8 +15,8 @@ source_skills:
   - lazy-review.stop
   - lazy-review.finalize
   - lazy-review.audit
-source_sha: 2b8e9e79da15a0e25e187f4c05ae6011a36f0740
-surface_sha: 860ab3fb9662bd07cc3da6d58d741775f677eb36e55195c3223de608f5811ff1
+source_sha: 2abf80046eef55ba4f805c6dfcc9c95f40ef997c
+surface_sha: 3140380ecba77e7b808a640797801d32d116faf58dfbe91122d16559d15e6e9d
 ---
 # Troubleshooting
 
@@ -106,7 +106,7 @@ surface_sha: 860ab3fb9662bd07cc3da6d58d741775f677eb36e55195c3223de608f5811ff1
 
 **Likely cause**: The document already has `review_active: true` in its frontmatter. `start` is idempotent — it does nothing when the document is already in the review loop.
 
-**Fix**: Run `/lazy-review.status <file>` to confirm the current state. If the document is already active and you want to restart from round 1, run `/lazy-review.stop <file>` first to close the current session, then `/lazy-review.start <file>` to open a fresh one.
+**Fix**: Run `/lazy-review.status <file>` to confirm the current state. If the document is already active, nothing needs to start. If you want to park it, run `/lazy-review.stop <file>`; a later `/lazy-review.start <file>` then resumes at the round and phase it was stopped in rather than at round 1 (see the stop-and-restart entry below).
 
 ---
 
@@ -114,9 +114,9 @@ surface_sha: 860ab3fb9662bd07cc3da6d58d741775f677eb36e55195c3223de608f5811ff1
 
 **Symptom**: After `/lazy-review.submit <file>`, instead of landing directly on the operator's Ready banner, a main-writer round fires on the next wake.
 
-**Likely cause**: `submit` pre-fills `review_main_done` with the class's `experts.main` list as it stood at submit time, then advances the document straight to the operator's turn. Every wake, though, re-evaluates who is still pending against the class's *current* `experts.main` order minus the names already recorded in `review_main_done`. If the class was reconfigured after this document was submitted — a main writer added, or the chain extended with a new name — that added writer isn't in the stale seed, so it counts as pending and its round fires.
+**Likely cause**: There are two usual reasons. First, the document carried a non-empty `[!todo] #review/command` callout when it was submitted. `submit` does not skip past an open command: the command is the opening round's input, so the document enters in the writer state with an empty `review_main_done` and a `Waiting: writer` banner, and the coordinator's first wake carries the command out. The Ready banner is never shown while a writer round is owed. Second, `submit` pre-fills `review_main_done` with the class's `experts.main` list as it stood at submit time, then advances the document straight to the operator's turn. Every wake, though, re-evaluates who is still pending against the class's *current* `experts.main` order minus the names already recorded in `review_main_done`. If the class was reconfigured after this document was submitted — a main writer added, or the chain extended with a new name — that added writer isn't in the stale seed, so it counts as pending and its round fires.
 
-**Fix**: Run `/lazy-review.status <file>` to see which owner is currently active. If a class change is what caused this, either let the newly-added writer's round complete — the document lands on the operator's Ready banner once its payload is in — or run `/lazy-review.configure` to remove that writer from the class if it shouldn't apply to documents already in flight.
+**Fix**: Run `/lazy-review.status <file>` to see which owner is currently active. If an open command callout caused it, let that writer round finish; the document then lands on the Ready banner. If a class change is what caused this, either let the newly-added writer's round complete — the document lands on the operator's Ready banner once its payload is in — or run `/lazy-review.configure` to remove that writer from the class if it shouldn't apply to documents already in flight.
 
 ---
 
@@ -174,7 +174,7 @@ surface_sha: 860ab3fb9662bd07cc3da6d58d741775f677eb36e55195c3223de608f5811ff1
 
 **Symptom**: Running `/lazy-review.audit` returns a FAIL finding with check `settings_present` and a message like "settings file not found".
 
-**Likely cause**: `/lazy-review.install` has not been run in this repo, so `.claude/lazy.settings.json` does not exist.
+**Likely cause**: `/lazy-review.install` has not been run in this repo, so `.claude/lazy.settings.json` does not exist. The audit reads the merged settings (the tracked file with `.claude/lazy.settings.local.json` laid over it) and writes nothing, so every finding comes with its own repair route.
 
 **Fix**: Run `/lazy-review.install` to create and seed the settings file. Then re-run `/lazy-review.audit`.
 

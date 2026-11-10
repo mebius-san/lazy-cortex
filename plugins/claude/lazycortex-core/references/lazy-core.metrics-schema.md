@@ -58,6 +58,7 @@ lazycortex_runtime_routine_errors_total{routine,repo,reason}
 lazycortex_runtime_tokens_total{routine,repo,expert,model,kind}
 lazycortex_runtime_expert_jobs_total{expert,repo,outcome}
 lazycortex_runtime_daemon_halts_total{repo,reason,triggered_by}
+lazycortex_runtime_incidents_total{repo,kind,cause}
 
 # Histograms
 lazycortex_runtime_routine_tick_duration_seconds{routine,repo}
@@ -67,21 +68,26 @@ lazycortex_runtime_expert_job_duration_seconds{expert,repo}
 lazycortex_runtime_routine_last_tick_timestamp{routine,repo}
 lazycortex_runtime_queue_depth{expert,repo,state}
 lazycortex_runtime_daemon_halted{repo,reason,triggered_by}
+lazycortex_runtime_daemon_paused{repo}
 lazycortex_runtime_dirty_tree{repo}
 lazycortex_runtime_up
 lazycortex_runtime_build_info{version,daemon_name,repo}
 ```
 
-`status` ∈ `{ok, error, timeout, crash}`. `state` ∈ `{queued, active, done, deferred, failed, dead, cancelled}` — the same classification `expert_runtime` applies to a bundle, read from the job dirs at scrape time; only `queued` and `active` are work the pump will still do, the other five are terminal and linger until their retention window elapses. `kind` ∈ `{input, output, cache_read, cache_write}`. `outcome` ∈ `{done, failed, dead, error}` — per job attempt, aggregated from the pump's `.logs/lazy-core/runtime/jobs.jsonl`; `error` marks an attempt that failed transiently and left the job queued for retry, the other three are terminal.
+`status` ∈ `{ok, error, timeout, crash}`. `state` ∈ `{queued, active, done, deferred, failed, dead, cancelled}` — the same classification `expert_runtime` applies to a bundle, read from the job dirs at scrape time; only `queued` and `active` are work the pump will still do, the other five are terminal and linger until their retention window elapses. `kind` ∈ `{input, output, cache_read, cache_write}`. `model` on `tokens_total` is the model name the token log recorded, with every `/` replaced by `_` so a provider-routed model (`rt-openai/gpt-5.1` → `rt-openai_gpt-5.1`) is counted rather than skipped; a record without a model counts as `unknown`. `outcome` ∈ `{done, failed, deferred, dead, error}` — per job attempt, aggregated from the pump's `.logs/lazy-core/runtime/jobs.jsonl`; `deferred` marks an attempt that deliberately left the work undone with its input untouched, `error` marks an attempt that failed transiently and left the job queued for retry, the other three are terminal.
 
 `dirty_tree` is 1 while the daemon's pre-iteration check finds uncommitted changes and routine dispatch is silently paused (the operator may be mid-edit); it drops back to 0 on the first iteration after the tree settles. This is the only externally visible trace of the silent skip — it is not a halt and records no incident.
+
+`daemon_paused` is 1 while the operator's local pause semaphore (`.runtime/daemon.pause`) is present and the daemon skips whole iterations — no git sync, no routine dispatch — and 0 once it is gone. It is not a halt and records no incident; the queue-depth and other disk-derived gauges keep refreshing during the pause.
+
+`incidents_total` counts error-ledger incidents once each, at the event that opens them — triage and resolution events of the same incident are not counted again. It is aggregated at scrape time from the ledger journal. `kind` is one of the ledger's incident kinds (`{job_dead, job_error, routine_error, daemon_halt, daemon_error, worktree_task_error, unpinned_model, plugin_error}`); `cause` is the incident's stable cause constant, and an entry whose cause falls outside the label charset `[A-Za-z0-9._-]` is skipped rather than counted.
 
 `routine_runs_total` counts only non-idle ticks: a tick whose routine type reports an explicit `dispatched_count` of 0 (an inbox / md-scan / git poll that matched nothing) increments `ticks_total` but not `runs_total`. Ticks from types that report no dispatch count always count as runs. `ticks_total` is the scheduler heartbeat; `runs_total` is the real-work rate.
 
 The `reason` label is metric-specific:
 
 - On `routine_errors_total` (routine tick failures): `{timeout, resolve, subprocess_error, unexpected, git_pre_failed, git_post_failed, external_dir_broken, routine_config_invalid}`. `routine_config_invalid` is the one value that marks a permanently broken entry rather than a failed run — it never clears on its own and needs a settings edit.
-- On `daemon_halts_total` / `daemon_halted` (gauge): `{uncommitted_changes, git_pull_diverged, git_push_failed, git_remote_unavailable, git_local_failed, suspected_loop, inbox_collision, routine_config_invalid, config_violation, rate_limit}` — the ten halt reasons of `lazy-core.state-schema.md` § 9. The label carries whatever reason `_halt_daemon` was handed, so it tracks that list and not the `HaltReason` enum, which is missing `config_violation`; the value is a fixed token either way, never raw exception text.
+- On `daemon_halts_total` / `daemon_halted` (gauge): `{uncommitted_changes, git_pull_diverged, git_push_failed, git_remote_unavailable, git_local_failed, git_rebase_not_started, suspected_loop, inbox_collision, routine_config_invalid, config_violation, rate_limit}` — the eleven halt reasons of `lazy-core.state-schema.md` § 9. Every halt writer goes through `record_halt` — the daemon's own halts and the pump's dirty-tree and rate-limit halts alike — and `daemon_halts_total` moves exactly once per halt block, whoever wrote it: in the writer's process when it has metrics, otherwise in the daemon the first time it observes the block: a writer without metrics sets the block's `metric_pending` mark (`lazy-core.state-schema.md` § 9), and the daemon counts only a block carrying that mark, removing it in the same step. A block without the mark — counted by its writer, or written before the mark existed — never moves the counter on observation. The `reason` label is the block's own reason, so it tracks that list and not the `HaltReason` enum, which is missing `config_violation`; the value is a fixed token either way, never raw exception text.
 
 ### Shipping to a Prometheus + Grafana stack
 

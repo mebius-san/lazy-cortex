@@ -70,16 +70,12 @@ Use when ALL of:
 - `git_status` has paths AND those paths match this job's expected target (`request_json.file` or files inside the routine's `paths` glob), AND
 - attempts threshold permits retry (same bands as `retry`).
 
-Action (two bash calls; the first prints `reverted`, the second `cleared`):
+Action (one bash call; prints `retried` when every named path is back at `HEAD` and the job is re-armed):
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" recover revert '<path-1>' '<path-2>')
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" recover clear-dead '<jdir_rel>')
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" recover revert-retry '<jdir_rel>' '<path-1>' '<path-2>')
 ```
 
-Then commit the revert under your bot identity (the daemon set `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` for you in env via `settings.experts[lazy-runtime.doctor].git_author`). Name the same paths you passed to `recover revert` and no others — the index is shared with the operator and with every other routine, so a wildcard would publish work you never looked at.
-```
-git add -- <path-1> <path-2> && git commit -m "doctor: revert <expert>/<job_id> partial edits" -- <path-1> <path-2>
-```
+The revert restores worktree and index from `HEAD`, so nothing is left to commit. When the failed job created an untracked file in its own scope (`request_json.file` or its `result/` directory), add `--remove-untracked` before `<jdir_rel>` so the file is deleted instead of keeping the tree dirty. The action succeeded only when the reply is the word `retried`.
 
 ### `permanent-fail` — write diagnosis.json, keep DEAD
 Use when:
@@ -158,5 +154,5 @@ Do NOT touch the `DONE` marker in your own job dir — the pump owns that. Just 
 ## Failure modes
 
 - **You see `response.json` already exists in a dead jdir without DONE marker** — Claude wrote it before being killed. This means the job actually succeeded; pump just didn't get to touch DONE. Action: `Bash(touch <jdir>/DONE)` and treat the job as complete. Don't unlink response.json.
-- **`recover revert` prints `error: …` and exits 1** — git checkout failed (file already gone, permission, etc.). Skip that file in the diagnosis and continue with the rest. Don't crash the whole tick.
+- **`recover revert-retry` prints `error: …` and exits 1** — the job stays dead. `error: still-dirty: <paths>` means the revert did not settle those paths; `error: outside-job-scope: <paths>` means an untracked path lies outside the job's scope and nothing was deleted; any other `error:` line is a failed git checkout (file already gone, an untracked path passed without `--remove-untracked`, permission). Name the paths in the diagnosis and continue with the rest. Don't crash the whole tick.
 - **All dead jobs were already triaged by a previous doctor run** — every DEAD jdir has `diagnosis.json`. The trigger should have filtered them out, but if you still got dispatched, return `outcome=noop` and exit cleanly.

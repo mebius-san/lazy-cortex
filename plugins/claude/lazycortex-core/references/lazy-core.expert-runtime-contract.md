@@ -15,17 +15,17 @@ This document is loaded into every expert run via `--append-system-prompt-file`.
 **Does it land anywhere else — code, data, product documentation, configuration?** Then you edit it in place and commit it yourself at the end of your job, naming every path:
 
 ```
-git add -- <path> <path>
+git add -N <new-path>
 git commit -m "<expert-name>: <one-line summary>" -- <path> <path>
 ```
 
-Never stage with a wildcard, never sweep the whole worktree into a commit, and never commit without a pathspec. The checkout's index is shared with the operator and with every other routine: a wildcard stage or a pathspec-less commit publishes work that is not yours. Your own persona memory under `.memory/<self>/` is committable too, but you never stage it by hand — the memory-write skill writes the note, its tag index and its commit as one atomic act, and running that skill is the whole of your part. Run logs under `.logs/` are the same shape.
+The `git add -N` line registers a file your job created and is skipped for a file that was already tracked; it stages no content. Never run a plain `git add` — the pathspec on `git commit` carries the worktree content straight into the commit. Never stage with a wildcard, never sweep the whole worktree into a commit, and never commit without a pathspec. The checkout's index is shared with the operator and with every other routine: a wildcard stage or a pathspec-less commit publishes work that is not yours. Your own persona memory under `.memory/<self>/` is committable too, but you never stage it by hand — the memory-write skill writes the note, its tag index and its commit as one atomic act, and running that skill is the whole of your part. Run logs under `.logs/` are the same shape.
 
 **The right stops at any file the system itself owns regions of.** A file carrying review frontmatter, a protected section, or a system-painted banner goes through the applying route (`result/`), never a direct worktree edit, for as long as it is in that state. A file you created outside that state and which later enters it stops being directly editable until it leaves again. This limit is independent of the two questions above: it reaches a code file, a data file and a configuration file exactly as it reaches a document, and a `true` commit right does not lift it.
 
 **Never commit anything under your own job dir.** Your job dir (`.experts/.jobs/<expert>/<job-id>/` — `response.json`, `result/*`, `transcript.jsonl`, `request.json`, `source/`, `context/`, `PID`, `attempts`, …) is runtime scratch space. It is gitignored. It is read by the daemon and the dispatcher; nothing about it belongs in `git log`.
 
-- If a bare `git add <path>` complains `paths are ignored by one of your .gitignore files`, that is the system telling you the path is not committable. **Do not retry with `-f`.** Stop and exit cleanly.
+- If `git add -N <path>` complains `paths are ignored by one of your .gitignore files`, that is the system telling you the path is not committable. **Do not retry with `-f`.** Stop and exit cleanly.
 - Do not use `git add -f` for any path, ever. The flag exists to bypass `.gitignore`; in this runtime, every gitignored path is gitignored on purpose.
 
 **If you produced no tracked-file mutations, exit with a clean tree.** Do NOT make a commit "to signal completion". The daemon detects completion via the `DONE` marker (which it touches, not you) and via `response.json` (which is gitignored — see above). The dispatcher records protocol-required noop commits itself, with the correct trailers; you cannot substitute for it. Specifically: returning `outcome: noop` (or any non-mutating outcome your protocol defines) means **write `response.json` and exit, no commit at all**.
@@ -39,7 +39,7 @@ Do **not** push. Do **not** change branches. Do **not** run `git checkout`, `git
 
 A sub-skill that writes to disk and leaves `git status --porcelain` non-empty after the skill returns is a contract violation against THIS contract — fix the sub-skill (option 1) rather than relying on option 2 as the permanent solution.
 
-Before exiting, your final `git status --porcelain` MUST be empty. If you exit with uncommitted changes in tracked files, the daemon halts the entire runtime and the operator must run `/lazy-runtime.recover` to restart it. Your job will be marked `outcome: error, category: uncommitted_changes`. (Files under your job dir don't trigger this — they're gitignored and don't show in `--porcelain`.)
+Before exiting, your final `git status --porcelain` MUST be empty. If you exit with uncommitted changes in tracked files, the daemon halts the entire runtime and the operator must run `/lazy-runtime.recover` to restart it. The halt (`reason: uncommitted_changes`) names your expert and job id and opens the `halt:<repo>` incident in the error ledger; your `response.json` is kept exactly as you wrote it and your job is marked `DONE`, so its result is collected once the halt lifts. (Files under your job dir don't trigger this — they're gitignored and don't show in `--porcelain`.)
 
 ## Where your files live
 

@@ -5,7 +5,7 @@ research: true
 ---
 # lazy-spec.lookup
 
-Answers one question against the spec tree (`specs/` by default) without loading whole documents into the caller's context. Given a query token and an optional anchor (a product key, a vault-relative path, or a product-relative path of any depth), it walks the tree in three bounded directions — up toward the vault root, down through declared and materialized children, across to siblings and backlinks — and returns matched paths with one-line excerpts. The executing agent NEVER dispatches `Agent`-tool subagents for this walk: every step is a direct `Read` / `Glob` / `Grep` in the caller's own context, so the skill works inside a one-shot dispatch (an expert job, a review specialist) that has no budget for sub-dispatch overhead.
+Answers one question against the spec tree (`specs/` by default) without loading whole documents into the caller's context. Given a query token and an optional anchor (a product key, a vault-relative path, or a product-relative path of any depth), it walks the tree in three bounded directions — up toward the vault root, down through the assets its documents link to, across to siblings and backlinks — and returns matched paths with one-line excerpts. The executing agent NEVER dispatches `Agent`-tool subagents for this walk: every step is a direct `Read` / `Glob` / `Grep` in the caller's own context, so the skill works inside a one-shot dispatch (an expert job, a review specialist) that has no budget for sub-dispatch overhead.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -56,10 +56,9 @@ Three independent directions, each bounded by the anchor Phase 1 resolved — ne
 - Product anchor (an asset anchor's owning product, or a bare product key): `Read` `<spec_path>/design.md` and `<spec_path>/tech.md`, keep only the paragraph(s) mentioning the query token — never the whole file.
 - Still nothing found → `Grep` the query token across `<vault_root>/**/*.md`, excluding paths already covered above (the vault-wide fallback).
 
-### Down — declared and materialized children
+### Down — materialized asset links
 
-- Asset anchor only: `Read` the asset's status folder-note frontmatter `spec_depends_on` list. Each token is a product-relative path of any depth naming a child under the same product — `Read` its `# Summary`.
-- `Grep` the anchor's authored docs that exist (`design.md` / `architecture.md` / `bug.md`) for path-qualified wikilinks (`[[<path>|...]]`) pointing at another asset under the same product tree — a materialized asset-proposal link (`lazy-spec.coordination-playbook.md` Chapter 10). `Read` each target's `# Summary`.
+- `Grep` the anchor's authored docs that exist — an asset's `design.md` / `bug.md`, and for a product anchor the product's own `<spec_path>/architecture.md` — for path-qualified wikilinks (`[[<path>|...]]`) pointing at another asset under the same product tree: a materialized `[!asset-proposal]` link (`lazy-spec.asset-creation-playbook.md`). `Read` each target's `# Summary`.
 
 ### Across — siblings and backlinks
 

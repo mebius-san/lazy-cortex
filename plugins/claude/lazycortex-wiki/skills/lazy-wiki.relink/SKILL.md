@@ -1,11 +1,11 @@
 ---
 name: lazy-wiki.relink
 description: "Use when a wiki scope's nodes need classifying and See-also linking right now — this checkout runs no runtime daemon, or the operator wants to force a relink instead of waiting for the `lazy-wiki.scan` / `lazy-wiki.relink-weekly` routines. Computes the plan (initial / incremental / anchor-lost), dispatches the wiki curator synchronously per node in tail-off mode, rebuilds `topics.md`, records the new anchor, and makes one commit under the operator identity."
-allowed-tools: Read, Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(date -u *), Bash(git *), Bash(mkdir -p *), Bash(rm -rf *), Bash(test *), Bash(cp *), Write, Agent, AskUserQuestion
+allowed-tools: Read, Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(date -u *), Bash(git rev-parse *), Bash(mktemp), Bash(mktemp *), Bash(rm -f *), Bash(mkdir -p *), Bash(rm -rf *), Bash(test *), Bash(cp *), Write, Agent, AskUserQuestion
 ---
 # lazy-wiki.relink
 
-Relink one wiki scope without the runtime daemon — entirely in the current Claude Code session. The deterministic core (`relink-plan`, `apply-node`, `build-index`, `set-synced-sha`) decides *what* to process; this skill orchestrates by dispatching the `wiki.curator` agent — and, for the tag-canon step, the `wiki.tag-curator` agent — as synchronous subagents in **tail-off mode** (`tail: false`). There are **no job dirs** — the curator reads the real node (and the real `topics.md` for link) named in its dispatch prompt and **applies its own curation via `apply-node`** (C-hybrid, exactly as on the daemon — there is no collector); it just skips the *tail* (`build-index` / git-commit / `dispatch-link`), which this skill owns: the skill rebuilds the index once between phases and makes the single commit. The daemon path (event-driven `lazy-wiki.scan` + weekly `lazy-wiki.relink-weekly`) is unaffected and runs in parallel as the autonomous alternative (it, not this skill, uses the runtime's job dirs, and there the curator runs its full tail with `tail: true`).
+Relink one wiki scope without the runtime daemon — entirely in the current Claude Code session. The deterministic core (`relink-plan`, `apply-node`, `tag-apply`, `build-index`, `prune-node`, `relink-commit`) decides *what* to process and what the commit carries; this skill orchestrates by dispatching the `wiki.curator` agent — and, for the tag-canon step, the `wiki.tag-curator` agent — as synchronous subagents in **tail-off mode** (`tail: false`). There are **no job dirs** — the curator reads the real node (and the real `topics.md` for link) named in its dispatch prompt and **applies its own curation via `apply-node`** (C-hybrid, exactly as on the daemon — there is no collector); it just skips the *tail* (`build-index` / git-commit / `dispatch-link`), which this skill owns: the skill rebuilds the index once between phases and makes the single commit. Every writer of the run — each curator's `apply-node`, each tag curator's `tag-apply`, every `build-index` and `prune-node` — appends the paths it wrote to one touch ledger outside the repository, and that ledger, not the working tree's status, is what the commit carries. The daemon path (event-driven `lazy-wiki.scan` + weekly `lazy-wiki.relink-weekly`) is unaffected and runs in parallel as the autonomous alternative (it, not this skill, uses the runtime's job dirs, and there the curator runs its full tail with `tail: true`).
 
 Invocation: `/lazy-wiki.relink [<scope-id>]`. When `<scope-id>` is omitted, ask the operator which configured scope to relink.
 
@@ -50,7 +50,7 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki"
 
 Parse the JSON `{mode, synced_sha, classify[], link[], drop[]}`. The three modes — `initial` (no anchor → all nodes), `incremental` (delta from `wiki_synced_sha`..HEAD), `anchor-lost` (content-hash backstop) — are all returned uniformly: process the path sets as given. Note the mode for the report.
 
-This skill creates **no** scratch of its own — no job dirs, no out-of-tree dir. Each dispatched curator manages (and removes) its own `mktemp` curation file inside its run; nothing relink-related is ever written inside the repo.
+Create the touch ledger — the run's one scratch file, outside the repository: `Bash(mktemp)`, and hold the printed path as `<ledger>`. Carry it into every curator and tag-curator dispatch prompt below as `ledger=<ledger>`, and pass `--ledger <ledger>` to every `build-index` and `prune-node` call. No job dirs are created; each dispatched curator manages (and removes) its own `mktemp` curation file inside its run, and nothing relink-related is ever written inside the repo.
 
 If `classify`, `link`, and `drop` are all empty, the scope is already in sync — report `empty-set` and skip Steps 2–5 (still run Step 6 to refresh the anchor and Step 7/Log).
 
@@ -64,10 +64,10 @@ For each absolute node path in `classify[]`, dispatch the curator synchronously 
 
 ```
 Agent(subagent_type: "lazycortex-wiki:lazy-wiki.curator",
-      prompt: "kind=classify, tail=false. node_path=<abs-node-path>, scope_id=<scope-id>, repo_root=<repo-root>, language=<code>, tag_axes=<comma-separated effective axes>, existing_tags=<the collect-tags JSON from above>. Read the real node at node_path (and its own pin fields); choose wiki_summary, topics, connectors — anchor topic values to existing_tags (reuse a fitting existing value instead of coining a synonym); apply them to the node yourself via `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" apply-node <node_path> --from <a mktemp curation file you create>` (this writes wiki_summary, the wiki/* tags, wiki_connectors, and the wiki_src_hash backstop), then rm the temp; STOP — do NOT build-index, git, or dispatch-link. Report the outcome.")
+      prompt: "kind=classify, tail=false. node_path=<abs-node-path>, scope_id=<scope-id>, repo_root=<repo-root>, language=<code>, ledger=<ledger>, tag_axes=<comma-separated effective axes>, existing_tags=<the collect-tags JSON from above>. Read the real node at node_path (and its own pin fields); choose wiki_summary, topics, connectors — anchor topic values to existing_tags (reuse a fitting existing value instead of coining a synonym); apply them to the node yourself via `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" apply-node <node_path> --from <a mktemp curation file you create> --ledger <ledger>` (this writes wiki_summary, the wiki/* tags, wiki_connectors, and the wiki_src_hash backstop, and records the node in the ledger), then rm the temp; STOP — do NOT build-index, git, or dispatch-link. Report the outcome.")
 ```
 
-The curator writes the node via `apply-node`; the skill runs no `apply-node`. If a curator reports an error, skip that node and continue. Track each curated node path for the Step 6 commit. Outcome: `classified:<n>` (or `empty-set` when `classify[]` was empty).
+The curator writes the node via `apply-node`; the skill runs no `apply-node`. If a curator reports an error, skip that node and continue; the ledger already holds every node that was written. Outcome: `classified:<n>` (or `empty-set` when `classify[]` was empty).
 
 ## Step 3 — Normalize tags + rebuild topics index
 
@@ -79,16 +79,16 @@ The canon is judged per **tag surface**: every configured `wiki.scopes` entry (r
 
    a. Capture that surface's value census: `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" collect-tags <surface> --repo <repo-root>)`. An empty `axes` object means nothing is tagged there — skip the surface, dispatch nothing.
 
-   b. Dispatch the tag curator to judge a canonical set — **no job dir**; it self-applies via `retag` and rewrites the advisory dictionary (the skill does neither):
+   b. Dispatch the tag curator to judge a canonical set — **no job dir**; it self-applies via `tag-apply`, which retags the surface and rewrites the advisory dictionary (the skill does neither):
 
    ```
    Agent(subagent_type: "lazycortex-wiki:lazy-wiki.tag-curator",
-         prompt: "kind=normalize-tags, tail=false. surface=<surface>, repo_root=<repo-root>, language=<code>, collected_tags=<the collect-tags JSON from step a>, tag_dictionary=<the `wiki.tags.dictionary` path from .claude/lazy.settings.json, or docs/tags.md when unset>. Judge a canonical axis-value set; build the alias map ({axis:{old-value:new-value}} — merge a synonym, nest a subtype, or keep); apply it yourself via `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" retag <surface> --from <a mktemp alias-map file you create> --repo <repo-root>`, then rm the temp; re-survey with collect-tags and rewrite the dictionary file to match; STOP — do NOT build-index or git. An empty map → skip retag, still reconcile the dictionary, report empty. Report the alias map and outcome.")
+         prompt: "kind=normalize-tags, tail=false. surface=<surface>, repo_root=<repo-root>, language=<code>, ledger=<ledger>, collected_tags=<the collect-tags JSON from step a>, tag_dictionary=<the `wiki.tags.dictionary` path from .claude/lazy.settings.json, or docs/tags.md when unset>. Judge a canonical axis-value set; build the alias map ({axis:{old-value:new-value}} — merge a synonym, nest a subtype, or keep) and gloss every value the dictionary does not yet record; write both to mktemp files you create and apply them via `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" tag-apply <surface> --from <alias-map file> --glosses <glosses file> --ledger <ledger> --repo <repo-root>`, then rm both temps; STOP — do NOT build-index or git. Report the alias map and outcome.")
    ```
 
-   The tag curator runs `retag` and writes the dictionary; the skill does neither. `retag` may modify any node on that surface — capture those paths (e.g. from `git status`) for the Step 6 commit alongside the classified nodes, and capture the dictionary path too (register it with `Bash(git add -N <dictionary>)` when this run created the file).
+   The tag curator runs `tag-apply`; the skill does not. The verb records every node it retagged and the dictionary it wrote in the ledger, so the Step 6 commit carries them without the skill collecting anything.
 
-2. **Rebuild the indexes.** `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" build-index <scope-id> --repo <repo-root>)` for the relinked scope — once, after normalize, before Step 4. The link phase reads this freshly-populated, canonicalised catalog. Run it again for every **other** scope surface whose canon pass reported a non-empty alias map, so a scope this run retagged is not left with a stale catalog. The `domains` surface has no topics index — never call `build-index` for it. Track every rebuilt `topics.md` path for the Step 6 commit.
+2. **Rebuild the indexes.** `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" build-index <scope-id> --repo <repo-root> --ledger <ledger>)` for the relinked scope — once, after normalize, before Step 4. The link phase reads this freshly-populated, canonicalised catalog. Run it again for every **other** scope surface whose canon pass reported a non-empty alias map, so a scope this run retagged is not left with a stale catalog. The `domains` surface has no topics index — never call `build-index` for it. Every `build-index` call carries `--ledger <ledger>`, so each rebuilt `topics.md` reaches the Step 6 commit.
 
 Outcome: `normalized:<n> index-rebuilt` (or `skipped-per-user-choice` only when the plan was `empty-set`).
 
@@ -101,51 +101,38 @@ For each absolute node path in `link[]`:
 
    ```
    Agent(subagent_type: "lazycortex-wiki:lazy-wiki.curator",
-         prompt: "kind=link, tail=false. node_path=<abs-node-path>, scope_id=<scope-id>, repo_root=<repo-root>, language=<code>, topics_path=<repo-root>/<topics_index>, candidates=<the JSON array from step 1>. Read the real node (it now carries the classify writes) and the real topics.md (and the node's own pin fields); verify the candidates first (empty → judge from topics.md); build see_also; apply it to the node yourself via `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" apply-node <node_path> --from <a mktemp curation file you create>` (this grafts only the # See also section), then rm the temp; STOP — do NOT git. Report the outcome.")
+         prompt: "kind=link, tail=false. node_path=<abs-node-path>, scope_id=<scope-id>, repo_root=<repo-root>, language=<code>, ledger=<ledger>, topics_path=<repo-root>/<topics_index>, candidates=<the JSON array from step 1>. Read the real node (it now carries the classify writes) and the real topics.md (and the node's own pin fields); verify the candidates first (empty → judge from topics.md); build see_also; apply it to the node yourself via `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" apply-node <node_path> --from <a mktemp curation file you create> --ledger <ledger>` (this grafts only the # See also section), then rm the temp; STOP — do NOT git. Report the outcome.")
    ```
 
-The curator writes the node via `apply-node`; the skill runs no `apply-node`. If a curator reports an error, skip that node and continue. Track each curated node path for the Step 6 commit. Outcome: `linked:<n>` (or `empty-set` when `link[]` was empty).
+The curator writes the node via `apply-node`; the skill runs no `apply-node`. If a curator reports an error, skip that node and continue; the ledger already holds every node that was written. Outcome: `linked:<n>` (or `empty-set` when `link[]` was empty).
 
 ## Step 5 — Prune dropped nodes
 
-For each path in `drop[]`: the node was deleted since the anchor. The Step 3 index rebuild already excludes it from `topics.md` (it no longer exists on disk, so `iter_nodes` skips it), but other nodes may still carry See-also links pointing at it. Drop those dangling lines deterministically:
+For each path in `drop[]`: the node was deleted since the anchor. The Step 3 index rebuild already excludes it from `topics.md` (it no longer exists on disk, so `find_all_nodes` skips it), but other nodes may still carry See-also links pointing at it. Drop those dangling lines deterministically:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" prune-node <dropped-path> --repo <repo-root> --no-commit)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" prune-node <dropped-path> --repo <repo-root> --no-commit --ledger <ledger>)
 ```
 
-Run once per dropped path. `--no-commit` is mandatory here — the Step 6 commit owns all writes. Capture the `pruned_nodes` paths from each JSON result and add them to the Step 6 staging set (the index is already tracked from Step 3). A `skip (no scope)` note is fine — the node resolved to no scope and nothing was touched.
+Run once per dropped path. `--no-commit` is mandatory here — the Step 6 commit owns all writes; `--ledger` records the pruned nodes and the rebuilt index for it. A `skip (no scope)` note is fine — the node resolved to no scope and nothing was touched.
 
 Outcome: `dropped:<n> pruned:<m>` (or `empty-set` when `drop[]` was empty).
 
 ## Step 6 — Commit touched files + record anchor
 
-Record the new anchor, then commit everything in one atomic step under the operator identity (not the curator's `git_author` — the skill owns this commit):
+Record the new anchor and commit the ledger in one call, under the operator identity (not the curator's `git_author` — the skill owns this commit):
 
-1. Capture `HEAD`: `Bash(git rev-parse HEAD)`.
-2. Write the anchor into `topics.md`:
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" relink-commit <scope-id> --ledger <ledger> --mode <mode> --classify <N> --link <M> --drop <K> --repo <repo-root>)
+```
 
-   ```
-   Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" set-synced-sha <scope-id> <HEAD> --repo <repo-root>)
-   ```
-3. Commit every path tracked through Steps 2–5 — the touched node files, each rebuilt `topics.md`, and the tag-values dictionary — by naming them in the commit pathspec:
+The verb anchors `wiki_synced_sha` at the `HEAD` the pass ran against and commits exactly the ledger plus the scope's index — never a path someone else left in the working tree or the index. Parse its one-line JSON `{status, anchor, paths, unledgered}`. A non-empty `unledgered` names wiki files changed outside this run; list them in the report — they are not this run's to commit. Do NOT invoke any project-level pre-commit pipeline — these are scope/data files, not plugin source.
 
-   ```
-   Bash(git commit -m "wiki(relink): <scope-id> (<mode>, classify N / link M / drop K)" -- <node-1> <node-2> … <topics.md>)
-   ```
-
-   No `git add` — the pathspec carries the worktree content straight into the commit, which is
-   what `lazy-core.git`'s pathspec discipline requires and what leaves the operator's index
-   alone. A node file this run created must be registered first with `Bash(git add -N <node>)`
-   so the pathspec can see it. Do NOT invoke any project-level pre-commit pipeline — these are
-   scope/data files, not plugin source. If nothing changed (idempotent re-run produced no byte
-   change), report `unchanged` and do not create an empty commit.
-
-Outcome: `committed` / `unchanged`.
+Outcome: `committed` / `unchanged` — the verb's `status`.
 
 ## Step 7 — Clean up scratch
 
-This skill creates no scratch — no job dirs, no out-of-tree dir; each curator removes its own `mktemp` curation file inside its run. So there is nothing for the skill to delete. Assert the worktree carries no relink residue (no `.experts/.wiki-relink/`, no stray curation files) — there should be none. Outcome: `cleaned` (nothing to remove).
+Delete the touch ledger: `Bash(rm -f <ledger>)`. It lives outside the repository, so nothing inside the worktree is touched. Each curator has already removed its own `mktemp` curation file. Outcome: `cleaned`.
 
 ## Report
 
@@ -154,6 +141,7 @@ One line per task in the canonical list, with its outcome word. A missing line i
 ## Failure modes
 
 - **`/lazy-wiki.relink` reports "unknown scope '<id>'"** — the scope id is not in `lazy.settings.json[wiki.scopes]` → run `/lazy-wiki.configure` to create it, or re-invoke with a known id.
-- **`relink-plan` returns `anchor-lost` unexpectedly** — the `wiki_synced_sha` commit became unreachable (rebase, `reset --hard`, squash, gc, shallow clone) → the plan falls back to a content-hash backstop over `wiki_src_hash`; this is expected recovery, not an error. The run records a fresh HEAD anchor at Step 6.
-- **A curator subagent reports an error** — malformed input, a failed `apply-node`, or a curator-side schema violation → in tail:false the curator reports it in its reply (there is no `result/response.json`); surface the message, skip that node, and continue with the rest; the node is picked up on the next relink.
-- **The commit at Step 6 stages nothing** — an idempotent re-run produced no byte change → reported as `unchanged`; no empty commit is created.
+- **`relink-plan` returns `anchor-lost` unexpectedly** — the `wiki_synced_sha` commit became unreachable (rebase, `reset --hard`, squash, gc, shallow clone) → the plan falls back to a content-hash backstop over `wiki_src_hash`; this is expected recovery, not an error. `relink-commit` anchors the new pass at Step 6 like any other.
+- **A curator subagent reports an error** — malformed input, a refused `apply-node` / `tag-apply`, or a curator-side schema violation → in tail:false the curator reports it in its reply (there is no job dir and no `response.json`); surface the message, skip that node, and continue with the rest; the node is picked up on the next relink.
+- **Step 6 reports `unchanged`** — `relink-commit` found nothing to commit → no empty commit is created.
+- **The report lists `unledgered` paths** — wiki files changed in the working tree that no writer of this run recorded (an operator edit, another session) → they are left out of the commit on purpose; commit or discard them yourself.

@@ -34,6 +34,7 @@ in the sibling `lazy-python.comment-guidelines.md`.
   - Do not remove or weaken sentences that describe caller-visible invariants or postconditions (for example, index alignment between frame states, turns, and chapter entities), unless they are clearly incorrect.
   - When in doubt whether an existing sentence describes an internal algorithm or a caller-visible guarantee, treat it as a guarantee and keep it, preferably under **Guarantees**, but do not create any new guarantees based on the implementation.
   - If a docstring currently places a caller-visible invariant or postcondition in **Notes** (for example, that lists are kept in sync and share the same indices), you may move that bullet into a **Guarantees** section instead of deleting it. The content must remain semantically equivalent or stricter.
+  - An existing inventory sentence is not a caller-visible invariant. Compress it to the kind of answer it enumerates; never extend it with the new item.
 - No-filler rules:
   - If there is nothing meaningful to add to a particular section, omit that section.
   - If you can't determine something from the code do not generate it based on your imagination, omit it.
@@ -84,7 +85,7 @@ in the sibling `lazy-python.comment-guidelines.md`.
 - Keep the following order of sections when they exist: Summary, Scope, Responsibilities, Guarantees, Subclassing, Notes, Type Parameters, Attributes — plus any project-registered sections at their configured positions. Fix the order if it is wrong.
 - Summary line.
   - Summary is mandatory. If non-compliant, normalize it; do not delete or move. Always keep a Summary section for every class.
-  - The first line is a noun phrase: “Planner for turn-based tactics.”
+  - The first line is a noun phrase: “Planner for nightly batch jobs.”
   - Avoid “This class …”.
   - Style:
     - This section must not have an empty line before it.
@@ -97,6 +98,7 @@ in the sibling `lazy-python.comment-guidelines.md`.
     - Omit the title 'Scope' for this section.
     - These rules override external style guides where they conflict.
     - For enums describe what the enum represents and how it is used by callers but do not use particular enum members in the description and to make descriptions more general. Description must be invariant to the addition or removal of enum members.
+    - Name the kind of answer the class gives, never the list of its answers. A sentence that walks through every measure, field, axis, case or branch the class handles, one by one, is an inventory of its members, not a description of behaviour; the Attributes section and the methods' own docstrings carry the items. The test: adding one more method, field or case must not require editing the Scope.
   - For a common case:
     - Describe what the class represents and how it is used by callers.
   - For ABCs/Protocols:
@@ -135,7 +137,7 @@ in the sibling `lazy-python.comment-guidelines.md`.
     - The class has lifecycle states (e.g. initialized → active → closed) with conditions that must hold in each state.
     - The class serializes/deserializes data and relies on schema or version constraints that must remain consistent.
     - Numeric domains, ranges, or unit constraints must always be satisfied in public attributes or results.
-    - External resource handles (e.g. attached world, open session) must obey “attached/not-attached” or “open/closed” invariants visible to callers.
+    - External resource handles (e.g. attached device, open session) must obey “attached/not-attached” or “open/closed” invariants visible to callers.
   - What to include:
     - Conditions that must always hold after construction and across method calls, including relationships between attributes, ordering guarantees, identity/uniqueness constraints, and thread-safety guarantees. Include only statements that are testable.
   - What to exclude:
@@ -218,14 +220,13 @@ in the sibling `lazy-python.comment-guidelines.md`.
     - Public fields that callers read or set.
       - Instance fields assigned in `__init__` as `self.name` without a leading underscore (public).
       - Public class variables without a leading underscore (public).
-    - Private members or properties only when the project declares a documented escape hatch for them (see the project overlay; enforced via `[tool.pcf] d2_exempt_marker_attrs`).
+    - Private members or properties only when the project declares a documented escape hatch for them (see the project overlay; enforced via `[tool.pcf] d2_exempt_marker_attrs` for marker attributes and `[tool.pcf] d2_exempt_attr_names` for the private labels a project allows in `Attributes`).
     - Mention meaning, units, allowed ranges, defaults, mutability (read-only or writable), and whether `None` is possible.
-    - All enum members except `INVALID`.
+    - All enum members.
   - What to exclude: 
     - All private fields (starting with an underscore), both class-level and those created in the `__init__` method, unless covered by the project's declared escape hatch.
     - Any property (public or private) methods created with `@property` decorator, unless covered by the project's declared escape hatch.
     - Type annotations.
-    - Only and only `INVALID` member of enums. All other members MUST be documented.
   - Style:
     - Do not include type annotations.
     - For a common case:
@@ -255,6 +256,7 @@ in the sibling `lazy-python.comment-guidelines.md`.
   - Do not mention private components or storage (trainers, managers, caches, configs, registries) unless they are part of the public API contract.
   - Do not mention any input arguments or parameters in the Scope section.
   - Omit internal algorithms, data structures, and micro-flow details.
+  - Name the kind of answer the method gives, never the list of its answers. A sentence that walks through every measure, field, axis, case or branch the method handles, one by one, is an inventory of its members, not a description of behaviour; the Args section and the called members' own docstrings carry the items. The test: adding one more method, field or case must not require editing the Scope.
   - Omit a Scope section for test methods named `test_...` from test classes.
   - These rules override external style guides where they conflict.
   - Style:
@@ -271,7 +273,7 @@ in the sibling `lazy-python.comment-guidelines.md`.
     - If no explicit protocol-level guarantees are available, do not invent or expand the **Guarantees** section. Omit this section entirely or keep only the guarantees that already exist in the docstring.
     - When editing an existing **Guarantees** section, you may reformat or clarify sentences, but you must not strengthen, weaken, or extend the contract beyond what is already stated in the source docstring or `Contract:` comments.
   - Typical triggers include:
-    - The method establishes or maintains stable relationships between collections, such as index alignment between entity lists and corresponding states, turns, or other per-entity data.
+    - The method establishes or maintains stable relationships between collections, such as index alignment between entity lists and corresponding states, steps, or other per-entity data.
     - The method guarantees ordering, uniqueness, or determinism of returned values given the same inputs and seed.
     - The method ensures consistency between multiple objects or views after it completes (for example, lengths of related lists always match; item i in one list refers to the same domain object as item i in another list).
     - The method maintains invariants on numeric ranges, units, or validity of public attributes or results.
@@ -315,7 +317,7 @@ in the sibling `lazy-python.comment-guidelines.md`.
     - Any requirement beyond type annotations must hold to avoid runtime errors or undefined behavior.
     - The object must be in a specific lifecycle state (e.g., initialized, open, attached, not disposed) for the call to be valid.
     - Inputs must satisfy content constraints such as non-emptiness, ordering, uniqueness, bounds, shapes, or units.
-    - External resources must exist or be available, such as an open session, connected database, attached world, or valid handle.
+    - External resources must exist or be available, such as an open session, connected database, attached device, or valid handle.
     - Caller context must provide permissions, ownership, thread confinement, or execution context (sync vs async) guarantees.
     - Feature flags, configuration keys, or environment conditions must be enabled or set.
     - Concurrency constraints must hold, such as “no concurrent writers,” “must be called from the main thread,” or “reentrant safe only if X.”
@@ -470,8 +472,8 @@ class ExampleForAnyClassDocstring(Generic[FeatureVectorType]):
   """
   Planner that converts goals and context into concrete actions.
 
-  Accepts high-level goals and the current world snapshot from callers, and produces scheduled actions suitable 
-  for execution by the tactical layer. Internal selection, scoring, and queuing details are intentionally omitted.
+  Accepts high-level goals and the current resource snapshot from callers, and produces scheduled actions suitable 
+  for execution by the worker layer. Internal selection, scoring, and queuing details are intentionally omitted.
 
   Responsibilities:
     - Prioritize goals and expand them into executable actions visible to callers.
@@ -504,25 +506,25 @@ class ExampleForAnyClassDocstring(Generic[FeatureVectorType]):
 
 class ExampleForInitDerivedClass(BaseInit):
   """
-  Emotional State Initialization Class
+  Load Balancing Weights Initialization Class
 
-  Represents the transient emotional forces influencing the char's behavior and decision-making.
-  These emotions shape priorities, biases, and reactions to environmental or social stimuli. Each emotion
-  can influence char decisions in subtle or dramatic ways depending on its current intensity.
+  Represents the relative weights a load balancer gives to the signals it uses to pick a backend.
+  These weights shape how traffic spreads across backends as load changes. Each weight
+  can shift routing decisions in subtle or dramatic ways depending on its current value.
 
   Guarantees:
-    - All emotional states must lie within the range [0, 1], where:
-      - 0 represents the complete absence or suppression of the emotion, resulting in apathy or emotional neutrality.
-      - 1 represents a peak intensity of the emotion, strongly influencing behavior, often overriding rational priorities.
+    - All weights must lie within the range [0, 1], where:
+      - 0 means the signal is ignored entirely and has no effect on backend selection.
+      - 1 means the signal dominates backend selection, often overriding every other signal.
 
   Attributes:
-    fear:
-      Aversion to perceived danger or threat.
-      High fear promotes avoidance, hesitation, or retreat in risky situations.
+    latency:
+      Weight of the backend's recent response time.
+      A high latency weight steers traffic away from slow backends.
 
-    confidence:
-      Belief in one’s own ability to succeed.
-      High confidence promotes initiative, bold tactics, and risk-taking.
+    capacity:
+      Weight of the backend's remaining capacity.
+      A high capacity weight steers traffic toward lightly loaded backends.
   """
 ```
 
@@ -613,7 +615,7 @@ def property_docstring_template(self) -> T:
     - <LSP notes, deprecations, migration guidance for implementers.>
 
   Notes:
-    - <Lifecycle or context preconditions required for access (e.g., "Requires initialized geometry.").>
+    - <Lifecycle or context preconditions required for access (e.g., "Requires an open connection.").>
     - <Post-access guarantees and stability/determinism under fixed seeds.>
     - <Observable interactions such as cache warm/invalidations triggered by the first access.>
     - <Concurrency guarantees or restrictions (e.g., "Not thread-safe; external synchronization is required.").>
@@ -626,9 +628,9 @@ def property_docstring_template(self) -> T:
   """
 
 @property
-def property_docstring_example(self) -> "AABB":
+def property_docstring_example(self) -> "Rect":
   """
-  Axis-aligned bounding box of the shape.
+  Bounding rectangle of the shape.
 
   Notes:
     - Computed lazily and cached until geometry mutates.

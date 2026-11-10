@@ -26,7 +26,7 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import gate_dispatch  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # ----------------------------------------------------------------------------------------
@@ -72,7 +72,7 @@ def _core_argv(repo: Path | None, *tail: str) -> list[str]:
   Returns:
     The full argv list, interpreter first.
   """
-  cli = gate_dispatch.resolve_core_cli(repo or Path.cwd())
+  cli = spec_paths.resolve_core_cli(repo or Path.cwd())
   return [sys.executable, str(cli), _Wire.VERB, *tail]
 
 

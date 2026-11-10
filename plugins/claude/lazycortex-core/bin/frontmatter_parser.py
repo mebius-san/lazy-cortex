@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 
 # a block-scalar indicator: `|` or `>`, an optional chomping sign and indentation digit, either order
-_BLOCK_RE = re.compile(r"^[|>](?:[+-]?[1-9]?|[1-9][+-])$")
+_BLOCK_RE = re.compile(r"^[|>](?:[+-]?[1-9]?|[1-9][+-])\Z")
 
 
 def parse_frontmatter(text: str) -> dict:
@@ -37,6 +37,11 @@ def parse_frontmatter(text: str) -> dict:
       nested value and is skipped, never misread as a sibling key.
     - A quoted scalar value is always returned as a string, with its quoting escapes resolved,
       and is never coerced to a bool, null, or number.
+    - A literal `|` block scalar joins its lines with newlines, a folded `>` one with spaces (a blank line
+      is a paragraph break); chomping `-` drops all trailing newlines, `+` keeps every one, and no sign
+      keeps exactly one.
+    - A single-quoted scalar has each doubled `''` resolved to one `'`; a double-quoted scalar has its
+      backslash escapes resolved under JSON escape rules.
 
   Args:
     text: Full document text whose frontmatter block (if any) is delimited by lines containing
@@ -51,6 +56,19 @@ def parse_frontmatter(text: str) -> dict:
   # This function MUST NEVER raise on malformed input. Missing, malformed, or empty
   # frontmatter always resolves to an empty dict rather than propagating an exception.
 
+  # Contract:
+  # A literal `|` block scalar MUST join its lines with newlines and a folded `>` block scalar with
+  # spaces, a blank line being a paragraph break. The chomping sign MUST decide the trailing newlines:
+  # `-` drops all of them, `+` keeps every one, and no sign keeps exactly one.
+
+  # Contract:
+  # A single-quoted scalar MUST have each doubled `''` resolved to one `'`; a double-quoted scalar MUST
+  # have its backslash escapes resolved under JSON escape rules.
+
+  # Contract:
+  # A quoted scalar MUST always be returned as a string and NEVER coerced to a bool, null, or number,
+  # even when its text would match one.
+
   # guard: empty input — nothing to parse
   if not text:
     return {}
@@ -64,9 +82,9 @@ def parse_frontmatter(text: str) -> dict:
 
   # locate the closing fence inside the block
   close_idx = None
-  for i in range(1, len(lines)):
-    if lines[i].strip() == "---":
-      close_idx = i
+  for idx in range(1, len(lines)):
+    if lines[idx].strip() == "---":
+      close_idx = idx
       break
 
   # guard: no closing fence — frontmatter is malformed
@@ -142,24 +160,19 @@ def _block_value(indicator: str, raw_lines: list[str]) -> str:
   """
   Assemble a YAML block scalar's value from its indented lines.
 
-  Guarantees:
-    - A literal (`|`) scalar joins its lines with newlines; a folded (`>`) scalar joins them
-      with spaces, turning a blank line into a paragraph break.
-    - The chomping sign in `indicator` decides the trailing newlines: `-` drops every one of
-      them, `+` keeps every one the source carried, and no sign keeps exactly one.
-
   Args:
     indicator: The `|` (literal) or `>` (folded) indicator, with an optional chomping sign.
     raw_lines: The scalar's lines as written, indentation included.
 
   Returns:
-    The dedented value — literal lines joined by newlines, folded lines by spaces — ending in one
-    newline, none with the `-` chomping sign, or every trailing newline with `+`.
+    The dedented value — literal lines joined by newlines, folded lines by spaces with a blank line
+    becoming a paragraph break — ending in one newline, none with the `-` chomping sign, or every
+    trailing newline the source carried with `+`.
   """
   # the first non-blank line sets the indentation every other line is measured against
-  indents = [ len(ln) - len(ln.lstrip()) for ln in raw_lines if ln.strip() ]
+  indents = [ len(line) - len(line.lstrip()) for line in raw_lines if line.strip() ]
   width = indents[0] if indents else 0
-  body = [ ln[width:] if ln.strip() else "" for ln in raw_lines ]
+  body = [ line[width:] if line.strip() else "" for line in raw_lines ]
 
   # trailing blank lines are held back for the chomping rule
   trailing = 0
@@ -170,11 +183,6 @@ def _block_value(indicator: str, raw_lines: list[str]) -> str:
   # guard: no content at all — an empty value
   if not body:
     return ""
-
-  # Contract:
-  # The assembled text ends according to the chomping sign in `indicator`: `-` drops every
-  # trailing newline, `+` keeps every trailing newline the source carried, and no sign keeps
-  # exactly one trailing newline.
 
   # join literal lines with newlines, folded lines with spaces, then chomp the trailing newlines
   text = "\n".join(body) if indicator[0] == "|" else _fold(body)
@@ -196,69 +204,60 @@ def _fold(body: list[str]) -> str:
     The folded text without a final newline.
   """
   out = ""
-  for ln in body:
-    if not ln:
+  for line in body:
+    if not line:
       out += "\n"
     elif out and not out.endswith("\n"):
-      out += " " + ln
+      out += " " + line
     else:
-      out += ln
+      out += line
   return out
 
 
-def _unquote(s: str) -> str:
+def _unquote(raw: str) -> str:
   """
   Return the string with one matched layer of surrounding single or double quotes removed.
 
   A single-quoted value turns each doubled `''` into one quote; a double-quoted value resolves its
-  backslash escapes.
-
-  Guarantees:
-    - A single-quoted scalar has every doubled `''` resolved to one `'`; a double-quoted
-      scalar has its backslash escapes resolved the same way JSON's are.
+  backslash escapes the same way JSON's are resolved.
 
   Args:
-    s: Candidate string that may be wrapped in matching `"` or `'` characters.
+    raw: Candidate string that may be wrapped in matching `"` or `'` characters.
 
   Returns:
     The unquoted, unescaped string when both ends carry the same quote character; the input
     unchanged otherwise.
   """
   # guard: not a quoted scalar
-  if not _is_quoted(s):
-    return s
-
-  # Contract:
-  # A single-quoted scalar's doubled `''` sequences are each resolved to one `'`; a
-  # double-quoted scalar's backslash escapes are resolved using JSON's escape rules, which YAML
-  # double-quote escapes are a superset of.
+  if not _is_quoted(raw):
+    return raw
 
   # a single-quoted scalar only ever doubles its own quote character
-  if s[0] == "'":
-    return s[1:-1].replace("''", "'")
+  if raw[0] == "'":
+    return raw[1:-1].replace("''", "'")
 
   # YAML double-quote escapes are a superset of JSON's; an escape JSON rejects keeps its text
   try:
-    decoded = json.loads(s, strict = False)
+    decoded = json.loads(raw, strict = False)
   except ValueError:
-    return s[1:-1]
-  return decoded if isinstance(decoded, str) else s[1:-1]
+    return raw[1:-1]
+  return decoded if isinstance(decoded, str) else raw[1:-1]
 
 
-def _is_quoted(s: str) -> bool:
+def _is_quoted(raw: str) -> bool:
   """
   Tell whether a scalar is wrapped in one matching pair of quotes.
 
   Args:
-    s: Raw scalar text.
+    raw: Raw scalar text.
 
   Returns:
     True when both ends carry the same `"` or `'` character.
   """
-  return len(s) >= 2 and s[0] == s[-1] and s[0] in ( '"', "'" )
+  return len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ( '"', "'" )
 
 
-def _coerce_scalar(s: str) -> bool | int | float | str | None:
+def _coerce_scalar(raw: str) -> bool | int | float | str | None:
   """
   Convert a raw YAML scalar literal into the closest matching Python value.
 
@@ -267,38 +266,30 @@ def _coerce_scalar(s: str) -> bool | int | float | str | None:
   is returned as its unquoted string and is never classified; only an unquoted scalar is classified
   as a bool, null, or number.
 
-  Guarantees:
-    - A quoted scalar is always returned as its unquoted string; it is never coerced to a
-      bool, null, or number, regardless of what its text would otherwise parse as.
-
   Args:
-    s: Raw scalar text taken from the right-hand side of a frontmatter `key: value` pair.
+    raw: Raw scalar text taken from the right-hand side of a frontmatter `key: value` pair.
 
   Returns:
     A `bool`, `None`, `int`, `float`, or `str` value depending on which literal shape the input matches.
   """
 
-  # Contract:
-  # A quoted scalar is a string by declaration: it is always returned unquoted, never coerced
-  # to a bool, null, or number even when its text would otherwise match one of those literals.
-
-  # guard: a quoted scalar is a string by declaration, never a bool, null, or number
-  if _is_quoted(s):
-    return _unquote(s)
+  # a quoted scalar is a string by declaration, never a bool, null, or number
+  if _is_quoted(raw):
+    return _unquote(raw)
   # waiver: YAML scalar keyword, external-format token, not an internal key
-  if s.lower() == "true":
+  if raw.lower() == "true":
     return True
   # waiver: YAML scalar keyword, external-format token, not an internal key
-  if s.lower() == "false":
+  if raw.lower() == "false":
     return False
-  if s.lower() in ( "null", "~" ):
+  if raw.lower() in ( "null", "~" ):
     return None
 
   # try numeric coercion: prefer int when there's no decimal point, fall back to float
   try:
-    if "." not in s:
-      return int(s)
-    return float(s)
+    if "." not in raw:
+      return int(raw)
+    return float(raw)
   except ValueError:
     # not a numeric literal — return the original string as-is
-    return s
+    return raw

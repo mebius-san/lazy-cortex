@@ -70,6 +70,9 @@ groups:
             git_pull_diverged      — local and origin each carry commits the
             git_push_failed          other lacks, a push kept being refused, or
             git_remote_unavailable   the remote could not be reached.
+            git_rebase_not_started — origin moved ahead and git refused to
+                                     start the rebase onto it, usually an
+                                     untracked file in the way; clear it.
             suspected_loop         — one file was committed over and over by the
                                      same bot author; the halt block names the
                                      (author, file) pair.

@@ -13,43 +13,28 @@ The body shape (the `# Sources` H1 container, the `#protected/spec/sources` owne
 
 Signature: `lazy-spec.refresh-sources <file-path>`.
 
-1. **File path** — absolute or vault-relative path to a single stage-bearing authored spec doc (`design.md`, `code-plan.md`, `test-plan.md`, `bug.md`, or product/asset-level `tech.md`). One file only — callers loop over files themselves. The folder-note (status file) and the report journals (`code-report.md` / `test-report.md`) carry no `spec_source_docs` and are rejected.
+1. **File path** — absolute or vault-relative path to a single stage-bearing authored spec doc (`design.md`, `code-plan.md`, `test-plan.md`, `bug.md`, or the product-level `tech.md`). One file only — callers loop over files themselves. The folder-note (status file) and the report journals (`code-report.md` / `test-report.md`) carry no `spec_source_docs` and are rejected.
 
 ## Process
 
-### 1. Read the doc
+Run the projection verb on the one file:
 
-- Read the doc's frontmatter and body.
-- Capture the `spec_source_requests` list (order-preserving; `[]` when absent) and the `spec_source_docs` list (order-preserving; `[]` when absent). Frontmatter is the source of truth.
-- Locate the body `# Sources` H1 container and its `## Requests` / `## Docs` sub-sections. If the `# Sources` container is absent, create it per the reference (H1 + `#protected/spec/sources` tag on the first content line + both sub-sections with their marker pairs) at the end of the body.
+```bash
+"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" refresh-sources <file-path>
+```
 
-### 2. Re-project `## Requests`
-
-- Rewrite only the bytes between the `<!-- auto:spec-requests:start --> / :end -->` markers, projecting one bullet per `spec_source_requests` wikilink per the reference's `## Requests` bullet format (request wikilink + the date it first appeared).
-- Preserve the first-appearance date and any operator gloss on existing bullets by matching on the wikilink target (the bytes left of the `|`). A wikilink already present in the body keeps its existing date / display; a wikilink new to the frontmatter gets today's UTC date (`date -u +%Y-%m-%d`) and the default display.
-- Drop bullets whose wikilink no longer appears in the frontmatter list. Dedupe on the wikilink target.
-
-### 3. Re-project `## Docs`
-
-- Rewrite only the bytes between the `<!-- auto:spec-docs:start --> / :end -->` markers, projecting one bullet per `spec_source_docs` wikilink per the reference's `## Docs` bullet format (wikilink only, no date).
-- Preserve any operator-edited display (gloss) on existing bullets by matching on the wikilink path (the bytes left of the `|`). A wikilink new to the frontmatter gets the default display (the last path segment).
-- Drop bullets whose wikilink no longer appears in the frontmatter list. Dedupe on the wikilink path.
-
-### 4. Leave everything else untouched
-
-- Never touch frontmatter — this primitive is body-only projection from frontmatter, never the reverse.
-- Never touch the `# Sources` H1 heading text, the `#protected/spec/sources` tag, sub-section headings, the marker comments themselves, or any unmarked sub-section under `# Sources` (operator-authored kinds). Rewrite only the bytes inside each kind's marker pair.
-- Never touch any content outside the `# Sources` container.
+The verb reads `spec_source_requests` and `spec_source_docs`, rewrites only the bytes between each kind's marker pair (creating the `# Sources` container with both sub-sections when it is absent), keeps every operator gloss and first-appearance date, and prints one JSON line: `{"doc", "docs", "requests", "touched_paths"}`. Exit 1 prints `{"status": "refused", "reason", "doc"}` — report the reason as it stands and stop.
 
 ## Output
 
-- The doc's path.
-- Per sub-section: the projected bullet count (or `unchanged` when the projection matched the existing bytes byte-for-byte).
-- Nothing else — no other note is read or written by this skill.
+- The doc's path (`doc`).
+- Per sub-section: the projected bullet count, or `unchanged` when the projection matched the existing bytes (`requests`, `docs`).
+- `touched_paths` — the doc when a byte changed, empty otherwise; nothing else is read or written by this skill.
 
 ## Failure modes
 
-- **`/lazy-spec.refresh-sources` refuses naming a non-authored doc** — the target's `spec_role` is `status` (folder-note), `code-report` / `test-report`, or otherwise not an authored doc that carries `spec_source_docs` → run on a stage-bearing authored doc (`design` / `code-plan` / `test-plan` / `bug` / `tech`) instead.
+- **`/lazy-spec.refresh-sources` reports `reason: folder-note`** — the target is a status or level note → run it on one of that folder's authored docs instead.
+- **`/lazy-spec.refresh-sources` reports `reason: no-source-docs`** — the target's type is undeclared or carries no `stages` → run it on a stage-bearing authored doc (`design` / `code-plan` / `test-plan` / `bug` / `tech`) instead.
 
 ## Key Rules
 

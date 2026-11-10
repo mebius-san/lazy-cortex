@@ -5,7 +5,7 @@ allowed-tools: Read, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), B
 ---
 # Routine Unregister
 
-Remove a named routine from the flat `routines` section of `.claude/lazy.settings.json`. Idempotent — unregistering a routine that does not exist is a no-op (INFO, not an error). Protects `lazy-expert.pump` (the built-in pump) from accidental removal unless `--force` is passed.
+Remove a named routine from the flat `routines` section of `.claude/lazy.settings.json`. Idempotent — unregistering a routine that does not exist is a no-op (INFO, not an error). Protects the built-in routines in `PROTECTED_ROUTINES` (`bin/expert_runtime.py`) — `lazy-expert.pump` and `lazy-runtime.doctor` — from accidental removal unless `--force` is passed.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -34,9 +34,9 @@ Outcome: `validated` or `aborted`.
 
 ## Step 2 — Built-in protection check
 
-If `name == "lazy-expert.pump"`:
-- If `--force` is NOT set → abort: "`lazy-expert.pump` is the built-in expert pump; removing it breaks the experts pipeline. Pass `--force` to override."
-- If `--force` IS set → warn: "WARNING: removing `lazy-expert.pump`. Expert jobs will not be processed until the routine is re-registered or `/lazy-core.install` is re-run." Then proceed.
+The protected set is `PROTECTED_ROUTINES` in `bin/expert_runtime.py`: `lazy-expert.pump` (the expert pump) and `lazy-runtime.doctor` (the runtime doctor). If `name` is in that set:
+- If `--force` is NOT set → abort: "`<name>` is a built-in routine (`lazy-expert.pump` processes expert jobs, `lazy-runtime.doctor` repairs stuck jobs and halts); removing it breaks the runtime. Pass `--force` to override."
+- If `--force` IS set → warn: "WARNING: removing `<name>`. Its work stops until the routine is re-registered or `/lazy-core.install` is re-run." Then proceed.
 
 Outcome: `allowed`, `force-override`, or `aborted`.
 

@@ -38,27 +38,62 @@ import subprocess
 import sys
 from pathlib import Path
 
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import flip_gate  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import iconize_inline  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import note_explainers  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import resolve_language  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import spec_frontmatter  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import spec_paths  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from spec_keys import (  # pylint: disable=import-error
-    DraftKey, HistoryEvent, UPSTREAM_ACTION_LABELS, UPSTREAM_FROZEN_STATUSES, UpstreamAction,
-    UpstreamKey, UpstreamRole, UpstreamSourceKey, UpstreamSourceStatus, UpstreamStatus,
-)
-
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
+
+
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import history_journal  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import note_explainers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import resolve_language  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# pylint: disable-next=import-error,wrong-import-position
+from spec_keys import (  # noqa: E402
+    Gate, HistoryEvent, LangId, SpecKey, SpecValue, UPSTREAM_ACTION_LABELS, UPSTREAM_FROZEN_STATUSES, UpstreamAction,
+    UpstreamKey, UpstreamRole, UpstreamSourceKey, UpstreamSourceStatus, UpstreamStatus,
+)
+
+
+# Known forge hosts mapped to the path segment their blob-view URL puts before the revision.
+_KNOWN_FORGE_HOSTS = {
+    "github.com": "blob",
+    "gitea.com": "src/commit",
+    "codeberg.org": "src/commit",
+}
+
+# GitLab's blob-URL shape differs from the table above (`-/blob` segment); `.com` plus any
+# self-hosted `gitlab.*` subdomain share it.
+_GITLAB_COM = "gitlab.com"
+_GITLAB_SUBDOMAIN_PREFIX = "gitlab."
+
+# Plan action of a file the sync primitive skipped rather than copied.
+_ACTION_SKIPPED = "skipped"
+
+# Statuses a released-gated unit may hold onto instead of advancing into a fresh new/drifted
+# transition (§ released-gate: status stays put).
+_GATE_HOLD_STATUSES = (UpstreamStatus.NEW, UpstreamStatus.DRIFTED, UpstreamStatus.PROCESSED)
+
+# Cursor-file field name.
+_CURSOR_KEY = "cursor"
+
+# One-line description under the root catalog note's title, per vault authoring language.
+_ROOT_NOTE_EXPLAINERS: dict[str, str] = {
+    LangId.EN: "_Mirrored external sources — one folder per configured source repo._",
+    LangId.RU: "_Зеркала внешних источников — по папке на каждый настроенный репозиторий._",
+}
 
 
 class _K:
@@ -98,15 +133,9 @@ class _K:
     LEGACY_SKIPPED_CURRENT_H1: The current list's pre-rename heading, read-only fallback.
     LEGACY_SKIPPED_PROCESSED_H1: The processed list's pre-rename heading, read-only fallback.
     HISTORY_H1: Heading of a unit note's closed-request log.
-    LANG_EN: English language token — the explainer fallback.
-    LANG_RU: Russian language token.
     NONE_MARKER: Placeholder line rendered under an empty list section.
     MODE_PLAN: `remote-mirror` plan-only mode token.
     MODE_SYNC: `remote-mirror` sync mode token.
-    PLUGIN_DIRS_ENV: Env var listing plugin dirs to resolve the core CLI in.
-    CORE_CLI_NAME: The `lazycortex-core` CLI binary name.
-    BIN_DIR: Per-plugin `bin/` sub-dir.
-    PLUGIN_TREE_DIR: Dev-vault plugin-tree segment (fallback CLI resolution).
     REPO_ROOT_ENV: Env var the core CLI reads to resolve settings/paths against.
     REMOTE_MIRROR_VERB: The core CLI's `remote-mirror` subcommand token.
     PROG: CLI program name shown in `--help` output.
@@ -149,11 +178,13 @@ class _K:
     SOURCE_NOTE_ICON: Default icon seeded on every source's repo-level folder-note.
     ROOT_NOTE_ICON: Default icon seeded on the root upstream catalog note.
     INTAKE_COLOR: Accent colour the root catalog note and each per-source note carry — both are
-      intake shelves, which the catalog paints apart from the ordinary containers. A unit note
-      carries no icon keys at all.
+      intake shelves, which the catalog paints apart from the ordinary containers.
     ROOT_NOTE_TITLE: Title line of the root upstream catalog note.
     UNSAFE_NAME_CHARS: Characters that make a source directory name vault-unsafe (§ 3).
     CASE_DUPLICATE_REASON: Refusal reason rendered for a name colliding only in case (§ 3).
+    UNSAFE_CHAR_REASON: Refusal reason template rendered for a directory name carrying a vault-unsafe character
+      (§ 3), with `{char}` and `{segment}` placeholders.
+    MOUNT_REFUSED_REASON: Refusal reason rendered beside a mount whose `units` globs overlap.
     DATAVIEWJS_FENCE: Fenced-code language tag opening a `dataviewjs` block.
     DOCTOR_PROG: CLI program name shown in `upstream-doctor --help` output.
   """
@@ -242,24 +273,12 @@ class _K:
   LEGACY_SKIPPED_PROCESSED_H1 = "# Skipped (processed)"
   # Heading of a unit note's closed-request log.
   HISTORY_H1 = "# History"
-  # English language token — the explainer fallback.
-  LANG_EN = "en"
-  # Russian language token.
-  LANG_RU = "ru"
   # Placeholder line rendered under an empty list section.
   NONE_MARKER = "_(none)_"
   # `remote-mirror` plan-only mode token.
   MODE_PLAN = "plan"
   # `remote-mirror` sync mode token.
   MODE_SYNC = "sync"
-  # Env var listing plugin dirs to resolve the core CLI in.
-  PLUGIN_DIRS_ENV = "LAZYCORTEX_PLUGIN_DIRS"
-  # The `lazycortex-core` CLI binary name.
-  CORE_CLI_NAME = "lazycortex-core"
-  # Per-plugin `bin/` sub-dir.
-  BIN_DIR = "bin"
-  # Dev-vault plugin-tree segment (fallback CLI resolution).
-  PLUGIN_TREE_DIR = "plugins/claude"
   # Env var the core CLI reads to resolve settings/paths against.
   REPO_ROOT_ENV = "LAZY_REPO_ROOT"
   # The core CLI's `remote-mirror` subcommand token.
@@ -333,6 +352,10 @@ class _K:
   UNSAFE_NAME_CHARS = frozenset({ "#", "[", "]", "|", ":" })
   # Refusal reason rendered for a name colliding only in case (§ 3).
   CASE_DUPLICATE_REASON = "case-only duplicate of another unit directory"
+  # Refusal reason template rendered for a name carrying a vault-unsafe character (§ 3).
+  UNSAFE_CHAR_REASON = "unsafe character {char!r} in directory name {segment!r}"
+  # Refusal reason rendered beside a mount whose `units` globs overlap.
+  MOUNT_REFUSED_REASON = "mount refused: overlapping `units` globs"
   # Fenced-code language tag opening a `dataviewjs` block.
   DATAVIEWJS_FENCE = "```dataviewjs"
   # CLI program name shown in `upstream-doctor --help` output.
@@ -464,6 +487,7 @@ class GlobMatcher:
       True on a match, False otherwise.
     """
     # compile once per pattern — the same globs are re-tested against every candidate path
+    # opt: cached by glob text — valid while compiling depends on nothing but the pattern string
     if pattern not in self._cache:
       self._cache[pattern] = self._compile(pattern)
     return bool(self._cache[pattern].match(rel_posix))
@@ -478,13 +502,21 @@ class GlobMatcher:
     Returns:
       Compiled regular expression equivalent to the pattern under this class's glob rules.
     """
+    # translate each literal stretch between `**` runs: `*` and `?` never cross a `/`, so they
+    # stay inside one path component
     parts = pattern.split("**")
     segs: list[str] = []
     for part in parts:
       escaped = re.escape(part).replace(r"\*", "[^/]*").replace(r"\?", "[^/]")
       segs.append(escaped)
+
+    # `**` crosses components; a `/**/` in the middle may also match zero components, so the two
+    # slashes around it collapse to one instead of demanding a non-empty middle
     regex = ".*".join(segs)
     regex = regex.replace("/.*/", "(?:/|/.*/)")
+
+    # a leading `**/` also matches at the root and a trailing `/**` also matches the directory
+    # itself — both stand for zero or more components, so each is made optional as a whole
     if regex.startswith(".*/"):
       regex = "(?:.*/)?" + regex[3:]
     if regex.endswith("/.*"):
@@ -494,42 +526,31 @@ class GlobMatcher:
 
 # italic one-liners rendered under every generated section heading, per vault language —
 # the bot note documents itself so the operator never has to guess what a section means
-# waiver: the RU lines carry `# noqa: RUF001` — Cyrillic in Russian UI strings is the content,
-# not a lookalike-character typo; the checker cannot distinguish deliberate Russian text
 _EXPLAINERS: dict[tuple[str, str], str] = {
-    (_K.ACTIONS_H1, _K.LANG_EN): "Operator decisions for this unit: tick one box — the next tick acts on it.",
-    # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-    (_K.ACTIONS_H1, _K.LANG_RU):
-        # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-        "Решения оператора по юниту: отметьте один чекбокс — следующий тик его исполнит.",  # noqa: RUF001
-    (_K.SKIPPED_CURRENT_H1, _K.LANG_EN):
+    (_K.ACTIONS_H1, LangId.EN): "Operator decisions for this unit: tick one box — the next tick acts on it.",
+    (_K.ACTIONS_H1, LangId.RU):
+        "Решения оператора по юниту: отметьте один чекбокс — следующий тик его исполнит.",
+    (_K.SKIPPED_CURRENT_H1, LangId.EN):
         "Source files left out of the current mirror (source/): too large or not text. "
         "Judge the unit knowing these are absent.",
-    (_K.SKIPPED_CURRENT_H1, _K.LANG_RU):
-    # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-        "Файлы источника, не попавшие в текущее зеркало (source/): слишком большие или нетекстовые. "  # noqa: RUF001
-    # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-        "Оценивайте юнит с учётом того, чего здесь нет.",  # noqa: RUF001
-    (_K.SKIPPED_PROCESSED_H1, _K.LANG_EN):
+    (_K.SKIPPED_CURRENT_H1, LangId.RU):
+        "Файлы источника, не попавшие в текущее зеркало (source/): слишком большие или нетекстовые. "
+        "Оценивайте юнит с учётом того, чего здесь нет.",
+    (_K.SKIPPED_PROCESSED_H1, LangId.EN):
         "Files that were absent from the last accepted snapshot (processed/) — "
         "the baseline drift is measured against.",
-    (_K.SKIPPED_PROCESSED_H1, _K.LANG_RU):
-    # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-        "Файлы, отсутствовавшие в последнем принятом снапшоте (processed/) — базе, от которой меряется дрейф.",  # noqa: RUF001
-    (_K.HISTORY_H1, _K.LANG_EN): "Closed requests of this unit; lines are appended by the tick.",
-    # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-    (_K.HISTORY_H1, _K.LANG_RU): "Закрытые реквесты юнита; строки дописывает рутина.",  # noqa: RUF001
-    (_K.SOURCE_NOTE_H1, _K.LANG_EN): "Result of the last scheduled fetch of this source repository.",
-    # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-    (_K.SOURCE_NOTE_H1, _K.LANG_RU): "Итог последнего планового фетча репозитория-источника.",  # noqa: RUF001
-    (_K.SOURCE_INVALID_H1, _K.LANG_EN):
+    (_K.SKIPPED_PROCESSED_H1, LangId.RU):
+        "Файлы, отсутствовавшие в последнем принятом снапшоте (processed/) — базе, от которой меряется дрейф.",
+    (_K.HISTORY_H1, LangId.EN): "Closed requests of this unit; lines are appended by the tick.",
+    (_K.HISTORY_H1, LangId.RU): "Закрытые реквесты юнита; строки дописывает рутина.",
+    (_K.SOURCE_NOTE_H1, LangId.EN): "Result of the last scheduled fetch of this source repository.",
+    (_K.SOURCE_NOTE_H1, LangId.RU): "Итог последнего планового фетча репозитория-источника.",
+    (_K.SOURCE_INVALID_H1, LangId.EN):
         "Source directories whose names are unsafe for the vault — no unit is created for them.",
-    (_K.SOURCE_INVALID_H1, _K.LANG_RU):
-    # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-        "Каталоги источника с именами, небезопасными для вольта — юниты по ним не создаются.",  # noqa: RUF001
-    (_K.SOURCE_UNITS_H1, _K.LANG_EN): "Live summary of this source's units (Dataview).",
-    # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-    (_K.SOURCE_UNITS_H1, _K.LANG_RU): "Живая сводка юнитов источника (Dataview).",  # noqa: RUF001
+    (_K.SOURCE_INVALID_H1, LangId.RU):
+        "Каталоги источника с именами, небезопасными для вольта — юниты по ним не создаются.",
+    (_K.SOURCE_UNITS_H1, LangId.EN): "Live summary of this source's units (Dataview).",
+    (_K.SOURCE_UNITS_H1, LangId.RU): "Живая сводка юнитов источника (Dataview).",
 }
 
 
@@ -567,14 +588,18 @@ def _load_upstream_config(repo: Path) -> dict:
   if not path.is_file():
     return {}
 
-  # a malformed settings file is treated the same as an absent one — every caller already
+  # guard: a malformed settings file is treated the same as an absent one — every caller already
   # falls back to an empty section
   try:
     spec = json.loads(path.read_text(encoding = "utf-8")).get(_K.SPEC_SECTION)
   except json.JSONDecodeError:
     return {}
+
+  # guard: malformed spec section — nothing configured
   if not isinstance(spec, dict):
     return {}
+
+  # the upstream sub-section, or nothing when it is absent or not a mapping
   upstream = spec.get(_K.UPSTREAM_SECTION)
   return upstream if isinstance(upstream, dict) else {}
 
@@ -590,35 +615,6 @@ def _source_keys(cfg: dict) -> list[str]:
     Sorted repo-key names, skipping the reserved limit keys.
   """
   return sorted(k for k, v in cfg.items() if k not in _K.RESERVED_KEYS and isinstance(v, dict))
-
-
-def _resolve_core_cli(repo: Path) -> Path:
-  """
-  Find the `lazycortex-core` CLI binary (`dev.plugin-boundaries.md` § 1c).
-
-  Args:
-    repo: Repository root the dev-fallback path is resolved against.
-
-  Returns:
-    Absolute path to the resolved `lazycortex-core` binary.
-
-  Raises:
-    RuntimeError: When neither the env-declared plugin dirs, the plugin registry, nor the dev-vault
-      fallback resolve.
-  """
-  # env-declared plugin dirs (the daemon's export), then the install the plugin registry records
-  cli = spec_paths.resolve_plugin_cli(_K.CORE_CLI_NAME)
-  if cli is not None:
-    return cli
-  # waiver: sibling-plugin path reach is intentional — this dev vault IS lazycortex-core's own
-  # source tree, so a session with no registry record and no env export still resolves the CLI
-  fallback = repo / _K.PLUGIN_TREE_DIR / _K.CORE_CLI_NAME / _K.BIN_DIR / _K.CORE_CLI_NAME
-  if fallback.is_file():
-    return fallback
-  raise RuntimeError(
-      f"lazycortex-core CLI not resolvable: ${_K.PLUGIN_DIRS_ENV} and the plugin registry yield no match "
-      f"and {fallback} is absent from this repo"
-  )
 
 
 def _call_remote_mirror(repo: Path, payload: dict) -> dict:
@@ -638,7 +634,7 @@ def _call_remote_mirror(repo: Path, payload: dict) -> dict:
     RuntimeError: The CLI process itself could not be resolved or crashed outside its own
       documented `{"error": ...}` contract.
   """
-  cli = _resolve_core_cli(repo)
+  cli = spec_paths.resolve_core_cli(repo)
   env = os.environ.copy()
   env[_K.REPO_ROOT_ENV] = str(repo)
   proc = subprocess.run(
@@ -650,14 +646,14 @@ def _call_remote_mirror(repo: Path, payload: dict) -> dict:
   # stdout" (remote_mirror.py `main`); a non-JSON stdout means the process itself crashed
   try:
     return json.loads(proc.stdout)
-  except json.JSONDecodeError as exc:
+  except json.JSONDecodeError as error:
     raise RuntimeError(
         f"remote-mirror crashed: exit={proc.returncode} stdout={proc.stdout!r} "
         f"stderr={proc.stderr!r}"
-    ) from exc
+    ) from error
 
 
-def _source_content_changed(repo: Path, source_dir: Path) -> bool:
+def _has_source_content_changed(repo: Path, source_dir: Path) -> bool:
   """
   Report whether the freshly rewritten `source/` differs from its last committed state.
 
@@ -695,7 +691,7 @@ def _clone_dir(repo: Path, repo_key: str) -> Path:
   return repo / _K.RUNTIME_CLONE_ROOT / repo_key
 
 
-def _clone_origin_mismatch(clone_dir: Path, url: str) -> bool:
+def _has_clone_origin_mismatch(clone_dir: Path, url: str) -> bool:
   """
   Check an existing clone's `origin` remote against the configured URL.
 
@@ -753,13 +749,15 @@ def _match_unit_dirs(all_paths: list[str], source_path: str, units: list[str], e
   # collect every directory segment under source_path that appears in the file-path list
   dirs: set[str] = set()
   for p in all_paths:
-    # guard: file lies outside this mount's source_path
+    # files outside this mount's source_path contribute no segment
     if prefix and not p.startswith(prefix):
       continue
     rel = p[len(prefix):]
     parts = rel.split("/")[:-1]
     for depth in range(1, len(parts) + 1):
       dirs.add("/".join(parts[:depth]))
+
+  # a directory is a unit when some `units` glob matches it and no `exclude` glob does
   matched: set[str] = set()
   for d in dirs:
     if any(matcher.match(d, pat) for pat in units) and not any(matcher.match(d, pat) for pat in exclude):
@@ -767,16 +765,10 @@ def _match_unit_dirs(all_paths: list[str], source_path: str, units: list[str], e
   return matched
 
 
-def _unit_glob_matches(unit_path: str, units: list[str], exclude: list[str]) -> bool:
+def _is_unit_in_globs(unit_path: str, units: list[str], exclude: list[str]) -> bool:
   """
   Test one unit path against a mount's `units`/`exclude` globs directly, independent of whether
   the directory currently exists in the fetched tree.
-
-  Deliberately separate from `_match_unit_dirs` (which derives candidates FROM the tree's
-  current file list): the excluded-vs-orphaned distinction (§ 8) needs a pure config-glob test —
-  a directory that vanished from the source tree also vanishes from `_match_unit_dirs`'s output,
-  so testing membership in that tree-derived set can never tell "still in scope but gone" apart
-  from "fell out of `units`/`exclude`".
 
   Args:
     unit_path: Unit path, relative to the mount's `source_path`.
@@ -786,6 +778,12 @@ def _unit_glob_matches(unit_path: str, units: list[str], exclude: list[str]) -> 
   Returns:
     `True` when `unit_path` matches at least one `units` pattern and no `exclude` pattern.
   """
+
+  # Decision: a pure config-glob test, not membership in the `_match_unit_dirs` set — a directory
+  # that vanished from the source tree also vanishes from that set, so it could never tell
+  # "still in scope but gone" (orphaned) apart from "fell out of the globs" (excluded)
+
+  # in scope means some `units` glob matches and no `exclude` glob does
   matcher = GlobMatcher()
   return (
       any(matcher.match(unit_path, pat) for pat in units)
@@ -834,9 +832,9 @@ def _invalid_char_reason(unit_path: str) -> str | None:
   for segment in unit_path.split("/"):
     bad = next((ch for ch in _K.UNSAFE_NAME_CHARS if ch in segment), None)
 
-    # guard: first offending character found — one reason is enough, no need to scan further
+    # the first offending character is the reason reported; one reason is enough
     if bad is not None:
-      return f"unsafe character {bad!r} in directory name {segment!r}"
+      return _K.UNSAFE_CHAR_REASON.format(char = bad, segment = segment)
   return None
 
 
@@ -846,9 +844,8 @@ def _filter_invalid_units(
   """
   Split a mount's freshly-matched candidate unit paths into vault-safe and refused (§ 3).
 
-  Guarantees:
-    - A candidate whose name collides only in case with an already-landed unit path in
-      `existing` is always refused, never accepted in place of the landed spelling.
+  A candidate whose name collides only in case with an already-landed unit path in `existing` is
+  refused, never accepted in place of the landed spelling.
 
   Args:
     candidates: Unit paths this tick's source tree matched (`_match_unit_dirs`'s output).
@@ -862,6 +859,14 @@ def _filter_invalid_units(
     `(accepted, refused)` — the vault-safe subset of `candidates`, and `(unit_path, reason)`
     pairs for every refused one, source-order-independent (sorted by `unit_path`).
   """
+
+  # Domain(spec.upstream):
+  # # An upstream unit that differs from a landed unit only in letter case is refused
+  # A freshly matched upstream unit whose name differs from an already-landed unit only in
+  # letter case is never accepted. On a case-insensitive filesystem the two spellings are one
+  # folder, so accepting the newcomer would overwrite the landed unit or shadow it. The landed
+  # spelling keeps the name and the newcomer is refused, however the two arrive in the source.
+
   # casefold -> the one original spelling that currently owns it
   taken = { name.casefold(): name for name in existing }
   accepted: set[str] = set()
@@ -869,11 +874,6 @@ def _filter_invalid_units(
   for unit_path in sorted(candidates):
     reason = _invalid_char_reason(unit_path)
     casefolded = unit_path.casefold()
-
-    # Contract:
-    # A candidate whose name is a different spelling that collides only in case with an
-    # already-landed unit path in `existing` is always refused; it never silently overwrites
-    # or shadows the landed spelling on a case-insensitive filesystem.
 
     # something else (a different spelling) already owns this casefolded name
     if reason is None and taken.get(casefolded, unit_path) != unit_path:
@@ -951,7 +951,7 @@ def _ordered_units(
     the set of `(repo_key, mount)` pairs whose `units` overlap this tick (§ 8: a refused mount is
     refused whole — a refused mount's own units still enumerate from whatever already exists in the
     vault, but every one of them reports `UpstreamStatus.EXCLUDED` this tick — `_advance_unit`
-    reads `refused_mounts`, not a tree-derived match set, see `_unit_glob_matches`); and
+    reads `refused_mounts`, not a tree-derived match set, see `_is_unit_in_globs`); and
     `{repo_key: [(mount, unit_path, reason), ...]}` for every freshly-matched candidate this
     tick refused for a vault-unsafe name (§ 3) — never enumerated into `ordered` at all.
   """
@@ -968,19 +968,25 @@ def _ordered_units(
       exclude_cfg = list(rec.get(_K.EXCLUDE) or [])
       matched: set[str] = set()
 
-      # guard: tree unreadable this tick — only vault-existing units are still visitable
+      # a readable tree is matched against the configured units; on an unreadable one only
+      # vault-existing units stay visitable
       if error is None:
         matched = _match_unit_dirs(tree_paths, source_path, units_cfg, exclude_cfg)
 
-        # guard: overlapping units — refuse the whole mount, not the tick
+        # overlapping units refuse the whole mount, not the tick
         if _has_overlap(matched):
           refused_mounts.add((repo_key, mount))
+
+      # freshly matched candidates with a vault-unsafe name are dropped and recorded per source;
+      # units the vault already holds pass through untouched
       existing = _vault_existing_units(repo, repo_key, mount)
       matched, refused = _filter_invalid_units(matched, existing)
       if refused:
         invalid_names.setdefault(repo_key, []).extend(
             (mount, unit_path, reason) for unit_path, reason in refused
         )
+
+      # the tick visits every matched unit together with every unit the vault already holds
       for unit_path in sorted(matched | existing):
         out.append((repo_key, mount, unit_path))
   return sorted(out), refused_mounts, invalid_names
@@ -1014,7 +1020,7 @@ def _plan_source_tree(
   clone_dir = _clone_dir(repo, repo_key)
 
   # guard: an existing clone points at a different remote — never silently re-fetch the wrong repo
-  if _clone_origin_mismatch(clone_dir, url):
+  if _has_clone_origin_mismatch(clone_dir, url):
     return [], f"clone origin mismatch for '{repo_key}': configured url is '{url}'"
   include = [f"{sp}/**" if sp and sp != "." else "**" for sp in mounts.values()]
   result = _call_remote_mirror(repo, {
@@ -1049,9 +1055,8 @@ def _sha256_file(path: Path) -> str:
   """
   Hash one file's content, with a text file's line endings read as LF.
 
-  Guarantees:
-    - A CRLF copy of an LF text file hashes equal to the LF file; a binary file (one carrying a
-      NUL byte) is hashed byte for byte.
+  A CRLF copy of an LF text file hashes equal to the LF file; a binary file (one carrying a NUL
+  byte) is hashed byte for byte.
 
   Args:
     path: File to hash.
@@ -1059,11 +1064,15 @@ def _sha256_file(path: Path) -> str:
   Returns:
     Hex sha256 digest.
   """
-  data = path.read_bytes()
 
-  # Contract:
-  # A CRLF copy of an LF text file hashes equal to the LF file; a file carrying a NUL byte is binary
-  # and is hashed byte for byte.
+  # Domain(spec.upstream):
+  # # Line endings alone are not a content change
+  # When upstream content is compared, a text file's CRLF and LF copies count as identical: a
+  # difference in line endings only is not drift and never reopens a unit for review. A binary
+  # file, recognised by carrying a NUL byte, is compared byte for byte, since for it every byte
+  # is content.
+
+  data = path.read_bytes()
 
   # a text file is hashed as LF so a CRLF copy never reads as drift; binary bytes stay exact
   if _NUL not in data:
@@ -1096,10 +1105,6 @@ def _git_ignored(repo: Path, rel_paths: list[str]) -> set[str]:
   """
   Batch-check which repo-relative paths git would ignore.
 
-  `.lazyignore` merging (the wiki plugin's own `RepoWalk._ignored` precedent) is deliberately
-  out of scope here — a cross-plugin private-method reach would violate
-  `dev.plugin-boundaries.md`; only the repo's own `.gitignore`/exclude mechanism is checked.
-
   Args:
     repo: Repository root.
     rel_paths: Repo-relative POSIX paths to check.
@@ -1107,6 +1112,11 @@ def _git_ignored(repo: Path, rel_paths: list[str]) -> set[str]:
   Returns:
     Subset of `rel_paths` git would ignore; empty when `rel_paths` is empty.
   """
+
+  # Decision: only the repo's own `.gitignore` / exclude mechanism, not `.lazyignore` as well — a
+  # `.lazyignore` entry hides a path from the runtime's tree walks, not from git, so the vault's
+  # commit still carries the file and dropping it here would withhold content the vault tracks
+
   # guard: nothing to check
   if not rel_paths:
     return set()
@@ -1145,7 +1155,7 @@ def _apply_ignore_filter(repo: Path, source_dir: Path, plan: list[dict]) -> tupl
     if rel_in_repo in ignored:
       entry = { _PlanKey.PATH: item[_PlanKey.PATH], _SkipKey.REASON: SKIP_REASON_IGNORED }
 
-      # guard: read the file's own size/hash before deleting it — the bytes are gone after
+      # record the file's own size/hash before deleting it — the bytes are gone after
       if file_path.is_file() and not file_path.is_symlink():
         entry[_SkipKey.SIZE] = file_path.stat().st_size
         entry[_SkipKey.HASH] = _sha256_file(file_path)
@@ -1186,18 +1196,6 @@ def _aggregate_hash(signature: dict[str, str], skipped: list[dict]) -> str:
   return hashlib.sha256("\n".join(lines).encode(_ENCODING)).hexdigest()
 
 
-_KNOWN_FORGE_HOSTS = {
-    "github.com": "blob",
-    "gitea.com": "src/commit",
-    "codeberg.org": "src/commit",
-}
-
-# GitLab's blob-URL shape differs from the table above (`-/blob` segment); `.com` plus any
-# self-hosted `gitlab.*` subdomain share it.
-_GITLAB_COM = "gitlab.com"
-_GITLAB_SUBDOMAIN_PREFIX = "gitlab."
-
-
 def _forge_blob_url(url: str, revision: str, path: str) -> str | None:
   """
   Best-effort web-viewer link for one file at one revision of a mirrored source.
@@ -1210,10 +1208,7 @@ def _forge_blob_url(url: str, revision: str, path: str) -> str | None:
   Returns:
     An HTTPS blob-view URL, or `None` when the host isn't recognised.
   """
-  # limit: covers github.com, the common self-hosted gitea/forgejo `src/commit` shape, and
-  # GitLab's `-/blob`; an unrecognised host (GitHub Enterprise, Bitbucket, sourcehut, ...)
-  # returns None rather than guessing a URL shape — upgrade path: fold in the forge table
-  # `lazy-spec.resolve-repo` already carries, once this worker's source config gains a `forge` field.
+  # limit: an unlisted forge host gets no link, a per-source `forge` field in the mirror source config
 
   # normalise `git@host:owner/repo.git` to `host/owner/repo`
   ssh_match = re.match(r"^git@([^:]+):(.+?)(?:\.git)?$", url)
@@ -1251,14 +1246,19 @@ def _render_skipped_section(heading: str, items: list[dict], url: str, revision:
     return f"{heading}\n{_K.NONE_MARKER}\n"
   lines = [heading]
   for item in items:
+    # the entry's recorded facts; size and hash are optional and absent on some skip reasons
     path = item.get(_PlanKey.PATH, "")
     reason = item.get(_SkipKey.REASON, "")
     size = item.get(_SkipKey.SIZE)
     digest = item.get(_SkipKey.HASH)
+
+    # the bullet reads path, size when known, then the reason
     bits = [f"`{path}`"]
     if size is not None:
       bits.append(f"{size} bytes")
     bits.append(reason)
+
+    # a hashed entry also shows its short digest and, when the forge is known, a source link
     if digest:
       bits.append(f"sha256:`{digest[:_HASH_DISPLAY_LEN]}`")
     link = _forge_blob_url(url, revision, path) if digest else None
@@ -1295,30 +1295,37 @@ def _render_actions(status: str, *, gated: bool = False, resume_label: str | Non
   TICKED — the postpone is a toggle (§ 7): the operator unticks it to release the unit without
   a request, or ticks the resume box, which takes the unit into work and cancels the postpone
   in the same tick. Every other status renders an inert one-line note
-  (`docs/tasks/lazycortex-specs.upstream.md`, the merge-decision status wording). A draft-gated
-  unit never carries a checkbox regardless of status (§ 4a draft-gate: a gated unit gets no
-  checkbox).
+  (`docs/tasks/lazycortex-specs.upstream.md`, the merge-decision status wording). A gated unit —
+  one whose canon note is an unreleased status note — never carries a checkbox regardless of status.
 
   Args:
     status: The unit's current `UpstreamStatus` value.
-    gated: Whether the unit's own canon note (mirrored into `source/`) carries `spec_draft: true`.
+    gated: Whether the unit's own canon note (mirrored into `source/`) is an unreleased status note.
     resume_label: The `UpstreamAction` label a postponed unit's own content status would carry,
       rendered as its checkbox; ignored for any status other than `UpstreamStatus.POSTPONED`.
 
   Returns:
     The `# Actions` heading plus body.
   """
+  # a released-gated unit gets no checkbox at all, whatever its status
   if gated:
-    return f"{_K.ACTIONS_H1}\n_(no action needed — upstream design still a draft)_\n"
+    return f"{_K.ACTIONS_H1}\n_(no action needed — upstream asset not released yet)_\n"
+
+  # a new or drifted unit offers its primary action with a postpone box beside it
   label = _label_for_content_status(status)
   if label:
     return f"{_K.ACTIONS_H1}\n- [ ] {label}\n- [ ] {UpstreamAction.POSTPONE}\n"
+
+  # a postponed unit with actionable content offers its resume box and shows the postpone ticked,
+  # so unticking it releases the unit
   if status == UpstreamStatus.POSTPONED and resume_label:
     return (
         f"{_K.ACTIONS_H1}\n- [ ] {resume_label}\n- [x] {UpstreamAction.POSTPONE}\n"
         "_(postponed by operator — untick Postpone to release without a request; ticking the "
         "box above takes the unit into work and cancels the postpone)_\n"
     )
+
+  # every other status renders an inert note naming why nothing is to be done
   notes = {
       UpstreamStatus.IN_REVIEW: "request in review",
       UpstreamStatus.POSTPONED: "postponed by operator",
@@ -1361,7 +1368,7 @@ def _extract_section(body: str, heading: str) -> list[dict]:
   section = after.split("\n#", 1)[0]
   out: list[dict] = []
   for line in section.splitlines():
-    # guard: only bullet lines carry an entry
+    # only bullet lines carry an entry
     if not line.startswith("- `"):
       continue
     path_match = re.match(r"^- `([^`]+)`", line)
@@ -1418,7 +1425,7 @@ def _render_note(
     *, unit_path: str, status: str, revision: str, url: str,
     skipped_current: list[dict], skipped_processed: list[dict], history_body: str,
     gated: bool = False, postponed_hash: str | None = None, resume_label: str | None = None,
-    request_wikilink: str | None = None, lang: str = _K.LANG_EN,
+    request_wikilink: str | None = None, lang: str = LangId.EN,
 ) -> str:
   """
   Render one unit's full folder-note text.
@@ -1431,9 +1438,9 @@ def _render_note(
     skipped_current: Current-state skip entries.
     skipped_processed: Last-processed-state skip entries (empty until the accept step first
       writes one).
-    history_body: The existing `# History` section text, plus any newly closed entry the
-      caller has already folded in — this module never appends to it itself.
-    gated: Whether the unit's own canon note carries `spec_draft: true` — suppresses the
+    history_body: The complete `# History` section text to render, already carrying any newly
+      appended entry; empty renders the empty-state placeholder.
+    gated: Whether the unit's own canon note is an unreleased status note — suppresses the
       operator checkbox regardless of `status`.
     postponed_hash: The stored postponed-state hash, carried through frontmatter only while
       `status` is `UpstreamStatus.POSTPONED`.
@@ -1511,39 +1518,37 @@ def _read_note(path: Path) -> tuple[dict, str]:
   return fm, text[end:]
 
 
-def _is_draft_gated(source_dir: Path, unit_title: str) -> bool:
+def _is_release_gated(source_dir: Path, unit_title: str) -> bool:
   """
-  Check the draft-gate flag on a unit's own canon note, mirrored verbatim into `source/`.
+  Check whether a unit's own canon note, mirrored verbatim into `source/`, is an unreleased status note.
 
-  Per `docs/tasks/lazycortex-specs.upstream.md` (the merge-decision rules): a root folder-note under
-  `source/`, same-named as the unit itself, that parses as a canon note and carries
-  `spec_draft: true` gates the unit — no note, an unparseable note, or an absent flag are all
-  the ungated (normal) case.
+  A root folder-note under `source/`, same-named as the unit itself, that is an asset status note
+  (`spec_role: status`) and does not carry `spec_released: true` gates the unit: the upstream asset
+  is not ready for a downstream consumer such as this repo. No note, an unparseable note, or a note that is not
+  a status note is the ungated (normal) case.
 
   Args:
     source_dir: The unit's synced `source/` directory.
     unit_title: The unit's own directory basename (the canon note's expected filename stem).
 
   Returns:
-    `True` only when the canon note exists, parses, and carries `spec_draft: true`.
+    `True` only when the canon note exists, is a status note, and its `spec_released` is not true.
   """
   canon = source_dir / f"{unit_title}{_K.MD_SUFFIX}"
 
   # guard: no root note mirrored for this unit — ungated
   if not canon.is_file():
     return False
+
+  # the canon note's frontmatter carries both its role and its readiness flag
   fm, _end = flip_gate.parse_frontmatter(canon.read_text(encoding = "utf-8"))
-  return flip_gate.is_true(fm, DraftKey.DRAFT)
 
+  # guard: a note that is not an asset status note carries no readiness flag — ungated
+  if fm.get(SpecKey.ROLE, "").strip() != SpecValue.ROLE_STATUS:
+    return False
 
-_ACTION_SKIPPED = "skipped"
-
-# Statuses a draft-gated unit may hold onto instead of advancing into a fresh new/drifted
-# transition (§ draft-gate: status stays put).
-_GATE_HOLD_STATUSES = (UpstreamStatus.NEW, UpstreamStatus.DRIFTED, UpstreamStatus.PROCESSED)
-
-# Cursor-file field name.
-_CURSOR_KEY = "cursor"
+  # an asset status note is ready only once it is published
+  return not flip_gate.is_true(fm, Gate.RELEASED)
 
 
 def _flatten_synced_tree(source_dir: Path, include_root: str) -> None:
@@ -1591,7 +1596,7 @@ def _flatten_synced_tree(source_dir: Path, include_root: str) -> None:
     try:
       ancestor.rmdir()
     except OSError:
-      # guard: still holds real content (e.g. a name-collision sibling) — stop pruning upward
+      # still holds real content (e.g. a name-collision sibling) — stop pruning upward
       break
     ancestor = ancestor.parent
 
@@ -1626,7 +1631,7 @@ def _sync_unit_source(
   """
   include_root = f"{source_path}/{unit_path}" if source_path and source_path != "." else unit_path
 
-  # guard: routine-owned directory, wiped before every sync so a removed upstream file cannot
+  # the routine-owned directory is wiped before every sync so a removed upstream file cannot
   # survive under a stale flattened path `remote-mirror`'s own dest-state tracking never sees
   if source_dir.is_dir():
     shutil.rmtree(source_dir)
@@ -1657,7 +1662,8 @@ def _sync_unit_source(
     clone_file = clone_dir / include_root / item[_PlanKey.PATH]
     entry = { _PlanKey.PATH: item[_PlanKey.PATH], _SkipKey.REASON: item.get(_SkipKey.REASON, "") }
 
-    # guard: the clone still holds the file's bytes for a too-large/binary skip (not a symlink)
+    # record size/hash from the clone, which still holds the bytes of a too-large/binary skip
+    # (never of a symlink)
     if clone_file.is_file() and not clone_file.is_symlink():
       entry[_SkipKey.SIZE] = clone_file.stat().st_size
       entry[_SkipKey.HASH] = _sha256_file(clone_file)
@@ -1672,8 +1678,7 @@ def _history_section(body: str) -> str:
   Extract a unit note's existing `# History` section verbatim.
 
   `# History` is always this module's last-rendered section, so everything from its heading to
-  the end of the text is the whole section — this module never appends to it (a later task's
-  request-close step owns that write).
+  the end of the text is the whole section.
 
   Args:
     body: A unit note's full body text (frontmatter stripped).
@@ -1687,32 +1692,35 @@ def _history_section(body: str) -> str:
   return body[body.index(_K.HISTORY_H1):]
 
 
-def _append_history_entry(history_body: str, entry: str) -> str:
+def _journal_history(repo: Path, existing_body: str, tail: str) -> str:
   """
-  Fold one newly closed outcome onto the front of a unit note's `# History` section.
+  Return the note's `# History` section with one new upstream-tick line appended.
+
+  The line lands under today's day group in the shared journal layout, and a section holding only
+  the empty-state placeholder counts as having no history, so the first real entry replaces it.
 
   Args:
-    history_body: The section's existing rendered text (from `_history_section`), or `""` when
-      the note carries none yet.
-    entry: The single rendered bullet line to add (no trailing newline).
+    repo: Repository root.
+    existing_body: The unit note's body text as it stood before this tick.
+    tail: The outcome's one-line message, without date or author.
 
   Returns:
-    The `# History` heading plus `entry` followed by whatever entries were already there, with
-    the `_(none)_` placeholder dropped once a real entry lands.
-  """
-  # default to the standard empty-section shape when the note carries no prior history
-  history_body = history_body or f"{_K.HISTORY_H1}\n{_K.NONE_MARKER}\n"
-  heading, _sep, rest = history_body.partition("\n")
+    The full `# History` section text, new line included.
 
-  # a prior render's explainer line — comment or legacy italic — is presentation, not history;
-  # the next render re-adds it
-  lines = [
-      line for line in spec_frontmatter.split_lines(rest)
-      if line.strip() and line.strip() != _K.NONE_MARKER
-      and not note_explainers.EXPLAINER_LINE_RE.match(line)
+  Raises:
+    RuntimeError: If the core verb refuses the append or cannot be resolved.
+  """
+  # the section as it stands; one holding only the empty-state placeholder carries no history yet
+  section = _history_section(existing_body)
+  entries = [
+      line for line in spec_frontmatter.split_lines(section)[1:]
+      if line.strip() and not note_explainers.EXPLAINER_LINE_RE.match(line)
   ]
-  lines.insert(0, entry)
-  return heading + "\n" + "\n".join(lines) + "\n"
+  if entries == [ _K.NONE_MARKER ]:
+    section = ""
+
+  # the shared journal writer places the line under today's day group
+  return history_journal.append(section, f"{_K.BOT_NAME} · {tail}", flip_gate.effective_today(None), repo = repo)
 
 
 def _wikilink_target(raw: str) -> str:
@@ -1970,12 +1978,9 @@ def _dispatch_request(
   request_path = _unique_request_path(requests_dir, slug)
   request_wikilink = str(request_path.resolve().relative_to(repo).with_suffix(""))
 
-  # Contract:
-  # The note is written before the request file, and both land in one commit — a crash
-  # mid-write leaves a doctor-visible dangling in-review note rather than two requests for
-  # the same change.
-
-  # step 1 of the contract above: the note, frozen onto the request that's about to exist
+  # fail-safe write order: the note, frozen onto the request that's about to exist, lands before
+  # the request file, and both ride one commit, so a crash mid-write leaves a doctor-visible
+  # dangling note rather than two requests for the same change
   new_note_text = _render_note(
       unit_path = unit_path, status = UpstreamStatus.IN_REVIEW, revision = revision,
       url = source_cfg.get(_K.URL, ""), skipped_current = skipped_current,
@@ -1988,10 +1993,9 @@ def _dispatch_request(
       revision = revision, added = added, modified = modified, removed = removed,
       skip_changed = skip_changed,
   ))
-  had_work = _commit_unit(
+  return _commit_unit(
       repo, unit_dir, unit_path, UpstreamStatus.IN_REVIEW, extra_paths = (request_path,),
-  )
-  return had_work, UpstreamStatus.IN_REVIEW
+  ), UpstreamStatus.IN_REVIEW
 
 
 def _accept_unit(
@@ -2004,7 +2008,6 @@ def _accept_unit(
   Args:
     repo: Repository root.
     unit_dir: The unit's own directory.
-    note_path: The unit note's own path.
     unit_path: The unit's own path, relative to its mount's `source_path`.
     source_url: The owning source's configured git URL.
     revision: The note's own recorded `spec_upstream_revision` value, carried through unchanged.
@@ -2041,10 +2044,7 @@ def _accept_unit(
   processed_tail = note_explainers.history_line_for_lang(
       repo_language, HistoryEvent.REQUEST_PROCESSED, wikilink = wikilink,
   )
-  history_body = _append_history_entry(
-      _history_section(existing_body),
-      f"- {flip_gate.effective_today(None)} — {_K.BOT_NAME} · {processed_tail}",
-  )
+  history_body = _journal_history(repo, existing_body, processed_tail)
   new_text = _render_note(
       unit_path = unit_path, status = UpstreamStatus.PROCESSED, revision = revision,
       url = source_url, skipped_current = skipped_current, skipped_processed = skipped_current,
@@ -2071,7 +2071,6 @@ def _release_unit(
   Args:
     repo: Repository root.
     unit_dir: The unit's own directory.
-    note_path: The unit note's own path.
     unit_path: The unit's own path, relative to its mount's `source_path`.
     source_url: The owning source's configured git URL.
     revision: The note's own recorded `spec_upstream_revision` value, carried through unchanged.
@@ -2085,9 +2084,7 @@ def _release_unit(
   """
   skipped_current = _extract_section(existing_body, _K.SKIPPED_CURRENT_H1)
   skipped_processed = _extract_section(existing_body, _K.SKIPPED_PROCESSED_H1)
-  history_body = _append_history_entry(
-      _history_section(existing_body), f"- {flip_gate.effective_today(None)} — {_K.BOT_NAME} · {history_note}",
-  )
+  history_body = _journal_history(repo, existing_body, history_note)
   new_text = _render_note(
       unit_path = unit_path, status = fallback_status, revision = revision, url = source_url,
       skipped_current = skipped_current, skipped_processed = skipped_processed,
@@ -2109,7 +2106,6 @@ def _advance_frozen_unit(
   Args:
     repo: Repository root.
     unit_dir: The unit's own directory.
-    note_path: The unit note's own path.
     unit_path: The unit's own path, relative to its mount's `source_path`.
     existing_fm: The note's own frontmatter, as read before this tick.
     existing_body: The note's body text as it stood before this tick.
@@ -2163,66 +2159,36 @@ def _advance_frozen_unit(
 def _commit_paths(repo: Path, paths: list[Path], subject: str, *,
                   deferred_write: tuple[Path, str] | None = None) -> bool:
   """
-  Stage a fixed path set and commit it under this module's bot identity, when the staged
-  contents actually changed this tick.
+  Commit a fixed path set under this module's bot identity, when those paths changed this tick.
 
   Shared by `_commit_unit` (one unit's own directory) and `_update_source_note` (one source's
-  own repo-level note) — both are "write text, then let git decide" atomic single-target
-  commits under the same bot identity.
+  own repo-level note).
 
-  Guarantees:
-    - Any `.md` path among `paths` has its icon-frontmatter repaint folded into this same
-      commit; no separate icons commit ever follows a note-owning bot commit.
-    - A `deferred_write` reaches its final path only after the repaint subprocess has returned:
-      a process death anywhere up to that point leaves the previously committed file untouched.
+  Notes:
+    - Only changes of `paths` count; the operator's staged files never ride into the commit.
+    - Any `.md` path among `paths` has its icon repaint folded into this same commit.
+    - A `deferred_write` reaches its final path only after the repaint, so a process death before
+      then leaves the previously committed file untouched.
 
   Args:
     repo: Repository root.
-    paths: Paths to stage, absolute or repo-relative.
+    paths: Paths to commit, absolute or repo-relative.
     subject: The commit subject line.
-    deferred_write: Optional `(path, text)` pair written immediately before staging — the
-      caller's rendered note, held back so the seconds-wide repaint step cannot sit between
-      the write and its commit.
+    deferred_write: Optional `(path, text)` pair written after the repaint and right before the commit.
 
   Returns:
-    `True` when a commit was made; `False` when nothing was staged (no change this tick).
+    `True` when a commit was made; `False` when the paths held no change this tick.
+
+  Raises:
+    subprocess.CalledProcessError: If the commit fails.
   """
 
-  # Contract:
-  # Any `.md` path among `paths` has its icon-frontmatter repaint folded into this same commit;
-  # no separate icons commit ever follows a note-owning bot commit.
-
-  # Contract:
-  # A `deferred_write` reaches its final path only after the repaint subprocess has returned;
-  # a process death anywhere up to that point leaves the previously committed file untouched.
-
-  # resolve every target to a repo-relative path git can stage
-  rel_paths = [str(path.resolve().relative_to(repo.resolve())) for path in paths]
-
-  # fold each note's icon repaint into this same commit so no separate icons commit follows
-  rel_paths.extend(iconize_inline.repaint_paths(
-      repo, [p for p in rel_paths if p.endswith(_K.MD_SUFFIX)],
-  ))
-
-  # the held-back write lands here — one syscall away from staging, past the slow repaint step
-  if deferred_write is not None:
-    deferred_path, deferred_text = deferred_write
-    spec_paths.write_text_atomic(deferred_path, deferred_text)
-
-  # stage the fixed target set
-  subprocess.run([_K.GIT, "add", "--", *rel_paths], cwd = str(repo), check = True, capture_output = True)
-  staged = subprocess.run([_K.GIT, "diff", "--cached", "--quiet"], cwd = str(repo), check = False)
-
-  # guard: nothing actually changed on disk — free target, no commit
-  if staged.returncode == 0:
-    return False
-
-  # commit under this module's own bot identity
-  subprocess.run([
-      _K.GIT, "-c", f"user.name={_K.BOT_NAME}", "-c", f"user.email={_K.BOT_EMAIL}",
-      "-c", "commit.gpgsign=false", "commit", "-q", "-m", subject,
-  ], cwd = str(repo), check = True, capture_output = True)
-  return True
+  # the shared pathspec commit under this module's own bot identity: each note's icon repaint folded in, the
+  # held-back write landed past the slow repaint step, and the operator's staged entries left out
+  return flip_gate.commit_paths(
+      repo, paths, subject = subject, author_name = _K.BOT_NAME, author_email = _K.BOT_EMAIL,
+      deferred_write = deferred_write,
+  )
 
 
 def _commit_unit(
@@ -2231,20 +2197,20 @@ def _commit_unit(
 ) -> bool:
   """
   Commit one unit's whole directory (plus any extra paths) under this module's bot identity,
-  when the staged contents actually changed this tick.
+  when those paths changed this tick.
 
   Args:
     repo: Repository root.
     unit_dir: The unit's own directory (`source/`, `processed/`, and its note).
     unit_path: The unit's own path, for the commit subject.
     status: The unit's freshly computed status, for the commit subject.
-    extra_paths: Additional paths to stage alongside `unit_dir` — Phase C's own freshly written
-      request file, staged in the same atomic commit as the note that links to it.
+    extra_paths: Additional paths to commit alongside `unit_dir` — Phase C's own freshly written
+      request file, committed together with the note that links to it.
     note_text: The unit note's freshly rendered text, written by `_commit_paths` only after the
       repaint step; `None` when the caller already wrote the note itself.
 
   Returns:
-    `True` when a commit was made; `False` when nothing was staged (unit unchanged this tick).
+    `True` when a commit was made; `False` when the unit held no change this tick.
   """
   # the unit's own note, named for repaint purposes — `unit_dir` alone is a directory, and
   # `_commit_paths` only repaints paths it can see end in `.md`
@@ -2288,25 +2254,31 @@ def _advance_unit(
 
   Returns:
     `(had_work, status)` — whether a commit was made, and the unit's resulting
-    `UpstreamStatus` value. `status` is `None` only when a draft-gated unit's first-ever landing
-    was undone this tick — it never materialized (no `source/`, no note, § draft-gate).
+    `UpstreamStatus` value. `status` is `None` only when a released-gated unit's first-ever landing
+    was undone this tick — it never materialized (no `source/`, no note, § released-gate). A unit is
+    released-gated while its mirrored canon root note is an asset status note not yet released.
   """
 
   # Domain(spec.upstream):
-  # # A draft-gated unit is frozen out of ingestion entirely
-  # When the upstream author's own root note for a unit still marks it a draft, the unit is not
-  # merely paused — it never reaches the operator as something to decide on at all. Its very
-  # first appearance is undone rather than landed, and once it has landed before the flag was
-  # set, later passes stop refreshing its mirror and hold its last status in place. The gate
-  # lifts silently the moment the upstream author clears the draft flag themselves.
+  # # An unreleased unit is frozen out of ingestion entirely
+  # A unit is held back when its own root note in the source is an asset status note whose asset
+  # is not yet released (published) — readiness is the released flag alone. The unit is not
+  # merely paused: while the upstream asset is unreleased it never reaches the operator as
+  # something to decide on at all. Its very first appearance is undone rather than landed, and
+  # once it has landed earlier, later passes stop refreshing its mirror and hold its last status
+  # in place. The gate lifts silently the moment the upstream asset is released. A root note
+  # that is not an asset status note never holds a unit back.
 
   # Domain(spec.upstream):
   # # A unit's recorded revision tracks its own content, not the source's tip
-  # The commit recorded against a unit is the one that actually changed that unit's own bytes,
-  # never simply the latest commit the source happened to be at when a pass ran. An upstream
-  # commit elsewhere in the same repository, one that never touches this unit's own subtree,
-  # must never move the recorded revision — otherwise every single pass would produce a
-  # revision-only commit with nothing else to show for it.
+  # The revision recorded against a unit moves only when that unit's own bytes changed, never
+  # simply because the source advanced when a pass ran. An upstream commit elsewhere in the same
+  # repository, one that never touches this unit's own subtree, must never move the recorded
+  # revision — otherwise every single pass would produce a revision-only commit with nothing
+  # else to show for it. The source is held as a shallow copy without history, so the commit that
+  # last touched the unit cannot be identified: what gets recorded is the commit the source was
+  # at on the pass that first saw the bytes change, which may be a later commit than the one
+  # that changed them.
 
   # Domain(spec.upstream):
   # # Resuming and postponing on the same unit always resolves toward resuming
@@ -2329,28 +2301,33 @@ def _advance_unit(
   existing_fm, existing_body = _read_note(note_path)
   prior_status = existing_fm.get(UpstreamKey.STATUS)
 
-  # guard: frozen — Phase A decides an in-review unit's fate from its linked request alone,
+  # a frozen unit takes Phase A, which decides an in-review unit's fate from its linked request alone,
   # never touching the fetch/detect ladder below
   if prior_status in UPSTREAM_FROZEN_STATUSES:
     return _advance_frozen_unit(
         repo, unit_dir, unit_path, existing_fm, existing_body, source_cfg.get(_K.URL, ""),
     )
 
-  # guard: already-materialized unit whose mirrored canon note already carries `spec_draft: true`
+  # the unit's path inside the fetched clone, read by the released-gate check below
+  source_path = mount_cfg.get(_K.SOURCE_PATH, "")
+  prefix = f"{source_path}/" if source_path and source_path != "." else ""
+
+  # guard: already-materialized unit whose mirrored canon note is an unreleased status note
   # — frozen wholesale, checked against the PRIOR tick's own mirror so a steady-state gated unit
-  # never gets re-synced (draft-gate: the mirror stays unrefreshed and the status stays put)
-  if source_dir.is_dir() and _is_draft_gated(source_dir, title):
+  # never gets re-synced (released-gate: the mirror stays unrefreshed and the status stays put);
+  # the gate lifts once the freshly fetched clone shows the upstream asset released
+  if source_dir.is_dir() and _is_release_gated(source_dir, title) and (
+      tree_error is not None or _is_release_gated(_clone_dir(repo, repo_key) / f"{prefix}{unit_path}", title)
+  ):
     return False, prior_status
 
   # existence-in-source and the pure config-glob match are independent inputs — conflating them
   # is exactly what made `orphaned` unreachable before this split (a vanished directory also
   # vanishes from any tree-derived match set)
-  source_path = mount_cfg.get(_K.SOURCE_PATH, "")
-  prefix = f"{source_path}/" if source_path and source_path != "." else ""
   exists_in_source = tree_error is not None or any(p.startswith(f"{prefix}{unit_path}/") for p in tree_paths)
   units_cfg = list(mount_cfg.get(_K.UNITS) or [])
   exclude_cfg = list(mount_cfg.get(_K.EXCLUDE) or [])
-  glob_matches = _unit_glob_matches(unit_path, units_cfg, exclude_cfg)
+  glob_matches = _is_unit_in_globs(unit_path, units_cfg, exclude_cfg)
 
   # defaults the excluded/orphaned/unreachable branches leave untouched; only the normal sync
   # path below ever assigns something other than these
@@ -2367,31 +2344,35 @@ def _advance_unit(
   elif tree_error is None and not exists_in_source:
     status = UpstreamStatus.ORPHANED
   elif tree_error is not None:
-    # guard: source unreachable this tick — isolate, leave the unit exactly as it was
+    # source unreachable this tick — isolate, leave the unit exactly as it was
     return False, prior_status or UpstreamStatus.NEW
   else:
     clone_dir = _clone_dir(repo, repo_key)
     skip_entries, fetched_sha, sync_error = _sync_unit_source(
         repo, source_cfg, clone_dir, source_path, unit_path, source_dir, max_bytes,
     )
+
+    # guard: per-unit sync failed — isolate, leave the unit as it was
     if sync_error is not None:
       return False, prior_status or UpstreamStatus.NEW
 
     # the revision names the commit that delivered the current bytes — an upstream commit that
     # left this unit's subtree untouched must not move it, or every tick lands a noise commit
-    if not revision or _source_content_changed(repo, source_dir):
+    if not revision or _has_source_content_changed(repo, source_dir):
       revision = fetched_sha or revision
     skipped_current = skip_entries
+
+    # a synced unit holding no markdown file at all is invalid; any other is judged on its content
     has_md = any(
         fname.endswith(_K.MD_SUFFIX) for _d, _dirs, files in os.walk(str(source_dir)) for fname in files
     )
     if not has_md:
       status = UpstreamStatus.INVALID
     else:
-      gated = _is_draft_gated(source_dir, title)
+      gated = _is_release_gated(source_dir, title)
 
-      # guard: first-ever landing of a unit whose own root note already carries `spec_draft:
-      # true` — undo this tick's sync entirely, the fetch/detect phase never materializes it
+      # guard: first-ever landing of a unit whose own root note is an unreleased status note
+      # — undo this tick's sync entirely, the fetch/detect phase never materializes it
       # (there is no prior state to freeze back to; it never existed before this tick)
       if gated and prior_status is None:
         shutil.rmtree(unit_dir, ignore_errors = True)
@@ -2433,7 +2414,7 @@ def _advance_unit(
         content_status = UpstreamStatus.POSTPONED
         postponed_hash = cur_hash
 
-      # a draft-gated unit never advances into a fresh new/drifted transition; every other
+      # a released-gated unit never advances into a fresh new/drifted transition; every other
       # unit takes its freshly computed content status as-is
       if gated and content_status in (UpstreamStatus.NEW, UpstreamStatus.DRIFTED):
         status = prior_status if prior_status in _GATE_HOLD_STATUSES else UpstreamStatus.NEW
@@ -2457,10 +2438,10 @@ def _advance_unit(
     )
 
   # render the note; the commit step itself persists it, past the repaint window
-  skipped_processed_for_note = _extract_section(existing_body, _K.SKIPPED_PROCESSED_H1)
   new_text = _render_note(
       unit_path = unit_path, status = status, revision = revision, url = source_cfg.get(_K.URL, ""),
-      skipped_current = skipped_current, skipped_processed = skipped_processed_for_note,
+      skipped_current = skipped_current,
+      skipped_processed = _extract_section(existing_body, _K.SKIPPED_PROCESSED_H1),
       history_body = _history_section(existing_body), gated = gated, postponed_hash = postponed_hash,
       resume_label = resume_label, lang = resolve_language.resolve_repo_language(repo),
   )
@@ -2516,13 +2497,6 @@ def _source_note_path(repo: Path, repo_key: str) -> Path:
   return repo / _K.UPSTREAM_ROOT / repo_key / f"{repo_key}{_K.MD_SUFFIX}"
 
 
-# One-line description under the root catalog note's title, per vault authoring language.
-_ROOT_NOTE_EXPLAINERS = {
-    _K.LANG_EN: "_Mirrored external sources — one folder per configured source repo._",
-    _K.LANG_RU: "_Зеркала внешних источников — по папке на каждый настроенный репозиторий._",
-}
-
-
 def _ensure_root_note(repo: Path) -> Path | None:
   """
   Seed the root upstream catalog folder-note once, so the `upstream/` folder carries its icon.
@@ -2542,7 +2516,7 @@ def _ensure_root_note(repo: Path) -> Path | None:
 
   # seed the icon frontmatter plus a one-line description in the vault's authoring language
   explainer = _ROOT_NOTE_EXPLAINERS.get(
-      resolve_language.resolve_repo_language(repo), _ROOT_NOTE_EXPLAINERS[_K.LANG_EN],
+      resolve_language.resolve_repo_language(repo), _ROOT_NOTE_EXPLAINERS[LangId.EN],
   )
   note_path.parent.mkdir(parents = True, exist_ok = True)
   spec_paths.write_text_atomic(note_path,
@@ -2565,7 +2539,7 @@ def _ensure_root_note(repo: Path) -> Path | None:
 def _render_source_note(
     *, status: str, failures: int, error: str | None, last_success: str | None,
     invalid: list[tuple[str, str, str]] | None = None, refused_mounts: list[str] | None = None,
-    lang: str = _K.LANG_EN,
+    lang: str = LangId.EN,
 ) -> str:
   """
   Render one source's own repo-level folder-note (§ 5): fetch status, the vault-unsafe
@@ -2627,7 +2601,7 @@ def _render_source_note(
       "_(ok)_" if status == UpstreamSourceStatus.OK else f"_(failing — {error or 'unknown error'})_"
   )
   for mount in sorted(refused_mounts):
-    status_body += f"\n- `{mount}` — mount refused: overlapping `units` globs"
+    status_body += f"\n- `{mount}` — {_K.MOUNT_REFUSED_REASON}"
 
   # one bullet per refused directory (§ 3), sorted for tick-to-tick stability; empty list reads
   # as the same none-marker every other list section in this module renders
@@ -2732,6 +2706,11 @@ def run(repo: Path) -> dict:
   """
   Execute one `lazy-spec.upstream-tick` fetch/detect pass.
 
+  Guarantees:
+    - Every bot commit that writes a unit note or a source note carries that note's
+      icon-frontmatter repaint in the same commit; no separate icons commit ever follows a
+      note-owning bot commit.
+
   Args:
     repo: Repository root.
 
@@ -2741,6 +2720,12 @@ def run(repo: Path) -> dict:
     `statuses` (per-`UpstreamStatus` counts across every visited unit), and `errors` (unique
     per-source fetch-failure messages, isolated so one dead source never blocks another).
   """
+
+  # Contract:
+  # Every bot commit that writes a unit note or a source note carries that note's
+  # icon-frontmatter repaint in the same commit. No separate icons commit ever follows
+  # a note-owning bot commit.
+
   # config + limits first — everything below reads from these
   cfg = _load_upstream_config(repo)
   content_root = spec_paths.spec_content_root(repo)
@@ -2796,7 +2781,7 @@ def run(repo: Path) -> dict:
         tree_paths, tree_error, mount_refused, max_bytes,
     )
 
-    # a `None` status is a draft-gated unit's undone first landing — it never materialized, so
+    # a `None` status is a released-gated unit's undone first landing — it never materialized, so
     # there is nothing to count here (contrast every other status, which always counts)
     if status is not None:
       statuses[status] = statuses.get(status, 0) + 1
@@ -2835,9 +2820,9 @@ class DoctorFinding:
     DANGLING_REQUEST_LINK: A `UpstreamStatus.IN_REVIEW` unit's request link is missing, or
       present but does not resolve to an existing request file (§ 8: dangling mutex).
     UNKNOWN_ACTION_LABEL: A unit note's `# Actions` section carries a checkbox label outside
-      the closed `UpstreamAction` set (deferred from Task 5's own scope to this one).
+      the closed `UpstreamAction` set, one no tick acts on.
     CLONE_ORIGIN_MISMATCH: A configured source's working clone points at a different remote
-      than its current `url` (Task 4's own guard, surfaced here by name for the operator).
+      than its current `url`, so it no longer mirrors the configured source.
   """
 
   # A `upstream/<repo-key>/` subtree exists with no matching config entry (§ 12: a subtree on disk with no matching
@@ -2855,11 +2840,11 @@ class DoctorFinding:
   # A `UpstreamStatus.IN_REVIEW` unit's request link is missing, or present but does not resolve to an existing
   # request file (§ 8: dangling mutex).
   DANGLING_REQUEST_LINK = "dangling-request-link"
-  # A unit note's `# Actions` section carries a checkbox label outside the closed `UpstreamAction` set (deferred from
-  # Task 5's own scope to this one).
+  # A unit note's `# Actions` section carries a checkbox label outside the closed `UpstreamAction` set, one no
+  # tick acts on.
   UNKNOWN_ACTION_LABEL = "unknown-action-label"
-  # A configured source's working clone points at a different remote than its current `url` (Task 4's own guard,
-  # surfaced here by name for the operator).
+  # A configured source's working clone points at a different remote than its current `url`, so it no longer
+  # mirrors the configured source.
   CLONE_ORIGIN_MISMATCH = "clone-origin-mismatch"
 
 
@@ -2913,7 +2898,7 @@ def _material_unit_dirs(mount_base: Path) -> dict[str, Path]:
   for dirpath, _dirs, _files in os.walk(str(mount_base)):
     unit_dir = Path(dirpath)
 
-    # guard: the mount base itself is never a unit
+    # the mount base itself is never a unit
     if unit_dir == mount_base:
       continue
     if (unit_dir / _K.SOURCE_DIR).is_dir() or (unit_dir / _K.PROCESSED_DIR).is_dir():
@@ -3036,8 +3021,7 @@ def _scan_unit(repo: Path, repo_key: str, unit_path: str, unit_dir: Path) -> lis
           unit_path = unit_path,
       ))
 
-  # unrecognized checkbox label under # Actions — closed UpstreamAction set (deferred from
-  # Task 5)
+  # a checkbox label under # Actions outside the closed UpstreamAction set is one no tick acts on
   for label in _unknown_action_labels(body):
     findings.append(_finding(
         DoctorFinding.UNKNOWN_ACTION_LABEL, repo_key,
@@ -3051,12 +3035,11 @@ def doctor_scan(repo: Path) -> dict:
   """
   Run every `spec.upstream` § 13 doctor check, read-only.
 
-  Wiki.domains-style honesty (§ 13): when `spec.upstream` carries no configured source, this
-  returns `configured: False` with no findings at all — a scope the operator never set up has
-  nothing to be wrong. Every finding kind here is `lazy-spec.audit`'s own to render as FAIL; this
-  worker never distinguishes severity or offers a fix — `orphaned` / `invalid` / `excluded` /
-  `postponed` units and an active `in-review` freeze are the documented steady states (§ 13)
-  and are never findings on their own.
+  When `spec.upstream` carries no configured source, this returns `configured: False` with no
+  findings at all — an unconfigured scope has nothing to be wrong. Every finding kind here is
+  `lazy-spec.audit`'s own to render as FAIL; this worker never distinguishes severity or offers
+  a fix — `orphaned` / `invalid` / `excluded` / `postponed` units and an active `in-review`
+  freeze are the documented steady states (§ 13) and are never findings on their own.
 
   Guarantees:
     - Never writes to disk or to git — every call is a pure read, whatever it finds.
@@ -3078,7 +3061,7 @@ def doctor_scan(repo: Path) -> dict:
   cfg = _load_upstream_config(repo)
   repo_keys = _source_keys(cfg)
 
-  # guard: nothing configured — silent, not a finding (wiki.domains-style honesty)
+  # guard: nothing configured — an unconfigured scope has nothing to be wrong, so no finding
   if not repo_keys:
     return { "configured": False, "findings": [] }
 
@@ -3101,7 +3084,7 @@ def doctor_scan(repo: Path) -> dict:
   for repo_key in repo_keys:
     url = cfg[repo_key].get(_K.URL, "")
     clone_dir = _clone_dir(repo, repo_key)
-    if _clone_origin_mismatch(clone_dir, url):
+    if _has_clone_origin_mismatch(clone_dir, url):
       findings.append(_finding(
           DoctorFinding.CLONE_ORIGIN_MISMATCH, repo_key,
           f"working clone at `{clone_dir}` does not point at the configured url '{url}'",
@@ -3247,7 +3230,7 @@ def doctor_apply(repo: Path) -> dict:
       for unit_path, unit_dir in sorted(_material_unit_dirs(repo_base / mount).items()):
         outcome = _apply_unit_reset(repo, repo_key, mount, unit_path, unit_dir, url)
 
-        # guard: the repair does not cover this unit — nothing to record
+        # a unit the repair does not cover has nothing to record
         if outcome is None:
           continue
         tag, entry = outcome
@@ -3272,6 +3255,7 @@ def main(argv: list[str]) -> int:
     SystemExit: `argparse` rejects an unrecognised flag or a missing option value (exit `2`).
     RuntimeError: The `lazycortex-core` CLI could not be resolved, or crashed outside its own
       documented `{"error": ...}` contract.
+    subprocess.CalledProcessError: Staging or committing the pass's writes with git exits non-zero.
   """
   parser = argparse.ArgumentParser(prog = _K.PROG)
   parser.add_argument(_K.ARG_CWD, default = None)
@@ -3289,11 +3273,11 @@ def main_doctor(argv: list[str]) -> int:
     argv: Subcommand tail (optional `--cwd`, optional `--apply`).
 
   Returns:
-    `0` always — both modes report their whole outcome in their own JSON output rather than
-    raising.
+    `0` when the pass completes — both modes report their whole outcome in the printed JSON.
 
   Raises:
     SystemExit: `argparse` rejects an unrecognised flag or a missing option value (exit `2`).
+    subprocess.CalledProcessError: In `--apply` mode, staging or committing a released unit fails.
   """
   parser = argparse.ArgumentParser(prog = _K.DOCTOR_PROG)
   parser.add_argument(_K.ARG_CWD, default = None)

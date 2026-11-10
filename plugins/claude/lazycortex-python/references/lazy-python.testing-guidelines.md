@@ -21,8 +21,8 @@ for Python projects that adopt these conventions.
 
 ## Test Directory Structure and file naming
 - Mirror the source code structure in the test directory, examples:
-  - `src/core/entity/entity.py` → `tests/core/entity/entity.py`
-  - `src/meta/groups/base.py` → `tests/meta/groups/base.py`
+  - `src/billing/invoice.py` → `tests/billing/invoice.py`
+  - `src/storage/cache/base.py` → `tests/storage/cache/base.py`
 - Do not create special test files to make other tests discoverable.
 - Do not name test files other than files named in the original source code you are making tests for.
 - Do not add any extra files to the test directory that are not directly testing a specific source code file.
@@ -132,6 +132,7 @@ with pytest.raises(ValueError, match = "Matrix must be square"):
 
 ## Forbidden Test Patterns
 - Never assert a default or a tuning value. A test that checks a field's default, a `_def_*` class constant, or a number read from a config restates the data instead of proving behaviour; it breaks on every tuning change and catches nothing. Feed the value under test in through the data or a loaded config and assert what the code does with it.
+- Never test a stub. A method whose body is a placeholder under a `# TODO:` comment has no behaviour to prove; a test asserting its placeholder value restates the stub, contradicts the documented result and has to be rewritten the day the method is implemented. Write no test for a stub. When a test method must exist anyway, it stays empty under a `# TODO:` comment naming the stub it waits for.
 
 ## Rule Waivers in Tests
 - A test may break a coding rule under two conditions that must hold together. First, the violation serves the check itself: the test needs a private helper, a protected member, an internal state, or a submodule path that no public surface reaches. Second, the only alternative is production code that would exist for the test alone — a public re-export, an accessor, a hook that no caller needs. A violation that merely saves effort, or one that a legitimate public surface avoids, is not covered and is fixed like any other.
@@ -145,14 +146,14 @@ with pytest.raises(ValueError, match = "Matrix must be square"):
 - When a change touches a `Contract:`, a `Domain(…):` block, or the body of a function in a file, the tests derived from every marker in that file are the re-verification: the review checks they changed with the markers, and a stale assumption fails its test instead of surviving in silence.
 
 ## Sampling and Randomness Testing Notes
-- When testing randomness (e.g., `DataRoll.reroll()`):
+- When testing randomness (e.g., `Sampler.resample()`):
   - Assert value ranges (e.g., uniform samples in [0.0, 1.0]).
   - Prefer probabilistic change assertions (value changed with very high probability) rather than strict equality.
   - Avoid global RNG seeding unless the test explicitly requires a deterministic behavior.
 - When testing operator overloading with unsupported types, rely on Python's standard `TypeError` generated via `NotImplemented` protocol. Example:
 ```python
-with pytest.raises(TypeError, match = "unsupported operand type.*@.*DataRoll.*str"):
-  roll @ "invalid"
+with pytest.raises(TypeError, match = "unsupported operand type.*@.*Matrix.*str"):
+  matrix @ "invalid"
 ```
 
 ## Test class docstrings
@@ -165,14 +166,6 @@ with pytest.raises(TypeError, match = "unsupported operand type.*@.*DataRoll.*st
 - Docstrings should state what behavior is validated, not just restate the method name.
 - Always start the summary line with `Test that ` phrase.
 - Omit any specific section, keep the Summary line only and make it short and simple.
-
-## Image Generation in Tests
-- Tests that generate images MUST always add them to the project's base test class image buffer (commonly `<YourBaseTest>.images`).
-- Use `self.images.append(image, name)` to add generated images to the buffer. Where:
-  - `image` is the generated image object.
-  - `name` is the name of the test method without the `test_` prefix and with the possible suffix indicating the variation (e.g., `__1`).
-- This ensures that generated images are properly collected and can be saved for debugging or visual inspection.
-- Never discard generated images without adding them to the buffer first.
 
 
 

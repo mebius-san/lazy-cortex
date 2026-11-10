@@ -118,11 +118,19 @@ if [ "$DEV_MODE" = "1" ] && [ -n "$REPO" ] && [ -d "$REPO/plugins/claude" ]; the
   fi
 fi
 
+# A recorded interpreter that no longer resolves (a package-manager upgrade retired its version)
+# must not leave the daemon unable to start: name the cause and fall back to python3 on PATH.
+if [ -n "${LAZYCORTEX_PYTHON:-}" ] && ! command -v "$LAZYCORTEX_PYTHON" >/dev/null 2>&1; then
+  echo "lazy.runtime: LAZYCORTEX_PYTHON=$LAZYCORTEX_PYTHON does not exist; falling back to python3 on PATH" >&2
+  unset LAZYCORTEX_PYTHON
+fi
+
 if [ -n "$DEV_RUNNER" ]; then
   RUNNER="$DEV_RUNNER"
 else
   # the highest-version lazycortex-core record in the install registry, compared numerically
-  # (5.13.0 above 5.9.0); prints nothing on any error so the guard below fires
+  # (5.13.0 above 5.9.0); the program prints nothing when the record is absent, and the
+  # interpreter's own failure to run is reported as such, never as a missing record
   RUNNER=$("${LAZYCORTEX_PYTHON:-python3}" -I -c '
 import json, os
 try:
@@ -135,7 +143,9 @@ try:
   print(os.path.join(max(records, key = version)["installPath"], "bin", "runner"))
 except Exception:
   pass
-' 2>/dev/null)
+')
+  PROBE_RC=$?
+  [ "$PROBE_RC" -ne 0 ] && { echo "lazy.runtime: interpreter ${LAZYCORTEX_PYTHON:-python3} failed to run (exit $PROBE_RC); cannot look up lazycortex-core/bin/runner" >&2; exit 1; }
   [ -z "$RUNNER" ] && { echo "lazycortex-core/bin/runner not recorded in ~/.claude/plugins/installed_plugins.json" >&2; exit 1; }
 fi
 # The runner is Python; run it under the interpreter install recorded rather than

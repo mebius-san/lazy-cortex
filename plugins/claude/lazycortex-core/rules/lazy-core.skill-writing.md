@@ -1,5 +1,5 @@
 ---
-description: Authoring contract for skills, commands, and runnable scripts. Covers Execution-Discipline preamble, no-Optional headings, outcome vocabulary, narrative-padding ban, waiver mechanism, parallel-scan coordinator pattern, no-dirty-tree clause, the optional Failure-modes section, the mandatory `Agent` member of a restricting `allowed-tools` list, the context block every `AskUserQuestion` site carries, and the ban on code embedded in the instruction — a step names a program on disk, never carries one.
+description: Authoring contract for skills, commands, and runnable scripts. Covers Execution-Discipline preamble, no-Optional headings, outcome vocabulary, narrative-padding ban, waiver mechanism, parallel-scan coordinator pattern, no-dirty-tree clause, the optional Failure-modes section, the mandatory `Agent` member of a restricting `allowed-tools` list, the context block every `AskUserQuestion` site carries, the ban on code embedded in the instruction — a step names a program on disk, never carries one — and English as the language of every instruction.
 paths:
   - ".claude/skills/**"
   - ".claude/commands/**"
@@ -111,7 +111,7 @@ Skills, commands, and runnable scripts that modify a tracked file MUST commit th
 
 **How to comply:**
 
-- Pair every write with `git add <path>` + `git commit -m "<short, deterministic message>" -- <path>` in the same execution. Use `core.hooksPath=/dev/null` if the artifact is itself fired by a hook chain to avoid re-entry.
+- Pair every write with `git commit -m "<short, deterministic message>" -- <path>` in the same execution, never preceded by a plain `git add` (per `lazy-core.git`); a file the write created is registered first with `git add -N <path>`. Use `core.hooksPath=/dev/null` if the artifact is itself fired by a hook chain to avoid re-entry.
 - If the artifact runs in a flow that lacks a meaningful commit anchor, restructure: gate the write so it never fires from that flow, or buffer the write into a real commit-anchored flow.
 - Loop-guard hooks that auto-commit their own writes by content (e.g., a publish-status hook bails when HEAD's diff is folder-notes-only).
 
@@ -194,7 +194,7 @@ A skill, hook, or command never runs a plugin file as `argv[0]`. Python runs as 
 
 `<specs-cli>` stands for the specs plugin's `bin/lazycortex-specs` file — the copy under `~/.claude/plugins/cache/lazycortex/lazycortex-specs/<version>/` that `~/.claude/plugins/installed_plugins.json` records as installed, or `plugins/claude/lazycortex-specs/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
-A plugin CLI (`bin/lazycortex-<plugin>`) is a Python file like any other and follows the same form — never a bare `lazycortex-core <verb>`: no plugin `bin/` is on `PATH`, and a path-only `<dir>/lazycortex-core <verb>` still needs the exec bit. The skill's own CLI is `"${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-<plugin>"`. A sibling plugin's CLI is a `<x-cli>` placeholder (`<core-cli>`, `<specs-cli>`, …) the skill resolves once, before its first call, and the paragraph that resolves it names the file it stands for (`bin/lazycortex-<x>`): an interactive skill reads `<installPath>/bin/lazycortex-<x>` from `$HOME/.claude/plugins/installed_plugins.json`, preferring `<repo-root>/plugins/claude/lazycortex-<x>/bin/lazycortex-<x>` in a repo that authors the plugin; an agent the daemon spawns walks `$LAZYCORTEX_PLUGIN_DIRS` for `<dir>/bin/lazycortex-<x>`. A skill whose `allowed-tools` restricts `Bash` lists `Bash("${LAZYCORTEX_PYTHON:-python3}" *)`; the allow-pattern an install seeds for headless spawns is that same entry, never `Bash(lazycortex-<x> *)`. `lazy-core.doctor` reports every call that breaks this form; the dev vault's test suite refuses it outright.
+A plugin CLI (`bin/lazycortex-<plugin>`) is a Python file like any other and follows the same form — never a bare `lazycortex-core <verb>`: no plugin `bin/` is on `PATH`, and a path-only `<dir>/lazycortex-core <verb>` still needs the exec bit. The skill's own CLI is `"${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-<plugin>"`. A sibling plugin's CLI is a `<x-cli>` placeholder (`<core-cli>`, `<specs-cli>`, …) the skill resolves once, before its first call, and the paragraph that resolves it names the file it stands for (`bin/lazycortex-<x>`): a skill that already has `<core-cli>` asks `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-<x>` and appends `bin/lazycortex-<x>` to the root it prints; any other resolver tries, in this order, the `$LAZYCORTEX_PLUGIN_DIRS` entry, the dev-vault sibling `plugins/claude/lazycortex-<x>/`, the repo's own `<repo-root>/plugins/claude/lazycortex-<x>/`, and last the `<installPath>` that `$HOME/.claude/plugins/installed_plugins.json` records, and a miss names every stage it searched. A skill whose `allowed-tools` restricts `Bash` lists `Bash("${LAZYCORTEX_PYTHON:-python3}" *)`; the allow-pattern an install seeds for headless spawns is that same entry, never `Bash(lazycortex-<x> *)`. `lazy-core.doctor` reports every call that breaks this form; the dev vault's test suite refuses it outright.
 
 `${CLAUDE_PLUGIN_ROOT}` reaches a loaded skill already expanded to an absolute path. Never pass that literal to `Bash` — the permission layer denies an expanded absolute path. Write the variable form, `"${CLAUDE_PLUGIN_ROOT}/…"`, exactly as it appears in the text, as a single command and never as a `;`-chained compound.
 
@@ -209,6 +209,17 @@ Forbidden anywhere in `.claude/**` and in a plugin's `skills/`, `commands/`, `ag
 - a `python` or `javascript` fence in the body of a skill or command.
 
 Allowed: one invocation of a file that lives on disk — a plugin CLI verb through the interpreter (§ 12), a script under `bin/` with its arguments, a single command or pipeline (`git status`, `ls`, `jq '.x' file`, `mkdir -p`). Logic a step needs becomes a CLI verb or a `bin/` script with its own test under `tests/`. A `python` fence in an agent, rule or reference that illustrates an API or a style is an example, not an instruction, and stays; a page under `help/` addresses a person and is out of scope.
+
+## 14. Instructions are written in English
+
+A skill, command, or agent is written in English: the `description:`, the body, every step and every rule it states, whatever language the request that produced it was in. Text in another language appears only as data, always inside a code span or quotes:
+
+- a note-name pattern or task text the vault expects;
+- a quotation from a source document, or a pattern matched against one;
+- a trigger phrase in `description:` the artifact must fire on;
+- a value the artifact writes into the vault or a report in the user's language.
+
+`lazy-core.audit` check L6 reports a letter outside the Latin script in instruction text as `WARN`; a Greek letter passes, since it is a formula symbol. The check sees scripts, not languages, so a language written in Latin letters passes it.
 
 ## Cross-referenced contracts (not copied here)
 
@@ -230,6 +241,7 @@ Opting a skill into `lazy-core.setup`: see `${CLAUDE_PLUGIN_ROOT}/references/laz
 - § 11: `lazy-core.audit` Agent B flags an `AskUserQuestion` site with no preceding `Context (print before asking):` block (or, for a policy paragraph, no naming of the four items) as `WARN`.
 - § 10: `lazy-core.audit` Agent B judges each skill's description/body against the research-marker convention — search/pull-shaped without the marker, or marker present without a documented query contract, both `WARN`.
 - § 13: `lazy-core.doctor` runs `${CLAUDE_PLUGIN_ROOT}/bin/inline_code_scan.py` and reports every embedded program as `FAIL`; the dev vault's test suite refuses one outright.
+- § 14: `lazy-core.audit` L6 runs `${CLAUDE_PLUGIN_ROOT}/bin/instruction_lang_scan.py` and reports every non-Latin instruction line as `WARN`; the dev vault's test suite refuses one outright.
 
 ## Scope
 

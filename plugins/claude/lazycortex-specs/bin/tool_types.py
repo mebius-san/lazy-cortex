@@ -122,10 +122,6 @@ def _declared(record: dict) -> dict[str, dict]:
   The product's own declarations merge key-by-key over the shipped ones, so a product may
   replace a single field of a shipped tool without restating the rest.
 
-  Guarantees:
-    - A product's own declaration for a tool overrides the shipped default field by field; it
-      never replaces the shipped declaration as a whole.
-
   Args:
     record: The product's settings record, or `{}` when the caller has no product in scope.
 
@@ -140,10 +136,6 @@ def _declared(record: dict) -> dict[str, dict]:
   # for a tool never requires restating its report document type or any other field the
   # shipped declaration already settled.
 
-  # Contract:
-  # A product's own declaration for a tool overrides the shipped default field by field; it
-  # never replaces the shipped declaration as a whole.
-
   merged = dict(builtin_defaults())
   for name, decl in ((record or {}).get(_K.TOOL_TYPES) or {}).items():
     merged[name] = { **merged.get(name, {}), **decl }
@@ -154,6 +146,10 @@ def resolve(tool: str, record: dict) -> dict | None:
   """
   Resolve one tool's declaration in a product's scope.
 
+  Guarantees:
+    - A product's own declaration of a tool overrides the shipped default field by field; it
+      never replaces the shipped declaration as a whole.
+
   Args:
     tool: The tool name to look up.
     record: The product's settings record, or `{}` to consult only the shipped set.
@@ -161,6 +157,11 @@ def resolve(tool: str, record: dict) -> dict | None:
   Returns:
     The merged declaration dict, or None when neither the plugin nor the product declares it.
   """
+
+  # Contract:
+  # A product's own declaration of a tool overrides the shipped default field by field.
+  # It never replaces the shipped declaration as a whole.
+
   return _declared(record).get(tool)
 
 
@@ -230,7 +231,7 @@ def tools_of(note: Path) -> list[str] | None:
   # waiver: sibling-module frontmatter parser -- the one parser every specs primitive shares
   fm_values, fm_end = flip_gate.parse_frontmatter(text)
 
-  # guard: an absent key is "not determined yet", which no list value can express
+  # an absent key reads as "not determined yet", which no list value can express
   if _TOOLS_KEY not in fm_values:
     return None
   # waiver: sibling-module list reader -- handles both the block and the inline list forms

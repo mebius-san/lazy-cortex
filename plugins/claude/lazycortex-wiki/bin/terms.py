@@ -122,7 +122,7 @@ def _mirror_paths(repo: Path) -> list[str]:
     sync = _mirror.MirrorSync(repo = repo, scope_id = scope_id, cfg = cfg)
 
     # guard: the scope mirrors nothing — it has no regenerated tree to protect
-    if not sync.configured:
+    if not sync.is_configured:
       continue
     out.append(sync.mirror_path)
   return out

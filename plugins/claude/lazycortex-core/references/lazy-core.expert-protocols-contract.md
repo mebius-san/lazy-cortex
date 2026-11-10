@@ -51,7 +51,8 @@ Every job under `.experts/.jobs/<expert-name>/<job-id>/` follows this structure:
 ├── response.json    # expert-written
 ├── DONE             # pump-written marker after expert exits — consumer collects only after this exists
 ├── DEAD             # pump-written marker if pump killed the process as stuck (alternative terminal state)
-└── dead.json        # pump-written audit log of the kill — paired with DEAD
+├── dead.json        # pump-written audit log of the kill — paired with DEAD
+└── CANCELLED        # cancel-job-written marker — the job was cancelled; wins over DONE and DEAD
 ```
 
 File-role summary:
@@ -69,12 +70,13 @@ File-role summary:
 | `DONE` | pump | terminal marker — expert exited cleanly (success or `outcome=error`) |
 | `DEAD` | pump | terminal marker — pump killed the expert as stuck |
 | `dead.json` | pump | audit log of the kill (timestamps, signals) — paired with DEAD |
+| `CANCELLED` | `cancel-job` | terminal marker — the job was cancelled; `READY` is withdrawn and a running expert is stopped; outranks `DONE` and `DEAD` |
 
 **When the two input buckets are filled.** The dispatcher declares repo-relative paths; nothing is copied while the job is being queued. The pump copies each declared path when it **claims** the job, after any linked worktree for that job exists — a directory entry whole under `<parent-directory-name>-<directory-name>`, a file entry under its basename. So the buckets carry the work tree as it stands at claim time, not as it stood at dispatch. A declared entry that resolves outside the work tree, or that no longer exists when the pump claims the job, fails the job with an `outcome: error` of category `logical` — neither condition can resolve itself on a retry. The `source_inline` / `context_inline` pair remains dispatcher-written at dispatch time, for content that exists in no file.
 
 Any of the `source` / `context` / `result` subdirs may be absent when no files of that kind exist for the job. The corresponding arrays in JSON may be omitted or empty. When a subdir IS present but the matching `request.json` array is empty/absent, the expert receives the directory path in its prompt but no per-file descriptions — protocols should populate the array whenever the dir contains files.
 
-**Two terminal states**: a collected job exposes EITHER `DONE` (whether `outcome=error` or any protocol-defined success outcome) OR `DEAD` (pump killed it). `lazy-expert.list-jobs` and `lazy-expert.collect-job` distinguish them.
+**Three terminal states**: a collected job exposes `DONE` (whether `outcome=error` or any protocol-defined success outcome), `DEAD` (pump killed it), or `CANCELLED` (`cancel-job` stopped it). `lazy-expert.list-jobs` and `lazy-expert.collect-job` distinguish them: `CANCELLED` wins over every other marker, so `collect-job` reports a job carrying it as `cancelled`, with no response, even when `DONE` or `DEAD` is also present; a `DEAD` job without `CANCELLED` is `dead`. A caller never waits on either as `pending`, and `missing` means only that the job folder does not exist.
 
 ---
 

@@ -23,8 +23,8 @@ from repo_root import resolve_repo_root  # pylint: disable=import-error
 from external_dirs import (  # pylint: disable=import-error
   append_ignore_lines,
   apply,
-  check,
   declared_paths,
+  query_dir_states,
   ignore_fix_lines,
   source_root,
 )
@@ -144,7 +144,7 @@ def fix_ignore(repo: Path, *, write: bool) -> dict[str, object]:
   """
   # the missing lines are computed once so the report and the append share the same list
   proposed = ignore_fix_lines(repo)
-  out: dict[str, object] = { _ROWS: check(repo), _PROPOSED: proposed }
+  out: dict[str, object] = { _ROWS: query_dir_states(repo), _PROPOSED: proposed }
 
   # the lines reach .gitignore only under --apply, and the report then says what was appended
   if write:
@@ -209,5 +209,5 @@ def cmd_external_dirs(argv: list[str]) -> int:
     return 0
 
   # `apply` and `check` share one wire shape — the per-path rows
-  print(json.dumps(apply(repo) if args.verb == _VERB_APPLY else check(repo), ensure_ascii = False))
+  print(json.dumps(apply(repo) if args.verb == _VERB_APPLY else query_dir_states(repo), ensure_ascii = False))
   return 0

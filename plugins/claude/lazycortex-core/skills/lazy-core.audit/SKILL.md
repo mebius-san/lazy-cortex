@@ -15,7 +15,7 @@ Read `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md` before dispat
 
 **Path expansion** (mandatory): Glob and Read do **not** shell-expand `~` or `$HOME`. Before any Glob/Read targeting a home-relative path, run `Bash(echo $HOME)` once and substitute the result (or read the absolute home path from the session env block). A literal `~/.claude/rules/*.md` or `$HOME/.claude/rules/*.md` passed to Glob will match nothing and silently report "empty".
 
-**Size estimation**: for Read-measured files use `size ~ lines × 45 bytes`; for `wc -c` use exact bytes.
+**Size estimation** (Agent B): for Read-measured files use `size ~ lines × 45 bytes`; for `wc -c` use exact bytes.
 
 ## Finding shape
 
@@ -26,7 +26,7 @@ Severity is the shared vocabulary of `lazy-core.audit-contract.md` and nothing e
 Resolution says what kind of change the finding implies, and `/lazy-core.checkup` reads it to decide whether to offer a fix-flow at all:
 
 - **`mechanical`** — the repair follows unambiguously from what the check already read; there is no second defensible answer. Checks: L1 consumer-scope copy absent, L2, L3; Agent B scaffold-registry `plugin_root_var`, path hygiene, Python runtime FAIL, rule-writing 3 (inline-array `paths:`) and 9 (missing template pointer), model routing 4 (orphans) and 5 (gaps), audit-shape S4 (contract not named); Agent D D3, D4, D10 index desync, D11 rows other than `not_a_symlink` / `source_missing`, D13.
-- **`selective`** — a repair exists, but which one is right is the operator's call. Checks: L1 missing plugin-source `description:`, L4; Agent A oversize rule and oversize `MEMORY.md`; Agent B MCP enablement, scaffold-registry `parse_error` / `bad_shape` / `glob_overlap` / `missing_template` / `orphan_key`, naming hygiene, every skill-writing, agent-writing and rule-writing check not listed as mechanical above, dirty-tree write-without-commit, reference-writing 11 and 12, audit-shape S1–S3; Agent D D1, D2, D5, D7, D8, D9, D11 `not_a_symlink` / `source_missing`, D12, D14, D15, D16, D17.
+- **`selective`** — a repair exists, but which one is right is the operator's call. Checks: L1 missing plugin-source `description:`, L4, L6; Agent A oversize rule and oversize `MEMORY.md`; Agent B MCP enablement, scaffold-registry `parse_error` / `bad_shape` / `glob_overlap` / `missing_template` / `orphan_key`, naming hygiene, every skill-writing, agent-writing and rule-writing check not listed as mechanical above, dirty-tree write-without-commit, reference-writing 11 and 12, audit-shape S1–S3; Agent D D1, D2, D5, D7, D8, D9, D11 `not_a_symlink` / `source_missing`, D12, D14, D15, D16, D17.
 - **`report-only`** — a measurement or an observation with no change expected. Checks: every sizing row and `total_kb` line from Agents A and B, the Python-runtime `[INFO]` line, model routing 1 (`_version` provenance), 3 (merged entries) and 7 (env var), every visible-waiver `[INFO]` (execution-discipline, `size-waiver:`, dirty-tree), Agent C H1 and H2 (both clear at the next publish bump — there is no manual route), D1's experts-count line, D3's absent-section lines, and D10's persona-but-empty line.
 
 A check added here is assigned a resolution in the same edit; an unassigned finding counts as `report-only` downstream, which silently drops a real repair out of `/lazy-core.checkup`'s question.
@@ -45,7 +45,7 @@ This skill has 3 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 ## Phase 1 — Inline logging compliance checks
 
-L1–L4 are absorbed from the retired `lazy-log.audit` skill; L5 covers the install-managed `.gitattributes` line. These five checks run inline (no subagent dispatch) before Phase 2's parallel scan. Record findings in a local list for inclusion in the Phase 3 render.
+L1–L4 are absorbed from the retired `lazy-log.audit` skill; L5 covers the install-managed `.gitattributes` line; L6 checks the language of skill, command and agent instructions. These six checks run inline (no subagent dispatch) before Phase 2's parallel scan. Record findings in a local list for inclusion in the Phase 3 render.
 
 Severity vocabulary: the four words from **Finding shape** above — `PASS` / `INFO` / `WARN` / `FAIL`. A check that ran clean emits `PASS`; the Phase 3 render folds the `PASS` lines into the section's summary line.
 
@@ -81,6 +81,12 @@ A literal `true` → no finding.
 
 - Read `.gitattributes`. If absent, or no line of it reads `* text=auto eol=lf` once stripped → `[WARN] .gitattributes does not pin LF — git may store or check out CRLF text files on some machines | .gitattributes`.
 
+### L6 — Instructions are written in English
+
+- `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/instruction_lang_scan.py" <repo-root>)`, adding `--dev` when the repo root carries a `plugins/claude/` tree, so the plugin sources are read too. The worker prints a JSON list of `{path, line, text}`; every entry is a line of a skill, command or agent, a skill's own references included, that carries a letter outside the Latin script, a Greek formula letter aside, outside a code span, a fence or quotes.
+- One finding per entry: `[WARN] <path>:<line> instruction text is not in English — translate it, or put text that is data in a code span or quotes (lazy-core.skill-writing § 14)`. An empty list → `PASS`.
+- Worker absent (older core) → `[INFO] instruction_lang_scan.py not shipped — skipping`.
+
 ## Phase 2 — Dispatch parallel scans
 
 Dispatch these four Explore agents **in a single message with four Agent tool calls** (`subagent_type: "Explore"`, `mode: "dontAsk"`). Each returns the structured report from `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md`. Budget: "Report under 350 words".
@@ -89,20 +95,14 @@ Severity vocabulary for every dispatched agent: the four words from **Finding sh
 
 ### Agent A — always-loaded context
 
-Measure everything that loads at conversation start. Include these sources as one `[INFO]` finding per source, sorted by size desc:
-
-- **Global CLAUDE.md** (`$HOME/.claude/CLAUDE.md`) — Read, estimate size.
-- **Project CLAUDE.md** (`CLAUDE.md`) — Read, estimate size.
-- **Global rules** (`$HOME/.claude/rules/*.md`) — Glob + Read. If the directory is a symlink, resolve and follow it. Only rules **without** a `paths` frontmatter field count as always-loaded; rules with `paths` are on-demand and belong to Agent B.
-- **Project rules** (`.claude/rules/*.md`) — `wc -c` via Bash. Same `paths` filtering rule.
-- **Memory index** (`$HOME/.claude/projects/*/memory/MEMORY.md`) — Read, estimate size.
+Measure everything that loads at conversation start with one call, `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" context-scan --section weight)` — the same measurement `/lazy-core.slim-context` reports. Its `always_loaded` list is the set of files to report, with exact `bytes`; do not add, drop, or re-measure files by hand. Emit one `[INFO]` finding per `always_loaded` entry, sorted by size desc.
 
 Also emit `[WARN]` findings for:
 
 - Any rules file > 3 KB (suggest `/lazy-core.slim-context`).
 - `MEMORY.md` > 5 KB (suggest consolidation).
 
-Include a `total_kb` line in the summary block.
+Include a `total_kb` line (from `always_total`) and the verb's `level` in the summary block.
 
 ### Agent B — on-demand assets, MCP, path + naming hygiene
 
@@ -210,15 +210,15 @@ Missing files are a silent no-op — the verb prints a stub with `_version` inta
 3. **Merged entries** — for every dispatch-string key across both scopes, emit one `[INFO]`: `agent_models <group>.<key> = <value> (<provenance>)`. Provenance is `project`, `global`, or `project, overrides global=<other>` when both scopes carry the same key with different values. Group entries together in the report render by their top-level group name. Skip any top-level key whose value is not a dict (e.g. `_version: int`) — only group sub-dicts carry dispatch mappings. (Filter by shape, not by name, because `_user` / `_project` / `_builtin` are legitimate group-name keys that share the underscore prefix.)
 4. **Orphans** — any key in either scope that does NOT resolve to a discovered agent (see Agent discovery below). Finding: `[WARN] orphan agent_models entry: <group>.<key> (<scope>)`.
 5. **Gaps** — discovered agents with no entry in any scope (exclude agents explicitly set to `"default"` in either scope — those are explicit decisions, not gaps). Finding: `[INFO] no agent_models entry for <dispatch-string> (from <source>) — run /lazy-core.slim-context to fill`.
-6. **Invalid values** — any value not in `{"haiku", "sonnet", "opus", "default"}`. Finding: `[WARN] invalid value <x> for <group>.<key> (<scope>)`.
-7. **Env-var status** — emit `[INFO]` with `LAZY_AGENT_MODEL_FLOOR=<value>` and a tier-order note (`haiku < sonnet < opus`), else `LAZY_AGENT_MODEL_FLOOR=(unset)`.
+6. **Invalid values** — any value not in `{"haiku", "sonnet", "opus", "fable", "default"}`. Finding: `[WARN] invalid value <x> for <group>.<key> (<scope>)`.
+7. **Env-var status** — emit `[INFO]` with `LAZY_AGENT_MODEL_FLOOR=<value>` and a tier-order note (`haiku < sonnet < opus < fable`), else `LAZY_AGENT_MODEL_FLOOR=(unset)`.
 
 **Agent discovery (shared helper — used by audit, optimize, doctor)**. Deduped by full dispatch string:
 
 1. **Built-ins** — hardcoded list: `Explore`, `Plan`, `general-purpose`, `statusline-setup`. Group: `_builtin`. Dispatch string: bare name.
 2. **User-authored, global** — `$HOME/.claude/agents/*.md`. Group: `_user`. Dispatch string: bare filename stem.
 3. **User-authored, project** — `./.claude/agents/*.md`. Group: `_project`. Dispatch string: bare filename stem. (Project entries shadow global entries of the same stem — both still listed separately with provenance.)
-4. **Plugin-shipped** — for every plugin name `installed_plugins.json` records (plus, in a repo that authors plugins, every `plugins/claude/<name>/` carrying a manifest), glob `<root>/agents/*.md` where `<root>` is what `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" plugin-root <name>` prints — the authoring repo's tree first, then the exported dir, then the `installPath` of the highest-version record in `~/.claude/plugins/installed_plugins.json`; a walk of `$HOME/.claude/plugins/cache/**` is never the route — it keeps every version ever installed and surfaces copies the registry no longer names. Group: **domain** derived from plugin name via the domain-extraction rule (first `-`-delimited segment, or full name if no `-`). Dispatch string: `<plugin-name>:<stem>`. **Install-scope filter:** the registry is machine-global — keep a plugin's agents only when `~/.claude/plugins/installed_plugins.json` shows it installed at `user` scope, or at `project` scope with a `projectPath` equal to the current repo root; a plugin installed only into another project's scope is not part of this repo's surface and its agents are never flagged missing here.
+4. **Plugin-shipped** — for every plugin name `installed_plugins.json` records (plus, in a repo that authors plugins, every `plugins/claude/<name>/` carrying a manifest), glob `<root>/agents/*.md` where `<root>` is what `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" plugin-root <name>` prints — the `$LAZYCORTEX_PLUGIN_DIRS` entry first, then the dev-vault sibling, then the repo's own `plugins/claude/<name>/`, and last the `installPath` of the highest-version record in `~/.claude/plugins/installed_plugins.json`; a walk of `$HOME/.claude/plugins/cache/**` is never the route — it keeps every version ever installed and surfaces copies the registry no longer names. Group: **domain** derived from plugin name via the domain-extraction rule (first `-`-delimited segment, or full name if no `-`). Dispatch string: `<plugin-name>:<stem>`. **Install-scope filter:** the registry is machine-global — keep a plugin's agents only when `~/.claude/plugins/installed_plugins.json` shows it installed at `user` scope, or at `project` scope with a `projectPath` equal to the current repo root; a plugin installed only into another project's scope is not part of this repo's surface and its agents are never flagged missing here.
 
 **Rule-writing compliance** — see `lazy-core.rule-writing`. File set: `.claude/rules/*.md`, `$HOME/.claude/rules/*.md`, `plugins/claude/*/rules/*.md`. **Exclude** `**/templates/**/*-template.md` from every check below — templates are skeletons, not rules; their placeholder frontmatter and example clauses would otherwise misfire. Checks:
 
@@ -598,7 +598,7 @@ Parse all four returned blocks plus the Phase 1 inline findings. Every rendered 
 |---|---|---|---|
 | (one row per Agent A `[INFO]` finding, sorted by size descending) |
 
-**Total always-loaded**: ~X KB
+**Total always-loaded**: X KB — `<level>` (Agent A's `level`: `PASS` / `WARN` / `FAIL`)
 
 `[INFO]` the system prompt, the skill registry, the MCP instructions and the deferred-tool list are injected by Claude Code, are not measured here, and no repair reduces them.
 
@@ -695,7 +695,7 @@ One line per entry. Below the table:
 
 - **Orphans** (WARN) — one line per `orphan agent_models entry` finding; route: run `/lazy-core.agent-models`, which prunes entries whose agent is gone.
 - **Gaps** (INFO) — one line per `no agent_models entry for ...` finding; route: run `/lazy-core.agent-models` to fill the tier, or set the agent to `"default"` deliberately.
-- **Invalid values** (WARN) — one line per invalid-value finding; route: rewrite the value to one of `haiku` / `sonnet` / `opus` / `default`.
+- **Invalid values** (WARN) — one line per invalid-value finding; route: rewrite the value to one of `haiku` / `sonnet` / `opus` / `fable` / `default`.
 - **Env-var** (INFO) — `LAZY_AGENT_MODEL_FLOOR=<value>` with tier-order note, or `(unset)`; no route.
 
 ### Rule-writing compliance

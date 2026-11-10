@@ -52,11 +52,11 @@ The `errors` key (nested under the flat `daemon` section) is optional and tunes 
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `retention_days` | int | `30` | The daemon prunes error-journal events (`.runtime/errors.jsonl`) older than this window on its hourly maintenance pass. The latest event of a still-open / needs-operator incident is always retained regardless of age, so a live incident never vanishes. |
+| `retention_days` | int | `30` | On its hourly maintenance pass the daemon drops a whole incident from the error journal (`.runtime/errors.jsonl`) once it is closed and its last event is older than this window. An open or needs-operator incident is never dropped by age, and a closed incident with a recent last event keeps all its events. The same pass caps every incident at its first 10 and last 40 events, dropping the ones between. |
 
 ### `daemon.rate_limit_guard` sub-fields
 
-The `rate_limit_guard` key is optional and tunes the subscription-rate-limit guard. Every field defaults to the protective value, so a section predating the guard — or one no migration has reached — protects the subscription rather than exposing it (`rate_limit_flag.config`).
+The `rate_limit_guard` key is optional and tunes the subscription-rate-limit guard. Every field defaults to the protective value, so a section predating the guard — or one no migration has reached — protects the subscription rather than exposing it (`rate_limit_flag.resolve_config`).
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|

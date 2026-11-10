@@ -6,7 +6,7 @@ coordinator owns, carrying the level role, the five level gates, the halt flag, 
 and the coordinator's own body sections. `lazy-spec.install` seeds the root note through this
 verb, and `lazy-spec.product-config` brings each existing product note up to the same schema.
 
-CLI: `catalog-note backfill (<product> | --root) [--today <YYYY-MM-DD>]`. The root form targets
+CLI: `catalog-note backfill (<product> | --root) [--cwd DIR]`. The root form targets
 `<vault_root>/<vault_root basename>.md`; the product form targets `<spec_path>/<leaf>.md` under
 the content root, following the folder-note convention rather than the product's own key. A
 missing note is created from the `level-note.md` template chain; an existing one only gains what
@@ -26,27 +26,32 @@ import os
 import sys
 from pathlib import Path
 
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import asset_types  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import flip_gate  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import note_explainers  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import note_ops  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import scaffold_asset  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import spec_frontmatter  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import spec_paths  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable-next=import-error
-from spec_keys import BOOL_FALSE, LEVEL_GATE_ORDER, Section, SpecHaltKey, SpecKey, SpecValue
-
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
+
+
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import asset_types  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import note_explainers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import note_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import scaffold_asset  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# pylint: disable-next=import-error,wrong-import-position
+from spec_keys import BOOL_FALSE, LEVEL_GATE_ORDER, Section, SpecHaltKey, SpecKey, SpecValue  # noqa: E402
 
 
 # ----------------------------------------------------------------------------------------
@@ -116,7 +121,6 @@ _VERB_BACKFILL = "backfill"
 _ARG_VERB = "verb"
 _ARG_PRODUCT = "product"
 _ARG_ROOT = "--root"
-_ARG_TODAY = "--today"
 _ARG_CWD = "--cwd"
 # waiver: the env var the daemon exports for every subprocess it spawns
 _ENV_REPO_ROOT = "LAZY_REPO_ROOT"
@@ -124,12 +128,11 @@ _ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 _HELP_VERB = "The level-note verb to run"
 _HELP_PRODUCT = "Product compound-key whose level note is backfilled; omit for --root"
 _HELP_ROOT = "Target the catalog root note instead of a product's own"
-_HELP_TODAY = "ISO date pinned into the emitted history line"
 _HELP_CWD = "Repository to run against; defaults to $LAZY_REPO_ROOT, then the process cwd"
 _ERR_TARGET = "name exactly one of <product> or --root\n"
 
 
-def _target(repo: Path, product: str | None, root: bool) -> tuple[Path, str, dict]:
+def _resolve_target(repo: Path, product: str | None, root: bool) -> tuple[Path, str, dict]:
   """
   Resolve which level note a call names, the role that note carries, and its product record.
 
@@ -147,14 +150,14 @@ def _target(repo: Path, product: str | None, root: bool) -> tuple[Path, str, dic
     to no product.
 
   Raises:
-    SystemExit: When the product form names a key no product registry declares.
+    ScaffoldRefusal: When the product form names a key no product registry declares.
   """
   # One call renders exactly the one level note its argument names and walks no tree: nothing
   # here enumerates a product's children, so a product nested inside another is never reached
   # from its parent's run and there is no nested-product skip to make.
   content_root = spec_paths.spec_content_root(repo)
 
-  # guard: the root form has no product record to read — the vault root names its own note
+  # the root form has no product record to read — the vault root names its own note
   if root:
     return content_root / f"{content_root.name}.md", SpecValue.ROLE_CATALOG, {}
   record = scaffold_asset.resolve_product(repo, product or "")
@@ -179,7 +182,7 @@ def _paint(role: str, record: dict) -> tuple[str, str]:
            str(record.get(asset_types.AssetTypeField.COLOR) or color) )
 
 
-def _managed_keys(role: str, record: dict) -> list[tuple[str, str]]:
+def _build_managed_keys(role: str, record: dict) -> list[tuple[str, str]]:
   """
   Build the frontmatter a level note of one role owes, as `(key, literal)` pairs.
 
@@ -230,7 +233,7 @@ def _seed_text(repo: Path, role: str, product: str, record: dict) -> str:
     The rendered note text, its paint keys already spliced into the frontmatter.
 
   Raises:
-    SystemExit: When no layer of the override chain carries the level-note template.
+    ScaffoldRefusal: When no layer of the override chain carries the level-note template.
   """
   # the catalog root has its own context and shares the level note with the product context
   template = scaffold_asset.resolve_template(
@@ -241,7 +244,7 @@ def _seed_text(repo: Path, role: str, product: str, record: dict) -> str:
   return scaffold_asset.inject_iconize(text, icon, color)
 
 
-def _section_blocks(text: str) -> dict[str, list[str]]:
+def _split_section_blocks(text: str) -> dict[str, list[str]]:
   """
   Split a note body into its H1 sections, each mapped to its own block of lines.
 
@@ -267,7 +270,7 @@ def _section_blocks(text: str) -> dict[str, list[str]]:
   return blocks
 
 
-def _rendered_block(lines: list[str], lang: str) -> list[str]:
+def _render_block(lines: list[str], lang: str) -> list[str]:
   """
   Render one template section into the lines an insertion carries, explainer included.
 
@@ -319,11 +322,12 @@ def _insert_sections(body: str, blocks: dict[str, list[str]], lang: str) -> tupl
   # Domain(spec.notes):
   # # A level note's body keeps one fixed section order
   # Every level note — the catalog root's own or a product's — carries its working sections in
-  # the same fixed order: a summary opens the document and an attachments registry closes it,
-  # with the coordinator's own working sections placed between the two. Whichever of those
-  # working sections a note already has stays exactly where it is; only a section still missing
-  # is inserted, always ahead of the next section the roster expects to follow it, so the shape
-  # converges toward the same order no matter how many passes it takes to complete.
+  # the same fixed order: a summary opens the document and the history closes it, with the gates,
+  # then an attachments registry, then the coordinator's own working sections between the two.
+  # Whichever of those working sections a note already has stays exactly where it is; only a
+  # section still missing is inserted, always ahead of the next section the roster expects to
+  # follow it, so the shape converges toward the same order no matter how many passes it takes
+  # to complete.
 
   # locate every canonical section already present, and note the schema's still-missing ones
   lines = spec_frontmatter.split_lines(body)
@@ -338,7 +342,7 @@ def _insert_sections(body: str, blocks: dict[str, list[str]], lang: str) -> tupl
   plan: dict[int, list[str]] = {}
   for heading in missing:
     plan.setdefault(_anchor(heading, positions, len(lines)), []).extend(
-        _rendered_block(blocks[heading], lang))
+        _render_block(blocks[heading], lang))
 
   # apply bottom-up, so every anchor still points at the line it was computed against; an
   # insertion never opens on the heels of the operator's last line — a blank separates them
@@ -363,7 +367,7 @@ def _apply_keys(text: str, role: str, record: dict) -> tuple[str, list[str]]:
     A `(text, added)` pair — `added` names the keys written, in write order.
   """
   frontmatter, fm_end = flip_gate.parse_frontmatter(text)
-  pairs = _managed_keys(role, record)
+  pairs = _build_managed_keys(role, record)
 
   # a note without frontmatter gets an empty block to fill; an existing key is the operator's
   # or another writer's, so only the absent ones are filled in
@@ -374,7 +378,7 @@ def _apply_keys(text: str, role: str, record: dict) -> tuple[str, list[str]]:
   return fm_text + text[fm_end:], [ key for key, _value in missing ]
 
 
-def backfill(repo: Path, *, product: str | None, root: bool, today: str | None = None) -> dict:
+def backfill(repo: Path, *, product: str | None, root: bool) -> dict:
   """
   Bring one level note up to the level schema, creating it when it is not there yet.
 
@@ -392,8 +396,6 @@ def backfill(repo: Path, *, product: str | None, root: bool, today: str | None =
     repo: The settings root holding `.claude/lazy.settings.json`.
     product: The product compound-key whose level note is the target, or None for the root form.
     root: True to target the catalog root note instead of a product's own.
-    today: Accepted for CLI compatibility and ignored — a backfill journals nothing since the
-      history redesign; the commit records the run.
 
   Returns:
     `{"outcome": "created" | "updated" | "unchanged", "note": <repo-relative path>,
@@ -401,7 +403,7 @@ def backfill(repo: Path, *, product: str | None, root: bool, today: str | None =
     and is empty for a created note and for an unchanged one.
 
   Raises:
-    SystemExit: When the product form names an unregistered product, or no layer of the
+    ScaffoldRefusal: When the product form names an unregistered product, or no layer of the
       override chain carries the level-note template.
   """
 
@@ -413,12 +415,8 @@ def backfill(repo: Path, *, product: str | None, root: bool, today: str | None =
   # A run over a note that already carries the full schema writes nothing to disk and reports
   # `unchanged`.
 
-  # the date is accepted for the callers that still pass it and discarded here, so the
-  # signature stays honest about the fact that a backfill journals nothing any more
-  del today
-
   # which note this call names, the role it carries, and whether it is there yet
-  note, role, record = _target(repo, product, root)
+  note, role, record = _resolve_target(repo, product, root)
   created = not note.is_file()
 
   # a fresh note starts as the rendered template; an existing one starts as its own bytes
@@ -429,11 +427,11 @@ def backfill(repo: Path, *, product: str | None, root: bool, today: str | None =
   # fill in the managed frontmatter, then the missing sections — the template supplies the shape
   text, added_keys = _apply_keys(text, role, record)
   _fm, fm_end = flip_gate.parse_frontmatter(text)
-  body, added_sections = _insert_sections(text[fm_end:], _section_blocks(seeded), lang)
+  body, added_sections = _insert_sections(text[fm_end:], _split_section_blocks(seeded), lang)
   text = text[:fm_end] + body
   added = added_keys + added_sections
 
-  # guard: an existing note that owed nothing is left exactly as it was found
+  # an existing note that owed nothing is left exactly as it was found
   if not created and not added:
     return { _Out.OUTCOME: _Outcome.UNCHANGED, _Out.NOTE: str(note.relative_to(repo)),
              _Out.ADDED: [] }
@@ -447,15 +445,19 @@ def backfill(repo: Path, *, product: str | None, root: bool, today: str | None =
            _Out.NOTE: str(note.relative_to(repo)), _Out.ADDED: added }
 
 
+@scaffold_asset.refusal_exits
 def main(argv: list[str]) -> int:
   """
   Run the `catalog-note` subcommand from the command line, printing the result as JSON.
 
   Args:
-    argv: Subcommand argv tail — `backfill (<product> | --root) [--today YYYY-MM-DD] [--cwd DIR]`.
+    argv: Subcommand argv tail — `backfill (<product> | --root) [--cwd DIR]`.
 
   Returns:
     Exit code: 0 on success, 2 when the call names both a product and the root, or neither.
+
+  Raises:
+    SystemExit: With status `1` and a JSON error object on stdout when the backfill is refused.
   """
   parser = argparse.ArgumentParser(prog = _PROG)
   # waiver: argparse CLI signature -- positional argument names shown in --help / usage
@@ -463,7 +465,6 @@ def main(argv: list[str]) -> int:
   parser.add_argument(_ARG_PRODUCT, nargs = "?", default = None, help = _HELP_PRODUCT)
   # waiver: argparse CLI signature -- option flag + standard argparse action
   parser.add_argument(_ARG_ROOT, action = "store_true", help = _HELP_ROOT)
-  parser.add_argument(_ARG_TODAY, default = None, help = _HELP_TODAY)
   parser.add_argument(_ARG_CWD, default = None, help = _HELP_CWD)
   args = parser.parse_args(argv)
 
@@ -472,10 +473,9 @@ def main(argv: list[str]) -> int:
     sys.stderr.write(_ERR_TARGET)
     return 2
 
-  # the flag, then the daemon-exported env var, then the process cwd — like every sibling verb;
+  # the flag, then the daemon-exported env var, then the process cwd;
   # a headless caller standing in another checkout would otherwise seed a catalog there
   start = Path(args.cwd or os.environ.get(_ENV_REPO_ROOT) or Path.cwd())
-  result = backfill(scaffold_asset.repo_root(start), product = args.product,
-                    root = args.root, today = args.today)
+  result = backfill(scaffold_asset.repo_root(start), product = args.product, root = args.root)
   print(json.dumps(result))
   return 0

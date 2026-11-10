@@ -18,6 +18,9 @@ spec_source_docs: []
 ## Goals
 <!-- Every goal of the design, the whole of it. One line per goal, verbatim from the design and in its order; this list is what the final verification task and the test-plan are judged against. A goal not in the design does not belong here. -->
 
+## Already implemented
+<!-- Optional. When the document has nothing to say here, the section is removed together with its heading. Every included asset whose goals the current code already implements: one entry per asset, each of its goals with the code paths that cover it, never a bare claim. Such an asset gets no task; it goes through the build with nothing to do and ships as the spec of the code that exists. When the code covers every included asset, Tasks stays empty and the build implements nothing. An asset the code covers only in part is not listed here: its remainder is planned in Tasks. -->
+
 ## Tasks
 <!-- The work, in order. One subsection per task, naming the exact files it creates, modifies or deletes before its steps begin. What proves the work done lives in Verification. -->
 

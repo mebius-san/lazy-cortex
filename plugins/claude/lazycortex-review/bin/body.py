@@ -1,31 +1,21 @@
 """
-Strip / reassemble document parts for agent dispatch.
+Reassemble an agent reply onto the operator's document, per role.
 
-This module is half of the ownership-isolation contract — together
-with :mod:`reapply`. The agent never sees more of the document than
-its role permits, and the dispatcher mechanically restores anything
-the agent should not have edited.
+Together with :mod:`reapply`, this module is half of the ownership-isolation contract: anything the agent
+must not edit is mechanically restored from the operator's document.
 
-Strip side (dispatch → agent):
+:func:`reassemble` grafts the agent's reply onto the operator's current state:
 
-- :func:`strip_for_main_writer` — keep frontmatter + content-only
-  body. Drop banner, every owned section, `# History`, approve
-  checkbox.
-- :func:`strip_for_section_writer` — same, but preserve the writer's
-  own owned section if it exists.
+- `phase="main"` — the body comes from the agent; owned meta-sections, history, and banner come from the
+  operator.
+- `phase="section"` — the body comes from the operator (any agent body edit is ignored); only the writer's
+  owned section is taken from the agent.
 
-Reassemble side (agent → dispatcher):
+Frontmatter overlay keys are applied exactly as the caller passes them; filtering the overlay is the
+caller's responsibility.
 
-- :func:`reassemble` — graft the agent's reply onto the operator's
-  current state per role rules:
-  * `phase="main"` — body comes from agent; owned meta-sections,
-    history, banner come from operator.
-  * `phase="section"` — body comes from operator (UNCHANGED — any
-    agent body edit ignored); ONLY the writer's owned section is
-    taken from the agent.
-
-Reserved frontmatter keys (`review_active` / `review_round` /
-`review_approved`) are silently dropped from any agent overlay.
+The module also offers section-level helpers: status-callout upsert and strip, owned-section stripping,
+protected-section lift and restore, answered-question stripping, and edit-marker folding.
 """
 from __future__ import annotations
 
@@ -42,7 +32,7 @@ from keys import Phase, Position, Tag  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  from collections.abc import Mapping, Sequence
+  from collections.abc import Collection, Mapping, Sequence
 
 
 # ----------------------------------------------------------- internals
@@ -87,7 +77,7 @@ def _enumerate_h1_spans(body: str) -> list[tuple[int, int, str, str]]:
     List of `(start, end, title, heading_line)` tuples where `end` is the start of the next H1
     or `len(body)`; a `# ` line inside a code fence is content, never a heading.
   """
-  headings = _parser.h1_headings(body)
+  headings = _parser.find_all_h1_headings(body)
   spans: list[tuple[int, int, str, str]] = []
   for i, (start, match_end, title) in enumerate(headings):
     line_end = body.find("\n", match_end)
@@ -117,7 +107,7 @@ def _owner_of_section(section_body: str) -> tuple[str, str] | None:
   for line in section_body.split("\n"):
     stripped = line.strip()
 
-    # guard: leading blank lines aren't the tag line; skip to the first non-empty content line.
+    # leading blank lines are passed over so the tag is matched on the first line with content
     if not stripped:
       continue
 
@@ -168,14 +158,14 @@ def _section_tag_line(section_body: str) -> str | None:
   for line in section_body.split("\n"):
     stripped = line.strip()
 
-    # guard: leading blank lines aren't the tag line; skip to the first non-empty content line.
+    # leading blank lines are passed over so the tag is matched on the first line with content
     if not stripped:
       continue
     return stripped if _TAG_LINE_RE.match(stripped) else None
   return None
 
 
-def _section_is_tagged(section_body: str) -> bool:
+def _is_section_tagged(section_body: str) -> bool:
   """
   Report whether the section's first non-empty content line is an Obsidian-style single-line
   hashtag (`#expert/...`, `#review/...`, `#protected/...`, `#consumer/<...>`, etc.).
@@ -208,7 +198,7 @@ def _section_is_tagged(section_body: str) -> bool:
   for line in section_body.split("\n"):
     stripped = line.strip()
 
-    # guard: leading blank lines aren't the tag line; skip to the first non-empty content line.
+    # leading blank lines are passed over so the tag is matched on the first line with content
     if not stripped:
       continue
     return bool(_TAG_LINE_RE.match(stripped))
@@ -220,14 +210,12 @@ def _drop_sections(
     *,
     drop_owned: bool,
     drop_history: bool,
-    keep_owner: tuple[str, str] | None = None,
 ) -> str:
   """
   Walk `body` H1 sections and remove those that match the policy.
 
   When `drop_owned` is `True`, any section whose first non-empty content line is a tag
-  (spec inv 8) is removed, except when `keep_owner` is given and the section's 2-part owner
-  equals it. This covers any foreign-owned overlay — they are not "main writer's body" —
+  (spec inv 8) is removed. This covers any foreign-owned overlay — they are not "main writer's body" —
   including ownerless tagged sections (`#protected/...`, `#consumer/...`), which are always
   removed under the policy. When `drop_history` is `True`, the `# History` section
   (titled exactly `History`, with or without an ownership tag) is also removed.
@@ -248,8 +236,6 @@ def _drop_sections(
   for start, end, _title, _heading in spans:
     section_text = body[start:end]
     section_body_only = section_text[len(_heading_line_for(start, end, body)):]
-    owner = _owner_of_section(section_body_only)
-    tagged = _section_is_tagged(section_body_only)
 
     # the # History section is governed solely by drop_history — never by the drop_owned
     # policy, even though the historian's tag is ownerless.
@@ -258,9 +244,8 @@ def _drop_sections(
         keep_ranges.append((start, end))
       continue
 
-    # guard: under drop_owned policy, tagged sections are removed; only an explicitly kept owner is
-    # exempt — ownerless tagged sections (#protected/..., owner is None) must never match a None keep_owner.
-    if drop_owned and tagged and (keep_owner is None or owner != keep_owner):
+    # under drop_owned policy, every tagged section is removed, ownerless ones (#protected/...) included
+    if drop_owned and _is_section_tagged(section_body_only):
       continue
     keep_ranges.append((start, end))
   return "".join(body[s:e] for s, e in keep_ranges)
@@ -291,46 +276,6 @@ _APPROVE_LINE_RE = re.compile(
 )
 
 
-# -------------------------------------------------------------- strip api
-
-
-def strip_for_main_writer(text: str) -> str:
-  """
-  Strip `text` to the content-only view for main-writer dispatch per spec § Stage 2.
-
-  Returns:
-    The full text with frontmatter preserved and the body reduced to operator-authored
-    content — banner, owned sections, approve checkbox, and history removed.
-  """
-  _meta, body = _fm.parse(text)
-  frontmatter_text = text[: len(text) - len(body)]
-  body = _strip_banner(body)
-  body = _parser.sub_outside_fences(_APPROVE_LINE_RE, "", body)
-  body = _drop_sections(body, drop_owned=True, drop_history=True)
-  return frontmatter_text + body
-
-
-def strip_for_section_writer(text: str, *, owner: tuple[str, str]) -> str:
-  """
-  Strip `text` to the section-writer view, preserving `owner`'s own section.
-
-  Applies the same strip as main-writer dispatch, but keeps the section already owned by
-  `owner` when it exists in the document. `owner` is the `(flat_name, section_id)` pair.
-
-  Returns:
-    The full text with frontmatter preserved and the body stripped of all owned sections
-    except `owner`'s, plus banner, approve checkbox, and history removed.
-  """
-  _meta, body = _fm.parse(text)
-  frontmatter_text = text[: len(text) - len(body)]
-  body = _strip_banner(body)
-  body = _parser.sub_outside_fences(_APPROVE_LINE_RE, "", body)
-  body = _drop_sections(
-      body, drop_owned=True, drop_history=True, keep_owner=owner,
-  )
-  return frontmatter_text + body
-
-
 # ------------------------------------------------------- reassemble api
 
 
@@ -352,35 +297,12 @@ def _extract_section_by_owner(body: str, owner: tuple[str, str]) -> str | None:
   return None
 
 
-def _extract_section_by_flat_name(body: str, flat_name: str) -> str | None:
-  """
-  Extract the full text of the H1 section whose owner flat-name matches `flat_name`.
-
-  Does not require the caller to know the section-id — useful for gate predicates that only
-  carry the flat expert name.
-
-  Returns:
-    The section text from heading through next H1 or EOF, or `None` when no matching section
-    exists.
-  """
-  spans = _enumerate_h1_spans(body)
-  for start, end, _title, _heading in spans:
-    section_text = body[start:end]
-    heading_len = len(_heading_line_for(start, end, body))
-    owner_pair = _owner_of_section(section_text[heading_len:])
-    if owner_pair is not None and owner_pair[0] == flat_name:
-      return section_text
-  return None
-
-
 def section_content_for_owner(body: str, owner: tuple[str, str]) -> str | None:
   """
   Return the markdown body of `owner`'s owned H1 section with the heading line and the
   ownership-tag line stripped.
 
-  Used by callers that need to inspect the section content apart from scaffolding — e.g.
-  the state-machine probe for `any_post_approve_section_non_empty` and the main-writer
-  payload builder (Phase 3b, `concerns.content`).
+  Lets callers inspect the section content apart from its scaffolding.
 
   Returns:
     The section content with heading and ownership-tag lines removed, or `None` when no
@@ -395,7 +317,7 @@ def section_content_for_owner(body: str, owner: tuple[str, str]) -> str | None:
 
   # Strip the leading ownership tag line. Tag may sit on the first
   # non-empty line; preserve blank lines around it for the caller's
-  # whitespace check (see `section_has_substance`).
+  # whitespace check (see `has_section_concerns`).
   lines = rest.split("\n")
   out_lines: list[str] = []
   tag_consumed = False
@@ -407,39 +329,21 @@ def section_content_for_owner(body: str, owner: tuple[str, str]) -> str | None:
   return "\n".join(out_lines)
 
 
-def section_has_substance(body: str, owner: tuple[str, str]) -> bool:
-  """
-  Report whether `owner`'s owned section in `body` contains any non-whitespace content beyond
-  the H1 heading and the ownership-tag line.
-
-  Used by the state-machine probe to decide whether a post-approve section is non-empty.
-
-  Returns:
-    `True` when the section exists and has non-whitespace content; `False` otherwise.
-  """
-  content = section_content_for_owner(body, owner)
-  # guard: no section owned by `owner` — nothing to hold content
-  if content is None:
-    return False
-  return any(line.strip() for line in content.split("\n"))
-
-
-_APPROVE_MARKER_RE = __import__("re").compile(
+_APPROVE_MARKER_RE = re.compile(
     r"^>\s*\[!check\]\s+No concerns\s*$",
-    __import__("re").MULTILINE,
+    re.MULTILINE,
 )
 
 
-def section_has_concerns(body: str, owner: tuple[str, str]) -> bool:
+def has_section_concerns(body: str, owner: tuple[str, str]) -> bool:
   """
   Report whether `owner`'s owned section contains content beyond scaffolding.
 
   Scaffolding consists of the H1 heading, the ownership-tag line, and the approve-marker
   callout `> [!check] No concerns` (spec invariant 6). The approve marker is auto-inserted
   when a section-writer returns `outcome=empty` or an empty result file (spec invariant 12)
-  — it signals "no concerns" and must not count as substance for state-machine gating,
-  otherwise `any_post_approve_section_non_empty` and the validation-round bump predicate
-  trigger spuriously on conceptually empty responses.
+  — it signals "no concerns" and must not count as substance, otherwise a conceptually
+  empty response would be mistaken for a section awaiting attention.
 
   Returns:
     `True` when the section exists and contains non-whitespace content beyond scaffolding;
@@ -463,135 +367,6 @@ def section_has_concerns(body: str, owner: tuple[str, str]) -> bool:
   return any(line.strip() for line in stripped.split("\n"))
 
 
-def remove_owned_section(body: str, owner: tuple[str, str]) -> str:
-  """
-  Remove `owner`'s owned H1 section from `body` entirely.
-
-  Removes the heading, ownership tag, substance, and trailing blank line, leaving all
-  surrounding sections intact. Used by the dispatcher to consume a post-approve validation
-  section once a main writer has lifted its findings into actionable `[!question]
-  #review/question` callouts in the body — without this step, `section_has_substance` would
-  keep returning `True` and `any_post_approve_section_non_empty` would trigger a fresh
-  revert-to-main on every re-approve, looping forever. A pending writer's next dispatch
-  re-creates the section from scratch; the pre-existing shell was previously visible as
-  cosmetic noise (Bug 42).
-
-  Returns:
-    `body` with the owned section removed, or `body` unchanged when `owner` does not own
-    any section.
-  """
-  spans = _enumerate_h1_spans(body)
-  for start, end, _title, _heading in spans:
-    section_text = body[start:end]
-    heading_line = _heading_line_for(start, end, body)
-    owner_pair = _owner_of_section(section_text[len(heading_line):])
-
-    # guard: only the target owner's section is dropped; skip every other section.
-    if owner_pair != owner:
-      continue
-
-    # Drop the section span entirely. The H1 spans returned by
-    # `_enumerate_h1_spans` include the trailing blank gap before
-    # the next H1, so cutting [start, end) leaves no orphan blank
-    # line behind. Surrounding sections shift up by exactly the
-    # section's byte length.
-    return body[:start] + body[end:]
-  return body
-
-
-def replace_owned_section_body(
-    body: str, owner: tuple[str, str], new_body: str,
-) -> str:
-  """
-  Replace the body of `owner`'s owned H1 section with `new_body`.
-
-  Preserves the heading line and the ownership-tag line; replaces everything below them
-  with `new_body`. Used by the dispatcher's mechanical clear-validation-section step
-  (Bug 73): after a validator's concerns have been forwarded and lifted by the main writer
-  into `[!question]` callouts in the body, the source validation section is spent and its
-  body is replaced with the deterministic approve-marker (spec inv 12), preserving heading
-  and ownership tag so the next validator dispatch finds an empty section to write into
-  rather than a stale concerns blob.
-
-  `new_body` is the literal replacement content; the caller is responsible for any trailing
-  newline handling. A single blank line is inserted between the ownership tag and `new_body`
-  to match the canonical section shape.
-
-  Returns:
-    `body` with the owned section's content replaced, or `body` unchanged when `owner` does
-    not own any section.
-  """
-  spans = _enumerate_h1_spans(body)
-  for start, end, _title, _heading in spans:
-    section_text = body[start:end]
-    heading_line = _heading_line_for(start, end, body)
-    owner_pair = _owner_of_section(section_text[len(heading_line):])
-
-    # guard: only the target owner's section has its tag line stripped; skip every other section.
-    if owner_pair != owner:
-      continue
-
-    # Find the ownership-tag line: should be the first non-empty
-    # line after the heading.
-    lines = section_text.splitlines(keepends=True)
-    head_lines: list[str] = []
-    i = 0
-    if i < len(lines):
-      head_lines.append(lines[i])  # heading
-      i += 1
-
-    # Walk blanks until we find the tag line.
-    while i < len(lines) and lines[i].strip() == "":
-      head_lines.append(lines[i])
-      i += 1
-    if i < len(lines):
-      head_lines.append(lines[i])  # ownership tag
-      i += 1
-
-    # Preserve any trailing blank lines from the section's tail
-    # (the trailing blank gap before the next H1 that the span
-    # includes — see `_enumerate_h1_spans`).
-    tail_blanks: list[str] = []
-    j = len(lines) - 1
-    while j >= i and lines[j].strip() == "":
-      tail_blanks.insert(0, lines[j])
-      j -= 1
-    stripped = new_body.strip("\n")
-    new_section = "".join(head_lines)
-    if stripped:
-      if new_section and not new_section.endswith("\n"):
-        new_section += "\n"
-      new_section += "\n" + stripped + "\n"
-    new_section += "".join(tail_blanks)
-    return body[:start] + new_section + body[end:]
-  return body
-
-
-def rewrite_section_h1(body: str, owner: tuple[str, str], canonical_title: str) -> str:
-  """
-  Replace the H1 heading of the section owned by `owner` with `# <canonical_title>`.
-
-  The section body under the heading line is preserved verbatim.
-
-  Returns:
-    `body` with the owned section's H1 heading replaced, or `body` unchanged when no
-    section with that owner exists.
-  """
-  spans = _enumerate_h1_spans(body)
-  for start, end, _title, _heading in spans:
-    section_text = body[start:end]
-    heading_line = _heading_line_for(start, end, body)
-    owner_pair = _owner_of_section(section_text[len(heading_line):])
-
-    # guard: only the target owner's section gets its heading rewritten; skip every other section.
-    if owner_pair != owner:
-      continue
-    new_heading = f"# {canonical_title}\n"
-    rest = section_text[len(heading_line):]
-    return body[:start] + new_heading + rest + body[end:]
-  return body
-
-
 _STATUS_CALLOUT_BLOCK_RE = re.compile(
     r"(?ms)^>\s*\[![\w-]+\][^\n]*#status/[\w-]+[^\n]*\n(?:>[^\n]*\n)*(?:\n)*"
 )
@@ -612,6 +387,41 @@ def strip_status_callout(body: str) -> str:
     blank lines normalised.
   """
   return _parser.sub_outside_fences(_STATUS_CALLOUT_BLOCK_RE, "", body, count = 1).lstrip("\n")
+
+
+def strip_status_callouts_in_states(body: str, *, states: Collection[str]) -> str:
+  """
+  Remove every `#status/<state>` callout block whose state is one of `states`.
+
+  Callouts of any other state are left verbatim, and fenced code blocks are never touched, so a status
+  callout shown as an example inside a fence stays.
+
+  Guarantees:
+    - A `#status/<state>` callout whose state is not in `states` survives verbatim.
+    - A callout inside a code fence survives verbatim, whatever its state.
+
+  Args:
+    body: Document body text, without frontmatter.
+    states: State names to drop, each the part after `#status/` in a callout's tag.
+
+  Returns:
+    `body` without the callout blocks whose state is in `states`.
+  """
+
+  # Contract:
+  # A `#status/<state>` callout whose state is not in the given set MUST survive this call
+  # verbatim, and a callout inside a code fence MUST survive verbatim whatever its state.
+
+  def _drop_if_listed(match: re.Match[str]) -> str:
+    # the callout's state is the tag token on its head line; other states are kept verbatim
+    head_tokens = match.group(0).split("\n", 1)[0].split()
+    state = next(
+        ( tok.removeprefix(Tag.STATUS_PREFIX) for tok in head_tokens if tok.startswith(Tag.STATUS_PREFIX) ), "",
+    )
+    return "" if state in states else match.group(0)
+
+  # fenced examples of a status callout are literal content and stay
+  return _parser.sub_outside_fences(_STATUS_CALLOUT_BLOCK_RE, _drop_if_listed, body)
 
 
 def upsert_status_callout(
@@ -696,7 +506,7 @@ def strip_owned_h1_sections(
     # per spec § Stage 7 (preserve-set keyed by section-id, since
     # section-id is unique across both umbrellas — see § review-class
     # configuration).
-    # guard: drop owned sections whose section-id is absent from the preserve-set; only kept owners survive the trim.
+    # an owned section whose section-id is absent from the preserve-set is dropped from the trim
     if owner is not None and owner[1] not in preserve_section_ids:
       continue
     keep_ranges.append((start, end))
@@ -718,35 +528,6 @@ def _extract_history_section(body: str) -> str | None:
     if _parser.is_historian_section(section_text[heading_len:]):
       return section_text
   return None
-
-
-_REVIEW_CALLOUT_BLOCK_RE = re.compile(
-    r"(?ms)^>\s*\[![\w-]+\][^\n]*#review/[\w-]+[^\n]*\n(?:>[^\n]*\n)*"
-)
-
-
-# `concerns-decision` is the retired pause banner: never a state, only stripped as a legacy leftover
-_BANNER_CALLOUT_BLOCK_RE = re.compile(
-    r"(?ms)^>\s*\[![\w-]+\][^\n]*"
-    r"#review/(?:in-process|action-needed|ready|finalizing|concerns-decision)"
-    r"[^\n]*\n(?:>[^\n]*\n)*"
-)
-
-
-def strip_banner_callouts(body: str) -> str:
-  """
-  Remove banner-state callouts from `body`.
-
-  Removes the `#review/in-process`, `#review/action-needed`, `#review/ready`, and `#review/finalizing` callouts,
-  along with the legacy `#review/concerns-decision` pause banner left over from the retired concerns pause.
-  Used by the historian-dispatch gate so the historian receives body content stripped of banner-state
-  scaffolding and narrates substance only. Writer-authored `[!question]` and `[!attention]` callouts are
-  substance and are preserved.
-
-  Returns:
-    `body` with banner-state callout blocks removed.
-  """
-  return _parser.sub_outside_fences(_BANNER_CALLOUT_BLOCK_RE, "", body)
 
 
 # The two operator-answered callout kinds a writer round folds: a tagged question and a
@@ -790,26 +571,37 @@ def strip_answered_questions(body: str) -> str:
   return _parser.sub_outside_fences(_ANSWERED_QUESTION_BLOCK_RE, "", body)
 
 
-def strip_review_callouts(body: str) -> str:
-  """
-  Remove every `#review/<x>`-tagged callout block from `body`.
-
-  Used by the historian-comparison gate: a body diff that consists only of system-callout
-  additions or removals must not be treated as a content change.
-
-  Returns:
-    `body` with all `#review/<x>`-tagged callout blocks removed.
-  """
-  return _parser.sub_outside_fences(_REVIEW_CALLOUT_BLOCK_RE, "", body)
-
-
 # Inert H1 placeholder that stands in for a lifted `#protected/...` section while the
 # body-wide finalize strips run. An untagged H1 owns its own span, so strip_owned_h1_sections
 # keeps it (owner is None); no strip matches its text, so it round-trips byte-for-byte.
 _PROTECTED_PLACEHOLDER = "# LAZY-REVIEW-PROTECTED-PLACEHOLDER-{idx}"
 
 
-def _section_is_protected(section_body: str) -> bool:
+def protected_section_owner(section_body: str) -> str | None:
+  """
+  Name the owner a section's `#protected/<owner>/<region>` tag declares.
+
+  Args:
+    section_body: Section text below its H1 heading line.
+
+  Returns:
+    The `<owner>` part of the tag when the first non-empty line starts with the `#protected/` prefix, else `None`.
+  """
+  for line in section_body.split("\n"):
+    stripped = line.strip()
+
+    # leading blank lines are passed over so the protected tag is matched on the first line with content
+    if not stripped:
+      continue
+
+    # guard: a first content line without the prefix leaves the section unprotected
+    if not stripped.startswith(Tag.PROTECTED_PREFIX):
+      return None
+    return stripped[len(Tag.PROTECTED_PREFIX):].split("/", 1)[0]
+  return None
+
+
+def _is_section_protected(section_body: str) -> bool:
   """
   Report whether the section's first non-empty content line is a `#protected/` owner tag.
 
@@ -819,14 +611,7 @@ def _section_is_protected(section_body: str) -> bool:
   Returns:
     True when the first non-empty line starts with the `#protected/` prefix, False otherwise.
   """
-  for line in section_body.split("\n"):
-    stripped = line.strip()
-
-    # guard: skip leading blank lines before the first content line
-    if not stripped:
-      continue
-    return stripped.startswith(Tag.PROTECTED_PREFIX)
-  return False
+  return protected_section_owner(section_body) is not None
 
 
 def split_out_protected_sections(body: str) -> tuple[str, list[str]]:
@@ -859,8 +644,8 @@ def split_out_protected_sections(body: str) -> tuple[str, list[str]]:
     section_text = body[start:end]
     heading_len = len(_heading_line_for(start, end, body))
 
-    # guard: not a protected section — leave it for the normal passes
-    if not _section_is_protected(section_text[heading_len:]):
+    # only protected sections are lifted; every other section is left for the normal passes
+    if not _is_section_protected(section_text[heading_len:]):
       continue
     out.append(body[cursor:start])
     out.append(_PROTECTED_PLACEHOLDER.format(idx=len(saved)) + "\n")
@@ -978,9 +763,9 @@ def reassemble(
   """
   Splice the agent's reply onto the operator state per phase rules.
 
-  `phase` is one of `'main'`, `'section'`, or `'final'` — the pipeline category of the
+  `phase` is one of `'main'` or `'section'` — the pipeline category of the
   writer. It is NOT the section-group label (`'routing'` etc.); that is a separate concept
-  owned by state-machine routing tables. `owned_owner` is the `(flat_name, section_id)`
+  owned by the routing configuration. `owned_owner` is the `(flat_name, section_id)`
   pair required when `phase='section'`. `section_layout` is an optional map of
   `(flat_name, section_id)` to `"top"` or `"bottom"`: top-positioned sections are placed
   before the operator's free body; bottom-positioned (and unmapped) sections are placed
@@ -992,10 +777,17 @@ def reassemble(
     - For `phase='section'`, the returned body equals the operator's document except that
       `owned_owner`'s own section is replaced by the matching section from `agent_body`;
       any other edit the agent made is discarded.
+    - For `phase='section'`, every untagged H1 section following the owned heading in the reply,
+      up to the next tagged section or a heading the operator's document already carries, stays
+      inside the owned section with its heading demoted to H2.
 
   Returns:
     The reassembled document text with the agent's contribution grafted onto the operator
     state per the phase rules.
+
+  Raises:
+    ValueError: If `phase` is neither `'main'` nor `'section'`.
+    ValueError: If `phase` is `'section'` and `owned_owner` is not given.
   """
 
   # Contract:
@@ -1004,6 +796,11 @@ def reassemble(
   # phase='section', the returned document MUST equal the operator's document except that
   # `owned_owner`'s own section is replaced by `agent_body`'s matching section; any other
   # edit in `agent_body` MUST be discarded.
+
+  # Contract:
+  # For phase='section', every untagged H1 section that follows the owned heading in the
+  # reply, up to the next tagged section or a heading the operator's document already
+  # carries, MUST stay inside the owned section with its heading demoted to H2.
 
   # Domain(review.dispatch):
   # # Ownership isolation between writer roles
@@ -1071,7 +868,7 @@ def _restore_owned_and_history(
     heading_len = len(_heading_line_for(start, end, operator_body))
     section_body_only = section_text[heading_len:]
     owner = _owner_of_section(section_body_only)
-    tagged = _section_is_tagged(section_body_only)
+    tagged = _is_section_tagged(section_body_only)
     if _parser.is_historian_section(section_body_only):
       history_section = section_text
       continue
@@ -1079,13 +876,13 @@ def _restore_owned_and_history(
     # Spec inv 8: preserve EVERY tagged H1 section (any tag), not
     # only 2-part #expert/<flat>/<section-id>. Downstream consumer
     # overlays may carry other prefixes. All foreign to the main writer.
-    # guard: only foreign-owned tagged sections get re-placed; skip untagged main-writer body and the
-    # caller's own section — but an ownerless tagged section (owner is None) never matches a None skip_owner.
+    # only foreign-owned tagged sections get re-placed; untagged main-writer body and the
+    # caller's own section are passed over — but an ownerless tagged section (owner is None) never matches a None skip_owner.
     if not tagged or (skip_owner is not None and owner == skip_owner):
       continue
     tag_line = _section_tag_line(section_body_only)
 
-    # guard: the tag pair is the section's identity — a second operator-side instance with the same
+    # the tag pair is the section's identity — a second operator-side instance with the same
     # tag is a duplicate; restore only the first so damaged documents self-heal to one instance.
     if tag_line is not None and tag_line in seen_tags:
       continue
@@ -1133,10 +930,10 @@ def _carry_banner_from_operator(operator_body: str, new_body: str) -> str:
   """
   Restore the operator's top banner above `new_body`'s first H1.
 
-  The state machine repaints the banner separately on its own tick; this function
-  preserves whatever banner was already in place so the body is never left banner-less
-  mid-tick. Normalizes trailing blank lines to exactly one blank line between the banner
-  and the following content, preventing layout drift across rounds (Bug 30 part a).
+  The banner is repainted separately; this function preserves whatever banner was already
+  in place so the body is never left banner-less in between. Normalizes trailing blank lines
+  to exactly one blank line between the banner and the following content, preventing layout
+  drift across rounds (Bug 30 part a).
 
   Returns:
     `new_body` with the operator's banner prepended and normalized, or `new_body` unchanged
@@ -1174,12 +971,12 @@ def _document_title_heading(body: str) -> str | None:
     heading_line = _heading_line_for(start, end, body)
     section_body_only = section_text[len(heading_line):]
 
-    # guard: the historian's # History section is not the title
+    # the historian's # History section is not the title
     if _parser.is_historian_section(section_body_only):
       continue
 
-    # guard: tagged sections (expert-owned, protected, consumer overlays) are not the title
-    if _section_is_tagged(section_body_only):
+    # tagged sections (expert-owned, protected, consumer overlays) are not the title
+    if _is_section_tagged(section_body_only):
       continue
     return heading_line.rstrip("\n")
   return None
@@ -1215,7 +1012,7 @@ def _carry_title_from_operator(operator_body: str, new_content: str) -> str:
   if op_title is None:
     return new_content
 
-  # guard: writer kept a title H1 — leave its content untouched
+  # a writer that kept a title H1 needs nothing restored, so its content stays untouched
   if _document_title_heading(new_content) is not None:
     return new_content
   return op_title + "\n\n" + new_content.lstrip("\n")
@@ -1227,25 +1024,16 @@ def _extract_writer_section(
   """
   Extract `owner`'s section from a section writer's reply, keeping the writer's own inner H1s.
 
-  Guarantees:
-    - Every untagged H1 section following the owned heading in the reply, up to the next tagged
-      section or a heading the operator's document already carries, belongs to the owned section,
-      its heading demoted to H2 so the section stays a single H1 section.
-
   Args:
     agent_body: The section writer's reply body.
     owner: The `(flat_name, section_id)` pair of the writer's owned section.
     operator_body: The operator's current body, whose headings mark echoed operator sections.
 
   Returns:
-    The owned section text with the writer's inner headings demoted, or `None` when the reply
-    carries no section owned by `owner`.
+    The owned section text, or `None` when the reply carries no section owned by `owner`. Every
+    untagged H1 section after the owned heading, up to the next tagged section or a heading the
+    operator's document already carries, stays inside it with its heading demoted to H2.
   """
-
-  # Contract:
-  # An untagged H1 section following the owned heading in the reply, up to the next tagged
-  # section or a heading the operator's document already carries, MUST stay inside the owned
-  # section, its heading demoted to H2.
 
   # Domain(review.dispatch):
   # # A section writer's headings belong to its section
@@ -1260,15 +1048,15 @@ def _extract_writer_section(
   for idx, (start, end, _title, _heading) in enumerate(spans):
     heading_len = len(_heading_line_for(start, end, agent_body))
 
-    # guard: only the owned section starts the extraction
+    # only the owned section starts the extraction
     if _owner_of_section(agent_body[start + heading_len:end]) != owner:
       continue
     parts = [agent_body[start:end]]
     for next_start, next_end, _next_title, next_heading in spans[idx + 1:]:
       next_heading_len = len(_heading_line_for(next_start, next_end, agent_body))
 
-      # guard: a tagged section or an echoed operator heading ends the writer's section
-      if _section_is_tagged(agent_body[next_start + next_heading_len:next_end]) or next_heading in op_headings:
+      # a tagged section or an echoed operator heading ends the writer's section
+      if _is_section_tagged(agent_body[next_start + next_heading_len:next_end]) or next_heading in op_headings:
         break
       parts.append("#" + agent_body[next_start:next_end])
     return "".join(parts)
@@ -1299,8 +1087,7 @@ def _reassemble_main(
   # 2. Restore operator's owned sections + history.
   rebuilt = _restore_owned_and_history(operator_body, new_content, section_layout=section_layout)
 
-  # 3. Restore the operator's banner anchor (state machine repaints
-  #    separately).
+  # 3. Restore the operator's banner anchor; the banner itself is repainted separately.
   rebuilt = _carry_banner_from_operator(operator_body, rebuilt)
   return new_fm_text + rebuilt
 
@@ -1331,7 +1118,6 @@ def _reassemble_section(
       operator_body,
       drop_owned=True,
       drop_history=True,
-      keep_owner=None,
   )
 
   # Splice the agent's owned section in BEFORE History so the History

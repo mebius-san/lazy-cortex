@@ -4,8 +4,9 @@ Halt-recovery verbs for the `lazycortex-core` CLI.
 This module backs the `recover` subcommand family the `lazy-runtime.recover` skill and the
 `lazy-runtime.doctor` agent call instead of embedding Python: `recover halt` reads the halt
 block, `recover cleanup` applies an operator-chosen cleanup mode, `recover resume` clears the
-halt, `recover revert` restores tracked paths to `HEAD`, `recover clear-dead` re-arms a dead
-job bundle, and `recover permanent-fail` records a doctor diagnosis beside one.
+halt, `recover revert` restores tracked paths to `HEAD`, `recover revert-retry` restores a dead
+job's dirty paths and re-arms its bundle, `recover clear-dead` re-arms a dead job bundle, and
+`recover permanent-fail` records a doctor diagnosis beside one.
 
 Every verb prints a one-word outcome or JSON to stdout and never raises a recovery error at
 the caller: a `RecoverError` or a failed git command becomes an `error: ...` line (or the
@@ -42,6 +43,7 @@ class Verb:
     REVERT: Restore tracked paths to `HEAD`.
     CLEAR_DEAD: Re-arm a dead job bundle for retry.
     PERMANENT_FAIL: Record a doctor diagnosis on a dead job bundle.
+    REVERT_RETRY: Restore a dead job's dirty paths to `HEAD`, then re-arm the bundle for retry.
   """
 
   # Print the halt block.
@@ -56,6 +58,8 @@ class Verb:
   CLEAR_DEAD = "clear-dead"
   # Record a doctor diagnosis on a dead job bundle.
   PERMANENT_FAIL = "permanent-fail"
+  # Restore a dead job's dirty paths to `HEAD`, then re-arm the bundle for retry.
+  REVERT_RETRY = "revert-retry"
 
 
 
@@ -71,6 +75,7 @@ class Outcome:
     REVERTED: `revert` restored every named path.
     CLEARED: `clear-dead` re-armed the bundle.
     MARKED: `permanent-fail` wrote the diagnosis.
+    RETRIED: `revert-retry` restored every named path and re-armed the bundle.
     ERROR_PREFIX: Prefix of the line printed when a verb fails.
     STILL_DIRTY_PREFIX: Prefix of the line `resume` prints when the tree is still dirty.
   """
@@ -87,6 +92,8 @@ class Outcome:
   CLEARED = "cleared"
   # `permanent-fail` wrote the diagnosis.
   MARKED = "marked"
+  # `revert-retry` restored every named path and re-armed the bundle.
+  RETRIED = "retried"
   # Prefix of the line printed when a verb fails.
   ERROR_PREFIX = "error: "
   # Prefix of the line `resume` prints when the tree is still dirty.
@@ -115,6 +122,24 @@ def _resolve_jdir(repo: Path, jdir: str) -> Path | None:
 
   # the primitives get an absolute path so a relative spelling never depends on the process cwd
   return path.resolve()
+
+
+def _report_git_failure(error: subprocess.CalledProcessError) -> int:
+  """
+  Print a failed git command as one `error: ...` line carrying git's own message.
+
+  Args:
+    error: The failure of a git command, captured as text or as bytes.
+
+  Returns:
+    Process exit code 1.
+  """
+  # git's own stderr is the useful part of a failed command, whether it was captured as text or as bytes
+  raw = error.stderr or ""
+  # waiver: the standard bytes-decoding error policy name, not a domain key
+  stderr = (raw.decode(errors = "replace") if isinstance(raw, bytes) else str(raw)).strip()
+  print(f"{Outcome.ERROR_PREFIX}{' '.join(error.cmd)} exited {error.returncode}: {stderr}")
+  return 1
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -157,6 +182,17 @@ def _build_parser() -> argparse.ArgumentParser:
   # waiver: argparse CLI signature, not a domain key
   revert.add_argument("path", nargs = "+")
 
+  # revert-retry takes the bundle first, then the paths its failed run left dirty
+  # waiver: argparse CLI signature and help strings, not domain keys
+  revert_retry = verbs.add_parser(Verb.REVERT_RETRY, help = "restore a dead job's paths to HEAD and re-arm it")
+  # waiver: argparse CLI signature and help strings, not domain keys
+  revert_retry.add_argument("--remove-untracked", action = "store_true",
+                            help = "delete named untracked paths inside the job's own scope")
+  # waiver: argparse CLI signature, not a domain key
+  revert_retry.add_argument("jdir")
+  # waiver: argparse CLI signature, not a domain key
+  revert_retry.add_argument("path", nargs = "+")
+
   # the job-bundle verbs take the bundle directory, permanent-fail also the diagnosis
   # waiver: argparse CLI signature and help strings, not domain keys
   clear_dead = verbs.add_parser(Verb.CLEAR_DEAD, help = "re-arm a dead job bundle for retry")
@@ -169,7 +205,7 @@ def _build_parser() -> argparse.ArgumentParser:
   # waiver: argparse CLI signature and help strings, not domain keys
   permanent_fail.add_argument("--diagnosis", required = True, help = "diagnosis as a JSON object")
 
-  # the fully wired parser
+  # every verb is registered, so the caller can parse a complete command line
   return parser
 
 
@@ -213,13 +249,51 @@ def _run_job_verb(repo: Path, args: argparse.Namespace) -> int:
   return 0
 
 
+def _run_revert_retry(repo: Path, args: argparse.Namespace) -> int:
+  """
+  Run `revert-retry` against one job bundle.
+
+  A refusal or git failure is printed as one `error: ...` line, and paths the revert did not settle as
+  `error: still-dirty: ...`, each reported through a non-zero exit code instead of raising.
+
+  Args:
+    repo: Absolute repository root.
+    args: Parsed arguments carrying `jdir`, `path`, and `remove_untracked`.
+
+  Returns:
+    Process exit code: 0 when the paths are restored and the bundle re-armed, 1 on a missing bundle, a
+    refusal, a git failure, or a path that is still dirty.
+  """
+  # guard: no bundle at the path — nothing to re-arm, and nothing is reverted on its behalf
+  if (jdir := _resolve_jdir(repo, args.jdir)) is None:
+    print(f"{Outcome.ERROR_PREFIX}no job directory at {args.jdir!r}")
+    return 1
+
+  # every refusal and git failure becomes one printed line, never a traceback
+  try:
+    dirty = recover.revert_and_retry(repo, jdir, args.path, remove_untracked = args.remove_untracked)
+  except recover.RecoverError as error:
+    print(f"{Outcome.ERROR_PREFIX}{error}")
+    return 1
+  except subprocess.CalledProcessError as error:
+    return _report_git_failure(error)
+
+  # a path the revert did not settle keeps the job dead
+  if dirty:
+    print(f"{Outcome.ERROR_PREFIX}{Outcome.STILL_DIRTY_PREFIX}{' '.join(dirty)}")
+    return 1
+
+  # the paths are back at HEAD and the bundle is armed again
+  print(Outcome.RETRIED)
+  return 0
+
+
 def _run_tree_verb(repo: Path, args: argparse.Namespace) -> int:
   """
   Run `cleanup`, `revert`, or `resume` — the verbs that act on the working tree or the halt.
 
-  Guarantees:
-    - A recovery or git failure never reaches the caller as an exception: it is printed as one
-      `error: ...` line (`still-dirty: ...` for `resume`) and reported through a non-zero exit code.
+  A recovery or git failure is printed as one `error: ...` line (`still-dirty: ...` for `resume`)
+  and reported through a non-zero exit code instead of raising.
 
   Args:
     repo: Absolute repository root.
@@ -228,11 +302,6 @@ def _run_tree_verb(repo: Path, args: argparse.Namespace) -> int:
   Returns:
     Process exit code: 0 on success, 1 when recovery refuses or a git command fails.
   """
-
-  # Contract:
-  # A recovery or git failure never reaches the caller as an exception; it becomes one printed
-  # `error: ...` line (`still-dirty: ...` for resume) and a non-zero exit, which the recover skill
-  # and the doctor agent branch on.
 
   # every verb here surfaces a recovery or git failure as one printed line, never a traceback
   try:
@@ -253,11 +322,7 @@ def _run_tree_verb(repo: Path, args: argparse.Namespace) -> int:
     print(f"{Outcome.STILL_DIRTY_PREFIX if args.verb == Verb.RESUME else Outcome.ERROR_PREFIX}{error}")
     return 1
   except subprocess.CalledProcessError as error:
-    # git's own stderr is the useful part of a failed command
-    # waiver: the standard bytes-decoding error policy name, not a domain key
-    stderr = (error.stderr or b"").decode(errors = "replace").strip()
-    print(f"{Outcome.ERROR_PREFIX}{' '.join(error.cmd)} exited {error.returncode}: {stderr}")
-    return 1
+    return _report_git_failure(error)
 
   # the outcome word was printed by the verb's own branch
   return 0
@@ -269,8 +334,14 @@ def cmd_recover(argv: list[str]) -> int:
 
   Printed outcomes: `halt` prints the halt block as indented JSON or `not_halted`;
   `cleanup` prints `cleaned`; `resume` prints `resumed` or `still-dirty: <reason>`;
-  `revert` prints `reverted`; `clear-dead` prints `cleared`; `permanent-fail` prints
+  `revert` prints `reverted`; `revert-retry` prints `retried`, or `error: still-dirty: <paths>` /
+  `error: outside-job-scope: <paths>`; `clear-dead` prints `cleared`; `permanent-fail` prints
   `marked`. A recovery or git failure prints `error: <reason>`.
+
+  Guarantees:
+    - For the `cleanup`, `revert`, and `resume` verbs, a recovery or git failure never escapes as an
+      exception: it becomes one printed `error: ...` line (`still-dirty: ...` for `resume`) and a non-zero
+      exit code.
 
   Args:
     argv: Argument vector after the `recover` subcommand name.
@@ -282,6 +353,12 @@ def cmd_recover(argv: list[str]) -> int:
   Raises:
     SystemExit: On an argument error, with exit code 2, raised by the argument parser.
   """
+
+  # Contract:
+  # For the `cleanup`, `revert`, and `resume` verbs, a recovery or git failure MUST NEVER escape as an
+  # exception: it becomes one printed `error: ...` line (`still-dirty: ...` for `resume`) and a non-zero
+  # exit code, which the recover skill and the doctor agent branch on.
+
   args = _build_parser().parse_args(argv)
   repo = resolve_repo_root(args.cwd).resolve()
 
@@ -294,4 +371,6 @@ def cmd_recover(argv: list[str]) -> int:
   # the remaining verbs split by what they act on: a job bundle, or the tree and halt state
   if args.verb in (Verb.CLEAR_DEAD, Verb.PERMANENT_FAIL):
     return _run_job_verb(repo, args)
+  if args.verb == Verb.REVERT_RETRY:
+    return _run_revert_retry(repo, args)
   return _run_tree_verb(repo, args)

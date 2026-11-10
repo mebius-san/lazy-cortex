@@ -33,30 +33,30 @@ if TYPE_CHECKING:
   pass
 
 
-# one finding as written by the reviewer agent: file, line, severity, rule, message
+# One finding as written by the reviewer agent: file, line, severity, rule, message
 Finding: TypeAlias = dict[str, object]
 
-# agent dispatched to perform the review
+# Agent dispatched to perform the review
 REVIEWER_AGENT = 'lazycortex-python:lazy-python.code-reviewer'
 
-# repo-relative directory holding manifests and findings
+# Repo-relative directory holding manifests and findings
 REVIEW_DIR = Path('.runtime') / 'lazy-python' / 'review'
 
-# exit code of a review that is manifested but not yet decided, distinct from a FAIL finding
+# Exit code of a review that is manifested but not yet decided, distinct from a FAIL finding
 PENDING_EXIT = 2
 
-# guideline layers as (directory, filename pattern), outermost (canon) first
+# Guideline layers as (directory, filename pattern), outermost (canon) first
 CANON_LAYER = ('references', 'lazy-python.*-guidelines.md')
 OVERLAY_LAYER = ('docs/guidelines', '*.md')
 RULES_LAYER = ('.claude/rules', '*.md')
 
-# project-wide note files read as the last overlay layer
+# Project-wide note files read as the last overlay layer
 PROJECT_NOTES = ['CLAUDE.md', '.claude/CLAUDE.md']
 
-# opening fence of a rule file's YAML frontmatter
+# Opening fence of a rule file's YAML frontmatter
 FRONTMATTER_FENCE = '---'
 
-# severity ordering — the highest one present decides the exit code
+# Severity ordering — the highest one present decides the exit code
 SEVERITY_RANK = { 'INFO': 0, 'WARN': 1, 'FAIL': 2 }
 
 
@@ -192,16 +192,20 @@ def rule_applies(text: str) -> bool:
     text: Full rule file content.
 
   Returns:
-    True when the rule is always loaded or scopes at least one path glob to Python
-    files. Body mentions of `.py` do not count — only the frontmatter scope does.
+    True when the rule's frontmatter carries an `always_loaded` key (its value is the reason, not a switch)
+    or its declared `paths` scope names a Python glob. Body mentions of `.py` do not count — only the
+    frontmatter scope does.
   """
 
   # Domain(pytool.pipeline-idempotency):
   # # Rule-file eligibility for a Python review
   # A repository rule file only enters a Python review's guideline set when its declared scope
-  # says so: either it is marked as always loaded, or its scope explicitly names a Python file
-  # glob. A rule whose body merely mentions Python source files in prose, without declaring that
-  # scope, is left out — only the declared scope decides membership, never incidental wording.
+  # says so: either its frontmatter carries the always-loaded marker, or its scope explicitly
+  # names a Python file glob. The marker counts by its mere presence: its value is a free-text
+  # reason for loading the rule everywhere, not a switch, so any value, even one that reads like
+  # a refusal, still makes the rule always loaded. A rule whose body merely mentions Python
+  # source files in prose, without declaring that scope, is left out — only the declared scope
+  # decides membership, never incidental wording.
 
   # guard: no frontmatter at all, the rule declares no scope
   if not text.startswith(FRONTMATTER_FENCE):
@@ -217,8 +221,30 @@ def rule_applies(text: str) -> bool:
   # the scope declaration is whatever sits between the two fences
   front = text[len(FRONTMATTER_FENCE):closing]
 
-  # an always-loaded rule governs every file; otherwise a Python glob must be declared
-  return 'always_loaded' in front or '.py' in front
+  # only the `always_loaded` and `paths` keys declare scope; every other key is prose
+  in_paths = False
+  for line in front.splitlines():
+    # a top-level key opens a new entry and closes any `paths` list above it
+    if line and not line[0].isspace() and not line.startswith('-'):
+      key, _sep, value = line.partition(':')
+      key = key.strip()
+
+      # an always-loaded rule governs every file
+      if key == 'always_loaded':
+        return True
+      in_paths = key == 'paths'
+
+      # an inline `paths` value carries its globs on the key line itself
+      if in_paths and '.py' in value:
+        return True
+      continue
+
+    # a list item under `paths` is one declared glob
+    if in_paths and '.py' in line:
+      return True
+
+  # neither key declared a scope that reaches Python files
+  return False
 
 
 def collect_guidelines(repo: Path, plugin_root: Path) -> dict[str, list[str]]:
@@ -278,41 +304,63 @@ def collect_guidelines(repo: Path, plugin_root: Path) -> dict[str, list[str]]:
   return layers
 
 
-def scope_key(repo: Path, files: list[str]) -> str:
+def compute_scope_key(repo: Path, files: list[str], guidelines: dict[str, list[str]]) -> str:
   """
   Build a content key identifying this exact review scope.
 
   Guarantees:
-    - Identical file lists, in the same order and with identical contents, always produce
-      the same digest, regardless of machine or process; contents that differ only in CRLF
-      versus LF line endings count as identical.
+    - Identical file lists (same order, identical contents) combined with identical guideline mappings
+      (same layers, same order, identical guideline contents) always produce the same digest, regardless
+      of machine or process; contents that differ only in CRLF versus LF line endings, in reviewed files
+      or in guideline files, count as identical.
+    - A change in the content of any guideline file produces a different digest, so the earlier verdict
+      is not reused.
 
   Args:
     repo: Repository root.
     files: Repo-relative paths under review.
+    guidelines: Guideline layers mapped to the paths of their guideline files, as handed to the reviewer.
 
   Returns:
-    Hex digest over every file's path and content — stable across re-runs that
-    changed nothing, so an already-reviewed scope is not re-dispatched.
+    Hex digest over every reviewed file's path and content and every guideline file's layer, name and content —
+    stable across re-runs that changed nothing, so an already-reviewed scope is not re-dispatched.
   """
 
   # Domain(pytool.pipeline-idempotency):
   # # Review scope identity
-  # A review scope is identified by a hash over every covered file's path and its content, not by a
-  # timestamp or a scope description. Content is read with LF line endings, so a CRLF copy of an
-  # unchanged file is the same content. Two runs that hash to the same value are the same
-  # review: the later run reuses the earlier verdict instead of dispatching a fresh review, so an
-  # unmodified scope is never reviewed twice.
+  # A review scope is identified by a hash over every reviewed file's path and content and over the content
+  # of every guideline layer the review is judged against: the shipped canon, the project overlay, the
+  # Python-scoped rules and the project notes, the same layers the reviewer is handed. Each guideline is
+  # identified by its layer and file name plus its content. It is never identified by a timestamp or a
+  # scope description. All content, reviewed files and guidelines alike, is read with LF line endings,
+  # so a CRLF copy counts as the same content. Two runs that hash to the same value are the same review:
+  # the later run reuses the earlier verdict instead of dispatching a fresh review, so an unmodified
+  # scope is never reviewed twice. A verdict is only valid for the guidelines it was judged against, so
+  # when any guideline changes, an otherwise unchanged scope is a new review and the earlier verdict is
+  # not reused.
 
   # Contract:
-  # Two calls given the same file list, in the same order, with identical file
-  # contents always return the same digest, on any machine and in any process; contents that
-  # differ only in CRLF versus LF line endings count as identical.
+  # Two calls given the same file list and the same guideline mapping always return the same digest, on any
+  # machine and in any process. The file lists must match in order and contents; the mappings must match in
+  # layers, layer order and guideline contents. Contents that differ only in CRLF versus LF line endings,
+  # in reviewed files or in guideline files, count as identical.
+
+  # Contract:
+  # A change in the content of any guideline file yields a different digest, so a verdict reached under the
+  # earlier guidelines is never reused.
 
   digest = hashlib.sha256()
   for name in files:
     digest.update(name.encode('utf-8'))
     digest.update((repo / name).read_bytes().replace(b'\r\n', b'\n'))
+
+  # every guideline the verdict was judged against is part of the scope; canon paths are absolute,
+  # so only the layer, the file name and the content enter the digest to keep it machine-independent
+  for layer, paths in guidelines.items():
+    digest.update(b'\0' + layer.encode('utf-8'))
+    for path in paths:
+      digest.update(b'\0' + Path(path).name.encode('utf-8') + b'\0')
+      digest.update((repo / path).read_bytes().replace(b'\r\n', b'\n'))
 
   # the digest is the cache key — identical content means the scope is already reviewed
   return digest.hexdigest()
@@ -395,8 +443,10 @@ def print_findings(findings: list[Finding]) -> int:
 
   # Domain(pytool.checker-severity):
   # # Severity vocabulary and the blocking threshold
-  # Every finding carries one severity drawn from a closed three-level vocabulary: informational,
-  # warning, or failure. A phase's overall verdict follows the single worst severity present
+  # A reviewer is expected to give every finding one severity drawn from a closed three-level
+  # vocabulary: informational, warning, or failure. The reading side is tolerant rather than
+  # strict: a finding with no severity is taken as a warning, and a value outside the vocabulary
+  # is printed as given and ranked as a warning. A phase's overall verdict follows the single worst severity present
   # across all its findings — one failure anywhere blocks the pipeline outright, while a set
   # containing only warnings or informational notes is surfaced without blocking it.
 
@@ -404,7 +454,7 @@ def print_findings(findings: list[Finding]) -> int:
   # Returns 1 exactly when at least one finding carries FAIL severity; any number of
   # WARN or INFO findings alone never produces a non-zero return.
 
-  # guard: a clean review still prints a summary line
+  # a clean review still prints a summary line
   if not findings:
     print('Success: no guideline issues found')
     return 0
@@ -414,9 +464,8 @@ def print_findings(findings: list[Finding]) -> int:
   for item in findings:
     severity = str(item.get('severity', 'WARN')).upper()
     worst = max(worst, SEVERITY_RANK.get(severity, 1))
-    location = f"{item.get('file', '?')}:{item.get('line', 0)}"
-    rule = item.get('rule', 'guideline')
-    print(f"{location}: {severity.lower()}: [{rule}] {item.get('message', '')}")
+    print(f"{item.get('file', '?')}:{item.get('line', 0)}: {severity.lower()}: "
+          f"[{item.get('rule', 'guideline')}] {item.get('message', '')}")
 
   # a single FAIL anywhere in the set has to block the pipeline
   counts = f'{len(findings)} finding(s)'
@@ -429,19 +478,20 @@ def print_findings(findings: list[Finding]) -> int:
   return 0
 
 
-def write_manifest(repo: Path, plugin_root: Path, files: list[str], key: str) -> tuple[Path, Path]:
+def write_manifest(repo: Path, files: list[str], key: str,
+                   guidelines: dict[str, list[str]]) -> tuple[Path, Path]:
   """
   Write the review manifest for the current scope.
 
   Guarantees:
     - The `findings_path` recorded in the manifest is exactly where the reviewer agent
-      must write its verdict; render mode reads findings from that path only.
+      must write its verdict, and the headless dispatch reads the verdict from there.
 
   Args:
     repo: Repository root.
-    plugin_root: Plugin root holding the canonical guidelines.
     files: Repo-relative paths under review.
     key: Scope key of the current review.
+    guidelines: Guideline layers mapped to the paths of their guideline files, recorded in the manifest as given.
 
   Returns:
     Manifest path and the findings path the agent is expected to write.
@@ -456,7 +506,7 @@ def write_manifest(repo: Path, plugin_root: Path, files: list[str], key: str) ->
 
   # Contract:
   # The `findings_path` recorded in the manifest is the exact path the reviewer agent
-  # must write its verdict to; render mode reads findings from that path and no other.
+  # must write its verdict to, and the headless dispatch reads the verdict from there.
 
   # the manifest carries everything the reviewer needs, so it discovers nothing on its own
   manifest = {
@@ -464,7 +514,7 @@ def write_manifest(repo: Path, plugin_root: Path, files: list[str], key: str) ->
     'repo': str(repo),
     'scope_key': key,
     'files': files,
-    'guidelines': collect_guidelines(repo, plugin_root),
+    'guidelines': guidelines,
     'findings_path': str(findings_path.relative_to(repo)),
   }
   manifest_path.write_text(json.dumps(manifest, indent = 2) + '\n', encoding = 'utf-8')
@@ -501,8 +551,7 @@ def dispatch_headless(repo: Path, manifest_path: Path) -> int:
     return 1
 
   # the manifest is authoritative about where the findings land — never recompute that path
-  manifest = json.loads(manifest_path.read_text(encoding = 'utf-8'))
-  findings_path = repo / manifest['findings_path']
+  findings_path = repo / json.loads(manifest_path.read_text(encoding = 'utf-8'))['findings_path']
 
   # guard: the agent produced no findings document
   if not findings_path.is_file():
@@ -554,8 +603,11 @@ def cmd_review(repo: Path, plugin_root: Path, paths: list[str], base: str | None
     print('review: SKIPPED — no changed Python files in scope')
     return 0
 
+  # the guidelines are collected once, so the key hashes exactly the layers the manifest hands the reviewer
+  guidelines = collect_guidelines(repo, plugin_root)
+
   # content key identifies this exact scope for the cache lookup that follows
-  key = scope_key(repo, files)
+  key = compute_scope_key(repo, files, guidelines)
 
   # Contract:
   # A scope whose content exactly matches a previously reviewed scope reuses that
@@ -568,7 +620,7 @@ def cmd_review(repo: Path, plugin_root: Path, paths: list[str], base: str | None
     return print_findings(load_findings(cached))
 
   # a scope nobody has reviewed yet needs a fresh manifest for the agent to pick up
-  manifest_path, findings_path = write_manifest(repo, plugin_root, files, key)
+  manifest_path, findings_path = write_manifest(repo, files, key, guidelines)
 
   # headless mode is the only path where this script talks to an agent itself
   if os.environ.get('CHK_REVIEW') == 'headless':
@@ -624,6 +676,6 @@ def main() -> None:
   sys.exit(cmd_review(repo, Path(args.plugin_root).resolve(), args.paths, args.base))
 
 
-# run main if this is the top-level script
+# entry point when executed as a script rather than imported as a module
 if __name__ == '__main__':
   main()

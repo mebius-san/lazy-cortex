@@ -1,7 +1,7 @@
 ---
 name: lazy-review.install
 description: "Run when the operator asks to set up document review in this repo, after a lazycortex-review update, or when review skills fail because `lazy.settings.json` has no `review` section, the `.experts/.jobs/` queue is missing, or the coordinator routines were never registered. Per-repo bootstrap only — wiring the first document class is `/lazy-review.configure`. Idempotent and quiet on re-run."
-allowed-tools: Read, Write, AskUserQuestion, Skill, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Bash(cp *), Bash(test *), Bash(diff *), Bash(cmp *), Bash(git rev-parse*), Agent
+allowed-tools: Read, Write, AskUserQuestion, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Bash(cp *), Bash(test *), Bash(diff *), Bash(cmp *), Bash(git rev-parse*), Agent
 ---
 # lazy-review.install
 
@@ -20,7 +20,7 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 5.6 — Install the review-callouts CSS snippet`
    - `Step 6 — Point user at /lazy-review.configure`
    - `Report`
-2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** Each step emits a one-word outcome (`installed` / `already-installed` / `registered` / `already-present` / `attached` / `surfaced` / `cli-allow-added` / `cli-allow-already-present` / `seeded` / `unchanged` / `merged` / `kept-local` / `enabled` / `already-enabled` / `deferred` / `no-vault` / `pointed` / `report-emitted`).
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** Each step emits a one-word outcome (`installed` / `already-installed` / `registered` / `already-present` / `attached` / `surfaced` / `cli-allow-added` / `cli-allow-already-present` / `seeded` / `unchanged` / `merged` / `kept-local` / `enabled` / `already-enabled` / `deferred` / `deferred-no-obsidian` / `refused` / `no-vault` / `pointed` / `report-emitted`).
 3. **Do not reach the Report step until every prior task is `completed`.**
 
 ## Decisions are remembered, never re-asked
@@ -46,7 +46,7 @@ Every file this skill creates or updates follows three cases — no per-file "in
 
 Run `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/install.py" --cwd .`. The script applies the File-sync policy at the section level:
 
-- Creates `.claude/lazy.settings.json` if missing, or merges the `review` / `experts` defaults in for absent top-level keys and absent nested keys only — existing values are never overwritten (cases 1–2; the bin contains no contradicting-region path, so case 3 never arises here).
+- Creates `.claude/lazy.settings.json` if missing, or merges the `review` / `experts` defaults in for absent top-level keys and absent nested keys only — existing values are never overwritten (cases 1–2; the bin contains no contradicting-region path, so case 3 never arises here). Sections are read and written through the core CLI's `settings-get` / `settings-set` verbs, one section at a time and only the sections that changed.
 - Reconciles the three routines below through the core CLI's `reconcile-routine` verb instead of the absent-only merge, so a registration made by an older version of this plugin does not stay on its old shape forever.
 - Creates `.experts/.jobs/` and `.logs/lazy-review/runs/` if missing.
 - Prints a JSON report of what changed, including a `migrated` list and a `reconciled` outcome word per routine.
@@ -58,9 +58,9 @@ The script's default seed includes the routine trio the loop runs on — `routin
 **Migration on a repo installed before the coordinator.** The bin applies it in the same run, unconditionally — none of the three steps below reads a version number — and the `migrated` list names each change:
 
 - **Retires `routines["lazy-review.scan"]`.** The md-scan sieve is gone with the script state machine; its `process-file` consumer no longer exists, so a surviving registration is a routine the daemon runs into a missing subcommand.
-- **Derives `review.watch_root`** from the common root of that routine's `paths` before removing it (`specs/core/**/*.md` + `specs/review/**/*.md` → `specs`). A glob without `**` is right-anchored and matches anywhere, so it makes the root `.`, and so do globs sharing no literal root. The watch routine's `path_filter` is `:(glob)<watch_root>/**/*.md` — a single pathspec, because core's git-watch takes one; class precision stays in `review.classes[].paths`.
+- **Derives `review.watch_root`** from that routine's `paths` before removing it; the watch routine's `path_filter` follows from the root — a single pathspec, because core's git-watch takes one; class precision stays in `review.classes[].paths`.
 
-**Every run widens `review.watch_root` to cover every class.** The root becomes the common directory of the recorded root and each `review.classes[].paths` glob's own root — `.` for a glob without `**`, the literal directory prefix for one with `**` — by the same rule `/lazy-review.configure` applies. It only ever widens, so an operator's narrower value survives as long as every class still sits under it, and a class another plugin adds later reaches the watch on the next install.
+**Every run widens `review.watch_root` to cover every class.** The bin computes the root and the watch's `path_filter`; `/lazy-review.configure` reaches the same code through its `configure-apply` verb, so there is one derivation. A class lying outside the root never reaches the coordinator's git-watch, which is why every run re-checks it; the root only ever widens, so an operator's narrower value survives as long as every class still sits under it.
 - **Drops the `history` group** from every `review.classes[*].experts`. The historian is retired; the coordinator writes `# History` inline, so the link points at an expert nothing dispatches.
 - **Leaves `review._version` alone.** The `review` section's version ladder belongs to `lazycortex-core`, which skips any section already standing at or beyond its own target — a number written from this side makes core skip its next step forever. The two cleanups above are version-independent and apply whatever the section's number is.
 
@@ -115,18 +115,15 @@ Outcome: **cli-allow-added**.
 
 ## Step 5.5 — Seed agent-model tiers
 
-The plugin ships the `review.coordinator` and `lazy-review.doc_doctor` subagents. Seed their canonical model tiers into the `agent_models.lazycortex` group by dispatching the shared primitive — it owns the `default-tiers.json` locate, the `lazycortex-review:`-prefix filter, and the non-destructive per-key semantics (absent→add, equal→unchanged, different→kept-local). No inline tier logic here. lazy-review is per-repo, so the scope is always `project`.
+The core `agent-models-seed` verb seeds the canonical model tiers of this plugin's `review.coordinator` and `lazy-review.doc_doctor` subagents into `agent_models.lazycortex`; the expert runtime resolves their models from there. lazy-review is per-repo, so the scope is always `project`:
 
 ```
-Skill(skill: "lazycortex-core:lazy-core.agent-models-seed", args: "prefix=lazycortex-review scope=project")
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> agent-models-seed --prefix lazycortex-review --scope project)
 ```
 
-Fold the primitive's returned report block verbatim into this skill's Report. Surface its terminal outcomes:
+The verb prints one JSON line: `outcome` (`seeded-N` / `unchanged` / `no-entries`) and one `entries` row per agent with its state (`added` / `unchanged` / `refreshed` / `kept-local`). Fold those rows into the Report; never report a seed the verb did not answer. Exit 1 carries `sot-missing`, `missing-prefix`, `missing-scope`, or an unparseable settings file — relay its message and do not fabricate seed lines. `no-entries` is reported plainly (a maintainer must extend `default-tiers.json`), not an abort.
 
-- **`sot-missing`** — `lazycortex-core`'s `default-tiers.json` was not found → the primitive aborts; relay its message (`lazycortex-core not installed; install it before seeding lazycortex-review tiers`) and do not fabricate seed lines.
-- **`no-entries`** — the SOT lists no `lazycortex-review:` agents → report it plainly (a maintainer must extend `default-tiers.json`); not an abort.
-
-Outcome: `seeded` (any entry added) or `unchanged`.
+Outcome: `seeded` (`seeded-N`) or `unchanged` (`unchanged` / `no-entries`).
 
 ## Step 5.6 — Install the review-callouts CSS snippet
 
@@ -149,11 +146,23 @@ The review loop's own callouts — the banner `[!note] #review/<state-tag>`, the
    ```
 
    **Under a no-questions run** (`lazy-core.autosetup` and anything else driving this skill without an operator channel), do not stall on the question: keep the local region, apply the rest of the shipped delta, and state **kept-local-unattended**, naming the conflicting file so the operator can resolve it by running this skill by hand. The conflict genuinely cannot be decided without them — but a question nobody can answer must still leave a determinate outcome, or the step reports `needs-interactive` on every unattended run for as long as the customisation stands.
-3. **Enable it in `<vault>/appearance.json`.** Read the file (treat missing or unparseable as `{}`), ensure `enabledCssSnippets` exists as an array, and append `"review-callouts"` when absent. Write only when the array changed. Do NOT add the entry when the snippet file is not on disk — a stale registration points at nothing; state **deferred** in that case. Outcome otherwise: **enabled** (added this run) or **already-enabled**.
+3. **Enable it through `lazycortex-obsidian`.** The Obsidian config belongs to that plugin, and its `snippet-enable` verb registers the snippet. Resolve its root first:
 
-Obsidian does not watch `appearance.json` mid-session, so when the outcome is **enabled** the Report tells the operator to reload Obsidian (or click ↻ next to the snippet in Settings → Appearance → CSS snippets).
+   ```
+   Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-obsidian)
+   ```
 
-Outcome: the snippet's sync word plus the enablement word (`installed+enabled`, `unchanged+already-enabled`, …), or **no-vault**.
+   Exit 1 means `lazycortex-obsidian` is not installed: the snippet stays copied but not enabled — state **deferred-no-obsidian** and continue; review works without it. Otherwise `<obsidian-cli>` is the obsidian plugin's `bin/lazycortex-obsidian` file under the printed root; run the verb through the interpreter:
+
+   ```
+   Bash("${LAZYCORTEX_PYTHON:-python3}" <obsidian-cli> snippet-enable --vault <vault> --name review-callouts)
+   ```
+
+   The verb prints one JSON line. The enablement word is `snippets["review-callouts"]` — **enabled** (added this run), **already-enabled**, or **deferred** (the snippet file is not on disk, so nothing is registered); `status: "no-vault"` gives **no-vault**; `status: "refused"` (exit 1, the config file does not parse and is left untouched) gives **refused** with the verb's `reason`.
+
+Obsidian does not watch its config mid-session, so when the outcome is **enabled** the Report tells the operator to reload Obsidian (or click ↻ next to the snippet in Settings → Appearance → CSS snippets).
+
+Outcome: the snippet's sync word plus the enablement word (`installed+enabled`, `unchanged+already-enabled`, `installed+deferred-no-obsidian`, …), or **no-vault**.
 
 ## Step 6 — Point user at /lazy-review.configure
 
@@ -168,7 +177,9 @@ One line per task in the canonical list with its outcome word.
 ## Failure modes
 
 - **Step 1 fails with permission error on `.claude/lazy.settings.json`** — operator's shell user can't write there → fix file ownership, re-run.
-- **JSON parse error on existing settings** — operator's `.claude/lazy.settings.json` is hand-edited and malformed → fix the JSON manually, re-run.
-- **Step 1 reports `review.watch_root` as `.` on a repo that used to scan a narrow subtree** — a class glob without `**` matches anywhere in the repo, so the watch must see the whole repo to reach it; the `review_active` filter keeps that cheap → nothing to fix, or rewrite the class globs with `**` anchored at the subtree and set `review.watch_root` by hand, since the bin never narrows it.
+- **Step 1 prints `status: "refused"` naming `.claude/lazy.settings.json`** — the file is hand-edited and malformed; the `reason` carries the parse error and the file is left untouched → fix the JSON manually, re-run.
+- **Step 1 reports `review.watch_root` as `.` on a repo that used to scan a narrow subtree** — some class glob reaches outside the subtree, so the watch must see the whole repo; the `review_active` filter keeps that cheap → nothing to fix, or rewrite the class globs with `**` anchored at the subtree and set `review.watch_root` by hand, since the bin never narrows it.
 - **Step 5.6 states `no-vault`** — this repo has no `.obsidian/` directory → nothing to style; review still works, the callouts just render with Obsidian's default look.
-- **Review callouts still look alike after install** — `appearance.json` changed while Obsidian was running → reload the vault, or click ↻ next to `review-callouts` in Settings → Appearance → CSS snippets.
+- **Step 5.6 states `deferred-no-obsidian`** — `lazycortex-obsidian` is not installed, so the snippet was copied but not enabled → install `lazycortex-obsidian` and re-run `/lazy-review.install`; review works meanwhile with Obsidian's default callout look.
+- **Step 5.6 states `refused`** — the vault's Obsidian config does not parse; the `snippet-enable` verb left it untouched and its `reason` names the error → fix the file by hand, re-run.
+- **Review callouts still look alike after install** — the snippet was enabled while Obsidian was running → reload the vault, or click ↻ next to `review-callouts` in Settings → Appearance → CSS snippets.

@@ -24,6 +24,8 @@ from pathlib import Path
 from constants import DaemonKey, MetricsNet, SettingsFile, SettingsKey  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from lazy_settings import load_section  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import metrics  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -88,7 +90,7 @@ class RegistryRow:
 # ----------------------------------------------------------------------------------------
 class HolderKey:
   """
-  Keys of the port-holder dict returned by `identify_holder`.
+  Keys of the port-holder dict returned by `find_holder`.
 
   Attributes:
     PID: The listening process id.
@@ -111,11 +113,9 @@ def _xdg_config_home() -> Path:
   Returns:
     The value of `$XDG_CONFIG_HOME` when set, otherwise `~/.config`.
   """
+  # an explicit XDG override wins over the home-relative default
   # waiver: external XDG env-var name, not a domain constant
-  env = os.environ.get("XDG_CONFIG_HOME")
-
-  # guard: explicit XDG override wins over the home-relative default
-  if env:
+  if (env := os.environ.get("XDG_CONFIG_HOME")):
     return Path(env)
   # waiver: XDG default directory name, not a domain constant
   return Path.home() / ".config"
@@ -141,7 +141,7 @@ def _unit_dir(platform: str) -> Path:
   Returns:
     `~/Library/LaunchAgents` on macOS; `<XDG config home>/systemd/user` otherwise.
   """
-  # guard: macOS keeps per-user launchd agents in a fixed home-relative location
+  # macOS keeps per-user launchd agents in a fixed home-relative location
   if platform == _DARWIN:
     # waiver: macOS filesystem layout names, not domain constants
     return Path.home() / "Library" / "LaunchAgents"
@@ -214,11 +214,10 @@ def enumerate_local_daemons(platform: str | None = None) -> list[dict]:
   """
   Enumerate every lazycortex runtime daemon installed on this host.
 
-  Walks the platform's supervisor-unit directory, extracts each unit's repo root, and joins
-  it with the repo's merged `daemon.metrics` settings (tracked file plus local overlay).
-  Units that cannot be read or parsed, repos that no longer exist on disk, and repos whose
-  settings will not parse are skipped with a one-line warning on stderr. None of the repos
-  walked here belongs to the caller, so one unreadable neighbour never fails the enumeration.
+  Each daemon is paired with its repo's merged `daemon.metrics` settings (tracked file plus
+  local overlay). Daemons that cannot be resolved are skipped with a one-line warning on
+  stderr. None of the repos involved belongs to the caller, so one unreadable neighbour never
+  fails the enumeration.
 
   Guarantees:
     - A single unit that cannot be read or parsed, or whose repo no longer exists or has
@@ -251,11 +250,9 @@ def enumerate_local_daemons(platform: str | None = None) -> list[dict]:
 
   platform = platform or sys.platform
   base = _unit_dir(platform)
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-  import metrics  # pylint: disable=import-error
   rows: list[dict] = []
   for name in _unit_names(platform):
+    # guard: a unit file that cannot be read has no repo root to join — skip it
     try:
       text = (base / name).read_text(encoding = "utf-8")
     except OSError as e:
@@ -273,12 +270,21 @@ def enumerate_local_daemons(platform: str | None = None) -> list[dict]:
     if not (repo_root / SettingsFile.REL).is_file():
       sys.stderr.write(f"daemon_registry: skipping unit for missing repo {root_str}: {name}\n")
       continue
+
+    # guard: settings that cannot be read or parsed carry no metrics configuration — skip the unit
     try:
       daemon_cfg = load_section(repo_root / SettingsFile.REL, SettingsKey.DAEMON)
     except (OSError, ValueError) as e:
       sys.stderr.write(f"daemon_registry: skipping unit with unreadable settings {root_str}: {e}\n")
       continue
     metrics_cfg = daemon_cfg.get(DaemonKey.METRICS) or {}
+
+    # guard: a port that does not resolve to a number is an unreadable setting
+    try:
+      port = int(metrics_cfg.get(DaemonKey.PORT, MetricsNet.PORT_BASE))
+    except (TypeError, ValueError) as e:
+      sys.stderr.write(f"daemon_registry: skipping unit with unreadable metrics port {root_str}: {e}\n")
+      continue
     rows.append({
       RegistryRow.REPO_ID: _repo_id_from_unit_name(name, platform),
       RegistryRow.REPO_ROOT: str(repo_root),
@@ -286,12 +292,12 @@ def enumerate_local_daemons(platform: str | None = None) -> list[dict]:
       RegistryRow.METRICS_ENABLED: bool(metrics_cfg.get(DaemonKey.ENABLED)),
       # waiver: inline network default literal shared with runtime_daemon, not a domain constant
       RegistryRow.BIND: metrics_cfg.get(DaemonKey.BIND, "127.0.0.1"),
-      RegistryRow.PORT: int(metrics_cfg.get(DaemonKey.PORT, MetricsNet.PORT_BASE)),
+      RegistryRow.PORT: port,
     })
   return rows
 
 
-def identify_holder(port: int, registry: list[dict] | None = None) -> dict | None:
+def find_holder(port: int, registry: list[dict] | None = None) -> dict | None:
   """
   Best-effort identification of the process currently listening on a TCP port.
 
@@ -323,11 +329,14 @@ def identify_holder(port: int, registry: list[dict] | None = None) -> dict | Non
   # matches a metrics-enabled row belongs to that row's checkout, and every listener whose port
   # matches nothing in the registry is a stranger to the fleet.
 
+  # a command name that is not valid UTF-8 is decoded with replacement characters rather than raising
   try:
     proc = subprocess.run(
       # waiver: external lsof CLI flags, not domain constants
       ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-Fpc"],
       capture_output = True, text = True, check = False, timeout = _LSOF_TIMEOUT_SEC, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
     )
   except (FileNotFoundError, subprocess.TimeoutExpired):
     # lsof missing or wedged — holder identification is best-effort only
@@ -363,13 +372,14 @@ def write_scrape_targets_file(out: Path | None = None, registry: list[dict] | No
   """
   Write the Prometheus file_sd scrape-targets file covering every metrics-enabled daemon.
 
-  The file is server-blind: each entry carries only a loopback address with the daemon's
-  port and the `repo` label — no repo paths, no hostnames, no credentials. The write is
-  atomic (sibling temp file + `os.replace`).
+  The file is server-blind: each entry carries only the address the local scraper reaches the
+  daemon at, with the daemon's port and the `repo` label — no repo paths, no credentials.
 
   Guarantees:
-    - Every written entry carries only a loopback address, the daemon's port, and the
-      `repo` label; it never carries a repository path, a hostname, or a credential.
+    - Every written entry carries the address the local Prometheus scraper on this host can reach
+      the daemon at (loopback for a daemon bound to a wildcard address, the bound address
+      otherwise), the daemon's port, and the `repo` label; it never carries a repository path or
+      a credential.
     - The file is replaced atomically; a reader never observes a partially written file.
 
   Args:
@@ -382,25 +392,28 @@ def write_scrape_targets_file(out: Path | None = None, registry: list[dict] | No
   """
 
   # Contract:
-  # Every written entry carries only a loopback address, the daemon's port, and the
-  # `repo` label; it never carries a repository path, a hostname, or a credential.
+  # Every written entry carries the address the local Prometheus scraper on this host can
+  # reach the daemon at (loopback for a daemon bound to a wildcard address, the bound address
+  # otherwise), the daemon's port, and the `repo` label; it never carries a repository path
+  # or a credential.
 
   # Contract:
   # The scrape-targets file is replaced atomically; a concurrent reader never observes a
   # partially written file.
 
   # Domain(runtime.metrics):
-  # # Server-blind, loopback-only scrape targets
+  # # Server-blind scrape targets named by their reachable address
   # The scrape-targets file names only what a collector needs to reach a daemon's metrics
-  # endpoint — never a repository path, a hostname, or a credential. A daemon bound to every
-  # interface is still named by its loopback address rather than its wildcard bind, because the
-  # file only ever describes how this same host's own collector reaches a daemon that lives on
-  # it, never an address meant to be reachable from elsewhere on the network.
+  # endpoint — never a repository path or a credential. A daemon bound to every interface is
+  # named by its loopback address rather than its wildcard bind, because the file only ever
+  # describes how this same host's own collector reaches a daemon that lives on it. A daemon
+  # bound to one specific address is not reachable on loopback, so it is named by exactly the
+  # address the operator configured, whatever that address is.
 
   registry = registry if registry is not None else enumerate_local_daemons()
   targets = []
   for row in registry:
-    # guard: daemons without metrics contribute no scrape target
+    # daemons without metrics contribute no scrape target
     if not row[RegistryRow.METRICS_ENABLED]:
       continue
 
@@ -417,7 +430,7 @@ def write_scrape_targets_file(out: Path | None = None, registry: list[dict] | No
   path.parent.mkdir(parents = True, exist_ok = True)
   body = json.dumps(targets, indent = 2) + "\n"
 
-  # guard: a file already carrying this content is left alone, so every repo's install run
+  # a file already carrying this content is left alone, so every repo's install run
   # regenerating the host-wide file never churns it when nothing changed
   if path.is_file() and path.read_text(encoding = "utf-8") == body:
     # waiver: external JSON contract field names of the metrics-scrape-file CLI, not internal keys

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Scaffold, configure, and run the iconize-sync system to keep Obsidian file and folder icons in sync with your vault's frontmatter-driven icon registry.
-last_regen: 2026-10-06
+last_regen: 2026-11-10
 diagram_spec:
   anchor: "How the three skills fit together"
   request: "Flow diagram showing the three-skill iconize block: iconize-install scaffolds plugins + icon-map + hooks; iconize-config edits the icon-map registry; iconize-sync runs the worker to write iconize_icon/iconize_color into note frontmatter; Iconize plugin and iconize-reloader plugin then paint icons on screen from frontmatter and data.json respectively."
@@ -10,8 +10,8 @@ source_skills:
   - lazy-obsidian.iconize-install
   - lazy-obsidian.iconize-config
   - lazy-obsidian.iconize-sync
-source_sha: 2b8e9e79da15a0e25e187f4c05ae6011a36f0740
-surface_sha: 71f984e6cef605c44e788bb02868e30e8fc01e1276bcf53ad0ca28c29c08d4ac
+source_sha: 93b3da11e8005d2847cfbdabb20b5483e80a7435
+surface_sha: 23f5963a64a9add2912ddc60fef18e8042beb24f4c6269b395df795641d86e9a
 ---
 # Iconize — frontmatter-driven icon management for Obsidian vaults
 
@@ -30,7 +30,7 @@ Three skills divide the work cleanly: `/lazy-obsidian.iconize-install` sets up t
 
 ## How it fits together
 
-You start with `/lazy-obsidian.iconize-install`. This skill installs the three required Obsidian plugins (`obsidian-icon-folder`, `folder-notes`, and the bundled `iconize-reloader`) into your vault via `/lazy-obsidian.update-plugin`, scaffolds the icon-map at `.claude/iconize/obsidian-icon-map.json`, registers the `lazy-obsidian.repaint` daemon routine (when the repo runs a daemon), and adds Iconize's `data.json` to `.gitignore` so runtime state does not pollute commits. It also asserts the Iconize frontmatter-feature settings (`iconInFrontmatterEnabled`, `iconInFrontmatterFieldName`, `iconColorInFrontmatterFieldName`) in your vault's plugin config so the worker's output keys match what Iconize expects to read. The install is quiet and idempotent — safe to re-run on any repo that already has it set up. Re-running it also keeps the daemon routine's wiring current: `type`, `watch`, `command`, and `git_author` are corrected to the shipped value on every run — typically because an older plugin version registered the routine on a different shape — while `interval_sec`, `branch`, and `ignore_halt` are yours to tune; reconcile only fills them in when the recorded entry never carried them, and never touches a value you already set. The same re-run drops the duplicate bot identity older versions parked in the `experts` table: the routine carries its own `git_author` now, and an experts entry naming no agent fails the runtime's own preflight. The vault root the install and worker resolve against is always your repo's git toplevel, so nothing here depends on where `.obsidian/` happens to sit.
+You start with `/lazy-obsidian.iconize-install`. This skill installs the three required Obsidian plugins (`obsidian-icon-folder`, `folder-notes`, and the bundled `iconize-reloader`) into your vault through the `plugin-install` verb (version-aware and idempotent, so a re-run brings each one current; if any of the three cannot be installed or updated, the whole install stops with the reason rather than carrying on without it), scaffolds the icon-map at `.claude/iconize/obsidian-icon-map.json`, registers the `lazy-obsidian.repaint` daemon routine (when the repo runs a daemon), and adds Iconize's `data.json` to `.gitignore` so runtime state does not pollute commits. It also asserts the Iconize frontmatter-feature settings (`iconInFrontmatterEnabled`, `iconInFrontmatterFieldName`, `iconColorInFrontmatterFieldName`) in your vault's plugin config so the worker's output keys match what Iconize expects to read. Those settings are merged in while the Iconize plugin is installed; the later settings step only verifies them. It never asks about a conflict and never overwrites: if the settings do not carry the required values, the install refuses that setting, reports it as refused with the command's output, and carries on with the remaining steps. Icons will not paint from frontmatter until the settings are corrected and the install is re-run. The install is quiet and idempotent — safe to re-run on any repo that already has it set up. Re-running it also keeps the daemon routine's wiring current: `type`, `watch`, `command`, and `git_author` are corrected to the shipped value on every run — typically because an older plugin version registered the routine on a different shape — while `interval_sec`, `branch`, and `ignore_halt` are yours to tune; reconcile only fills them in when the recorded entry never carried them, and never touches a value you already set. The same re-run drops the duplicate bot identity older versions parked in the `experts` table: the routine carries its own `git_author` now, and an experts entry naming no agent fails the runtime's own preflight. The vault root the install and worker resolve against is always your repo's git toplevel, so nothing here depends on where `.obsidian/` happens to sit.
 
 Commit-time repaint is entirely the `lazy-obsidian.repaint` daemon routine's job now — there is no pre-commit shim any more. If your vault still has one from an older install (a `.githooks/pre-commit` file with the shim's `HOOK_VERSION` marker), `/lazy-obsidian.iconize-install` removes it automatically and unsets `core.hooksPath` if `.githooks/` ends up empty; a foreign `pre-commit` file without that marker is left alone. Nothing here disturbs the PostToolUse hook that already keeps individual notes current as you edit them — that hook ships with the plugin itself and is unaffected.
 

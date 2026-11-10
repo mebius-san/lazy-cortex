@@ -1,20 +1,19 @@
 """
 Tag-consistency primitives for lazycortex-wiki.
 
-`TagOps` provides two deterministic, scope-level operations over a wiki scope's
-topic tags. `collect` surveys the distinct axis values in use (with per-value
-node counts and a couple of example summaries) — the input a tag-normalisation
-judgement consumes. `retag` applies an axis-value alias map across every node's
-tags. Both operate uniformly over markdown and code nodes; the markdown-vs-code
-storage difference is hidden behind the node accessors.
+Deterministic, scope-level operations that keep a wiki scope's topic tags and its advisory tag-values dictionary
+consistent, uniformly over markdown and code nodes.
 """
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import domains as _domains  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import explainers as _explainers  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import nodes as _nodes  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -33,13 +32,19 @@ _SURFACE_DOMAINS = "domains"
 
 # Key under which `TagOps.collect` reports the per-axis value lists.
 COLLECT_AXES = "axes"
+# Key naming one value entry's value in a `TagOps.collect` axis list.
+COLLECT_VALUE = "value"
 
 # Dictionary markdown markers: the heading that opens an axis section, and a value bullet.
 _AXIS_HEADING = "## "
+# Separator between a dictionary bullet's value and its gloss.
+_GLOSS_SEP = " — "
+# Line break the dictionary text is assembled with.
+_NL = "\n"
 _VALUE_BULLET = "- "
 
 
-# ────────────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------------------------
 def dictionary_rel(repo: Path) -> str:
   """
   Return the repo-relative path of the tag-values dictionary.
@@ -54,10 +59,10 @@ def dictionary_rel(repo: Path) -> str:
     disk is not an error for this reader.
   """
   # the reader lives in scope.py so domains.py can reach it without importing this module
-  return _scope.dictionary_rel(repo)
+  return _scope.read_dictionary_rel(repo)
 
 
-# ────────────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------------------------
 def dictionary_values(repo: Path) -> dict[str, list[str]]:
   """
   Read the per-axis value lists recorded in the tag-values dictionary.
@@ -80,6 +85,24 @@ def dictionary_values(repo: Path) -> dict[str, list[str]]:
   # the settled vocabulary independently of who currently wears it, which is exactly what a fresh judgement
   # needs to anchor to. It advises rather than binds — nothing is refused for being absent from it.
 
+  # each axis keeps its values in file order; the glosses are for human readers
+  return { axis: list(entries) for axis, entries in dictionary_entries(repo).items() }
+
+
+# ----------------------------------------------------------------------------------------
+def dictionary_entries(repo: Path) -> dict[str, dict[str, str]]:
+  """
+  Read the per-axis values of the tag-values dictionary together with their glosses.
+
+  Args:
+    repo: Absolute repository root that owns the dictionary file.
+
+  Returns:
+    A dict `{<axis>: {<value>: <gloss>}}` built from the dictionary's `## <axis>` sections and their
+    `- <value> — <gloss>` bullets, in file order; a value repeated within an axis keeps its first gloss, and a
+    value without a gloss maps to an empty string. Empty when the file is absent or unreadable — the dictionary
+    is advisory, so neither case is an error.
+  """
   dictionary = Path(repo) / dictionary_rel(repo)
 
   # guard: the dictionary is advisory — an absent file simply contributes nothing
@@ -94,31 +117,56 @@ def dictionary_values(repo: Path) -> dict[str, list[str]]:
     return {}
 
   # walk the file top-down: each heading opens the section its following bullets belong to
-  out: dict[str, list[str]] = {}
+  out: dict[str, dict[str, str]] = {}
   axis: str | None = None
   for line in text.splitlines():
     stripped = line.strip()
     if stripped.startswith(_AXIS_HEADING):
       axis = stripped[len(_AXIS_HEADING):].strip()
-      out.setdefault(axis, [])
+      out.setdefault(axis, {})
       continue
 
     # guard: a bullet before the first heading names no axis, and prose names no value
     if axis is None or not stripped.startswith(_VALUE_BULLET):
       continue
-    parts = stripped[len(_VALUE_BULLET):].split()
+    body = stripped[len(_VALUE_BULLET):]
+    parts = body.split()
 
     # guard: an empty bullet carries no value
     if not parts:
       continue
 
-    # the value is the bullet's first token; the em-dash gloss after it is for human readers
-    if parts[0] not in out[axis]:
-      out[axis].append(parts[0])
+    # the value is the bullet's first token; the first occurrence of a value keeps its gloss
+    value = parts[0]
+    if value not in out[axis]:
+      _, sep, gloss = body.partition(_GLOSS_SEP)
+      out[axis][value] = gloss.strip() if sep else ""
   return out
 
 
-# ────────────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------------------------
+@dataclass
+class RetagResult:
+  """
+  Outcome of applying an alias map to a scope's nodes.
+
+  Reports how much a retag changed and which files it rewrote, so a caller can commit exactly those files.
+
+  Attributes:
+    nodes_changed: Number of nodes whose tags the alias map rewrote.
+    tags_remapped: Number of tags the alias map matched across those nodes.
+    changed_paths: Files of the rewritten nodes, in enumeration order.
+  """
+
+  # Nodes whose tags the alias map rewrote
+  nodes_changed: int = 0
+  # Tags the alias map matched across those nodes
+  tags_remapped: int = 0
+  # The files of the rewritten nodes, in enumeration order
+  changed_paths: list[Path] = field(default_factory = list)
+
+
+# ----------------------------------------------------------------------------------------
 class TagOps:
   """
   Deterministic tag-consistency operations over one wiki scope.
@@ -137,14 +185,14 @@ class TagOps:
   # Max example summaries kept per tag value in a `collect` result.
   _MAX_EXAMPLES = 2
 
-  # collect-result dict keys.
+  # Collect-result dict keys.
   _K_SCOPE    = "scope"
   _K_AXES     = COLLECT_AXES
-  _K_VALUE    = "value"
+  _K_VALUE    = COLLECT_VALUE
   _K_COUNT    = "count"
   _K_EXAMPLES = "examples"
 
-  # retag-result dict keys.
+  # Retag-result dict keys.
   _K_NODES_CHANGED = "nodes_changed"
   _K_TAGS_REMAPPED = "tags_remapped"
 
@@ -192,8 +240,6 @@ class TagOps:
     domain_cfg = _domains.DomainConfig.load(repo)
     node_paths = cls._domain_doc_paths(domain_cfg) if domain_cfg is not None else []
     return cls(repo = repo, scope_id = _SURFACE_DOMAINS, cfg = {}, node_paths = node_paths)
-
-  # ── public ────────────────────────────────────────────────────────────────
 
   def collect(self) -> dict:
     """
@@ -247,6 +293,8 @@ class TagOps:
           and len(entry[self._K_EXAMPLES]) < self._MAX_EXAMPLES
         ):
           entry[self._K_EXAMPLES].append(summary)
+
+    # emit the tally with axes and their values in sorted order, so the survey reads the same on every run
     out_axes: dict = {}
     for axis in sorted(axes):
       out_axes[axis] = [
@@ -269,12 +317,7 @@ class TagOps:
     region, so a re-run with no further alias matches is a no-op.
 
     Guarantees:
-      - Only tags whose axis and value the map lists are rewritten; every other tag a node carries is left
-        unchanged.
-      - Collapsing an alias onto a value a node already carries leaves a single copy of that tag, never a
-        duplicate.
-      - A repeated call with the same alias map after a successful one changes nothing.
-      - A retag never changes a node's summary or its stored source hash.
+      - Rewrites nodes exactly as `retag_detailed` does; the result only omits the list of rewritten files.
 
     Args:
       alias_map: `{<axis>: {<old-value>: <new-value>}}`.
@@ -282,6 +325,42 @@ class TagOps:
     Returns:
       A dict `{"scope": <id>, "nodes_changed": <n>, "tags_remapped": <m>}`.
     """
+
+    # the dict form is the detailed result without its path list
+    detailed = self.retag_detailed(alias_map)
+    return {
+      self._K_SCOPE:         self._scope_id,
+      self._K_NODES_CHANGED: detailed.nodes_changed,
+      self._K_TAGS_REMAPPED: detailed.tags_remapped,
+    }
+
+  def retag_detailed(self, alias_map: dict) -> RetagResult:
+    """
+    Apply an axis-value alias map to every node's tags and report the files it rewrote.
+
+    Behaves exactly like `retag`, but additionally names each rewritten file so the caller can commit them.
+
+    Guarantees:
+      - The rewritten files are listed in node enumeration order, and only nodes that actually changed appear.
+      - Only tags whose axis and value the map lists are rewritten; every other tag a node carries is left
+        unchanged.
+      - Collapsing an alias onto a value a node already carries leaves a single copy of that tag, never a
+        duplicate.
+      - A repeated call with the same alias map after a successful one changes nothing.
+      - A node's summary and stored source hash are never changed; only the topic tags the map matches are
+        rewritten.
+
+    Args:
+      alias_map: `{<axis>: {<old-value>: <new-value>}}`.
+
+    Returns:
+      The counts of changed nodes and remapped tags together with the paths of the changed nodes.
+    """
+
+    # Contract:
+    # The changed paths name exactly the nodes whose tags were rewritten, in node
+    # enumeration order; a node left unchanged NEVER appears, so callers can commit
+    # precisely those files.
 
     # Contract:
     # Only tags whose axis and value the alias map lists are rewritten; every
@@ -309,9 +388,8 @@ class TagOps:
     # leaves that node with one copy rather than two, and once every alias has been rewritten the same declaration
     # has nothing left to change.
 
-    # count the nodes and tags the alias declaration actually rewrites
-    nodes_changed = 0
-    tags_remapped = 0
+    # count the nodes and tags the alias declaration actually rewrites, and keep the files it wrote
+    result = RetagResult()
     for node_path in self._iter_node_paths():
       node = _nodes.node_for(node_path)
 
@@ -324,19 +402,15 @@ class TagOps:
       # guard: nothing changed for this node — skip the write
       if remapped == bare:
         continue
+
       # only the topics are rewritten: the summary stays, and so does the stored source hash, so an
       # operator edit made since the last curation still reads as pending
-      prefixed = [ f"{self._WIKI_PREFIX}{t}" for t in remapped ]
+      prefixed = [ f"{self._WIKI_PREFIX}{tag}" for tag in remapped ]
       node.apply_classify(topics = prefixed, stamp_src_hash = False)
-      nodes_changed += 1
-      tags_remapped += hits
-    return {
-      self._K_SCOPE:         self._scope_id,
-      self._K_NODES_CHANGED: nodes_changed,
-      self._K_TAGS_REMAPPED: tags_remapped,
-    }
-
-  # ── helpers ───────────────────────────────────────────────────────────────
+      result.nodes_changed += 1
+      result.tags_remapped += hits
+      result.changed_paths.append(node_path)
+    return result
 
   def _iter_node_paths(self) -> list[Path]:
     """
@@ -347,10 +421,12 @@ class TagOps:
       `for_domains` surface); otherwise the configured scope's nodes,
       resolved fresh on every call.
     """
-    # guard: a fixed enumeration overrides scope-config resolution
+    # a fixed enumeration overrides scope-config resolution
     if self._node_paths is not None:
       return self._node_paths
-    return self._resolver.iter_nodes(self._cfg)
+
+    # otherwise the configured scope's nodes, resolved fresh
+    return self._resolver.find_all_nodes(self._cfg)
 
   @classmethod
   def _domain_doc_paths(cls, cfg: _domains.DomainConfig) -> list[Path]:
@@ -395,12 +471,14 @@ class TagOps:
     Returns:
       The node's topics with any `wiki/` namespace prefix stripped.
     """
-    # guard: markdown stores prefixed `wiki/*` tags — strip the namespace
+    # markdown stores prefixed `wiki/*` tags — strip the namespace
     if isinstance(node, _nodes.MarkdownNode):
       return [
-        t[len(cls._WIKI_PREFIX):] if t.startswith(cls._WIKI_PREFIX) else t
-        for t in node.wiki_tags
+        tag[len(cls._WIKI_PREFIX):] if tag.startswith(cls._WIKI_PREFIX) else tag
+        for tag in node.wiki_tags
       ]
+
+    # a code node already stores its topics bare
     return list(node.topics)
 
   @staticmethod
@@ -411,9 +489,11 @@ class TagOps:
     Returns:
       The node's summary string, or None when it has none.
     """
-    # guard: markdown and code expose the summary under different accessors
+    # markdown and code expose the summary under different accessors
     if isinstance(node, _nodes.MarkdownNode):
       return node.wiki_summary
+
+    # a code node's own summary accessor
     return node.summary
 
   @classmethod
@@ -464,3 +544,165 @@ class TagOps:
         seen.add(new_tag)
         out.append(new_tag)
     return out, hits
+
+
+# ----------------------------------------------------------------------------------------
+class TagDictionary:
+  """
+  Advisory tag-values dictionary of one repository.
+
+  Produces the dictionary text that follows a canon pass over a tag surface and reports which values still need a
+  gloss before that text is complete.
+  """
+
+  def __init__(self, *, repo: Path) -> None:
+    """
+    Bind the dictionary to one repository.
+
+    Args:
+      repo: Absolute repository root that owns the dictionary file and the language its intro is written in.
+    """
+    # the repository whose dictionary file and language the merge reads
+    self._repo = Path(repo)
+
+  @property
+  def path(self) -> Path:
+    """
+    Absolute path of the dictionary file.
+
+    Notes:
+      - The file need not exist yet.
+    """
+    return self._repo / dictionary_rel(self._repo)
+
+  def merge(self,
+            *,
+            post_values: dict[str, list[str]],
+            alias_map: dict,
+            glosses: dict[str, dict[str, str]]) -> str:
+    """
+    Compose the dictionary text that follows a canon pass.
+
+    Guarantees:
+      - Values the dictionary already records stay, even when the surface no longer wears them.
+      - A renamed value keeps the gloss it had under its old name, unless the new name already has an entry of its
+        own, whose gloss is kept instead.
+      - A supplied gloss replaces the recorded one.
+      - Axes and values are listed alphabetically, so an unchanged vocabulary yields text identical to the
+        existing dictionary.
+
+    Notes:
+      - The dictionary file is only read; writing the returned text is the caller's job.
+
+    Args:
+      post_values: `{<axis>: [<value>, ...]}` the surface carries once the canon is applied.
+      alias_map: `{<axis>: {<old-value>: <new-value>}}` the canon renamed.
+      glosses: `{<axis>: {<value>: <gloss>}}` supplied with the canon.
+
+    Returns:
+      The full dictionary markdown, ending with a newline.
+    """
+
+    # Contract:
+    # Every value the dictionary already records stays in the returned text,
+    # even when the surface no longer wears it.
+
+    # Contract:
+    # A renamed value keeps the gloss it had under its old name; when the new name
+    # already has an entry of its own, that entry's gloss is kept instead.
+
+    # Contract:
+    # A gloss supplied for a recorded or worn value replaces the recorded one.
+
+    # Contract:
+    # Axes and values are listed alphabetically, so an unchanged vocabulary
+    # MUST yield text identical to the existing dictionary.
+
+    # Domain(wiki.taxonomy):
+    # # Rewriting the dictionary after a canon pass
+    # The dictionary is the union of what it already recorded and the values the surface carries once the
+    # canon is applied. A value the dictionary records and this surface does not wear is kept, because
+    # another surface may be the one wearing it. A value the canon renamed takes its new name and keeps its
+    # gloss, since the meaning it covered did not move. When the new name already has an entry of its own,
+    # the two values merge into that entry: it keeps its gloss and the gloss of the old name is dropped,
+    # because the established entry already defines the surviving value. A gloss supplied with the canon
+    # replaces the one recorded. Axes and values are listed alphabetically, so an unchanged vocabulary
+    # rewrites to the same text.
+
+    entries = self._renamed(alias_map)
+
+    # every value the surface now carries has an entry; a supplied gloss replaces the recorded one
+    for axis, values in post_values.items():
+      section = entries.setdefault(axis, {})
+      for value in values:
+        section.setdefault(value, "")
+    for axis, supplied in glosses.items():
+      section = entries.get(axis, {})
+      for value, gloss in supplied.items():
+        # guard: a gloss for a value neither recorded nor worn adds no entry of its own
+        if value not in section:
+          continue
+        section[value] = gloss
+
+    # the fetched intro, then one section per axis and one bullet per value, both alphabetical
+    lang = _explainers.language_code(_explainers.resolve_language(self._repo))
+    blocks = [ _explainers.text_for(_explainers.TEXT_TAG_DICTIONARY_INTRO, lang) ]
+    for axis in sorted(entries):
+      bullets = [ f"{_VALUE_BULLET}{value}{_GLOSS_SEP}{entries[axis][value]}" for value in sorted(entries[axis]) ]
+      blocks.append(_NL.join([ f"{_AXIS_HEADING}{axis}", "", *bullets ]))
+    return (_NL + _NL).join(blocks) + _NL
+
+  def find_all_missing_glosses(self,
+                      *,
+                      post_values: dict[str, list[str]],
+                      alias_map: dict,
+                      glosses: dict[str, dict[str, str]]) -> list[tuple[str, str]]:
+    """
+    List the values the surface carries that have no gloss yet.
+
+    Args:
+      post_values: `{<axis>: [<value>, ...]}` the surface carries once the canon is applied.
+      alias_map: `{<axis>: {<old-value>: <new-value>}}` the canon renamed.
+      glosses: `{<axis>: {<value>: <gloss>}}` supplied with the canon.
+
+    Returns:
+      Sorted `(axis, value)` pairs that neither the dictionary (after the renames) nor the supplied glosses
+      cover; empty when every value is covered.
+    """
+    entries = self._renamed(alias_map)
+
+    # a value needs a gloss when neither the dictionary (after renames) nor the supplied glosses carry a non-blank one
+    return [
+      (axis, value)
+      for axis in sorted(post_values)
+      for value in sorted(set(post_values[axis]))
+      if not entries.get(axis, {}).get(value, "").strip() and not glosses.get(axis, {}).get(value, "").strip()
+    ]
+
+  def _renamed(self, alias_map: dict) -> dict[str, dict[str, str]]:
+    """
+    Read the dictionary entries with the canon's renames applied.
+
+    Args:
+      alias_map: `{<axis>: {<old-value>: <new-value>}}` the canon renamed.
+
+    Returns:
+      The `{<axis>: {<value>: <gloss>}}` entries in which each recorded old value has moved to its new name along
+      with its gloss; a new name that already has its own gloss keeps it.
+    """
+    entries = dictionary_entries(self._repo)
+
+    # a renamed value takes its new name and keeps its gloss, unless the new name already has its own
+    for axis, renames in alias_map.items():
+      section = entries.get(axis)
+
+      # guard: an axis the dictionary does not record has nothing to rename
+      if section is None or not isinstance(renames, dict):
+        continue
+      for old, new in renames.items():
+        # guard: only a recorded value carries a gloss to move
+        if old not in section:
+          continue
+        gloss = section.pop(old)
+        section.setdefault(new, gloss)
+    return entries

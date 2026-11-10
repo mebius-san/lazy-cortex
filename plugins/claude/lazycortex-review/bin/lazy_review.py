@@ -29,6 +29,12 @@ Subcommands:
                  markup-final view validation / terminal dispatches use as source).
 - `fold-markup` — fold the document's edit-annotation markup in place, frontmatter untouched,
                  printing `{"changed": bool}` — run on an operator approve gesture.
+- `repair-structure` — delegate to :mod:`structure_repair` (repair an unclosed fence or frontmatter
+                 delimiter and strip lone edit-annotation opening marks (the mark characters only, outside
+                 sections another plugin owns) in place when no guess is needed, no commit; `--check` only reports).
+- `configure-apply` — delegate to :mod:`configure_apply` (write one review class collected by
+                 `/lazy-review.configure` and re-run the install bootstrap; JSON in via `--payload`,
+                 `--payload-file`, or stdin).
 - `decisions-context` — delegate to :mod:`decisions_context` (print the `{filename: text}`
                  map of whichever decisions-registry file(s) resolve for one document; the
                  coordinator folds this into a main or barrier writer dispatch's `context`).
@@ -57,6 +63,23 @@ if str(_BIN) not in sys.path:
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import atomic_io as _atomic_io  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import git_ops as _git_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+from keys import JobMarker  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+
+
+# Subcommand names, help lines and argument spellings of the `repair-structure` and `configure-apply` verbs
+_REPAIR_VERB = "repair-structure"
+_REPAIR_HELP = "repair the doc's mechanical structure in place"
+_CONFIGURE_VERB = "configure-apply"
+_CONFIGURE_HELP = "write one review class from stdin and re-run install"
+_ARG_FILE = "file"
+_ARG_CHECK = "--check"
+_ARG_REPO = "--repo"
+_ARG_PAYLOAD = "--payload"
+_ARG_PAYLOAD_FILE = "--payload-file"
+_STORE_TRUE = "store_true"
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -69,7 +92,7 @@ def cmd_status(args: argparse.Namespace) -> int:
   Returns:
     Exit code from the status module.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import status  # type: ignore  # pylint: disable=import-error
   return status.main([args.file])
@@ -85,7 +108,7 @@ def cmd_parse_note(args: argparse.Namespace) -> int:
   Returns:
     Exit code from the note_ops module.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import note_ops  # type: ignore  # pylint: disable=import-error
   # waiver: `plugins/claude/lazycortex-specs/bin/note_ops.py` shares this basename; in a whole-project mypy
@@ -117,7 +140,7 @@ def cmd_set_key(args: argparse.Namespace) -> int:
   # The file is left completely untouched when `key` is not in the reserved schema; a
   # rejected key never produces a partial write.
 
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import note_ops  # type: ignore  # pylint: disable=import-error
 
@@ -139,6 +162,8 @@ def cmd_set_key(args: argparse.Namespace) -> int:
 
   # resolve the file path against --repo
   file_path = (Path(args.repo).resolve() / args.file).resolve()
+
+  # guard: target file does not exist — nothing to set the key on
   if not file_path.is_file():
     sys.stderr.write(f"file not found: {file_path}\n")
     return 2
@@ -146,7 +171,8 @@ def cmd_set_key(args: argparse.Namespace) -> int:
   # read the document and attempt to set the key
   lf_text, ending = _atomic_io.to_lf(_atomic_io.read_text(file_path))
   try:
-    # waiver: type: ignore — note_ops is a deferred/late-bound sibling import; mypy cannot resolve it
+    # waiver: type: ignore — a whole-project mypy run binds `note_ops` to
+    # `lazycortex-specs/bin/note_ops.py`, so this review module's attributes are unknown to it
     updated_text = note_ops.set_key(lf_text, args.key, parsed_value)  # type: ignore[attr-defined]
   except ValueError as error:
     sys.stderr.write(f"{error}\n")
@@ -167,7 +193,7 @@ def cmd_mark_job(args: argparse.Namespace) -> int:
   Returns:
     Exit code from the job_markers module.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import job_markers  # type: ignore  # pylint: disable=import-error
   forward: list[str] = [args.file, args.kind]
@@ -193,15 +219,12 @@ def cmd_paint_banner(args: argparse.Namespace) -> int:
     ParseError: If the document has an opening frontmatter fence with no matching closing
       fence — mirrors `cmd_set_key`, which propagates the same failure uncaught.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import job_markers  # type: ignore  # pylint: disable=import-error
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import note_ops  # type: ignore  # pylint: disable=import-error
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
-  from keys import JobMarker  # type: ignore  # pylint: disable=import-error
 
   # resolve the file path against --repo, mirroring cmd_set_key
   repo = Path(args.repo).resolve()
@@ -216,7 +239,8 @@ def cmd_paint_banner(args: argparse.Namespace) -> int:
   # document is runtime state now, so the banner's in-process state comes from the sidecar
   lf_text, ending = _atomic_io.to_lf(_atomic_io.read_text(file_path))
   in_flight = bool(job_markers.read(repo, file_path)[JobMarker.ACTIVE_JOB])
-  # waiver: type: ignore — note_ops is a deferred/late-bound sibling import; mypy cannot resolve it
+  # waiver: type: ignore — a whole-project mypy run binds `note_ops` to
+  # `lazycortex-specs/bin/note_ops.py`, so this review module's attributes are unknown to it
   updated_text = note_ops.repaint_banner(  # type: ignore[attr-defined]
       lf_text, job_in_flight = in_flight, lang = note_ops.resolve_language(file_path))  # type: ignore[attr-defined]
   _atomic_io.write_text_atomic(file_path, _atomic_io.restore_ending(updated_text, ending))
@@ -233,7 +257,7 @@ def cmd_collect_job(args: argparse.Namespace) -> int:
   Returns:
     Exit code from the collect_ops module.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import collect_ops  # type: ignore  # pylint: disable=import-error
   extra = ["--no-commit"] if args.no_commit else []
@@ -250,7 +274,7 @@ def cmd_collect_tick(args: argparse.Namespace) -> int:
   Returns:
     Exit code from the collect_ops module.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import collect_ops  # type: ignore  # pylint: disable=import-error
   return collect_ops.main_tick(["--repo", args.repo])
@@ -266,7 +290,7 @@ def cmd_sanitize(args: argparse.Namespace) -> int:
   Returns:
     Exit code from the sanitize module.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import sanitize  # type: ignore  # pylint: disable=import-error
   return sanitize.main(["--repo", args.repo])
@@ -282,7 +306,7 @@ def cmd_coordinator_dispatch(args: argparse.Namespace) -> int:
   Returns:
     Exit code from the coordinator_dispatch module.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import coordinator_dispatch  # type: ignore  # pylint: disable=import-error
   return coordinator_dispatch.main([args.item_json, "--repo", args.repo])
@@ -298,7 +322,7 @@ def cmd_commit_doc(args: argparse.Namespace) -> int:
   Returns:
     Exit code from the commit_doc module.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import commit_doc  # type: ignore  # pylint: disable=import-error
 
@@ -319,7 +343,7 @@ def cmd_start(args: argparse.Namespace) -> int:
   Returns:
     Exit code from the start module.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import start  # type: ignore  # pylint: disable=import-error
   forward: list[str] = [args.file]
@@ -343,7 +367,7 @@ def cmd_submit(args: argparse.Namespace) -> int:
   Returns:
     Exit code from the submit module.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import submit  # type: ignore  # pylint: disable=import-error
   forward: list[str] = [args.file]
@@ -362,7 +386,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
   Returns:
     Exit code from the stop module.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import stop  # type: ignore  # pylint: disable=import-error
   return stop.main([args.file])
@@ -378,7 +402,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
   Returns:
     Exit code from the finalize module.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import finalize  # type: ignore  # pylint: disable=import-error
   return finalize.main([args.file])
@@ -388,12 +412,8 @@ def cmd_strip_markup(args: argparse.Namespace) -> int:
   """
   Print the document with its edit-annotation markup resolved to final text.
 
-  The body is run through `edit_markup.strip_markers` with the document's pinned
-  `review_marker_style` (repo settings as fallback); the frontmatter is printed
-  untouched. Used by the
-  coordinator to build the markup-resolved source for validation / terminal
-  writer dispatches — those experts judge the document's final state, not the
-  raw diff material main writers work on.
+  The body is resolved according to the document's own marker style, falling back to the
+  repo's configured style; the frontmatter is printed untouched.
 
   Guarantees:
     - Never aborts on an unrecognized configured edit-marker style; the document's body is
@@ -406,13 +426,13 @@ def cmd_strip_markup(args: argparse.Namespace) -> int:
     Exit code: 0 on success (unknown configured style degrades to printing the
     document unchanged), 2 when the file is missing or not markdown.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import edit_markup  # type: ignore  # pylint: disable=import-error
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import finalize  # type: ignore  # pylint: disable=import-error
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import frontmatter as _fm  # type: ignore  # pylint: disable=import-error
   file_path = Path(args.file).resolve()
@@ -445,7 +465,7 @@ def cmd_strip_markup(args: argparse.Namespace) -> int:
 
   # resolve the body's edit markup per the document's pinned style; an unknown style must not
   # kill the dispatch — `body` stays the raw document half and the verb degrades gracefully
-  style = finalize.document_edit_marker_style(file_path)
+  style = finalize.read_document_edit_marker_style(file_path)
   try:
     body = edit_markup.strip_markers(body, style=style)
   except ValueError:
@@ -488,13 +508,13 @@ def cmd_fold_markup(args: argparse.Namespace) -> int:
   # Contract:
   # A rewrite MUST be atomic: a reader never observes a partially written document.
 
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import body as _body  # type: ignore  # pylint: disable=import-error
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import finalize  # type: ignore  # pylint: disable=import-error
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import frontmatter as _fm  # type: ignore  # pylint: disable=import-error
 
@@ -513,7 +533,7 @@ def cmd_fold_markup(args: argparse.Namespace) -> int:
 
   # fold the body per the document's pinned style; an unknown style leaves the file untouched
   try:
-    folded = _body.fold_edit_markers(body, style = finalize.document_edit_marker_style(file_path))
+    folded = _body.fold_edit_markers(body, style = finalize.read_document_edit_marker_style(file_path))
   except ValueError as error:
     sys.stderr.write(f"{error}\n")
     return 2
@@ -524,6 +544,44 @@ def cmd_fold_markup(args: argparse.Namespace) -> int:
     _atomic_io.write_text_atomic(file_path, _atomic_io.restore_ending(fm_text + folded, ending))
   print(json.dumps({ "changed": changed }))
   return 0
+
+
+def cmd_repair_structure(args: argparse.Namespace) -> int:
+  """
+  Delegate the `repair-structure` subcommand to the `structure_repair` module.
+
+  Args:
+    args: Parsed namespace with `file`, `repo`, and `check` attributes.
+
+  Returns:
+    Exit code from the `structure_repair` module.
+  """
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; pylint cannot see that path
+  import structure_repair  # pylint: disable=import-error
+
+  # `--check` is replayed only when given, so the module's own default stays the write
+  return structure_repair.main([ args.file, _ARG_REPO, args.repo, *([ _ARG_CHECK ] if args.check else []) ])
+
+
+def cmd_configure_apply(args: argparse.Namespace) -> int:
+  """
+  Delegate the `configure-apply` subcommand to the `configure_apply` module.
+
+  Args:
+    args: Parsed namespace with the `repo`, `payload`, and `payload_file` attributes.
+
+  Returns:
+    Exit code from the `configure_apply` module.
+  """
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; pylint cannot see that path
+  import configure_apply  # pylint: disable=import-error
+
+  # each given document source is replayed as its flag; with neither, the document stays on stdin for the module
+  payload = [ _ARG_PAYLOAD, args.payload ] if args.payload is not None else []
+  payload_file = [ _ARG_PAYLOAD_FILE, args.payload_file ] if args.payload_file is not None else []
+  return configure_apply.main([ _ARG_REPO, args.repo, *payload, *payload_file ])
 
 
 def cmd_decisions_context(args: argparse.Namespace) -> int:
@@ -537,7 +595,7 @@ def cmd_decisions_context(args: argparse.Namespace) -> int:
     Exit code: always 0. Prints the JSON `{filename: text}` decisions-registry context map to
     stdout on every call; the target document need not exist on disk.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import decisions_context  # type: ignore  # pylint: disable=import-error
 
@@ -561,7 +619,7 @@ def cmd_guidelines_context(args: argparse.Namespace) -> int:
     Exit code: always 0. Prints the JSON `{paths, warnings}` map to stdout on every call; the
     target document need not exist on disk.
   """
-  # waiver: deferred local import — the verb's module is loaded only when the verb runs, like its sibling verbs
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import guidelines_context  # type: ignore  # pylint: disable=import-error
 
@@ -582,23 +640,13 @@ def cmd_core_cli(_args: argparse.Namespace) -> int:
     Exit code: 0 with the path on stdout, 1 with an `error:` line on stderr when no lookup
     stage finds core.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
-  import coordinator_dispatch  # type: ignore  # pylint: disable=import-error
-
-  # one resolver for the whole plugin — the verb only exposes what the dispatcher already uses
-  # waiver: protected-access — the dispatcher's resolver is the plugin's single lookup; a second copy is the anti-pattern
-  # waiver: a project-wide mypy run binds the bare name to the specs plugin's same-named module, which lacks the attribute
-  cli = coordinator_dispatch._resolve_core_cli()  # type: ignore[attr-defined]  # pylint: disable=protected-access
-
-  # guard: no lookup stage found a binary — the agent stops and reports rather than guessing a path
-  if cli is None:
-    # waiver: one-off human-facing message -- stderr diagnostic naming every stage searched
-    sys.stderr.write(
-        "error: lazycortex-core CLI not resolvable: $LAZYCORTEX_PLUGIN_DIRS yields no match, no "
-        "dev-vault sibling tree carries bin/lazycortex-core, and the plugin registry records no "
-        "lazycortex-core install with a bin/lazycortex-core entry.\n"
-    )
+  # one resolver for the whole plugin — the verb only exposes what every other caller already uses
+  try:
+    cli = _git_ops.require_core_cli()
+  # no lookup stage found a binary — the agent stops and reports rather than guessing a path; the
+  # resolver's own message names every stage searched
+  except RuntimeError as exc:
+    sys.stderr.write(f"error: {exc}\n")
     return 1
   print(cli)
   return 0
@@ -611,12 +659,6 @@ def build_parser() -> argparse.ArgumentParser:
   Returns:
     Configured argument parser with all subcommands registered.
   """
-  # the `mark-job` kind tokens below are the sidecar's own, so they come from `keys` rather
-  # than being re-spelled in the CLI surface
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
-  from keys import JobMarker  # type: ignore  # pylint: disable=import-error
-
   # the root parser and the subcommand slot every verb below registers itself into
   # waiver: argparse CLI signature, not a domain key
   parser = argparse.ArgumentParser(prog="lazy-review")
@@ -782,6 +824,20 @@ def build_parser() -> argparse.ArgumentParser:
   p_fold.add_argument("--repo", default = ".")
   p_fold.set_defaults(func=cmd_fold_markup)
 
+  # `repair-structure` — the guess-free mechanical repair, written in place with no commit
+  p_repair = sub.add_parser(_REPAIR_VERB, help = _REPAIR_HELP)
+  p_repair.add_argument(_ARG_FILE)
+  p_repair.add_argument(_ARG_CHECK, action = _STORE_TRUE)
+  p_repair.add_argument(_ARG_REPO, default = ".")
+  p_repair.set_defaults(func = cmd_repair_structure)
+
+  # `configure-apply` — the wizard's collected class written through the core settings verbs
+  p_configure = sub.add_parser(_CONFIGURE_VERB, help = _CONFIGURE_HELP)
+  p_configure.add_argument(_ARG_REPO, default = ".")
+  p_configure.add_argument(_ARG_PAYLOAD, default = None)
+  p_configure.add_argument(_ARG_PAYLOAD_FILE, default = None)
+  p_configure.set_defaults(func = cmd_configure_apply)
+
   # `decisions-context` — decisions-registry context map for a main / barrier writer dispatch
   # waiver: argparse CLI signature, not a domain key
   p_decisions = sub.add_parser("decisions-context", help="print the decisions-registry context map for one file")
@@ -820,8 +876,7 @@ def main(argv: list[str]) -> int:
   Returns:
     Exit code from the dispatched subcommand.
   """
-  parser = build_parser()
-  args = parser.parse_args(argv)
+  args = build_parser().parse_args(argv)
   return args.func(args)
 
 

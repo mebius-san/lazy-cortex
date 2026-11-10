@@ -91,7 +91,7 @@ def format_report_path(real_file: str, project_dir: str) -> str:
 
 
 # ----------------------------------------------------------------------------------------
-def collect_violations(real_file: str) -> list[str]:
+def collect_violations(real_file: str, *, project_dir: str) -> list[str]:
   """
   Collect the style-checker violation lines for a Python file.
 
@@ -100,6 +100,7 @@ def collect_violations(real_file: str) -> list[str]:
 
   Args:
     real_file: Absolute, resolved path of the Python file to check.
+    project_dir: Project root the checker runs from; the violation lines name the file relative to it.
 
   Returns:
     Each `pcf` violation line for the file, or an empty list when the file is clean,
@@ -111,10 +112,11 @@ def collect_violations(real_file: str) -> list[str]:
   except (OSError, SyntaxError, ValueError):
     return []
 
-  # pcf owns the exclude decision; --honor-excludes makes an excluded path a no-op
+  # pcf owns the exclude decision; --honor-excludes makes an excluded path a no-op.
+  # pcf names the file relative to its working directory, so it runs from the project root
   result = subprocess.run(
     [ sys.executable, str(_PCF), "--honor-excludes", real_file ],
-    capture_output = True, text = True, check = False, encoding = "utf-8",
+    capture_output = True, text = True, check = False, encoding = "utf-8", cwd = project_dir,
   )
   return [ line for line in (result.stdout + result.stderr).splitlines() if _NOTE_MARKER in line ]
 
@@ -137,7 +139,7 @@ def main() -> int:
 
   # resolve symlinks, then collect the style violations of the edited file
   real_file = os.path.realpath(path)
-  notes = collect_violations(real_file)
+  notes = collect_violations(real_file, project_dir = project_dir)
 
   # guard: a clean or excluded file stays silent
   if not notes:

@@ -1,6 +1,6 @@
 ---
 name: lazy-review.start
-description: "Use when a markdown document is NOT yet in the review loop and the operator wants it to be — 'put this under review', 'start the review on X', or resuming a document that `/lazy-review.stop` parked. The review opens at the writing round, so the expert chain drafts first; use `/lazy-review.submit` instead when the content is already written and only needs reviewing. No-op on a document already opted in."
+description: "Use when a markdown document is NOT yet in the review loop and the operator wants it to be — 'put this under review', 'start the review on X', or resuming a document that `/lazy-review.stop` parked. A fresh review opens at the writing round, so the expert chain drafts first, and a parked one resumes at the round and phase it was stopped in; use `/lazy-review.submit` instead when the content is already written and only needs reviewing. No-op on a document already opted in."
 allowed-tools: Read, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Agent
 execution-discipline-waiver: "thin dispatcher — work lives in bin/start.py (open_review + atomic git add/commit), this SKILL.md is a single subprocess call with no decision logic"
 ---

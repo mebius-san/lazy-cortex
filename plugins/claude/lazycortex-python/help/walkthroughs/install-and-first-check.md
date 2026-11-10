@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Install lazycortex-python, then run chk-py all -q directly to build the project venv and prove the six-step checker gate is clean.
-last_regen: 2026-10-24
+last_regen: 2026-11-10
 diagram_spec:
   anchor: "Install-and-first-check flow"
   request: "Sequence diagram: user runs /lazy-python.install (quiet install wizard, detail out of scope here) → user runs cli/chk-py all -q from a terminal → the shared venv resolver probes $VIRTUAL_ENV, then <project>/.venv, then a configured path, finds none, creates a project-local .venv and installs mypy/pylint/pytest/ruff plus the pytest-clarity/pytest-sugar plugins → the six-step gate runs in order: pcf, toi, cmp, mypy, ruff, pylint, each reporting clean on the still-untouched repo (the guideline-review phase is deliberately NOT part of this run — it has its own cadence) → user runs cli/tst-py -q to confirm the same venv's pytest works → pytest completes with no failures."
@@ -11,8 +11,8 @@ source_skills:
   - chk
   - tst
   - pcf.py
-source_sha: 33e8a296cb2bda2f7c06945ca9d46e24ed4c1858
-surface_sha: be0fb0047ce7b47e9b65c152c3a8ca9b85d904028c406f8f93763f8509560ca9
+source_sha: 2a09f47e1d9e777cff05b9a3c2c3d132fe1c3555
+surface_sha: 75381b7617f4119c9f522899bbbb5b3b16cdbd6e523d37dd12020c6618395fb6
 ---
 # Bootstrap the plugin in a clean repo and confirm the checker stack is wired up
 
@@ -22,7 +22,7 @@ This walkthrough is for anyone enabling `lazycortex-python` in a repo for the fi
 
 After this walkthrough you have:
 
-- The plugin installed — the four rule mirrors in `.claude/rules/` (style, docstrings, tests, and failing-tests, which tells Claude to judge a failing test before touching either side and never to edit or exclude a test without your explicit yes), `cli/chk-py` / `cli/tst-py` wrappers (no exec bit required — they launch through `bash`), matching human-facing `~/.local/bin/chk-py` / `tst-py` copies, bootstrapped `pyproject.toml` sections, and overlay stubs all in place (see the **install-and-audit** block article for the full wizard).
+- The plugin installed — the four rule mirrors in `.claude/rules/` (style, docstrings, tests, and failing-tests, which tells Claude to judge a failing test before touching either side and never to edit or exclude a test without your explicit yes), `cli/chk-py` / `cli/tst-py` wrappers plus the mypy plugin shim at `cli/mypy/protected_access.py` (no exec bit required — the wrappers launch through `bash`), matching human-facing `~/.local/bin/chk-py` / `tst-py` copies, bootstrapped `pyproject.toml` sections, and overlay stubs all in place (see the **install-and-audit** block article for the full wizard).
 - A project-local `.venv` at the repo root with `mypy`, `pylint`, `pytest`, `ruff`, `pytest-clarity`, and `pytest-sugar` installed, built automatically the first time you invoke either wrapper.
 - A completed `chk-py all -q` run reporting all six deterministic steps clean — `pcf`, `toi`, `cmp`, `mypy`, `ruff`, `pylint` — and a completed `tst-py -q` run confirming the same venv's pytest works.
 - Confidence that the venv resolver and the six-step gate are correctly wired before you start relying on them for real edits.
@@ -42,9 +42,9 @@ After this walkthrough you have:
 /lazy-python.install
 ```
 
-This is a quiet, mostly prompt-free install — the only two prompts it can ever raise are a genuine file-sync conflict and, when your repo ships more than one recognised environment-bootstrap script, a one-time choice of which one `python.env_source` should record. The full step-by-step breakdown — rule mirroring, wrapper deployment, the `~/.local/bin/chk-py` / `tst-py` human-facing copies, the PyCharm `pch` probe, `pyproject.toml` bootstrapping, overlay scaffolding, scaffold-template sync, `env_source` detection, and the closing agent-model-tier and code-reviewer-expert registration — is covered in the **install-and-audit** block article, not here.
+This is a quiet, mostly prompt-free install — the only two prompts it can ever raise are a genuine file-sync conflict and, when your repo ships more than one recognised environment-bootstrap script, a one-time choice of which one `python.env_source` should record. The full step-by-step breakdown — rule mirroring, wrapper and mypy-shim deployment, the `~/.local/bin/chk-py` / `tst-py` human-facing copies, the PyCharm `pch` probe, `pyproject.toml` bootstrapping, overlay scaffolding, scaffold-template sync, `env_source` detection, and the closing agent-model-tier and code-reviewer-expert registration — is covered in the **install-and-audit** block article, not here.
 
-**Verification gate**: the install ends with a one-line-per-step report. Confirm every line shows an outcome word (`installed`, `wrappers-deployed-2 + gitignore-ensured`, `pyproject-bootstrapped + pch-skipped-no-pycharm`, etc.) with no `ERROR`. Once that report is clean, `cli/chk-py` and `cli/tst-py` exist at the repo root — run through `bash`, no exec bit needed, so a mode-blind sync client can never break them — and `~/.local/bin/chk-py` / `tst-py` are installed alongside them, so a bare `chk-py` / `tst-py` works from anywhere under the repo once `~/.local/bin` is on your `$PATH` (the install report calls out a `path-warning` if it isn't).
+**Verification gate**: the install ends with a one-line-per-step report. Confirm every line shows an outcome word (`installed`, `wrappers-deployed-3 + gitignore-ensured`, `pyproject-bootstrapped + pch-skipped-no-pycharm`, etc.) with no `ERROR`. Once that report is clean, `cli/chk-py` and `cli/tst-py` exist at the repo root — run through `bash`, no exec bit needed, so a mode-blind sync client can never break them — and `~/.local/bin/chk-py` / `tst-py` are installed alongside them, so a bare `chk-py` / `tst-py` works from anywhere under the repo once `~/.local/bin` is on your `$PATH` (the install report calls out a `path-warning` if it isn't).
 
 ### Step 2 — Run the six-step gate and let it build the venv
 
@@ -54,7 +54,7 @@ From a plain terminal at the repo root:
 bash ./cli/chk-py all -q
 ```
 
-`chk-py` is the rendered wrapper around the plugin's shared `chk` aggregator, launched through `bash` — the tracked copy carries no exec bit on purpose, so it keeps working even after a git client that resets file modes to `100644`. If `~/.local/bin` is on your `$PATH` (Step 1's install put the human-facing copy there), the same run is just `chk-py all -q` typed from anywhere under the repo. `all` runs six deterministic checks in order — `pcf` (code format), `toi` (type-only imports), `cmp` (`py_compile` syntax check), `mypy`, `ruff`, and `pylint` — against `.` by default. Before the first check runs, the shared venv resolver probes for a usable venv in this order: an already-activated `$VIRTUAL_ENV`, an existing `<repo>/.venv`, then a `[tool.lazy-python] venv` path configured in `pyproject.toml`. On a freshly installed repo none of those exist yet, so the resolver falls back to creating `<repo>/.venv` with `uv venv --python 3.12` and installing `mypy`, `pylint`, `pytest`, `ruff`, `pytest-clarity`, and `pytest-sugar` into it — never wiping a pre-existing venv, only adding what's missing.
+`chk-py` is the rendered wrapper around the plugin's shared `chk` aggregator, launched through `bash` — the tracked copy carries no exec bit on purpose, so it keeps working even after a git client that resets file modes to `100644`. If `~/.local/bin` is on your `$PATH` (Step 1's install put the human-facing copy there), the same run is just `chk-py all -q` typed from anywhere under the repo. `all` runs six deterministic checks in order — `pcf` (code format; pytest test files are exempt from its assert and magic-literal checks by default, and a `# waiver:` comment is honoured), `toi` (type-only imports), `cmp` (`py_compile` syntax check), `mypy`, `ruff`, and `pylint` — against `.` by default. Before the first check runs, the shared venv resolver probes for a usable venv in this order: an already-activated `$VIRTUAL_ENV`, an existing `<repo>/.venv`, then a `[tool.lazy-python] venv` path configured in `pyproject.toml`. On a freshly installed repo none of those exist yet, so the resolver falls back to creating `<repo>/.venv` with `uv venv --python 3.12` and installing `mypy`, `pylint`, `pytest`, `ruff`, `pytest-clarity`, and `pytest-sugar` into it — never wiping a pre-existing venv, only adding what's missing.
 
 The guideline-review phase (`chk-py review`) is deliberately **not** part of this run. It used to be the seventh step of `all`, but it now runs on its own cadence — recommended at the end of a logical unit of work, mandatory at the end of a full cycle of planned work — so its fixed per-dispatch cost (the whole guideline canon, every time) is paid once per unit of work rather than once per `chk-py all` invocation. It is pure stdlib and skips the venv entirely, so it also works from pre-commit and CI. See "After you're done" below for how to run it.
 
@@ -66,9 +66,9 @@ The guideline-review phase (`chk-py review`) is deliberately **not** part of thi
 bash ./cli/tst-py -q
 ```
 
-`tst-py` sources the same venv the previous step built or reused — it never creates its own — then runs `pytest -q` across everything under `tests/`. Because Step 2 already installed `pytest` (plus the `pytest-clarity` and `pytest-sugar` plugins) into `<repo>/.venv`, this step should activate instantly with no new installs. Same as Step 2, a bare `tst-py -q` works instead once `~/.local/bin` is on your `$PATH`.
+`tst-py` sources the same venv the previous step built or reused — it never creates its own — then runs `pytest -q` across everything under `tests/` (a bare `tst-py` and `tst-py all` are the same whole-suite run; `tst-py <module>` scopes to `tests/<module>/`). It also loads a small dedup plugin so a test collected twice through re-export shims runs only once. Because Step 2 already installed `pytest` (plus the `pytest-clarity` and `pytest-sugar` plugins) into `<repo>/.venv`, this step should activate instantly with no new installs. Same as Step 2, a bare `tst-py -q` works instead once `~/.local/bin` is on your `$PATH`.
 
-**Verification gate**: on a repo with no `tests/` directory yet, `pytest` reports no tests collected — that's expected and not a failure. On a repo with existing tests, confirm the run completes with `0 failed` (whatever the passed/skipped counts happen to be). Either outcome confirms the venv resolver and the pytest wiring both work. If a test does fail on a repo with existing tests, the failing-tests rule installed in Step 1 applies: the failure is judged first, and no test is edited or excluded from the run without your explicit yes. A hard error here (e.g. `pytest: command not found`) means the venv from Step 2 didn't build correctly and is worth re-running `bash ./cli/chk-py all -q` to diagnose before moving on.
+**Verification gate**: on a repo with no `tests/` directory yet, `tst-py` refuses up front with a "does not exist" message instead of handing pytest a missing path — that is expected on a fresh repo and not a venv problem; create a `tests/` directory (or add your first test) and re-run. The same refusal fires for `tst-py <module>` when `tests/<module>/` is missing, and it lists the modules that do exist. On a repo with existing tests, confirm the run completes with `0 failed` (whatever the passed/skipped counts happen to be). Either outcome confirms the venv resolver and the pytest wiring both work. If a test does fail on a repo with existing tests, the failing-tests rule installed in Step 1 applies: the failure is judged first, and no test is edited or excluded from the run without your explicit yes. A hard error here (e.g. `pytest: command not found`) means the venv from Step 2 didn't build correctly and is worth re-running `bash ./cli/chk-py all -q` to diagnose before moving on.
 
 ## After you're done
 

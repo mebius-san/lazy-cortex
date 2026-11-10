@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, causes, and fixes for lazycortex-python install, audit, style checks, the guideline-review gate, and writer agents.
-last_regen: 2026-10-24
+last_regen: 2026-11-10
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision-tree routing install/audit/check-style/review/writer failures: top-level branch on skill invoked (install vs audit vs check-style vs review vs docstring-writer vs test-writer); install branch splits on phase (source-not-found, rule-read-only, wrapper-template-missing, pyproject-absent, pch-no-inspect-sh, scaffold-sync-fails, env-source-multiple-candidates, wrapper-cannot-resolve-active-install); audit branch splits on check number (check-crash, check1 drift, check2 broken-pointer, check3 artifact-missing, check4 placeholder, check10 invalid-json, check11 venv-degraded, check12 domain-groups-dictionary-missing); check-style branch splits on step (step3-manual-vs-chk, step5-test-gate, step6-violations-persist); pcf branch splits on new-violations-after-upgrade: (a) D2/D5/D7/D9 firing on previously-passing docstrings because project-neutral defaults dropped a project's implicit Generation Rules / Value Ranges / _field_filters conventions, needing [tool.pcf] extra_docstring_sections / d2_exempt_marker_attrs / private_name_allowlist declared; (b) check_language flagging comments/docstrings written outside [tool.pcf] allowed_languages (default english-only), needing translation, allowed_languages, or a # waiver:; (c) project_package autodetection resolving to nothing on an ambiguous src/ + root layout, misclassifying first-party imports, needing [tool.pcf] project_package declared explicitly; review branch splits on: chk-py-all-no-longer-runs-review (review left chk-py all as of 4.0.0 and needs its own chk-py review dispatch, mandatory at the end of a planned-work cycle) vs chk-py-review-base-ref-unresolvable (typo'd or unfetched --base ref, fetch or use git merge-base) vs chk-py-review-render-still-fails-with-FAIL-finding (fix the code, re-run — new scope key re-manifests); docstring-writer branch (step6-chk-violations); test-writer branch (step6-fails-flag, step7-tst-py-fails); each leaf names the fix action"
@@ -19,8 +19,8 @@ source_skills:
   - lazy-python.knowledge-sweep
   - lazy-python.domain-writer
   - lazy-python.contract-writer
-source_sha: 33e8a296cb2bda2f7c06945ca9d46e24ed4c1858
-surface_sha: e2f998edb83fb82fed0d9327938aa67d9c77fb50b78aa37275d1fcb1ed3ef39a
+source_sha: 2a09f47e1d9e777cff05b9a3c2c3d132fe1c3555
+surface_sha: 559ac730ec800619719b7b3b537574e9483e11a64575c1ebae5718b13c1a7e9e
 ---
 # Troubleshooting
 
@@ -184,9 +184,9 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 
 **Symptom**: After install, `cli/chk-py` and the rules are in place, but new `*.py` files are not being matched to the Python scaffold template by `lazy-core.scaffold`. The audit's `check8` reports `WARN` (scaffold registry entry absent).
 
-**Likely cause**: Phase 6 dispatches `lazy-core.scaffold-sync`. If `lazycortex-core` is not installed or its `scaffold-sync` skill is not reachable, the registry entry in `.claude/rules/lazy-core.scaffold.md` is never written.
+**Likely cause**: Step 6 runs the `scaffold sync-plugin` verb that `lazycortex-core` ships, and the verb asks nothing. If `lazycortex-core` is not installed or cannot be reached, the registry entry in `.claude/rules/lazy-core.scaffold.md` is never written. The verb prints one JSON line: a `status` of `collision` or `error`, or exit code 3 with a `failed` list naming a template whose write did not verify, means the copy or the registration did not land. The install step succeeds only when the verb's `status` came back, so a missing reply is a failed step, not a silent skip.
 
-**Fix**: Verify `lazycortex-core` is installed and enabled, then re-run `/lazy-python.install`. Phase 6 will retry the `scaffold-sync` dispatch and upsert the `python-template.py` entry.
+**Fix**: Verify `lazycortex-core` is installed and enabled, then re-run `/lazy-python.install`. Step 6 runs the verb again, copies the Python templates into `.claude/templates/python/`, and upserts the `python-template.py` entry. If the reply names a failed template, fix the write problem it points at (for example a read-only target) before re-running.
 
 ---
 
@@ -316,7 +316,7 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 
 **Likely cause**: The style checker deliberately never validates a `Domain(<group>):` marker's group against anything — it only ever matches the reserved `unfiled` literal — so a project whose knowledge markers all cite real-looking group names passes every checker even if the dictionary meant to define those groups was never created. Check 12 closes that blind spot: once any source carries a `Domain(…)` block, it looks for the dictionary at `.claude/lazy.settings.json[wiki.domains.dictionary]` when configured, else the conventional `docs/guidelines/domain-groups.md`.
 
-**Fix**: Run `/lazy-python.knowledge-sweep` — it builds the dictionary from the project's parked and in-use `Domain(…)` groups (with the operator confirming candidates) and refiles blocks that don't yet cite a real one. Re-run `/lazy-python.audit`; check 12 passes once the dictionary exists (or immediately, if the codebase carries no `Domain(…)` blocks at all).
+**Fix**: Run `/lazy-python.knowledge-sweep` — it builds the dictionary from the project's parked and in-use `Domain(…)` groups (it settles the cut itself and reports every added group, so you can overrule a name or boundary afterwards) and refiles blocks that don't yet cite a real one. Re-run `/lazy-python.audit`; check 12 passes once the dictionary exists (or immediately, if the codebase carries no `Domain(…)` blocks at all).
 
 ---
 
@@ -352,7 +352,7 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 
 ## `/lazy-python.check-style` Step 6 still reports violations after fixes landed
 
-**Symptom**: After Step 5 applied targeted fixes, the re-verify pass in Step 6 reports that violations remain. The skill surfaces the remaining list and asks how to proceed rather than looping.
+**Symptom**: After Step 5 applied targeted fixes, the re-verify pass in Step 6 reports that violations remain. The skill surfaces the remaining list and asks how to proceed rather than looping. The re-verify pass runs `chk-py all` per file and over the whole project, then `tst-py <module>` for each module the edits touched, so a failing test counts as a remaining issue too.
 
 **Likely cause**: The fix was targeted at a single file or line, but the violation spans multiple files (a removed public API, a broken import chain, a cross-file type reference) or the canon rule was misread and the fix introduced a different issue.
 
@@ -367,6 +367,26 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 **Likely cause**: The generated docstring text exceeded the 117-character line limit, or a section body was indented at the wrong depth. These are syntactic violations the agent should have caught in its Step 5 self-check but may have missed on long prose lines.
 
 **Fix**: The agent will apply targeted fixes in Step 6 and re-run the check. If violations persist, the agent reports them and stops. You can re-dispatch `lazy-python.docstring-writer` against the specific file, or run `/lazy-python.check-style` to perform the full review loop — Step 4 will surface the remaining violations and Step 5 will fix them.
+
+---
+
+## `lazy-python.test-writer` leaves a test method empty under a `TODO:` comment
+
+**Symptom**: A method you expected to see tested has either no test at all or an empty test method with only a `# TODO:` comment naming the stub it waits for. The agent's report does not flag it as a failure.
+
+**Likely cause**: The target method's body is a placeholder under a `# TODO:` comment. The agent writes no test asserting a placeholder value, because such a test would pin down behaviour that is about to be replaced. A test method that has to exist anyway stays empty, with the `TODO:` comment naming the stub.
+
+**Fix**: Implement the method, then re-dispatch `lazy-python.test-writer` against it so it derives a real test from the finished behaviour. Do not ask it to assert the placeholder.
+
+---
+
+## `lazy-python.docstring-writer` compresses a Summary or Scope instead of extending it
+
+**Symptom**: You asked for a docstring to cover a new field, case, or measure, but the agent left the Scope sentence short (or shortened it) rather than adding a clause for the new item.
+
+**Likely cause**: The docstring canon forbids inventory in Summary and Scope: a sentence that walks through the measures, fields, axes, or cases the body handles one by one. The agent's Step 5 self-check (nine points) flags a Scope with four or more parallel how/whether/what clauses, or one that would need a new clause whenever an item is added, and rewrites it to name the kind of answer. The individual items belong in the `Attributes:` section and the methods' own docstrings.
+
+**Fix**: This is expected behaviour. Put the new item in `Attributes:` or in the relevant method's docstring rather than in the Scope sentence. An existing inventory is compressed, never appended to.
 
 ---
 
@@ -386,7 +406,47 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 
 **Likely cause**: No source file carries a `Domain(unfiled):` block yet, and the sources don't yet carry enough recognizable subject-area vocabulary (module/package names, recurring domain nouns in docstrings) for the step to propose a candidate cluster on its own.
 
-**Fix**: This is expected on a codebase that hasn't adopted domain markers yet, or one that's already fully filed. Add groups by hand to the dictionary if you already know the subject areas you want to document, or just let the sweep continue against the dictionary as it stands — Step 4 still dispatches the writer agents, and any new `Domain(…)` blocks they write can seed the next sweep's candidates.
+**Fix**: This is expected on a codebase that hasn't adopted domain markers yet, or one that's already fully filed. Add groups by hand to the dictionary if you already know the subject areas you want to document, or just let the sweep continue against the dictionary as it stands — Step 4 still dispatches the writer agents, and any new `Domain(…)` blocks they write can seed the next sweep's candidates. A cluster the sweep judged too thin or too ambiguous to name honestly also stays parked; its report says which and why.
+
+---
+
+## `lazy-python.knowledge-sweep` reports a verb as `refused`
+
+**Symptom**: A sweep step stops with a `refused` result carrying a `reason`, and nothing was written for that step. The reasons seen are `reserved_group`, `single_segment`, `invalid_name`, `duplicate_group`, `unknown_group`, `invalid_gloss` (when writing the dictionary), and `unlisted_group`, `reserved_group`, `no_domain_header`, `conflicting_assign`, `file_changed` (when refiling block headers).
+
+**Likely cause**: The sweep writes the dictionary and rewrites block group names through deterministic verbs that validate the request before touching a file. A group name that is `unfiled` (parking is a state, never a group), has a single segment instead of the two-segment form, is already listed, or is not in the dictionary is refused outright. `file_changed` means a block header moved while the verb ran.
+
+**Fix**: Correct the name or the plan the `reason` points at and re-run the step; the refusal wrote nothing, so there is nothing to undo. For `file_changed`, re-run the step once the file is stable.
+
+---
+
+## `lazy-python.knowledge-sweep` Step 8 does not commit
+
+**Symptom**: The sweep finishes, but Step 8 reports `commit-skipped`, `noop`, or `refused` instead of `committed`, or its report lists files under `held`.
+
+**Likely cause**: Step 1 takes a snapshot of which scope files and the dictionary were already dirty before the run, and Step 8 commits only what the run itself changed against that snapshot. `commit-skipped` means git is mid-merge, rebase, cherry-pick, or revert. `noop` means nothing the run changed is left to commit. `refused` with `staged_content` means the index holds content you staged, which the sweep never commits over. `refused` with `no_snapshot` means Step 1 did not run in this checkout, or Step 8 already consumed the snapshot. A `held` file was already dirty before the run and the run changed it too, so it stays out of the commit.
+
+**Fix**: For `commit-skipped`, finish or abort the git operation and commit the listed paths yourself. For `staged_content`, commit or unstage your own changes, then let Step 8 re-run. For `no_snapshot`, re-run the sweep from Step 1. Commit any `held` files by hand once you have looked at them.
+
+---
+
+## `lazy-python.knowledge-sweep` renamed or added a group I never approved
+
+**Symptom**: After a sweep, the dictionary has groups you did not name, or some `Domain(<group>):` blocks carry a different group than before. The sweep did not stop to ask about any of it.
+
+**Likely cause**: The sweep does not ask. Step 2 clusters the parked blocks and takes the finest cut the clusters justify. It also reconciles every block whose group is neither `unfiled` nor listed in the dictionary (a typo, or a name invented at the keyboard) by adding the name or renaming it into the listed group it duplicates. Step 5 then consolidates the whole corpus: it collapses synonyms, splits overloaded groups, folds single-block groups into a neighbour, enforces the two-segment naming law, and rewrites glosses. Each of these is reported in full, so the result is something you overrule after the fact.
+
+**Fix**: Read the sweep's report, which lists every group with its gloss and the blocks under it. Rename a group or move a block by editing the dictionary entry and re-running `/lazy-python.knowledge-sweep`, or dispatch `lazy-python.domain-writer` with `refile=true` over the affected file so it re-picks the header line against the corrected dictionary.
+
+---
+
+## `lazy-python.knowledge-sweep` removed or reworded `Contract:` blocks
+
+**Symptom**: A sweep that was meant to add markers also deleted some `Contract:` blocks, together with their `Guarantees` bullets, or reworded a few.
+
+**Likely cause**: Step 6 consolidates the contracts at corpus scale. It removes blocks the canon excludes (presentation details, signature-obvious facts, implementation details), converges one guarantee stated across sibling classes to one phrasing, and folds two blocks carrying one guarantee only when they address the same audience. A block on a hook that any subclass overrides, or on a surface with its own readers, is kept even when its text matches another block word for word. The removals and rewordings are applied through `lazy-python.contract-writer` and reported by file and symbol.
+
+**Fix**: Check the report entry for the block. If the removal was right, nothing remains to do. If the block served a distinct audience, restore it from the sweep's commit and re-dispatch `lazy-python.contract-writer` naming that exact block.
 
 ---
 
@@ -406,7 +466,7 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 
 **Likely cause**: `Domain(unfiled):` is the parking group the agent uses whenever no listed group in the domain-groups dictionary fits the concept it just documented — it never invents a permanent group on its own. This is the expected outcome when the dictionary doesn't yet cover that subject area, not a defect in the write itself.
 
-**Fix**: The agent's report names the candidate group and a one-line gloss for each parked block. Accept or rename the candidate into the dictionary — by hand, or by re-running `/lazy-python.knowledge-sweep`, whose Step 2 walks parked blocks and proposes clusters for exactly this case — then re-dispatch `lazy-python.domain-writer` with `refile=true` against the affected file so it re-picks the group for the now-fileable blocks. A block that still matches nothing after the dictionary grows stays parked; `check12` (see above) keeps flagging it until it's filed.
+**Fix**: The agent's report names the candidate group and a one-line gloss for each parked block. Add the candidate to the dictionary, renaming it if you prefer — by hand, or by re-running `/lazy-python.knowledge-sweep`, whose Step 2 walks parked blocks, clusters them, and writes the groups it settles on for exactly this case — then re-dispatch `lazy-python.domain-writer` with `refile=true` against the affected file so it re-picks the group for the now-fileable blocks. A block that still matches nothing after the dictionary grows stays parked; `check12` (see above) keeps flagging it until it's filed.
 
 ---
 
@@ -424,9 +484,9 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 
 **Symptom**: Dispatching `lazy-python.contract-writer` against a method or class produces no new `Contract:` block, and the agent's report names the requested guarantee as out of scope.
 
-**Likely cause**: The agent's hard rules exclude three categories from ever becoming a contract: pure implementation details invisible to callers, anything already obvious from the signature and type hints, and presentation details (exact message text, log lines, formatting) — the last is only ever contractable when a caller demonstrably parses the string programmatically, and even then the contract names the parsed structure, not the prose.
+**Likely cause**: The agent judges every requested guarantee against the canon's significance test before writing anything: would calling code build on it, and could a plausible change silently break it. A block with any of five hollow signs is not written, and the report records `declined-hollow: <name> — <sign>`. The signs are: it restates the docstring's summary line, the signature, or a type hint; it describes how the code is built rather than what is promised (an internal step, a data structure, a call sequence); any correct implementation satisfies it; it copies the base class's or interface's contract verbatim; or it sits on a private helper. Presentation details (exact message text, log lines, formatting) usually fail the first or second sign — they are only contractable when a caller demonstrably parses the string programmatically, and even then the contract names the parsed structure, not the prose. The agent judges the guarantee against the code alone: a nearby comment or docstring is never a reason to skip a real guarantee, and it is never a reason to write a hollow one.
 
-**Fix**: This is expected behaviour, not a bug — writing a contract for one of these would violate the plugin's own documenting canon. If the guarantee is genuinely caller-visible (a return value's shape, a side effect, an invariant that must survive refactoring), re-describe it in those terms in the dispatch. If it's presentation-only, it belongs in a code comment or the docstring's ordinary prose instead of a `Contract:` block.
+**Fix**: This is expected behaviour, not a bug — writing a contract for one of these would violate the plugin's own documenting canon. If the guarantee is genuinely caller-visible (a return value's shape, a side effect, an invariant that must survive refactoring), re-describe it in those terms in the dispatch. If it records a fork with a reason ("X is not done here because Y does it"), the report names the `Decision:` marker as its destination. If it's presentation-only, it belongs in a code comment or the docstring's ordinary prose instead of a `Contract:` block.
 
 ---
 
@@ -457,6 +517,16 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 **Likely cause**: The reviewer's checklist treats a guarantee repeated verbatim on both an interface declaration and an implementation of the same method as redundant — the guarantee belongs on the interface, and the implementation should only trace to it through a synced `Guarantees` docstring section. This does not fire for a block that states an extra guarantee only the implementation itself adds; only an actual duplicate.
 
 **Fix**: Drop the implementation's copy of the `Contract:` block and confirm its docstring's `Guarantees` section still states the guarantee in prose (add it if the section is missing it). If the implementation genuinely enforces something extra beyond what the interface promises, a block there is fine for that additional guarantee only — never a re-statement of the interface's.
+
+---
+
+## `lazy-python.code-reviewer` flags a `# guard:` marker as misplaced
+
+**Symptom**: A review finding says a `# guard:` marker sits on the wrong branch, or that a protective branch has no marker, even though the branch exits early.
+
+**Likely cause**: The reviewer reads `# guard:` as labelling a protective branch only: an `if` or `case` that shields the code below from an invalid, missing, or degenerate input or state, either by leaving early (`return`, `continue`, `break`, `raise`) or by repairing the state (a default for a missing value, a normalised input). A branch that carries the regular work, such as the main path, a regular outcome, an accumulation, or one branch of a dispatch, is a finding when it carries the marker, even if its body exits. A protective branch that lacks the marker is a finding too.
+
+**Fix**: Remove the marker from branches that do regular work, and add it to branches that protect against bad input or state, including ones that repair the state rather than exit. Re-run `chk-py review` so the changed scope is judged again.
 
 ---
 

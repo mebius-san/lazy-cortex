@@ -1,33 +1,32 @@
 ---
 name: lazy-spec.product-config
-description: Use when creating a new product in the spec system OR editing an existing product's registration — unified wizard that collects answers via AskUserQuestion, writes the product record into lazy.settings.json[products][<compound-key>], scaffolds the product root with its operator-zone folder-note and iconize icon (group folders appear lazily with their first asset), generates or reuses the shared vault-wide behavior-keyed review classes (one per doc-kind, right-anchored wildcard globs spanning every product and asset type; a product with divergent experts gets a per-product override), and auto-detects code dependencies. Edit mode adds source to a design-only product, extends dependencies, or switches language/icon without clobbering asset_types.
+description: Use when creating a new product in the spec system OR editing an existing product's registration — unified wizard that collects answers via AskUserQuestion, writes the product record into lazy.settings.json[products][<compound-key>], scaffolds the product root with its level note (spec_role product) and iconize icon (group folders appear lazily with their first asset), and auto-detects code dependencies. Edit mode adds source to a design-only product, extends dependencies, or switches language/icon without clobbering asset_types.
 allowed-tools: Read, Glob, Grep, Bash, Edit, Write, Skill, AskUserQuestion, Agent
 ---
 # Configure Product
 
 **Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file; `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" core-cli)` prints its absolute path — this plugin's own resolver tries the daemon's `$LAZYCORTEX_PLUGIN_DIRS`, then the dev-vault sibling `plugins/claude/lazycortex-core/`, then the install `~/.claude/plugins/installed_plugins.json` records; exit 1 with an `error:` line means core is not installed — abort and say so. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
 
-Unified wizard that owns the product-registration lifecycle. One entry point for **creating a new product** (with source code, or design-only) and for **editing an existing product** (add `source` to a design-only product, extend `dependencies`, switch `language` / `icon`). The product record lives in `lazy.settings.json[products][<compound-key>]`, read and written atomically via `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get products` / `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set products`. On save the skill scaffolds the product root, writes its operator-zone folder-note carrying the iconize icon (group folders and their notes appear lazily — the first `create-asset` landing an asset seeds them), and generates or reuses the shared review classes so the product's design / tech / feature / change / bug docs flow through the review loop.
+Unified wizard that owns the product-registration lifecycle. One entry point for **creating a new product** (with source code, or design-only) and for **editing an existing product** (add `source` to a design-only product, extend `dependencies`, switch `language` / `icon`). The product record lives in `lazy.settings.json[products][<compound-key>]`, read and written atomically via `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get products` / `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set products`. On save the skill scaffolds the product root and brings up its level note (`spec_role: product`, via `catalog-note backfill`, Step 11) carrying the iconize icon (group folders and their notes appear lazily — the first `create-asset` landing an asset seeds them). The product's documents flow through the review loop on the shared review classes `/lazy-spec.install` seeds.
 
-Repo records are NOT part of this product record — they live in the cross-plugin `lazy.settings.json[repos]` section (read/written via `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get repos` / `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set repos`) and are resolved by `lazy-spec.resolve-repo`. The inline repo wizard in Step 4 writes a `repos[<repo-key>]` record when the operator attaches a new source repo. The product `language` overrides the repo-global `spec.language` (the `language` key in the `spec` settings section) for narrative prose this product emits.
+A product's code lives in this same repository; its `source` names only the repo-relative paths it covers. The product `language` overrides the repo-global `spec.language` (the `language` key in the `spec` settings section) for narrative prose this product emits.
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 13 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 12 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Mode detection + resolve registry`
    - `Step 2 — Product key + spec_path`
    - `Step 3 — Language`
-   - `Step 4 — Source (repo + paths, or design-only)`
+   - `Step 4 — Source (paths, or design-only)`
    - `Step 5 — Dependencies (autodetect + confirm)`
    - `Step 6 — Product icon`
    - `Step 7 — Guidelines (optional per-role context)`
-   - `Step 8 — Built-in review experts (use-case-writer / designer / system-designer / architect / ui-designer / planner / developer / tester / data-writer / researcher)`
    - `Step 9 — Asset types (delegate)`
    - `Step 10 — Workflow mode (full vs spec-only)`
+   - `Step 10b — Release (implementer, manifest, deploy targets)`
    - `Step 11 — Write product record + scaffold folders + folder-notes`
-   - `Step 12 — Built-in review classes + routine sync + audit`
    - `Step 13 — Verify`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". A no-op counts only when it emits an explicit outcome (`unchanged`, `skipped-per-user-choice`, `design-only`, `taken-from-arg`, …).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
@@ -37,7 +36,7 @@ This skill has 13 ordered steps. The executing agent MUST NOT skip, merge, reord
 
 Every `AskUserQuestion` this skill issues is a single question (one question per call, wait for the answer, then ask the next) authored as a full-context block per the Wizard-question explanation standard in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md` — stem (name the field, what it controls, where it takes effect) + why-it-matters + per-option copy with a concrete example + a trailing `See:` reference pointer — and preceded by the context block each site below spells out (`Where` / `Found` / `Why asking` / `Answers`, per `lazy-core.skill-writing` § 11), printed to the operator as prose immediately before the call. Once the wizard's opening has named the skill and mode, the `Where` line may stay short; `Found`, `Why asking`, and `Answers` are per question, filled from the run at hand. Never ask a bare one-line question. Never present options as plain-text prose.
 
-All narrative prose this skill authors (folder-note bodies) is rendered in the product's effective `language`. Frontmatter keys, fixed headers, wikilinks, settings JSON, review-class `class` labels, and section ids stay English.
+All narrative prose this skill authors (folder-note bodies) is rendered in the product's effective `language`. Frontmatter keys, fixed headers, wikilinks, settings JSON, and section ids stay English.
 
 ## Input
 
@@ -45,19 +44,18 @@ The user provides one of:
 
 1. A natural-language request ("new product for X", "edit chapter settings", "add source to Tester/chapter", …).
 2. A product compound-key (new or existing) or a path under an existing product's `spec_path`.
-3. The caller form `create <key> at <spec_path> [source <repo-key>:<path>[,<path>]]` — a skill registering a nested product (e.g. `lazy-spec.create-from-code` Step P3b) hands the key, the spec path, and the source folder in this form. Step 2 and Step 4 take those values directly, outcome `taken-from-arg`, and ask nothing for them; every other step runs as usual, with `inherited` where the effective record already carries the value.
+3. The caller form `create <key> at <spec_path> [source <path>[,<path>]]` — a skill registering a nested product (e.g. `lazy-spec.create-from-code` Step P2b) hands the key, the spec path, and the source folder in this form. Step 2 and Step 4 take those values directly, outcome `taken-from-arg`, and ask nothing for them; every other step runs as usual, with `inherited` where the effective record already carries the value.
 4. Nothing — the skill asks whether to create or edit.
 
 ## Step 1 — Mode detection + resolve registry
 
-Read the products section and the existing repo records once:
+Read the products section once:
 
 ```bash
 "${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get products
-"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get repos
 ```
 
-The first prints the `products` object — each key is a compound-key, each value a record (`spec_path`, optional `language`, `icon`, `source`, `dependencies`, `asset_types`, `tool_types`). The second prints the `repos` object — each key is a repo key, each value a record (`local_path`, `branch`, optional `forge`); this is the repo registry the source step offers. Ignore the `_version` key in each section.
+The first prints the `products` object — each key is a compound-key, each value a record (`spec_path`, optional `language`, `icon`, `source`, `dependencies`, `asset_types`, `tool_types`). Ignore the section's `_version` key.
 
 Resolve the user's input to a mode:
 
@@ -78,7 +76,7 @@ AskUserQuestion: header "Create or edit", question "Configure a product in <repo
 
 **Vault-spec gate (create mode only).** Products are a consequence of the repo-wide spec: resolve the content-root (`<settings-dir>/<spec.vault_root>`, default `specs`) and check that `<content-root>/vision.md` — the vault spec — exists, OR that a pre-existing `<content-root>/design.md` without a vision does (the legal pre-vision state; documents are migrated by the operator by hand). Both absent → abort with outcome `aborted:no-vault-spec`, pointing the operator at `/lazy-spec.install` (its Step 6.9 seeds the vision draft). Presence is the whole gate; how far the document must have progressed (written / approved) is deliberately outside this contract yet. Edit mode skips the check — the registered catalog predates the gate.
 
-The products object + `repos` section drive: uniqueness of the new product key and registered-repo options. A `spec_path` under another product's `spec_path` is legal — products may nest, and the innermost owns its tree per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md`.
+The products object drives uniqueness of the new product key. A `spec_path` under another product's `spec_path` is legal — products may nest, and the innermost owns its tree per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md`.
 
 Outcome: `create`, `edit`, or `aborted:no-vault-spec`.
 
@@ -140,120 +138,53 @@ AskUserQuestion: header "Language", question "Narrative language for product `<k
 
 Outcome: `set` or `inherit-default`.
 
-## Step 4 — Source (repo + paths, or design-only)
+## Step 4 — Source (paths, or design-only)
 
-A product is **design-only** when it carries no `source` block (specs authored ahead of code). Otherwise `source` is `{ repo: <repo-key>, paths: [<path>, …] }`.
+A product is **design-only** when it carries no `source` block (specs authored ahead of code). Otherwise `source` is `{ paths: [<path>, …] }` — repo-relative directories of this repository, which holds both the spec catalog and the product's code.
 
-When the input's caller form carried a `source <repo-key>:<path>[,<path>]` clause, take `has source code`, `source.repo`, and `source.paths` from it directly, outcome `taken-from-arg`, and ask none of the three questions below. A caller form with no `source` clause runs this step as usual.
+When the input's caller form carried a `source <path>[,<path>]` clause, take `has source code` and `source.paths` from it directly, outcome `taken-from-arg`, and ask neither question below. A caller form with no `source` clause runs this step as usual.
 
 1. Whether this product has source code. In edit mode this is where a design-only product gains a `source` block.
 
    ```
    Context (print before asking):
    - Where: Step 4 — Source; target `products[<key>].source`
-   - Found: `source` on record: <{repo, paths}, or "none — design-only">; registered repos: <keys, or "none">
+   - Found: `source` on record: <{paths}, or "none — design-only">
    - Why asking: whether specs are authored ahead of code is a fact about the product only the operator knows
-   - Answers: `has source code` — continue to the repo and paths questions; `source` is written in Step 11 and read by dependency autodetect (Step 5) and `lazy-spec.source-url`; `design-only (no source)` — no `source` key; code-grounded autodetect and source links are skipped until source is added later in edit mode
-   AskUserQuestion: header "Source code", question "Does product `<key>` have source code to bind — a repo checkout plus the subdirectories it covers — or is it design-only for now? See: ${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md", options `has source code` / `design-only (no source)` with the descriptions above.
+   - Answers: `has source code` — continue to the paths question; `source` is written in Step 11 and read by dependency autodetect (Step 5) and `lazy-spec.source-url`; `design-only (no source)` — no `source` key; code-grounded autodetect and source links are skipped until source is added later in edit mode
+   AskUserQuestion: header "Source code", question "Does product `<key>` have source code in this repository to bind — the subdirectories it covers — or is it design-only for now? See: ${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md", options `has source code` / `design-only (no source)` with the descriptions above.
    ```
 
    - **design-only** → record no `source`; skip the rest of this step (outcome `design-only`) and skip Step 5's autodetect.
+   - **A nested product under an owner may only narrow the owner's `source`.** Before asking for paths, walk the ancestor chain of `<spec_path>` (`resolve-product ancestor-chain`, or the registry read in Step 1): when any enclosing product declares a `source`, the outermost such product owns the releases, and this product never does — its assets ship in the owner's releases and it owns no `releases/` folder (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md` § Products may nest). Say so, and skip Step 10b for it whatever the answers below. It may still declare a `source` of its own whose paths lie inside its parent's source paths: that `source` only narrows the code area for `sync-with-code` and the audit. A path outside the parent's source paths is refused with that explanation rather than written, in the Paths question below and in a caller form alike. A nested product that declares no `source` records none, outcome `inherits-owner-source`.
 
-2. **Repo** — if the user picks "other", run the **inline repo wizard** (below) before continuing.
-
-   ```
-   Context (print before asking):
-   - Where: Step 4 — Repo; target `products[<key>].source.repo`
-   - Found: registered repos (`repos` section, Step 1): <key → local_path, …, or "none">
-   - Why asking: which registered checkout holds this product's code is not derivable from the vault
-   - Answers: `<repo-key>` — written as `source.repo`, the `lazy.settings.json[repos]` record `lazy-spec.resolve-repo` resolves; `other — register a new repo` — the inline repo wizard runs first, then this product uses the new key
-   AskUserQuestion: header "Source repo", question "Which repo record holds the code of product `<key>`? Registered: <keys>. See: ${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.sources-protocol.md", options: each registered repo key + `other — register a new repo`, with the descriptions above.
-   ```
-
-3. **Paths** — for each path, validate it exists under the resolved repo's `local_path`; if any does not exist, warn and ask whether to proceed (keep the path as a forward declaration) or correct it.
+2. **Paths** — for each path, validate it exists relative to the repository root; if any does not exist, warn and ask whether to proceed (keep the path as a forward declaration) or correct it.
 
    ```
    Context (print before asking):
-   - Where: Step 4 — Paths; target `products[<key>].source.paths`, checkout <local_path>
-   - Found: repo `<repo-key>` at <local_path>, branch `<branch>`
-   - Why asking: which subdirectories the product covers bounds dependency autodetect and source-url resolution — a scope only the operator can draw
-   - Answers: `single subpath` — one string via "other"; `multiple subpaths` — comma-separated via "other"; written as `source.paths` in Step 11, each validated under <local_path> (a missing one raises the follow-up below)
-   AskUserQuestion: header "Source paths", question "Subdirectories of `<repo-key>` (<local_path>) that product `<key>` covers? See: ${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md", options `single subpath` / `multiple subpaths` (free text via "other") with the descriptions above.
+   - Where: Step 4 — Paths; target `products[<key>].source.paths`
+   - Found: `source.paths` on record: <paths, or "none">; repository root <git root>
+   - Why asking: which subdirectories the product covers bounds dependency autodetect, `sync-with-code`, and the audit — a scope only the operator can draw
+   - Answers: `single subpath` — one repo-relative string via "other"; `multiple subpaths` — comma-separated via "other"; written as `source.paths` in Step 11, each validated relative to the repository root (a missing one raises the follow-up below)
+   AskUserQuestion: header "Source paths", question "Repo-relative subdirectories of this repository that product `<key>` covers? See: ${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md", options `single subpath` / `multiple subpaths` (free text via "other") with the descriptions above.
    ```
 
    ```
    Context (print before asking):
-   - Where: Step 4 — Paths validation; target `<local_path>/<path>`
-   - Found: `<path>` does not exist under <local_path>
+   - Where: Step 4 — Paths validation; target `<path>` relative to the repository root
+   - Found: `<path>` does not exist in the working tree
    - Why asking: a typo and a forward declaration look the same — only the operator knows which
    - Answers: `proceed` — keep `<path>` in `source.paths` as a forward declaration; `correct` — re-ask the paths question for this entry
-   AskUserQuestion: header "Missing path", question "`<path>` does not exist under `<repo-key>` (<local_path>). Keep it as a forward declaration, or correct it?", options `proceed` / `correct` with the descriptions above.
+   AskUserQuestion: header "Missing path", question "`<path>` does not exist in this repository. Keep it as a forward declaration, or correct it?", options `proceed` / `correct` with the descriptions above.
    ```
 
-Outcome: `sourced` or `design-only`.
-
-### Inline repo wizard
-
-Triggered from Step 4 when `source.repo` names an unregistered repo:
-
-1. The repo key. Validate uniqueness among the keys in the `repos` section read in Step 1.
-
-   ```
-   Context (print before asking):
-   - Where: Step 4 — Inline repo wizard, repo key; target `repos[<repo-key>]`
-   - Found: registered repo keys: <keys, or "none">
-   - Why asking: the key is the record's identity across products; nothing derives it
-   - Answers: any typed key (via "other") — becomes `repos[<repo-key>]` at wizard step 5 and this product's `source.repo`; a key already registered is refused and re-asked
-   AskUserQuestion: header "Repo key", question "Key for the new repo record (lowercase-with-hyphens, e.g. `backend`, `shared`; taken: <keys>)?", free text via "other".
-   ```
-
-2. `local_path`. Validate existence: for `"."` run `git rev-parse --show-toplevel` (cwd must be a git repo); for an absolute path, the directory exists and is a git repo.
-
-   ```
-   Context (print before asking):
-   - Where: Step 4 — Inline repo wizard, local path; target `repos[<repo-key>].local_path`
-   - Found: cwd git root: <`git rev-parse --show-toplevel` output, or "not a git repo">
-   - Why asking: an absolute path pins the record to one machine's checkout, `"."` stays checkout-agnostic — the trade-off is the operator's
-   - Answers: `this repo (.)` — the code lives in the very repo that holds `lazy.settings.json`: the literal `"."` is written, and every checkout (dev, or a runtime checkout under `~/lazy-runtime/<repo>`) resolves it to its own root via `git rev-parse --show-toplevel`, so no absolute path leaks into tracked settings; `absolute path` — a fixed checkout elsewhere on this machine (the cross-repo case, e.g. a separate spec-vault and code repo), typed via "other"; either is validated, then written at wizard step 5
-   AskUserQuestion: header "Local path", question "Where does repo `<repo-key>` live on this machine — the repo holding lazy.settings.json (<git root>), or a fixed absolute path elsewhere? `lazy-spec.resolve-repo` reads its source and git remote there. See: ${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md", options `this repo (.)` / `absolute path` with the descriptions above.
-   ```
-
-3. Auto-detect the default branch:
-
-   ```bash
-   git -C <local_path> symbolic-ref --short refs/remotes/<remote-name>/HEAD 2>/dev/null \
-     | sed 's@^[^/]*/@@' \
-     || git -C <local_path> rev-parse --abbrev-ref HEAD
-   ```
-
-4. Confirm detected `local_path` + `branch` before writing.
-
-   ```
-   Context (print before asking):
-   - Where: Step 4 — Inline repo wizard, confirm; target `repos[<repo-key>]`
-   - Found: local_path `<local_path>`, default branch `<branch>` (from `symbolic-ref`, or the HEAD fallback)
-   - Why asking: the branch was auto-detected, and the record is about to be persisted
-   - Answers: `write` — wizard step 5 writes `{ "local_path", "branch" }` into `repos[<repo-key>]`; `correct` — re-enter the branch or local_path via "other", then re-confirm
-   AskUserQuestion: header "Confirm repo", question "Register `<repo-key>` as local_path `<local_path>`, branch `<branch>`?", options `write` / `correct` with the descriptions above.
-   ```
-
-5. Write the new repo record into the cross-plugin `repos` section, preserving every other repo and the section's `_version`. Read-modify-write atomically:
-
-   ```bash
-   "${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get repos
-   ```
-
-   In the parsed object, set `repos[<repo-key>]` to `{ "local_path": <local_path>, "branch": <branch> }`; add `"forge": <key>` ONLY when the host is not in the known-forges table (per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.sources-protocol.md`) — otherwise omit it so `lazy-spec.resolve-repo` auto-detects. The remote URL and forge type are NOT written — they are derived at runtime by `lazy-spec.resolve-repo`. Then write the whole object back:
-
-   ```bash
-   printf '%s' '<edited-repos-json>' | "${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set repos
-   ```
+Outcome: `sourced`, `design-only`, `inherits-owner-source`, or `taken-from-arg`.
 
 ## Step 5 — Dependencies (autodetect + confirm)
 
-When `source.paths` is non-empty and the paths exist, dispatch **one Explore subagent** (`subagent_type: "Explore"`, `mode: "dontAsk"`, read-only) to scan imports/requires within `<repo-config>.local_path/<each source.path>`. Skip this step entirely for a design-only product (outcome `design-only`).
+When `source.paths` is non-empty and the paths exist, dispatch **one Explore subagent** (`subagent_type: "Explore"`, `mode: "dontAsk"`, read-only) to scan imports/requires within each `source.paths` entry. Skip this step entirely for a design-only product (outcome `design-only`).
 
-The agent's prompt must include: the exact globs to scan (source.paths under local_path); the set of registered product `source.paths` (to classify candidates as `internal-product`); the set of registered repo `local_path` values (to classify candidates crossing into a different repo as `repo` kind); the structured-report contract below; and a word budget ("Report under 400 words").
+The agent's prompt must include: the exact globs to scan (the `source.paths` entries, repo-relative); the set of registered product `source.paths` (to classify candidates as `internal-product`); the structured-report contract below; and a word budget ("Report under 400 words").
 
 Expected report block (per the parallel-scan coordinator pattern in `lazycortex-core`'s `references/lazy-core.parallel-scan.md`):
 
@@ -262,18 +193,17 @@ Expected report block (per the parallel-scan coordinator pattern in `lazycortex-
 
 ### findings
 - [DEP] <dep-label> | <import-path-or-package-name>
-  kind: internal-product | repo | external
+  kind: internal-product | external
   evidence: <file>:<line> — <import line>
   suggest: <dep entry snippet>
 
 ### summary
-internal: <n>  repo: <n>  external: <n>
+internal: <n>  external: <n>
 ```
 
 Classification:
 
-- **internal-product** — imported path falls under another registered product's `source.paths`. Suggest a dep entry resolved via `lazy-spec.resolve-dependency` (see `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.sources-protocol.md`).
-- **repo** — imported path crosses into a different registered repo's `local_path` but not into a specific product. Suggest a `{repo: <key>}` dep.
+- **internal-product** — imported path falls under another registered product's `source.paths`. Suggest a `{product: <key>}` dep entry resolved via `lazy-spec.resolve-dependency` (see `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.sources-protocol.md`).
 - **external** — third-party package from a manifest (`requirements.txt`, `package.json`, `go.mod`, `Cargo.toml`, `pyproject.toml`, …). Listed but not added by default.
 
 Iterate candidates **one `AskUserQuestion` call per candidate**. Keep one running list. In edit mode, append accepted entries to the existing `dependencies` list (never clobber prior entries); never emit an empty `dependencies: []`.
@@ -281,7 +211,7 @@ Iterate candidates **one `AskUserQuestion` call per candidate**. Keep one runnin
 ```
 Context (print before asking, one block per candidate):
 - Where: Step 5 — Dependencies; target `products[<key>].dependencies`
-- Found: `[DEP] <dep-label>` kind `<internal-product | repo | external>`, evidence `<file>:<line> — <import line>`; accepted so far: <running list, or "none">
+- Found: `[DEP] <dep-label>` kind `<internal-product | external>`, evidence `<file>:<line> — <import line>`; accepted so far: <running list, or "none">
 - Why asking: the scan proves the import exists, not that the operator wants it declared as a spec dependency
 - Answers: `add` — append `<dep entry snippet>` to the running list, written into `dependencies` in Step 11 (edit mode appends to the existing list); `skip` — leave it out; "other" — a free-text note
 AskUserQuestion: header "Dependency", question "Declare `<dep-label>` (<kind>, seen at <file>:<line>) as a dependency of product `<key>`?", options `add` / `skip` (+ "other" for a note) with the descriptions above.
@@ -310,14 +240,14 @@ Outcome: `iconed` or `default-icon`.
 
 **Nested product:** when the effective record already carries this step's key from an ancestor, outcome `inherited`, no question; edit mode still lets the operator declare an own value, which wins.
 
-Optional per-role guideline paths folded into every expert job on this product's documents — the launch-checkbox jobs `spec.coordinator` dispatches and the review rounds `lazycortex-review`'s coordinator dispatches (per `products[<key>].guidelines` in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md`). `guidelines` is a dict keyed by the dispatched role token (`planner`, `tester`, `developer`, `architect`, `designer`, `data-writer`, …) plus the wildcard `"*"`, each value a list of repo-relative file paths. A path every role on one asset type needs — a content type's record schema — belongs on the type instead, under `asset_types.<type>.guidelines`.
+Optional per-role guideline paths folded into every expert job on this product's documents — the launch-checkbox jobs `spec.coordinator` dispatches and the review rounds `lazycortex-review`'s coordinator dispatches (per `products[<key>].guidelines` in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md`). `guidelines` is a dict keyed by the dispatched role token (`planner`, `tester`, `developer`, `architect`, `researcher`, `coordinator`, and any role token a registered expert carries — `designer`, `data-writer`, …) plus the wildcard `"*"`, each value a list of repo-relative file paths. A path every role on one asset type needs — a content type's record schema — belongs on the type instead, under `asset_types.<type>.guidelines`.
 
 ```
 Context (print before asking):
 - Where: Step 7 — Guidelines; target `products[<key>].guidelines`
 - Found: `guidelines` on record: <dict, or "none">
 - Why asking: which repo files an expert should read before a launch-checkbox job is project knowledge nothing derives
-- Answers (create mode): `none (no guidelines)` — no key written; `add guideline paths` — the role/paths follow-up below, one role at a time until the operator is done. Answers (edit mode, current dict shown): `keep as-is` — unchanged; `add/change a role's paths` / `remove a role's paths` — the same follow-up per role. A path's contents are folded into the job's context when an operator ticks a launch checkbox in an asset's `# Gates` section — the code-plan checkbox dispatches under `planner`, `Write test-plan` and `Start testing` both under `tester`, `Start implementation` under `developer`, `Write architecture` under `architect`; `*` paths are folded into every one of those jobs regardless of role. A path that does not resolve is never silently dropped — it surfaces as a warning appended to the asset's `# History` section on every dispatch, so a typo stays visible until fixed
+- Answers (create mode): `none (no guidelines)` — no key written; `add guideline paths` — the role/paths follow-up below, one role at a time until the operator is done. Answers (edit mode, current dict shown): `keep as-is` — unchanged; `add/change a role's paths` / `remove a role's paths` — the same follow-up per role. A path's contents are folded into the job's context when a `Write <doc>` row's writer round opens or a release build job runs — a release's `Write code-plan` under `planner`, every `Write test-plan` row and the release's `Test` job under `tester`, the release's `Build` job under `developer` (the implementer, who hands the paths on to the child agents it delegates to), the product's `Write architecture` row and the build's `Revise architecture` job under `architect`; `*` paths are folded into every one of those jobs regardless of role. A path that does not resolve is never silently dropped — it surfaces as a warning appended to the asset's `# History` section on every dispatch, so a typo stays visible until fixed
 AskUserQuestion: header "Guidelines", question "Per-role guideline files to hand product `<key>`'s dispatched experts as extra context (on record: <dict, or none>)? See: ${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md", options per mode as above, with the descriptions above.
 ```
 
@@ -328,8 +258,8 @@ Context (print before asking):
 - Where: Step 7 — Guideline role, then its paths; target `products[<key>].guidelines.<role>`
 - Found: roles already set: <roles → paths, or "none">
 - Why asking: the dict is keyed by role; the paths are free text
-- Answers: `planner` / `tester` / `developer` / `architect` / `*` — the role to set (edit mode's `remove a role's paths` offers the roles on record instead, and removes the chosen one); then any comma-separated repo-relative paths (via "other") — validated below, written under that role in Step 11
-AskUserQuestion: header "Guideline role", question "Which role of product `<key>` gets guideline paths (set so far: <roles>)?", options the five role tokens with the descriptions above; then header "Guideline paths", question "Repo-relative paths for role `<role>` of product `<key>` (comma-separated)?", free text via "other".
+- Answers: `planner` / `tester` / `developer` / `architect` / `*` — the role to set, any other role token from the list above via "other" (edit mode's `remove a role's paths` offers the roles on record instead, and removes the chosen one); then any comma-separated repo-relative paths (via "other") — validated below, written under that role in Step 11
+AskUserQuestion: header "Guideline role", question "Which role of product `<key>` gets guideline paths (set so far: <roles>)?", options the five role tokens with the descriptions above, any other token via "other"; then header "Guideline paths", question "Repo-relative paths for role `<role>` of product `<key>` (comma-separated)?", free text via "other".
 ```
 
 No new delivery mechanism exists or is needed for the project-structure map: when `lazycortex-wiki` is installed, `docs/structure.md` is an ordinary repo-relative path an operator can add under the `architect` role like any other guideline file — this wizard does not special-case it.
@@ -347,76 +277,19 @@ AskUserQuestion: header "Missing guideline", question "`<path>` (role `<role>`) 
 
 Outcome: `guidelines-set`, `no-guidelines`, or (edit mode) `unchanged`.
 
-## Step 8 — Built-in review experts (use-case-writer / designer / system-designer / architect / ui-designer / planner / developer / tester / data-writer / researcher)
-
-**Nested product:** when an ancestor's `@<key>` classes already cover this product's documents by path, outcome `inherited`, no question; edit mode still lets the operator declare an own value, which wins — declaring experts here generates this product's own `@<key>` set, which wins by depth.
-
-The built-in review classes generated in Step 12 are driven by the roles `use-case-writer`, `designer`, `system-designer`, `architect`, `ui-designer`, `planner`, `developer`, `tester`, `data-writer`, `researcher`, and `editor`. These experts are **shared vault-wide**: one common set of review classes serves every product whose role-experts are identical, so a second product normally reuses the first product's experts rather than adding its own classes (see Step 12). Read the available expert names and the current review classes first:
-
-```bash
-"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get experts
-"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get review
-```
-
-The keys of the first printed object are the registered expert names. In the second, the **shared set** is the classes whose `class` labels are the bare doc-kinds `use-cases`, `system-use-cases`, `design`, `system-design`, `system-tech`, `ui-design`, `system-ui-design`, `code-plan`, `test-plan`, `bug`, `code-report`, `test-report`, `data-report`, `docs-report`, `content-design`, `research-design`, `research-report` (no `@<key>` suffix). Determine the path:
-
-- **Shared set absent** (no bare-label class of any of those kinds — the usual first-product case) → ask the role questions below; the answers seed the shared set in Step 12. Outcome `assigned`.
-- **Shared set present** → ask whether this product rides the shared experts or defines a product-specific override:
-
-  ```
-  Context (print before asking):
-  - Where: Step 8 — Review experts; target `review.classes` (shared set vs `<kind>@<key>` override)
-  - Found: shared set present — experts read from its bare-label classes: use-case-writer `<…>`, designer `<…>`, system-designer `<…>`, architect `<…>`, ui-designer `<…>`, planner `<…>`, developer `<…>`, tester `<…>`, data-writer `<…>`, editor `<…>`
-  - Why asking: whether this product's design / code-plan / test-plan / bug docs need a different persona than the rest of the vault is a judgement about the product, not derivable
-  - Answers: `use shared experts` — NO new review classes for this product; Step 12 reuses the shared set and collapses this product's stale `@<key>` classes (outcome `shared-set`); `define product-specific override` — the nine role questions below, then Step 12 generates product-scoped `<kind>@<key>` classes that shadow the shared set for this product only (outcome `override`). A typed document takes the scoped class whose globs anchor on the most leading literal segments — the innermost product's — so a nested product's override outranks its ancestor's; list order only breaks an equal-depth tie and drives the untyped-document fallback (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md` § Effective record); every other product keeps riding the shared set either way
-  AskUserQuestion: header "Review experts", question "Product `<key>`: ride the vault's shared review experts (<experts>), or define a product-specific override? See: ${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md", options `use shared experts` / `define product-specific override` with the descriptions above.
-  ```
-
-  - **use shared experts** → read the experts from the shared classes (`use-case-writer` = the `use-cases` class main writer, `designer` = the `design` class `experts.main[0].name`, `system-designer` = the `system-design` class main writer, `architect` = the `system-tech` class main writer, `ui-designer` = the `ui-design` class main writer, `planner` = the `code-plan` class main writer, `developer` = the `code-report` class main writer, `tester` = the `bug` class main writer, `data-writer` = the `data-report` class main writer, `researcher` = the `research-report` class main writer, `editor` = the `design` class `experts.main[1].name` when that entry exists, else none) and do NOT ask the role questions. Outcome `shared-set`. **Fallback for a class the shared set lacks:** a vault seeded before the `use-cases`, `system-use-cases`, `ui-design`, `system-ui-design`, `research-design`, or `research-report` classes existed lacks them, so those reads come back empty — for each missing one, take the same path the `docs-report` class takes below: ask that single role question offering only the "other — define a new persona" option, pointing the operator at `lazycortex-experts` to compose one, and omit the class when they have none. Every other role still rides the shared set and the outcome stays `shared-set`.
-  - **define product-specific override** → ask the role questions below; the answers drive this product's override classes in Step 12. Outcome `override`.
-
-Role questions (asked only on the `assigned` and `override` paths — skipped on `shared-set`): for EACH role in order (`use-case-writer`, then `designer`, then `system-designer`, then `architect`, then `ui-designer`, then `planner`, then `developer`, then `tester`, then `data-writer`, then `researcher`, then `editor`), issue a SEPARATE `AskUserQuestion` (one per role) offering the registered expert names as options. Where each role lands in the built-in classes (Step 12), for the question's `<landing>`:
-
-- `use-case-writer` — main writer of the `use-cases` and `system-use-cases` classes (an asset's use cases, and the product's above them), defaulting to `<domain>.use-case-writer` when `lazycortex-experts` seeded one.
-- `designer` — main writer of the asset-level `design`, `vision`, `content-design` and `research-design` classes and a section validator on `use-cases` and `system-use-cases`.
-- `system-designer` — main writer of the `system-design` and `system-vision` classes (the product-root and project-root `design.md` / `vision.md`); never validates.
-- `architect` — main writer of the `system-tech` and `architecture` classes and the standing validator of everything design-shaped (a section validator on `design`, `system-design`, `ui-design`, `system-ui-design`, and `code-plan`).
-- `ui-designer` — main writer of the `ui-design` and `system-ui-design` classes (an asset's screens, and the product's shared look above them), defaulting to `<domain>.ui-designer` when `lazycortex-experts` seeded one.
-- `planner` — main writer of the `code-plan` class and a section validator on `architecture`.
-- `developer` — main writer of the `code-report` class and a section validator on the `test-plan` and `bug` classes.
-- `tester` — main writer of `bug`, `test-plan`, and `test-report`, and a section validator on the `code-plan` class.
-- `data-writer` — main writer of the `data-report` class and a section validator on `content-design`, defaulting to `<domain>.data-writer` when `lazycortex-experts` seeded one.
-- `researcher` — main writer of the `research-report` class (a research asset's `research.md`) and a section validator on `research-design`, defaulting to `<domain>.researcher` when `lazycortex-experts` seeded one.
-- `editor` — second main writer, after the author, of the nine prose classes `vision`, `system-vision`, `use-cases`, `system-use-cases`, `design`, `system-design`, `content-design`, `research-design`, `research-report`: it brings the author's prose to the writing canon in every main round before the operator reads, defaulting to `<domain>.editor` when `lazycortex-experts` seeded one. It is the one role that may be answered `none`: the classes are then generated with their author alone, never omitted.
-
-The `docs-report` class has no default writer — offer only the "other" path for it, pointing the operator at `lazycortex-experts` to compose one, and omit the class when they have none. Do NOT invent an expert name — only names present in `settings-get experts` are valid.
-
-```
-Context (print before asking, one block per role):
-- Where: Step 8 — Role `<role>` (<n> of 10); target the class(es) Step 12 binds it to: <landing>
-- Found: registered experts (`settings-get experts`): <names>; default for this role: <`<domain>.<role>` if seeded, or "none">
-- Why asking: the chosen expert's persona is what actually reviews/writes the product's use-cases / design / tech / ui-design / code-plan / test-plan / code-report / test-report / data-report / bug docs in the review loop, and only a registered name is valid
-- Answers: `<expert-name>` — bound as this role's writer/validator in Step 12's classes, persisted in `review.classes`; `other — define a new persona` — compose the expert via `lazycortex-experts`, then re-run this skill (choosing it aborts with `expert-undefined`; nothing is written)
-AskUserQuestion: header "<role>", question "Which registered expert is product `<key>`'s `<role>` — <landing>? See: ${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md", options: each registered expert name + `other — define a new persona`, with the descriptions above.
-```
-
-Validate that every chosen role expert (use-case-writer / designer / system-designer / architect / ui-designer / planner / developer / tester / data-writer / researcher) is a key in `settings-get experts`. If any chosen name is the "other" sentinel, abort with the `lazycortex-experts` pointer and do NOT write — the product is not registered until real expert names exist.
-
-Outcome: `assigned`, `shared-set`, or `override` (or abort `expert-undefined`).
-
 ## Step 9 — Asset types (delegate)
 
 **Nested product:** when the effective record already carries this step's key from an ancestor, outcome `inherited`, no question; edit mode still lets the operator declare an own value, which wins.
 
-Whether to declare any asset types of the product's own (beyond the shipped feature / change / bug / content / research set) now. An asset type is a declared kind of asset (characters / scenes / chapters / …) written into `products[<key>].asset_types.<name>`, carrying its icon, its primary document (the type's `start_doc` — the attach target; a fresh asset spawns with no documents), its default tools, the folder its assets land in by default, and the playbook the coordinator works them under.
+Whether to declare any asset types of the product's own (beyond the shipped feature / change / bug / content / research / release set) now. An asset type is a declared kind of asset (characters / scenes / chapters / …) written into `products[<key>].asset_types.<name>`, carrying its icon, its primary document (the type's `start_doc` — the attach target; a fresh asset spawns with no documents), its default tools, the folder its assets land in by default, and the playbook the coordinator works them under.
 
 ```
 Context (print before asking):
 - Where: Step 9 — Asset types; target `products[<key>].asset_types`
-- Found: declared types on record: <names, or "none">; shipped types need no declaration: feature / change / bug / content / research
+- Found: declared types on record: <names, or "none">; shipped types need no declaration: feature / change / bug / content / research / release
 - Why asking: which kinds of asset the product has beyond the shipped set is content design only the operator knows
-- Answers: `declare types now` — nothing written here; after Step 13 the operator runs `/lazy-spec.add-asset-type <compound-key>` once per type (a dedicated skill's job, not an inline branch of this wizard; outcome `delegated`, instruction surfaced in the Report); `none (shipped types only)` — outcome `shipped-only`. Declaring a type creates nothing on disk — every group folder, shipped types included, appears only at the first `create-asset` that lands an asset in it, seeded with its group folder-note by the scaffold; a type's design / code-plan / test-plan docs are covered by the shared behavior-keyed review classes (Step 12's right-anchored wildcard globs), so no per-type class exists
-AskUserQuestion: header "Asset types", question "Does product `<key>` need asset types of its own (characters / scenes / chapters / …) beyond the shipped feature / change / bug / content / research set? See: ${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md", options `declare types now` / `none (shipped types only)` with the descriptions above.
+- Answers: `declare types now` — nothing written here; after Step 13 the operator runs `/lazy-spec.add-asset-type <compound-key>` once per type (a dedicated skill's job, not an inline branch of this wizard; outcome `delegated`, instruction surfaced in the Report); `none (shipped types only)` — outcome `shipped-only`. Declaring a type creates nothing on disk — every group folder, shipped types included, appears only at the first `create-asset` that lands an asset in it, seeded with its group folder-note by the scaffold; a type's design / code-plan / test-plan docs are covered by the shared behavior-keyed review classes `/lazy-spec.install` seeds, so no per-type class exists
+AskUserQuestion: header "Asset types", question "Does product `<key>` need asset types of its own (characters / scenes / chapters / …) beyond the shipped feature / change / bug / content / research / release set? See: ${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md", options `declare types now` / `none (shipped types only)` with the descriptions above.
 ```
 
 - **declare types now** → after this skill finishes (Step 13 done), the operator runs `/lazy-spec.add-asset-type <compound-key>` once per type. Do NOT inline-duplicate that flow — surface the instruction in the Report (outcome `delegated`). Do NOT call `lazy-spec.add-asset-type` from here; the product must be fully written and audited first.
@@ -435,7 +308,7 @@ Context (print before asking):
 - Where: Step 10 — Workflow mode; target `products[<key>].mode`
 - Found: `mode` on record: <"spec-only", or absent → full>
 - Why asking: a per-product commitment, not a per-asset toggle — every asset under the product follows the chosen ladder, and only the operator knows whether specs are the whole deliverable
-- Answers: `full (default — design through implementation and testing)` — no key written; the coordinator's ladder (`lazy-spec.coordination-playbook.md` Chapter 14) runs vision → design → architecture → plan → implementation → test for every asset; `spec-only (design and review only; released by operator word)` — `mode: "spec-only"` written in Step 11; the ladder stops after `design.md` approves (`spec_design_done`), `spec_released` flips only on an explicit operator word, and no architecture/plan/implementation/test step ever hangs a checkbox — for a product whose specs are the whole deliverable (a design-only reference other repos consume, not code this repo will itself implement)
+- Answers: `full (default — design through implementation and testing)` — no key written; every asset's ladder is design-only (start document → review → approve → `spec_design_done`) and the product's releases carry the implementation (`lazy-spec.release-playbook.md`); `spec-only (design and review only; released by operator word)` — `mode: "spec-only"` written in Step 11; the product owns no releases, `Start release` never hangs, and `spec_released` flips only on an explicit operator word — for a product whose specs are the whole deliverable (a design-only reference other repos consume, not code this repo will itself implement)
 AskUserQuestion: header "Workflow mode", question "How far does the coordinator's ladder run for every asset of product `<key>` — full, or spec-only? See: ${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md", options `full (default — design through implementation and testing)` / `spec-only (design and review only; released by operator word)` with the descriptions above.
 ```
 
@@ -443,29 +316,69 @@ Capture `<mode>` only when `spec-only` is chosen; absent/`full` writes no key (m
 
 Outcome: `spec-only` or `full` (no key written).
 
+## Step 10b — Release (implementer, manifest, deploy targets)
+
+Only for a product that owns releases: Step 4 produced a `source` block, no enclosing product declares a `source`, and Step 10 kept `full`. Otherwise outcome `no-releases`, no question. In edit mode default every menu to the record's current `release` values.
+
+1. **Implementer.** The expert key that leads every release build. Resolve `<default>` first with `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" resolve-product release-implementer <key>`: it prints `{"key": "<key>", "implementer": <expert-or-null>}` — the record's explicit `release.implementer` when set, else the first registered expert of the product's `release.implementer_chain`, else of the repository's `spec.release.implementer_chain` (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md`). A key not yet registered (create mode) resolves through the repository chain alone.
+
+   ```
+   Context (print before asking):
+   - Where: Step 10b — Release implementer; target `products[<key>].release.implementer` / `.implementer_chain`
+   - Found: `release.implementer` on record: <key, or absent>; `release.implementer_chain` on record: <list, or absent>; `spec.release.implementer_chain`: <list, or absent>; resolved now: <implementer, or none>; registered experts: <keys>
+   - Why asking: one implementer answers for the whole product inside a release and delegates every foreign tool; the repository chain may not fit what this product is made of, and a null resolution leaves the release with no one to build it
+   - Answers: `<default> (inherited)` — no `implementer` and no `implementer_chain` written in create mode (edit mode keeps whichever the record holds); the implementer follows the chain whenever it or the expert registry changes; `explicit expert` — a registered expert key via "other", written as `release.implementer`, which wins over every chain; `product chain` — an ordered list of registered expert keys via "other", comma-separated, written as `release.implementer_chain` and replacing the repository chain for this product entirely
+   AskUserQuestion: header "Implementer", question "Which expert leads every release build of product `<key>` — the inherited `<default>`, an explicit expert, or a chain of the product's own? See: ${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.release-playbook.md", options `<default> (inherited)` / `explicit expert` / `product chain`.
+   ```
+
+   When `<default>` resolves to none, the `<default> (inherited)` option reads `none (inherited)` and its description says that no build can run until an expert is named or registered.
+
+2. **Manifest.** The repo-relative file whose version field a published release reads and writes.
+
+   ```
+   Context (print before asking):
+   - Where: Step 10b — Release manifest; target `products[<key>].release.manifest`
+   - Found: `release.manifest` on record: <path, or absent>; candidates under `<source.paths>`: <plugin.json / package.json / pyproject.toml / manifest.json found, or none>
+   - Why asking: the previous version is read from the manifest and the published one written back; without one the version chain starts from the highest published release, then `0.1.0`
+   - Answers: `<candidate>` — written as `release.manifest`; `none` — no key, versions chain through the published releases alone
+   AskUserQuestion: header "Manifest", question "Which file carries product `<key>`'s version?", one option per candidate plus `none`.
+   ```
+
+3. **Deploy targets.** Up to two, `staging` and `production`, each `{ "command": [<argv>], "url": "<address>" }`.
+
+   ```
+   Context (print before asking):
+   - Where: Step 10b — Deploy targets; target `products[<key>].release.deploy.staging` / `.production`
+   - Found: targets on record: <staging: command/url or absent; production: command/url or absent>
+   - Why asking: a built release is deployed to `staging` automatically before its tests and to `production` on `Publish`; only the operator knows the commands and addresses, and a product may have neither
+   - Answers: `none` — no `deploy` key, tests run against a local instance and `Publish` sets `spec_released` at once; `staging only` / `production only` / `both` — for each chosen target, the argv (via "other", space-separated, run from the repo root) and an optional address shown beside `Publish`
+   AskUserQuestion: header "Deploy targets", question "Does product `<key>` deploy anywhere — a staging instance to test against, a production target to publish to, both, or neither?", options `none` / `staging only` / `production only` / `both`.
+   ```
+
+Capture `<release>` = `{ implementer?, implementer_chain?, manifest?, deploy? }`; only the keys the operator settled are written — the inherited answer settles neither implementer key.
+
+Outcome: `release-configured`, `unchanged`, or `no-releases`.
+
 ## Step 11 — Write product record + scaffold folders + folder-notes
 
-Each settings mutation is an atomic read-modify-write. Read the products section, edit the in-memory object, write it back:
-
-```bash
-"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get products
-```
-
-In the parsed object, set `products[<compound-key>]` to the gathered fields:
+Each settings mutation is one keyed write: `settings-set products --key <a>/<b>/…` replaces exactly the value at that path and leaves every other product and every other field as it is. The product record carries the gathered fields:
 
 - `spec_path` (always).
 - `language` — only when Step 3 set a concrete override.
 - `icon` — always: the Step 6 value, or the default `LiPackage` when the operator declined.
 - `guidelines` — only when Step 7 produced at least one role's paths.
-- `source` — `{ repo, paths }` only when Step 4 produced a source block.
+- `source` — `{ paths }` only when Step 4 produced a source block.
 - `dependencies` — only when Step 5 accepted at least one entry.
 - `mode` — only when Step 10 captured `spec-only`; absent/`full` writes no key.
+- `release` — only when Step 10b settled at least one key: `implementer` or `implementer_chain` when the operator named one, `manifest` and `deploy` when settled; an empty `release` is never written.
 
-**Edit mode**: start from the existing record captured in Step 2 and merge — add `source` to a design-only product, extend `dependencies`, switch `language` / `icon` / `guidelines` / `mode` — while preserving `asset_types` / `tool_types` and every untouched field. Never emit empty `dependencies: []` or an empty `source`; likewise, a Step 7 outcome of `no-guidelines` or an `unchanged`/`remove a role's paths` edit that empties every role means an absent `guidelines` key, never an empty `guidelines: {}`. Then write the whole products object back:
+**Create mode**: write the whole record at its own key:
 
 ```bash
-printf '%s' '<edited-products-json>' | "${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set products
+"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set products --key <compound-key> --value '<record-json>'
 ```
+
+**Edit mode**: start from the existing record captured in Step 2 and write one call per field that changed — add `source` to a design-only product, extend `dependencies`, switch `language` / `icon` / `guidelines` / `mode` / `release` — each as `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set products --key <compound-key>/<field> --value '<field-json>'` (`<field>` one of `source`, `dependencies`, `language`, `icon`, `guidelines`, `mode`, `release`). `asset_types` / `tool_types` and every untouched field are never written, so they stay as they are. Never emit empty `dependencies: []` or an empty `source`; likewise, a Step 7 outcome of `no-guidelines` or an `unchanged`/`remove a role's paths` edit that empties every role means an absent `guidelines` key, never an empty `guidelines: {}` — a field that must go away is removed with `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set products --key <compound-key>/<field> --delete`.
 
 Initialize the on-disk structure (create mode, or any missing piece in edit mode). Use two separate calls for each folder-note — `Bash(mkdir -p <dir>)` then the `Write` tool (never chain):
 
@@ -476,7 +389,7 @@ Initialize the on-disk structure (create mode, or any missing piece in edit mode
    "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" catalog-note backfill <compound-key>
    ```
 
-   The verb writes `spec_role: product`, the four level gates at `false`, `spec_halted: false`, and the managed paint keys — `iconize_icon` from the Step 6 value (the operator's, or the default `LiPackage`) and `iconize_color` from `products[<key>].color` when the record declares one, otherwise the product default `#64748b` — plus the coordinator's own body sections (`# Summary`, `# Gates`, `# Attachments`, `# Status brief`, `# Coordinator rules`, `# Coordinator commands`, `# History`). On an existing note it adds only what is missing: no key is rewritten, no section is moved, and the operator's `# Coordinator rules` and rendered `# Summary` survive byte-for-byte. A product root is the only ordinary container that carries a colour; group folders beneath it carry none (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md` § Container colour). Run the verb in edit mode too — it is idempotent, and a note that predates the level schema gains it here.
+   The verb writes `spec_role: product`, the five level gates at `false`, `spec_halted: false`, and the managed paint keys — `iconize_icon` from the Step 6 value (the operator's, or the default `LiPackage`) and `iconize_color` from `products[<key>].color` when the record declares one, otherwise the product default `#64748b` — plus the coordinator's own body sections (`# Summary`, `# Gates`, `# Attachments`, `# Status brief`, `# Coordinator rules`, `# Coordinator commands`, `# History`). On an existing note it adds only what is missing: no key is rewritten, no section is moved, and the operator's `# Coordinator rules` and rendered `# Summary` survive byte-for-byte. A product root is the only ordinary container that carries a colour; group folders beneath it carry none (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md` § Container colour). Run the verb in edit mode too — it is idempotent, and a note that predates the level schema gains it here.
 
    Then author the note's `<!-- spec:precis -->` region — one-line description drawn from the product's design intent — inline between the `<!-- spec:precis:start -->` and `<!-- spec:precis:end -->` markers of its `# Summary` section, replacing any `_TBD` placeholder, and run `render-container-stats` so the `<!-- spec:stats:* -->` region is populated:
 
@@ -485,6 +398,8 @@ Initialize the on-disk structure (create mode, or any missing piece in edit mode
    ```
 
    Fold the verb's returned `note` path into this step's own commit.
+
+   A new product also changes the `N products` count of every level above it. Run the same verb on each folder-note between the product and the content root, up to and including the catalog root's note `<content_root>/<content_root leaf>.md` — the verb leaves a note without stats markers alone — and fold every note it rewrites into the same commit.
 
 3. **Product-level `vision.md`** (create mode only): if `<content_root>/<spec_path>/vision.md` does not exist AND `<content_root>/<spec_path>/design.md` does not exist either (the seeding guard — a product with a pre-vision `design.md` is a legal state migrated by the operator by hand, never seeded over), seed it beside the level note item 2 just wrote — never by copying the template yourself:
 
@@ -503,145 +418,7 @@ Real icon values are fine — the iconize hook only strips unresolvable placehol
 
 Outcome: `written`.
 
-## Step 12 — Built-in review classes + routine sync + audit
-
-Append the built-in review classes to `review.classes`. Read the section, append, write back:
-
-```bash
-"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get review
-```
-
-In the parsed object, write the classes below into `review.classes` (create the list if absent) per the reconcile rule further down. **The review-class schema is owned by `lazycortex-review`** — match it exactly:
-
-- Each class is an object with a `class` string label (human-readable identity; there is NO `id` field — the daemon matches files to classes purely by `paths` globs), a `paths` non-empty list of glob strings, and an `experts` object.
-- `experts.main` — a LIST of `{ "name": <expert> }` writer objects (the opening-writer chain).
-- `experts.validation` and `experts.terminal` — a DICT keyed by stable `section-id` (`^[a-z][a-z0-9_-]*$`), each value a writer object `{ "name": <expert>, "section": "<H1 title>", "position": "top" | "bottom" }`. These author named post-approve H1 sections; `validation` sections block finalize and trigger revert-to-main on concerns. There is NO flat "list of reviewers" bucket — a reviewer is expressed as one named validation section.
-
-A class's label IS the name of a document type (`spec_doc_type`), and that is the class's only identity. `paths` stay in the schema, but their role has narrowed: they discriminate a product override `<type>@<key>` from the bare-type class, and they catch documents carrying no type at all. A typed document is routed by its frontmatter, never by where it sits or what it is called.
-
-Generate **one class per declared type carrying `review: true`** — the shipped types plus whatever the product declares under `products[<key>].doc_types`. The **shared set** — bare-type labels with right-anchored wildcard globs — serves every product whose role-experts match; a product with divergent experts (Step 8 outcome `override`) gets the same types re-emitted as product-scoped `<type>@<key>` classes inserted BEFORE the shared set. Globs span the product root and every group folder (built-in AND operator-defined) — so `lazy-spec.add-asset-type` never touches `review.classes`, a new group folder needs no new class, and a new product needs no new class when it rides the shared experts. Reusable validation dicts plus a no-validation case. **`system-designer` is never a validation writer in any class** — it appears only as a `main` writer; `designer` appears as a validation writer only on `use-cases` and `system-use-cases`, never elsewhere; the `architect` is the standing validator of everything design-shaped (`design`, `system-design`, `ui-design`, `system-ui-design`, `code-plan`) except a content asset's `content-design`, which the `data-writer` validates — an entity's design has no code structure to judge, only data to be expressed; no class is validated by its own main writer; the report classes carry no validation bucket, same as `system-tech`. Each checkbox in the launch ladder (`lazy-spec.lifecycle-protocol.md` Part 3) resolves its dispatched expert from the review class matching its own result document — `planner` writes `code-plan.md`, `developer` writes `code-report.md`, `tester` writes both `test-plan.md` and `test-report.md`, `data-writer` writes `data-report.md` — mirroring `lazy-spec.install` § 6e's seed template:
-
-- **A = architect review** — `{ "architect_review": { "name": "<architect>", "section": "Architect review", "position": "bottom" } }`.
-- **D = designer review** — `{ "designer_review": { "name": "<designer>", "section": "Designer review", "position": "bottom" } }`.
-- **TA = tester + architect review** — `{ "tester_review": { "name": "<tester>", "section": "Tester review", "position": "bottom" }, "architect_review": { "name": "<architect>", "section": "Architect review", "position": "bottom" } }`.
-- **DV = developer review** — `{ "developer_review": { "name": "<developer>", "section": "Developer review", "position": "bottom" } }`.
-- **P = planner review** — `{ "planner_review": { "name": "<planner>", "section": "Planner review", "position": "bottom" } }`.
-- **R = researcher review** — `{ "researcher_review": { "name": "<researcher>", "section": "Researcher review", "position": "bottom" } }`.
-- **DW = data-writer review** — `{ "data-writer_review": { "name": "<data-writer>", "section": "Data writer review", "position": "bottom" } }`.
-- **NONE** — omit the `experts.validation` key entirely (no validation writers this iteration).
-
-**Enumerate the types first.** The set of classes is derived, not written down here:
-
-```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" doc-type list --product <key>)
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" doc-type resolve <type> --product <key>)
-```
-
-Take every name `doc-type list` returns, keep those whose declaration carries `review: true`, and emit one class per surviving type with `class` = the type's own name. A type declared `review: false` (the shipped `decisions`, and any project type declaring the same) gets no class and never enters the review loop.
-
-**Expert bindings** (bare-type labels; substituting `<use-case-writer>`, `<designer>`, `<system-designer>`, `<architect>`, `<ui-designer>`, `<planner>`, `<developer>`, `<tester>`, `<data-writer>`, `<docs-writer>`, `<researcher>`) — the defaults for the shipped types. For a project-declared type the experts are not derivable: ask the operator, exactly one question per such type, naming the type and offering the same A / D / TA / DV / P / R / DW / NONE validation shapes:
-
-```
-Context (print before asking, one block per project-declared type):
-- Where: Step 12 — Review classes; target the `<type>` class about to be written into `review.classes`
-- Found: `doc-type resolve <type> --product <key>` → `review: true`, declared under `products[<key>].doc_types`, no shipped binding
-- Why asking: the validation shape of a project-declared type is not derivable
-- Answers: `A` / `D` / `TA` / `DV` / `P` / `R` / `DW` / `NONE` — the validation dict listed above, filled with this product's role experts and persisted on the `<type>` class; asked again only when the type's class is regenerated
-AskUserQuestion: header "<type> class", question "Validation shape for product `<key>`'s project-declared type `<type>` — who validates its documents after the main writer?", options `A` / `D` / `TA` / `DV` / `P` / `R` / `DW` / `NONE` with the descriptions above.
-```
-
-`design`, `bug`, `use-cases`, `system-use-cases`, `content-design`, and `research-design` additionally carry `context_from_frontmatter: [spec_source_requests]` — at main-job dispatch the dispatcher resolves that frontmatter key's wikilink/path values on the document under review to repo files and folds them into the job's `context/`, so the writer's job bundle includes the originating request(s). Attribution reaches a doc two ways: `lazy-spec.request-apply`'s `ensure_source_request` writer stamps `spec_source_requests` onto an attach target's primary doc, and `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" seed-doc` copies the status folder-note's union (stamped there at apply) onto every checkbox-seeded doc:
-
-| `class` label | `paths` | `experts.main` | `experts.validation` | extra |
-|---|---|---|---|---|
-| `use-cases` | `["*/use-cases.md"]` | `[{ "name": "<use-case-writer>" }, { "name": "<editor>" }]` | D | `context_from_frontmatter: [spec_source_requests]` |
-| `system-use-cases` | `["*/use-cases.md"]` | `[{ "name": "<use-case-writer>" }, { "name": "<editor>" }]` | D | `context_from_frontmatter: [spec_source_requests]` |
-| `design` | `["*/*/design.md"]` | `[{ "name": "<designer>" }, { "name": "<editor>" }]` | A | `context_from_frontmatter: [spec_source_requests]` |
-| `vision` | `["*/*/vision.md"]` | `[{ "name": "<designer>" }, { "name": "<editor>" }]` | NONE | `context_from_frontmatter: [spec_source_requests]` |
-| `system-vision` | `["*/vision.md", "vision.md"]` | `[{ "name": "<system-designer>" }, { "name": "<editor>" }]` | NONE | `context_from_frontmatter: [spec_source_requests]` |
-| `system-design` | `["*/design.md", "design.md"]` | `[{ "name": "<system-designer>" }, { "name": "<editor>" }]` | A | `context_from_frontmatter: [spec_source_requests]` |
-| `system-tech` | `["*/tech.md", "tech.md"]` | `[{ "name": "<architect>" }]` | NONE | — |
-| `system-ui-design` | `["*/ui-design.md"]` | `[{ "name": "<ui-designer>" }]` | A | — |
-| `architecture` | `["*/architecture.md"]` | `[{ "name": "<architect>" }]` | P | — |
-| `ui-design` | `["*/ui-design.md"]` | `[{ "name": "<ui-designer>" }]` | A | — |
-| `code-plan` | `["*/code-plan.md"]` | `[{ "name": "<planner>" }]` | TA | — |
-| `test-plan` | `["*/test-plan.md"]` | `[{ "name": "<tester>" }]` | DV | — |
-| `bug` | `["bugs/*/bug.md"]` | `[{ "name": "<tester>" }]` | DV | `context_from_frontmatter: [spec_source_requests]` |
-| `code-report` | `["*/code-report.md"]` | `[{ "name": "<developer>" }]` | NONE | — |
-| `test-report` | `["*/test-report.md"]` | `[{ "name": "<tester>" }]` | NONE | — |
-| `data-report` | `["*/data-report.md"]` | `[{ "name": "<data-writer>" }]` | NONE | — |
-| `docs-report` | `["*/docs-report.md"]` | `[{ "name": "<docs-writer>" }]` | NONE | — |
-| `content-design` | `["*/*/design.md"]` | `[{ "name": "<designer>" }, { "name": "<editor>" }]` | DW | `context_from_frontmatter: [spec_source_requests]` |
-| `research-design` | `["*/*/design.md"]` | `[{ "name": "<designer>" }, { "name": "<editor>" }]` | R | `context_from_frontmatter: [spec_source_requests]` |
-| `research-report` | `["*/research.md"]` | `[{ "name": "<researcher>" }, { "name": "<editor>" }]` | NONE | — |
-
-The `system-vision` / `system-design` / `system-tech` classes serve the **level docs** — the product-root `vision.md` / `design.md` / `tech.md` set AND the same set at the spec content-root (the project-wide spec; no config key declares it — the files' existence is the declaration, except `vision.md`, which is seeded). One expert set serves both scales. The `system-ui-design` class serves the product-root `ui-design.md` alone — the product's shared look (design system, recurring screen patterns, navigation skeleton) that the assets' own `ui-design.md` refine; the content root never carries one. It shares the asset `ui-design` class's glob and is told apart by type, exactly like the design pair. The `system-use-cases` class serves the product-root `use-cases.md` alone the same way — the product's actors and the scenarios that cross its assets, which the assets' own `use-cases.md` refine; the content root's opt-in `use-cases.md` stays typed `use-cases` and rides the `use-cases` class. The vision classes carry NO validators — the writer and the operator close the loop. A typed document routes by its `spec_doc_type`, so the overlapping design globs are untyped-fallback tie-breakers only: the asset `design` class sits earlier in the list and wins the fallback. The `research-design` class shares the `*/*/design.md` glob for the same reason: a research asset's `design.md` carries `spec_doc_type: research-design` and routes by type.
-
-**Override set** (product-scoped labels; generated ONLY on Step 8 outcome `override`, with this product's `<spec_path>` and override experts) — shadows the shared set for one product. An asset-level override glob is `<spec_path>/*/**/<doc>.md`: at least one segment below the product root, so the product's own level document stays with its `system-*` class, then any depth, because an asset may sit straight at the product root or nested inside another asset:
-
-| `class` label | `paths` | `experts.main` | `experts.validation` |
-|---|---|---|---|
-| `use-cases@<key>` | `["<spec_path>/*/**/use-cases.md"]` | `[{ "name": "<use-case-writer>" }, { "name": "<editor>" }]` | D |
-| `system-use-cases@<key>` | `["<spec_path>/use-cases.md"]` | `[{ "name": "<use-case-writer>" }, { "name": "<editor>" }]` | D |
-| `design@<key>` | `["<spec_path>/*/**/design.md"]` | `[{ "name": "<designer>" }, { "name": "<editor>" }]` | A |
-| `vision@<key>` | `["<spec_path>/*/**/vision.md"]` | `[{ "name": "<designer>" }, { "name": "<editor>" }]` | NONE |
-| `system-vision@<key>` | `["<spec_path>/vision.md"]` | `[{ "name": "<system-designer>" }, { "name": "<editor>" }]` | NONE |
-| `system-design@<key>` | `["<spec_path>/design.md"]` | `[{ "name": "<system-designer>" }, { "name": "<editor>" }]` | A |
-| `system-tech@<key>` | `["<spec_path>/tech.md"]` | `[{ "name": "<architect>" }]` | NONE |
-| `system-ui-design@<key>` | `["<spec_path>/ui-design.md"]` | `[{ "name": "<ui-designer>" }]` | A |
-| `architecture@<key>` | `["<spec_path>/*/**/architecture.md"]` | `[{ "name": "<architect>" }]` | P |
-| `ui-design@<key>` | `["<spec_path>/*/**/ui-design.md"]` | `[{ "name": "<ui-designer>" }]` | A |
-| `code-plan@<key>` | `["<spec_path>/*/**/code-plan.md"]` | `[{ "name": "<planner>" }]` | TA |
-| `test-plan@<key>` | `["<spec_path>/*/**/test-plan.md"]` | `[{ "name": "<tester>" }]` | DV |
-| `bug@<key>` | `["<spec_path>/*/**/bug.md"]` | `[{ "name": "<tester>" }]` | DV |
-| `code-report@<key>` | `["<spec_path>/*/**/code-report.md"]` | `[{ "name": "<developer>" }]` | NONE |
-| `test-report@<key>` | `["<spec_path>/*/**/test-report.md"]` | `[{ "name": "<tester>" }]` | NONE |
-| `data-report@<key>` | `["<spec_path>/*/**/data-report.md"]` | `[{ "name": "<data-writer>" }]` | NONE |
-| `docs-report@<key>` | `["<spec_path>/*/**/docs-report.md"]` | `[{ "name": "<docs-writer>" }]` | NONE |
-| `content-design@<key>` | `["<spec_path>/*/**/design.md"]` | `[{ "name": "<designer>" }, { "name": "<editor>" }]` | DW |
-| `research-design@<key>` | `["<spec_path>/*/**/design.md"]` | `[{ "name": "<designer>" }, { "name": "<editor>" }]` | R |
-| `research-report@<key>` | `["<spec_path>/*/**/research.md"]` | `[{ "name": "<researcher>" }, { "name": "<editor>" }]` | NONE |
-
-The content-root (project-wide) `design.md` / `tech.md` pair is never product-scoped — it belongs to no product, so only the shared `system-design` / `system-tech` classes ever cover it; a content-root `ui-design.md` does not exist at all.
-
-The `class` label is the schema's only identity slot (a `class` field, not `id`): the shared set uses the bare type name, the override set the `<type>@<key>` value. **Two types never share one class** — that is the price of the identity, and it is deliberate: a class is addressable by its type, so a label serving two types would make the type non-addressable.
-
-**Matching semantics.** For a document carrying `spec_doc_type`, resolution is type-first: among the classes whose label's part before `@` equals the document's type, a product-scoped one whose `paths` cover the file wins, otherwise the bare-type class does. Neither the filename nor the directory participates — a document named `races.md` typed `design` lands in the `design` class.
-
-`paths` still matter in two places. They discriminate which product an `@<key>` override applies to, and they are the whole matcher for a document carrying no `spec_doc_type` (a free-form intake file, a consumer's own document class), which falls back to first-match-wins over `paths` in list order. On that fallback path a glob without `**` uses `PurePath.match` right-anchored, where `*` never crosses `/`; a glob carrying `**` is matched against the whole repo-relative path, `**` spanning any number of segments (zero included) — that form is what the product-scoped overrides use, since a `spec_path` prefix would otherwise pin the asset's depth. Right-anchoring is why the shared globs need no `<spec_path>` prefix: `*/*/design.md` matches every asset's own `<…>/<slug>/design.md` at any depth (its last three segments), while the separate `system-design` class's `*/design.md` and `design.md` match the product-root and content-root `design.md`; `bugs/*/bug.md` matches `<spec_path>/bugs/<slug>/bug.md`. Discovery itself is review's own repo-wide `lazy-review.coordinator-watch` pathspec — no per-product mask bounds it, so a class's globs are the whole of the routing. A product's override globs deliberately OVERLAP the shared globs, so override classes MUST still sit earlier in `review.classes` than the shared set.
-
-**Reconcile, not append.** Read `review.classes` and act per Step 8's outcome:
-
-1. **`assigned` (shared set absent)** — append the **shared** classes with the Step-8 experts. Then run the *per-product collapse* below to drop any stale `<kind>@<key>` classes this product carries from the old per-product scheme.
-2. **`shared-set` (present, reuse)** — leave the shared set untouched; run the *per-product collapse* to drop this product's stale `<kind>@<key>` classes (this is the migration — the product stops carrying its own classes and rides the shared set).
-3. **`override` (present, product-specific)** — first compute this product's override experts; if they are identical to the shared set's experts for every role, there is no divergence, so fall through to the `shared-set` behavior (no override classes written). Otherwise remove any prior `<kind>@<key>` classes for THIS product, then insert the **override** classes (product-scoped globs, override experts) immediately BEFORE the first shared-set class.
-
-**Per-product collapse.** Remove from `review.classes` every class whose `class` label ends in `@<key>` for THIS `<key>` and whose prefix either matches a type declared in this product's scope (`doc-type list --product <key>`) or is one of the legacy labels the open set no longer covers — the removed `plan`, and any dotted per-category label (`spec.design`, `spec.tech`, `bugs.bug`, `bugs.plan`, `<category>.design`, `<category>.plan`). Before removing one, compare its `experts` block to the shared-set class of the same type: if they **differ**, ask first:
-
-```
-Context (print before asking):
-- Where: Step 12 — Per-product collapse; target class `<kind>@<key>` in `review.classes`
-- Found: its `experts` block differs from the shared `<kind>` class: <the two blocks, or their diff>
-- Why asking: the divergence is either a deliberate override or a leftover of the old per-product scheme — only the operator knows which
-- Answers: `keep as override` — re-insert `<kind>@<key>` before the shared set (as in outcome 3); this product keeps its variant; `collapse` — remove it; the product rides the shared `<kind>` class
-AskUserQuestion: header "Diverging class", question "Class `<kind>@<key>` carries different experts than the shared `<kind>` class. Keep the variant as product `<key>`'s override, or collapse it into the shared set?", options `keep as override` / `collapse` with the descriptions above.
-```
-
-Bare doc-kind labels (the shared set) and `@<key>` labels naming a DIFFERENT product are never touched. This makes Step 12 idempotent across create and edit mode — re-running `/lazy-spec.product-config` in edit mode on a product generated under the old per-product scheme IS the migration to the shared set (a per-product scheme's classes collapse onto the shared set).
-
-**Expert re-verification (MANDATORY, before the write).** Collect every expert name the classes are about to carry — each `main[].name`, each `validation.<section-id>.name`, each `history.name` — and re-check every one against the keys of `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get experts`. Any name missing → abort WITHOUT calling `settings-set review`, naming the dangling expert and pointing at `lazycortex-experts` (same abort as Step 8's `expert-undefined`). Step 8's earlier validation does not guard this write — a dangling reference (e.g. an unregistered tester) must be impossible to persist.
-
-Write the edited review object back:
-
-```bash
-printf '%s' '<edited-review-json>' | "${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set review
-```
-
-Then check for the retired `lazy-review.scan` routine — a leftover of the md-scan sieve model, which `/lazy-review.install` deletes on sight (its `process-file` consumer no longer exists, so a surviving registration is a routine the daemon runs into a missing subcommand). Review's live discovery surface is the repo-wide `lazy-review.coordinator-watch` git-watch routine, which its own install seeds and which carries no per-product masks — nothing here to normalize, in either routine. `Bash`-free check: **absent** → outcome `legacy-scan-routine-absent`. **Present** → do NOT touch it, and report `legacy-scan-routine-present` so the operator re-runs `/lazy-review.install`. Same posture as `/lazy-spec.install`'s Step 6f, which owns this cleanup for the install path.
-
-Finally, verify the generated classes by invoking `/lazy-review.audit` via the `Skill` tool (`skill: "lazycortex-review:lazy-review.audit"`) and surface its findings — report the `audit: <LEVEL> (<N> findings)` line and any FAIL/WARN detail. If the audit reports FAIL, report it; do not silently leave broken classes.
-
-Outcome: `wired` (carry the audit level into the report).
+Product-specific reviewers are added as `<kind>@<key>` classes through `/lazy-review.configure`.
 
 ## Step 13 — Verify
 
@@ -651,13 +428,9 @@ Outcome: `verified`.
 
 ## Report
 
-One line per task in the canonical list, with its outcome word. A missing line is a bug. End with the `lazy-spec.audit` summary line from Step 13 and the `audit:` line from Step 12. If Step 9 was `delegated`, include the `/lazy-spec.add-asset-type <compound-key>` instruction.
+One line per task in the canonical list, with its outcome word. A missing line is a bug. End with the `lazy-spec.audit` summary line from Step 13. If Step 9 was `delegated`, include the `/lazy-spec.add-asset-type <compound-key>` instruction.
 
 ## Failure modes
 
 - **`/lazy-spec.product-config` aborts with `aborted:no-vault-spec`** — create mode with neither `vision.md` nor a pre-vision `design.md` at the spec content-root → run `/lazy-spec.install` (its Step 6.9 seeds the vault-vision draft), fill it in, then re-run this skill.
-
-- **`/lazy-spec.product-config` aborts pointing at `lazycortex-experts`** — a chosen role expert (use-case-writer / designer / system-designer / architect / ui-designer / planner / developer / tester / data-writer / researcher) is not registered in `experts` → compose the persona via `lazycortex-experts`, then re-run this skill.
 - **`/lazy-spec.product-config` refuses because the product key already exists** — the chosen key is already a `products` key → edit that product instead, or pick a different key.
-- **`/lazy-review.audit` reports FAIL after Step 12** — a generated class references an unregistered expert or violates the section-writer schema → fix the expert assignments (re-run Step 8 with registered experts) and re-audit.
-- **`/lazy-spec.product-config` skips a declared type, leaving it with no class** — a type declared `review: true` whose experts the operator never answered for gets no class, and every document of that type then stays outside the review loop indefinitely → re-run the skill and answer the `AskUserQuestion` naming that type, or declare the type `review: false` if it genuinely should not be reviewed.

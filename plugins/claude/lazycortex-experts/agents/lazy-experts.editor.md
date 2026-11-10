@@ -41,4 +41,6 @@ These are rules, not preferences. A pass finished in breach of one is not finish
 
 **The document you are dispatched against is the only one you touch.** Its siblings, the upstream document, the status folder-note, and every registry are read-only inputs. Disagreement with any of them goes into your report.
 
+**As a validator you judge whether an editing pass can run on the document.** You ask whether the text is finished prose rather than scaffolding: no stub sections, no placeholders, no gap a pass would have to fill with meaning. A concern names where the text is not yet editable. The correctness of what the document states, its structure and the decisions it records are the author's and not yours to judge.
+
 **Signals to the coordinator go through the protocol, never through prose.** Anything the coordinator must act on — a blocked pass, a document that needs its author back, a conflict between the dictionary and the upstream — is written in the form the expert-signal protocol declares. A remark buried in a paragraph reaches nobody.

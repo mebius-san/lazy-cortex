@@ -225,8 +225,6 @@ class SnippetSourceKind(StrEnum):
   PLUGIN = "plugin"
   # Personal or edited; deploy writes the body recorded in the manifest.
   VAULT = "vault"
-  # The canon-mandated invalid sentinel, outside the named set.
-  INVALID = "~inv~"
 
 
 # ----------------------------------------------------------------------------------------
@@ -274,12 +272,14 @@ class BundleSourceKind(StrEnum):
 
   # Domain(obsidian.plugin-bundling):
   # # Plugin bundle resolution fallback ladder
-  # A community plugin's install bundle is resolved by trying, in order: the plugin's live upstream
-  # release, then a copy vendored in the local cache from an earlier successful resolution, then a
-  # copy bundled with this plugin for a plugin with no public release to fall back to, and finally
-  # nothing when none of those has the bundle. Each source is pinned to the plugin's own id, so a
-  # repository that has been renamed or repurposed can never serve as the bundle source for a
-  # different plugin id than the one it originally shipped.
+  # A plugin for which this tooling ships its own copy is installed from that copy alone, without
+  # asking upstream or the cache, because a plugin with no public release has nothing else to
+  # resolve. Every other community plugin's install bundle is resolved by trying, in order: the
+  # plugin's live upstream release, then a copy vendored in the local cache from an earlier
+  # successful resolution, and finally nothing when neither has the bundle. Each upstream or cached
+  # source is pinned to the plugin's own id, so a repository that has been renamed or repurposed
+  # can never serve as the bundle source for a different plugin id than the one it originally
+  # shipped.
 
   # Fetched from the plugin's GitHub release.
   UPSTREAM = "upstream"
@@ -289,8 +289,6 @@ class BundleSourceKind(StrEnum):
   BUNDLED = "bundled"
   # Nothing could be resolved; the plugin was skipped.
   NONE = "none"
-  # The canon-mandated invalid sentinel, outside the named set.
-  INVALID = "~inv~"
 
 
 # ----------------------------------------------------------------------------------------
@@ -356,8 +354,9 @@ class AppearanceKey:
   # A vault's captured configuration is meant to travel unchanged across machines and devices, so a
   # setting that only reflects the specific device or window the vault happened to be open on has no
   # place in it. The window zoom factor is such a setting: it is never written into the captured
-  # record, so restoring the configuration on a different device leaves that device's own zoom
-  # exactly where it already was rather than overwriting it with a value that belonged elsewhere.
+  # record, so a restore can never impose the zoom of the machine that was captured onto another
+  # device. The appearance settings are rebuilt entirely from the record, so a device's own zoom
+  # is not preserved by a restore either.
 
   # Name of the active theme.
   CSS_THEME = "cssTheme"
@@ -385,8 +384,6 @@ class CommandKind(StrEnum):
   DRIFT = "drift"
   # Resolve one community plugin's GitHub repo from the catalog, touching no vault.
   LOOKUP = "lookup"
-  # The canon-mandated invalid sentinel, outside the named set.
-  INVALID = "~inv~"
 
 
 # ----------------------------------------------------------------------------------------

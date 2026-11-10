@@ -1,11 +1,11 @@
 ---
 name: lazy-spec.config-protocol
 version: 1
-description: Canonical contract for spec product / repo / language config in lazy.settings.json — what the products, repos, and spec sections hold and how spec.* skills resolve product, repo, and language at runtime.
+description: Canonical contract for spec product / language config in lazy.settings.json — what the products and spec sections hold and how spec.* skills resolve product and language at runtime.
 ---
-# Config protocol — products, repos, language resolution
+# Config protocol — products, language resolution
 
-Everything the spec system needs to know about products, source repos, and what language prose is written in lives in two cross-plugin sections of `.claude/lazy.settings.json` (`products`, `repos`) plus one plugin-owned section (`spec`). This document is the canonical contract for what's in each, how to read it, and how `spec.*` skills resolve product / repo / language at runtime.
+Everything the spec system needs to know about products and what language prose is written in lives in one cross-plugin section of `.claude/lazy.settings.json` (`products`) plus one plugin-owned section (`spec`). A product's code lives in the same repository as the spec catalog. This document is the canonical contract for what's in each section, how to read it, and how `spec.*` skills resolve product / language at runtime.
 
 ### `spec` settings section — vault root
 
@@ -13,14 +13,15 @@ The `spec` section of `.claude/lazy.settings.json` carries plugin-owned settings
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `spec.vault_root` | `specs` | Path of the spec content-root relative to the settings-dir (the directory holding `.claude/lazy.settings.json`, i.e. the repo root). All spec content — the operator's product trees and the `requests/` inbox — lives under `<settings-dir>/<spec.vault_root>`. Use `.` to place content directly at the settings-dir (content-root = settings-dir). Vault-relative paths (`spec_path`, tags) are relative to this content-root; a wikilink's short form is too, while its vault form carries this segment — see [file-roles](./lazy-spec.file-roles-protocol.md) § Wikilinks. See [layout](./lazy-spec.layout-protocol.md) Part 1 § Spec content-root. |
+| `spec.vault_root` | `specs` | Path of the spec content-root relative to the settings-dir (the directory holding `.claude/lazy.settings.json`, i.e. the repo root). All spec content — the operator's product trees and the `requests/` inbox — lives under `<settings-dir>/<spec.vault_root>`. The value must name a sub-directory of the settings-dir: `.` (the settings-dir itself), an absolute path, and a path climbing out through `..` are not allowed — every verb that resolves the content-root refuses such a value with exit 2 and a message telling the operator to move the catalog into a sub-directory and set `spec.vault_root` to it, and `/lazy-spec.install` stops on it. An absent or empty value is the default `specs`. Vault-relative paths (`spec_path`, tags) are relative to this content-root; a wikilink's short form is too, while its vault form carries this segment — see [file-roles](./lazy-spec.file-roles-protocol.md) § Wikilinks. See [layout](./lazy-spec.layout-protocol.md) Part 1 § Spec content-root. |
 | `spec.language` | none (optional) | ISO 639-1 language code for spec prose across the vault. When absent the top-level `language` key applies, then the floor `en` — see Part 3 |
 | `spec.guidelines` | none (optional) | Catalog-wide guidelines every product inherits, in the same role-keyed shape as `products[<key>].guidelines` (below). They form the outermost layer of each product's per-role union, ahead of its enclosing products and its own, and the catalog-root coordinator reads the `coordinator` and `"*"` roles from here alone. Products standing side by side at the top of the catalog share no ancestor, so this is the one place a guideline reaches them all. |
+| `spec.release.implementer_chain` | none (optional) | Ordered list of expert keys — the repository-wide default for which expert leads a release build. The first entry registered in `experts` is the implementer of every release-owning product that sets neither `release.implementer` nor `release.implementer_chain` of its own; a product chain replaces this one entirely, never merging with it. Resolved by `resolve-product release-implementer` (Part 1, product record `release`); a chain with no registered entry yields no implementer. |
 | `spec.coordination_rules` | none (optional) | Repo-relative path to the vault-wide operator doc of coordinator rules — the second of the six rule layers `spec.coordinator` reads before every decision (playbook → this doc → product guidelines → product folder-note rules → container folder-note rules → asset folder-note rules; see `lazy-spec.coordination-playbook.md` § 3). States what the coordinator may run automatically across the whole vault, and any vault-wide override of the playbook's defaults. When set, its content is injected into every `spec.coordinator` job's context; `lazy-spec.audit` flags a configured path that doesn't resolve to a file. |
 
-## Part 1 — Config files (products + repos)
+## Part 1 — Config files (products)
 
-Product config and repo config are both records in `lazy.settings.json`: products under the `products` section, repos under the cross-plugin `repos` section.
+Product config is a set of records in `lazy.settings.json` under the `products` section.
 
 ### Product records — `lazy.settings.json[products]`
 
@@ -35,23 +36,23 @@ There is no `spec.cfg-<product>.md` rule file any more — that form is removed.
 | Field | Required | Description |
 |-------|----------|-------------|
 | `spec_path` | yes | Where the product's specs live, relative to vault root |
-| `source.repo` | no | Key of the repo config this product's source lives in (e.g., `backend`). Omitted for a design-only product (specs authored ahead of code) |
-| `source.paths` | no | Subdirectories within that repo the product covers. Present iff `source` is present |
+| `source.paths` | no | Repo-relative directories of this repository the product's code covers. `source` is `{ "paths": [...] }` and nothing else; it is omitted for a design-only product (specs authored ahead of code) |
 | `language` | no (default `en`) | ISO 639-1 language code overriding the repo-global `spec.language`. Skills write narrative prose in this language — see Part 3 (inherited from the nearest ancestor when absent) |
 | `icon` | no (default `LiPackage`) | Iconize identifier (Lucide name or emoji) painted on the product folder; mirrored into the product folder-note's managed `iconize_icon`. The wizard writes the default when the operator declines — every product folder-note carries an icon |
 | `color` | no (default `#64748b`) | Iconize colour of the product folder, mirrored into the managed `iconize_color`. A product root is the one ordinary container that carries a colour — the neutral one — so the products stand out from the group folders beneath them; the key exists to override that for one product. See § Container colour below |
-| `dependencies` | no | List of upstream deps (other products, repos, or external) — see [sources](./lazy-spec.sources-protocol.md) Part 3 |
-| `asset_types` | no | Per-type declarations, merged **key-by-key** over the plugin's shipped spawnable set (`feature`, `change`, `bug`, `content`, `research`; `references/lazy-spec.asset-types.json` also carries the `catalog` and `product` level entries, which have no `default_path` and spawn nothing), so a product may replace one field of a shipped type without restating the rest, or declare a type of its own. Along a nested product's ancestor chain the same merge runs over each ancestor's declarations in turn, outermost first. Written by `/lazy-spec.add-asset-type`. See below and [layout](./lazy-spec.layout-protocol.md) § Asset types |
+| `dependencies` | no | List of upstream deps (other products or external tools) — see [sources](./lazy-spec.sources-protocol.md) Part 3 |
+| `asset_types` | no | Per-type declarations, merged **key-by-key** over the plugin's shipped spawnable set (`feature`, `change`, `bug`, `content`, `research`, plus `release`, which the product coordinator creates under `releases/` rather than routing spawning it; `references/lazy-spec.asset-types.json` also carries the `catalog` and `product` level entries, which have no `default_path` and spawn nothing), so a product may replace one field of a shipped type without restating the rest, or declare a type of its own. Along a nested product's ancestor chain the same merge runs over each ancestor's declarations in turn, outermost first. Written by `/lazy-spec.add-asset-type`. See below and [layout](./lazy-spec.layout-protocol.md) § Asset types |
 | `tool_types` | no | Per-tool declarations, merged key-by-key over the plugin's shipped set (`references/lazy-spec.tool-types.json` — `code`, `data`, `test`, `docs`, `research`). See below |
 | `guidelines` | no | Extra context files folded into launch-checkbox job dispatch, keyed by dispatched role token plus the wildcard `"*"` — the union along the ancestor chain, outermost first. See below |
-| `mode` | no (default full) | `"spec-only"` activates the designer-only ladder (`lazy-spec.coordination-playbook.md` Chapter 17, extracted as `lazy-spec.spec-only-playbook.md`) for every asset under this product — design.md → review → approve → `spec_design_done`, no architecture/plan/implementation/test steps. Absence means the ordinary full ladder. Written by `/lazy-spec.product-config`'s wizard. `_build_bundle` folds the owning product's whole record — `mode` included — into every coordinator job's `payload["product"]` unconditionally, so no separate settings read is needed to detect the profile. (inherited from the nearest ancestor when absent) |
+| `release` | no | The product's release section, read where the product owns releases (the outermost product in its chain with a `source`): `release.implementer` names the expert key that leads every build explicitly and wins over any chain; `release.implementer_chain` is an ordered list of expert keys whose first entry registered in `experts` leads the build when no explicit `release.implementer` is set, and replaces the repository's `spec.release.implementer_chain` for this product entirely; with neither key the repository chain applies, and nothing registered means no implementer — `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> resolve-product release-implementer <key>` prints `{"key", "implementer"}` with the result or `null`; `release.manifest` names the repo-relative file whose version field a published release reads and writes (`plugin.json`, `package.json`, `pyproject.toml`, `manifest.json`); `release.deploy.staging` and `release.deploy.production` each take `{ "command": [<argv>], "url": "<address>" }` — the command `release-deploy` runs from the repo root, the optional address shown beside `Publish`. See `lazy-spec.release-playbook.md` |
+| `mode` | no (default full) | `"spec-only"` marks a product that owns no releases (`lazy-spec.coordination-playbook.md` Chapter 17, extracted as `lazy-spec.spec-only-playbook.md`): every asset's ladder is design-only as everywhere, `Start release` never hangs, and `spec_released` flips only on the operator's word. Absence means the ordinary ladder. Written by `/lazy-spec.product-config`'s wizard. `_build_bundle` folds the owning product's whole record — `mode` included — into every coordinator job's `payload["product"]` unconditionally, so no separate settings read is needed to detect the profile. (inherited from the nearest ancestor when absent) |
 
 Example product record:
 
 ```json
 "server-tester-chapter": {
   "spec_path": "Server/Tester/chapter",
-  "source": { "repo": "backend", "paths": [ "chapter", "shared/log" ] },
+  "source": { "paths": [ "chapter", "shared/log" ] },
   "language": "ru",
   "icon": "LiBook",
   "color": "#64748b",
@@ -97,9 +98,10 @@ Each key is a type name — the value an asset status folder-note's `spec_asset_
 | `icon` | yes | Iconize identifier painted on the type's folder and on every asset folder of the type (mirrored into the managed `iconize_icon` key) |
 | `color` | no | Iconize colour seeded onto every asset status folder-note of the type, mirrored into the managed `iconize_color` key. It does NOT reach the type's own group folder — an ordinary container carries no colour (§ Container colour) |
 | `playbook` | yes (unless `alias_of`) | Reference key of the playbook `spec.coordinator` loads on every wake of an asset of this type |
-| `alias_of` | no | Names a base type whose playbook this type borrows when it declares none of its own. The folder, icon, colour, start document and tools stay this type's own, and aliases never chain |
+| `alias_of` | no | Names a base type whose playbook this type borrows when it declares none of its own. The folder, icon, colour, start document and tools stay this type's own, aliases never chain, and `release` is never a base |
 | `default_path` | no | Folder name under `<spec_path>/` where assets of this type land unless the caller names another location |
-| `start_doc` | yes | `"<file>:<doc_type>"` token naming the one document a fresh asset of the type is seeded with (e.g. `design.md:design`, `bug.md:bug`). A type with no `start_doc` cannot be scaffolded at all |
+| `start_doc` | yes | `"<file>:<doc_type>"` token naming the one document a fresh asset of the type is seeded with (e.g. `design.md:design`, `bug.md:bug`). A type with no `start_doc` cannot be scaffolded at all. `release` is the one type whose start document is opt-in: `code-plan.md:code-plan` is declared, but the release note is created alone and the plan arrives through its `Write code-plan` row |
+| `vision` | no | The type's `vision.md` contract: `opt-in` (the shipped `feature`, `change` and `content` — the operator may launch one, nothing requires it), `none` (the shipped `bug`, `research` and `release` — the type carries no vision), or `mandatory` (no shipped type; an operator-declared type only — `vision.md:vision` is seeded in place of the start document, which waits for the vision's approval); an undeclared field reads as `opt-in` (`lazy-spec.layout-protocol.md`). Read by `lazy-spec.create-asset`, `lazy-spec.create-from-code` and the type playbooks; no script validates it |
 | `default_tools` | no | Tool-type names an asset of this type is realised and checked with; written into the status folder-note's `spec_tools` at scaffold time |
 | `guidelines` | no | Repo-relative file paths every expert job on an asset of this type carries, whatever role it dispatches — folded after the role's own `products[<key>].guidelines[<role>]` paths and before the wildcard `"*"` ones. This is where a content type declares the schema its records are written against: the designer writing a content design, the data writer validating it and later writing the data all read the same files. Merges like every other field — the nearest declaration wins whole |
 
@@ -114,7 +116,7 @@ Each key is a tool name — the value an asset's `spec_tools` list carries. Each
 | Field | Required | Description |
 |---|---|---|
 | `playbook` | yes | Reference key of the playbook the coordinator loads when driving this tool's work on an asset |
-| `report_doc` | yes | Document type of the tool's report — an append-only execution journal for `code` / `data` / `test` / `docs` (e.g. `code-report`), a stage-bearing deliverable for `research` (`research-report`) |
+| `report_doc` | yes | Document type of the tool's report — an append-only execution journal for `code` / `test` (e.g. `code-report`), a stage-bearing deliverable for `research` (`research-report`). For `data` / `docs` it only names the review class whose main writer is the tool's expert; a release build journals their work in `code-report.md` |
 | `plan_doc` | no | Document type of the tool's plan. Its presence is what hangs the `Write <tool>-plan` launch checkbox; a tool without `plan_doc` gets no plan checkbox |
 
 The shipped set is `code` (`code-plan` / `code-report`), `data` (`data-report`), `test` (`test-plan` / `test-report`), `docs` (`docs-report`), and `research` (the research report written from the approved research design; its report type carries a stage).
@@ -123,7 +125,7 @@ Per-product doc-template overrides are NOT declared in the record. The override 
 
 ### `products[<key>].guidelines` — expert-job context paths
 
-A product record MAY carry a `guidelines` dict supplying extra context to every expert job dispatched on the product's documents — the jobs `spec.coordinator` dispatches when an operator ticks a launch checkbox (`Write architecture` / `Write code-plan` / `Write test-plan` / `Start implementation` / `Start testing`) in an asset's `# Gates` section, and the writer and validator rounds `lazycortex-review`'s coordinator dispatches on a document under review (every `Write <doc>` row ends in such a round, so a design's author reads the product's guidelines for its role the same way an implementer does):
+A product record MAY carry a `guidelines` dict supplying extra context to every expert job dispatched on the product's documents — the writer rounds a `Write <doc>` row opens (`Write design`, `Write test-plan`, `Write architecture` on a product note, `Write code-plan` on a release note, `Start research` on a research asset) and the release's build jobs (`Revise architecture`, `Build`, `Test`), and the writer and validator rounds `lazycortex-review`'s coordinator dispatches on a document under review (every `Write <doc>` row ends in such a round, so a design's author reads the product's guidelines for its role the same way an implementer does):
 
 ```json
 "guidelines": {
@@ -138,10 +140,11 @@ A product record MAY carry a `guidelines` dict supplying extra context to every 
 
 | Key | Description |
 |---|---|
-| `architect` | Guideline paths folded into the `Write architecture` checkbox's job — this is also the blessed route for handing the architect an operator-declared `docs/structure.md` project-structure map (`lazy-spec.coordination-playbook.md` Chapter 8), when the operator wants it injected as job context instead of left to the architect's own pull-skill query. |
-| `planner` | Guideline paths folded into the `Write code-plan` checkbox's job. |
-| `tester` | Guideline paths folded into both the `Write test-plan` and `Start testing` checkboxes' jobs — both dispatch under the `tester` role. |
-| `developer` | Guideline paths folded into the `Start implementation` checkbox's job. |
+| `architect` | Guideline paths folded into the product's `Write architecture` row and into the `Revise architecture` job of every release build — this is also the blessed route for handing the architect an operator-declared `docs/structure.md` project-structure map (`lazy-spec.coordination-playbook.md` Chapter 8), when the operator wants it injected as job context instead of left to the architect's own pull-skill query. |
+| `planner` | Guideline paths folded into a release's `Write code-plan` row. |
+| `tester` | Guideline paths folded into every `Write test-plan` row — an asset's test cases, the product's standing plan, a release's composed plan — and into a release's `Test` job; all dispatch under the `tester` role. |
+| `developer` | Guideline paths folded into a release's `Build` job, led by the release implementer (`resolve-product release-implementer`), and handed on to the child agents it delegates foreign tools to. |
+| `researcher` | Guideline paths folded into the research type's `Start research` writer row. |
 | `coordinator` | Guideline paths folded into every `spec.coordinator` job dispatched for this product's assets — the third of the six rule layers the coordinator reads before deciding (see `lazy-spec.coordination-playbook.md` § 3). Distinct from a product, container, or asset folder-note's `# Coordinator rules` section: this key names files, the folder-note sections carry operator-authored prose directly. |
 | `designer`, `data-writer`, … | Guideline paths folded into every review round a `<domain>.<role>` expert of that role writes on the product's documents — the role token is the expert key's part after the first dot. Any role token a registered expert carries is valid here. |
 | `*` | Guideline paths folded into every expert job for this product, regardless of role. |
@@ -164,7 +167,7 @@ Each key is a type name — the value a document's `spec_doc_type` carries. Each
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `stages` | boolean | `false` | The document carries `spec_stage`, and is the only kind `lazy-spec.set-stage` accepts. |
-| `review` | boolean | `false` | The document goes through the review loop under a class of the same name; `lazy-spec.product-config` generates that class. |
+| `review` | boolean | `false` | The document goes through the review loop under a class of the same name; `lazy-spec.install` seeds that class for a shipped type, and the operator adds it through `/lazy-review.configure` for any other. |
 | `append_only` | boolean | `false` | The file is only ever appended to, never rewritten. |
 | `icon` | string | absent | Iconize identifier a document of the type is seeded with at creation, written into its managed `iconize_icon`. |
 | `color` | string | absent | Iconize colour paired with the icon, written into the managed `iconize_color`. |
@@ -175,37 +178,9 @@ Each key is a type name — the value a document's `spec_doc_type` carries. Each
 
 The key is entirely optional: a product with no `doc_types` sees exactly the shipped set, whatever `references/lazy-spec.doc-types.json` currently declares — the file is the count, never a number repeated in prose that a later type silently invalidates. `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> doc-type list --product <key>` prints the merged set, `doc-type resolve <type> --product <key>` one merged declaration.
 
-### Repo records — `lazy.settings.json[repos]`
-
-Repo records live in the cross-plugin `repos` section of `.claude/lazy.settings.json`, symmetric to `products[]`. The section maps a symbolic `<repo-key>` to runtime metadata for one local checkout. It is read and written atomically via `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get repos` / `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set repos`, and resolved by the `lazy-spec.resolve-repo` primitive. The `repos` section is registered in lazy-core's `CURRENT_VERSIONS` and auto-initializes on first `settings-get`; `/lazy-spec.product-config` (inline repo wizard) is the wizard that writes records. Being cross-plugin (top-level, not under a plugin namespace), the section is also available to other plugins that need repo metadata.
-
-```yaml
-repos:
-  _version: 1
-  backend:
-    local_path: /abs/path/to/backend
-    branch: main
-    # forge: gitea            # optional — override for self-hosted hosts; else auto-detected from the remote URL
-  shared:
-    local_path: /abs/path/to/shared
-    branch: master
-  self:                       # same-repo product — code lives in this very repo
-    local_path: "."           # expands to `git rev-parse --show-toplevel` per checkout
-    branch: master
-    forge: github             # explicit when the remote host isn't auto-detected
-```
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `local_path` | yes | Absolute path to the local checkout, **or `"."` — the repo containing this settings file** (same-repo products); `lazy-spec.resolve-repo` expands `"."` to `git rev-parse --show-toplevel` so each checkout resolves to its own root |
-| `branch` | yes | Branch to link against (typically `main` / `master`). Skills compare against this as the repo's default when reconciling pins |
-| `forge` | no | Forge key override (`github` / `gitlab` / `bitbucket` / `gitea` / `forgejo` / `sourcehut`). Needed ONLY when the hostname on the local checkout's git remote is not in the known-forges table (e.g., self-hosted GitLab / Gitea). For well-known hosts, omit this field — the forge is auto-detected |
-
-Repo records DO NOT carry the repo's URL. The URL is derived at runtime from the local checkout's git remote (`git -C <local_path> remote get-url origin`) via the `lazy-spec.resolve-repo` primitive — see [sources](./lazy-spec.sources-protocol.md) Part 2.
-
 > The word `spec` in skill names (`spec.*`) refers to the overall specification system. It is unrelated to the per-file `design` role introduced elsewhere.
 
-## Part 2 — Product / repo resolution
+## Part 2 — Product resolution
 
 ### Resolving a Product
 
@@ -222,9 +197,10 @@ Product resolution goes through the `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli>
 
 1. Resolve the user's input to a product. Try in order: exact compound-key (`resolve-product by-key`); a `spec_path` exact-or-sub-path match (`resolve-product by-path`); a `source.paths` entry match; then a **bare-name fallback** — if the input matches exactly one record key's trailing `-<input>` suffix, resolve it. If two or more records match the bare name, abort the non-interactive path AND prompt the user via `AskUserQuestion` to pick (options = the full keys of the candidates).
 2. A `null` record means the product is not registered. Tell the user and suggest registering it via `/lazy-spec.product-config`.
-3. Resolve the product's `source.repo` (when present) against the repo configs via `lazy-spec.resolve-repo` to get `{local_path, branch, host, owner, repo, forge, base_url, …}`.
 
 **Products may nest**: a product's `spec_path` may sit under another product's `spec_path`. Ownership of any path is the innermost product — the longest matching `spec_path` — so an enclosing product never claims a nested product's own documents or assets, and a nested product's cross-asset tokens resolve against its own root (see [folder-structure](./lazy-spec.layout-protocol.md)).
+
+**Releases are owned by the outermost product in the chain that declares a `source`.** A product nested under such an owner owns no releases: its approved assets enter the owner's delta, the owner's release sets their `spec_released`, and it has no `releases/` folder. A nested product may declare a `source` of its own when its paths lie inside its parent's source paths; that `source` only narrows the code area for `sync-with-code` and the audit, and the product still owns no releases. Only a nested `source` naming a path outside the parent's source paths is a configuration error — `lazy-spec.product-config` refuses it at registration and `lazy-spec.audit` reports it (`resolve_product.find_all_own_source_conflicts`, the `own-source-conflicts` mode of `resolve-product`). A product without `source` is a design-only umbrella, and products with their own `source` under it each own their releases; the path rule holds only inside an owner. A separate deliverable is registered as a product beside the owner and linked through `dependencies`.
 
 ### Effective record
 
@@ -284,14 +260,14 @@ this protocol uses. Configuration lives in the plugin-owned `spec` settings sect
     "max_units_per_tick": 7,
     "max_text_file_bytes": 1048576,
     "fetch_failure_threshold": 5,
-    "game-design": {
-      "url": "git@github.com:studio/game-design.git",
+    "product-docs": {
+      "url": "git@github.com:example-org/product-docs.git",
       "branch": "main",
       "mounts": {
-        "designs": {
-          "source_path": "designs",
-          "units": [ "quests/*", "systems/*" ],
-          "exclude": [ "quests/_shared" ]
+        "specs": {
+          "source_path": "specs",
+          "units": [ "features/*", "services/*" ],
+          "exclude": [ "features/_shared" ]
         }
       }
     }
@@ -328,8 +304,9 @@ for an operator who wants to see the result immediately instead of waiting for t
 **Ignore handling** honors only git's own mechanism, on both sides: `remote-mirror`'s
 `git ls-files` over the source clone means anything the source's own `.gitignore` excludes is
 never fetched, and a freshly-synced file the vault's own `.gitignore` would also ignore is pulled
-back out into the skip list. The wiki plugin's `.lazyignore` convention is never consulted for
-either side — merging it would reach into a sibling plugin's own ignore semantics.
+back out into the skip list. The core plugin's `.lazyignore` convention (`repo_walk.RepoWalk`) is
+never consulted for either side — it hides a path from the runtime's tree walks, not from git, so
+the vault's commit still carries a file it lists.
 
 ## Part 5 — Upstream unit enumeration
 

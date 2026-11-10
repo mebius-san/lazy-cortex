@@ -43,14 +43,12 @@ entry whose `terminal.routing.name` still equals `spec.request-router`; an
 operator customization pointing routing elsewhere is left alone. Idempotent:
 once rewritten, the name no longer matches, so a second run is a no-op.
 
-v6 → v7 (`MIGRATIONS[6]`) adds the `architecture` class (`*/architecture.md`,
-main the architect expert, one `validation.planner_review` slot checking
-whether the doc carries enough decisions to decompose into a plan — mirrors
-`design`'s existing `developer_review` / `tester_review` validation shape)
-when absent, and adds that same `planner_review` validation slot to the
-existing `design` class (guarded add-if-absent: an operator-customized
-`design.validation` block — one that already declares `planner_review` — is
-left untouched).
+v6 → v7 (`MIGRATIONS[6]`) adds a `validation.planner_review` slot to the
+existing `design` class, checking whether the design carries enough decisions
+to decompose into a plan — mirrors `design`'s existing `developer_review` /
+`tester_review` validation shape (guarded add-if-absent: an
+operator-customized `design.validation` block — one that already declares
+`planner_review` — is left untouched). The step adds no other class.
 
 v7 → v8 (`MIGRATIONS[7]`) moves every class's lazycortex-specs protocol
 reference onto the plugin's own namespace: a `classes[].protocols[]` member
@@ -173,9 +171,6 @@ _ROUTING_KEY = "routing"
 # reusable domain values
 _ROUTER_EXPERT_NAME = "spec.request-router"
 _COORDINATOR_EXPERT_NAME = "spec.coordinator"
-# waiver: one-off expert-name literal for the v6 -> v7 architecture class seed, not a reusable
-# domain value; mirrors the naming convention _PLANNER_EXPERT_NAME etc. already use
-_ARCHITECT_EXPERT_NAME = "claude-plugin.architect"
 # waiver: v6 -> v7 nested experts.validation keys, not tracked in ReviewClassKey (that enum
 # covers whole-class fields only; the validation block is a generic dispatcher shape, same
 # convention as the v5 -> v6 _TERMINAL_KEY / _ROUTING_KEY waiver above)
@@ -187,9 +182,6 @@ _POSITION_KEY = "position"
 # reusable domain values
 _PLANNER_REVIEW_SECTION = "Planner review"
 _PLANNER_REVIEW_POSITION = "bottom"
-# waiver: one-off filename-glob literal for the single architecture class-creation step, not a
-# reusable domain value
-_ARCHITECTURE_PATH = "*/architecture.md"
 
 _DEV_PLAN_SEEDED_DEFAULT_MAIN = [ { _NAME_KEY: _IMPLEMENTER_EXPERT_NAME } ]
 # waiver: one-off filename-glob literals for a single class-creation step, not reusable domain values
@@ -567,40 +559,12 @@ def _build_planner_review_entry() -> dict:
   }
 
 
-def _add_architecture_class(classes: list[dict]) -> list[dict]:
-  """
-  Add the `architecture` review class, when missing.
-
-  Args:
-    classes: The `review.classes` list, verbatim from the settings section.
-
-  Returns:
-    The list with an `architecture` class appended — main writer the architect expert, one
-    `planner_review` validation slot — or unchanged when a class by that name already exists
-    (an operator-added or previously-migrated class is never overwritten).
-  """
-  # guard: this class already exists — nothing to add
-  if any(entry.get(ReviewClassKey.CLASS) == ReviewClassName.ARCHITECTURE for entry in classes):
-    return classes
-
-  # a fresh class: one main writer (the architect), one planner-review validation slot
-  architecture_class = {
-    ReviewClassKey.CLASS: ReviewClassName.ARCHITECTURE,
-    ReviewClassKey.PATHS: [ _ARCHITECTURE_PATH ],
-    ReviewClassKey.EXPERTS: {
-      _MAIN_KEY: [ { _NAME_KEY: _ARCHITECT_EXPERT_NAME } ],
-      _VALIDATION_KEY: { _PLANNER_REVIEW_KEY: _build_planner_review_entry() },
-    },
-  }
-  return [ *classes, architecture_class ]
-
-
 def _add_planner_review_to_design(classes: list[dict]) -> list[dict]:
   """
   Add the `planner_review` validation slot to the `design` class, when absent.
 
   Args:
-    classes: The `review.classes` list, already past the `architecture` class addition.
+    classes: The `review.classes` list, verbatim from the settings section.
 
   Returns:
     A new list with the `design` entry's `experts.validation.planner_review` set when the class
@@ -629,9 +593,9 @@ def _add_planner_review_to_design(classes: list[dict]) -> list[dict]:
   return result
 
 
-def _migrate_architecture_and_planner(data: dict) -> dict:
+def _migrate_design_planner_review(data: dict) -> dict:
   """
-  Apply the v6 → v7 `architecture` class addition plus `design`'s `planner_review` slot.
+  Apply the v6 → v7 addition of `design`'s `planner_review` slot.
 
   Args:
     data: The `review` section content at v6.
@@ -639,9 +603,7 @@ def _migrate_architecture_and_planner(data: dict) -> dict:
   Returns:
     The section content with `classes` migrated; all other keys preserved.
   """
-  classes = _add_architecture_class(data.get(ReviewClassKey.CLASSES, []))
-  classes = _add_planner_review_to_design(classes)
-  return { **data, ReviewClassKey.CLASSES: classes }
+  return { **data, ReviewClassKey.CLASSES: _add_planner_review_to_design(data.get(ReviewClassKey.CLASSES, [])) }
 
 
 def _migrate_spec_protocol_refs(data: dict) -> dict:
@@ -875,7 +837,7 @@ MIGRATIONS = {
   3: _migrate_planner_and_reports,
   4: _migrate_context_from_frontmatter,
   5: _migrate_routing_to_coordinator,
-  6: _migrate_architecture_and_planner,
+  6: _migrate_design_planner_review,
   7: _migrate_spec_protocol_refs,
   8: _migrate_code_classes,
   9: _migrate_doc_height_protocol,

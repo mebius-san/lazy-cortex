@@ -20,8 +20,9 @@ Level mode: `seed-doc --root <folder-note-path> --doc <name>:<spec_doc_type>
 catalog root's or a product's own. A product's level note is resolved to
 the registered product whose `spec_path` is its folder, so the product
 tokens, the per-product template layer and the paint declarations are the
-product's own; at the catalog root the product tokens carry the content
-root's directory name and only the project-wide override layer applies.
+product's own; at the catalog root the product token carries the content
+root's directory name, no product tag is written, and only the project-wide
+override layer applies.
 Naming a product alongside `--root` is refused; the two spellings never
 combine.
 
@@ -33,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -73,6 +75,12 @@ _ERR_MODE_INCOMPLETE = "seed-doc needs <product> <folder-note-path>, or --root <
 _ROOT_TEMPLATE_CONTEXT_PRODUCT = "product"
 _ROOT_TEMPLATE_CONTEXT_VAULT = "vault"
 _NO_PRODUCT = ""
+
+# The template token carrying a document's product tag, and the frontmatter list item it fills —
+# dropped whole for a document that belongs to no product.
+_PRODUCT_TAG_TOKEN = "product_tag"
+_PRODUCT_TAG_LINE_RE = re.compile(
+    r"^[ \t]*-[ \t]*\{\{[ \t]*" + re.escape(_PRODUCT_TAG_TOKEN) + r"[ \t]*\}\}[ \t]*\n", re.M)
 
 
 def _note_source_requests(note_text: str) -> list[str]:
@@ -148,7 +156,7 @@ def _root_seed_inputs(repo: Path, note_path: Path, note_fm: dict, slug: str, doc
     catalog root), the substitution mapping and the chosen template file.
 
   Raises:
-    SystemExit: When no layer of the override chain carries a template for `doc_name`, nor any
+    ScaffoldRefusal: When no layer of the override chain carries a template for `doc_name`, nor any
       template declaring `doc_type`, or the first one found declares a different type.
   """
 
@@ -158,9 +166,9 @@ def _root_seed_inputs(repo: Path, note_path: Path, note_fm: dict, slug: str, doc
   # asset does. A product's own level note sits in the product's declared folder, so the
   # product that owns it names the document, styles it through its own template layer and
   # paints it with its own declarations — exactly as the product's assets are. The catalog root
-  # belongs to no product: its document takes its name from the document tree's own top-level
-  # directory, and its template comes from the shared per-type set with only the project-wide
-  # override layer in front of it.
+  # belongs to no product: its document takes its name from the document tree's own top-level directory,
+  # carries no product tag at all, and its template comes from the shared per-type set with only the
+  # project-wide override layer in front of it.
 
   # only a product's own level note has a product to resolve; the catalog root never does
   product: str = ""
@@ -168,9 +176,10 @@ def _root_seed_inputs(repo: Path, note_path: Path, note_fm: dict, slug: str, doc
   if note_fm.get(SpecKey.ROLE) == SpecValue.ROLE_PRODUCT:
     product, record = _product_for_note(repo, note_path)
 
-  # the catalog root has no product record, so the content root's own directory names it
+  # the catalog root has no product record, so the content root's own directory names it and no product
+  # tag is written; an empty tag drops the template's product-tag line
   content_root_name = spec_paths.spec_content_root(repo).name
-  label = tag = content_root_name
+  label, tag = content_root_name, ""
   if product:
     label, tag = product, scaffold_asset.product_tag(record)
 
@@ -183,6 +192,25 @@ def _root_seed_inputs(repo: Path, note_path: Path, note_fm: dict, slug: str, doc
       doc_name, alias_base = "" if product else _ROOT_TEMPLATE_CONTEXT_PRODUCT, expect_type = doc_type)
 
 
+def _drop_empty_tag_line(template: str, tokens: dict) -> str:
+  """
+  Remove the template's product-tag list item when the document carries no product tag.
+
+  Args:
+    template: Template source text.
+    tokens: The substitution tokens for this document.
+
+  Returns:
+    The template without its `- {{product_tag}}` line when the token is empty; unchanged otherwise.
+  """
+
+  # guard: the document has a product tag — the line is substituted as usual
+  if tokens.get(_PRODUCT_TAG_TOKEN):
+    return template
+  return _PRODUCT_TAG_LINE_RE.sub("", template)
+
+
+@scaffold_asset.refusal_exits
 def main(argv: list[str]) -> int:
   """
   Run the `seed-doc` subcommand: seed one authored doc beside an existing folder-note.
@@ -279,7 +307,9 @@ def main(argv: list[str]) -> int:
         repo, asset_type, product, name, alias_base = alias_base, expect_type = doc_type)
   else:
     product, tokens, tmpl_path = _root_seed_inputs(repo, note_path, note_fm, slug, name, doc_type)
-  doc_text = scaffold_asset.substitute(tmpl_path.read_text(encoding = "utf-8"), tokens)
+  # the template with an unfilled product-tag line dropped, then every token filled in
+  template = _drop_empty_tag_line(tmpl_path.read_text(encoding = "utf-8"), tokens)
+  doc_text = scaffold_asset.substitute(template, tokens)
   doc_text = scaffold_asset.ensure_doc_type(doc_text, doc_type)
 
   # the type's own paint: the icon names the kind of document, matchers own the colour later

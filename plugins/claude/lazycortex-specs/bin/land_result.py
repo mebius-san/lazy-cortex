@@ -37,13 +37,12 @@ if str(_BIN) not in sys.path:
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import iconize_inline  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from spec_keys import SpecKey  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# pylint: disable-next=import-error,wrong-import-position
+from spec_keys import AssetTypeKey, LevelDoc, ReleaseKey, SpecKey  # noqa: E402
 
 
 # Job-bundle layout, mirrored file-wise from `lazycortex-core`'s runtime rather than imported
@@ -65,7 +64,7 @@ _PATH_KEY = "path"
 
 # Bot identity for this worker's own commits.
 _LAND_AUTHOR_NAME = "lazy-spec.land-result"
-_LAND_AUTHOR_EMAIL = "lazy-spec.land-result@bot.invalid"
+LAND_AUTHOR_EMAIL = "lazy-spec.land-result@bot.invalid"
 
 # A link target pointing into the job's own result dir — what a writer spells when it references
 # an attachment it is returning alongside the document. Four shapes carry such a target: an inline
@@ -271,17 +270,68 @@ def _is_inside(path: Path, root: Path) -> bool:
   return path.is_relative_to(root.resolve())
 
 
+def _folder_note_frontmatter(folder: Path) -> dict:
+  """
+  Read the frontmatter of a folder's own note.
+
+  Args:
+    folder: The folder whose `<name>/<name>.md` note is read.
+
+  Returns:
+    The parsed frontmatter; empty when the folder has no note of its own.
+  """
+  path = folder / f"{folder.name}{_MD_SUFFIX}"
+
+  # guard: a folder without its own note carries no frontmatter to read
+  if not path.is_file():
+    return {}
+  return flip_gate.parse_frontmatter(path.read_text(encoding = "utf-8"))[0]
+
+
+def is_release_product_doc(target: Path, asset_dir: Path) -> bool:
+  """
+  Report whether a path is the product document a release build may revise outside its own folder.
+
+  Admits only the `architecture.md` in the root of the product owning the release.
+
+  Args:
+    target: The candidate document path.
+    asset_dir: The asset folder the job runs for.
+
+  Returns:
+    `True` when `asset_dir` is a release and `target` is the release owner's root `architecture.md`; `False`
+    otherwise.
+  """
+
+  # Domain(spec.lifecycle):
+  # # A release build revises the architecture of the product it ships
+  # The first step of a release's build dispatches an architect to revise the architecture document
+  # of the owner product against what the release carries. The revised text belongs to the product
+  # it describes and lands in that product's own folder, outside the release's folder. So besides its
+  # own folder a release accepts exactly one document, the architecture document sitting directly in
+  # the root of the owner product; any other document or location outside its own folder is refused.
+
+  # guard: only a release's job revises a document outside its own folder
+  if str(_folder_note_frontmatter(asset_dir).get(AssetTypeKey.TYPE) or "") != ReleaseKey.ASSET_TYPE:
+    return False
+
+  # the one document a build's first step writes, directly in the release owner's root
+  return target.resolve() == asset_dir.resolve().parent.parent / LevelDoc.ARCHITECTURE
+
+
 def document_target(job_dir: Path, asset_dir: Path) -> Path | None:
   """
   Name the path one dispatched job's result document takes, as the dispatch declared it.
 
   Args:
     job_dir: The job-bundle directory.
-    asset_dir: The asset folder the job's document must land in.
+    asset_dir: The asset folder the job's document must land in; for a release, the root `architecture.md` of
+      its owner product is accepted as well.
 
   Returns:
     The repo-root-resolved `target_doc` the dispatch payload declared, or `None` when the
-    payload is unreadable, declares no `target_doc`, or names a path outside `asset_dir`.
+    payload is unreadable, declares no `target_doc`, or names a path outside `asset_dir` that is not the root
+    `architecture.md` of a release's owner product.
   """
 
   # Domain(spec.lifecycle):
@@ -309,8 +359,8 @@ def document_target(job_dir: Path, asset_dir: Path) -> Path | None:
   # containment check below, which is what actually decides whether it may be written
   target = (flip_gate.repo_root(asset_dir) / raw).resolve()
 
-  # guard: a launch job's document belongs in its own asset folder and nowhere else
-  if not _is_inside(target, asset_dir):
+  # guard: a launch job's document belongs in its own asset folder, a release's revision also in its product's
+  if not _is_inside(target, asset_dir) and not is_release_product_doc(target, asset_dir):
     sys.stderr.write(
         f"land-result: {job_dir.name}: {_TARGET_DOC_KEY} {raw!r} is outside {asset_dir.name}\n")
     return None
@@ -372,42 +422,20 @@ def _commit(repo: Path, paths: list[str]) -> None:
   """
   Commit exactly `paths` under this worker's bot identity, repaint folded in.
 
+  Nothing is committed when the paths hold no change.
+
   Args:
     repo: The repository root.
-    paths: Repo-relative paths to stage and commit.
+    paths: Repo-relative paths to commit; the operator's staged entries stay out of the commit.
+
+  Raises:
+    subprocess.CalledProcessError: If the commit fails.
   """
-  # the icon repaint rides the same commit so no second, foreign-identity commit follows
-  extra_paths = iconize_inline.repaint_paths(repo, paths)
-  all_paths = list(dict.fromkeys([*paths, *extra_paths]))
-
-  # guard: a byte-identical re-landing changed nothing — an empty status over exactly these
-  # paths covers all three states at once (untracked, unstaged, staged), which `git diff` alone
-  # does not: it is blind to a file the first landing has only just created
-  status = subprocess.run(
-      ["git", "status", "--porcelain", "--", *all_paths],
-      cwd = str(repo), check = True, capture_output = True, text = True, encoding = "utf-8",
-  )
-  if not status.stdout.strip():
-    return
-
-  # stage exactly what this landing wrote — the index is shared, so nothing else may ride along
-  subprocess.run(
-      ["git", "add", "--", *all_paths],
-      cwd = str(repo), check = True, capture_output = True,
-  )
-
-  # commit under the dedicated bot identity so the operator's authorship stays untouched
-  subprocess.run(
-      [
-          "git",
-          "-c", f"user.name={_LAND_AUTHOR_NAME}",
-          "-c", f"user.email={_LAND_AUTHOR_EMAIL}",
-          "-c", "commit.gpgsign=false",
-          "commit", "-q", "-m",
-          f"{_LAND_AUTHOR_NAME}: land {len(paths)} file(s) for {Path(paths[0]).parent.name}",
-          "--", *all_paths,
-      ],
-      cwd = str(repo), check = True, capture_output = True,
+  # commit exactly what this landing wrote under the dedicated bot identity, its icon repaint folded in; a
+  # byte-identical re-landing changed nothing and commits nothing
+  flip_gate.commit_paths(
+      repo, paths, author_name = _LAND_AUTHOR_NAME, author_email = LAND_AUTHOR_EMAIL,
+      subject = f"{_LAND_AUTHOR_NAME}: land {len(paths)} file(s) for {Path(paths[0]).parent.name}",
   )
 
 
@@ -424,9 +452,35 @@ def _snapshot(destinations: list[Path]) -> dict[Path, bytes | None]:
   return {dest: dest.read_bytes() if dest.is_file() else None for dest in destinations}
 
 
+def _indexed(repo: Path, paths: list[str]) -> set[str]:
+  """
+  Select the paths the shared git index already carries.
+
+  Args:
+    repo: The repository root.
+    paths: Repo-relative paths to look up.
+
+  Returns:
+    The subset of `paths` with an index entry, staged or committed.
+  """
+  # guard: rejects a repository root that does not exist, which has no index to carry any path
+  if not repo.is_dir():
+    return set()
+
+  # one listing answers for every path at once, in the same repo-relative spelling the caller used
+  listing = subprocess.run(
+      ["git", "ls-files", "-z", "--", *paths],
+      cwd = str(repo), check = False, capture_output = True, text = True, encoding = "utf-8",
+  )
+  return {path for path in listing.stdout.split("\0") if path}
+
+
 def _unstage(repo: Path, paths: list[str]) -> None:
   """
   Take exactly `paths` back out of the shared index, leaving everything else staged.
+
+  Undoes the intent-to-add registrations a failed landing made for brand-new files. A path the index
+  already carried before the landing, including one the operator staged, is never reset.
 
   Notes:
     - Never raises: a reset that cannot run leaves the index as it is rather than masking the
@@ -434,13 +488,13 @@ def _unstage(repo: Path, paths: list[str]) -> None:
 
   Args:
     repo: The repository root.
-    paths: Repo-relative paths the failed landing may have staged.
+    paths: Repo-relative brand-new paths the failed landing registered as intent-to-add.
   """
   # guard: an empty pathspec would reset the whole index, including what the operator parked
   if not paths:
     return
 
-  # the landing staged these itself, so only these come back out
+  # the landing registered these itself, so only these come back out
   subprocess.run(
       ["git", "reset", "-q", "--", *paths],
       cwd = str(repo), check = False, capture_output = True,
@@ -476,8 +530,9 @@ def land_result(job_dir: Path, target_doc: Path) -> dict:
       writer parked in the shared index stays unpublished; a landing that changed no byte
       reports `landed` and makes no commit at all.
     - A write or a commit that fails puts every destination back to the bytes it held before
-      the landing — one the landing created is removed — takes the landing's own paths back
-      out of the shared index, and re-raises the failure.
+      the landing — one the landing created is removed — takes back only the intent-to-add
+      registrations the landing made, so the operator's staged entries survive, and re-raises
+      the failure.
 
   Args:
     job_dir: The finished job's bundle directory.
@@ -524,7 +579,9 @@ def land_result(job_dir: Path, target_doc: Path) -> dict:
 
   # what every destination holds right now, so a failed commit can undo the whole landing
   repo = flip_gate.repo_root(target_doc.parent)
-  before = _snapshot([target_doc, *(target_doc.parent / name for name in names[1:])])
+  destinations = [target_doc, *(target_doc.parent / name for name in names[1:])]
+  before = _snapshot(destinations)
+  indexed = _indexed(repo, [str(dest.resolve().relative_to(repo.resolve())) for dest in destinations])
   landed: list[str] = []
 
   # write and commit as one step: whatever the folder held comes back if the commit does not land
@@ -546,7 +603,7 @@ def land_result(job_dir: Path, target_doc: Path) -> dict:
   # the roll-back is the only thing this handler adds — the caller still decides what an
   # undeliverable job means, so the failure is re-raised exactly as it arrived
   except (subprocess.CalledProcessError, OSError):
-    _unstage(repo, landed)
+    _unstage(repo, [path for path in landed if path not in indexed])
     _restore(before)
     raise
 
@@ -559,9 +616,9 @@ def main(argv: list[str]) -> int:
   Land one finished job's result set from the command line, printing the result as JSON.
 
   Without `--target` the document goes where the job's own dispatch payload said, which must be
-  inside `asset_dir`. With it, the caller names the target itself — the coordinator's cascade
-  landing, whose document belongs to another asset — and the only bound left is the spec
-  catalog's own content root.
+  inside `asset_dir`, or be the root `architecture.md` of a release's owner product. With it, the
+  caller names the target itself — the coordinator's cascade landing, whose document belongs to
+  another asset — and the only bound left is the spec catalog's own content root.
 
   Args:
     argv: Command-line arguments, excluding the program name.

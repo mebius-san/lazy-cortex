@@ -1,11 +1,12 @@
 """
 Stdlib-only Prometheus metrics for the lazycortex-core runtime daemon.
 
-Every label value comes from a closed, declared set.
-Label values derived from raw user input, raw exception text, file paths, job ids,
-branch names, commit shas, or hostnames are rejected. The `daemon_name` label is
-intentionally a constant — operator identity (hostname) must not leak into metric
-streams.
+Every label value is meant to come from a closed, declared set, and keeping to that set is the caller's duty.
+Values derived from raw user input, raw exception text, file paths, job ids, branch names, commit shas, or
+hostnames do not belong in a label. The module itself rejects only values with characters outside the plain
+set `[A-Za-z0-9._-]` (spaces, path separators, free-form text); a value built from allowed characters passes
+whatever it names. The `daemon_name` label is intentionally a constant — operator identity (hostname) must
+not leak into metric streams.
 
 The module is inert until `init()` is called: the daemon invokes it only when
 `daemon.metrics.enabled` is true, so importing this module is free
@@ -42,7 +43,11 @@ if TYPE_CHECKING:
   from wsgiref.simple_server import WSGIServer
 
 
-_LABEL_VALUE_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+_LABEL_VALUE_RE = re.compile(r"^[A-Za-z0-9._-]+\Z")
+# Why a label value is refused; the stable tail of every rejection message.
+LABEL_REJECT_REASON = "closed-vocabulary guard rejects values outside [A-Za-z0-9._-]"
+# Rejection message for a label value outside the allowed set, filled with the label name and its value.
+LABEL_REJECT_TEMPLATE = "label {label!r} got value {value!r} — " + LABEL_REJECT_REASON
 
 
 def _validate_label_value(label: str, value: str) -> None:
@@ -62,17 +67,18 @@ def _validate_label_value(label: str, value: str) -> None:
   # Every metric label value must be drawn from a fixed, declared vocabulary rather than raw
   # operator- or user-controlled text — a job id, a file path, a commit hash, a branch name, or
   # free-form exception text would each multiply the number of distinct label combinations a metrics
-  # backend has to track, without bound. A hostname is refused for the same reason and for a second
+  # backend has to track, without bound. A hostname is kept out for the same reason and for a second
   # one besides: it would let the machine running a daemon leak into a stream meant to describe only
-  # the software's behavior. A value outside the allowed set is rejected outright, never sanitized,
-  # so a violation is caught at the call site instead of entering the metric stream in a mangled form.
+  # the software's behavior. Keeping to the fixed vocabulary is the duty of whoever supplies the
+  # value; the gate itself only checks that a value uses a restricted set of plain characters, so
+  # free-form text, spaces and path separators are caught, while a value built from allowed
+  # characters passes whatever it names. A value outside that character set is rejected outright,
+  # never sanitized, so a violation is caught at the call site instead of entering the metric
+  # stream in a mangled form.
 
   # guard: closed-vocabulary check rejects anything outside the allowed character set
   if not _LABEL_VALUE_RE.match(value):
-    raise ValueError(
-      f"label {label!r} got value {value!r} — closed-vocabulary guard "
-      "rejects values outside [A-Za-z0-9._-]"
-    )
+    raise ValueError(LABEL_REJECT_TEMPLATE.format(label = label, value = value))
 
 
 def _format_labels(labels: dict[str, str]) -> str:
@@ -110,7 +116,7 @@ def _format_value(value: float) -> str:
     Integer form when the value is whole; `repr` form otherwise so non-integer
     floats round-trip without precision loss.
   """
-  # guard: integer-valued floats render as bare integers for cleaner output
+  # integer-valued floats render as bare integers for cleaner output
   if value == int(value):
     return str(int(value))
   return repr(value)
@@ -271,7 +277,7 @@ def _bucket_label(bucket: float) -> str:
   Returns:
     Integer string when the boundary is whole; `repr` form otherwise.
   """
-  # guard: whole-number bucket boundaries render as bare integers
+  # whole-number bucket boundaries render as bare integers
   if bucket == int(bucket):
     return str(int(bucket))
   return repr(bucket)
@@ -360,20 +366,8 @@ class _Histogram:
 
 
 # Module-level state — populated by init().
+# waiver: module-level mutable state, one per process by design — the daemon's recorders and its exporter thread share one registry
 _state: dict = {}
-
-
-# waiver: test-only surface, kept deliberately — the metric series live in one module-level dict
-# that outlives a single test, and the alternative is a registry object threaded through every
-# record_* signature. Not worth that churn for one private reset.
-def _reset_for_tests() -> None:
-  """
-  Discard every metric series and registered configuration recorded by `init`.
-
-  Intended for use only by test fixtures that need to start each test from a
-  pristine module state.
-  """
-  _state.clear()
 
 
 def is_enabled() -> bool:
@@ -568,25 +562,28 @@ def _resolve_status(exit_code: int, error: str | None) -> tuple[str, str | None]
   # still counts as an error rather than disappearing from the metrics, under a generic catch-all
   # reason.
 
-  # guard: clean exit short-circuits to ok with no reason
+  # a clean exit is ok with no reason
   if exit_code == 0:
     return ("ok", None)
   # waiver: cross-module daemon error tag, not an internal key
   if error == "timeout":
     return ("timeout", "timeout")
 
-  # guard: a registry entry rejected by its own schema is its own axis, not a failed run
+  # a registry entry rejected by its own schema is its own axis, not a failed run
   if error is not None and error.startswith(HaltReason.ROUTINE_CONFIG_INVALID):
     return ("error", HaltReason.ROUTINE_CONFIG_INVALID)
   # waiver: cross-module daemon error-tag prefix, not an internal key
   if error is not None and error.startswith("external_dir_broken"):
     # waiver: cross-module daemon error tag, not an internal key
     return ("error", "external_dir_broken")
-  # waiver: cross-module daemon error tag, not an internal key
-  if error == "git_pre_failed":
+  # the daemon logs a failed sync step as "git_pre failed: <git's message>" / "git_post failed: <...>"
+  # waiver: cross-module daemon error-tag prefix, not an internal key
+  if error is not None and error.startswith("git_pre failed"):
+    # waiver: closed-set metric reason, not an internal key
     return ("error", "git_pre_failed")
-  # waiver: cross-module daemon error tag, not an internal key
-  if error == "git_post_failed":
+  # waiver: cross-module daemon error-tag prefix, not an internal key
+  if error is not None and error.startswith("git_post failed"):
+    # waiver: closed-set metric reason, not an internal key
     return ("error", "git_post_failed")
   if exit_code == -1 and error is not None:
     # the daemon's broad except wraps the original message as
@@ -660,6 +657,9 @@ def record_daemon_halt(reason: str, triggered_by: str) -> None:
   Args:
     reason: Closed-set string identifying why the daemon halted.
     triggered_by: Closed-set string identifying the trigger of the halt.
+
+  Raises:
+    ValueError: If `reason` or `triggered_by` fails the closed-vocabulary label check.
   """
   # guard: metrics are off — recording is a no-op
   if not is_enabled():
@@ -759,94 +759,6 @@ def set_dirty_tree_gauge(dirty: bool) -> None:
     _state[MetricStateKey.DIRTY_TREE].set({ MetricLabel.REPO: repo }, 1 if dirty else 0)
 
 
-# --- Read API for tests ------------------------------------------------------
-
-def _registry_for(name: str) -> _Counter | _Gauge | _Histogram | None:
-  """
-  Look up a registered metric instance by its exposition-format name.
-
-  Args:
-    name: Metric base name (the same string passed to the metric's constructor;
-      no `_bucket`, `_sum`, or `_count` suffix).
-
-  Returns:
-    The matching `_Counter`, `_Gauge`, or `_Histogram` instance, or None when
-    the module is not initialized or no metric matches the name.
-  """
-  # guard: metrics are off — no registry to look up
-  if not is_enabled():
-    return None
-  for key in (
-    "ticks", "runs", "errors", "tokens", "duration", "last_tick",
-    "queue_depth", "up", "daemon_halted", "daemon_paused", "build_info", "halt_count", "dirty_tree",
-    "expert_jobs", "expert_job_duration", "incidents",
-  ):
-    metric = _state.get(key)
-    if metric is not None and metric.name == name:
-      return metric
-  return None
-
-
-def get_value(metric_name: str, labels: dict[str, str]) -> float | None:
-  """
-  Return the current value of a counter or gauge series.
-
-  Args:
-    metric_name: Exposition-format name of the counter or gauge.
-    labels: Mapping providing a value for every label declared by the metric.
-
-  Returns:
-    The current series value, or None when the metric is not registered, is not
-    a counter or gauge, or has no value recorded for the given label combination.
-  """
-  metric = _registry_for(metric_name)
-
-  # guard: metric not registered
-  if metric is None:
-    return None
-
-  # guard: histograms expose values via get_bucket_value, not this entry point
-  if not isinstance(metric, (_Counter, _Gauge)):
-    return None
-  key = tuple(labels.get(name, "") for name in metric.labelnames)
-  return metric.values.get(key)
-
-
-def get_bucket_value(metric_name: str, labels: dict[str, str], le: str) -> float | None:
-  """
-  Return the count in one histogram bucket for the given label combination.
-
-  Args:
-    metric_name: Exposition-format base name of the histogram.
-    labels: Mapping providing a value for every label declared by the histogram.
-    le: Bucket label string — `'0.5'`, `'1'`, `'+Inf'`, etc.
-
-  Returns:
-    The bucket count as a float, or None when the metric is not a registered
-    histogram, has no series for the given labels, or the `le` value does not
-    match any configured bucket boundary.
-  """
-  metric = _registry_for(metric_name)
-
-  # guard: only histograms expose bucket values
-  if not isinstance(metric, _Histogram):
-    return None
-  key = tuple(labels.get(name, "") for name in metric.labelnames)
-  state = metric.values.get(key)
-
-  # guard: series has no observations yet
-  if state is None:
-    return None
-  buckets, _sum, _count = state
-  # waiver: Prometheus histogram +Inf bucket bound, not a domain constant
-  if le == "+Inf":
-    return float(buckets[-1])
-  for idx, bucket in enumerate(_BUCKETS):
-    if _bucket_label(bucket) == le:
-      return float(buckets[idx])
-  return None
-
-
 # --- Render + HTTP -----------------------------------------------------------
 
 CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
@@ -911,9 +823,8 @@ class _QuietRequestHandler(WSGIRequestHandler):
   """
   Request handler for the exposition endpoint that keeps scrapes out of the process's stderr.
 
-  Scope:
-    - Identical to the stdlib handler in every respect except the per-request access line, which is
-      dropped rather than written.
+  Behaves identically to the stdlib handler in every respect except the per-request access line, which is
+  dropped rather than written.
 
   Notes:
     - The endpoint is scraped on a fixed interval forever, and the supervisor captures the daemon's
@@ -961,7 +872,7 @@ def expose(bind: str = "127.0.0.1", port: int = 9464) -> WSGIServer:
   return server
 
 
-# --- Repo-label resolver (Task A2) -------------------------------------------
+# --- Repo-label resolver ----------------------------------------------------
 
 def resolve_repo_label(repo_root: Path, override: str | None) -> str:
   """
@@ -987,12 +898,12 @@ def resolve_repo_label(repo_root: Path, override: str | None) -> str:
   # across renames of the same checkout but unreadable on its own — a deliberate trade against the
   # alternative of refusing to label the repo at all.
 
-  # guard: explicit override wins
+  # an explicit override wins
   if override:
     return override
   candidate = repo_root.name
 
-  # guard: the readable default is used only when it satisfies the closed label charset
+  # the readable default is used only when it satisfies the closed label charset
   if _LABEL_VALUE_RE.match(candidate):
     return candidate
   try:
@@ -1004,8 +915,7 @@ def resolve_repo_label(repo_root: Path, override: str | None) -> str:
       url = rc.stdout.strip()
       if url:
         # waiver: stdlib encoding idiom
-        digest = hashlib.sha1(url.encode("utf-8")).hexdigest()
-        return digest[:12]
+        return hashlib.sha1(url.encode("utf-8")).hexdigest()[:12]
   except FileNotFoundError:
     # git binary not present on PATH — fall through to the last-resort constant
     pass
@@ -1013,7 +923,7 @@ def resolve_repo_label(repo_root: Path, override: str | None) -> str:
   return "unnamed"
 
 
-# --- Queue-depth filesystem scan (Task A3) -----------------------------------
+# --- Queue-depth filesystem scan --------------------------------------------
 
 def set_queue_depth_from_filesystem(repo_root: Path) -> None:
   """
@@ -1079,45 +989,35 @@ def set_queue_depth_from_filesystem(repo_root: Path) -> None:
 
 def _classify_job_state(job_dir: Path) -> str:
   """
-  Classify an expert job directory into the closed-set state label.
+  Classify an expert job directory into its lifecycle state label.
 
-  Mirrors `expert_runtime._job_status` so the metric matches the runtime's own
-  view of each job. Possible return values: `cancelled`, `queued`, `active`,
-  `dead`, `done`, `deferred`, `failed`. The filesystem signatures consulted are:
-
-  - CANCELLED marker present                             → cancelled
-  - DEAD marker present                                  → dead
-  - DONE marker + response reporting a finished outcome  → done
-  - DONE marker + response reporting `deferred`          → deferred
-  - DONE marker + any other response                     → failed
-  - READY marker + PID file (no DEAD, no response.json)  → active
-  - READY marker only (no PID file)                      → queued
-  - none of the above                                    → queued (fallback)
+  The state is read from the job's on-disk markers and response, so the metric matches the runtime's own view of
+  each job.
 
   Args:
     job_dir: Path to the job directory under `.experts/.jobs/<expert>/`.
 
   Returns:
-    The closed-set state label for the job.
+    One of `cancelled`, `queued`, `active`, `dead`, `done`, `deferred`, or `failed`.
   """
-  # guard: cancellation is a terminal operator decision and outranks every other marker —
+  # cancellation is a terminal operator decision and outranks every other marker —
   # a cancelled bundle keeps its READY, so without this branch it reads as pending work the
   # pump will never take, and the queue depth reports a backlog that does not exist
   if (job_dir / JobMarker.CANCELLED).exists():
     return JobStatus.CANCELLED
 
-  # guard: DEAD outranks every other marker — a job the runtime abandoned is nothing else
+  # DEAD outranks every other marker — a job the runtime abandoned is nothing else
   if (job_dir / JobMarker.DEAD).exists():
     return JobStatus.DEAD
 
-  # guard: a finished job is classified by its response rather than by the marker alone
+  # a finished job is classified by its response rather than by the marker alone
   if (job_dir / JobMarker.DONE).exists():
     # only an explicit finished outcome counts as done; a missing, malformed, or
     # outcome-less response is a failure the dashboard must show, not hide, and
     # postponed work gets its own state so it cannot hide inside either bucket
     return classify_response(read_response(job_dir))
 
-  # guard: READY without DEAD or DONE is still in the queue — only a PID file makes it active
+  # READY without DEAD or DONE is still in the queue — only a PID file makes it active
   if (job_dir / JobMarker.READY).exists():
     if (job_dir / JobMarker.PID).exists():
       return JobStatus.ACTIVE
@@ -1127,12 +1027,31 @@ def _classify_job_state(job_dir: Path) -> str:
   return JobStatus.QUEUED
 
 
-# --- Token aggregation (Task B2) ---------------------------------------------
+# --- Token aggregation ------------------------------------------------------
 
 # Tokens are recorded into <repo>/.logs/lazy-core/runtime/tokens.jsonl by
 # the expert pump. This module reads from a checkpointed offset stored
-# in `_state[MetricStateKey.TOKEN_OFFSET]` (process-local; durable persistence comes
-# with the Phase B XDG_STATE checkpoint file — Task B2 step 2).
+# in `_state[MetricStateKey.TOKEN_OFFSET]`, which lives in this process only.
+
+# Separator a provider-routed model name carries (`rt-openai/gpt-5.1`), and its label-safe stand-in.
+_MODEL_PROVIDER_SEP = "/"
+_MODEL_PROVIDER_SEP_LABEL = "_"
+
+
+def _model_label_value(model: str) -> str:
+  """
+  Map a token-log model name onto the label character set.
+
+  Args:
+    model: Model name as the token log recorded it.
+
+  Returns:
+    `model` with every provider separator `/` replaced by `_`.
+  """
+  # a provider-routed model is a closed, declared name, not free text — normalise its separator so
+  # the record is counted instead of being dropped by the label charset check
+  return model.replace(_MODEL_PROVIDER_SEP, _MODEL_PROVIDER_SEP_LABEL)
+
 
 def aggregate_tokens_from_log(repo_root: Path) -> None:
   """
@@ -1140,8 +1059,10 @@ def aggregate_tokens_from_log(repo_root: Path) -> None:
 
   Reads `<repo_root>/.logs/lazy-core/runtime/tokens.jsonl` starting from the
   byte offset recorded in module state and advances the offset to the end of
-  the file. Malformed lines and entries with label values outside the closed
-  set are skipped silently so a corrupt suffix does not poison the counter.
+  the file. A `/` in the model name is normalised to `_` so provider-routed
+  models are counted. Malformed lines and entries with label values still
+  outside the closed set are skipped silently so a corrupt suffix does not
+  poison the counter.
 
   Args:
     repo_root: Absolute path to the repository root.
@@ -1170,7 +1091,7 @@ def aggregate_tokens_from_log(repo_root: Path) -> None:
       # waiver: external token-log JSON field name and default, not internal keys
       routine = rec.get("routine") or "expert-pump"
       # waiver: external token-log JSON field name and default, not internal keys
-      model = rec.get("model") or "unknown"
+      model = _model_label_value(rec.get("model") or "unknown")
 
       # the log's `expert` field names the actual consumer; older lines predate the field
       # waiver: external token-log JSON field name and default, not internal keys
@@ -1344,7 +1265,7 @@ def aggregate_incidents_from_ledger(repo_root: Path) -> None:
       # dashboard has already seen — counting them again would inflate the rate an alert fires on
       # for the one incident that happens to get worked on more than once.
 
-      # guard: only the opening event counts as one incident
+      # only the opening event counts as one incident
       if rec.get(IncidentKey.PHASE) != IncidentPhase.OPENED:
         continue
       kind = rec.get(IncidentKey.KIND) or ""

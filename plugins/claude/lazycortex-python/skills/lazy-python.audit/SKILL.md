@@ -41,7 +41,7 @@ Verify the four plugin rule files (`lazy-python.style.md`, `lazy-python.docstrin
 Run:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py" check1 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/audit_checks.py" check1 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `PASS` / `WARN` (a rule is missing from `<consumer>/.claude/rules/` → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts)) / `FAIL` (a rule was hand-edited away from the plugin canon → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts), an intentional clobber of the mirror).
@@ -53,19 +53,19 @@ Verify every `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.*.md` path cited from
 Run:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py" check2 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/audit_checks.py" check2 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `PASS` / `WARN` (no mirrored rules under `<consumer>/.claude/rules/` to scan → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts)) / `FAIL` (a mirrored rule cites a `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.*.md` path that no longer exists → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts) when the mirror is stale; when the canon itself is gone from the plugin tree, file a plugin bug).
 
 ## Check 3: Artifacts present
 
-Verify the plugin tree at `${CLAUDE_PLUGIN_ROOT}` carries every required artifact — manifest + overview, 4 rules, 5 references, 7 binaries, the PostToolUse hook script + its `hooks.json` manifest, the check-style skill, every agent under `agents/`, and the 7 templates. Missing artifact means the plugin install is incomplete on this machine.
+Verify the plugin tree at `${CLAUDE_PLUGIN_ROOT}` carries every required artifact — manifest + overview, 4 rules, 6 references, 7 binaries, the PostToolUse hook script + its `hooks.json` manifest, the check-style skill, every agent under `agents/`, and the 7 templates. Missing artifact means the plugin install is incomplete on this machine.
 
 Run:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py" check3 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/audit_checks.py" check3 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `PASS` / `FAIL` (the plugin tree at `${CLAUDE_PLUGIN_ROOT}` is incomplete on this machine → `/plugin update lazycortex-python@lazycortex` restores it).
@@ -77,7 +77,7 @@ Verify `<consumer>/cli/chk-py` and `<consumer>/cli/tst-py` exist, open with a sh
 Run:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py" check4 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/audit_checks.py" check4 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `PASS` (both wrappers deployed and substituted) / `WARN` (one or both wrappers missing from `<consumer>/cli/` → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts)) / `FAIL` (a `{{CHK_BIN_PATH}}` / `{{TST_BIN_PATH}}` placeholder is still in the wrapper — the install was interrupted → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts)).
@@ -89,7 +89,7 @@ Verify `<consumer>/pyproject.toml` carries the six always-on checker sections (`
 Run:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py" check5 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/audit_checks.py" check5 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `PASS` (all six always-on sections present) / `WARN` (1-2 sections missing from `<consumer>/pyproject.toml` → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts), which merges them from `pyproject-defaults.toml`) / `FAIL` (3+ sections missing, or `pyproject.toml` itself absent → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts)).
@@ -101,7 +101,7 @@ Probe for the PyCharm `inspect.sh` script on `$PATH`. The check is informational
 Run:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py" check6 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/audit_checks.py" check6 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `PASS` (`inspect.sh` found) / `WARN` (not on `$PATH`, so `pch.py` stays skipped while the rest of the stack runs → put PyCharm's `inspect.sh` on `$PATH` on this host; no skill in this plugin installs it).
@@ -113,7 +113,7 @@ Verify each of the four overlay files (`coding_guidelines.md`, `documenting_guid
 Run:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py" check7 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/audit_checks.py" check7 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `PASS` (all four headers correct) / `WARN` (1-2 overlay files under `<consumer>/docs/guidelines/` missing or carrying the wrong header → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts), whose Phase 5 scaffolds the stubs; a consumer-edited overlay keeps its body, restore the header by hand) / `FAIL` (3+ missing or wrong → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts)).
@@ -125,7 +125,7 @@ Verify `<consumer>/.claude/rules/lazy-core.scaffold.md` mentions the `python-tem
 Run:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py" check8 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/audit_checks.py" check8 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `PASS` (entry present) / `WARN` (`<consumer>/.claude/rules/lazy-core.scaffold.md` is missing, or carries no `python-template.py` entry → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts)).
@@ -137,7 +137,7 @@ Report whether `<consumer>/CLAUDE.md` carries a `lazy-python` pointer. This is *
 Run:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py" check9 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/audit_checks.py" check9 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `PASS` (pointer present) / `INFO` (`<consumer>/CLAUDE.md` absent, or carries no `lazy-python` mention — nothing to act on; install never writes the pointer, and an operator who wants one adds it by hand).
@@ -149,7 +149,7 @@ Verify the plugin ships a well-formed PostToolUse hook manifest at `${CLAUDE_PLU
 Run:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py" check10 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/audit_checks.py" check10 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `PASS` (manifest present + declares the hook) / `WARN` (`${CLAUDE_PLUGIN_ROOT}/hooks/hooks.json` missing, or no PostToolUse entry references `lazy-python.check-style.sh` → `/plugin update lazycortex-python@lazycortex` restores the shipped manifest) / `FAIL` (`hooks.json` is invalid JSON, so the engine loads none of the plugin's hooks → `/plugin update lazycortex-python@lazycortex`).
@@ -161,7 +161,7 @@ Mirror the probe-then-fallback logic of `_ensure_venv.sh`, read-only. A venv is 
 Run:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py" check11 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/audit_checks.py" check11 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `PASS` (probe satisfied or fallback bootstrappable) / `WARN` (recoverable degradation — a found venv missing tools or pytest plugins, no venv plus `bootstrap-fallback = false`, or no `uv` on `$PATH` → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts), or point `[tool.lazy-python].venv` at a venv that satisfies the contract).
@@ -173,7 +173,7 @@ Verify a domain-groups dictionary exists once the sources carry `Domain(…)` bl
 Run:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py" check12 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/audit_checks.py" check12 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `PASS` (dictionary present, or no `Domain(…)` blocks in the sources yet) / `WARN` (the sources file knowledge under `Domain(…)` groups but the configured or conventional dictionary does not exist, so no group is validated against anything → run `/lazy-python.knowledge-sweep`, which builds it and refiles what is parked).
@@ -185,7 +185,7 @@ Verify `<consumer>/pyproject.toml` lists `cli/mypy/protected_access.py` under `[
 Run:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py" check13 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/audit_checks.py" check13 ${CLAUDE_PROJECT_DIR})
 ```
 
 Outcome: `PASS` (plugin listed, shim present and current) / `WARN` (`[tool.mypy]` `plugins` omits `cli/mypy/protected_access.py`, the shim file is missing, or the shim is stale against the template → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts); a string-form `plugins` without the entry, or a non-table `tool` / `tool.mypy` → make the edit the message names by hand) / `FAIL` (`pyproject.toml` absent or not valid TOML → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts)).

@@ -1,5 +1,5 @@
 ---
-description: Contract for the scaffold registry — schema, plain-scalar policy, per-plugin manifest SOT, the scaffold primitive, install via scaffold-sync, the registry-file write discipline, precedence, and audit invariants.
+description: Contract for the scaffold registry — schema, plain-scalar policy, per-plugin manifest SOT, the scaffold primitive, install via the scaffold sync-plugin verb, the registry-file write discipline, precedence, and audit invariants.
 ---
 # Scaffold registry contract
 
@@ -43,23 +43,26 @@ Each plugin declares its registry entries in a per-group manifest `plugins/claud
 
 `<core-cli>` stands for the core plugin's `bin/lazycortex-core` file — the copy under `~/.claude/plugins/cache/lazycortex/lazycortex-core/<version>/` that `~/.claude/plugins/installed_plugins.json` records as installed, or `plugins/claude/lazycortex-core/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
-The `## Registry` block is owned exclusively by the `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold` CLI (`bin/scaffold_registry.py`), a dependency-free parser/serializer (no PyYAML). Five subcommands, each of which takes `--registry <path>` naming the registry markdown file to operate on — argparse marks the flag required on all five, so an invocation that omits it exits 2 without touching anything:
+The `## Registry` block is owned exclusively by the `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold` CLI (`bin/scaffold_registry.py`), a dependency-free parser/serializer (no PyYAML). Seven subcommands take `--registry <path>` naming the registry markdown file to operate on — argparse marks the flag required on all seven, so an invocation that omits it exits 2 without touching anything:
 
 - `scaffold upsert --registry <path> --plugin <n> --entries <@file|json>`
 - `scaffold remove --registry <path> --plugin <n>`
+- `scaffold set-entry --registry <path> --plugin <n> --template <path> --glob <g>...` — one template's globs under one key, written through `upsert`; status `registered`, `unchanged`, `created-and-registered`.
+- `scaffold drop-entry --registry <path> --plugin <n> --template <path>` — one template out of one key, the key itself once empty; status `removed-entry`, `removed-plugin`, `not-found` (exit 1).
 - `scaffold list --registry <path>`
 - `scaffold validate --registry <path>`
 - `scaffold sync-rule --registry <path> --src <shipped rule file>` — the whole-file refresh, not a per-key write: it replaces the plugin-owned prose and frontmatter of the rule file from `--src` while carrying the consumer's `## Registry` block across, and `--registry` names the consumer's target copy rather than a bare registry. Status is `installed`, `unchanged`, `refreshed`, `failed`, or `error` (the consumer's block does not parse — the file is left alone). This is the invocation `lazy-core.install` Step 3 §5a makes for `lazy-core.scaffold.md`.
 
-Registry writes (`upsert` / `remove`) are **surgical** — only the target key's line-region is rewritten; every other top-level key (`_local`, sibling plugins) and all bytes outside the fence stay byte-for-byte. `upsert` of identical entries is `unchanged`; a missing registry file is created from a minimal template. `_local` is an ordinary key to the primitive — no special-casing.
+An eighth, `scaffold sync-plugin --plugin <n> --install-path <path> --scope <project|user>`, takes no `--registry`: it derives the registry from the scope and runs the whole install-side sync described in § Install-skill responsibilities.
+
+Registry writes (`upsert` / `remove` / `set-entry` / `drop-entry` / `sync-plugin`) are **surgical** — only the target key's line-region is rewritten; every other top-level key (`_local`, sibling plugins) and all bytes outside the fence stay byte-for-byte. `upsert` of identical entries is `unchanged`; a missing registry file is created from a minimal template. `_local` is an ordinary key to the primitive — no special-casing.
 
 ## Install-skill responsibilities
 
-Every plugin that contributes templates to the registry MUST invoke `lazy-core.scaffold-sync` from its install skill: `Skill(skill: "lazycortex-core:lazy-core.scaffold-sync", args: "plugin=<name> installPath=<path> scope=<project|user>")`. That one shipped skill does the whole job:
+Every plugin that contributes templates to the registry MUST run the `scaffold sync-plugin` verb from its install skill: `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold sync-plugin --plugin <name> --install-path <path> --scope <project|user>`. The verb copies the plugin's templates into the consumer, merges its manifests and upserts its key, and its JSON reply names every copy state and the registry `status` (`registered`, `unchanged`, `created-and-registered`, `none`, `collision`, `error`). Two properties hold because the verb enforces them, not by convention:
 
-1. **Copy templates** — `<installPath>/templates/<group>/*` (excluding `scaffold.entries.json`) → `<consumerScope>/.claude/templates/<group>/`. Idempotent; prompts on drift the same way the rule sync does. **A plugin writes only its own files.** Before copying, the skill resolves every path the registry lists under `_local` and passes it to the sync script as a protected target: such a file is never compared, never overwritten, and reported as `protected`. A shipped template that carries the same filename confers no claim on it — name equality is not ownership.
-2. **Upsert the plugin's key** — reads the plugin's `scaffold.entries.json` manifest(s), unions them across groups, and calls `scaffold upsert --registry <consumer registry> --plugin <name> --entries <@file>`, which surgically replaces only `data[<name>]` and creates a minimal registry file if absent.
-3. **Touches no other key** — `_local` and sibling-plugin keys are out of bounds, enforced by the primitive's surgical write (not by convention).
+1. **A plugin writes only its own files.** A path the registry lists under `_local` is reported `protected` and never compared or overwritten; a shipped namesake confers no claim on it — name equality is not ownership.
+2. **Touches no other key** — `_local` and sibling-plugin keys are out of bounds, enforced by the primitive's surgical write.
 
 Install skills MUST NOT hand-roll the YAML upsert (parse / replace / serialize) — that logic lives once, in the primitive. Uninstall skills (when they exist) drop their own key via `scaffold remove --registry <consumer registry> --plugin <name>` and delete the template files the manifest referenced.
 
@@ -81,7 +84,7 @@ A customer may also use any other top-level key that doesn't collide with an ins
 
 ## Registry-file write discipline (§5a)
 
-The `## Registry` block is **primitive-owned**. Generic rule-sync (`lazy-core.install` Step 3) MUST exclude `lazy-core.scaffold.md` from its `overwrite` path and MUST NOT rewrite the `## Registry` block — it may additively merge only the prose/frontmatter above it. The block is mutated only by `scaffold upsert` / `remove`, surgically. The file is created (full template + `{}`) only when absent; when present-and-parseable, only key-regions change; when present-but-broken, the primitive FAILs and surfaces the parse error rather than clobbering.
+The `## Registry` block is **primitive-owned**. Generic rule-sync (`lazy-core.install` Step 3) MUST exclude `lazy-core.scaffold.md` from its `overwrite` path and MUST NOT rewrite the `## Registry` block — it may additively merge only the prose/frontmatter above it. The block is mutated only by the `scaffold` verbs (`upsert`, `remove`, `set-entry`, `drop-entry`, `sync-plugin`), surgically. The file is created (full template + `{}`) only when absent; when present-and-parseable, only key-regions change; when present-but-broken, the primitive FAILs and surfaces the parse error rather than clobbering.
 
 ## Precedence & collisions (§7)
 

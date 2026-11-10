@@ -1,4 +1,5 @@
-"""Runtime job-marker sidecar for asset status folder-notes, plus the `mark-job` verb writing it.
+"""
+Runtime job-marker sidecar for asset status folder-notes, plus the `mark-job` verb writing it.
 
 The two markers that gate an asset's automation — which coordinator job is in flight on the note,
 which launch-checkbox expert job is — live here rather than in the folder-note's frontmatter. Two
@@ -12,15 +13,17 @@ Store shape — `<repo>/.runtime/lazy-specs.jobs.json`, keyed by the note's repo
       "specs/my-product/bugs/thing/thing.md": {
         "coordinator_job": {"trigger": ..., "expert": ..., "job_id": ...} | null,
         "active_job":      {"checkbox": ..., "expert": ..., "job_id": ...} | null,
-        "pending_wake":    "job-done" | "declined" | null
+        "pending_wake":    "job-done" | "declined" | null,
+        "coherence_jobs":  [{"doc": ..., "expert": ..., "job_id": ..., "dropped": ...}, ...] | null
       }
     }
 
 Both job fields carry native JSON objects validated against the closed sub-schema their key
-declares, so a malformed value refuses at write time rather than crashing a later tick. An absent
-key and an all-null entry mean the same thing; `update` prunes an entry once every field is null,
-so an untouched note leaves no row. Writes are atomic (temp file + rename) — the daemon's main
-loop is serial by contract, so nothing beyond atomicity is needed.
+declares, and every member of the `coherence_jobs` list is validated the same way, so a malformed
+value refuses at write time rather than crashing a later tick. A `coherence_jobs` member's `dropped` is
+optional. An absent key and an all-null entry mean the same thing; `update` prunes an entry once every
+field is null, so an untouched note leaves no row. Writes are atomic (temp file + rename) — the daemon's main loop is serial by
+contract, so nothing beyond atomicity is needed.
 """
 from __future__ import annotations
 
@@ -32,7 +35,7 @@ from pathlib import Path
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  from collections.abc import Mapping
+  from collections.abc import Callable, Mapping
 
 
 _BIN = Path(__file__).resolve().parent
@@ -50,12 +53,18 @@ from spec_keys import CoordinatorTrigger, JobMarker  # noqa: E402
 _RUNTIME_DIR = ".runtime"
 _JOBS_SIDECAR = "lazy-specs.jobs.json"
 
+# The sibling sidecar recording each stage lag already raised on a note, so a repeat warns instead of waking.
+_STAGE_LAG_SIDECAR = "lazy-specs.stage-lag.json"
+
 # The closed field schema of one note's entry. A field outside it is refused the way `note-set-key`
 # refuses a frontmatter key outside its own schema — a typo must not become state.
-_FIELDS = (JobMarker.COORDINATOR_JOB, JobMarker.ACTIVE_JOB, JobMarker.PENDING_WAKE)
+_FIELDS = (JobMarker.COORDINATOR_JOB, JobMarker.ACTIVE_JOB, JobMarker.PENDING_WAKE, JobMarker.COHERENCE_JOBS)
 
 # The two dict-valued fields, whose values are validated against a closed sub-schema below.
 _DICT_FIELDS = (JobMarker.COORDINATOR_JOB, JobMarker.ACTIVE_JOB)
+
+# The list-valued field, each member of which is validated against the field's closed sub-schema below.
+_LIST_FIELDS = (JobMarker.COHERENCE_JOBS,)
 
 # Maps the `mark-job` CLI's kind token to the entry field it writes.
 _FIELD_BY_KIND = {
@@ -87,7 +96,8 @@ def _enum_values(cls: type[object]) -> frozenset[str]:
 # Sub-schema per dict-valued field — `(required keys, {field: closed-value-set})`. Moved here with
 # the markers themselves from `note_ops.note_set_key`, which validated the same two shapes while
 # they were frontmatter keys; `lazy-spec.audit`'s own deep-shape checks read this store. The key
-# set is closed in both entries; only the coordinator's `trigger` closes its VALUE set too — a
+# set is closed in every entry, widened only by the optional counts `_OPTIONAL_COUNTS` names; only
+# the coordinator's `trigger` closes its VALUE set too — a
 # launch checkbox's label is playbook vocabulary, including labels a playbook parameterises by
 # tool, so it is validated for shape alone rather than against a list this worker would have to
 # grow every time a playbook names a new one.
@@ -100,6 +110,15 @@ _SUB_SCHEMAS: dict[str, tuple[frozenset[str], dict[str, frozenset[str]]]] = {
         frozenset({ JobMarker.TRIGGER, JobMarker.EXPERT, JobMarker.JOB_ID }),
         { JobMarker.TRIGGER: _enum_values(CoordinatorTrigger) },
     ),
+    JobMarker.COHERENCE_JOBS: (
+        frozenset({ JobMarker.DOC, JobMarker.EXPERT, JobMarker.JOB_ID }),
+        {},
+    ),
+}
+
+# The optional keys a field's object may carry beside its required ones, each a positive count when present
+_OPTIONAL_COUNTS: dict[str, frozenset[str]] = {
+    JobMarker.COHERENCE_JOBS: frozenset({ JobMarker.DROPPED }),
 }
 
 
@@ -153,7 +172,7 @@ def note_key(repo: Path, note: Path) -> str:
     return note.resolve().as_posix()
 
 
-def empty_entry() -> dict[str, dict | str | None]:
+def empty_entry() -> dict[str, dict | list | str | None]:
   """
   Return the entry every note has before anything is marked on it.
 
@@ -165,16 +184,18 @@ def empty_entry() -> dict[str, dict | str | None]:
 
 def check_sub_schema(field: str, value: dict) -> str | None:
   """
-  Validate a dict-valued field against its sub-schema.
+  Validate one job-metadata object against the sub-schema of the field it is written to.
 
   Every marker's key set stays closed. A field's VALUE set is closed only where the vocabulary
   belongs to this worker — the coordinator's own `trigger`. A launch checkbox's label does not:
   which labels exist, and how a playbook parameterises one by tool, is the playbook's decision,
-  so the label is validated for shape alone.
+  so the label is validated for shape alone. A member of the `coherence_jobs` list is checked the
+  same way, as one object of that field. Beside its required keys such a member may carry the optional
+  `dropped` key, which must be a positive integer (a boolean is refused); any other extra key is refused.
 
   Args:
-    field: The entry field being written (`coordinator_job` / `active_job`).
-    value: The candidate job-metadata object.
+    field: The entry field being written (`coordinator_job` / `active_job` / `coherence_jobs`).
+    value: The candidate job-metadata object — for `coherence_jobs`, one member of the list.
 
   Returns:
     An error string naming the violation, or None when `field` declares no sub-schema or `value`
@@ -196,8 +217,16 @@ def check_sub_schema(field: str, value: dict) -> str | None:
   if sub_schema is None:
     return None
   required_keys, closed_fields = sub_schema
-  if value.keys() != required_keys:
-    return f"expected exactly the keys {sorted(required_keys)}, got {sorted(value.keys())}"
+  optional_keys = _OPTIONAL_COUNTS.get(field, frozenset())
+  if not required_keys <= value.keys() <= required_keys | optional_keys:
+    optional = f" plus optionally {sorted(optional_keys)}" if optional_keys else ""
+    return f"expected exactly the keys {sorted(required_keys)}{optional}, got {sorted(value.keys())}"
+  for name in sorted(optional_keys & value.keys()):
+    count = value[name]
+
+    # guard: an optional count is a positive integer or absent; a bool is no count
+    if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+      return f"{name} must be a positive integer, got {count!r}"
   for name, allowed in closed_fields.items():
     if value[name] not in allowed:
       return f"{name} must be one of {sorted(allowed)}, got {value[name]!r}"
@@ -221,12 +250,7 @@ def _read_store(repo: Path) -> dict[str, dict]:
     The parsed store, or `{}` when the file is absent, unreadable, or not a JSON object — a
     corrupt sidecar is runtime scratch and re-derives itself, so it never fails a tick.
   """
-  path = sidecar_path(repo)
-  try:
-    data = json.loads(path.read_text(encoding = "utf-8"))
-  except (OSError, json.JSONDecodeError):
-    return {}
-  return data if isinstance(data, dict) else {}
+  return _read_json(sidecar_path(repo))
 
 
 def _write_store(repo: Path, store: Mapping[str, dict]) -> None:
@@ -237,7 +261,34 @@ def _write_store(repo: Path, store: Mapping[str, dict]) -> None:
     repo: Repository root holding the sidecar.
     store: The whole store to serialise.
   """
-  path = sidecar_path(repo)
+  _write_json(sidecar_path(repo), store)
+
+
+def _read_json(path: Path) -> dict[str, dict]:
+  """
+  Read a sidecar store from disk.
+
+  Args:
+    path: The sidecar file.
+
+  Returns:
+    The stored mapping, or an empty one when the file is absent, unreadable, malformed, or not a mapping.
+  """
+  try:
+    data = json.loads(path.read_text(encoding = "utf-8"))
+  except (OSError, json.JSONDecodeError):
+    return {}
+  return data if isinstance(data, dict) else {}
+
+
+def _write_json(path: Path, store: Mapping[str, dict]) -> None:
+  """
+  Write a sidecar store to disk.
+
+  Args:
+    path: The sidecar file; its directory is created when missing.
+    store: The mapping to write.
+  """
   path.parent.mkdir(parents = True, exist_ok = True)
 
   # write beside the target and rename over it, so a reader never observes a half-written store
@@ -246,7 +297,101 @@ def _write_store(repo: Path, store: Mapping[str, dict]) -> None:
   os.replace(tmp, path)
 
 
-def _normalize_entry(stored: object) -> dict[str, dict | str | None]:
+def stage_lag_path(repo: Path) -> Path:
+  """
+  Locate the stage-lag sidecar.
+
+  Args:
+    repo: The repository root.
+
+  Returns:
+    The path of the gitignored `.runtime/lazy-specs.stage-lag.json` sidecar.
+  """
+  return repo / _RUNTIME_DIR / _STAGE_LAG_SIDECAR
+
+
+def read_stage_lag(repo: Path, note: Path) -> dict[str, str]:
+  """
+  Read the stage-lag record of one asset note.
+
+  Args:
+    repo: The repository root.
+    note: The asset's status folder-note.
+
+  Returns:
+    A mapping of `<basename>:<review_result>` to `woken` or `warned`; empty when nothing is recorded.
+  """
+  stored = _read_json(stage_lag_path(repo)).get(note_key(repo, note))
+
+  # guard: nothing (or garbage) recorded for this note reads as no lag ever raised
+  if not isinstance(stored, dict):
+    return {}
+  return { key: value for key, value in stored.items() if isinstance(key, str) and isinstance(value, str) }
+
+
+def write_stage_lag(repo: Path, note: Path, fingerprints: Mapping[str, str]) -> None:
+  """
+  Replace the stage-lag record of one asset note.
+
+  An empty record removes the note's row; clearing a row that was never written writes nothing.
+
+  Guarantees:
+    - A concurrent reader never observes a partially written record.
+
+  Args:
+    repo: The repository root.
+    note: The asset's status folder-note.
+    fingerprints: The new record, mapping `<basename>:<review_result>` to `woken` or `warned`.
+  """
+
+  # Contract:
+  # A concurrent reader never observes a partially written record;
+  # it sees either the previous content or the new one.
+
+  # the whole stored mapping and this note's key in it
+  store = _read_json(stage_lag_path(repo))
+  key = note_key(repo, note)
+
+  # guard: clearing a record that was never written leaves no file behind
+  if not fingerprints and key not in store:
+    return
+
+  # an empty record is indistinguishable from an absent one, so drop the row instead
+  if fingerprints:
+    store[key] = dict(fingerprints)
+  else:
+    store.pop(key, None)
+  _write_json(stage_lag_path(repo), store)
+
+
+def prune_stage_lag(repo: Path, drop: Callable[[str], bool], *, dry_run: bool = False) -> list[str]:
+  """
+  Remove every stage-lag row whose note key the predicate selects.
+
+  Args:
+    repo: The repository root.
+    drop: Called with each stored note key; True removes that row.
+    dry_run: When True, report the selected keys and write nothing.
+
+  Returns:
+    The selected note keys, sorted; empty when the store is absent, unreadable, or holds no match.
+
+  Raises:
+    OSError: The rewritten store could not be written.
+  """
+  store = _read_json(stage_lag_path(repo))
+  dropped = sorted(key for key in store if drop(key))
+
+  # guard: a dry run or a store with nothing to drop leaves the file exactly as it is
+  if dry_run or not dropped:
+    return dropped
+
+  # the surviving rows replace the store through the same atomic write every other writer uses
+  _write_json(stage_lag_path(repo), { key: value for key, value in store.items() if key not in dropped })
+  return dropped
+
+
+def _normalize_entry(stored: object) -> dict[str, dict | list | str | None]:
   """
   Normalize one raw store row into the closed-schema entry shape.
 
@@ -255,7 +400,8 @@ def _normalize_entry(stored: object) -> dict[str, dict | str | None]:
 
   Returns:
     The entry with every field of the closed schema present; a non-dict row, a non-dict value
-    in a dict field, and a blank wake token all read as `None`.
+    in a dict field, a list field holding no valid member, and a blank wake token all read as
+    `None`.
   """
   entry = empty_entry()
 
@@ -266,12 +412,16 @@ def _normalize_entry(stored: object) -> dict[str, dict | str | None]:
     value = stored.get(field)
     if field in _DICT_FIELDS:
       entry[field] = value if isinstance(value, dict) and value else None
+    elif field in _LIST_FIELDS:
+      members = value if isinstance(value, list) else []
+      entry[field] = [ member for member in members
+                       if isinstance(member, dict) and check_sub_schema(field, member) is None ] or None
     else:
       entry[field] = value if isinstance(value, str) and value.strip() else None
   return entry
 
 
-def read(repo: Path, note: Path) -> dict[str, dict | str | None]:
+def read(repo: Path, note: Path) -> dict[str, dict | list | str | None]:
   """
   Read one note's marker entry.
 
@@ -285,7 +435,24 @@ def read(repo: Path, note: Path) -> dict[str, dict | str | None]:
   return _normalize_entry(_read_store(repo).get(note_key(repo, note)))
 
 
-def entries(repo: Path) -> dict[str, dict[str, dict | str | None]]:
+def coherence_jobs(repo: Path, note: Path) -> list[dict]:
+  """
+  Read the coherence checks in flight for one note's documents.
+
+  Args:
+    repo: Repository root holding the sidecar.
+    note: The folder-note's path.
+
+  Returns:
+    The recorded members in recorded order, each `{"doc", "expert", "job_id"}` as strings plus `"dropped"` as an
+    integer when one was recorded; empty when none is recorded.
+  """
+  jobs = read(repo, note)[JobMarker.COHERENCE_JOBS]
+  return [ { str(key): value if key == JobMarker.DROPPED else str(value) for key, value in job.items() }
+           for job in jobs if isinstance(job, dict) ] if isinstance(jobs, list) else []
+
+
+def entries(repo: Path) -> dict[str, dict[str, dict | list | str | None]]:
   """
   Read every recorded row of the sidecar at once.
 
@@ -299,7 +466,37 @@ def entries(repo: Path) -> dict[str, dict[str, dict | str | None]]:
   return { key: _normalize_entry(stored) for key, stored in _read_store(repo).items() }
 
 
-def update(repo: Path, note: Path, changes: Mapping[str, dict | str | None]) -> dict[str, dict | str | None]:
+def _check_members(field: str, value: object) -> list[dict]:
+  """
+  Validate the value of a list-valued field member by member.
+
+  Args:
+    field: The list-valued entry field being written.
+    value: The candidate value.
+
+  Returns:
+    The members, each satisfying the field's closed sub-schema.
+
+  Raises:
+    ValueError: If the value is not a list, or a member is not an object or violates the sub-schema.
+  """
+  # guard: a list-valued field never takes anything but a list
+  if not isinstance(value, list):
+    raise ValueError(f"mark-job: {field} takes a JSON list, got {value!r}")
+  for member in value:
+    # guard: every member is an object of the field's closed shape, or the whole write is refused
+    if not isinstance(member, dict):
+      raise ValueError(f"mark-job: {field} takes JSON objects, got {member!r}")
+    error = check_sub_schema(field, member)
+
+    # guard: a member that violates the closed shape is refused just as cleanly
+    if error is not None:
+      raise ValueError(f"mark-job: {field} {error}")
+  return value
+
+
+def update(repo: Path, note: Path,
+           changes: Mapping[str, dict | list | str | None]) -> dict[str, dict | list | str | None]:
   """
   Apply `changes` to one note's entry and persist the store.
 
@@ -317,7 +514,8 @@ def update(repo: Path, note: Path, changes: Mapping[str, dict | str | None]) -> 
 
   Raises:
     ValueError: If `changes` names a field outside the closed schema, gives a dict-valued field
-      a non-dict value, or gives it an object violating that field's closed sub-schema.
+      a non-dict value or a list-valued field a non-list one, or gives either an object violating
+      that field's closed sub-schema.
   """
 
   # Contract:
@@ -344,6 +542,8 @@ def update(repo: Path, note: Path, changes: Mapping[str, dict | str | None]) -> 
       if error is not None:
         raise ValueError(f"mark-job: {field} {error}")
       entry[field] = value
+    elif field in _LIST_FIELDS and value is not None:
+      entry[field] = _check_members(field, value) or None
     else:
       entry[field] = value.strip() if isinstance(value, str) and value.strip() else None
 

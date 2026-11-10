@@ -41,9 +41,9 @@ from expert_pump import (  # pylint: disable=import-error
   build_expert_argv,
   filter_tcc_protected,
   get_additional_dirs,
-  _normalize_mcp_config,
-  _normalize_setting_sources,
-  _VALID_SETTING_SOURCES,
+  normalize_mcp_config,
+  normalize_setting_sources,
+  VALID_SETTING_SOURCES,
 )
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from expert_runtime import resolve_agent_model  # pylint: disable=import-error
@@ -52,6 +52,10 @@ from lazy_settings import load_section, resolve_agent_model_tier  # pylint: disa
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from plugin_dirs_cli import derive_plugin_dirs  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from provider_env import (  # pylint: disable=import-error
+  ProviderConfigError, ProviderKey, apply_spawn_env, resolve_provider, resolve_token, validate_expert_model,
+)
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import rate_limit_flag  # pylint: disable=import-error
 # waiver: ReferenceError is reference_resolver's domain exception, not the builtin
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -59,6 +63,7 @@ from reference_resolver import resolve, ReferenceError  # pylint: disable=import
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from constants import (  # pylint: disable=import-error
   ClaudeSettingsFile,
+  DaemonKey,
   HaltReason,
   InboxGuardKey,
   JobConfigKey,
@@ -91,7 +96,7 @@ _DEFAULT_ROUTINE_TYPE = "subprocess"
 _ROUTINE_PROTOCOL_SINGULAR = "protocol"
 
 # Model tiers accepted without a WARN (mirrors expert_runtime._MODEL_TIERS plus `default`).
-_MODEL_TIERS = frozenset({ "haiku", "sonnet", "opus", "default" })
+_MODEL_TIERS = frozenset({ "haiku", "sonnet", "opus", "fable", "default" })
 
 # Wall budget (seconds) for one probe subprocess; a hung server should be
 # dropped by MCP_TIMEOUT long before this trips. TimeoutExpired past this = hung.
@@ -341,7 +346,7 @@ def _load_rate_guard_cfg(repo: Path) -> dict:
   Raises:
     json.JSONDecodeError: If the tracked `lazy.settings.json` or its local overlay is not valid JSON.
   """
-  return rate_limit_flag.config(load_section(_resolve_settings_path(repo), SettingsKey.DAEMON))
+  return rate_limit_flag.resolve_config(load_section(_resolve_settings_path(repo), SettingsKey.DAEMON))
 
 
 def collect_target_experts(repo: Path) -> list[str]:
@@ -402,10 +407,6 @@ def _collect_routine_protocols(repo: Path, expert: str) -> list[str]:
   on the expert, so they are gathered across every routine that dispatches this
   expert and de-duplicated.
 
-  Guarantees:
-    - Each reference appears once, in the order its first dispatching routine declares it, a
-      routine's list before its singular key.
-
   Notes:
     - Reads `lazy.settings.json` and its local overlay from disk.
 
@@ -414,17 +415,12 @@ def _collect_routine_protocols(repo: Path, expert: str) -> list[str]:
     expert: Expert name whose dispatching routines are scanned.
 
   Returns:
-    The de-duplicated protocol references, in first-seen order.
+    The de-duplicated protocol references, in first-seen order, a routine's list before its singular key.
 
   Raises:
     json.JSONDecodeError: If the tracked `lazy.settings.json` or its local overlay is not valid JSON.
   """
   out: list[str] = []
-
-  # Contract:
-  # Each reference appears exactly once, in the order its first dispatching routine declares
-  # it, with a routine's list contributing before its singular key; the static checks resolve
-  # the references in that order.
 
   # walk every routine that dispatches this expert, merging its references in declaration order
   for cfg in load_section(_resolve_settings_path(repo), SettingsKey.ROUTINES).values():
@@ -765,15 +761,11 @@ def _static_checks(repo: Path, expert: str, entry: dict | None) -> list[dict]:
   """
   Run the no-spawn validation checks for one expert.
 
-  Verifies the expert is registered, its agent reference resolves, each declared
-  aspect and each dispatching-routine protocol resolves, each `mcp_config` path
-  exists and parses as JSON, any pinned model is a recognized tier, an explicit
-  model resolves for the expert either via a pinned model or an `agent_models` entry
-  for its agent, and every declared inbox directory it is dispatched from resolves
-  on disk. When the `user` setting source is declared, the operator's user-scope settings
-  file is also checked for directories a background spawn cannot load. Missing or
-  unresolvable required references and an unresolved model are `fail`; an unknown model
-  tier is a soft `warn`.
+  Answers whether the expert's configuration is statically sound, using only what is on disk and
+  launching nothing. A missing or unresolvable required reference and an unresolved model are
+  reported as `fail`. An explicit model outside the four tier aliases is a `fail` for an expert
+  bound to a provider, matching the refusal dispatch raises, and a soft `warn` for an expert
+  without one.
 
   Notes:
     - Reads `lazy.settings.json`, its local overlay, the referenced files and each declared
@@ -840,12 +832,20 @@ def _static_checks(repo: Path, expert: str, entry: dict | None) -> list[dict]:
 
   # the operator's own settings file reaches a spawn only when the expert opts into the user scope
   # waiver: external Claude Code setting-source scope name, not an internal key
-  if "user" in _normalize_setting_sources(entry.get(JobConfigKey.SETTING_SOURCES)):
+  if "user" in normalize_setting_sources(entry.get(JobConfigKey.SETTING_SOURCES)):
     findings.extend(_user_scope_checks())
 
-  # an unrecognized pin is only a soft warning — the CLI may still accept the alias
+  # a provider-bound expert's own model must be a tier alias — the dispatch refuses anything else
   model = entry.get(JobConfigKey.MODEL)
-  if model and isinstance(model, str) and not _is_known_model(repo, model):
+  provider_name = entry.get(JobConfigKey.PROVIDER)
+  if provider_name and model:
+    try:
+      validate_expert_model(provider_name, model)
+    except ProviderConfigError as error:
+      findings.append(_build_finding(Level.FAIL, str(error)))
+
+  # elsewhere an unrecognized pin is only a soft warning — the CLI may still accept the alias
+  elif model and isinstance(model, str) and not _is_known_model(repo, model):
     findings.append(_build_finding(Level.WARN, f"model '{model}' is not a known tier nor present in agent_models"))
 
   # Domain(runtime.preflight):
@@ -905,7 +905,7 @@ def _mcp_config_checks(repo: Path, mcp_config: object) -> list[dict]:
     return findings
 
   # every declared path is checked; the first bad one does not hide the rest
-  for cfg_path in _normalize_mcp_config(mcp_config, repo):
+  for cfg_path in normalize_mcp_config(mcp_config, repo):
     cfg_file = Path(cfg_path)
 
     # guard: declared config path is absent on disk
@@ -954,7 +954,7 @@ def _setting_sources_checks(setting_sources: object) -> list[dict]:
       continue
 
     # an unrecognized scope is dropped by the normalizer, so the operator is told here
-    if source.strip().lower() not in _VALID_SETTING_SOURCES:
+    if source.strip().lower() not in VALID_SETTING_SOURCES:
       findings.append(_build_finding(
         Level.WARN, f"setting_sources value '{source}' is not one of user / project / local (dropped)"
       ))
@@ -1005,9 +1005,6 @@ def _read_config_servers(repo: Path, mcp_config: object) -> list[str]:
   """
   List the server names declared across an expert's MCP-config files.
 
-  Guarantees:
-    - Each server name appears once, in the order the config files declare it.
-
   Notes:
     - Reads each declared config file from disk; a missing or unparsable file is skipped, since
       the static check reports it.
@@ -1024,13 +1021,9 @@ def _read_config_servers(repo: Path, mcp_config: object) -> list[str]:
   if not mcp_config or not isinstance(mcp_config, (str, list)):
     return []
 
-  # Contract:
-  # Each server name appears exactly once, in the order the config files declare it — file by
-  # file, then entry by entry; the probe classifies and reports the servers in that order.
-
   # collect the server table of every readable config, file by file
   names: list[str] = []
-  for cfg_path in _normalize_mcp_config(mcp_config, repo):
+  for cfg_path in normalize_mcp_config(mcp_config, repo):
     cfg_file = Path(cfg_path)
 
     # guard: unreadable / missing config — static check already flagged it
@@ -1207,6 +1200,46 @@ def _read_and_unlink_debug_file(debug_file: str) -> str:
   return text
 
 
+def _apply_provider_probe(repo: Path, entry: dict, env: dict[str, str]) -> tuple[str | None, str | None]:
+  """
+  Point a provider-bound expert's probe at the endpoint and model its real job would use.
+
+  Notes:
+    - Rewrites `env` in place when the provider resolves and its token is found.
+
+  Args:
+    repo: Repository root whose settings hold the providers registry and the agent tiers.
+    entry: The `experts[<expert>]` settings block; carries a `provider` key.
+    env: Probe spawn environment to rewrite.
+
+  Returns:
+    A tuple of the refusal message (or `None` when the probe may spawn) and the model the probe runs on.
+
+  Raises:
+    json.JSONDecodeError: If the tracked `lazy.settings.json` or its local overlay is not valid JSON.
+  """
+  # the job's model: the expert's own pin, else its agent's tier — exactly what dispatch records
+  model = entry.get(JobConfigKey.MODEL) or resolve_agent_model(repo, entry.get(JobConfigKey.AGENT))
+
+  # guard: a provider the dispatch would refuse leaves nothing to probe
+  try:
+    provider = resolve_provider(repo, entry[JobConfigKey.PROVIDER])
+  except ProviderConfigError as error:
+    return str(error), model
+
+  # guard: the pump fails the job before the spawn when the token is nowhere to be found
+  if (token := resolve_token(provider[ProviderKey.TOKEN_ENV])) is None:
+    return (
+      f"provider {provider[ProviderKey.NAME]!r}: token variable {provider[ProviderKey.TOKEN_ENV]!r} "
+      f"is set neither in the environment nor in ~/.claude/.env"
+    ), model
+
+  # the probe's environment becomes the job's: provider endpoint in, operator credentials out
+  daemon_token_env = load_section(_resolve_settings_path(repo), SettingsKey.DAEMON).get(DaemonKey.TOKEN_ENV)
+  apply_spawn_env(env, provider, token, daemon_token_env = daemon_token_env)
+  return None, model
+
+
 def _run_probe(repo: Path, entry: dict) -> dict:
   """
   Emulate one expert launch and classify its MCP init and agent resolution.
@@ -1218,9 +1251,16 @@ def _run_probe(repo: Path, entry: dict) -> dict:
   most often because the `claude` binary is not on PATH — is reported as a spawn error naming the
   binary, with no exit code and the agent unresolved.
 
+  For an expert bound to a provider, the probe runs on the model the job would get and in the
+  provider's environment, so it reaches the same endpoint and model as the real job. A provider the
+  dispatch would refuse, or a token found nowhere, is reported as a spawn error and nothing is
+  launched.
+
   Notes:
     - Spawns one real `claude` subprocess inside the repository and blocks until it exits or the
-      probe wall budget runs out.
+      probe wall budget runs out; no subprocess is spawned when the provider is refused.
+    - For a provider-bound expert, the spawn environment carries the provider's endpoint, token and
+      tier aliases, with the operator and daemon credentials removed.
     - Writes the MCP debug log to a temporary file and removes it once read, whether or not the
       spawn started.
     - Sets the MCP timeout variables on a copy of the process environment; the caller's environment
@@ -1234,7 +1274,8 @@ def _run_probe(repo: Path, entry: dict) -> dict:
 
   Returns:
     A dynamic-result dict with `exit`, `duration_s`, `timed_out`, `spawn_error` (the message, or
-    `None` when the spawn started), `agent_resolved`, a per-server `servers` list, and a
+    `None` when the spawn started; carries the refusal message when the provider is refused),
+    `agent_resolved`, a per-server `servers` list, and a
     `best_effort_plugin_dirs` flag.
 
   Raises:
@@ -1242,11 +1283,18 @@ def _run_probe(repo: Path, entry: dict) -> dict:
   """
   env, best_effort = _build_probe_env(repo)
   mcp_config = entry.get(JobConfigKey.MCP_CONFIG)
+  model = entry.get(JobConfigKey.MODEL)
+
+  # a provider-bound probe reaches the job's own endpoint and model; a refusal the pump would meet is
+  # reported as a spawn error and nothing is launched
+  spawn_error: str | None = None
+  if entry.get(JobConfigKey.PROVIDER):
+    spawn_error, model = _apply_provider_probe(repo, entry, env)
 
   # build the same command line the pump would spawn, then bolt on MCP debug output
   argv = build_expert_argv(
     repo, env,
-    contract_path = _resolve_contract_path(), model = entry.get(JobConfigKey.MODEL), mcp_config = mcp_config,
+    contract_path = _resolve_contract_path(), model = model, mcp_config = mcp_config,
     agent_ref = entry.get(JobConfigKey.AGENT) or "", prompt = _PROBE_PROMPT,
     setting_sources = entry.get(JobConfigKey.SETTING_SOURCES),
   )
@@ -1263,19 +1311,20 @@ def _run_probe(repo: Path, entry: dict) -> dict:
   # the result slots every outcome below fills in: the clock, and the flags a normal exit leaves unset
   started = time.monotonic()
   timed_out = False
-  spawn_error: str | None = None
   exit_code: int | None = None
   stdout = ""
 
   # run the probe spawn under a bounded timeout — an overrun counts as hung, not failed, and a
   # spawn the host refuses (binary not on PATH) counts as a spawn error the verdict reports
   try:
-    proc = subprocess.run(
-      argv, cwd = repo, env = env,
-      capture_output = True, text = True, timeout = _PROBE_TIMEOUT_SEC, check = False, encoding = "utf-8",
-    )
-    exit_code = proc.returncode
-    stdout = proc.stdout or ""
+    # spawn only when no provider refusal already settled the verdict — a refused provider is never probed
+    if spawn_error is None:
+      proc = subprocess.run(
+        argv, cwd = repo, env = env,
+        capture_output = True, text = True, timeout = _PROBE_TIMEOUT_SEC, check = False, encoding = "utf-8",
+      )
+      exit_code = proc.returncode
+      stdout = proc.stdout or ""
   except subprocess.TimeoutExpired as error:
     timed_out = True
     stdout = error.stdout if isinstance(error.stdout, str) else ""
@@ -1291,8 +1340,8 @@ def _run_probe(repo: Path, entry: dict) -> dict:
   try:
     cfg = _load_rate_guard_cfg(repo)
     if cfg[RateLimitGuardKey.ENABLED]:
-      for info in rate_limit_flag.frames(stdout):
-        if (trigger := rate_limit_flag.triggered(info, cfg)) is not None:
+      for info in rate_limit_flag.parse_frames(stdout):
+        if (trigger := rate_limit_flag.evaluate_trigger(info, cfg)) is not None:
           # waiver: writer self-identification label, not a reusable domain key
           rate_limit_flag.record(info, trigger, writer = "preflight-probe")
   except OSError as error:
@@ -1316,10 +1365,8 @@ def _propose_fixes(expert: str, static: list[dict], dynamic: dict | None) -> lis
   """
   Propose concrete fixes for one failing expert.
 
-  Translates bad-path static findings into `fix-path` proposals, an unpinned-model
-  static finding into a `pin-model` proposal, and each bad per-server dynamic status
-  into a `drop-mcp-server` (timed-out / spawn-failed) or `mcp-login` (auth-required /
-  pending-approval) proposal. The skill applies each only after the operator confirms.
+  Turns the failing static findings and the bad per-server probe statuses into fix proposals.
+  The skill applies each only after the operator confirms.
 
   Args:
     expert: Bare local expert name the fixes target.
@@ -1424,31 +1471,31 @@ def _compute_verdict(static: list[dict], dynamic: dict | None) -> str:
   # and went wrong does. A probe that did run fails the expert on a wall-clock hang, an agent that
   # never proved it resolved, or any declared server landing in an unhealthy state.
 
-  # guard: any hard static failure fails the expert regardless of the probe
+  # any hard static failure fails the expert regardless of the probe
   if any(finding.get(ResultKey.LEVEL) == Level.FAIL for finding in static):
     return Verdict.FAIL
 
-  # guard: static-only run (no probe) with no hard failure passes
+  # a static-only run (no probe) with no hard failure passes
   if not dynamic:
     return Verdict.OK
 
-  # guard: a deliberately skipped probe (rate-limit flag up) is not evidence of failure
+  # a deliberately skipped probe (rate-limit flag up) is not evidence of failure
   if dynamic.get(ResultKey.SKIPPED):
     return Verdict.OK
 
-  # guard: the probe never started — the host cannot launch the expert at all
+  # the probe never started — the host cannot launch the expert at all
   if dynamic.get(ResultKey.SPAWN_ERROR):
     return Verdict.FAIL
 
-  # guard: probe hit the wall timeout — hung spawn
+  # the probe hit the wall timeout — a hung spawn
   if dynamic.get(ResultKey.TIMED_OUT):
     return Verdict.FAIL
 
-  # guard: agent never resolved — spawn would fall back to the default assistant
+  # the agent never resolved — the spawn would fall back to the default assistant
   if not dynamic.get(ResultKey.AGENT_RESOLVED):
     return Verdict.FAIL
 
-  # guard: any declared server hit a bad init status
+  # any declared server hit a bad init status
   if any(srv.get(ResultKey.STATUS) in _BAD_STATUSES for srv in dynamic.get(ResultKey.SERVERS, [])):
     return Verdict.FAIL
 
@@ -1507,7 +1554,7 @@ def evaluate_expert(repo: Path, expert: str, *, probe: bool) -> dict:
     ResultKey.NAME: expert,
     ResultKey.STATIC: static,
     ResultKey.DYNAMIC: dynamic,
-    ResultKey.SETTING_SOURCES: _normalize_setting_sources(
+    ResultKey.SETTING_SOURCES: normalize_setting_sources(
       raw_sources if isinstance(raw_sources, (str, list)) else None
     ),
     ResultKey.VERDICT: verdict,

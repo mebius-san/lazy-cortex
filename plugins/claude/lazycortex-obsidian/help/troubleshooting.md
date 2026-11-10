@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, likely causes, and fixes for lazycortex-obsidian — install, iconize, diagram render, plugin updates, tag pages, and vault manifest capture/deploy.
-last_regen: 2026-10-06
+last_regen: 2026-11-10
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree branching first on which skill aborted or misbehaved (install / iconize-install / iconize-config / iconize-sync / diagram-install / update-plugin / gen-tag-pages); each branch then splits on the specific symptom; each leaf names the troubleshooting entry that resolves it"
@@ -16,8 +16,8 @@ source_skills:
   - lazy-obsidian.audit
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: 2b8e9e79da15a0e25e187f4c05ae6011a36f0740
-surface_sha: 789f8e700f5d535daefe8163bb70652acb8a6ae50976f612b989179a91c96f21
+source_sha: 95a6f5224213cc4af073635a199aa35b8e68949b
+surface_sha: 21caa7f5b3de5d2982c65ca9566655b984d9ea7fa64e677d248c2f60966773b5
 ---
 # Troubleshooting
 
@@ -55,9 +55,9 @@ surface_sha: 789f8e700f5d535daefe8163bb70652acb8a6ae50976f612b989179a91c96f21
 
 **Symptom**: `/lazy-obsidian.iconize-install` aborts partway through Step 1.5 with a message like "Hard dependency `folder-notes` (or `obsidian-icon-folder` or `iconize-reloader`) could not be installed/updated."
 
-**Likely cause**: `/lazy-obsidian.update-plugin` returned FAIL for one of the three required plugins — most commonly a network failure reaching the Obsidian community registry or GitHub releases.
+**Likely cause**: The plugin-install step refused one of the three required plugins. The message quotes its reason: the community registry was unreachable, the id was not in the registry, the release could not be fetched and nothing was cached, or the vault's `community-plugins.json` is not a JSON array.
 
-**Fix**: Check network connectivity. Run `/lazy-obsidian.update-plugin <id>` for the failing plugin directly to see the underlying error. Once the network issue is resolved, re-run `/lazy-obsidian.iconize-install` — the skill is idempotent and will resume from a clean state.
+**Fix**: Fix what the quoted reason names — for a network problem, check connectivity. Run `/lazy-obsidian.update-plugin <id>` for the failing plugin directly to see the same refusal on its own. Once resolved, re-run `/lazy-obsidian.iconize-install` — the skill is idempotent and will resume from a clean state.
 
 ---
 
@@ -77,7 +77,7 @@ surface_sha: 789f8e700f5d535daefe8163bb70652acb8a6ae50976f612b989179a91c96f21
 
 **Likely cause**: One of two things: Iconize's `data.json` does not exist yet (Obsidian has never launched with the plugin enabled, so it hasn't initialized the file), or the Iconize plugin is not configured to read icons from frontmatter (`iconInFrontmatterEnabled` is not `true`).
 
-**Fix**: Open Obsidian once with the Iconize plugin enabled so it initializes `data.json`. Then re-run `/lazy-obsidian.iconize-install` — Step 2.6 asserts the required frontmatter-feature settings (`iconInFrontmatterEnabled: true`, `iconInFrontmatterFieldName: "iconize_icon"`, `iconColorInFrontmatterFieldName: "iconize_color"`) and writes them if absent. After that, re-run `/lazy-obsidian.iconize-sync reconcile` to repopulate the frontmatter keys.
+**Fix**: Open Obsidian once with the Iconize plugin enabled so it initializes `data.json`. Then re-run `/lazy-obsidian.iconize-install` — its Iconize plugin-install step merges the shipped frontmatter-feature settings (`iconInFrontmatterEnabled: true`, `iconInFrontmatterFieldName: "iconize_icon"`, `iconColorInFrontmatterFieldName: "iconize_color"`) into `data.json`, and Step 2.6 then only checks that they are in place. If Step 2.6 reports `refused`, Iconize is still not configured to paint from frontmatter; the report quotes what differs. Re-run `/lazy-obsidian.update-plugin obsidian-icon-folder` to re-apply the shipped settings, then re-run the install. After that, re-run `/lazy-obsidian.iconize-sync reconcile` to repopulate the frontmatter keys.
 
 ---
 
@@ -145,9 +145,9 @@ surface_sha: 789f8e700f5d535daefe8163bb70652acb8a6ae50976f612b989179a91c96f21
 
 **Symptom**: `/lazy-obsidian.update-plugin` fails immediately with a message saying it could not fetch the community registry from `obsidianmd/obsidian-releases`.
 
-**Likely cause**: No network access, or the GitHub raw content endpoint is temporarily unavailable.
+**Likely cause**: The community catalog could not be fetched — no network access, or the GitHub raw content endpoint is temporarily unavailable — and no cached copy of the catalog exists yet.
 
-**Fix**: Check network connectivity and retry. No vault files are modified before the registry fetch, so retrying is safe with no cleanup needed.
+**Fix**: Check network connectivity and retry. The refusal comes before any write, so the vault is left as it was and retrying is safe with no cleanup needed.
 
 ---
 
@@ -161,23 +161,33 @@ surface_sha: 789f8e700f5d535daefe8163bb70652acb8a6ae50976f612b989179a91c96f21
 
 ---
 
-## `/lazy-obsidian.update-plugin` aborts: binary download failed
+## `/lazy-obsidian.update-plugin` is refused: release fetch or binary install failed
 
-**Symptom**: The skill starts successfully but fails during Step 5 with a message about being unable to fetch `manifest.json` or `main.js` from a GitHub release. It reports restoring from `.bak` files.
+**Symptom**: The report shows `binary=fetch-failed` with a reason such as "Could not fetch latest release manifest for `<id>` from `<repo>` … Retry." or "Could not install `<id>` binaries (…); the vault plugin was restored from backup."
 
-**Likely cause**: The GitHub releases endpoint for the plugin was unreachable mid-install (transient network error, or the latest release tag has no attached binaries).
+**Likely cause**: For the first message, the plugin's GitHub release could not be fetched (transient network error, or the latest release has no attached binaries) and no cached bundle of the plugin exists. An offline run does not fail when a cached bundle exists — it installs that bundle and prints a `WARN:` line instead. For the second message, writing the bundle into the vault failed (disk space or permissions).
 
-**Fix**: The vault is restored to its pre-run state via the `.bak` files — no cleanup is needed. Check network connectivity and re-run `/lazy-obsidian.update-plugin <id>`.
+**Fix**: Check network connectivity, or disk space and permissions, and re-run `/lazy-obsidian.update-plugin <id>`. After a failed write the previous `manifest.json`, `main.js` and `styles.css` are back and any plugin directory the run created is removed, so no cleanup is needed.
 
 ---
 
-## `/lazy-obsidian.update-plugin` aborts: `community-plugins.json` is not a JSON array
+## `/lazy-obsidian.update-plugin` is refused: `community-plugins.json` is not a JSON array
 
-**Symptom**: The skill reaches Step 7 and aborts with "`community-plugins.json` is not a JSON array; cannot register `<id>` safely."
+**Symptom**: The skill is refused with "`<path>` is not a JSON array; cannot register `<id>` safely."
 
-**Likely cause**: The vault's `<vault>/.obsidian/community-plugins.json` was corrupted — likely by a partial write during an Obsidian crash or a manual edit that introduced invalid JSON.
+**Likely cause**: The vault's `<vault>/.obsidian/community-plugins.json` was corrupted — likely by a partial write during an Obsidian crash or a manual edit that introduced invalid JSON. The same refusal can surface from `/lazy-obsidian.install`, `/lazy-obsidian.iconize-install` and `/lazy-obsidian.diagram-install`, which run the same plugin-install step.
 
-**Fix**: Open Obsidian once to let it repair the file, or fix the JSON manually (the file is a plain array of plugin id strings, e.g. `["dataview", "obsidian-icon-folder"]`). Then re-run `/lazy-obsidian.update-plugin <id>`.
+**Fix**: Open Obsidian once to let it rewrite the file, or fix the JSON manually (the file is a plain array of plugin id strings, e.g. `["dataview", "obsidian-icon-folder"]`). Then re-run the skill. The refusal comes before any write, so the vault is unchanged.
+
+---
+
+## `/lazy-obsidian.update-plugin` is refused: "Cannot merge overrides" or "not a plain plugin id"
+
+**Symptom**: The skill is refused with "Cannot merge overrides for `<id>`: …" or "`<id>` is not a plain plugin id; nothing written."
+
+**Likely cause**: In the first case, the shipped override settings or the vault plugin's `data.json` cannot be read or merged — usually invalid JSON in `data.json`. In the second, the id contains a path separator or another character that would write outside the vault's plugins directory.
+
+**Fix**: For the merge refusal, fix the JSON the message names (or let Obsidian rewrite the vault plugin's `data.json`) and re-run. For the id refusal, pass the bare plugin id, such as `dataview`.
 
 ---
 
@@ -191,11 +201,21 @@ surface_sha: 789f8e700f5d535daefe8163bb70652acb8a6ae50976f612b989179a91c96f21
 
 ---
 
+## Dataview fails to install during `/lazy-obsidian.install`
+
+**Symptom**: The install report shows the Dataview step as `failed:<reason>`, and the tag pages' `Summary` section renders while the `Index` DataviewJS block stays blank. Snippet rows may also show `refused: <reason>` when `appearance.json` could not be edited safely.
+
+**Likely cause**: The plugin-install step for Dataview was refused (registry unreachable, release not fetchable with nothing cached, or `community-plugins.json` not a JSON array). A refused snippet row means `appearance.json` was left as it is rather than risk damaging it.
+
+**Fix**: Fix what the quoted reason names and re-run `/lazy-obsidian.install`, or run `/lazy-obsidian.update-plugin dataview` on its own once the network is available.
+
+---
+
 ## `mermaid-popup` fails to install during `/lazy-obsidian.diagram-install`
 
 **Symptom**: `/lazy-obsidian.diagram-install` Step 2 reports `failed:<reason>` for the `mermaid-popup` plugin. The skill continues and completes, but click-to-zoom on mermaid fences is unavailable.
 
-**Likely cause**: The Obsidian community registry was unreachable, or `mermaid-popup` was not found in it at the time of install.
+**Likely cause**: The plugin-install step for `mermaid-popup` was refused — the Obsidian community registry was unreachable, `mermaid-popup` was not found in it, or its release could not be fetched with nothing cached.
 
 **Fix**: The mermaid/ascii fit CSS snippets are installed and enabled by `/lazy-obsidian.install`'s own shared snippet step (not by `diagram-install` itself) — so mermaid SVG fit and background/theme color already work without click-to-zoom, as long as you have run `/lazy-obsidian.install` at least once. When network access is restored, run `/lazy-obsidian.update-plugin mermaid-popup` to install the plugin, or install it via Obsidian's Community Plugins UI. Re-running `/lazy-obsidian.diagram-install` later is also safe (idempotent).
 

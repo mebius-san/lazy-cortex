@@ -1,14 +1,14 @@
 ---
 chapter_type: block
 summary: The PostToolUse hook that runs `pcf.py` on every `.py` edit and surfaces style violations inline in the next turn — zero install steps, zero config writes.
-last_regen: 2026-10-24
+last_regen: 2026-11-10
 no_diagram: true
 source_skills:
   - lazy-python.check-style.sh
   - hooks.json
   - pcf.py
-source_sha: 33e8a296cb2bda2f7c06945ca9d46e24ed4c1858
-surface_sha: 7fee17a5273cc2a6a90ef7237573d22255dcb5b5465b71dea5b920aa1718d51a
+source_sha: e37cd0825c0891766ee7b8b1fe16fe2d39299aaf
+surface_sha: 795563082a1de2b28a9881d981be18ced7b1d6aade603a518cadd0450e6d7ea9
 ---
 # Inline style feedback on every Python edit
 
@@ -43,6 +43,8 @@ The violation format the hook surfaces is the same `file:line: note: message` fo
 **Per-directory relaxed rules.** Add entries to `[tool.pcf.overrides]` for subdirectories that need different limits, for example `"tools" = { check_magic_literal = false }`. The last matching path prefix wins.
 
 **Allowing comments or docstrings in another language.** `check_language` (on by default) reports any letter in a comment or docstring that belongs to a script none of `[tool.pcf] allowed_languages` admits — the default is `["english"]`. Add the language you write in (e.g. `"russian"`, `"chinese"`, `"japanese"`) to that list in `pyproject.toml` and the hook stops flagging it; a single quoted foreign word inside a string literal is never scanned, and `# waiver: <reason>` exempts one specific line without widening the project-wide setting.
+
+**Tolerating private names in docstrings.** Two further `[tool.pcf]` lists in `pyproject.toml` quiet docstring findings about private names without turning a check off: `d2_exempt_attr_names` lists private labels that any class may carry in its `Attributes:` section, and `private_name_allowlist` lists private identifiers the docstring checks tolerate in narrative text.
 
 ## See also
 

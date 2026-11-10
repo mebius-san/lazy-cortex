@@ -1,11 +1,11 @@
 ---
 name: lazy-spec.record-decision
 description: "Use when the operator wants to record, supersede, obsolete, or promote an entry in the spec catalog's decisions registry — 'log this decision', 'mark D-007 superseded', 'D-012 is obsolete now', 'pull the decision blocks out of design.md'. Interactive wrapper over the `decide` CLI primitive; never edits a `decisions.md` file by hand."
-allowed-tools: Read, Glob, Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(git add -N *), Bash(git commit *), Bash(git status*), Bash(mkdir -p *), AskUserQuestion, Agent
+allowed-tools: Read, Glob, Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(git status*), Bash(mkdir -p *), AskUserQuestion, Agent
 ---
 # Record Decision
 
-Interactive wrapper over the four `decide` operations — `add`, `supersede`, `obsolete`, `promote`. All writes go through `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" decide ...)`; this skill NEVER edits a `decisions.md` file, or a living doc's `[!decision]` blocks, by hand. Before recording a new decision, hold the operator to the weight test in `${CLAUDE_PLUGIN_ROOT}/rules/spec.decisions.md` — a real fork, expensive to reverse, unrecoverable from the artifact.
+Interactive wrapper over the four `decide` operations — `add`, `supersede`, `obsolete`, `promote`. All writes go through `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" decide ...)`; this skill NEVER edits a `decisions.md` file, or a living doc's `[!decision]` blocks, by hand. Before recording a new decision, hold the operator to the weight test in `${CLAUDE_PLUGIN_ROOT}/rules/lazy-spec.decisions.md` — a real fork, expensive to reverse, unrecoverable from the artifact.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -37,7 +37,7 @@ AskUserQuestion: header "Operation", question "Which decisions-registry operatio
 - `add` — a new entry in an asset's, product's, or the project's `decisions.md`.
 - `supersede <id>` — a new entry that also marks an older one `superseded-by`.
 - `obsolete <id>` — marks an existing entry `obsolete — <reason>`.
-- `promote <living-doc>` — transfers decision blocks out of a `design.md` / `bug.md` / `tech.md` / `architecture.md` body into its sibling registry.
+- `promote <living-doc>` — transfers decision blocks out of a `vision.md` / `design.md` / `bug.md` / `tech.md` / `architecture.md` body into its sibling registry.
 
 ## Step 2 — Resolve the target
 
@@ -53,16 +53,16 @@ AskUserQuestion: header "Operation", question "Which decisions-registry operatio
 - **`obsolete`** — the record id (`D-NNN`) and a reason string.
 - **`promote`** — nothing further; the doc path from Step 2 is the only input.
 
-Before collecting an `add` or `supersede` thesis, restate the three-test weight bar from `spec.decisions.md` in one line and ask the operator to confirm a genuine fork exists — a foregone conclusion is not worth a record. Context first: where (`/lazy-spec.record-decision · Step 3 — Collect the record fields`, target `<decisions.md>`), found (the thesis as stated so far), why asking (only the operator knows whether a real alternative existed and reversal is expensive), answers (`yes, a real fork` — continue collecting the justification; `no` — stop, nothing written); header "Weight test", question "Is `<thesis>` a genuine fork — a real alternative existed, reversal is expensive, the why is unrecoverable from the artifact?".
+Before collecting an `add` or `supersede` thesis, restate the three-test weight bar from `lazy-spec.decisions.md` in one line and ask the operator to confirm a genuine fork exists — a foregone conclusion is not worth a record. Context first: where (`/lazy-spec.record-decision · Step 3 — Collect the record fields`, target `<decisions.md>`), found (the thesis as stated so far), why asking (only the operator knows whether a real alternative existed and reversal is expensive), answers (`yes, a real fork` — continue collecting the justification; `no` — stop, nothing written); header "Weight test", question "Is `<thesis>` a genuine fork — a real alternative existed, reversal is expensive, the why is unrecoverable from the artifact?".
 
 ## Step 4 — Run the primitive
 
-Subprocess the matching call, quoting every free-text argument:
+Subprocess the matching call with `--commit`, quoting every free-text argument:
 
-- `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" decide add <decisions.md> "<thesis>" "<justification>" [--origin "<origin>"])`
-- `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" decide supersede <decisions.md> <old-id> "<thesis>" "<justification>" [--origin "<origin>"])`
-- `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" decide obsolete <decisions.md> <id> "<reason>")`
-- `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" decide promote <living-doc>)`
+- `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" decide add <decisions.md> "<thesis>" "<justification>" [--origin "<origin>"] --commit)`
+- `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" decide supersede <decisions.md> <old-id> "<thesis>" "<justification>" [--origin "<origin>"] --commit)`
+- `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" decide obsolete <decisions.md> <id> "<reason>" --commit)`
+- `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" decide promote <living-doc> --commit)`
 
 Parse the single-line JSON printed on stdout.
 
@@ -73,12 +73,7 @@ Parse the single-line JSON printed on stdout.
 
 ## Step 5 — Commit the touched paths
 
-The primitive never commits — it only writes files and, for `promote`, returns `touched_paths`. Skip this step entirely on `refused` / `duplicate` / `noop` (outcome `no-commit`).
-
-- **`add` / `supersede` / `obsolete`** — the touched path is the `<decisions.md>` argument from Step 2. `Bash(git add -N <path>)` when the file did not exist before this run (lazy creation), then `Bash(git commit -m "<message>" -- <path>)`.
-- **`promote`** — the touched paths are exactly `result["touched_paths"]` (the doc, its sibling registry, and — on a `**Supersedes.**` line — the superseded record's own registry file, which may be the product's rather than the asset's). `git add -N` any of them that did not exist before this run, then commit all of them together in one call.
-
-Commit message: `docs(spec-decisions): <op> <id-or-doc-stem>` — deterministic, names the operation and its target.
+`--commit` makes the primitive commit what it wrote, in the same call; this step only reads the result. On `refused` / `duplicate` / `noop` nothing was written and the result carries no `commit` field (outcome `no-commit`). On `added` / `superseded` / `obsoleted` / `promoted` read `result["commit"]`: `status: committed` with its `sha` (outcome `committed`), or `status: nothing-to-commit` (outcome `no-commit`). The commit carries the `<decisions.md>` file for `add` / `supersede` / `obsolete` and exactly `result["touched_paths"]` for `promote`, under the subject the `decide` verb composes (`${CLAUDE_PLUGIN_ROOT}/bin/spec_decisions.py` owns it).
 
 ## Report
 
@@ -86,8 +81,8 @@ One line per step above, plus: operation, target path(s), primitive outcome, id(
 
 ## Failure modes
 
-- **`lazy-spec.record-decision` reports `refused: no such record: D-NNN`** — the id given to `supersede` or `obsolete` doesn't exist in that file → re-check the id against the file's own `## D-NNN` headings.
-- **`lazy-spec.record-decision` reports `refused: no such doc`** — the living-doc path passed to `promote` doesn't exist → check the path.
-- **`lazy-spec.record-decision` reports `refused: spec_role '<x>' is not a living doc`** — `promote` only reads from `design` / `bug` / `tech` / `architecture`; a plan never promotes (plans decompose already-accepted decisions, not source them) and a report never promotes (it carries only decision-candidates) → the fix is a decision statement in the correct living doc, followed by its own approve/promote, never a forced promote on the plan or report.
-- **`lazy-spec.record-decision` reports `refused: asset flag spec_cancelled/spec_halted/spec_released is true`** — the owning asset is cancelled, halted, or released; `promote` refuses unconditionally in all three states → clear the flag (or, for a halted asset, un-halt it) and re-run `promote`, or leave the block in place — nothing forces the transfer.
-- **`lazy-spec.record-decision` reports `duplicate: D-NNN`** — an existing record already carries the same normalized thesis and body; nothing new was written, not an error.
+- **`lazy-spec.record-decision` reports `status: refused`, `reason: no such record: D-NNN`** — the id given to `supersede` or `obsolete` is not in that file → re-check the id against the file's own `## D-NNN` headings.
+- **`lazy-spec.record-decision` reports `status: refused`, `reason: no such doc: <path>`** — the living-doc path passed to `promote` does not exist → check the path.
+- **`lazy-spec.record-decision` reports `status: refused`, `reason: spec_role '<x>' is not a living doc (…)`** — the document passed to `promote` is a plan or a report → write the decision statement in the living doc the reason lists, approve it, and promote that one.
+- **`lazy-spec.record-decision` reports `status: refused`, `reason: asset flag <flag> is true`** — the owning asset is cancelled, halted, or released → clear the flag (or un-halt the asset) and re-run `promote`, or leave the block in place.
+- **`lazy-spec.record-decision` reports `status: duplicate`** — an existing record already carries the same thesis and body; nothing was written, not an error.

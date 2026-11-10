@@ -11,6 +11,7 @@ found in a declared slot is always reported, never touched.
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -23,6 +24,8 @@ from constants import (  # pylint: disable=import-error
   SettingsFile,
   SettingsKey,
 )
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from lazy_settings import load_section  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import runtime_state  # pylint: disable=import-error
 
@@ -46,9 +49,6 @@ def _section(repo: Path) -> dict:
   Returns:
     The merged section dict — tracked layer with the local overlay applied.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-  from lazy_settings import load_section  # pylint: disable=import-error
   return load_section(repo / SettingsFile.REL, SettingsKey.EXTERNAL_DIRS)
 
 
@@ -67,10 +67,12 @@ def _is_contained(rel: str) -> bool:
   # # Containment invariant for declared external directories
   # A declaration naming where a repository sources one of its directories from travels with
   # every clone of that repository, so it must never be able to point the repair mechanism
-  # outside the repository it was written for. A declared path that resolves to an absolute
-  # location or that climbs above the repository root names something other than a slot inside
-  # this checkout, and is treated as if it had never been declared at all — dropped silently
-  # rather than surfaced as a broken or repairable entry.
+  # outside the repository it was written for. Surrounding slashes are stripped from every entry
+  # before it is judged, so a leading slash does not make a path absolute: it is read as a path
+  # relative to the repository root. A declared path that climbs above the repository root, or that
+  # still names an absolute location after the slashes are stripped, names something other than a
+  # slot inside this checkout, and is treated as if it had never been declared at all — dropped
+  # silently rather than surfaced as a broken or repairable entry.
 
   norm = os.path.normpath(rel)
 
@@ -103,8 +105,8 @@ def declared_paths(repo: Path | str) -> list[str]:
   # directories from it.
 
   raw = _section(Path(repo)).get(ExternalDirsKey.PATHS) or []
-  stripped = [str(p).strip("/") for p in raw if str(p).strip("/")]
-  return [rel for rel in stripped if _is_contained(rel)]
+  stripped = [ str(entry).strip("/") for entry in raw if str(entry).strip("/") ]
+  return [ rel for rel in stripped if _is_contained(rel) ]
 
 
 def is_declared(repo: Path | str, rel: str) -> bool:
@@ -149,8 +151,8 @@ def source_root(repo: Path | str) -> Path | None:
     return None
   expanded = Path(os.path.expandvars(str(raw))).expanduser()
 
-  # guard: a relative root would otherwise resolve against the process cwd, so the daemon and an
-  # interactive install would disagree on where the same declaration points
+  # a relative root is anchored at the repository, not the process cwd, so the daemon and an
+  # interactive install agree on where the same declaration points
   if not expanded.is_absolute():
     return repo / expanded
   return expanded
@@ -169,8 +171,6 @@ def _check_ignore(repo: Path | str, pathname: str) -> int:
     The exit status git reported — 0 when a rule matches, 1 when none does, 128 outside a
     working tree — and 1 when git could not be run at all.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import subprocess
   try:
     # waiver: git plumbing invocation, not a domain constant
     proc = subprocess.run(
@@ -228,7 +228,7 @@ def ignore_state(repo: Path | str, rel: str) -> str:
   Returns:
     One token from `ExternalDirIgnore`.
   """
-  # guard: the path as it stands is covered, whichever rule form did it
+  # the path as it stands is covered, whichever rule form did it
   if is_gitignored(repo, rel):
     return ExternalDirIgnore.IGNORED
   name = str(rel).rstrip("/")
@@ -322,7 +322,7 @@ def _link_target(link: Path) -> Path:
   """
   raw = Path(os.readlink(link))
 
-  # guard: a relative target resolves against the directory holding the link
+  # a relative target resolves against the directory holding the link
   if not raw.is_absolute():
     return link.parent / raw
   return raw
@@ -350,30 +350,30 @@ def _status_for(link: Path, source: Path) -> str:
   # found does the absence of a source itself become the reported condition, ahead of a plain
   # missing link.
 
-  # guard: a symlink is diagnosed by its target, whatever else is on disk
+  # a symlink is diagnosed by its target, whatever else is on disk
   if link.is_symlink():
     target = _link_target(link)
 
-    # guard: a broken link is the operational failure regardless of where it aimed
+    # a broken link is the operational failure regardless of where it aimed
     if not target.exists():
       return ExternalDirStatus.DANGLING
 
-    # guard: a live link aimed somewhere else is repairable by re-pointing
+    # a live link aimed somewhere else is repairable by re-pointing
     if target != source:
       return ExternalDirStatus.WRONG_TARGET
     return ExternalDirStatus.OK
 
-  # guard: real content in the declared slot belongs to the operator
+  # real content in the declared slot belongs to the operator
   if link.exists():
     return ExternalDirStatus.NOT_A_SYMLINK
 
-  # guard: an empty slot with no source has nothing to link to
+  # an empty slot with no source has nothing to link to
   if not source.exists():
     return ExternalDirStatus.SOURCE_MISSING
   return ExternalDirStatus.MISSING
 
 
-def check(repo: Path | str) -> list[dict]:
+def query_dir_states(repo: Path | str) -> list[dict]:
   """
   Report the state of every declared external directory of a repository.
 
@@ -388,7 +388,7 @@ def check(repo: Path | str) -> list[dict]:
   root = source_root(repo)
   findings: list[dict] = []
   for rel in declared_paths(repo):
-    # guard: without a source root every declared path is unconfigured, not broken
+    # without a source root every declared path is unconfigured, not broken
     if root is None:
       findings.append({
         ExternalDirFindingKey.PATH: rel,
@@ -465,23 +465,23 @@ def apply(repo: Path | str) -> list[dict]:
 
   repo = Path(repo)
   records: list[dict] = []
-  for finding in check(repo):
+  for finding in query_dir_states(repo):
     rel = finding[ExternalDirFindingKey.PATH]
     status = finding[ExternalDirFindingKey.STATUS]
     raw_source = finding[ExternalDirFindingKey.SOURCE]
 
-    # guard: already correct — leave it alone
+    # an entry already correct is recorded unchanged
     if status == ExternalDirStatus.OK:
       records.append(_record(rel, status, ExternalDirAction.UNCHANGED))
       continue
 
-    # guard: operator content and an unconfigured checkout are the operator's call
+    # operator content and an unconfigured checkout are the operator's call
     if status in (ExternalDirStatus.NOT_A_SYMLINK, ExternalDirStatus.UNCONFIGURED):
       records.append(_record(rel, status, ExternalDirAction.SKIPPED))
       continue
     source = Path(str(raw_source))
 
-    # guard: nothing to point at — repair is impossible, report instead
+    # nothing to point at — repair is impossible, report instead
     if not source.exists():
       records.append(_record(rel, status, ExternalDirAction.SKIPPED))
       continue
@@ -493,11 +493,11 @@ def apply(repo: Path | str) -> list[dict]:
         link.unlink()
       link.parent.mkdir(parents = True, exist_ok = True)
       os.symlink(str(source), str(link))
-    except OSError as e:
+    except OSError as error:
       # a refused repair is reported like every other unrepairable state instead of aborting the
       # pass, so the paths after it are still repaired and the operator sees what blocked this one
       # waiver: reporting the type name of an arbitrary value; type(x).__name__ is the right idiom here — no class-system object
-      records.append(_record(rel, f"{status}: {type(e).__name__}: {e}", ExternalDirAction.SKIPPED))
+      records.append(_record(rel, f"{status}: {type(error).__name__}: {error}", ExternalDirAction.SKIPPED))
       continue
     action = ExternalDirAction.RELINKED if relinked else ExternalDirAction.LINKED
     records.append(_record(rel, status, action))

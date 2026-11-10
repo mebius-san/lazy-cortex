@@ -2,10 +2,10 @@
 
 Lazy-review's frontmatter rules (spec § Frontmatter schema):
 
-- Three reserved keys (`review_active`, `review_round`, `approved`) are
-  managed by the dispatcher; agents may not write them.
-- All other keys belong to the consumer and survive byte-for-byte
-  through any dispatcher-side edit.
+- Three keys (`review_active`, `review_round`, `review_approved`) carry the
+  review lifecycle state; this module treats them like any other key and
+  leaves it to callers to decide who may write them.
+- Every key a line edit does not target survives byte-for-byte.
 - Block-style values (`tags:\\n  - one\\n  - two`), inline arrays,
   comments and quoting style MUST survive byte-for-byte. A
   parse → render round-trip via PyYAML collapses or rewrites these
@@ -30,7 +30,6 @@ if TYPE_CHECKING:
   pass
 
 
-_FENCE = "---"
 _FENCE_LINE = re.compile(r"^---[ \t]*\r?$", re.MULTILINE)
 
 # the opening fence: an optional BOM, `---`, trailing blanks, then a line end or end of text
@@ -40,27 +39,35 @@ _OPEN_FENCE = re.compile(r"\A\ufeff?---[ \t]*(?:\r?\n|\Z)")
 # ----------------------------------------------------------------- helpers
 
 
-def _find_fences(text: str) -> tuple[int, int, int] | None:
+def find_fences(text: str) -> tuple[int, int, int] | None:
   """
-  Return the byte offsets of the frontmatter fences, or `None` if none exist.
+  Return the character offsets of the frontmatter fences, or `None` if none exist.
 
-  A document has frontmatter iff its first non-empty line is `---` and a later
+  A document has frontmatter iff its first line, after an optional UTF-8 BOM, is `---` and a later
   `---`-only line closes the block. An opening fence with no matching close raises
   `ParseError` rather than silently skipping.
+
+  Guarantees:
+    - An opening fence with no matching closing fence always raises `ParseError`; it is never reported as
+      "no frontmatter" by returning `None`.
 
   Args:
     text: Raw document text to inspect.
 
   Returns:
-    A three-tuple `(open_end, close_start, close_end)` byte offsets, or `None`
+    A three-tuple `(open_end, close_start, close_end)` of character (string) offsets into `text`, or `None`
     when no frontmatter is present.
 
   Raises:
     ParseError: If an opening fence exists but no matching closing fence is found.
   """
+
+  # Contract:
+  # A document whose opening fence has no matching closing fence MUST raise `ParseError`;
+  # it is NEVER reported as "no frontmatter" by returning `None`.
+
   # guard: no opening fence on the first line (after an optional BOM) → no frontmatter
-  opening = _OPEN_FENCE.match(text)
-  if opening is None:
+  if (opening := _OPEN_FENCE.match(text)) is None:
     return None
 
   # locate the closing fence as the next `---`-only line after the opening fence
@@ -79,7 +86,7 @@ def _find_fences(text: str) -> tuple[int, int, int] | None:
   close_start = after_open + match.start()
   close_end = after_open + match.end()
 
-  # The fence may be followed by `\n` (typical), `\r\n`, or end-of-file.
+  # the fence may be followed by `\n` (typical), `\r\n`, or end-of-file
   if close_end < len(text) and text[close_end] == "\n":
     close_end += 1
 
@@ -91,31 +98,17 @@ def _serialise_scalar(value: object) -> str:
   """
   Render a Python scalar into a YAML literal, double-quoting a string that YAML cannot hold bare.
 
-  Guarantees:
-    - A Python bool, None, or int value is emitted using its YAML literal spelling.
-    - A string is emitted double-quoted when writing it bare would break the YAML line or
-      structure: empty, surrounding whitespace, a line break, a leading indicator character,
-      an embedded `: ` or ` #`, or a trailing colon.
-    - A string already written as a strict single-line flow list or mapping is emitted as is.
-    - A string that YAML would merely retype, such as `9`, `true`, `null`, or a date, is emitted
-      bare on purpose.
-
   Args:
     value: The Python value to serialise.
 
   Returns:
-    The YAML representation of the value.
+    The YAML representation of the value. A bool, None, or int takes its YAML literal spelling.
+    A string is double-quoted when writing it bare would break the YAML line or structure: empty,
+    surrounding whitespace, a line break, a leading indicator character, an embedded `: ` or
+    ` #`, or a trailing colon. A string already written as a strict single-line flow list or
+    mapping is returned as is, and one that YAML would merely retype, such as `9`, `true`,
+    `null`, or a date, is returned bare on purpose.
   """
-
-  # Contract:
-  # A Python bool, None, or int value MUST be emitted using its YAML literal spelling.
-  # A string MUST be emitted double-quoted when writing it bare would break the YAML line or
-  # structure: an empty string, one with surrounding whitespace, one containing a line break, one
-  # starting with a leading indicator character, one containing `: ` or ` #`, or one ending in a
-  # trailing colon.
-  # A string already written as a strict single-line flow list or mapping MUST be emitted as is.
-  # A string that YAML would merely retype, such as `9`, `true`, `null`, or a date, MUST be
-  # emitted bare — a caller passes a real Python type when a number or boolean is meant.
 
   # booleans, null, and numbers have one YAML spelling each
   if isinstance(value, bool):
@@ -129,7 +122,7 @@ def _serialise_scalar(value: object) -> str:
     return json.dumps(value, ensure_ascii = False, default = str)
   text = str(value)
 
-  # guard: a caller-rendered flow list or mapping is already YAML
+  # a caller-rendered flow list or mapping is already YAML and is written as is
   if _FLOW_COLLECTION_RE.fullmatch(text):
     return text
 
@@ -163,12 +156,12 @@ _CONTINUATION_LINE_RE = re.compile(r"^(?:[ \t]+\S|-(?:[ \t]|$))")
 _KEY_LINE = re.compile(r"^([A-Za-z_][\w.-]*)\s*:(?:\s|$)")
 
 
-def _line_starts_top_level_key(line: str) -> bool:
+def is_top_level_key_line(line: str) -> bool:
   """
   Return whether a frontmatter line begins a new top-level key.
 
-  A top-level key line has no leading whitespace and matches the `key:` shape.
-  Used to identify the end of a block-style value owned by the previous key.
+  A top-level key line has no leading whitespace and matches the `key:` shape. A blank line, a comment
+  line, and an indented line are never top-level key lines.
 
   Args:
     line: A single line from the frontmatter block (without trailing newline).
@@ -183,7 +176,7 @@ def _line_starts_top_level_key(line: str) -> bool:
 
 def _key_block_span(block: str, key: str) -> tuple[int, int] | None:
   """
-  Return the byte offsets of the full logical entry for `key` within `block`.
+  Return the character offsets of the full logical entry for `key` within `block`.
 
   The span covers the key's header line plus its continuation lines: indented lines and list
   items, with blank lines between them. A blank line or a comment line not followed by more of
@@ -194,7 +187,7 @@ def _key_block_span(block: str, key: str) -> tuple[int, int] | None:
     key: The top-level key to locate.
 
   Returns:
-    A `(start, end)` tuple of byte offsets inside `block`, or `None` if `key`
+    A `(start, end)` tuple of character (string) offsets inside `block`, or `None` if `key`
     is not present at the top level.
   """
   # the header stays on its own line: horizontal whitespace only, so an empty `key:` never
@@ -203,11 +196,12 @@ def _key_block_span(block: str, key: str) -> tuple[int, int] | None:
       rf"(?m)^{re.escape(key)}[ \t]*:(?=[ \t]|\r?$)",
   )
   match = pattern.search(block)
+  # guard: the key is absent from the frontmatter block
   if match is None:
     return None
   start = match.start()
 
-  # Walk forward line-by-line: indented lines and list items continue the value; blank lines
+  # walk forward line-by-line: indented lines and list items continue the value; blank lines
   # continue it only when more of the value follows them.
   cursor = block.find("\n", match.end())
   if cursor == -1:
@@ -223,7 +217,7 @@ def _key_block_span(block: str, key: str) -> tuple[int, int] | None:
       end = cursor
       continue
 
-    # guard: anything but a blank line (a comment, the next key) ends the value
+    # anything but a blank line (a comment, the next key) ends the value
     if line.strip():
       break
   return (start, end)
@@ -250,16 +244,16 @@ def parse(text: str) -> tuple[dict[str, str], str]:
     their raw string values, and `body` is the text following the closing fence.
     When no frontmatter is present, `meta` is empty and `body` is the full text.
   """
-  span = _find_fences(text)
-  if span is None:
+  # guard: no frontmatter block — the whole text is body
+  if (span := find_fences(text)) is None:
     return ({}, text)
   open_end, close_start, close_end = span
   block = text[open_end:close_start]
   body = text[close_end:]
   meta: dict[str, str] = {}
   for line in block.splitlines():
-    # guard: skip continuation/list/indented lines so only top-level `key: value` pairs are collected into meta
-    if not _line_starts_top_level_key(line):
+    # only top-level `key: value` lines are collected; continuation, list and indented lines pass by
+    if not is_top_level_key_line(line):
       continue
     key, _, rest = line.partition(":")
     meta[key.strip()] = rest.strip()
@@ -273,10 +267,9 @@ def read_list_field(text: str, key: str) -> list[str]:
   """
   Read a frontmatter key's list value, whether written inline or as a block-style YAML list.
 
-  `parse()` flattens block-style continuation lines away — it exists for scalar reads, not
-  multi-line lists. This helper walks the same key-block span `set_field` targets, but returns
-  every list item instead of replacing them, so callers can read fields a producer writes as a
-  block list (e.g. `spec_source_requests`, one `- "value"` line per entry).
+  Unlike `parse()`, which serves scalar reads only, this returns every item of a list written
+  as a block (e.g. `spec_source_requests`, one `- "value"` line per entry) as well as an inline
+  array.
 
   Args:
     text: Raw document text, with or without a frontmatter block.
@@ -286,13 +279,13 @@ def read_list_field(text: str, key: str) -> list[str]:
     List of item strings (surrounding quotes stripped), in document order. Empty when the
     document has no frontmatter, the key is absent, or the key's value is not a list.
   """
-  span = _find_fences(text)
-  if span is None:
+  # guard: no frontmatter block to read from
+  if (span := find_fences(text)) is None:
     return []
   open_end, close_start, _close_end = span
   block = text[open_end:close_start]
-  key_span = _key_block_span(block, key)
-  if key_span is None:
+  # guard: the key is absent from the frontmatter
+  if (key_span := _key_block_span(block, key)) is None:
     return []
   entry = block[key_span[0]:key_span[1]]
   header, _, continuation = entry.partition("\n")
@@ -327,11 +320,20 @@ def set_field(text: str, key: str, value: object) -> str:
 
   Guarantees:
     - Every byte of `text` outside the `key` entry's own span is left unchanged.
+    - A Python bool, None, or int `value` is written in its YAML literal spelling.
+    - A string `value` is written double-quoted when writing it bare would break the YAML line or
+      structure: empty, surrounding whitespace, a line break, a leading indicator character, an
+      embedded `: ` or ` #`, or a trailing colon.
+    - A string `value` that is a strict single-line flow list or mapping is written as is.
+    - A string `value` that YAML would merely retype, such as `9`, `true`, `null`, or a date, is
+      written bare on purpose; a caller passes a real Python type when a number or boolean is
+      meant.
 
   Args:
     text: Raw document text to modify.
     key: The frontmatter key to set.
-    value: The Python value to write; serialised to a bare YAML literal.
+    value: The Python value to write; a string is double-quoted when bare would break YAML, and a list, tuple, or
+      dict is written as a JSON flow collection.
 
   Returns:
     The updated document text with the key set and all other bytes unchanged.
@@ -342,17 +344,31 @@ def set_field(text: str, key: str, value: object) -> str:
   # line plus any block-style continuation lines) is left unchanged; other
   # frontmatter keys, body text, and formatting survive byte-for-byte.
 
+  # Contract:
+  # A Python bool, None, or int `value` MUST be written in its YAML literal spelling.
+
+  # Contract:
+  # A string `value` MUST be written double-quoted when writing it bare would break the YAML
+  # line or structure: empty, surrounding whitespace, a line break, a leading indicator
+  # character, an embedded `: ` or ` #`, or a trailing colon.
+
+  # Contract:
+  # A string `value` that is a strict single-line flow list or mapping MUST be written as is.
+
+  # Contract:
+  # A string `value` that YAML would merely retype, such as `9`, `true`, `null`, or a date,
+  # is written bare on purpose; a caller passes a real Python type when a number or boolean
+  # is meant.
+
   rendered = f"{key}: {_serialise_scalar(value)}"
-  span = _find_fences(text)
-  if span is None:
-    # Document has no frontmatter at all — synthesize one.
+  if (span := find_fences(text)) is None:
+    # document has no frontmatter at all — synthesize one.
     bom = "\ufeff" if text.startswith("\ufeff") else ""
     return f"{bom}---\n{rendered}\n---\n{text[len(bom):]}"
   open_end, close_start, _close_end = span
   block = text[open_end:close_start]
-  existing = _key_block_span(block, key)
-  if existing is None:
-    # Append before the closing fence, preserving the block's
+  if (existing := _key_block_span(block, key)) is None:
+    # append before the closing fence, preserving the block's
     # trailing newline if any.
     newline = "\r\n" if "\r\n" in text[:close_start] else "\n"
     if block and not block.endswith("\n"):
@@ -361,7 +377,7 @@ def set_field(text: str, key: str, value: object) -> str:
       new_block = block + rendered + newline
     return text[:open_end] + new_block + text[close_start:]
 
-  # Replace the whole existing entry (header + any continuation lines)
+  # replace the whole existing entry (header + any continuation lines)
   # with a single-line scalar form. Preserve the entry's trailing
   # newline so the closing fence stays on its own line.
   start, end = existing
@@ -386,11 +402,11 @@ def is_empty(text: str) -> bool:
     text: Raw document text whose frontmatter is to be inspected.
 
   Returns:
-    `True` if the frontmatter body contains only whitespace and blank lines,
-    or if there is no frontmatter block. `False` otherwise.
+    `True` only when a frontmatter block exists and its body contains only whitespace and blank lines.
+    `False` otherwise, including when there is no frontmatter block.
   """
-  span = _find_fences(text)
-  if span is None:
+  # guard: no frontmatter block, so there is no empty block to report
+  if (span := find_fences(text)) is None:
     return False
   open_end, close_start, _close_end = span
   block = text[open_end:close_start]
@@ -419,13 +435,13 @@ def unset_field(text: str, key: str) -> str:
   # left unchanged; when the key is absent or no frontmatter exists, the
   # input is returned unchanged.
 
-  span = _find_fences(text)
-  if span is None:
+  # guard: no frontmatter block to remove the key from
+  if (span := find_fences(text)) is None:
     return text
   open_end, close_start, _close_end = span
   block = text[open_end:close_start]
-  existing = _key_block_span(block, key)
-  if existing is None:
+  # guard: the key is absent, nothing to remove
+  if (existing := _key_block_span(block, key)) is None:
     return text
   start, end = existing
   new_block = block[:start] + block[end:]

@@ -1,9 +1,9 @@
 """Build agent requests and validate agent responses.
 
 Together with :mod:`body` and :mod:`reapply`, this module enforces the
-ownership-isolation contract: the dispatcher only ever applies an
-agent response that passed validation, and validation refuses
-responses that overstep the role's mandate.
+ownership-isolation contract: an agent response is applied only after
+it passed validation, and validation refuses responses that overstep
+the role's mandate.
 
 Request shape (matches the trimmed protocol contract in
 `references/lazy-review.doc-review-protocol.md`):
@@ -18,15 +18,8 @@ Request shape (matches the trimmed protocol contract in
       "owned_section": "<H1 title>"   # section-writer only
     }
 
-`kind` is no longer on the wire — it was an internal-only enum
-(`review` / `repair` / `history`) that the dispatcher already knows
-from its entry point. The agent never branched on it.
-
-`edit_marker_template` (a per-style copy-paste snippet) was retired
-in favour of the agent reading `edit_marker_style` directly and
-fetching its rules block from the `lazy-core.markdown-style`
-protocol that the routine attaches to every job's `config.json`. One
-source of truth for marker shape, no duplication in the payload.
+The request carries `edit_marker_style` only; the rules for that style
+come from the `lazy-core.markdown-style` protocol attached to the job.
 
 Response shape:
 
@@ -141,17 +134,17 @@ def build_request(
   Raises:
     PayloadError: If `kind` is not a recognized dispatch kind or `mode` is not a valid mode.
   """
+  # guard: an unknown dispatch kind has no outcome set to build a request against
   if kind not in _OUTCOMES_BY_KIND:
     raise PayloadError(f"unknown kind: {kind!r}")
+  # guard: an unknown mode would hand the agent an instruction it cannot follow
   if mode not in _VALID_MODES:
     raise PayloadError(
         f"unknown mode: {mode!r}; allowed: {sorted(_VALID_MODES)}"
     )
 
-  # `kind` is no longer written to the request — see module
-  # docstring. It survives as a build-time sanity input
-  # (`_OUTCOMES_BY_KIND` enum gate) and as a validate_response
-  # parameter, both driven by the dispatcher's local context.
+  # `kind` is not written to the request: it only gates the build against
+  # `_OUTCOMES_BY_KIND` above and is passed to validate_response by the caller.
   request: dict = {
       JobKey.MODE: mode,
       JobKey.ROLE: role,
@@ -239,6 +232,7 @@ def validate_response(response: Mapping, *, kind: str) -> None:
   # whatever the outcome token itself means in another kind's context.
 
   outcome = response.get(JobKey.OUTCOME)
+  # guard: a response without a string outcome cannot be checked against any kind
   if not isinstance(outcome, str):
     raise PayloadError("response missing 'outcome' (must be a string)")
   valid = _OUTCOMES_BY_KIND.get(kind)
@@ -248,8 +242,10 @@ def validate_response(response: Mapping, *, kind: str) -> None:
   # is the metadata-only signal.
   if kind == Phase.HISTORY and outcome == Outcome.NOOP:
     return
+  # guard: an unknown kind has no outcome set to validate against
   if valid is None:
     raise PayloadError(f"unknown kind: {kind!r}")
+  # guard: an outcome outside the kind's own set is not a valid claim
   if outcome not in valid:
     raise PayloadError(
         f"outcome={outcome!r} not valid for kind={kind!r}; "
@@ -291,8 +287,9 @@ def _strip_owned_section(body: str, owned_expert: str) -> str:
   Returns:
     Document body with the owned section removed; all other sections are preserved verbatim.
   """
-  headings = _parser.h1_headings(body)
+  headings = _parser.find_all_h1_headings(body)
   keep_ranges: list[tuple[int, int]] = []
+  # guard: a body with no H1 heading holds no owned section to strip
   if not headings:
     return body
   if headings[0][0] > 0:
@@ -312,7 +309,7 @@ def _strip_owned_section(body: str, owned_expert: str) -> str:
     for raw in rest.splitlines():
       stripped = raw.strip()
 
-      # guard: skip blank lines so the owner tag is read from the first line carrying content
+      # leading blank lines are passed over so the owner tag is read from the first line with content
       if not stripped:
         continue
       if stripped.startswith(Tag.EXPERT_PREFIX):
@@ -320,9 +317,9 @@ def _strip_owned_section(body: str, owned_expert: str) -> str:
         owner_flat = rest_tag.split("/")[0]
       break
 
-    # guard: this is the owned section being stripped — skip it so it is excluded from the kept ranges
+    # the owned section is the one being stripped, so it stays out of the kept ranges
     if owner_flat == owned_expert:
-      continue  # skip — this is the owned section we want gone
+      continue
     keep_ranges.append((start, end))
   return "".join(body[s:e] for s, e in keep_ranges)
 

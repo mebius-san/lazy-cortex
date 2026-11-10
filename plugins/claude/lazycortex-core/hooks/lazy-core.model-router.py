@@ -51,7 +51,7 @@ import hook_gate  # noqa: E402
 from constants import AgentToolInput, HookKey, HookName, SettingsFile, SettingsKey, ToolName  # noqa: E402
 
 
-TIER = { "haiku": 1, "sonnet": 2, "opus": 3 }
+TIER = { "haiku": 1, "sonnet": 2, "opus": 3, "fable": 4 }
 SENTINELS = { "default", None, "" }
 
 

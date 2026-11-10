@@ -1,15 +1,17 @@
 """
 Install-phase verbs for the `lazycortex-core` CLI.
 
-This module backs the `install-phase` and `daemon-run-here` subcommands the
+This module backs the `install-phase`, `daemon-run-here` and `gitignore-ensure` subcommands the
 `lazy-core.install` and `lazy-core.doctor` skills call instead of embedding Python.
 `install-phase <name>` runs one idempotent bootstrap phase from `lazy_install_phases` (or a
-one-line derivation such as the repo id or the interpreter path) and prints the phase's
-outcome word; the `python-env` phase additionally requires `--command` naming the
+one-line derivation such as the repo id) and prints the phase's outcome word, or for the
+`interpreter` phase the interpreter path a supervisor unit should record: the operator's pin,
+else the version-neutral `python3` on `PATH` outside a virtualenv, else the running interpreter; the `python-env` phase additionally requires `--command` naming the
 interpreter command an install probe resolved. `daemon-run-here` reads or writes the
 `daemon.run_here` host-to-checkout gate for the current host. The repository root follows
 the dispatcher convention: the `LAZY_REPO_ROOT` env var, falling back to the process
-working directory, overridable per-call with `--cwd`.
+working directory, overridable per-call with `--cwd`. `gitignore-ensure` adds ignore lines to the repository's
+`.gitignore`.
 """
 from __future__ import annotations
 
@@ -18,6 +20,7 @@ import hashlib
 import json
 import os
 import socket
+import subprocess
 import sys
 from pathlib import Path
 
@@ -33,9 +36,11 @@ from lazy_install_phases import (  # pylint: disable=import-error
   bootstrap_logs_dir,
   bootstrap_memory_dir,
   ensure_gitattributes_lf,
-  index_has_crlf,
+  ensure_gitignore_lines,
+  has_index_crlf,
   migrate_log_hooks,
   record_python_env,
+  resolve_unit_interpreter,
 )
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from lazy_settings import load_section, load_tracked_section, save_section  # pylint: disable=import-error
@@ -104,7 +109,7 @@ def _run_phase_gitattributes(root: Path) -> None:
 
   # CRLF already in the index is not rewritten by the rule; the operator renormalizes it once
   # waiver: outcome-line label and tokens read by the install skill, not reusable domain keys
-  print("renormalize:", "needed" if index_has_crlf(root) else "not-needed")
+  print("renormalize:", "needed" if has_index_crlf(root) else "not-needed")
 
 
 def _run_phase_log_hooks(root: Path) -> None:
@@ -199,7 +204,7 @@ _PHASES: dict[str, Callable[[Path, Path], None]] = {
   "daemon-defaults": lambda root, _template: _run_phase_daemon_defaults(root),
   "daemon-git": lambda root, _template: print(bootstrap_daemon_git(root)),
   "repo-id": lambda root, _template: print(_compute_repo_id(root)),
-  "interpreter": lambda _root, _template: print(sys.executable),
+  "interpreter": lambda root, _template: print(resolve_unit_interpreter(root)),
 }
 
 # waiver: phase name is the install-phase verb's own vocabulary; kept out of `_PHASES` because it takes `--command`
@@ -218,7 +223,7 @@ def cmd_install_phase(argv: list[str]) -> int:
 
   Raises:
     SystemExit: On an argument error, with exit code 2, raised by the argument parser.
-    json.JSONDecodeError: If the tracked settings file is not valid JSON.
+    json.JSONDecodeError: If the tracked settings file, or for `interpreter` the local one, is not valid JSON.
   """
   # the verb's command line: the phase name, the template override, and the repo-root override
   # waiver: argparse CLI signature and help strings, not domain keys
@@ -286,12 +291,12 @@ def evaluate_run_here(root: Path) -> str:
   # not a mapping, a host absent from it, and a host mapped to another checkout are four distinct
   # verdicts; only an exact match authorizes a run here.
 
-  # guard: anything but a mapping cannot name a checkout for this host
+  # a gate that is missing or not a mapping names no checkout for this host
   if not isinstance(gate := load_section(root / SettingsFile.REL, SettingsKey.DAEMON).get(DaemonKey.RUN_HERE), dict):
     # waiver: CLI outcome tokens read by the install skill, not reusable domain keys
     return "unset" if gate is None else "invalid-shape"
 
-  # guard: a host absent from the gate never runs a daemon
+  # a host absent from the gate never runs a daemon
   if (mapped := _normalize_gate(gate).get(_read_short_host())) is None:
     # waiver: CLI outcome token read by the install skill, not a reusable domain key
     return "not-this-host"
@@ -384,4 +389,45 @@ def cmd_daemon_run_here(argv: list[str]) -> int:
   update_run_here(root, enable = args.on)
   # waiver: CLI outcome token read by the install skill, not a reusable domain key
   print("on" if args.on else "off")
+  return 0
+
+
+def cmd_gitignore_ensure(argv: list[str]) -> int:
+  """
+  Run the `gitignore-ensure` subcommand: make sure ignore lines are present in the repo's `.gitignore`.
+
+  Prints a JSON report with the file's state (`created` when the file did not exist) and the lines git
+  already tracks, which an ignore line cannot untrack.
+
+  Args:
+    argv: Argument vector after the subcommand name (one or more ignore lines, optional `--cwd`).
+
+  Returns:
+    Process exit code: `0`.
+  """
+  # the verb names one or more ignore lines; the repo root follows the dispatcher convention
+  # waiver: argparse CLI signature, not a domain key
+  parser = argparse.ArgumentParser(prog = "lazycortex-core gitignore-ensure")
+  # waiver: argparse CLI signature, not a domain key
+  parser.add_argument("line", nargs = "+")
+  # waiver: argparse CLI signature, not a domain key
+  parser.add_argument("--cwd", default = None, help = "Repository root (default: $LAZY_REPO_ROOT or cwd)")
+  args = parser.parse_args(argv)
+  root = resolve_repo_root(args.cwd)
+
+  # the line lands through the one ignore-file writer; a file absent before the call is reported as created
+  # waiver: filesystem filename idiom, not a domain constant
+  existed = (root / ".gitignore").exists()
+  state = ensure_gitignore_lines(root, args.line)
+
+  # an ignore line does not untrack a file git already records, so such a line is named for the caller
+  tracked = [
+    line for line in args.line
+    if subprocess.run(
+      [ "git", "ls-files", "--error-unmatch", "--", line ],
+      cwd = str(root), capture_output = True, check = False,
+    ).returncode == 0
+  ]
+  # waiver: CLI outcome fields and token read by the calling skill, not reusable domain keys
+  print(json.dumps({ "state": state if existed else "created", "tracked": tracked }))
   return 0

@@ -113,10 +113,10 @@ Checks the agent performs:
      - `[WARN]` any value under `agent_models` that is a dict but has unexpected shape — finding: `malformed group <name> in <path>`. Skip any top-level key whose value is not a dict (e.g. `_version: int`) — only group sub-dicts carry dispatch mappings. Filter by shape, not by name, because `_user` / `_project` / `_builtin` are legitimate group-name keys that share the underscore prefix.
      - `[WARN]` unexpected reserved group — any group whose name starts with `_` and is NOT one of `_builtin`, `_user`, `_project`. Finding: `unknown reserved group <name> in <path> — reserved prefix`.
      - `[WARN]` cross-group duplicate keys — same dispatch string appearing in more than one group. Finding: `duplicate key <dispatch> in groups <a>, <b> (<path>) — router last-wins is non-deterministic`.
-     - `[WARN]` invalid value — any value not in `{"haiku", "sonnet", "opus", "default"}`. Finding: `invalid value <x> for <group>.<key> in <path>`.
+     - `[WARN]` invalid value — any value not in `{"haiku", "sonnet", "opus", "fable", "default"}`. Finding: `invalid value <x> for <group>.<key> in <path>`.
      - `[WARN]` orphan — dispatch string in any group that does NOT resolve to any discovered agent (see Agent discovery under `lazy-core.audit` / `lazy-core.slim-context`). Finding: `orphan agent_models entry: <group>.<key> (<path>)`.
      - `[INFO]` gap — discovered agent with no entry in any group (except those explicitly set to `"default"`, which are NOT gaps). Finding: `no agent_models entry for <dispatch-string> — run /lazy-core.slim-context to fill`.
-     - `[INFO]` env-var status — current `LAZY_AGENT_MODEL_FLOOR` value if set, plus tier-order note `haiku < sonnet < opus`.
+     - `[INFO]` env-var status — current `LAZY_AGENT_MODEL_FLOOR` value if set, plus tier-order note `haiku < sonnet < opus < fable`.
   All non-blocking.
 
 - **Language-key checks (project scope only)** — read the raw project `lazy.settings.json` from step 1 above and inspect every language key the settings schema lists: root `language`, `spec.language`, `wiki.language`, `wiki.domains.language`, and each `products[<key>].language`. Every one holds an ISO 639-1 code; a free-form name reaches code that compares against codes and silently loses.
@@ -200,12 +200,8 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core"
   - `[WARN]` project `CLAUDE.md` references paths that don't exist
   - `[WARN]` project `CLAUDE.md` > 10 KB
   - `[WARN]` global `CLAUDE.md` contains project-specific instructions
-- **Always-loaded context budget** — sum the byte size of everything Claude Code auto-loads into every session's context on every turn:
-  - `$HOME/.claude/CLAUDE.md`
-  - `<project>/.claude/CLAUDE.md`
-  - Every always-loaded rule file under `$HOME/.claude/rules/*.md` — i.e., frontmatter declares `always_loaded:` (the canonical waiver per `lazy-core.rule-writing § 1`). Rules with `paths:` instead are loaded only when files under their glob are touched, so they don't count toward this budget.
-  - Every always-loaded rule file under `<project>/.claude/rules/*.md`
-  Thresholds: `[WARN]` total > 20 KB, `[FAIL]` total > 40 KB. This is the real token budget — individual per-file limits are a crude proxy; the sum is what hits every turn. Finding must list per-file breakdown (largest first) so the user knows what to cut.
+- **Always-loaded context budget** — measure everything Claude Code auto-loads into every session's context on every turn with one call, `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" context-scan --section weight)` — the same measurement `/lazy-core.audit` and `/lazy-core.slim-context` report. Its `always_loaded` list (exact `bytes`, largest first) is the set the budget counts and its `always_total` is the sum; do not add, drop, or re-measure files by hand.
+  Severity: the verb's `level` grades the total — `WARN` becomes a `[WARN]` finding, `FAIL` a `[FAIL]` finding, `PASS` no finding; do not re-grade `always_total` by hand. This is the real token budget — individual per-file limits are a crude proxy; the sum is what hits every turn. Finding must list per-file breakdown (largest first) so the user knows what to cut.
 
   **Phrase the finding correctly.** This is a *budget* check, not a frontmatter-shape check. Always-loaded rules with a valid `always_loaded:` waiver are correctly authored; they only matter here because they contribute bytes. Do NOT emit findings reading "rule lacks `paths:` restriction" — that wording falsely implies the rule is misshaped. If a rule lacks BOTH `paths:` AND `always_loaded:`, that's a separate FAIL caught by `lazy-core.rule-writing` Check 2 and surfaced via `lazy-core.audit`, not this budget check.
 - **Hooks** (registered in global `settings.json` under `hooks.*`):
@@ -533,7 +529,7 @@ Any one signal is sufficient — doctor should not skip a delegated audit just b
 - *Run condition*: `.claude/lazy.settings.json[products]` holds at least one key besides `_version`. No registered product → silent skip.
 - *On invoke*: run it in all-products mode over the registered keys — doctor never raises the audit's own product question. Fold findings into a **Spec** subsection. The audit is read-only and has no fix mode: carry each finding's repair route from the audit's own `## Repair routes` table, which the operator runs.
 
-**Resolve `<wiki-cli>` once, before the first call.** It is the wiki plugin's `bin/lazycortex-wiki` file: `<root>/bin/lazycortex-wiki`, where `<root>` is what `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" plugin-root lazycortex-wiki)` prints — the authoring repo's `plugins/claude/lazycortex-wiki/` when this checkout ships the plugin, else the daemon's exported dir, else the install `~/.claude/plugins/installed_plugins.json` records; exit 1 with an `error:` line means the wiki plugin is not installed. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
+**Resolve `<wiki-cli>` once, before the first call.** It is the wiki plugin's `bin/lazycortex-wiki` file: `<root>/bin/lazycortex-wiki`, where `<root>` is what `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" plugin-root lazycortex-wiki)` prints — the `$LAZYCORTEX_PLUGIN_DIRS` entry first, then the dev-vault sibling, then the repo's own `plugins/claude/lazycortex-wiki/`, and last the `installPath` the install `~/.claude/plugins/installed_plugins.json` records; exit 1 with an `error:` line means the wiki plugin is not installed. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
 
 **11m. Wiki coverage** → `lazy-wiki.audit`
 - *Availability*: `lazycortex-wiki` meets the canonical signal set above.
@@ -731,7 +727,7 @@ On Record:
 ```
 Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" sandbox-sync --repo-root "$PWD")
 ```
-The verb prints JSON `{path, present, enabled, added_read, added_write, removed_read, changed}`; report the receipt as `changed=<changed> added_write=<added_write>` from those fields. The file is gitignored daemon state, so there is nothing to commit. The sync appends what is missing, lays the `sandbox` section of `lazy.settings.json` over the file, and drops exactly one class of entry: a version-pinned read grant under the plugin cache root whose directory no longer exists (reported as `removed_read`). Every other recorded entry survives, including one whose path is missing — a grant outside the cache may name a location the operator has yet to create.
+The verb prints JSON `{path, present, enabled, added_read, added_write, removed_read, removed_write, changed}`; report the receipt as `changed=<changed> added_write=<added_write>` from those fields. The file is gitignored daemon state, so there is nothing to commit. The sync appends what is missing, lays the `sandbox` section of `lazy.settings.json` over the file, and drops exactly one class of entry: a version-pinned grant under the plugin cache root whose directory no longer exists, dropped from whichever allowlists record it (reported as `removed_read` / `removed_write`). Every other recorded entry survives, including one whose path is missing — a grant outside the cache may name a location the operator has yet to create.
 
 For any finding surfaced by a delegated audit (Guard / Logging), direct the user to run that sibling skill for fixes. Doctor never auto-fixes issues owned by sibling audits.
 

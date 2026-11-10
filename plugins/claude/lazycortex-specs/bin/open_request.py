@@ -16,8 +16,8 @@ State table for the input file:
 - **Naked** (no frontmatter)
   → write fresh shape, commit, outcome `opened`.
 - **Partial bootstrap** (request_status: draft, missing review_active
-  or review_round or review_approved or banner) → write the missing
-  pieces, commit, outcome `repaired`.
+  or review_round or review_approved or review_phase or review_main_done
+  or banner) → write the missing pieces, commit, outcome `repaired`.
 - **Fully opted in** (all required keys present, banner above first H1)
   → outcome `already-opted-in`, no-op.
 - **Ready-for-apply** (request_status: draft + review_result present)
@@ -25,9 +25,9 @@ State table for the input file:
   by the apply-gate routine, not the open transition.
 - **Terminal status** (request_status in {accepted, rejected})
   → outcome `terminal-state-skip`, no-op.
-- **Has frontmatter but request_status is set to an unknown value** →
-  outcome `unknown-state-skip`, no-op (operator state, not script's
-  business).
+- **Has frontmatter but request_status is missing or set to a value that is
+  neither draft nor terminal** → outcome `unknown-state-skip`, no-op
+  (operator state, not script's business).
 
 On the naked and partial paths, the spec-side frontmatter write to disk happens before
 `_bootstrap_review` runs. If that delegated call raises `SystemExit` (CLI unresolved, timeout,
@@ -62,12 +62,14 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_keys import BannerTag, Outcome, PlanReview, SpecKey, SpecValue, State  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_paths import (  # noqa: E402
-    find_settings_root, read_text, resolve_plugin_cli, spec_content_root, write_text_atomic,
+    find_settings_root, read_text, require_plugin_cli, spec_content_root, write_text_atomic,
 )
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -140,8 +142,7 @@ def _has_banner(body: str) -> bool:
     True when a recognised review-status tag appears before the first H1 heading;
     False when the H1 comes first or no banner is found.
   """
-  # First non-empty line of body region above first H1 must be the
-  # banner. The banner is a one-line callout with the tag.
+  # scan down to the first H1: a banner tag on any line above it counts, other lines are passed over
   for line in body.splitlines():
     # guard: skip blank lines
     if not line.strip():
@@ -151,8 +152,7 @@ def _has_banner(body: str) -> bool:
     if BannerTag.IN_PROCESS in line or BannerTag.ACTION_NEEDED in line or BannerTag.READY in line:
       return True
 
-  # Any other non-empty, non-H1 line — keep scanning (could be
-  # blank padding, stale snippet, etc.).
+  # the body ended with neither a banner nor an H1 — no banner
   return False
 
 
@@ -175,32 +175,28 @@ def _classify(values: dict, body: str) -> str:
   # draft carrying every opt-in key plus its banner is fully in the review loop; a draft missing
   # any of those pieces is only partway opted in; a draft that also carries a review result has
   # already been finalized and awaits the separate apply step, which owns that state exclusively;
-  # a status outside the draft stage is terminal and closed to further opt-in; and a draft with
-  # no status at all is left alone as operator state nobody but the operator should touch.
+  # an accepted or rejected status is terminal and closed to further opt-in; and a file that has
+  # frontmatter but no status, or a status that is neither draft nor one of those two, is left
+  # alone as operator state nobody but the operator should touch.
 
+  # read the state off the frontmatter, most decisive signal first
   if not values:
     return State.NAKED
   status = values.get(SpecKey.STATUS)
   if status in _TERMINAL_STATUSES:
     return State.TERMINAL
   if status == SpecValue.STATUS_DRAFT:
-      # Post-finalize files carry `review_result` (set by finalize
-      # as the last step) plus `request_status: draft` while the
-      # apply-gate routine has not yet flipped status to terminal.
-      # That state belongs to the apply-gate, not the open
-      # transition — re-bootstrapping here would undo the finalize.
+    # a finalized draft carries `review_result` until the apply-gate flips its status; that state
+    # belongs to the apply-gate, and re-bootstrapping here would undo the finalize
     if values.get(SpecKey.REVIEW_RESULT):
       return State.READY_FOR_APPLY
 
-  # Required review-side keys + banner = fully opted in
-    missing = [k for k in _REQUIRED_REVIEW_KEYS if k not in values]
-    if missing or not _has_banner(body):
+    # every required review-side key plus the banner means fully opted in
+    if any(key not in values for key in _REQUIRED_REVIEW_KEYS) or not _has_banner(body):
       return State.PARTIAL
     return State.READY
-  if status is None or status == "":
-      # Has some frontmatter but no request_status: operator state,
-      # not script's business
-    return State.UNKNOWN
+
+  # frontmatter without a status, or with a status outside the known set, is operator state
   return State.UNKNOWN
 
 
@@ -260,25 +256,25 @@ def _ensure_tags_member(fm_text: str, member: str) -> str:
   return spec_frontmatter.write_list(fm_text, _TAGS_KEY, [ *members, member ])
 
 
-def _resolve_review_cli() -> Path:
+def _resolve_review_cli(repo: Path) -> Path:
   """
   Resolve the `lazycortex-review` CLI binary, failing hard when it cannot be found.
+
+  Args:
+    repo: The repository root whose own plugin tree is searched.
 
   Returns:
     The resolved binary path.
 
   Raises:
-    SystemExit: When no plugin directory carries the `lazycortex-review` CLI.
+    SystemExit: When no lookup stage finds the `lazycortex-review` CLI.
   """
-  cli = resolve_plugin_cli(PlanReview.REVIEW_CLI)
-
-  # guard: unresolved — env var unset or no plugin dir carries the CLI
-  if cli is None:
-    sys.stderr.write(
-        f"no '{PlanReview.REVIEW_CLI}' resolvable via ${PlanReview.PLUGIN_DIRS_ENV}\n"
-    )
-    raise SystemExit(3)
-  return cli
+  try:
+    return require_plugin_cli(PlanReview.REVIEW_CLI, repo)
+  # guard: unresolved — the message names every lookup stage that was searched
+  except RuntimeError as exc:
+    sys.stderr.write(f"{exc}\n")
+    raise SystemExit(3) from None
 
 
 def _bootstrap_review(file_path: Path) -> None:
@@ -297,8 +293,8 @@ def _bootstrap_review(file_path: Path) -> None:
   """
   try:
     res = subprocess.run(
-        [sys.executable, str(_resolve_review_cli()), PlanReview.START_VERB, _NO_COMMIT_FLAG,
-         str(file_path)],
+        [sys.executable, str(_resolve_review_cli(flip_gate.repo_root(file_path.parent))), PlanReview.START_VERB,
+         _NO_COMMIT_FLAG, str(file_path)],
         cwd = str(file_path.parent), capture_output = True, text = True, check = False,
         timeout = _BOOTSTRAP_TIMEOUT_S, encoding = "utf-8",
     )
@@ -333,7 +329,6 @@ def _repair(text: str, values: dict, fm_end: int) -> str:
     apply-gate discriminator cleared, and the `request/draft` tag ensured.
   """
   fm_text = text[:fm_end]
-  body = text[fm_end:]
 
   # Spec keys: only add if missing (operator may have meaningful values)
   if SpecKey.ROLE not in values:
@@ -341,17 +336,15 @@ def _repair(text: str, values: dict, fm_end: int) -> str:
   if SpecKey.CLASS not in values:
     fm_text = _set_field(fm_text, SpecKey.CLASS, SpecValue.CLASS_UNKNOWN)
 
-# Clear the terminal apply-gate discriminator so re-entering the
-# review loop does not also trigger the downstream apply-gate
-# routine on the next md-scan tick. `review_result` is set only
-# by finalize; its presence after re-open would be a stale signal.
+  # clear the terminal apply-gate discriminator so re-entering the review loop does not also
+  # trigger the downstream apply-gate on the next md-scan tick; after a re-open it is stale
   if SpecKey.REVIEW_RESULT in values:
     fm_text = _unset_field(fm_text, SpecKey.REVIEW_RESULT)
   fm_text = _ensure_tags_member(fm_text, SpecValue.TAG_DRAFT)
 
   # a closing fence at the very end of the file gets its line break, so whatever the review side
   # appends below it starts on a line of its own
-  return fm_text.rstrip("\n") + "\n" + body.lstrip("\n")
+  return fm_text.rstrip("\n") + "\n" + text[fm_end:].lstrip("\n")
 
 
 def open_naked_file(file_path: Path) -> str:
@@ -393,18 +386,25 @@ def open_naked_file(file_path: Path) -> str:
   # already landed, the file is left in a shape the next call classifies as `partial`, so a
   # retry on the same file always resumes and completes the interrupted opt-in.
 
+  # classify the file's current opt-in state from its frontmatter and body
   text = read_text(file_path)
   values, _, fm_end = _parse_frontmatter(text)
   state = _classify(values, text[fm_end:])
+
+  # a naked file gets the fresh opt-in frontmatter; an empty frontmatter block the file already
+  # carries is replaced, never stacked under
   if state == State.NAKED:
-    # an empty frontmatter block the file already carries is replaced, never stacked under
     write_text_atomic(file_path, _FRESH_FRONTMATTER + text[fm_end:].lstrip("\n"))
     _bootstrap_review(file_path)
     return Outcome.OPENED
+
+  # a half-opted-in file has its frontmatter repaired and the review-side bootstrap retried
   if state == State.PARTIAL:
     write_text_atomic(file_path, _repair(text, values, fm_end))
     _bootstrap_review(file_path)
     return Outcome.REPAIRED
+
+  # every other state is left untouched and reported by its own skip outcome
   if state == State.READY:
     return Outcome.ALREADY_OPTED_IN
   if state == State.READY_FOR_APPLY:
@@ -422,25 +422,21 @@ def _atomic_commit(
     subject: str,
 ) -> None:
   """
-  Stage and commit a request file's opt-in edit under a caller-supplied bot identity.
+  Commit a request file's opt-in edit under a caller-supplied bot identity, without an icon repaint.
 
   Notes:
-    - Also stages and commits the requests inbox summary file when its container stats need
-      updating.
-    - Runs `git add` and `git commit` as subprocesses scoped to the file's parent directory,
-      with the commit's author identity set per-call via `-c user.name=` / `-c user.email=`
-      flags rather than mutating the repo's persistent git config, so concurrent bot commits
-      under different identities never race on the same per-repo config file — the same
-      technique used by `lazycortex-review`'s own commit functions.
+    - Also commits the requests inbox summary file when its container stats need updating.
+    - The author identity applies to this commit only and never changes the repo's git config.
+    - The operator's staged entries never ride into the commit.
 
   Args:
-    file_path: Request file to stage and commit.
+    file_path: Request file to commit.
     author_name: Git author name used for the commit.
     author_email: Git author email used for the commit.
     subject: Commit message subject.
 
   Raises:
-    subprocess.CalledProcessError: When either git invocation exits non-zero.
+    subprocess.CalledProcessError: If the commit fails.
   """
 
   # Domain(spec.notes):
@@ -451,25 +447,18 @@ def _atomic_commit(
   # the two from drifting apart — a separate summary commit would leave a window where the
   # displayed count disagrees with what the inbox actually contains.
 
-  cwd = file_path.parent
+  # the commit carries the request file, plus the inbox summary when its container stats changed
   add_paths: list[str] = [str(file_path)]
   # waiver: inbox path segments are fixed protocol constants; no constants class in this module
   inbox = spec_content_root(find_settings_root(file_path.parent)) / "requests" / "requests.md"
   if inbox.is_file() and apply_container_stats(inbox):
     add_paths.append(str(inbox))
-  subprocess.run(
-      ["git", "add", "--", *add_paths],
-      cwd = cwd, check = True, capture_output = True,
-  )
-  subprocess.run(
-      [
-          "git",
-          "-c", f"user.name={author_name}",
-          "-c", f"user.email={author_email}",
-          "-c", "commit.gpgsign=false",
-          "commit", "-q", "-m", subject, "--", *add_paths,
-      ],
-      cwd = cwd, check = True, capture_output = True,
+
+  # commit them under the caller's bot identity, set for this one command only, with an explicit
+  # pathspec so content anyone else staged never rides along; no icon repaint rides this commit
+  flip_gate.commit_paths(
+      flip_gate.repo_root(file_path.parent), add_paths, subject = subject, author_name = author_name,
+      author_email = author_email, repaint = False,
   )
 
 
@@ -511,10 +500,14 @@ def main(argv: list[str]) -> int:
   )
   args = parser.parse_args(argv)
   file_path: Path = args.file.resolve()
+
+  # guard: the named path is missing or is not a markdown document
   # waiver: filesystem path idiom -- markdown file extension guard
   if not file_path.exists() or file_path.suffix.lower() != ".md":
     sys.stderr.write(f"not a markdown file: {file_path}\n")
     return 2
+
+  # open or repair the opt-in, then commit it unless the caller asked for an uncommitted run
   outcome = open_naked_file(file_path)
   if outcome in (Outcome.OPENED, Outcome.REPAIRED) and not args.no_commit:
     subject = (

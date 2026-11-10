@@ -23,6 +23,16 @@
     },
     {
       "when": {
+        "frontmatter.spec_conflicted": true
+      },
+      "resolve": {
+        "iconName": "{{frontmatter.iconize_icon}}",
+        "iconColor": "#f0abfc"
+      },
+      "priority": 500
+    },
+    {
+      "when": {
         "frontmatter.spec_upstream_status": "orphaned"
       },
       "resolve": {
@@ -83,6 +93,28 @@
         "iconColor": "#c4b5fd"
       },
       "priority": 330
+    },
+    {
+      "when": {
+        "frontmatter.spec_role": "status",
+        "frontmatter.spec_state": "awaiting-release"
+      },
+      "resolve": {
+        "iconName": "{{frontmatter.iconize_icon}}",
+        "iconColor": "#a5b4fc"
+      },
+      "priority": 328
+    },
+    {
+      "when": {
+        "frontmatter.spec_role": "status",
+        "frontmatter.spec_state": "in-release"
+      },
+      "resolve": {
+        "iconName": "{{frontmatter.iconize_icon}}",
+        "iconColor": "#67e8f9"
+      },
+      "priority": 327
     },
     {
       "when": {
@@ -186,17 +218,6 @@
         "iconColor": "#94a3b8"
       },
       "priority": 240
-    },
-    {
-      "when": {
-        "frontmatter.spec_role": "status",
-        "frontmatter.spec_state": "blocked"
-      },
-      "resolve": {
-        "iconName": "{{frontmatter.iconize_icon}}",
-        "iconColor": "#f9a8d4"
-      },
-      "priority": 236
     },
     {
       "when": {

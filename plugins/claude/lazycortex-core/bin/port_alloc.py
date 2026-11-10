@@ -48,7 +48,7 @@ def probe_port_free(port: int, bind: str = "127.0.0.1") -> bool:
   return True
 
 
-def allocate_port(repo_root: Path, registry: list[dict] | None = None) -> dict:
+def allocate_port(repo_root: Path) -> dict:
   """
   Pick a metrics port for the given repo: its recorded one when present, else the first free.
 
@@ -64,14 +64,14 @@ def allocate_port(repo_root: Path, registry: list[dict] | None = None) -> dict:
       another metrics-enabled daemon registered on this host.
     - A repository with an already-recorded port receives that exact same port on every later
       call, unless another registered daemon also records it.
-    - Either an allocated port is returned or `RuntimeError` is raised; a port already claimed
-      by another registered daemon or that fails a live bind probe is never returned.
+    - Either a port is returned or `RuntimeError` is raised; a freshly allocated port is never
+      claimed by another registered daemon and never fails a live bind probe. A repository's own
+      recorded port is reused without a bind probe, because its own daemon may hold it.
     - A call never fails outright because one other daemon's record on the host is unreadable
       or malformed.
 
   Args:
     repo_root: Absolute path of the repo the port is allocated for.
-    registry: Optional pre-computed `enumerate_local_daemons()` result; computed when omitted.
 
   Returns:
     A dict `{"port": <int>, "reused": <bool>}` — `reused` is True when the repo's existing
@@ -80,7 +80,6 @@ def allocate_port(repo_root: Path, registry: list[dict] | None = None) -> dict:
   Raises:
     RuntimeError: If every port in the allocation range is taken.
   """
-  registry = registry if registry is not None else enumerate_local_daemons()
   repo_key = str(Path(repo_root).resolve())
   taken: set[int] = set()
   recorded: int | None = None
@@ -93,18 +92,19 @@ def allocate_port(repo_root: Path, registry: list[dict] | None = None) -> dict:
   # Domain(runtime.metrics):
   # # Metrics-port holder identification
   # A daemon holds a metrics port only while its own row in the local daemon registry has metrics
-  # enabled and names a port; a daemon whose metrics collection is switched off is not a holder and
-  # never occupies a slot in the allocation. The row that names the same repository the request is
+  # enabled; a row that names no port of its own holds the first port of the allocation range. A
+  # daemon whose metrics collection is switched off is not a holder and never occupies a slot in
+  # the allocation. The row that names the same repository the request is
   # for is the requester's own prior allocation, not a competing holder, and is set aside separately
   # from every other holder's port.
 
   # walk the registry and split it into this repo's own recorded port and every other holder's port
-  for row in registry:
+  for row in enumerate_local_daemons():
     # guard: a daemon with metrics off holds no port
     if not row[RegistryRow.METRICS_ENABLED]:
       continue
 
-    # guard: the repo's own row supplies the reuse candidate, never a taken port
+    # the repo's own row supplies the reuse candidate, never a taken port
     if str(Path(row[RegistryRow.REPO_ROOT]).resolve()) == repo_key:
       recorded = row[RegistryRow.PORT]
       continue
@@ -115,6 +115,8 @@ def allocate_port(repo_root: Path, registry: list[dict] | None = None) -> dict:
   # A repository that already has a metrics port on record keeps that same port on every later
   # allocation, even when the port is currently bound — the listener holding it is that repository's
   # own running daemon, not a stranger, so the bind state carries no information worth acting on.
+  # This holds only while the repository's own row has metrics enabled: with metrics switched off the
+  # recorded port is not a candidate, and the repository goes through ordinary sequential allocation.
 
   # Domain(runtime.metrics):
   # # Avoiding a foreign recorded port
@@ -128,7 +130,7 @@ def allocate_port(repo_root: Path, registry: list[dict] | None = None) -> dict:
   # A repository with an already-recorded metrics port receives that exact same port on every
   # later allocation call, as long as no other registered daemon also records it.
 
-  # guard: the repo's own recorded port is reused verbatim, busy or not — unless a second daemon records it too
+  # the repo's own recorded port is reused verbatim, busy or not — unless a second daemon records it too
   if recorded is not None and recorded not in taken:
     return { _PORT_KEY: recorded, _REUSED_KEY: True }
 
@@ -154,8 +156,9 @@ def allocate_port(repo_root: Path, registry: list[dict] | None = None) -> dict:
       return { _PORT_KEY: port, _REUSED_KEY: False }
 
   # Contract:
-  # Allocation either returns an allocated port or raises RuntimeError; it never returns a
-  # port that is currently claimed by another registered daemon or fails a live bind probe.
+  # Allocation either returns a port or raises RuntimeError. A freshly allocated port is never
+  # claimed by another registered daemon and never fails a live bind probe. A repository's own
+  # recorded port is reused without a bind probe, because its own daemon may hold it.
 
   # no candidate in the whole range cleared both checks
   raise RuntimeError(

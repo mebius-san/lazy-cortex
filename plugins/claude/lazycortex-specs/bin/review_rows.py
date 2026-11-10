@@ -39,7 +39,8 @@ import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-pos
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_keys import (  # noqa: E402
-    LEVEL_ROLES, GateCheckbox, LevelDoc, Section, SpecHaltKey, SpecKey, Stage, StageKey,
+    GATE_ROW_ORDER, LEVEL_ROLES, ConflictCallout, GateCheckbox, GateRowGroup, LangId, LevelDoc, Section, SpecHaltKey,
+    SpecKey, Stage, StageKey,
 )
 
 
@@ -49,8 +50,11 @@ _LF = "\n"
 _QUOTE = ">"
 _CALLOUT_OPEN = "> [!"
 _GATE_OPEN = f"{_QUOTE} {GateCheckbox.GATE_CALLOUT_MARK} "
+CONFLICT_OPEN = f"{_QUOTE} {ConflictCallout.MARK} {ConflictCallout.TITLE_PREFIX}"
 _TICKED_BOX = "> - [x]"
 _UNTICKED_BOX = "> - [ ]"
+_WRITE_PREFIX = "Write "
+_REVISE_PREFIX = "Revise "
 _H1_PREFIX = "# "
 _ADDED = "added"
 _REMOVED = "removed"
@@ -222,12 +226,43 @@ def read_review_candidates(repo: Path, note: Path) -> list[str]:
 
   # keep the scope's order, dropping every document that is not owed a block
   return [
-      # waiver: the specs `bin/` modules are one flat sibling set sharing this single private role reader, which
-      # has no public counterpart in `flip_gate` or `spec_keys`
-      # pylint: disable-next=protected-access
-      name for name in _find_all_scope_files(note, flip_gate._note_role(note_fm))
+      name for name in _find_all_scope_files(note, flip_gate.note_role(note_fm))
       if _is_owed(repo, note.parent / name, product)
   ]
+
+
+def _find_all_callout_spans(section_lines: list[str], opener: str) -> list[tuple[int, int]]:
+  """
+  Locate the callout blocks of a section whose first line opens with a given prefix.
+
+  A block runs from its opening line over the consecutive `>` lines, ending before the next non-quoted line or the
+  next callout (`> [!`).
+
+  Args:
+    section_lines: Lines of the `# Gates` section.
+    opener: The prefix a block's first line starts with.
+
+  Returns:
+    The `(start, end)` half-open line index ranges of the blocks, in section order.
+  """
+  spans: list[tuple[int, int]] = []
+  pos = 0
+  while pos < len(section_lines):
+    # guard: a line that opens no such callout belongs to no block
+    if not section_lines[pos].startswith(opener):
+      pos += 1
+      continue
+
+    # the block runs over the consecutive quoted lines, stopping where another callout opens
+    end = pos + 1
+    while end < len(section_lines) and section_lines[end].startswith(_QUOTE) and \
+        not section_lines[end].startswith(_CALLOUT_OPEN):
+      end += 1
+    spans.append(( pos, end ))
+    pos = end
+
+  # every block in the order the section carries them
+  return spans
 
 
 def _find_all_gate_spans(section_lines: list[str]) -> list[tuple[int, int]]:
@@ -242,24 +277,23 @@ def _find_all_gate_spans(section_lines: list[str]) -> list[tuple[int, int]]:
   Returns:
     The `(start, end)` half-open line index ranges of the gate blocks, in section order.
   """
-  spans: list[tuple[int, int]] = []
-  pos = 0
-  while pos < len(section_lines):
-    # guard: a line that opens no gate callout belongs to no block
-    if not section_lines[pos].startswith(_GATE_OPEN):
-      pos += 1
-      continue
+  return _find_all_callout_spans(section_lines, _GATE_OPEN)
 
-    # the block runs over the consecutive quoted lines, stopping where another callout opens
-    end = pos + 1
-    while end < len(section_lines) and section_lines[end].startswith(_QUOTE) and \
-        not section_lines[end].startswith(_CALLOUT_OPEN):
-      end += 1
-    spans.append(( pos, end ))
-    pos = end
 
-  # every block in the order the section carries them
-  return spans
+def find_all_conflict_spans(section_lines: list[str]) -> list[tuple[int, int]]:
+  """
+  Locate the conflict callouts of a section.
+
+  A conflict callout opens with `> [!warning] Conflict with ` and runs over the consecutive `>` lines, ending before
+  the next non-quoted line or the next callout; any other `[!warning]` callout is not one.
+
+  Args:
+    section_lines: Lines of the `# Gates` section.
+
+  Returns:
+    The `(start, end)` half-open line index ranges of the conflict callouts, in section order.
+  """
+  return _find_all_callout_spans(section_lines, CONFLICT_OPEN)
 
 
 def parse_gate_blocks(section_lines: list[str]) -> list[GateBlock]:
@@ -302,7 +336,7 @@ def render_review_block(file: str, lang: str) -> list[str]:
     The four block lines, callout line first.
   """
   # an unknown language falls back to the English helper
-  helper = note_explainers.REVIEW_HELPER.get(lang) or note_explainers.REVIEW_HELPER[note_explainers.LANG_EN]
+  helper = note_explainers.REVIEW_HELPER.get(lang) or note_explainers.REVIEW_HELPER[LangId.EN]
   label = f"{GateCheckbox.REVIEW_PREFIX}{file}"
   return [ f"{_GATE_OPEN}{label}", f"{_UNTICKED_BOX} {label}", _QUOTE, f"{_QUOTE} {helper.format(file = file)}" ]
 
@@ -340,7 +374,222 @@ def _is_blank_or_absent(lines: list[str], idx: int) -> bool:
   return idx >= len(lines) or not lines[idx].strip()
 
 
-def reconcile(body: str, wanted: list[str], lang: str) -> tuple[str, dict[str, list[str]]]:
+def read_review_stages(repo: Path, note: Path) -> dict[str, str]:
+  """
+  Read the stage of every document in a folder note's review scope.
+
+  Args:
+    repo: Repository root.
+    note: Path of the folder note, located inside the repository.
+
+  Returns:
+    Document name to its `spec_stage`, for every scope document that carries one; a document without a stage is
+    absent from the result.
+
+  Raises:
+    ValueError: If the note lies outside the repository.
+  """
+  note.resolve().relative_to(repo.resolve())
+  note_fm, _fm_end = spec_frontmatter.parse(note.read_text(encoding = _ENCODING))
+
+  # every scope document with a stage, keyed by its name
+  stages: dict[str, str] = {}
+  for name in _find_all_scope_files(note, flip_gate.note_role(note_fm)):
+    doc_fm, _end = spec_frontmatter.parse((note.parent / name).read_text(encoding = _ENCODING))
+    if stage := doc_fm.get(StageKey.STAGE, "").strip():
+      stages[name] = stage
+  return stages
+
+
+def _row_document(label: str) -> str | None:
+  """
+  Name the document a gate row is about.
+
+  Args:
+    label: The row's label.
+
+  Returns:
+    The document a `Review`, `Write` or `Revise` row names, or `None` for a tool launch or publication row.
+  """
+  # a review row names its document outright
+  if label.startswith(GateCheckbox.REVIEW_PREFIX):
+    return label[len(GateCheckbox.REVIEW_PREFIX):]
+
+  # a write or revise row names the document it creates or reopens by its stem
+  for prefix in (_WRITE_PREFIX, _REVISE_PREFIX):
+    if label.startswith(prefix):
+      return label[len(prefix):] + _MD_SUFFIX
+  return None
+
+
+def order_key(block: GateBlock) -> int:
+  """
+  Place a gate row on the ladder.
+
+  Args:
+    block: The gate block to place.
+
+  Returns:
+    The row's index in the ladder order, by the document it is about or by its label; a row the ladder does not
+    list sorts after every listed one.
+  """
+  # the document first, the bare label second, so a review of the design and the design's own write row share a rung
+  for key in (_row_document(block.label), block.label):
+    if key in GATE_ROW_ORDER:
+      return GATE_ROW_ORDER.index(key)
+  return len(GATE_ROW_ORDER)
+
+
+def group_of(block: GateBlock, stages: dict[str, str]) -> str:
+  """
+  Sort a gate row into its layout group.
+
+  Args:
+    block: The gate block to sort.
+    stages: Document name to `spec_stage`, as `read_review_stages` reads them.
+
+  Returns:
+    `GateRowGroup.REREVIEW` for a review row of an approved document, `GateRowGroup.NEXT` for every other row.
+  """
+  # only a review of an already approved document re-opens settled work; everything else moves the asset forward
+  file = _parse_review_file(block)
+  if file is not None and stages.get(file) == Stage.APPROVED:
+    return GateRowGroup.REREVIEW
+  return GateRowGroup.NEXT
+
+
+def normalize_block(block: GateBlock, lang: str) -> list[str]:
+  """
+  Bring an un-ticked gate block to the canonical shape: callout line, checkbox line, a bare `>`, the hint.
+
+  Args:
+    block: The gate block to normalise.
+    lang: Authoring language of the note.
+
+  Returns:
+    The block's lines. A ticked block comes back exactly as it was; a block without any hint line comes back as
+    the callout and the checkbox alone, unless it is a review row, which gets the review helper.
+  """
+  # guard: a ticked block is the operator's gesture and is carried as it is
+  if block.ticked:
+    return list(block.lines)
+
+  # the hint runs from the first to the last quoted line with text after the checkbox line, blank lines inside kept
+  texts = [ line[len(_QUOTE):].strip() for line in block.lines[1:] if not line.lower().startswith(_UNTICKED_BOX) ]
+  filled = [ idx for idx, text in enumerate(texts) if text ]
+  hint = texts[filled[0]:filled[-1] + 1] if filled else []
+
+  # a review row without a hint is rendered afresh with the helper
+  if not hint and (file := _parse_review_file(block)) is not None:
+    return render_review_block(file, lang)
+
+  # the canonical shape, the hint behind its own blank quoted line so Obsidian's task renderer keeps it visible
+  head = [ f"{_GATE_OPEN}{block.label}", f"{_UNTICKED_BOX} {block.label}" ]
+  return head + ([ _QUOTE, *(f"{_QUOTE} {text}" if text else _QUOTE for text in hint) ] if hint else [])
+
+
+def _heading(group: str, lang: str) -> str:
+  """
+  Pick a layout group's sub-heading in the note's language.
+
+  Args:
+    group: One of the `GateRowGroup` values.
+    lang: Authoring language of the note.
+
+  Returns:
+    The `## ` heading line, English for an unknown language.
+  """
+  # an unknown language falls back to the English heading
+  return (note_explainers.GATE_GROUP_HEADINGS.get(( group, lang ))
+          or note_explainers.GATE_GROUP_HEADINGS[( group, LangId.EN )])
+
+
+def layout_section(section_lines: list[str], stages: dict[str, str], lang: str) -> list[str]:
+  """
+  Lay a `# Gates` section out into its row groups and conflict callouts.
+
+  Every line outside the gate blocks and the conflict callouts — the heading, the protected tag, the explainer, a
+  halt callout — keeps its order and comes first, runs of such lines separated by one blank line. Then come the
+  next-step rows under their sub-heading and the re-review rows under theirs, each group in ladder order and each
+  block in canonical shape, and last the conflict callouts under theirs, in section order and byte for byte; a group
+  without members gets no sub-heading. Sub-headings a previous layout wrote are dropped and written anew.
+
+  Guarantees:
+    - Laying out an already laid-out section changes nothing.
+
+  Args:
+    section_lines: Lines of the `# Gates` section, heading first.
+    stages: Document name to `spec_stage`, as `read_review_stages` reads them.
+    lang: Authoring language of the note.
+
+  Returns:
+    The section's lines, laid out.
+  """
+
+  # Contract:
+  # Laying out an already laid-out section changes nothing: the layout is a fixed point of itself, so a caller may
+  # run it on every wake without churning the note.
+
+  # Domain(spec.notes):
+  # # Conflict callouts close the gates section
+  # In the gates section of a folder-note, conflict callouts form the last group, after the next-step rows and the
+  # re-review rows. They are carried as written, without being reshaped or reordered, and sit under their own group
+  # heading. When the note holds no conflict callout, the group heading is absent as well.
+
+  headings = set(note_explainers.GATE_GROUP_HEADINGS.values())
+
+  # every line outside the blocks, as runs of written lines, blank lines and old sub-headings dropped
+  conflict_spans = find_all_conflict_spans(section_lines)
+  block_spans = sorted([ *_find_all_gate_spans(section_lines), *conflict_spans ])
+  runs: list[list[str]] = []
+  run: list[str] = []
+  pos = 0
+  for start, end in [ *block_spans, ( len(section_lines), len(section_lines) ) ]:
+    for line in section_lines[pos:start]:
+      if line in headings or not line.strip():
+        if run:
+          runs.append(run)
+          run = []
+        continue
+      run.append(line)
+    if run:
+      runs.append(run)
+      run = []
+    pos = end
+
+  # the written lines first, one blank line between runs
+  laid: list[str] = []
+  for chunk in runs:
+    if laid:
+      laid.append("")
+    laid.extend(chunk)
+
+  # then the two groups, each under its sub-heading, rows in ladder order
+  blocks = parse_gate_blocks(section_lines)
+  for group in (GateRowGroup.NEXT, GateRowGroup.REREVIEW):
+    members = [ block for block in blocks if group_of(block, stages) == group ]
+
+    # guard: a group without rows gets no sub-heading
+    if not members:
+      continue
+    laid.extend([ "", _heading(group, lang) ])
+    for block in sorted(members, key = order_key):
+      laid.extend([ "", *normalize_block(block, lang) ])
+
+  # last the conflict callouts, under their own sub-heading, each carried as the section holds it
+  if conflict_spans:
+    laid.extend([ "", _heading(GateRowGroup.CONFLICTS, lang) ])
+    for start, end in conflict_spans:
+      laid.extend([ "", *section_lines[start:end] ])
+
+  # the section closes the way it opened: on a blank line when one followed its last written line
+  if section_lines and not section_lines[-1].strip():
+    laid.append("")
+  return laid
+
+
+def reconcile(body: str, wanted: list[str], lang: str, *,
+              stages: dict[str, str] | None = None) -> tuple[str, dict[str, list[str]]]:
   """
   Bring the `Review <doc>` gate blocks of a folder note in line with the documents owed one.
 
@@ -349,17 +598,21 @@ def reconcile(body: str, wanted: list[str], lang: str) -> tuple[str, dict[str, l
   when nothing but a blank line or the end of the body follows the block, and stays when text or a callout, such as
   a halt callout, follows it flush. A ticked review block is never removed. One block is appended per wanted
   document that has none yet, after the last remaining gate block (or after the section's last non-blank line when
-  none remains), each preceded by one blank line.
+  none remains), each preceded by one blank line. With `stages` given, the whole section is then laid out into its
+  two row groups by `layout_section`.
 
   Guarantees:
-    - Every line outside a `Review <doc>` gate block, including other gate blocks, the halt callout, the protected
-      tag, the explainer and other sections, is carried over byte for byte.
-    - Repeating the call with the same `wanted` changes nothing; an up-to-date note comes back identical.
+    - Without `stages`, every line outside a `Review <doc>` gate block, including other gate blocks, the halt
+      callout, the protected tag, the explainer and other sections, is carried over byte for byte; with `stages`,
+      every line outside the `# Gates` section is.
+    - Repeating the call with the same `wanted` and `stages` changes nothing; an up-to-date note comes back
+      identical.
 
   Args:
     body: Folder-note body text, after the frontmatter.
     wanted: Names of the documents owed a block, as produced by `read_review_candidates`.
     lang: Authoring language of the note.
+    stages: Document name to `spec_stage`, as `read_review_stages` reads them, or `None` to leave the layout alone.
 
   Returns:
     The rewritten body and a summary with the keys `added`, `removed` and `kept`. `added` lists the new blocks'
@@ -371,12 +624,13 @@ def reconcile(body: str, wanted: list[str], lang: str) -> tuple[str, dict[str, l
   """
 
   # Contract:
-  # Every line that is not part of a `Review <doc>` gate block, including other gate blocks, the halt callout, the
-  # protected tag, the explainer and the other sections, is carried over byte for byte.
+  # Without `stages`, every line that is not part of a `Review <doc>` gate block, including other gate blocks, the
+  # halt callout, the protected tag, the explainer and the other sections, is carried over byte for byte; with
+  # `stages`, every line outside the `# Gates` section is.
 
   # Contract:
-  # Repeating the call with the same `wanted` changes nothing: an up-to-date note comes back identical, so the
-  # caller can leave its bytes and modification time alone.
+  # Repeating the call with the same `wanted` and `stages` changes nothing: an up-to-date note comes back identical,
+  # so the caller can leave its bytes and modification time alone.
 
   lines = body.split(_LF)
 
@@ -424,6 +678,10 @@ def reconcile(body: str, wanted: list[str], lang: str) -> tuple[str, dict[str, l
     if not _is_blank_or_absent(section + tail, insert_at):
       chunk.append("")
     section[insert_at:insert_at] = chunk
+
+  # with the stages known, the whole section is laid out into its two groups
+  if stages is not None:
+    section = layout_section(section, stages, lang)
 
   # re-join the untouched head, the rewritten section and the untouched rest
   return _LF.join([ *lines[:head], *section, *tail ]), { _ADDED: added, _REMOVED: removed, _KEPT: kept }
@@ -480,9 +738,10 @@ def main(argv: list[str]) -> int:
   # `# Gates` refusal marks a non-note -- every other failure propagates as itself
   # waiver: `wanted` and `lang` stay out of the `try` so a candidate failure is never reported as a missing `# Gates`
   wanted = read_review_candidates(repo, note)
+  stages = read_review_stages(repo, note)
   lang = note_explainers.lang_for_note(note)
   try:
-    body, summary = reconcile(text[fm_end:], wanted, lang)
+    body, summary = reconcile(text[fm_end:], wanted, lang, stages = stages)
   except ValueError as error:
     sys.stderr.write(f"not a spec folder note ({error}): {note}\n")
     return 2

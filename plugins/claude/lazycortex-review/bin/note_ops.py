@@ -40,6 +40,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -59,6 +60,8 @@ import body as _body  # noqa: E402  # pylint: disable=import-error,wrong-import-
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import frontmatter as _fm  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import git_ops as _git_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import job_markers as _job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 # waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
@@ -67,7 +70,7 @@ import parser as _parser  # noqa: E402  # pylint: disable=import-error,wrong-imp
 from errors import ParseError  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 # pylint: disable-next=import-error,wrong-import-position
-from keys import LANG_EN as _LANG_EN, AutorunState, Bucket, Phase, ReviewKey, Tag  # noqa: E402
+from keys import AutorunState, Bucket, CoreCommand, LangId, Phase, ReviewKey, Tag  # noqa: E402
 
 
 # The closed `review_*` frontmatter schema (spec § Frontmatter schema) — any `review_`-prefixed
@@ -120,10 +123,15 @@ _TICK_CHAR = "x"
 # is also scanned for ticked options.
 _QUESTION_MARKER = "question"
 
-# The vault settings file `resolve_language` walks up to and the key it reads there; the
-# shipped floor it returns when neither is found is `keys.LANG_EN`.
+# The `[!todo]` marker and `#review/command` tag of the operator's command callout.
+_COMMAND_MARKER = "todo"
+_COMMAND_TAG = f"{Tag.REVIEW_PREFIX}command"
+
+# The vault settings file `resolve_language` walks up to; the shipped floor it returns when
+# none is found is `keys.LangId.EN`.
 _SETTINGS_REL = Path(".claude") / "lazy.settings.json"
-_LANGUAGE_KEY = "language"
+# Core CLI flag naming the repository root the language verb reads.
+_ARG_CWD = "--cwd"
 
 
 def _coerce_known_value(key: str, raw: str) -> bool | int | str:
@@ -382,6 +390,26 @@ def build_report(text: str, job_markers: dict[str, str | None] | None = None) ->
   }
 
 
+def has_open_command(text: str) -> bool:
+  """
+  Report whether a review document carries an operator command the coordinator still owes.
+
+  Args:
+    text: Full document text, frontmatter included.
+
+  Returns:
+    `True` when a `[!todo] #review/command` callout with a non-empty body is present; `False`
+    otherwise, including for a document whose frontmatter does not parse.
+  """
+  # the same callout reading the coordinator's command wake trigger uses
+  # waiver: 'callouts'/'type'/'tag'/'body' are build_report's own wire-shape keys (module docstring), not keys.py constants
+  return any(
+      callout["type"] == _COMMAND_MARKER and callout["tag"] == _COMMAND_TAG and callout["body"].strip()
+      # waiver: 'callouts' is build_report's own wire-shape key (module docstring), not a keys.py constant
+      for callout in build_report(text)["callouts"]
+  )
+
+
 def set_key(text: str, key: str, value: object) -> str:
   """
   Set a frontmatter key to a value, using line-surgery to preserve byte-for-byte.
@@ -530,51 +558,57 @@ def resolve_language(file_path: Path) -> str:
   """
   Resolve the language the review system's own fixed strings are written in.
 
-  Walks up from the document to the nearest `.claude/lazy.settings.json` and
-  returns the top-level `language` key, or the shipped `en` floor. Review has
-  no language key of its own — the prose it writes follows the document under
-  review, and only its fixed operator-facing strings follow this value.
+  Answers with the repo-wide language of the vault that holds the document, as resolved by the
+  `lazycortex-core` language chain, or the shipped `en` floor. Review has no language key of its
+  own — the prose it writes follows the document under review, and only its fixed operator-facing
+  strings follow this value.
 
   Guarantees:
-    - Always returns a language tag; a document outside any vault, or an
-      unreadable settings document, resolves to `en` instead of raising.
+    - A document outside any vault resolves to `en` without raising.
+    - A document inside a vault resolves only to the language the `lazycortex-core` language chain answers; when core
+      cannot be reached or answers nothing, `RuntimeError` is raised and no language is substituted.
 
   Args:
     file_path: The document the language is resolved for.
 
   Returns:
-    The repo-wide language tag; `en` when no settings file is found or readable.
+    The repo-wide language tag; `en` when the document sits outside any vault.
+
+  Raises:
+    RuntimeError: If the `lazycortex-core` CLI cannot be resolved, exits non-zero, or answers nothing.
   """
 
   # Contract:
-  # Resolution MUST always yield a language tag: a document outside any vault, or
-  # an unreadable settings document, resolves to `en` rather than raising.
+  # A document with no vault settings file above it MUST resolve to `en`, the shipped floor, without raising.
+
+  # Contract:
+  # A document inside a vault MUST resolve only to the language the `lazycortex-core` language chain answers.
+  # When core cannot be reached or answers nothing, resolution raises `RuntimeError` and NEVER substitutes a language.
 
   # walk up to the nearest settings root; a doc outside any vault keeps the floor
-  settings = None
-  for cand in file_path.resolve().parents:
-    candidate = cand / _SETTINGS_REL
-    if candidate.is_file():
-      try:
-        settings = json.loads(candidate.read_text(encoding = "utf-8"))
-      except (OSError, json.JSONDecodeError):
-        settings = None
-      break
+  root = next((cand for cand in file_path.resolve().parents if (cand / _SETTINGS_REL).is_file()), None)
 
-  # guard: no settings file, or an unreadable one — English is the shipped floor
-  if not isinstance(settings, dict):
-    return _LANG_EN
+  # guard: no settings file above the document — English is the shipped floor
+  if root is None:
+    return LangId.EN
 
-  # the repo-wide key is the only one consulted — review has no language of its own
-  value = settings.get(_LANGUAGE_KEY)
+  # core owns the chain, and a missing core is a failure rather than a language; review names no section of its
+  # own, so only the repo-wide key is read
+  proc = subprocess.run(
+      [ sys.executable, str(_git_ops.require_core_cli()), CoreCommand.RESOLVE_LANGUAGE, _ARG_CWD, str(root) ],
+      capture_output = True, text = True, check = False, encoding = "utf-8",
+  )
 
-  # guard: an absent or empty key leaves the floor in place
-  if not isinstance(value, str) or not value:
-    return _LANG_EN
-  return value
+  # guard: a non-zero exit or an empty answer — surface stdout+stderr instead of inventing a language
+  if proc.returncode != 0 or not proc.stdout.strip():
+    raise RuntimeError(
+        f"lazycortex-core {CoreCommand.RESOLVE_LANGUAGE} exit={proc.returncode} "
+        f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    )
+  return proc.stdout.removesuffix("\n")
 
 
-def repaint_banner(text: str, *, job_in_flight: bool = False, lang: str = _LANG_EN) -> str:
+def repaint_banner(text: str, *, job_in_flight: bool = False, lang: str = LangId.EN) -> str:
   """
   Recompute and repaint the top banner from the document's current frontmatter state.
 
@@ -588,6 +622,8 @@ def repaint_banner(text: str, *, job_in_flight: bool = False, lang: str = _LANG_
   Guarantees:
     - Repainting is idempotent: calling this function again on its own output, with the
       same `job_in_flight` value, returns identical text.
+    - Never paints the ready banner on an unapproved document whose `review_phase` is `main` or
+      that carries a non-empty `[!todo] #review/command` callout.
 
   Args:
     text: Full document text, frontmatter included.
@@ -609,6 +645,10 @@ def repaint_banner(text: str, *, job_in_flight: bool = False, lang: str = _LANG_
   # Contract:
   # Repainting is idempotent: calling this function again on its own output, with the
   # same `job_in_flight` value, returns identical text.
+
+  # Contract:
+  # The ready banner is NEVER painted on an unapproved document whose `review_phase` is
+  # `main` or that carries a non-empty `[!todo] #review/command` callout.
 
   meta, body = _fm.parse(text)
 
@@ -635,6 +675,7 @@ def repaint_banner(text: str, *, job_in_flight: bool = False, lang: str = _LANG_
       dispatch_state = dispatch_state,
       approved = approved,
       review_phase = review_phase,
+      command_pending = has_open_command(text),
   )
 
   # render the callout for that state and splice it back into the document

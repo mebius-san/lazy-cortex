@@ -1,5 +1,5 @@
 ---
-description: Contract for the `lazy_setup_phase:` frontmatter key — allowed values, ordering inside `lazy-core.setup`, the companion `requires_live_session:` key, the chained-from-inside-another-install anti-pattern, and the canonical resolution of a repo's enabled plugin set.
+description: Contract for the `lazy_setup_phase:` frontmatter key — allowed values, ordering inside `lazy-core.setup`, the `lazy_setup_last:` phase-closer key, the companion `requires_live_session:` key, the chained-from-inside-another-install anti-pattern, and the canonical resolution of a repo's enabled plugin set.
 ---
 # `lazy_setup_phase` frontmatter contract
 
@@ -18,6 +18,8 @@ Any other value is a `WARN` finding from `lazy-core.audit`.
 1. All `pre-install` skills, alphabetical.
 2. All `per-plugin` skills (any directory matching `*.install`), with `lazy-core.install` first, then alphabetical.
 3. All `post-install` skills, alphabetical.
+
+Inside any of the three phases, one skill may declare `lazy_setup_last: true` to close its phase: it runs after every other skill of that phase, whatever its name. Every other skill keeps the order above. The key is for a skill that must see what the rest of its phase wrote — for example a post-install step that runs after every installer and every other cross-cutter. At most one skill per phase may carry it; when two skills of one phase both declare it, discovery fails with `two skills claim lazy_setup_last in phase <phase>` and nothing runs, because neither can be placed after the other.
 
 ## Resolving a repo's enabled plugin set
 
@@ -57,6 +59,13 @@ lazy_setup_phase: post-install
 ```
 
 That is the only edit needed; `lazy-core.setup` discovers and orders the skill on its next run.
+
+A skill that must close its phase adds the closer key beside it:
+
+```yaml
+lazy_setup_phase: post-install
+lazy_setup_last: true
+```
 
 ## Enforcement
 

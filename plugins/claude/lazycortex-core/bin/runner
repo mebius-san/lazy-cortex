@@ -38,7 +38,11 @@ sys.path.insert(0, str(Path(__file__).parent))
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime
 # via sys.path, and only after the version guard so an old interpreter never parses 3.12-only syntax
 # pylint: disable-next=import-error,wrong-import-position
-from runtime_daemon import run, set_plugin_dirs  # noqa: E402
+from runtime_daemon import run  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime
+# via sys.path, and only after the version guard so an old interpreter never parses 3.12-only syntax
+# pylint: disable-next=import-error,wrong-import-position
+from plugin_dirs import set_plugin_dirs  # noqa: E402
 
 # one pass over argv: the flag consumes its value, the first bare argument is the repository root
 repo = None

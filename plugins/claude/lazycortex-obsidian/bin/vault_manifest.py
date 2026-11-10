@@ -12,10 +12,6 @@ Backs the `lazy-obsidian.capture` and `lazy-obsidian.deploy` skills; the `lookup
 serves `lazy-obsidian.update-plugin`, which needs a plugin's repo out of the same catalog.
 """
 
-# Decision: a plain script rather than skill-driven steps — the deploy path has to run over ssh on
-# a phone, where no model is present, and duplicating the bundle-download logic the update-plugin
-# skill already describes in prose is the price of that.
-
 from __future__ import annotations
 
 import argparse
@@ -27,6 +23,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -105,6 +102,68 @@ ENV_CACHE_HOME = "XDG_CACHE_HOME"
 GH_TOKEN_COMMAND = ("gh", "auth", "token")
 GH_TOKEN_TIMEOUT_SEC = 5
 HTTP_TIMEOUT_SEC = 30
+# Drift line for a plugin whose settings differ from the manifest, formatted with the plugin id `pid`
+DRIFT_SETTINGS_DIFFER = "plugins.{pid}: settings differ"
+# Staleness warning for a plugin whose version moved since capture, formatted with `pid`, `captured`, `installed`
+WARNING_VERSION_MOVED = "plugins.{pid}: captured under {captured}, {installed} installed"
+# Warning for credentials kept out of the manifest, formatted with their `count` and their joined `paths`
+WARNING_SECRETS_LIVE = "{count} credential value(s) live in the vault and never in the manifest: {paths}"
+# Drift line for a name present only in the vault, formatted with the manifest `section` and the `name`
+DRIFT_VAULT_ONLY = "{section}.{name}: in the vault, not in the manifest"
+# Drift line for a name present only in the manifest, formatted with the manifest `section` and the `name`
+DRIFT_MANIFEST_ONLY = "{section}.{name}: in the manifest, not in the vault"
+# Drift line for a name whose value changed, formatted with the manifest `section` and the `name`
+DRIFT_DIFFERS = "{section}.{name}: differs"
+# Drift line for a plugin installed but not captured, formatted with the plugin id `pid`
+DRIFT_PLUGIN_INSTALLED_ONLY = "plugins.{pid}: installed, not in the manifest"
+# Drift line for a captured plugin no longer installed, formatted with the plugin id `pid`
+DRIFT_PLUGIN_MANIFEST_ONLY = "plugins.{pid}: in the manifest, not installed"
+# Drift line for a plugin whose enablement flipped, formatted with `pid` and the flag it `was` and is `now`
+DRIFT_PLUGIN_ENABLED = "plugins.{pid}: enabled {was} in the manifest, {now} in the vault"
+# Worker error for a repo root without a config directory, formatted with the `config_dir` name and the `root`
+NO_CONFIG_DIR_ERROR = "no {config_dir}/ under {root}"
+# Worker error for a repo root without a readable manifest, formatted with the `manifest` name and the `root`
+NO_MANIFEST_ERROR = "no readable {manifest} at {root}"
+# Deploy error for a config file name that would escape its directory, formatted with the `name`
+CONFIG_UNSAFE_ERROR = "config {name!r}: not a plain filename, skipped"
+# Deploy error for a snippet name that would escape its directory, formatted with the `name`
+SNIPPET_UNSAFE_ERROR = "snippet {name!r}: not a plain filename, skipped"
+# Deploy error for a snippet recorded as plugin-shipped that the plugin no longer ships, formatted with the `name`
+SNIPPET_NOT_SHIPPED_ERROR = "snippet {name}: recorded as plugin-shipped but this plugin has none"
+# Deploy error for a vault-owned snippet recorded without a body, formatted with the `name`
+SNIPPET_NO_BODY_ERROR = "snippet {name}: no body recorded"
+# Deploy error for a plugin id that would escape its directory, formatted with the plugin id `pid`
+PLUGIN_UNSAFE_ERROR = "plugin {pid!r}: not a plain plugin id, skipped"
+# Deploy error for a plugin nothing could serve, formatted with the plugin id `pid` and the resolution `error`
+PLUGIN_UNRESOLVED_ERROR = "plugin {pid}: {error}"
+# Deploy error for a plugin served from the cache, formatted with the plugin id `pid` and the upstream `error`
+PLUGIN_FROM_CACHE_ERROR = "plugin {pid}: served from cache ({error})"
+# Deploy error for a theme name that would escape its directory, formatted with the `theme`
+THEME_UNSAFE_ERROR = "theme {theme!r}: not a plain theme name, skipped"
+# Deploy error for a theme nothing could serve, formatted with the `theme` and the resolution `error`
+THEME_UNRESOLVED_ERROR = "theme {theme!r}: {error}"
+# Deploy error for a theme served from the cache, formatted with the `theme` and the upstream `error`
+THEME_FROM_CACHE_ERROR = "theme {theme!r}: served from cache ({error})"
+# Lookup error for a catalog that is neither reachable nor cached
+CATALOG_UNAVAILABLE_ERROR = "community catalog unavailable: upstream unreachable and nothing cached"
+# Bundle-resolution reason for a plugin with no catalog entry and no repo override
+NOT_IN_CATALOG_REASON = "not in the community catalog and no repo override in the manifest entry"
+# Bundle-resolution reason for a repo whose HEAD manifest cannot be read
+HEAD_UNREADABLE_REASON = "no readable manifest at repo HEAD"
+# Bundle-resolution reason for a repo now shipping another plugin, formatted with the `found` id
+HEAD_REBRANDED_REASON = "repo HEAD manifest id is {found!r} (rebranded)"
+# Bundle-resolution reason for a HEAD manifest without a version
+HEAD_UNVERSIONED_REASON = "repo HEAD manifest has no version"
+# Bundle-resolution reason for release assets no tag served, formatted with the joined `tried` attempts
+RELEASE_UNAVAILABLE_REASON = "release assets unavailable ({tried})"
+# Theme-resolution reason for a theme outside the community catalogue
+THEME_NOT_IN_CATALOG_REASON = "not in the community theme catalogue"
+# Theme-resolution reason for a repo declaring another theme, formatted with the `repo` and the `found` name
+THEME_NAME_MISMATCH_REASON = "{repo}: theme is {found!r}"
+# Theme-resolution reason for an HTTP failure, formatted with the `repo` and the status `code`
+THEME_HTTP_REASON = "{repo}: HTTP {code}"
+# Theme-resolution reason for any other fetch failure, formatted with the `repo` and the failure `kind`
+THEME_FETCH_REASON = "{repo}: {kind}"
 
 
 # ----------------------------------------------------------------------------------------
@@ -136,19 +195,22 @@ def load_json(path: Path) -> Any:  # waiver: arbitrary JSON payload — Obsidian
 
 def dump_json(path: Path,
               obj: Any,  # waiver: arbitrary JSON payload — Obsidian config shape is not ours
-              *, trailing_newline: bool = False) -> None:
+              *,
+              trailing_newline: bool = False) -> None:
   """
   Write an object as indented JSON, atomically.
-
-  Obsidian writes its own config with a serializer that ends at the closing brace. Adding
-  a trailing newline there makes every vault re-dirty the file on next launch, so the
-  newline is opt-in and used only for the manifest — a repo file, not Obsidian's.
 
   Args:
     path: File to write; parent directories are created.
     obj: Value to serialize.
     trailing_newline: Whether to end the file with a newline.
   """
+
+  # Decision: the trailing newline is opt-in, not always appended — Obsidian writes its own config with a
+  # serializer that ends at the closing brace, so a trailing newline there makes every vault re-dirty the
+  # file on next launch; only the manifest, a repo file and not Obsidian's, asks for it.
+
+  # serialize the object and write it atomically, creating the directory first
   path.parent.mkdir(parents = True, exist_ok = True)
   text = json.dumps(obj, indent = 2, ensure_ascii = False)
   if trailing_newline:
@@ -248,7 +310,9 @@ def is_secret(key: object,
   # Domain(obsidian.vault-capture):
   # # Recognising a credential in captured configuration
   # A configuration entry counts as a credential on either of two independent signals: the name of
-  # the entry says so outright, or the value itself has the shape of a credential a provider issues.
+  # the entry says so outright, or the value itself has the shape of a credential: a token a
+  # provider issues, or any long unbroken run of base64-style text. The second shape is
+  # deliberately broad, so a long opaque value that is not secret is removed along with the real ones.
   # The two signals are needed together because neither is sufficient — an entry named for a secret
   # may hold a harmless flag, and an entry with a neutral name may hold a real token.
   # One name is deliberately excluded from the first signal: a bare "token" is used across the
@@ -300,7 +364,7 @@ def strip_secrets(obj: Any,  # waiver: arbitrary JSON payload — plugin setting
     for key, value in obj.items():
       here = f"{path}.{key}"
 
-      # guard: a credential never enters the manifest, by its key or by its own shape
+      # a credential is recorded as omitted and never enters the manifest, by its key or by its own shape
       if is_secret(key, value):
         omitted.append(here)
         continue
@@ -352,8 +416,7 @@ def resolve_github_token() -> str:
     A token from the environment or the `gh` CLI, or an empty string when neither has one.
   """
   for name in Http.ENV_TOKENS:
-    token = os.environ.get(name)
-    if token:
+    if (token := os.environ.get(name)):
       return token
   try:
     # waiver: the `gh` CLI is the operator's own credential store, not an injected command
@@ -392,31 +455,47 @@ def fetch_bytes(url: str, *, accept: str = Http.JSON) -> bytes:
 
   # authenticate only to GitHub's own hosts, and only when a token was found at all
   token = resolve_github_token()
-  if token and any(host in url for host in Http.TOKEN_HOSTS):
+  if token and urllib.parse.urlsplit(url).hostname in Http.TOKEN_HOSTS:
     request.add_header(Http.AUTHORIZATION, f"Bearer {token}")
   # waiver: fixed https endpoints built from constants above, not caller-supplied schemes
   with urllib.request.urlopen(request, timeout = HTTP_TIMEOUT_SEC) as response:
     return response.read()
 
 
-def fetch_community_catalog() -> dict[str, dict]:  # waiver: catalog entries are upstream JSON
+# waiver: catalog entries are upstream JSON
+def fetch_community_catalog(*, write_cache: bool = True) -> dict[str, dict]:
   """
   Load the community-plugin catalog, refreshing a day-old cached copy.
 
+  Args:
+    write_cache: Whether a catalog fetched from upstream also refreshes the cached copy; when false, the cache is
+      left as it was.
+
   Returns:
     Catalog entries keyed by plugin id; empty when upstream is unreachable and nothing was
-    ever cached.
+    ever cached, or when the catalog does not parse.
   """
   cached = cache_root() / CachePath.CATALOG
+  # opt: a cached catalog younger than the TTL is reused — upstream additions and delistings may go unseen that long
   fresh = cached.is_file() and cached.stat().st_mtime + CATALOG_TTL_SEC > time.time()
+  fetched: bytes | None = None
   if not fresh:
     try:
-      write_bytes(cached, fetch_bytes(COMMUNITY_LIST_URL))
+      fetched = fetch_bytes(COMMUNITY_LIST_URL)
+      if write_cache:
+        write_bytes(cached, fetched)
     except (urllib.error.URLError, OSError):
       # guard: an unreachable catalog is survivable only when a stale copy exists
       if not cached.is_file():
         return {}
-  entries = load_json(cached) or []
+      fetched = None
+
+  # a fresh fetch is read as fetched, so an unmirrored one still answers; otherwise the cached copy is read
+  try:
+    entries = (json.loads(fetched) if fetched is not None else load_json(cached)) or []
+  except ValueError:
+    # guard: an unparseable catalog answers as an empty one
+    entries = []
   return { entry[PluginKey.ID]: entry for entry in entries
            if isinstance(entry, dict) and entry.get(PluginKey.ID) }
 
@@ -430,6 +509,7 @@ def fetch_theme_catalog() -> dict[str, dict]:  # waiver: catalog entries are ups
     ever cached.
   """
   cached = cache_root() / CachePath.THEME_CATALOG
+  # opt: a cached catalog younger than the TTL is reused — upstream additions and delistings may go unseen that long
   fresh = cached.is_file() and cached.stat().st_mtime + CATALOG_TTL_SEC > time.time()
   if not fresh:
     try:
@@ -443,7 +523,10 @@ def fetch_theme_catalog() -> dict[str, dict]:  # waiver: catalog entries are ups
            if isinstance(entry, dict) and entry.get(ThemeKey.NAME) }
 
 
-def resolve_bundle(pid: str, repo: str | None) -> dict:  # waiver: mixed bytes/str envelope
+def fetch_bundle(pid: str,
+                 repo: str | None,
+                 *,
+                 write_cache: bool = True) -> dict:  # waiver: mixed bytes/str envelope
   """
   Resolve a plugin's latest bundle, falling back to the vendored cache.
 
@@ -456,6 +539,8 @@ def resolve_bundle(pid: str, repo: str | None) -> dict:  # waiver: mixed bytes/s
   Args:
     pid: Plugin id to resolve.
     repo: Owner/name of the plugin's GitHub repo, or None when it is unknown.
+    write_cache: Whether a bundle fetched from upstream is also mirrored into the local bundle cache; when false,
+      the cache is left untouched.
 
   Returns:
     An envelope carrying the bundle's source, version, asset bytes, and the upstream error
@@ -476,12 +561,12 @@ def resolve_bundle(pid: str, repo: str | None) -> dict:  # waiver: mixed bytes/s
   # Every bundle this returns, whatever its source, declares the requested plugin id; a
   # repository or cache entry recorded under a different id is never returned as a match.
 
+  # the cached mirror is written on an upstream hit and read back when upstream cannot serve the plugin
   cache_dir = cache_root() / CachePath.BUNDLES / pid
 
   # a plugin outside the catalog needs an explicit repo in its manifest entry to be resolvable
   if not repo:
-    # waiver: one-off diagnostic text, not a shared constant
-    error: str | None = "not in the community catalog and no repo override in the manifest entry"
+    error: str | None = NOT_IN_CATALOG_REASON
   else:
     version, error = _head_version(_fetch_head_manifest(repo), pid)
     if version is not None:
@@ -489,10 +574,11 @@ def resolve_bundle(pid: str, repo: str | None) -> dict:  # waiver: mixed bytes/s
       for tag in (version, f"v{version}"):
         assets = _fetch_release(repo, tag, pid, tried)
         if assets is not None:
-          _write_cache(cache_dir, assets)
+          if write_cache:
+            _write_cache(cache_dir, assets)
           return { BundleKey.SOURCE: BundleSourceKind.UPSTREAM, BundleKey.VERSION: version,
                    **assets, BundleKey.ERROR: None }
-      error = f"release assets unavailable ({', '.join(tried)})"
+      error = RELEASE_UNAVAILABLE_REASON.format(tried = ", ".join(tried))
 
   # fall back to the vendored bundle when upstream could not serve this plugin
   cached = _read_cache(cache_dir, pid)
@@ -503,6 +589,26 @@ def resolve_bundle(pid: str, repo: str | None) -> dict:  # waiver: mixed bytes/s
     BundleKey.MANIFEST_BYTES: None, BundleKey.MAIN_BYTES: None, BundleKey.STYLES_BYTES: None,
     BundleKey.ERROR: error,
   }
+
+
+def resolve_plugin_repo(pid: str,
+                        catalog: dict[str, dict],  # waiver: catalog entries are upstream JSON
+                        *,
+                        repo: str | None = None) -> str | None:
+  """
+  Name the GitHub repo a plugin's bundle is resolved against.
+
+  Args:
+    pid: Plugin id to resolve.
+    catalog: Community catalog entries keyed by plugin id; empty when the catalog could not be read.
+    repo: Owner/name of the plugin's GitHub repo, overriding the catalog's; None defers to the catalog.
+
+  Returns:
+    The repo, or None when neither the caller nor the catalog names one — bundle resolution then falls back to
+    the vendored cache.
+  """
+  # an explicit repo wins; otherwise the catalog names it, and an absent or unreadable catalog names none
+  return repo or (catalog.get(pid) or {}).get(PluginKey.REPO)
 
 
 def _fetch_head_manifest(repo: str) -> dict | None:  # waiver: upstream manifest JSON
@@ -535,18 +641,16 @@ def _head_version(head: dict | None,  # waiver: upstream manifest JSON
   """
   # guard: nothing to trust without a readable manifest
   if head is None:
-    # waiver: one-off diagnostic text, not a shared constant
-    return None, "no readable manifest at repo HEAD"
+    return None, HEAD_UNREADABLE_REASON
 
   # guard: id mismatch means the repo was rebranded and now ships a different plugin
   if head.get(PluginKey.ID) != pid:
-    return None, f"repo HEAD manifest id is {head.get(PluginKey.ID)!r} (rebranded)"
+    return None, HEAD_REBRANDED_REASON.format(found = head.get(PluginKey.ID))
   version = head.get(PluginKey.VERSION)
 
   # guard: an unversioned manifest cannot name a release tag
   if not version:
-    # waiver: one-off diagnostic text, not a shared constant
-    return None, "repo HEAD manifest has no version"
+    return None, HEAD_UNVERSIONED_REASON
   return version, None
 
 
@@ -580,12 +684,12 @@ def _fetch_release(repo: str,
       tried.append(f"{tag}: id is {released.get(PluginKey.ID)!r}")
       return None
     main_bytes = fetch_asset(VaultPath.PLUGIN_MAIN)
-  except urllib.error.HTTPError as exc:
-    tried.append(f"{tag}: HTTP {exc.code}")
+  except urllib.error.HTTPError as error:
+    tried.append(f"{tag}: HTTP {error.code}")
     return None
-  except (urllib.error.URLError, OSError, ValueError) as exc:
+  except (urllib.error.URLError, OSError, ValueError) as error:
     # waiver: exception class name as diagnostic text, not a domain class id
-    tried.append(f"{tag}: {type(exc).__name__}")
+    tried.append(f"{tag}: {type(error).__name__}")
     return None
 
   # the stylesheet is optional, so its absence does not rule the tag out
@@ -632,6 +736,7 @@ def _read_cache(cache_dir: Path, pid: str) -> dict | None:  # waiver: asset byte
   """
   manifest_path = cache_dir / VaultPath.PLUGIN_MANIFEST
   main_path = cache_dir / VaultPath.PLUGIN_MAIN
+  # guard: no complete cached copy of this plugin exists to fall back on
   if not (manifest_path.is_file() and main_path.is_file()):
     return None
   manifest = load_json(manifest_path)
@@ -650,7 +755,7 @@ def _read_cache(cache_dir: Path, pid: str) -> dict | None:  # waiver: asset byte
 
 
 # ----------------------------------------------------------------------------------------
-def resolve_theme(name: str) -> dict:  # waiver: mixed bytes/str envelope
+def fetch_theme(name: str) -> dict:  # waiver: mixed bytes/str envelope
   """
   Resolve a theme's current files, falling back to the vendored cache.
 
@@ -684,8 +789,7 @@ def resolve_theme(name: str) -> dict:  # waiver: mixed bytes/str envelope
 
   # a theme outside the catalogue has no repository to read, so only the cache can serve it
   if not repo:
-    # waiver: one-off diagnostic text, not a shared constant
-    error: str | None = "not in the community theme catalogue"
+    error: str | None = THEME_NOT_IN_CATALOG_REASON
   else:
     assets, error = _fetch_theme_assets(repo, name)
     if assets is not None:
@@ -720,15 +824,15 @@ def _fetch_theme_assets(repo: str, name: str) -> tuple[dict | None, str | None]:
 
     # guard: the repo must declare the theme we asked for
     if declared.get(ThemeKey.NAME) != name:
-      return None, f"{repo}: theme is {declared.get(ThemeKey.NAME)!r}"
+      return None, THEME_NAME_MISMATCH_REASON.format(repo = repo, found = declared.get(ThemeKey.NAME))
     css_bytes = fetch_bytes(
       THEME_ASSET_URL.format(repo = repo, asset = VaultPath.THEME_CSS),
       accept = Http.OCTET_STREAM)
-  except urllib.error.HTTPError as exc:
-    return None, f"{repo}: HTTP {exc.code}"
-  except (urllib.error.URLError, OSError, ValueError) as exc:
+  except urllib.error.HTTPError as error:
+    return None, THEME_HTTP_REASON.format(repo = repo, code = error.code)
+  except (urllib.error.URLError, OSError, ValueError) as error:
     # waiver: exception class name as diagnostic text, not a domain class id
-    return None, f"{repo}: {type(exc).__name__}"
+    return None, THEME_FETCH_REASON.format(repo = repo, kind = type(error).__name__)
   return {
     BundleKey.VERSION: declared.get(ThemeKey.VERSION) or "",
     BundleKey.MANIFEST_BYTES: manifest_bytes,
@@ -761,6 +865,7 @@ def _read_theme_cache(cache_dir: Path, name: str) -> dict | None:  # waiver: ass
   """
   manifest_path = cache_dir / VaultPath.THEME_MANIFEST
   css_path = cache_dir / VaultPath.THEME_CSS
+  # guard: no complete cached copy of this theme exists to fall back on
   if not (manifest_path.is_file() and css_path.is_file()):
     return None
   manifest = load_json(manifest_path)
@@ -800,13 +905,11 @@ def build_manifest(root: Path) -> dict:  # waiver: manifest of mixed JSON shapes
 
   # guard: nothing to read without a config directory
   if not vault.is_dir():
-    raise WorkerError(f"no {VaultPath.OBSIDIAN}/ under {root}")
+    raise WorkerError(NO_CONFIG_DIR_ERROR.format(config_dir = VaultPath.OBSIDIAN, root = root))
 
   # collect the whole config surface before assembling anything
   omitted: list[str] = []
   config = _capture_config(vault, omitted)
-  previous = load_json(root / VaultPath.MANIFEST) or {}
-  appearance = config.get(VaultPath.APPEARANCE) or {}
 
   # Contract:
   # The group field always carries over from whatever manifest already sits at `root`; it is
@@ -815,8 +918,8 @@ def build_manifest(root: Path) -> dict:  # waiver: manifest of mixed JSON shapes
   # assemble the manifest from the captured parts
   return {
     ManifestKey.VERSION: MANIFEST_VERSION,
-    ManifestKey.GROUP: previous.get(ManifestKey.GROUP),
-    ManifestKey.THEME: appearance.get(AppearanceKey.CSS_THEME) or None,
+    ManifestKey.GROUP: (load_json(root / VaultPath.MANIFEST) or {}).get(ManifestKey.GROUP),
+    ManifestKey.THEME: (config.get(VaultPath.APPEARANCE) or {}).get(AppearanceKey.CSS_THEME) or None,
     ManifestKey.CONFIG: config,
     ManifestKey.SNIPPETS: _capture_snippets(vault),
     ManifestKey.PLUGINS: _capture_plugins(vault, omitted),
@@ -886,6 +989,8 @@ def _capture_config(vault: Path, omitted: list[str]) -> dict:  # waiver: Obsidia
     # guard: an unparseable file is left to the operator, not half-captured
     if data is None:
       continue
+
+    # record the file, minus the per-device appearance keys that would not carry to another device
     if path.name == VaultPath.APPEARANCE and isinstance(data, dict):
       data = { key: value for key, value in data.items()
                if key not in APPEARANCE_DEVICE_KEYS }
@@ -958,7 +1063,6 @@ def _capture_plugins(vault: Path, omitted: list[str]) -> dict:  # waiver: plugin
     # guard: only plugin directories carry a bundle
     if not directory.is_dir():
       continue
-    pid = directory.name
     installed = load_json(directory / VaultPath.PLUGIN_MANIFEST) or {}
 
     # Domain(obsidian.vault-capture):
@@ -971,12 +1075,12 @@ def _capture_plugins(vault: Path, omitted: list[str]) -> dict:  # waiver: plugin
 
     # capture settings whole, keeping only the settings part of a file that mixes in derived state
     data = load_json(directory / VaultPath.PLUGIN_DATA)
-    keep = PLUGIN_DATA_KEEP.get(pid)
+    keep = PLUGIN_DATA_KEEP.get(directory.name)
     if keep is not None and isinstance(data, dict):
       data = { key: value for key, value in data.items() if key in keep }
-    data = strip_secrets(data, pid, omitted)
-    plugins[pid] = {
-      PluginKey.ENABLED: pid in enabled,
+    data = strip_secrets(data, directory.name, omitted)
+    plugins[directory.name] = {
+      PluginKey.ENABLED: directory.name in enabled,
       # Not a pin — deploy always installs latest. Kept so the audit can warn that the
       # snapshot was taken under an older schema than the version now installed.
       PluginKey.CAPTURED_VERSION: installed.get(PluginKey.VERSION) or "",
@@ -986,7 +1090,7 @@ def _capture_plugins(vault: Path, omitted: list[str]) -> dict:  # waiver: plugin
 
 
 # ----------------------------------------------------------------------------------------
-def drift(root: Path) -> dict:  # waiver: report envelope of mixed shapes
+def read_drift(root: Path) -> dict:  # waiver: report envelope of mixed shapes
   """
   Report how a vault's live configuration differs from what its manifest records.
 
@@ -1015,7 +1119,7 @@ def drift(root: Path) -> dict:  # waiver: report envelope of mixed shapes
 
   # guard: there is nothing to compare the vault against
   if not isinstance(stored, dict):
-    raise WorkerError(f"no readable {VaultPath.MANIFEST} at {root}")
+    raise WorkerError(NO_MANIFEST_ERROR.format(manifest = VaultPath.MANIFEST, root = root))
   live = build_manifest(root)
 
   # accumulate the differences, and the notes that are not differences
@@ -1035,8 +1139,10 @@ def drift(root: Path) -> dict:  # waiver: report envelope of mixed shapes
   # a manifest that omitted a credential leaves the vault permanently different from it
   if live[ManifestKey.SECRETS_OMITTED]:
     warnings.append(
-      f"{len(live[ManifestKey.SECRETS_OMITTED])} credential value(s) live in the vault and "
-      f"never in the manifest: {', '.join(live[ManifestKey.SECRETS_OMITTED])}")
+      WARNING_SECRETS_LIVE.format(
+        count = len(live[ManifestKey.SECRETS_OMITTED]), paths = ", ".join(live[ManifestKey.SECRETS_OMITTED])
+      )
+    )
 
   # report the differences for the operator to arbitrate
   return {
@@ -1061,11 +1167,11 @@ def _compare_maps(section: str, stored: dict, live: dict) -> list[str]:
   """
   before = stored.get(section) or {}
   after = live.get(section) or {}
-  findings = [f"{section}.{name}: in the vault, not in the manifest"
+  findings = [DRIFT_VAULT_ONLY.format(section = section, name = name)
               for name in sorted(set(after) - set(before))]
-  findings += [f"{section}.{name}: in the manifest, not in the vault"
+  findings += [DRIFT_MANIFEST_ONLY.format(section = section, name = name)
                for name in sorted(set(before) - set(after))]
-  findings += [f"{section}.{name}: differs"
+  findings += [DRIFT_DIFFERS.format(section = section, name = name)
                for name in sorted(set(before) & set(after)) if before[name] != after[name]]
   return findings
 
@@ -1084,19 +1190,20 @@ def _compare_plugins(stored: dict, live: dict, warnings: list[str]) -> list[str]
   """
   before = stored.get(ManifestKey.PLUGINS) or {}
   after = live.get(ManifestKey.PLUGINS) or {}
-  findings = [f"plugins.{pid}: installed, not in the manifest"
+  findings = [DRIFT_PLUGIN_INSTALLED_ONLY.format(pid = pid)
               for pid in sorted(set(after) - set(before))]
-  findings += [f"plugins.{pid}: in the manifest, not installed"
+  findings += [DRIFT_PLUGIN_MANIFEST_ONLY.format(pid = pid)
                for pid in sorted(set(before) - set(after))]
 
-  # a version that moved on is context for the settings drift, not drift itself
+  # compare enablement and settings of every plugin both sides carry
   for pid in sorted(set(before) & set(after)):
     was, now = before[pid], after[pid]
     if was.get(PluginKey.ENABLED) != now.get(PluginKey.ENABLED):
-      findings.append(f"plugins.{pid}: enabled {was.get(PluginKey.ENABLED)} "
-                      f"in the manifest, {now.get(PluginKey.ENABLED)} in the vault")
+      findings.append(
+        DRIFT_PLUGIN_ENABLED.format(pid = pid, was = was.get(PluginKey.ENABLED), now = now.get(PluginKey.ENABLED))
+      )
     if was.get(PluginKey.DATA) != now.get(PluginKey.DATA):
-      findings.append(f"plugins.{pid}: settings differ")
+      findings.append(DRIFT_SETTINGS_DIFFER.format(pid = pid))
 
     # Domain(obsidian.vault-capture):
     # # A version that moved on is not settings drift
@@ -1104,14 +1211,16 @@ def _compare_plugins(stored: dict, live: dict, warnings: list[str]) -> list[str]
     # tell two situations apart: settings that genuinely changed since the snapshot, and settings
     # that only look different because the installed plugin has migrated its own schema past what
     # the snapshot recorded. Only the first is drift the snapshot should be blamed for; the second
-    # is a signal that the snapshot itself has gone stale and is due for a fresh capture.
+    # is a signal that the snapshot itself has gone stale and is due for a fresh capture. A
+    # settings difference is reported as drift whatever the versions say; the staleness signal is
+    # raised beside it, as a separate warning, so the operator can read the difference in context.
 
     # compare the version captured then against the version installed now
     captured, installed = was.get(PluginKey.CAPTURED_VERSION), now.get(PluginKey.CAPTURED_VERSION)
 
     # a settings snapshot taken under an older plugin may predate that plugin's own migration
     if captured and installed and captured != installed:
-      warnings.append(f"plugins.{pid}: captured under {captured}, {installed} installed")
+      warnings.append(WARNING_VERSION_MOVED.format(pid = pid, captured = captured, installed = installed))
   return findings
 
 
@@ -1138,7 +1247,7 @@ def deploy(root: Path) -> dict:  # waiver: report envelope of mixed shapes
 
   # guard: deploy has no other source of truth
   if not isinstance(manifest, dict):
-    raise WorkerError(f"no readable {VaultPath.MANIFEST} at {root}")
+    raise WorkerError(NO_MANIFEST_ERROR.format(manifest = VaultPath.MANIFEST, root = root))
 
   # the config directory may not exist at all on a fresh checkout
   vault = root / VaultPath.OBSIDIAN
@@ -1158,7 +1267,7 @@ def deploy(root: Path) -> dict:  # waiver: report envelope of mixed shapes
 
     # guard: a name that is not a plain filename would escape the config directory
     if not is_safe_name(name):
-      errors.append(f"config {name!r}: not a plain filename, skipped")
+      errors.append(CONFIG_UNSAFE_ERROR.format(name = name))
       continue
     dump_json(vault / name, data)
     written_config.append(name)
@@ -1207,7 +1316,7 @@ def _deploy_snippets(vault: Path, snippets: dict, errors: list[str]) -> list[str
   for name, entry in sorted(snippets.items()):
     # guard: a name that is not a plain filename would escape the snippets directory
     if not is_safe_name(name):
-      errors.append(f"snippet {name!r}: not a plain filename, skipped")
+      errors.append(SNIPPET_UNSAFE_ERROR.format(name = name))
       continue
     target = vault / VaultPath.SNIPPETS / name
     if entry.get(SnippetKey.SOURCE) == SnippetSourceKind.PLUGIN:
@@ -1215,7 +1324,7 @@ def _deploy_snippets(vault: Path, snippets: dict, errors: list[str]) -> list[str
 
       # guard: the manifest claims this plugin ships the snippet, and it no longer does
       if not reference.is_file():
-        errors.append(f"snippet {name}: recorded as plugin-shipped but this plugin has none")
+        errors.append(SNIPPET_NOT_SHIPPED_ERROR.format(name = name))
         continue
       write_bytes(target, reference.read_bytes())
     else:
@@ -1223,7 +1332,7 @@ def _deploy_snippets(vault: Path, snippets: dict, errors: list[str]) -> list[str
 
       # guard: a vault-owned snippet without a body cannot be reconstructed
       if not isinstance(body, str):
-        errors.append(f"snippet {name}: no body recorded")
+        errors.append(SNIPPET_NO_BODY_ERROR.format(name = name))
         continue
       write_bytes(target, body.encode(Encoding.UTF8))
     written.append(name)
@@ -1251,25 +1360,24 @@ def _deploy_plugins(vault: Path, plugins: dict, errors: list[str]) -> list[dict]
   for pid, entry in plugins.items():
     # guard: a plugin id that is not a plain name would escape the plugins directory
     if not is_safe_name(pid):
-      errors.append(f"plugin {pid!r}: not a plain plugin id, skipped")
+      errors.append(PLUGIN_UNSAFE_ERROR.format(pid = pid))
       continue
     destination = vault / VaultPath.PLUGINS / pid
     bundled = bundled_root / pid
     if bundled.is_dir():
-      version = _install_bundled(bundled, destination)
+      version = install_bundled(bundled, destination)
       installed.append({ PluginKey.ID: pid, BundleKey.SOURCE: BundleSourceKind.BUNDLED,
                          BundleKey.VERSION: version })
     else:
-      repo = entry.get(PluginKey.REPO) or (catalog.get(pid) or {}).get(PluginKey.REPO)
-      resolved = resolve_bundle(pid, repo)
+      resolved = fetch_bundle(pid, resolve_plugin_repo(pid, catalog, repo = entry.get(PluginKey.REPO)))
 
       # guard: an unresolvable plugin is reported and skipped, never half-written
       if resolved[BundleKey.SOURCE] == BundleSourceKind.NONE:
-        errors.append(f"plugin {pid}: {resolved[BundleKey.ERROR]}")
+        errors.append(PLUGIN_UNRESOLVED_ERROR.format(pid = pid, error = resolved[BundleKey.ERROR]))
         continue
-      _install_resolved(resolved, destination)
+      install_resolved(resolved, destination)
       if resolved[BundleKey.ERROR]:
-        errors.append(f"plugin {pid}: served from cache ({resolved[BundleKey.ERROR]})")
+        errors.append(PLUGIN_FROM_CACHE_ERROR.format(pid = pid, error = resolved[BundleKey.ERROR]))
       installed.append({ PluginKey.ID: pid, BundleKey.SOURCE: resolved[BundleKey.SOURCE],
                          BundleKey.VERSION: resolved[BundleKey.VERSION] })
 
@@ -1280,9 +1388,12 @@ def _deploy_plugins(vault: Path, plugins: dict, errors: list[str]) -> list[dict]
   return installed
 
 
-def _install_bundled(bundled: Path, destination: Path) -> str:
+def install_bundled(bundled: Path, destination: Path) -> str:
   """
   Copy a bundle this plugin ships into the vault.
+
+  Guarantees:
+    - A stylesheet already in the destination is removed when the bundle carries none.
 
   Args:
     bundled: Source directory inside the plugin's templates.
@@ -1291,26 +1402,47 @@ def _install_bundled(bundled: Path, destination: Path) -> str:
   Returns:
     The bundled version, or an empty string when its manifest declares none.
   """
+
+  # Contract:
+  # After the call the destination holds a stylesheet only when the bundle carries one;
+  # a stylesheet left there by an earlier install is never kept alongside a bundle without it.
+
+  # copy each asset the bundle ships and drop a stale stylesheet
   for name in (VaultPath.PLUGIN_MANIFEST, VaultPath.PLUGIN_MAIN, VaultPath.PLUGIN_STYLES):
     source = bundled / name
     if source.is_file():
       write_bytes(destination / name, source.read_bytes())
+    elif name == VaultPath.PLUGIN_STYLES:
+      # a bundle without a stylesheet must not leave an older one behind
+      (destination / name).unlink(missing_ok = True)
   manifest = load_json(bundled / VaultPath.PLUGIN_MANIFEST) or {}
   return manifest.get(PluginKey.VERSION) or ""
 
 
-def _install_resolved(resolved: dict, destination: Path) -> None:  # waiver: asset bytes envelope
+def install_resolved(resolved: dict, destination: Path) -> None:  # waiver: asset bytes envelope
   """
   Write a resolved bundle's assets into the vault.
+
+  Guarantees:
+    - A stylesheet already in the destination is removed when the bundle carries none.
 
   Args:
     resolved: Envelope returned by bundle resolution.
     destination: Per-plugin directory inside the vault.
   """
+
+  # Contract:
+  # After the call the destination holds a stylesheet only when the bundle carries one;
+  # a stylesheet left there by an earlier install is never kept alongside a bundle without it.
+
+  # write the assets the resolved bundle carries and drop a stale stylesheet
   write_bytes(destination / VaultPath.PLUGIN_MANIFEST, resolved[BundleKey.MANIFEST_BYTES])
   write_bytes(destination / VaultPath.PLUGIN_MAIN, resolved[BundleKey.MAIN_BYTES])
   if resolved[BundleKey.STYLES_BYTES] is not None:
     write_bytes(destination / VaultPath.PLUGIN_STYLES, resolved[BundleKey.STYLES_BYTES])
+  else:
+    # a bundle without a stylesheet must not leave an older one behind
+    (destination / VaultPath.PLUGIN_STYLES).unlink(missing_ok = True)
 
 
 def _deploy_theme(vault: Path, theme: str | None, errors: list[str]) -> str | None:
@@ -1341,49 +1473,48 @@ def _deploy_theme(vault: Path, theme: str | None, errors: list[str]) -> str | No
 
   # guard: a theme name that is not a plain name would escape the themes directory
   if not is_safe_name(theme):
-    errors.append(f"theme {theme!r}: not a plain theme name, skipped")
+    errors.append(THEME_UNSAFE_ERROR.format(theme = theme))
     return None
 
   # fetch the theme the way Obsidian would, and write both its files beside each other
   destination = vault / VaultPath.THEMES / theme
-  resolved = resolve_theme(theme)
+  resolved = fetch_theme(theme)
 
   # guard: an unresolvable theme is reported and skipped, never half-written
   if resolved[BundleKey.SOURCE] == BundleSourceKind.NONE:
-    errors.append(f"theme {theme!r}: {resolved[BundleKey.ERROR]}")
+    errors.append(THEME_UNRESOLVED_ERROR.format(theme = theme, error = resolved[BundleKey.ERROR]))
     return theme
   write_bytes(destination / VaultPath.THEME_MANIFEST, resolved[BundleKey.MANIFEST_BYTES])
   write_bytes(destination / VaultPath.THEME_CSS, resolved[BundleKey.CSS_BYTES])
   if resolved[BundleKey.ERROR]:
-    errors.append(f"theme {theme!r}: served from cache ({resolved[BundleKey.ERROR]})")
+    errors.append(THEME_FROM_CACHE_ERROR.format(theme = theme, error = resolved[BundleKey.ERROR]))
   return theme
 
 
 # ----------------------------------------------------------------------------------------
-def lookup(pid: str) -> dict:  # waiver: report envelope of mixed shapes
+def query_plugin_repo(pid: str, *, write_cache: bool = True) -> dict:  # waiver: report envelope of mixed shapes
   """
   Resolve one community plugin's GitHub repo from the catalog.
 
   Args:
     pid: Plugin id as the community catalog records it.
+    write_cache: Whether a catalog fetched from upstream also refreshes the cached copy.
 
   Returns:
     A report carrying the id and its `owner/name` repo, or a null repo plus one error when the
     id is unknown or the catalog could not be read at all.
   """
-  catalog = fetch_community_catalog()
+  catalog = fetch_community_catalog(write_cache = write_cache)
   report: dict = { ReportKey.ACTION: CommandKind.LOOKUP, PluginKey.ID: pid,
                    PluginKey.REPO: None, ReportKey.ERRORS: [] }
 
-  # guard: an empty catalog means upstream was unreachable and no cached copy exists
+  # guard: an empty catalog means upstream was unreachable with no cached copy, or the catalog did not parse
   if not catalog:
-    # waiver: one-off error message the update-plugin skill matches, not a reusable key
-    report[ReportKey.ERRORS].append("community catalog unavailable: upstream unreachable and nothing cached")
+    report[ReportKey.ERRORS].append(CATALOG_UNAVAILABLE_ERROR)
     return report
 
   # an id the catalog does not carry is the caller's to spell right or to install bundled
-  entry = catalog.get(pid)
-  if entry is None:
+  if (entry := catalog.get(pid)) is None:
     # waiver: one-off error message the update-plugin skill matches, not a reusable key
     report[ReportKey.ERRORS].append(f"{pid} not in the Obsidian community catalog")
     return report
@@ -1419,13 +1550,13 @@ def main(argv: list[str]) -> int:
   # `lookup` reads the catalog alone, so it never resolves a vault root
   args = parser.parse_args(argv)
   if args.command == CommandKind.LOOKUP:
-    report = lookup(args.id)
+    report = query_plugin_repo(args.id)
     print(json.dumps(report, indent = 2, ensure_ascii = False))
     return 1 if report[ReportKey.ERRORS] else 0
 
   # resolve the vault root before any subcommand touches disk
   root = Path(args.root).expanduser().resolve()
-  handlers = { CommandKind.CAPTURE: capture, CommandKind.DEPLOY: deploy, CommandKind.DRIFT: drift }
+  handlers = { CommandKind.CAPTURE: capture, CommandKind.DEPLOY: deploy, CommandKind.DRIFT: read_drift }
   try:
     report = handlers[args.command](root)
   except WorkerError as error:

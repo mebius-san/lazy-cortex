@@ -1,26 +1,26 @@
 ---
 chapter_type: block
-summary: Curate wiki nodes via /lazy-wiki.relink or daemon routines — curator classifies/links; tag-curator consolidates axis vocabulary via retag.
-last_regen: 2026-10-21
+summary: Curate wiki nodes via /lazy-wiki.relink or daemon routines — curator classifies/links; tag-curator consolidates axis vocabulary via tag-apply.
+last_regen: 2026-11-10
 diagram_spec:
   anchor: "How the pieces fit together"
-  request: "Flow diagram showing /lazy-wiki.relink driving the curation block: (1) relink-plan produces classify[], link[], drop[] lists; (2) curator agent runs classify per node via apply-node; (3) normalize-tags consolidates the tag vocabulary via retag — dispatched to the tag-curator agent, once per configured surface; (4) build-index rebuilds topics.md; (5) curator agent runs link per node via apply-node; (6) prune-node drops dangling See-also lines for each path in drop[]; (7) relink commits all touched files (including the tag-values dictionary) and records the wiki_synced_sha anchor. Show that the curator agent is dispatched twice (classify phase, link phase) and is distinct from the tag-curator agent dispatched for normalize-tags, that prune-node is a deterministic primitive with no agent dispatch, and that the skill owns the single commit."
+  request: "Flow diagram showing /lazy-wiki.relink driving the curation block: (1) relink-plan produces classify[], link[], drop[] lists; (2) curator agent runs classify per node via apply-node; (3) normalize-tags consolidates the tag vocabulary via tag-apply (retag plus dictionary rewrite) — dispatched to the tag-curator agent, once per configured surface; (4) build-index rebuilds topics.md; (5) curator agent runs link per node via apply-node; (6) prune-node drops dangling See-also lines for each path in drop[]; (7) relink-commit commits exactly the paths every writer recorded in a touch ledger (including the tag-values dictionary) plus the scope's index, records the wiki_synced_sha anchor, and leaves unledgered changes out. Show that the curator agent is dispatched twice (classify phase, link phase) and is distinct from the tag-curator agent dispatched for normalize-tags, that prune-node is a deterministic primitive with no agent dispatch, and that the skill owns the single commit."
 source_skills:
   - lazy-wiki.relink
   - lazy-wiki.curator
   - lazy-wiki.tag-curator
-source_sha: 117b82946395f0f99664e069977bea4dcc5c6d40
-surface_sha: d0e33f003addafd3dabd287adc4629306554915468d012725bf19841c2f19db8
+source_sha: d6848f6fc7a53765c462e2e34263d3c62f0b8919
+surface_sha: 5362320b872ac27e8f85e712953c5da4411c4fbdc991b4c96efcbcc4e1d00540
 ---
 # Curation
 
 When you run `/lazy-wiki.relink`, you get a fully curated wiki scope without needing the runtime daemon. Every changed node receives a one-line summary and hierarchical topic tags (so it shows up in the scope's topic index), then a See-also section whose entries are glossed with the target's summary (so an agent can judge relevance without opening the target file). Nodes deleted since the last run have their dangling See-also links dropped from the rest of the scope. The entire process runs synchronously in the current Claude Code session and ends with a single atomic commit.
 
-Three pieces share this work. `/lazy-wiki.relink` is the orchestrator: it computes what to process, fires the right agent for each node or surface, prunes links to deleted nodes, rebuilds the topic index at the right moment, and makes the commit. `lazy-wiki.curator` is the per-node expert: it reads each changed node in place, applies editorial judgment, and writes the result directly to the file via the deterministic `apply-node` primitive — it never hand-edits. `lazy-wiki.tag-curator` is the per-surface expert: once all of a run's node writes land, it looks at a scope's (or the domain-doc tree's) whole tag vocabulary at once, decides which values are synonyms or subtypes of one another, and applies that canon via the deterministic `retag` primitive — a job the classifying curator no longer does. The three pieces are cleanly separated: the skill owns the index rebuilds, the deletion pruning, and the commit; the curator owns every write to node summaries, tags, and links; the tag-curator owns the vocabulary canon and the advisory dictionary that records it. Both curators write in one language throughout a run — resolved once from `wiki.language` if you set it, falling back to the repo-wide `language` key, then English — so a node's summary, its See-also glosses, and the tag-values dictionary never mix languages inside the same relink; existing prose already in another language is never retranslated on a later pass, only newly-written sections follow the resolved language.
+Three pieces share this work. `/lazy-wiki.relink` is the orchestrator: it computes what to process, fires the right agent for each node or surface, prunes links to deleted nodes, rebuilds the topic index at the right moment, and makes the commit. `lazy-wiki.curator` is the per-node expert: it reads each changed node in place, applies editorial judgment, and writes the result directly to the file via the deterministic `apply-node` primitive — it never hand-edits. `lazy-wiki.tag-curator` is the per-surface expert: once all of a run's node writes land, it looks at a scope's (or the domain-doc tree's) whole tag vocabulary at once, decides which values are synonyms or subtypes of one another, and applies that canon via the deterministic `tag-apply` verb, which retags the surface and rewrites the dictionary — a job the classifying curator no longer does. The three pieces are cleanly separated: the skill owns the index rebuilds, the deletion pruning, and the commit (which carries only what this run's writers recorded in a touch ledger); the curator owns every write to node summaries, tags, and links; the tag-curator owns the vocabulary canon and the advisory dictionary that records it. Both curators write in one language throughout a run — resolved once from `wiki.language` if you set it, falling back to the repo-wide `language` key, then English — so a node's summary, its See-also glosses, and the tag-values dictionary never mix languages inside the same relink; existing prose already in another language is never retranslated on a later pass, only newly-written sections follow the resolved language.
 
 `<wiki-cli>` stands for the wiki plugin's `bin/lazycortex-wiki` file — the newest copy under `~/.claude/plugins/cache/lazycortex/lazycortex-wiki/<version>/`, or `plugins/claude/lazycortex-wiki/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
-The same curation logic runs autonomously when the runtime daemon is active. On every commit, the `lazy-wiki.scan` routine watches changed files and feeds each one through `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> process-file` (per-node classify + link, committed by the curator itself in tail-on mode). A companion `lazy-wiki.scan-deletes` routine watches for deleted files and feeds each one through `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> prune-node` — a deterministic pass with no curator dispatch at all, since a deleted file has no content left to classify. Vocabulary consolidation runs on its own weekly cadence: the `lazy-wiki.tag-normalize` routine fires `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> tag-tick` every Monday at 06:00, dispatching the `wiki.tag-curator` agent once per configured scope (plus the `domains` surface when `wiki.domains` is configured) to judge that surface's canonical axis-value set, apply it via `retag`, and rewrite the tag-values dictionary. Every Monday at 04:00 the `lazy-wiki.relink-weekly` routine fires `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> relink-all` with no scope id — the scope id is an optional argument, and omitting it walks every configured scope in turn, printing one JSON result line per scope. Each scope's nodes get re-classified and every surface's vocabulary gets re-normalized in the same pass — useful for catching drift and stale links between the two weekly routines and whatever the daily incremental passes missed. Naming a specific scope id still works if you ever run `relink-all` yourself; naming an unknown scope id still exits with an error either way.
+The same curation logic runs autonomously when the runtime daemon is active. On every commit, the `lazy-wiki.scan` routine watches changed files and feeds each one through `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> process-file` (per-node classify + link, committed by the curator itself in tail-on mode). A companion `lazy-wiki.scan-deletes` routine watches for deleted files and feeds each one through `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> prune-node` — a deterministic pass with no curator dispatch at all, since a deleted file has no content left to classify. Vocabulary consolidation runs on its own weekly cadence: the `lazy-wiki.tag-normalize` routine fires `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> tag-tick` every Monday at 06:00, dispatching the `wiki.tag-curator` agent once per configured scope (plus the `domains` surface when `wiki.domains` is configured) to judge that surface's canonical axis-value set, apply it via `tag-apply`, and rewrite the tag-values dictionary. Every Monday at 04:00 the `lazy-wiki.relink-weekly` routine fires `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> relink-all` with no scope id — the scope id is an optional argument, and omitting it walks every configured scope in turn, printing one JSON result line per scope. Each scope's nodes get re-classified and every surface's vocabulary gets re-normalized in the same pass — useful for catching drift and stale links between the two weekly routines and whatever the daily incremental passes missed. Naming a specific scope id still works if you ever run `relink-all` yourself; naming an unknown scope id still exits with an error either way.
 
 ## When you'd use this
 
@@ -43,7 +43,7 @@ The skill starts by running `relink-plan`, which inspects the `wiki_synced_sha` 
 
 **Overriding curation with pins.** You can steer the curator on a specific node by hand, without waiting for it to guess right. Setting `wiki_pinned_topics` or `wiki_unrelated_topics` in a node's frontmatter forces or forbids specific topic tags on the next classify pass; `wiki_pinned_links` or `wiki_unrelated_links` do the same for specific See-also targets on the next link pass. Pins are vetoes: the curator applies them unconditionally in both directions, even against its own judgment. This is the mechanism to reach for when a node keeps losing a tag or a link you know belongs, or keeps picking up one that doesn't.
 
-**Normalise phase.** After all classify writes land, the skill consolidates tag vocabulary across *every* configured surface — every scope in your project, plus the `domains` surface (the generated domain-doc tree) when `wiki.domains` is configured — not only the scope you invoked. A relink is the moment the vault's whole vocabulary gets reconciled, and two surfaces may legitimately spell the same idea differently, so each is judged on its own. For each surface, the skill collects the current census of tag values and dispatches `lazy-wiki.tag-curator` — a different agent from the classifying curator — to judge a canonical axis-value set for that surface alone. The tag-curator examines the collected vocabulary, builds an alias map (merging synonyms, nesting subtypes), applies it via `retag` — which rewrites every affected node's tags on that surface in one pass — then rewrites the advisory tag-values dictionary to match, so a later classify pass reuses a settled value instead of coining a synonym beside it. The dictionary path comes from `wiki.tags.dictionary` in your settings, or `docs/tags.md` when that key is unset. An empty alias map is valid; the tag-curator skips `retag` but still reconciles the dictionary. Every rewrite opens the dictionary file with the same fixed heading and introductory paragraph, which the tag-curator fetches from the wiki CLI rather than composing itself, in the vault's resolved language — the sections below that heading (one per axis, one bullet per value) stay in the tag-curator's own hands as before.
+**Normalise phase.** After all classify writes land, the skill consolidates tag vocabulary across *every* configured surface — every scope in your project, plus the `domains` surface (the generated domain-doc tree) when `wiki.domains` is configured — not only the scope you invoked. A relink is the moment the vault's whole vocabulary gets reconciled, and two surfaces may legitimately spell the same idea differently, so each is judged on its own. For each surface, the skill collects the current census of tag values and dispatches `lazy-wiki.tag-curator` — a different agent from the classifying curator — to judge a canonical axis-value set for that surface alone. The tag-curator examines the collected vocabulary, builds an alias map (merging synonyms, nesting subtypes) and glosses every value the dictionary does not yet record, then hands both to `tag-apply` — which rewrites every affected node's tags on that surface in one pass and brings the advisory tag-values dictionary in line, so a later classify pass reuses a settled value instead of coining a synonym beside it. The dictionary path comes from `wiki.tags.dictionary` in your settings, or `docs/tags.md` when that key is unset. An empty alias map is valid; `tag-apply` skips the retag but still reconciles the dictionary. The verb refuses to write anything when a value that needs a gloss has none, so the tag-curator supplies a gloss for every new value. Every rewrite opens the dictionary file with the same fixed heading and introductory paragraph, and the verb — not the tag-curator — owns that opening, the section layout (one section per axis, one bullet per value), and which entries are kept; the tag-curator only supplies the alias map and the glosses, in the vault's resolved language.
 
 **Index rebuild.** The skill rebuilds `topics.md` once for the relinked scope, after the normalise pass and before linking — this produces the freshly populated catalog the link phase reads. It also rebuilds the index for any *other* configured scope whose normalise pass changed something, so a scope this run only retagged (not classified or linked) isn't left with a stale catalog; the `domains` surface has no topics index and is never rebuilt. The scope's own topics-index file — the path you set for `topics_index` in `/lazy-wiki.configure`, or any file carrying `wiki_role: topics-index` in its frontmatter — is recognised as the index and never treated as a curatable node, so a relink can never write a summary and See-also section into the file the next index rebuild is about to overwrite wholesale.
 
@@ -51,11 +51,11 @@ The skill starts by running `relink-plan`, which inspects the `wiki_synced_sha` 
 
 **Prune phase.** For each path in the drop list, the skill runs `prune-node` — a deterministic primitive, no curator involved — which drops any dangling See-also line elsewhere in the scope that still points at the now-deleted node. The index rebuild already dropped the node from `topics.md` itself; this phase cleans up the links pointing *at* it.
 
-**Commit.** The skill stages every touched node file, each rebuilt `topics.md`, and the tag-values dictionary, records the new `wiki_synced_sha` anchor, and makes a single atomic commit under your operator identity. If an idempotent re-run produced no byte changes, no empty commit is created.
+**Commit.** Every writer of the run — each curator's `apply-node`, each tag-curator's `tag-apply`, every index rebuild and prune — records the paths it wrote in one touch ledger kept outside the repository. At the end the skill calls `relink-commit`, which records the new `wiki_synced_sha` anchor at the `HEAD` the pass ran against and makes a single atomic commit under your operator identity of exactly the ledger's paths plus the scope's index — never a file someone else left changed in your working tree. The verb reports any wiki files that changed outside this run as unledgered; the skill lists them in its report and leaves them uncommitted for you to commit or discard. If an idempotent re-run produced no byte changes, no empty commit is created.
 
-If the curator or tag-curator reports an error for a specific node or surface (malformed input, a failed `apply-node` or `retag`), the skill skips it, continues with the rest, and surfaces the error in the report. The skipped node or surface is picked up on the next relink.
+If the curator or tag-curator reports an error for a specific node or surface (malformed input, a refused `apply-node` or `tag-apply`), the skill skips it, continues with the rest, and surfaces the error in the report. The skipped node or surface is picked up on the next relink.
 
-**Daemon paths.** When the runtime daemon is active, curation happens without any `/lazy-wiki.relink` invocation. The `lazy-wiki.scan` routine watches every commit for changed files and calls `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> process-file` for each one — the curator runs in tail-on mode and owns its own classify, link, and commit. The `lazy-wiki.scan-deletes` routine watches every commit for deleted files and calls `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> prune-node` for each one — no curator dispatch, since there is no content left to judge; it drops dangling See-also links, rebuilds `topics.md`, and commits on its own. The `lazy-wiki.tag-normalize` routine calls `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> tag-tick` every Monday at 06:00, dispatching the `wiki.tag-curator` agent once per configured scope (plus the `domains` surface when configured) — each dispatch judges that surface's canonical axis-value set, applies it via `retag`, and rewrites the tag-values dictionary; this is now the primary mechanism for keeping vocabulary consolidated on a live daemon, running on its own schedule regardless of whether any node changed that week. The `lazy-wiki.relink-weekly` routine calls `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> relink-all` on a cron schedule (Mondays 04:00) with no scope id, so one run sweeps every scope configured in your project — one JSON result line per scope — dispatching a classify job for every node in each scope regardless of change, and running the same per-surface normalise pass `tag-normalize` runs on its own; this routine's job is a full node re-classification, not merely vocabulary drift. All four routines are seeded by `/lazy-wiki.install` and managed by the core runtime; you do not invoke them directly.
+**Daemon paths.** When the runtime daemon is active, curation happens without any `/lazy-wiki.relink` invocation. The `lazy-wiki.scan` routine watches every commit for changed files and calls `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> process-file` for each one — the curator runs in tail-on mode and owns its own classify, link, and commit. The `lazy-wiki.scan-deletes` routine watches every commit for deleted files and calls `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> prune-node` for each one — no curator dispatch, since there is no content left to judge; it drops dangling See-also links, rebuilds `topics.md`, and commits on its own. The `lazy-wiki.tag-normalize` routine calls `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> tag-tick` every Monday at 06:00, dispatching the `wiki.tag-curator` agent once per configured scope (plus the `domains` surface when configured) — each dispatch judges that surface's canonical axis-value set, applies it via `tag-apply`, and rewrites the tag-values dictionary; this is now the primary mechanism for keeping vocabulary consolidated on a live daemon, running on its own schedule regardless of whether any node changed that week. The `lazy-wiki.relink-weekly` routine calls `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> relink-all` on a cron schedule (Mondays 04:00) with no scope id, so one run sweeps every scope configured in your project — one JSON result line per scope — dispatching a classify job for every node in each scope regardless of change, and running the same per-surface normalise pass `tag-normalize` runs on its own; this routine's job is a full node re-classification, not merely vocabulary drift. All four routines are seeded by `/lazy-wiki.install` and managed by the core runtime; you do not invoke them directly.
 
 ## Common adjustments
 
@@ -73,6 +73,8 @@ If the curator or tag-curator reports an error for a specific node or surface (m
 
 **Topics index no longer needs a manual exclusion.** You used to have to add the scope's topics-index path to `exclude_paths` in `/lazy-wiki.configure` yourself, or the curator would treat the index as an ordinary node — writing a summary and See-also section into it that the next index rebuild silently erased. The index is now recognised automatically by its configured path or by a `wiki_role: topics-index` frontmatter marker, ahead of every other check, which also covers a renamed index or a neighbouring scope's index caught by the same globs. Any existing `exclude_paths` entry for the index is harmless to keep.
 
+**The report lists unledgered paths.** These are wiki files changed in your working tree that no writer of the run recorded — a hand edit or another session's work. They are left out of the relink commit on purpose; commit or discard them yourself.
+
 **Daemon routines not seeded.** If `lazy-wiki.scan`, `lazy-wiki.scan-deletes`, `lazy-wiki.tag-normalize`, or `lazy-wiki.relink-weekly` are missing from your settings, run `/lazy-wiki.install` — it seeds all four (absent-only, so existing configuration is untouched).
 
 ## How the pieces fit together
@@ -80,36 +82,48 @@ If the curator or tag-curator reports an error for a specific node or surface (m
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  lazyWikiRelink["/lazy-wiki.relink"]
-  relinkPlan["relink-plan - classify[] / link[] / drop[]"]
-  curatorClassifyPhase["curator agent - classify via apply-node"]
-  tagCuratorNormalizeTags["tag-curator agent - normalize-tags via retag"]
-  buildIndex["build-index rebuilds topics.md"]
-  curatorLinkPhase["curator agent - link via apply-node"]
-  pruneNode["prune-node - drop dangling See-also lines"]
-  relinkCommit["relink commits touched files + wiki_synced_sha"]
+  relinkSkill["/lazy-wiki.relink skill"]
+  relinkPlan["relink-plan: classify[], link[], drop[]"]
+  curatorClassify["curator agent, dispatch 1: classify per node"]
+  applyNodeClassify["apply-node: writes classify result, records touch ledger"]
+  tagCuratorAgent["tag-curator agent: normalize-tags, once per configured surface"]
+  tagApply["tag-apply: retag plus dictionary rewrite, records touch ledger"]
+  buildIndex["build-index: rebuild topics.md"]
+  curatorLink["curator agent, dispatch 2: link per node"]
+  applyNodeLink["apply-node: writes See-also links, records touch ledger"]
+  pruneNode["prune-node: deterministic primitive, no agent dispatch, drops dangling See-also lines for each path in drop[]"]
+  relinkCommit["relink-commit: skill owns the single commit, exactly the ledgered paths incl. tag-values dictionary plus scope index, unledgered changes left out"]
+  syncedShaRecorded["wiki_synced_sha anchor recorded"]
 
-  lazyWikiRelink -->|dispatches| relinkPlan
-  relinkPlan -->|classify list| curatorClassifyPhase
-  relinkPlan -->|drop list| pruneNode
-  curatorClassifyPhase -->|then| tagCuratorNormalizeTags
-  tagCuratorNormalizeTags -->|then| buildIndex
-  buildIndex -->|link list| curatorLinkPhase
-  curatorLinkPhase -->|then| pruneNode
-  pruneNode -->|then| relinkCommit
+  relinkSkill -->|runs| relinkPlan
+  relinkPlan -->|classify list| curatorClassify
+  curatorClassify -->|applies via| applyNodeClassify
+  applyNodeClassify -->|classify done| tagCuratorAgent
+  tagCuratorAgent -->|applies via| tagApply
+  tagApply -->|vocabulary consolidated| buildIndex
+  buildIndex -->|index rebuilt| curatorLink
+  curatorLink -->|applies via| applyNodeLink
+  applyNodeLink -->|link done| pruneNode
+  pruneNode -->|drop list pruned| relinkCommit
+  relinkCommit -->|records anchor| syncedShaRecorded
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
+  classDef service fill:#1e4a5f,stroke:#4abce2,color:#fff
+  classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
-
-  class lazyWikiRelink entry
+  class relinkSkill entry
   class relinkPlan action
-  class curatorClassifyPhase action
-  class tagCuratorNormalizeTags action
+  class curatorClassify service
+  class applyNodeClassify action
+  class tagCuratorAgent guard
+  class tagApply action
   class buildIndex action
-  class curatorLinkPhase action
+  class curatorLink service
+  class applyNodeLink action
   class pruneNode action
-  class relinkCommit success
+  class relinkCommit action
+  class syncedShaRecorded success
 ```
 
 ## See also

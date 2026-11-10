@@ -4,9 +4,9 @@ the operator's current document.
 The hard logic of "what flows back from the agent under each role"
 lives in :mod:`body.reassemble`. This module's job is to:
 
-- Refuse the reply when the frontmatter overlay touches reserved keys
-  (`review_active` / `review_round` / `approved`) — that IS a hard
-  error and the agent must be reprompted.
+- Refuse the reply when a required frontmatter key is set neither by the
+  agent's overlay nor by the operator's document — that IS a hard error
+  and the agent must be reprompted.
 - For section-writers, ALWAYS produce a grafted result by ignoring the
   agent's body edits outside its owned section. If the agent did touch
   content outside its owned section, the diagnostic is surfaced via the
@@ -36,24 +36,24 @@ if TYPE_CHECKING:
   from collections.abc import Mapping
 
 
-# Type alias for the section-layout map forwarded from TickInputs.
+# Type alias for the section-layout map: an owned section's flat-name and section-id pair to its slot.
 _SectionLayout = dict[tuple[str, str], str]
 
 
 @dataclass(frozen=True)
 class ReapplyResult:
-  """Result of :func:`reapply`. Always carries the grafted document
-    text; `ownership_violation` is non-None only when the agent (a
-    section-writer) modified content outside its owned section. The
-    text in that case is the graceful-clipped version — agent's body
-    edits ignored, agent's owned section spliced into the operator's
-    body.
+  """
+  Grafted document text paired with an optional ownership-violation diagnostic.
 
   Guarantees:
     - `text` always holds the fully grafted document, whether or not an ownership
       violation was detected.
     - `ownership_violation` is non-`None` only when the agent modified content outside
       its owned section.
+
+  Attributes:
+    text: Full text of the grafted document.
+    ownership_violation: Diagnostic describing content the agent changed outside its owned section.
   """
 
   # Contract:
@@ -75,37 +75,32 @@ def reapply(
     section_layout: _SectionLayout | None = None,
     require_fm: frozenset[str] = frozenset(),
 ) -> ReapplyResult:
-  """Validate `agent_body` and `agent_frontmatter_overlay` against
-    the ownership-isolation contract, then graft the result onto
-    `operator_text`. Returns a :class:`ReapplyResult` whose `text`
-    field is the new full document text.
+  """
+  Graft an agent reply onto the operator's current document.
 
-    `phase` is the writer pipeline phase (`'main'` / `'section'`
-    / `'final'`). Distinct from the section-group label that lives
-    in state-machine routing tables.
+  Rejects a reply that leaves a required frontmatter key unset. For a section-writer, edits outside its owned
+  section are ignored and reported on the result, and the graft still succeeds.
 
-    For `phase='section'`, `owned_owner` (the `(flat_name,
-    section_id)` pair) is required. A body-drift diagnostic is reported
-    via `ReapplyResult.ownership_violation` but the graft proceeds
-    regardless — agent's body edits outside the owned section are
-    silently ignored by `body.reassemble`.
+  Args:
+    operator_text: Current full text of the operator's document.
+    agent_body: Body text of the agent's reply.
+    phase: Writer pipeline phase, either `'main'` or `'section'`.
+    agent_frontmatter_overlay: Frontmatter keys the agent's reply sets.
+    owned_owner: Pair of expert flat name and section id that owns the section; required for `'section'`.
+    section_layout: Map from the flat name and section id pair to the slot of each owned section; `None` places
+      every section at the bottom.
+    require_fm: Frontmatter keys that must be set after the round, either by the overlay or by the operator's
+      document.
 
-    `section_layout` is the `(flat_name, section_id) → position`
-    map forwarded from `TickInputs.section_layout`. Passed unchanged
-    to `body.reassemble` so each owned section lands in its configured
-    top/bottom slot. `None` defaults to bottom placement for all
-    sections (existing caller behaviour preserved).
+  Returns:
+    `ReapplyResult` with `text` set to the grafted full document. `ownership_violation`
+    is non-`None` only when a section-writer modified content outside its owned section;
+    in that case `text` still contains the gracefully clipped result.
 
-    Returns:
-        `ReapplyResult` with `text` set to the grafted full document. `ownership_violation`
-        is non-`None` only when a section-writer modified content outside its owned section;
-        in that case `text` still contains the gracefully clipped result.
-
-    Raises:
-        ValueError:          when `phase` is unrecognised, `phase="section"` but
-                             `owned_owner` is missing, or a `require_fm` key is absent
-                             from both the overlay and the operator's frontmatter.
-    """
+  Raises:
+    ValueError: when `phase` is unrecognised, `phase="section"` but `owned_owner` is missing,
+      or a `require_fm` key is absent from both the overlay and the operator's frontmatter.
+  """
 
   # Domain(review.dispatch):
   # # A required signal must land, not merely be attempted
@@ -116,18 +111,18 @@ def reapply(
   # neither confirms nor produces the required signal is a failed run, not a silent commit of
   # a document still missing state the rest of the system depends on.
 
-  # The overlay is already allow-filtered at the dispatcher collect seam
-  # (review.classes[].experts.*.frontmatter.allow). Enforce the require half here: a
+  # the overlay is applied as the caller passes it — filtering it against
+  # review.classes[].experts.*.frontmatter.allow is the caller's job. Enforce the require half here: a
   # required key must end up set — written this round (overlay) OR already present from an
   # earlier round (operator frontmatter). The router declares require: [request_class] so a
   # run that fails to classify is caught rather than silently committed.
   if require_fm:
-    _op_meta, _ = _fm.parse(operator_text)
-    _missing = set(require_fm) - (set(agent_frontmatter_overlay) | set(_op_meta))
+    op_meta, _ = _fm.parse(operator_text)
+    missing = set(require_fm) - (set(agent_frontmatter_overlay) | set(op_meta))
 
     # guard: a required key absent from both overlay and operator frontmatter means classification failed — fail rather than commit silently
-    if _missing:
-      raise ValueError(f"missing required frontmatter keys: {sorted(_missing)}")
+    if missing:
+      raise ValueError(f"missing required frontmatter keys: {sorted(missing)}")
 
   # Defensive normalize: drop ```diff fences that only wrap whitespace
   # differences (Bug 28). Writer's whitespace reflow does not earn a
@@ -144,11 +139,10 @@ def reapply(
 
     # payload.check_section_writer_response still takes a flat-name
     # string; extract the first element of the pair.
-    owned_expert_flat = owned_owner[0]
     ownership_violation = _payload.check_section_writer_response(
         operator_body=op_body,
         agent_body=agent_body,
-        owned_expert=owned_expert_flat,
+        owned_expert=owned_owner[0],
     )
 
   # the reassembled document is what lands back on disk

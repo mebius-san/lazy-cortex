@@ -1,9 +1,9 @@
 """
 Job-dispatch support primitives shared by `lazycortex-specs`' own dispatch workers.
 
-`core_dispatch_job` / `consume_stale_job` queue and retire jobs via the `lazycortex-core` CLI's
-`dispatch-job` / `consume-job` subcommands — the § 1c inter-plugin boundary contract in
-`dev.plugin-boundaries.md`. `collect_guideline_paths` names a product's role + wildcard
+`core_dispatch_job` / `consume_stale_job` / `cancel_job` queue, retire and cancel jobs via the
+`lazycortex-core` CLI's `dispatch-job` / `consume-job` / `cancel-job` subcommands — the § 1c inter-plugin boundary
+contract in `dev.plugin-boundaries.md`. `collect_guideline_paths` names a product's role + wildcard
 guideline files for a dispatch bundle; `collect_decisions_paths` names the same bundle's asset
 and owning-product `decisions.md` registries beside them, per
 `spec-decisions-design.md` § "How decisions are read" — every job bundle gets both registries
@@ -49,6 +49,7 @@ class WireKey:
     PAYLOAD: The job payload dict (`kind` / `role` / `request`).
     SOURCE: The repo-relative paths of the source files the pump copies at claim time.
     CONTEXT: The repo-relative paths of the context files the pump copies at claim time.
+    PROTOCOLS: The protocol references the expert reads on top of the dispatching routine's own.
     RESULT: The list of expected result filenames.
     DEDUP_KEY: The dedup key guarding against a repeat dispatch.
     JOB_ID: The queued job's id, as returned by the CLI.
@@ -65,6 +66,8 @@ class WireKey:
   SOURCE = "source"
   # The repo-relative paths of the context files the pump copies at claim time.
   CONTEXT = "context"
+  # The protocol references the expert reads on top of the dispatching routine's own.
+  PROTOCOLS = "protocols"
   # The list of expected result filenames.
   RESULT = "result"
   # The dedup key guarding against a repeat dispatch.
@@ -128,13 +131,14 @@ _SPEC_PATH_KEY = "spec_path"
 _DECISIONS_FILENAME = "decisions.md"
 
 _SETTINGS_REL = Path(".claude") / "lazy.settings.json"
-_PLUGIN_DIRS_ENV = "LAZYCORTEX_PLUGIN_DIRS"
 _REPO_ROOT_ENV = "LAZY_REPO_ROOT"
-_CORE_CLI_NAME = "lazycortex-core"
-_BIN_DIR = "bin"
 _DISPATCH_VERB = "dispatch-job"
 _CONSUME_VERB = "consume-job"
-_PLUGIN_TREE_DIR = "plugins/claude"
+_CANCEL_VERB = "cancel-job"
+# The `cancel-job` response key reporting whether the job was cancelled.
+_CANCELLED_KEY = "cancelled"
+# The seconds a `cancel-job` call may take before the cancel counts as failed, so a hung CLI cannot stall a dispatch.
+_CANCEL_TIMEOUT_S = 60
 
 
 def load_settings(repo: Path) -> dict:
@@ -277,84 +281,6 @@ def collect_decisions_paths(repo: Path, asset_dir: Path | None, product_record: 
   return paths
 
 
-def _resolve_core_cli(repo: Path) -> Path:
-  """
-  Find the `lazycortex-core` CLI binary.
-
-  Resolves `$LAZYCORTEX_PLUGIN_DIRS`, the plugin cache this plugin is itself installed from, and
-  this project's own dev-vault layout (a checkout carrying `lazycortex-core`'s source tree
-  alongside this plugin's), per the § 1c inter-plugin boundary contract.
-
-  Args:
-    repo: The repository root the dev-vault fallback paths are resolved against.
-
-  Returns:
-    Absolute path to the resolved `lazycortex-core` binary.
-
-  Raises:
-    RuntimeError: When no lookup finds a binary, naming every location searched.
-  """
-
-  # Domain(plugin.boundaries):
-  # # Reaching a neighbouring plugin's binary from this project's own dev checkout
-  # Before a neighbouring plugin's published command can be run as a subprocess, its binary has
-  # to be found. The general answer is to walk the plugin directories a spawning process was
-  # handed, then fall back to that plugin's own installed cache — described where that lookup
-  # itself lives. Here a further fallback exists on top of it, because this project's own
-  # working copy carries the neighbouring plugin's source right alongside this one, in the same
-  # tree. A caller running straight from that source, with neither a spawning process's
-  # directory list nor an installed cache to consult, still finds the binary sitting where this
-  # project's own layout keeps it — a fallback specific to this one tree carrying both plugins
-  # side by side, not a general way installed plugin caches can be addressed.
-
-  # stage 1 — env-declared plugin dirs (set by the daemon for every subprocess routine), then the
-  # install the plugin registry records for a consumer install.
-  cli = spec_paths.resolve_plugin_cli(_CORE_CLI_NAME)
-  if cli is not None:
-    return cli
-
-  # stage 2 — dev-vault-only fallback, deliberate per the task brief — this repo IS
-  # lazycortex-core's own source tree, so a session with no registry record and nothing on the env path
-  # (e.g. a direct dev run of the specs plugin) still resolves the CLI without one plugin
-  # hardcoding another's install layout (dev.plugin-boundaries § 2b is about the
-  # cache, not this repo's own source tree)
-  # waiver: sibling-plugin path reach is intentional here — see the paragraph above
-  fallback = repo / _PLUGIN_TREE_DIR / _CORE_CLI_NAME / _BIN_DIR / _CORE_CLI_NAME
-  if fallback.is_file():
-    return fallback
-
-  # stage 3 — this file's own dev-vault sibling: a verb run against a repository that is NOT
-  # this checkout (a test fixture, a consumer vault opened from a dev session) still finds the
-  # neighbour that sits beside this plugin in the tree the code itself runs from — the same
-  # stage the review plugin's resolver carries
-  # waiver: sibling-plugin path reach is intentional here — see the paragraph above stage 2
-  sibling = Path(__file__).resolve().parents[2] / _CORE_CLI_NAME / _BIN_DIR / _CORE_CLI_NAME
-  if sibling.is_file():
-    return sibling
-
-  # no stage found a binary — nothing left to try
-  raise RuntimeError(
-      f"lazycortex-core CLI not resolvable: ${_PLUGIN_DIRS_ENV} and the plugin registry yield no match, "
-      f"{fallback} is absent from this repo and {sibling} is absent beside this plugin"
-  )
-
-
-def resolve_core_cli(repo: Path) -> Path:
-  """
-  Find the `lazycortex-core` CLI binary for a sibling module.
-
-  Args:
-    repo: The repository root the dev-fallback path is resolved against.
-
-  Returns:
-    Absolute path to the resolved `lazycortex-core` binary.
-
-  Raises:
-    RuntimeError: When no lookup stage finds a binary.
-  """
-  return _resolve_core_cli(repo)
-
-
 def main_core_cli(argv: list[str]) -> int:
   """
   Run the `core-cli` verb: print the resolved `lazycortex-core` CLI path.
@@ -374,7 +300,7 @@ def main_core_cli(argv: list[str]) -> int:
 
   # the resolver names every stage it searched in its message; the verb only prefixes it
   try:
-    cli = _resolve_core_cli(Path(args.repo).resolve())
+    cli = spec_paths.resolve_core_cli(Path(args.repo).resolve())
   except RuntimeError as exc:
     sys.stderr.write(f"error: {exc}\n")
     return 1
@@ -398,7 +324,7 @@ def core_dispatch_job(repo: Path, bundle: dict) -> dict:
     RuntimeError: When the CLI exits non-zero.
     json.JSONDecodeError: When the CLI exits zero but its stdout is not valid JSON.
   """
-  cli = _resolve_core_cli(repo)
+  cli = spec_paths.resolve_core_cli(repo)
   env = os.environ.copy()
   env[_REPO_ROOT_ENV] = str(repo)
 
@@ -418,6 +344,48 @@ def core_dispatch_job(repo: Path, bundle: dict) -> dict:
         f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     )
   return json.loads(proc.stdout)
+
+
+def cancel_job(repo: Path, expert: str, job_id: str) -> bool:
+  """
+  Cancel a queued or running job via `lazycortex-core cancel-job`, best-effort.
+
+  Guarantees:
+    - Returns within its own timeout, however long the CLI takes.
+
+  Args:
+    repo: The repository root the CLI resolves settings and its own binary against.
+    expert: The job's dispatched expert name.
+    job_id: The job's id.
+
+  Returns:
+    True when the CLI reported the job cancelled; False when it was not, or the CLI could not be resolved, run or
+    understood.
+  """
+  # guard: rejects the cancel when the core CLI cannot be resolved
+  try:
+    cli = spec_paths.resolve_core_cli(repo)
+  except RuntimeError:
+    return False
+
+  # the wire bundle is `{expert, job_id}` per the `cancel-job` CLI's published contract
+  env = os.environ.copy()
+  env[_REPO_ROOT_ENV] = str(repo)
+  request = json.dumps({ WireKey.EXPERT: expert, WireKey.JOB_ID: job_id })
+  try:
+    proc = subprocess.run(
+        [sys.executable, str(cli), _CANCEL_VERB],
+        input = request,
+        capture_output = True,
+        text = True,
+        env = env,
+        timeout = _CANCEL_TIMEOUT_S,
+        check = False, encoding = "utf-8",
+    )
+    answer = json.loads(proc.stdout)
+  except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+    return False
+  return proc.returncode == 0 and isinstance(answer, dict) and answer.get(_CANCELLED_KEY) is True
 
 
 def consume_stale_job(repo: Path, expert: str, job_id: str) -> None:
@@ -449,7 +417,7 @@ def consume_stale_job(repo: Path, expert: str, job_id: str) -> None:
 
   # guard: CLI unresolvable — nothing to retire against, degrade to a no-op
   try:
-    cli = _resolve_core_cli(repo)
+    cli = spec_paths.resolve_core_cli(repo)
   except RuntimeError:
     return
 

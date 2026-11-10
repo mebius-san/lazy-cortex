@@ -31,8 +31,12 @@ Python projects that adopt these conventions.
 - All inline comments must:
   - Be concise (one sentence when possible).
   - Do not add any comments to any imports and all import sections even if it has more than five lines.
-- Use `# guard: <description>` ONLY for a guard clause: an `if` whose body exits the current scope — `return`, `continue`, `break`, `raise`, or `sys.exit`. If the body does anything else (assign, append, call, mutate), it is NOT a guard — use a plain `# <description>` comment or none.
-  - Hard test: cover the `if` body. If control leaves the function or loop iteration, it is a guard. Otherwise it is not.
+- Use `# guard: <description>` ONLY for a guard clause: an `if` — or a `match` `case` arm — that protects the code below it from an invalid, missing, or degenerate input or state.
+  - Most guards leave early — `return` with or without a value, `continue`, `break`, `raise`, or `sys.exit` — when there is nothing valid to work on.
+  - A guard may also repair the state instead of leaving: give a missing value its default, or normalise an input the code below cannot take as is.
+  - An `if` that carries the regular work is NOT a guard, whatever its body does — the main path or one of the regular outcomes: the found result, the computed answer, one branch of a dispatch, an accumulation. Give it a plain `# <description>` comment or none.
+  - Hard test: ask what the `if` is for. If it shields the code below from bad or missing input or state, it is a guard. If it is part of the work itself, it is not.
+  - Whether an `if` is a guard is judged by meaning in the review phase, which reports both a `# guard:` on an `if` that protects nothing and a protective `if` — leaving or repairing — that lacks one; no checker enforces the marker.
   - A `try`/`except` validation whose `except` block exits the scope the same way (e.g. a contract cast that logs and returns on `TypeError`) also qualifies as a guard. Calls that always raise (`pytest.skip`, `sys.exit`) count as exits.
   - Place the guard comment immediately before the `if` statement that performs the check.
   - The description states what the check rejects, literally. Never invent a "skip"/"else" narrative the code does not execute.
@@ -41,14 +45,22 @@ Python projects that adopt these conventions.
       # guard: no target position, nothing to move
       if target is None:
         return
+  - Correct (a guard that repairs instead of leaving):
+      # guard: no explicit limit given, fall back to the configured one
+      if limit is None:
+        limit = self._default_limit
   - Wrong (accumulation if — not a guard, comment invents a "skip"):
-      # guard: skip rows whose action carries no asset id
-      if row[ChapterField.SKILL_AID]:
-        asset_aids.add(row[ChapterField.SKILL_AID])
+      # guard: skip rows whose order carries no product id
+      if row[OrderField.PRODUCT_ID]:
+        product_ids.add(row[OrderField.PRODUCT_ID])
   - Right version of the above:
-      # collect asset ids present on skill rows
-      if row[ChapterField.SKILL_AID]:
-        asset_aids.add(row[ChapterField.SKILL_AID])
+      # collect product ids present on order rows
+      if row[OrderField.PRODUCT_ID]:
+        product_ids.add(row[OrderField.PRODUCT_ID])
+  - Right (main-path exit — not a guard, though the body returns):
+      # a cached answer is returned without recomputing it
+      if key in self._cache:
+        return self._cache[key]
 - Correct:
 ```python
 # convert vector back to original coordinates
@@ -107,7 +119,7 @@ A block marker is **not a comment to the code** — it is a standalone block, se
 - `Decision:` — marks a recorded design decision: a real fork where the author chose X over Y and the why is worth keeping next to the code. Hybrid format: the thesis is mandatory on the marker line — `# Decision: <chose X, not Y> — <why>`; rationale or rejected alternatives that do not fit the line continue on the following `#` lines. A short decision stays a single line.
   - Correct:
       # Decision: dict over dataclass — the schema drifts with the config
-      # Decision: core/export#D-007 — records are append-only
+      # Decision: <product>/<asset>#D-NNN — records are append-only
       # rejected in-place edits: anchors point at heading text,
       # rewriting the thesis breaks every inbound link
   - The multi-line form is a standalone block — separated by an empty line from the surrounding code and from any other comments. Never glue it to a statement in place of the block's purpose comment, and never glue other comments to it: every `#` line adjacent to the block is treated as decision text.
@@ -118,7 +130,7 @@ A block marker is **not a comment to the code** — it is a standalone block, se
   - Not `waiver:` — no checker rule is being broken.
   - The clause is written in English, like every other comment — even when the linked registry record is in another language; the thesis is then a translated paraphrase and the original stays behind the link.
   - `pcf` proves only that the thesis is non-empty; whether it records a real fork with an honest why is the review phase's call.
-- `guard:` — marks a guard clause: an `if` (or equivalent `try`/`except` validation) whose body exits the current scope (`return`/`continue`/`break`/`raise`/`sys.exit`). Not for accumulation or branch ifs (see guard rules in Comments section above).
+- `guard:` — marks a guard clause: an `if`, a `case` arm, or an equivalent `try`/`except` validation that protects the code below from an invalid, missing, or degenerate input or state, by leaving early or by repairing the state. Not for the main path, a regular outcome, an accumulation, or a dispatch branch (see guard rules in Comments section above).
 - `Domain(…):` — marks documentation comments that describe domain rules, mechanics, algorithms, or other domain-specific concepts (see Domain Comments section below).
 - `waiver:` — marks an intentional exception from a coding rule. The comment must explain **why** the exception is justified. Required whenever `typing.cast()` is used (see Type Casting rules) or any other banned pattern is unavoidable.
 
@@ -138,11 +150,11 @@ A block marker is **not a comment to the code** — it is a standalone block, se
 - A private helper carries no `Contract:` block and no `Guarantees` section. A private helper is a leading-underscore method or function used only inside its own class or module and never overridden. Its docstring summary states what it does, and a domain rule it implements goes in a `Domain(…):` block. A rule that a caller relies on is stated in the contract of the public method through which it becomes visible. A private helper has one reader, the maintainer of the same class, who reads its code anyway.
 - Correct — a private helper gets no contract; the promise lives on the public method that exposes it:
   ```python
-  def create_clone(self) -> Self:
-      """Return an independent copy of the entity."""
+  def snapshot(self) -> Self:
+      """Return an independent copy of the cache."""
 
       # Contract:
-      # The returned clone is a fully independent deep copy;
+      # The returned snapshot is a fully independent deep copy;
       # mutating it never affects the original.
 
       return self._copy_state()
@@ -153,12 +165,12 @@ A block marker is **not a comment to the code** — it is a standalone block, se
   ```
 - Correct — a protected hook that subclasses override keeps its contract, on the declaration:
   ```python
-  def _on_turn_end(self) -> None:
-      """Hook run once after every turn resolves."""
+  def _on_batch_end(self) -> None:
+      """Hook run once after every batch is processed."""
 
       # Contract:
-      # Called exactly once per turn, after all effects are applied;
-      # an override may read turn state but never mutates the effect queue.
+      # Called exactly once per batch, after all records are written;
+      # an override may read batch state but never mutates the write queue.
 
       raise NotImplementedError
   ```
@@ -185,7 +197,7 @@ A block marker is **not a comment to the code** — it is a standalone block, se
 - Wrong — a decision wearing a contract's marker; the why belongs on a `Decision:` line, and the caller-visible promise, if any, is the one the docstring already carries:
   ```python
   def copy_from(self, other: Self) -> None:
-      """Copy the turn data of ``other`` into this instance."""
+      """Copy the batch data of ``other`` into this instance."""
 
       # Contract:
       # The index is not copied because a separate pass
@@ -201,7 +213,7 @@ A block marker is **not a comment to the code** — it is a standalone block, se
   - The guarantee text follows on subsequent `#` comment lines:
     ```python
     # Contract:
-    # The returned clone is a fully independent deep copy;
+    # The returned snapshot is a fully independent deep copy;
     # mutating it never affects the original.
     ```
   - Placement by layer. A guarantee that an interface declares for every implementation is written once, on the abstract declaration in the interface: the block sits inside the abstract method's body, above its `raise NotImplementedError`, and states what every implementation MUST honour. An implementation of that method in a subclass never repeats the block; its docstring `Guarantees` section carries the promise and traces it to the interface's contract. A public or protected method with no interface declaration keeps its contract at the load-bearing spot in its own body.
@@ -214,41 +226,41 @@ A block marker is **not a comment to the code** — it is a standalone block, se
 
 ## Domain Comments
 - Domain comments (`# Domain(group name):`) are special documentation comments that describe domain rules, mechanics, algorithms, or other domain-specific principles.
-- The **group name** in parentheses categorizes the comment by topic. **Always use a group listed in the project's domain-groups dictionary** (`docs/guidelines/domain-groups.md` — a language-neutral project registry shared by every language's markers). Do not invent new groups without explicit user approval.
-- The group `unfiled` is **reserved**: it marks a block whose real group is not in the dictionary yet. It is never listed in the dictionary, and the checker flags every `Domain(unfiled)` block until the operator adds the real group and renames the block.
+- The **group name** in parentheses categorizes the comment by topic. **Always use a group listed in the project's domain-groups dictionary** (the path `.claude/lazy.settings.json[wiki.domains.dictionary]` names, else `docs/guidelines/domain-groups.md`, as the `/lazy-python.knowledge-sweep` `scope` verb resolves it — a language-neutral project registry shared by every language's markers). Do not invent new groups without explicit user approval.
+- The group `unfiled` is **reserved**: it marks a block whose real group is not in the dictionary yet. The sweep's `dictionary-apply` verb refuses to list it (`reason: reserved_group`), and the checker flags every `Domain(unfiled)` block until the operator adds the real group and renames the block.
 - Domain comments explain **principles and concepts**, not method implementation details.
 - A `Domain(…):` block that states a formula or a rule is the source of expected values in tests: the test works them out by hand from the block, never from the implementation — see *Knowledge-derived tests* in `lazy-python.testing-guidelines.md`.
 - Domain comments must always be placed **inside methods or functions**, near the code that implements the described mechanic, or **at class body level** when documenting enum members, class-level constants, or weight mappings that are not tied to a single method. Never place Domain comments between class definitions, above class definitions, or at module level outside a class or function. When a constant or mapping is used by only one method, prefer placing the Domain comment inside that method.
 - Never describe what "this method does" or how the code works internally. Instead, describe the underlying domain mechanics, formulas, or rules that the code implements.
 - Focus on answering "what are the rules/principles?" rather than "what does the code do?"
 - **Never reference code constructs** (class names, method names, variable names, constants, module paths) in Domain comments. Domain comments describe domain concepts and rules in plain language, not code.
-- Domain comments are written for human reading and for extraction: the wiki plugin's domain routine collects the blocks of one group and regenerates that group's document from them, so a block's wording is published prose, not a private note.
+- Domain comments are written for human reading and for extraction: the wiki plugin's domain routine turns each block into a document of its own, named by the block's title, and regenerates it whenever the block changes, so a block's wording is published prose, not a private note.
 - Format:
   - Start with `# Domain(group):`.
-  - The group name is lowercase and carries at least two dot-separated segments — the subject area, then the topic inside it (`entities.lifecycle`, `space.grids`). A single word is never a group name: it names an area with no topic or a topic with no area. The first segment names a subject area, never a package or directory; a segment naming a family of things is plural (`grids`, `shapes`), one activity or quality is singular; a group names a subject, never a formula. Dots lay the group out in the generated documentation tree: every segment but the last is a directory and the last is the document itself, under the configured output root (`docs/domains` unless the project sets its own) — `Domain(mechanics.fighting)` becomes the `fighting` document inside the `mechanics` directory.
-  - Use `# #` for the title line.
+  - The group name is lowercase and carries at least two dot-separated segments — the subject area, then the topic inside it (`orders.lifecycle`, `geometry.grids`). A single word is never a group name: it names an area with no topic or a topic with no area. The first segment names a subject area, never a package or directory; a segment naming a family of things is plural (`grids`, `shapes`), one activity or quality is singular; a group names a subject, never a formula. Dots lay the group out in the generated documentation tree: every segment is a directory under the configured output root (`docs/domains` unless the project sets its own), and the last one holds the group's folder note and one document per block — `Domain(billing.taxes)` becomes the `billing/taxes/` folder, opened by `taxes.md`.
+  - Use `# #` for the title line, as the first line after the header. The title names the block's published document; a block without one gets no document, and two blocks of one group with the same title share one document.
   - Continue with `#` for the body text describing the principles.
 - Example format:
 ```python
-# Domain(simulation.mechanics):
+# Domain(network.retries):
 # # Title of the concept
 # Description of the domain mechanics, principles, or rules.
 # Additional details about how the system works conceptually.
 ```
 - Correct (describes domain principles):
 ```python
-# Domain(mechanics.skills):
-# # Skill execution chance check
-# When a skill is used, there is a chance that the skill use may fail at the moment of invocation.
-# This chance is determined by the skill's control chance value altered by any relevant modifiers.
-# A random roll is made, and if the roll exceeds the skill's chance, the skill use fails, and the
-# skill enters a FAILED phase for that round.
+# Domain(network.retries):
+# # Retry backoff
+# When a request fails with a transient error, it is sent again after a waiting period.
+# Each wait is twice as long as the one before it, starting from the base delay and capped by the
+# maximum delay. Once the retry budget is spent, the request is reported as failed and no further
+# attempt is made.
 ```
 - Wrong (describes method behavior):
 ```python
-# Domain(mechanics.skills):
-# # Skill execution chance check
-# This method checks if the skill invocation succeeds. It retrieves the invoke_chance from state
-# and compares it with a random roll. If the check fails, the method sets the run_phase to FAILED
-# and updates the turn resolution accordingly.
+# Domain(network.retries):
+# # Retry backoff
+# This method checks whether another attempt is allowed. It reads the retry_policy from state
+# and compares the attempt counter with max_retries. If the budget is spent, the method sets the
+# request_state to FAILED and updates the error log accordingly.
 ```

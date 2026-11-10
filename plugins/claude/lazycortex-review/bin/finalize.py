@@ -11,21 +11,23 @@ The finalizing commit:
    but keeps `# History`.
 5. Strips every transient `review_*` frontmatter key by prefix (everything except `review_result`).
 6. Stamps the terminal `review_result` outcome
-   (`approved` | `approved-with-concerns`) — the discriminator
-   downstream apply-gate md-scan routines key off. The open
+   (`approved` | `approved-with-concerns`) when `review_approved` is affirmative — the discriminator
+   downstream apply-gate md-scan routines key off. A `review_approved` that is present but not affirmative
+   drops any stale `review_result` and any stale `approved` / `approved-with-concerns` status callout
+   (status callouts of other states stay) and stamps nothing. The open
    transition unsets it on every fresh review.
 7. Single atomic commit carrying `Doc-Review-Phase: finalize`
    trailer under the bot identity.
 
 Idempotent: re-running finalize on an already-finalized document
-(no transient `review_*` keys, `review_result` already stamped,
+(no transient `review_*` keys, so no `review_approved`; `review_result` already stamped,
 status callout already in place) produces byte-identical output →
-no-op.
+no-op. An existing `review_result` and approved status callout are kept only while `review_approved` is absent;
+when it is present but not affirmative, both are dropped.
 """
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
 from pathlib import Path
@@ -42,6 +44,8 @@ if str(_BIN) not in sys.path:
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import atomic_io as _atomic_io  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import core_settings as _core_settings  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import body as _body  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import edit_markup as _edit_markup  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -57,8 +61,10 @@ import job_markers as _job_markers  # noqa: E402  # pylint: disable=import-error
 # waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
 import parser as _parser  # noqa: E402  # pylint: disable=import-error,wrong-import-position,deprecated-module
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+from errors import SettingsReadError  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 # pylint: disable-next=import-error,wrong-import-position
-from keys import Bucket, JobKey, Paths, ResultValue, ReviewKey, Style  # noqa: E402
+from keys import BotIdentity, Bucket, JobKey, Paths, ResultValue, ReviewKey, Style  # noqa: E402
 
 
 # `concerns-decision` is the retired pause banner: never a state, only stripped as a legacy leftover
@@ -87,9 +93,19 @@ _APPROVE_LINE_RE = re.compile(
     r"[^\n]*\n",
     re.MULTILINE | re.IGNORECASE,
 )
+# frontmatter flag values that read as set, compared after lowercasing and trimming
+_AFFIRMATIVE_VALUES = frozenset({ "true", "yes", "1" })
+# Title of the status callout stamped on a document approved while a validation concern stays open.
+APPROVED_WITH_CONCERNS_TITLE = "Document approved & finalized with outstanding concerns"
+# Title of the status callout stamped on a document approved with no concern left open.
+APPROVED_TITLE = "Document approved & finalized"
+# Stderr refusal for a body still carrying operator callouts, filled with the file and the offending lines.
+LEFTOVER_REFUSAL_TEMPLATE = "refused: unfolded operator callouts remain in {file} ({lines})\n"
+# Stdout notice for a document the transforms leave unchanged, filled with the file.
+ALREADY_FINALIZED_TEMPLATE = "already finalized: {file}"
 
 
-def document_edit_marker_style(file_path: Path) -> str:
+def read_document_edit_marker_style(file_path: Path) -> str:
   """
   Return the edit-marker style in effect for one document.
 
@@ -105,7 +121,7 @@ def document_edit_marker_style(file_path: Path) -> str:
 
   Returns:
     The document's pinned `review_marker_style` when it is one of the supported styles;
-    otherwise the `settings_edit_marker_style` fallback for the containing repo.
+    otherwise the `read_settings_edit_marker_style` fallback for the containing repo.
   """
 
   # Contract:
@@ -119,43 +135,48 @@ def document_edit_marker_style(file_path: Path) -> str:
   # repository was configured with at that instant. Every later step of the cycle — dispatch,
   # markup stripping, finalize — reads that recorded value instead of the live configuration,
   # so a configuration change made mid-cycle never reaches a review already in progress. A
-  # document that never had this value recorded falls back to the repository's current
-  # configuration.
+  # document whose recorded value is missing, empty, or not one of the supported styles falls
+  # back to the repository's current configuration.
 
   try:
     meta, _ = _fm.parse(file_path.read_text(encoding = "utf-8"))
   except OSError:
-    return settings_edit_marker_style(file_path)
+    return read_settings_edit_marker_style(file_path)
 
   # the pin wins only when it names a style the stripper set actually supports;
   # anything else (absent, empty, unknown, wrong-case) falls through to settings
   pinned = meta.get(ReviewKey.MARKER_STYLE)
   if isinstance(pinned, str) and pinned in _edit_markup.SUPPORTED_STYLES:
     return pinned
-  return settings_edit_marker_style(file_path)
+  return read_settings_edit_marker_style(file_path)
 
 
-def settings_edit_marker_style(file_path: Path) -> str:
+def read_settings_edit_marker_style(file_path: Path) -> str:
   """
   Return the configured edit-marker style for the repo containing `file_path`.
 
+  Args:
+    file_path: The document whose containing repo's settings are consulted.
+
   Returns:
-    The `review.edit_marker_style` value from the nearest `.claude/lazy.settings.json`,
-    or `"simple"` when no settings file is found or the key is absent.
+    The `review.edit_marker_style` value of the nearest repo carrying `.claude/lazy.settings.json`,
+    read with its local overlay merged on, or `"simple"` when no settings file is found, the
+    settings are unreadable, or the key is absent.
+
+  Raises:
+    RuntimeError: When a settings file is found but no core CLI is resolvable.
   """
   cur = file_path.parent
   # waiver: inline numeric literal, not a domain constant
   for _ in range(10):
-    candidate = cur / Paths.CLAUDE_DIR / Paths.SETTINGS_FILE
-    if candidate.exists():
+    # the nearest repo carrying a settings file answers, its local overlay merged on as core reads it
+    if (cur / Paths.CLAUDE_DIR / Paths.SETTINGS_FILE).exists():
       try:
-        data = json.loads(candidate.read_text(encoding = "utf-8"))
-        return (
-            data.get(JobKey.REVIEW, {}).get(JobKey.EDIT_MARKER_STYLE, Style.SIMPLE)
-        )
-      except (OSError, json.JSONDecodeError):
+        review = _core_settings.read_merged_sections(cur, JobKey.REVIEW)[JobKey.REVIEW]
+      except SettingsReadError:
         return Style.SIMPLE
-    # guard: filesystem root reached without a settings file — fall back to the default style
+      return review.get(JobKey.EDIT_MARKER_STYLE, Style.SIMPLE)
+    # filesystem root reached without a settings file — fall back to the default style
     if cur.parent == cur:
       break
     cur = cur.parent
@@ -164,27 +185,25 @@ def settings_edit_marker_style(file_path: Path) -> str:
 
 def _load_settings(repo: Path) -> dict:
   """
-  Read `<repo>/.claude/lazy.settings.json`.
+  Read the `review` section of `repo`'s settings as core sees them, local overlay merged.
 
   Args:
-    repo: Repository root to resolve the settings path against.
+    repo: Repository root whose settings are read.
 
   Returns:
-    Parsed settings dict, or `{}` when the file is absent or unparseable.
+    Settings-shaped dict holding the merged `review` section, or `{}` when the settings are unreadable.
+
+  Raises:
+    RuntimeError: When no core CLI is resolvable.
   """
 
-  # Decision: a local copy of the settings reader, not a cross-module import — the coordinator
-  # migration's own-verbs-only boundary (`coordinator_dispatch.py` and `submit.py` carry the same copy)
+  # Decision: one reader of the merged view, core's `settings-get --scope merged` through `core_settings`,
+  # replacing the local copy of the file reader — the local overlay is honoured and every reader sees the same values
 
-  # the settings file sits at a fixed path under the repo's `.claude` dir
-  path = repo / Paths.CLAUDE_DIR / Paths.SETTINGS_FILE
-
-  # guard: no settings file at all — nothing registered
-  if not path.exists():
-    return {}
+  # an unreadable settings layer resolves no review class, exactly as an absent one does
   try:
-    return json.loads(path.read_text(encoding = "utf-8"))
-  except json.JSONDecodeError:
+    return _core_settings.read_merged_sections(repo, JobKey.REVIEW)
+  except SettingsReadError:
     return {}
 
 
@@ -249,6 +268,21 @@ def _validation_owners(class_cfg: dict | None) -> list[tuple[str, str]]:
   ]
 
 
+def _is_flag_set(meta: dict, key: str) -> bool:
+  """
+  Return whether a frontmatter flag holds an affirmative value.
+
+  Args:
+    meta: Parsed frontmatter dict of the document.
+    key: Frontmatter key of the flag.
+
+  Returns:
+    `True` when the flag's value, case-insensitively and ignoring surrounding whitespace, is one of
+    `true`, `yes`, `1`; `False` when it is absent or holds anything else.
+  """
+  return str(meta.get(key, "")).strip().lower() in _AFFIRMATIVE_VALUES
+
+
 def finalize_text(
     text: str,
     *,
@@ -278,7 +312,10 @@ def finalize_text(
 
   Returns:
     Finalized document text with review-machinery markers, transient frontmatter
-    keys, and non-preserved expert sections removed, and `review_result` stamped.
+    keys, and non-preserved expert sections removed. `review_result` is stamped only when the document's
+    `review_approved` flag is affirmative. When the flag is present but not affirmative, any stale
+    `review_result` and any stale `approved` or `approved-with-concerns` status callout are removed and nothing
+    is stamped; an existing result is kept only when the flag is absent.
   """
 
   # Contract:
@@ -291,15 +328,22 @@ def finalize_text(
   # The outcome is approved with concerns when the operator's skip-validation choice is set on
   # the document and at least one validation section still holds a concern; otherwise it is
   # approved. Skipping validation with nothing raised is therefore a plain approval, and an
-  # unskipped validation never ends in concerns. The outcome is recorded twice: as a
-  # frontmatter value other systems treat as the signal that a review has just closed and
-  # their own follow-on action may now run, and as a status callout placed above the
-  # document's first heading so a reader sees the outcome without opening frontmatter or
-  # scanning history. The callout lives in its own status namespace, distinct
-  # from the in-review callouts it replaces, and is upserted rather than accumulated, so
-  # re-finalizing an already-finalized document leaves it unchanged. A consumer that owns a
-  # richer terminal state of its own may overwrite the callout with its own record once its
-  # action lands; this is only the review system's default.
+  # unskipped validation never ends in concerns. The outcome is recorded in two places, both
+  # only when the document's approval flag is affirmative: as a frontmatter value other systems
+  # treat as the signal that a review has just closed and their own follow-on action may now
+  # run; and as a status callout placed above the document's first heading so a reader sees
+  # the outcome without opening frontmatter or scanning history. A document whose approval flag
+  # is present but not affirmative therefore gets neither the frontmatter value nor the
+  # callout. Re-finalizing keeps an outcome already stamped, frontmatter value and callout alike,
+  # only when the document carries no approval flag at all, as in a re-run on a document that was
+  # already finalized. When the flag is present but not affirmative, both the frontmatter outcome
+  # value and any status callout an earlier cycle left in the approved or approved with concerns
+  # state are removed, and nothing new is stamped. A status callout in any other state, such as a
+  # consumer's own disposition, is left alone, and so is an example of one inside a code fence,
+  # which is literal content. The callout lives in its own status namespace,
+  # distinct from the in-review callouts it replaces, and is upserted rather than accumulated. A
+  # consumer that owns a richer terminal state of its own may overwrite the callout with its own
+  # record once its action lands; this is only the review system's default.
 
   # split the document once; every step below rewrites either the frontmatter text or the body
   meta, body = _fm.parse(text)
@@ -309,7 +353,7 @@ def finalize_text(
   # bytes (including any inner HTML markers a `strip_markers(style="html")` pass would eat)
   # survive finalize verbatim; restored after the status callout is stamped. They are owned
   # by another plugin (the cross-plugin protected-section contract), not by review.
-  body, _protected_sections = _body.split_out_protected_sections(body)
+  body, protected_sections = _body.split_out_protected_sections(body)
 
   # erase the inline review machinery — edit markers, the waiting banner, the approve
   # checkbox line and the system callouts — none of it belongs to a finalized document
@@ -331,23 +375,19 @@ def finalize_text(
   # finalize transition strips them once its work is done.
   body = _body.strip_owned_h1_sections(body, preserve_section_ids=preserve_section_ids)
 
-  # Bug 36: stamp a visible terminal-state status callout above the
-  # first H1 so the operator sees what the review concluded the
-  # moment they open the document — without having to read frontmatter
-  # or trace `# History` entries. The callout lives in its own
-  # `#status/<state>` namespace (not under `#review/`) and
-  # survives subsequent re-finalize passes (it's upserted, not
-  # accumulated). Consumers that own a richer terminal state (e.g.
-  # `lazy-spec.request-apply` setting request_status to accepted /
-  # rejected) overwrite this callout with their own when their action
-  # lands; the default is the review-side "approved & finalized"
-  # record below.
+  # stamp the terminal-state status callout above the first H1 — upserted, so a re-finalize
+  # never stacks a second one
   status = _status_callout_for_finalize(meta, with_concerns=with_concerns)
   if status is not None:
     body = _body.upsert_status_callout(body, **status)
+  elif ReviewKey.APPROVED in meta:
+    # approval flag present but not affirmative — a stale approved callout from an earlier cycle is dropped
+    body = _body.strip_status_callouts_in_states(
+        body, states = ( ResultValue.APPROVED, ResultValue.APPROVED_WITH_CONCERNS ),
+    )
 
   # Restore the foreign protected sections lifted before the body-wide passes (verbatim).
-  body = _body.restore_protected_sections(body, _protected_sections)
+  body = _body.restore_protected_sections(body, protected_sections)
 
   # Spec § Stage 7: strip ALL `review_*` keys from frontmatter. The
   # finalized document carries no review-machinery metadata — the
@@ -375,32 +415,26 @@ def finalize_text(
   if _fm.is_empty(fm_text):
     fm_text = ""
 
-  # Stamp the terminal `review_result` outcome — the apply-gate
-  # discriminator that downstream md-scan routines key off
-  # (e.g. `spec.request-handler` apply mode triggers on
-  # `review_result: [approved, approved-with-concerns]`). Written
-  # LAST so it survives the `review_*` prefix strip above. The open
-  # transition unsets this key when a doc re-enters the review
-  # loop, so its presence is a reliable signal of "review just
-  # closed". Stamp only when there is actual review evidence —
-  # either a fresh finalize (`review_approved` was in meta) or an
-  # idempotent re-run on an already-stamped doc. A doc with neither
-  # was never in the review loop; finalize is a no-op on it (input
-  # bytes == output bytes).
-  if ReviewKey.APPROVED in meta:
+  # stamp the terminal `review_result` outcome last, so the `review_*` prefix strip above never
+  # removes it; only real approval evidence stamps it, and a non-affirmative flag drops a stale one
+  if _is_flag_set(meta, ReviewKey.APPROVED):
     result_value = ResultValue.APPROVED_WITH_CONCERNS if with_concerns else ResultValue.APPROVED
     fm_text = _fm.set_field(fm_text, ReviewKey.RESULT, result_value)
+  elif ReviewKey.APPROVED in meta:
+    # approval flag present but not affirmative — a stale outcome from an earlier cycle is dropped
+    fm_text = _fm.unset_field(fm_text, ReviewKey.RESULT)
+    if _fm.is_empty(fm_text):
+      fm_text = ""
   elif meta.get(ReviewKey.RESULT, "").strip() in (ResultValue.APPROVED, ResultValue.APPROVED_WITH_CONCERNS):
     # Idempotent re-run — preserve existing key (set_field call is
     # a byte-identical no-op when the value already matches).
-    existing = meta[ReviewKey.RESULT].strip()
-    fm_text = _fm.set_field(fm_text, ReviewKey.RESULT, existing)
+    fm_text = _fm.set_field(fm_text, ReviewKey.RESULT, meta[ReviewKey.RESULT].strip())
 
   # reassemble the two halves the steps above rewrote independently
   return fm_text + body
 
 
-def leftover_callouts(text: str) -> list[tuple[int, str]]:
+def find_all_leftover_callouts(text: str) -> list[tuple[int, str]]:
   """
   Report every operator-facing block that must not survive into a finalized document.
 
@@ -438,12 +472,11 @@ def _status_callout_for_finalize(meta: dict, *, with_concerns: bool = False) -> 
 
   Returns:
     A dict with `state`, `marker`, `title`, and `body_lines` keys suitable for passing
-    to `_body.upsert_status_callout`, or `None` when the document has no approval flag
-    and therefore no terminal status to record.
+    to `_body.upsert_status_callout`, or `None` when the document has no affirmative approval
+    flag and therefore no terminal status to record.
   """
-  approved_raw = str(meta.get(ReviewKey.APPROVED, "")).strip().lower()
-  # guard: no approval flag — no terminal status to record
-  if approved_raw not in ("true", "yes", "1"):
+  # no affirmative approval flag — no terminal status to record
+  if not _is_flag_set(meta, ReviewKey.APPROVED):
     return None
   if with_concerns:
 
@@ -454,13 +487,13 @@ def _status_callout_for_finalize(meta: dict, *, with_concerns: bool = False) -> 
     return {
         JobKey.STATE:      ResultValue.APPROVED_WITH_CONCERNS,
         JobKey.MARKER:     "success",
-        JobKey.TITLE:      "Document approved & finalized with outstanding concerns",
+        JobKey.TITLE:      APPROVED_WITH_CONCERNS_TITLE,
         JobKey.BODY_LINES: (),
     }
   return {
       JobKey.STATE:      ResultValue.APPROVED,
       JobKey.MARKER:     "success",
-      JobKey.TITLE:      "Document approved & finalized",
+      JobKey.TITLE:      APPROVED_TITLE,
       JobKey.BODY_LINES: (),
   }
 
@@ -474,7 +507,7 @@ def _commit_final(repo: Path, file_path: Path) -> str:
   """
   return _git_ops.commit_final(
       repo, file_path,
-      author={"name": "lazy-review", "email": "lazy-review@bot.invalid"},
+      author={JobKey.NAME: BotIdentity.NAME, JobKey.EMAIL: BotIdentity.EMAIL},
       # waiver: one-off human-facing message
       message="review: finalize",
   )
@@ -494,7 +527,7 @@ def _repo_root_for(file_path: Path) -> Path:
   for _ in range(20):
     if (cur / Paths.GIT_DIR).exists():
       return cur
-    # guard: filesystem root reached without a `.git` entry — fall back to the file's parent
+    # filesystem root reached without a `.git` entry — fall back to the file's parent
     if cur.parent == cur:
       break
     cur = cur.parent
@@ -527,47 +560,51 @@ def main(argv: list[str]) -> int:
   parser.add_argument("--no-commit", action="store_true")
   args = parser.parse_args(argv)
   file_path: Path = args.file.resolve()
+
   # guard: nothing to finalize — the named file does not exist
   if not file_path.exists():
     sys.stderr.write(f"file not found: {file_path}\n")
     return 2
-  style = document_edit_marker_style(file_path)
+
+  # the document is read once, as written on disk, for the leftover-callout check below
   original = _atomic_io.read_text(file_path)
 
   # guard: a questionnaire the writer never folded must not ship inside an approved document
-  if leftovers := leftover_callouts(original):
+  if leftovers := find_all_leftover_callouts(original):
     lines = ", ".join(f"line {line}: {kind}" for line, kind in leftovers)
-    sys.stderr.write(f"refused: unfolded operator callouts remain in {file_path} ({lines})\n")
+    sys.stderr.write(LEFTOVER_REFUSAL_TEMPLATE.format(file = file_path, lines = lines))
     # waiver: process exit code, not a domain constant
     return 3
+
+  # work on an LF copy and resolve the document's class from its repo's review settings
   lf_text, ending = _atomic_io.to_lf(original)
   meta, body_text = _fm.parse(lf_text)
   repo = _repo_root_for(file_path)
-  settings = _load_settings(repo)
-  class_cfg = _doc_class.class_for_file(settings, repo, file_path)
+  class_cfg = _doc_class.class_for_file(_load_settings(repo), repo, file_path)
 
   # under the operator's skip-validation choice, each validation section that still carries a concern
   # survives on its own; with none of them raising one the skip is a plain approve
-  skip_validation = str(meta.get(ReviewKey.SKIP_VALIDATION, "")).strip().lower() in ("true", "yes", "1")
   concern_section_ids = {
-      owner[1] for owner in _validation_owners(class_cfg) if _body.section_has_concerns(body_text, owner)
-  } if skip_validation else set()
+      owner[1] for owner in _validation_owners(class_cfg) if _body.has_section_concerns(body_text, owner)
+  } if _is_flag_set(meta, ReviewKey.SKIP_VALIDATION) else set()
   new_text = finalize_text(
-      lf_text, style = style,
+      lf_text, style = read_document_edit_marker_style(file_path),
       preserve_section_ids = _section_ids_for_finalize(class_cfg, concern_section_ids = concern_section_ids),
       with_concerns = bool(concern_section_ids),
   )
   new_text = _atomic_io.restore_ending(new_text, ending)
-  # guard: already finalized — the transforms changed nothing, so nothing to write or commit
+
+  # already finalized — the transforms changed nothing, so nothing to write or commit
   if new_text == original:
-    print(f"already finalized: {file_path}")
+    print(ALREADY_FINALIZED_TEMPLATE.format(file = file_path))
     return 0
   _atomic_io.write_text_atomic(file_path, new_text)
 
   # the finalized document carries no review machinery, and its runtime job markers are part
   # of that machinery — a stale one would paint the next cycle's banner from a dead job
   _job_markers.clear(repo, file_path)
-  # guard: the caller asked for an uncommitted finalize — stop before the commit
+
+  # the caller asked for an uncommitted finalize — stop before the commit
   if args.no_commit:
     print(f"finalized (uncommitted): {file_path}")
     return 0

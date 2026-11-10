@@ -30,9 +30,9 @@ Signature: `<product>` — the product compound-key (e.g. `specs`, `core`). If o
 
 1. Run `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" resolve-product effective <product>`. It prints `{"key": "<product>", "record": <record-or-null>}`, the record merged with its ancestor products' (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md` § Effective record) so a nested product's inherited types and binding are visible here.
 2. **`record` is `null`** — refuse, naming `<product>` and pointing at `/lazy-spec.product-config` to register it. Do NOT proceed.
-3. **`record` present** — capture `spec_path` (required, vault-relative), optional `source` (`{repo, paths}` — the product's own only, never inherited), and the visible `asset_types` names (the effective record's declarations merged key-by-key over the plugin's shipped `feature` / `change` / `bug` / `content` / `research`).
+3. **`record` present** — capture `spec_path` (required, vault-relative), optional `source` (`{paths}` — repo-relative paths of this repository; the product's own only, never inherited), and the visible `asset_types` names (the effective record's declarations merged key-by-key over the plugin's shipped `feature` / `change` / `bug` / `content` / `research`).
    - **No `source` block** (design-only product) — there is no code side to gap-scan. Mark Phases 2, 3, and the fallback branch of Phase 5 `skipped` with outcome `no-source-binding`, proceed straight to Phase 4 to confirm the spec tree exists, then report "no code binding — nothing to gap-scan" at Phase 6. Do NOT invent a code-side comparison.
-   - **`source` present** — resolve `source.repo` via the `lazy-spec.resolve-repo` primitive to get `{local_path, ...}`. Continue to Phase 2.
+   - **`source` present** — the code lives in this repository under `source.paths`. Continue to Phase 2.
 
 Outcome: `code-bound` / `design-only` / `refused: <reason>`.
 
@@ -118,7 +118,7 @@ AskUserQuestion: header "Gap <n>/<N>", question "The code of <product> has <capa
 ```
 
 - **`materialize via lazy-spec.create-from-code`** — only offered when the gap's proposed category is `feature` AND the product is code-bound (Phase 1). On confirm, invoke `Skill(skill: "lazycortex-specs:lazy-spec.create-from-code", args: "<product> feature <slug>")` — appending `--path <folder>` only when a folder was chosen for the gap, so the default placement stays the type's own (`default_path`, the product root for `feature`) — passing the gap's evidence (capability name, source path(s)) in the dispatch prompt so its own clarifying step has grounding.
-- **`print asset-proposal markup`** — any category. Render the exact `[!asset-proposal] create` block (`category:`, `slug:`, `description:`) per `lazycortex-core:lazy-core.markdown-style` § The `[!asset-proposal]` callout — `create` only, never `link`/`reopen` (this skill has no existing target asset to link or reopen). This skill does NOT paste it into any document itself: an `[!asset-proposal]` is only legal inside a document an expert already owns mid-review, and this skill has no such document open. Print the block for the operator to paste into a living doc (`design.md`, `tech.md`, `architecture.md`) themselves, where the coordinator will materialize it once that doc is next accepted.
+- **`print asset-proposal markup`** — any category. Render the exact `[!asset-proposal] create` block (`category:`, `slug:`, `description:`) per `lazycortex-core:lazy-core.markdown-style` § The `[!asset-proposal]` callout — `create` only, never `link`/`reopen` (this skill has no existing target asset to link or reopen). This skill does NOT paste it into any document itself: an `[!asset-proposal]` is only legal inside a document an expert already owns mid-review, and this skill has no such document open. Print the block for the operator to paste into a living doc (`vision.md`, `design.md`, `tech.md`, `architecture.md`) themselves, where the coordinator will materialize it once that doc is next accepted.
 - **`skip`** — no trace.
 
 Outcome per gap: `materialized-via-create-from-code` / `printed-asset-proposal` / `skipped-per-user-choice`.
@@ -130,5 +130,5 @@ One line per task in the canonical list, with its outcome word.
 ## Failure modes
 
 - **Refuses: product not registered** — `<product>` has no record in `lazy.settings.json[products]` → register it via `/lazy-spec.product-config`, then re-invoke.
-- **Reports "no code binding — nothing to gap-scan"** — the product has no `source` block (design-only) → this skill has nothing to compare the spec tree against; attach a repo via `/lazy-spec.product-config` if the product does have code, or accept that a design-only product has no gap-scan surface.
+- **Reports "no code binding — nothing to gap-scan"** — the product has no `source` block (design-only) → this skill has nothing to compare the spec tree against; add its source paths via `/lazy-spec.product-config` if the product does have code, or accept that a design-only product has no gap-scan surface.
 - **Reports `structure-absent` / `domains-not-configured`** — the structure map or domain tree isn't built/configured for this repo → run `/lazy-wiki.structure rebuild` or `/lazy-wiki.configure domains` + `/lazy-wiki.domain-sync` if richer signal is wanted; the fallback scan still runs on the raw source tree either way.

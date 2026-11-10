@@ -44,6 +44,10 @@ def is_enabled(name: str) -> bool:
   """
   Report whether the hook identified by `name` should run in the current process.
 
+  Guarantees:
+    - Any failure to resolve the disabled-hooks list — no repository, no settings file, or an unreadable or
+      malformed value — leaves every hook enabled; only an explicit `hooks.disabled` entry can disable one.
+
   Args:
     name: The hook's canonical short name (a `HookName` value, e.g. `git-guard`).
 
@@ -52,6 +56,11 @@ def is_enabled(name: str) -> bool:
     allow-list environment variable is set and does not contain `name`, or an interactive session
     lists `name` under `hooks.disabled`.
   """
+
+  # Contract:
+  # Any failure to resolve the disabled-hooks list (no repository, no settings file, an unreadable or
+  # malformed value) MUST leave every hook enabled; only an explicit `hooks.disabled` entry can disable one.
+
   allow = os.environ.get(EnvVar.HOOKS_ALLOW_LIST)
 
   # Domain(runtime.daemon-loop):
@@ -78,23 +87,14 @@ def _disabled_hooks() -> frozenset[str]:
   Return the set of hook short names the operator has disabled for interactive sessions.
 
   Reads the `hooks` section of the current repository's `lazy.settings.json` (tracked value with
-  the local overlay merged on top). Fails open — any resolution error yields an empty set so no
-  hook is silenced by accident.
-
-  Guarantees:
-    - Any failure to resolve this list — no repository, no settings file, or an unreadable or
-      malformed value — yields an empty set rather than a disabled hook; only an explicit
-      `hooks.disabled` entry can silence one.
+  the local overlay merged on top). Fails open — any resolution error (no repository, no settings
+  file, or an unreadable or malformed value) yields an empty set, so only an explicit
+  `hooks.disabled` entry silences a hook.
 
   Returns:
     The frozenset of disabled hook short names, or an empty frozenset when none are configured or
     the settings cannot be read.
   """
-
-  # Contract:
-  # Any failure to resolve the disabled-hooks list — no repository, no settings file, or an
-  # unreadable or malformed value — yields the empty set, never a hook name. A resolution
-  # failure never disables a hook; only an explicit `hooks.disabled` entry can.
 
   # Domain(runtime.daemon-loop):
   # # Silencing a hook is always deliberate
@@ -116,7 +116,8 @@ def _disabled_hooks() -> frozenset[str]:
     return frozenset()
   # noinspection PyBroadException
   try:
-    # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+    # waiver: lazy_settings is imported inside this try so any failure to load it leaves no hook disabled;
+    # a module-level import would make a broken settings loader take the hook down instead of failing open
     # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
     import lazy_settings  # type: ignore  # noqa: E402  # pylint: disable=import-error
     section = lazy_settings.load_section(settings_path, SettingsKey.HOOKS)

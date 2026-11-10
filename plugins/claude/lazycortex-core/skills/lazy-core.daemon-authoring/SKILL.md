@@ -26,6 +26,8 @@ First question, always: does this need to be a separate daemon at all?
 
 Check whether the target repository is driven by the lazycortex runtime — `.claude/lazy.settings.json` with a `routines` section, or a `com.lazycortex.runtime.*` supervisor unit for the checkout. If it is, the answer is a **routine**: register the periodic work via `/lazy-routine.register` (type `subprocess`, `schedule`, `git`, `inbox`, or `md-scan`) and let the existing daemon drive it — it already carries the rate-limit guard, serial scheduling, git discipline, and the error ledger. Do not write a second daemon next to a running one.
 
+A routine reports its failures through the runtime, never through a mechanism of its own: a failed run exits non-zero and the daemon records it in the error ledger, and a failure an exit code cannot express goes into the ledger through the core CLI verb `error-record`. A routine keeps no error file, no error sidecar and no alerting of its own.
+
 If the repository is not under the lazycortex runtime (or the process must outlive/precede it), proceed as a **standalone daemon**.
 
 When the situation is ambiguous — an existing runtime but a workload that arguably needs its own lifecycle — confirm the choice:
@@ -89,6 +91,7 @@ Rules the skeleton encodes:
 - **Own `PATH`** — set it explicitly; the wrapper is still called by absolute path on top of that, but the real `claude` and any tools the daemon shells out to must be reachable.
 - **`StartInterval` over `KeepAlive`** for periodic work — a tick process that exits beats a long-lived loop; use `KeepAlive` only for a process that genuinely must stay resident.
 - **Logs to fixed files** — launchd captures stdout/stderr only when told where; without these keys failures are invisible.
+- **Failures go to the error ledger** — the daemon calls the core CLI verb `error-record` through the interpreter, from its repository root, with `bin/lazycortex-core` taken from the core plugin's `installPath` in `~/.claude/plugins/installed_plugins.json`. It passes `--kind plugin_error`, a short stable `--cause` defined once in its own code, a stable `--incident` key, and the changing details in `--detail`. It keeps no error file and no alerting of its own: the ledger's metrics and alerts carry the failure.
 - **State** lives in the daemon's own repo or under `${XDG_CACHE_HOME:-$HOME/.cache}/<name>/` — never in the plist directory, never in `/tmp` (wiped on reboot).
 
 Linux equivalent: a systemd user timer + service pair with the same properties (explicit `Environment=PATH=…`, journal logging, `ExecStart` by absolute path).

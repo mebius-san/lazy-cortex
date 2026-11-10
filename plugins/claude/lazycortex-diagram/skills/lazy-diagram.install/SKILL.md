@@ -1,7 +1,7 @@
 ---
 name: lazy-diagram.install
 description: "Run when the operator asks to set up diagram drawing in a repo, and again after a plugin update so new artifacts land. Also the answer when `/lazy-diagram.draw` or `/lazy-diagram.fix` misbehaves because the `lazy-diagram.authoring` rule is missing from the rules directory or the drawer agents have no model tier assigned. Idempotent and quiet on re-run; install scope is detected, not asked."
-allowed-tools: Read, Write, Edit, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(test *), Bash(ls *), Bash(date *), Bash(diff *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), AskUserQuestion, Skill, Agent
+allowed-tools: Read, Write, Edit, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(test *), Bash(ls *), Bash(date *), Bash(diff *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), AskUserQuestion, Agent
 ---
 # Install lazycortex-diagram
 
@@ -103,20 +103,17 @@ Target files outside this plugin's owned namespaces (other plugins, user-authore
 
 ## Step 4: Seed agent-model tiers
 
-Seed the `agent_models.lazycortex` group with this plugin's drawer subagents by dispatching the shared primitive — it owns the `default-tiers.json` locate, the `lazycortex-diagram:`-prefix filter, and the non-destructive per-key semantics (absent→add, equal→unchanged, different→kept-local). There is no inline tier logic here.
+The `agent-models-seed` verb seeds the `agent_models.lazycortex` group with every `lazycortex-diagram:` drawer subagent the core tier table lists. The step is here so `/lazy-diagram.draw` and `/lazy-diagram.fix` resolve a model for the drawers they dispatch.
 
-Dispatch, passing the scope resolved in Step 1 (`project` | `user`):
+Run, passing the scope resolved in Step 1 (`project` | `user`):
 
 ```
-Skill(skill: "lazycortex-core:lazy-core.agent-models-seed", args: "prefix=lazycortex-diagram scope=<scope>")
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> agent-models-seed --prefix lazycortex-diagram --scope <scope>)
 ```
 
-Fold the primitive's returned report block verbatim into this skill's Step 5 report. Surface its terminal outcomes:
+The verb prints one JSON line: `outcome` is `seeded-N`, `unchanged`, or `no-entries` (exit 0), or a refusal — `sot-missing`, `missing-prefix`, `missing-scope`, `settings-unparseable` (exit 1, with a `message`); `entries` carries one `{dispatch, tier, state}` line per key, `state` being `added` / `unchanged` / `refreshed` / `kept-local`. Fold the `entries` lines into the Step 5 report; on a refusal relay its `message` and write no seed lines. `no-entries` is reported plainly (a maintainer must extend `default-tiers.json`), not an abort.
 
-- **`sot-missing`** — `lazycortex-core`'s `default-tiers.json` was not found → the primitive aborts; relay its message (`lazycortex-core not installed; install it before seeding lazycortex-diagram tiers`) and do not fabricate seed lines.
-- **`no-entries`** — the SOT lists no `lazycortex-diagram:` agents → report it plainly (a maintainer must extend `default-tiers.json`); not an abort.
-
-Step outcome: `seeded` (any entry added) or `unchanged`.
+Step outcome: `seeded` (the verb answered `seeded-N`) or `unchanged` (it answered `unchanged` or `no-entries`); never report a seed the verb did not answer.
 
 ## Step 5: Verify / Report
 

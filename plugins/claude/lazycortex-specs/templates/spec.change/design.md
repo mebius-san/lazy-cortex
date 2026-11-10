@@ -13,7 +13,7 @@ spec_source_requests: []
 spec_source_docs: []
 ---
 # {{slug}} — design
-<!-- What is being changed and how: the state before, the state after, and the frame the change works within. It answers the sibling vision and does not restate it. How the code is arranged lives in the sibling architecture. -->
+<!-- What is being changed and how: the state before, the state after, and the frame the change works within. It answers the sibling vision and does not restate it. How the code is arranged lives in the product's architecture. -->
 
 ## Overview
 <!-- What is being changed. A few sentences of prose that open with a link to the sibling vision. Why it changes, its goals and its value live in the vision and are not restated here. -->

@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-10-21
+last_regen: 2026-11-10
 no_diagram: true
 source_skills:
   - lazy-spec.add-asset-type
@@ -14,19 +14,17 @@ source_skills:
   - lazy-spec.install
   - lazy-spec.lookup
   - lazy-spec.product-config
-  - lazy-spec.rebase-pins
   - lazy-spec.record-decision
   - lazy-spec.refresh-sources
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
   - lazy-spec.resolve-dependency
-  - lazy-spec.resolve-repo
   - lazy-spec.set-stage
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
   - lazy-spec.audit
-source_sha: 21763ae2fa16878b13efb42b047e99dfe583b898
-surface_sha: bfae30442f57bfd0e4624743dadf6a62c1a97583f75cc0aef138615e7c772a6c
+source_sha: 7e37c5dbc0a6feeccf0edb68b0daf514e2a57753
+surface_sha: a88a036fe54ac1b43f5850134c3c4b93bcc177274eb9721aed3cc594f90d36bd
 ---
 # Troubleshooting
 
@@ -37,6 +35,16 @@ surface_sha: bfae30442f57bfd0e4624743dadf6a62c1a97583f75cc0aef138615e7c772a6c
 **Likely cause**: The plugin isn't enabled in this Claude Code environment yet — `enabledPlugins` in `settings.json` has no entry for it.
 
 **Fix**: Add `"lazycortex-specs@lazycortex": true` to `enabledPlugins` in your `settings.json`, restart Claude Code, then re-run `/lazy-spec.install`.
+
+---
+
+## `/lazy-spec.install` stops with `aborted:vault-root-not-subdir`
+
+**Symptom**: The install run stops at the start with `aborted:vault-root-not-subdir` and writes nothing.
+
+**Likely cause**: The configured spec vault root is `.` (the repository root), an absolute path, or a path that climbs out of the repository through `..`. The spec catalog must live in a sub-directory of the repository.
+
+**Fix**: Move the spec catalog into a sub-directory of the repository (the default is `specs`), point the vault root at that directory, and re-run `/lazy-spec.install`.
 
 ---
 
@@ -76,7 +84,7 @@ surface_sha: bfae30442f57bfd0e4624743dadf6a62c1a97583f75cc0aef138615e7c772a6c
 
 **Likely cause**: The project-wide vault spec — the content-root `vision.md` that states what the project is, for whom, and what counts as success, the document every product split is a consequence of — hasn't been seeded yet. Registering the first product is gated on that file existing (an older, pre-vision content-root `design.md` with no `vision.md` beside it is also accepted as a legal starting state).
 
-**Fix**: Run `/lazy-spec.install` — its Step 6.9 seeds a draft `vision.md` at the content-root if neither file is missing — fill it in, then re-run `/lazy-spec.product-config`.
+**Fix**: Run `/lazy-spec.install` — its Step 6.9 seeds a draft `vision.md` at the content-root when neither file exists — fill it in, then re-run `/lazy-spec.product-config`.
 
 ---
 
@@ -90,15 +98,15 @@ surface_sha: bfae30442f57bfd0e4624743dadf6a62c1a97583f75cc0aef138615e7c772a6c
 
 ---
 
-## `/lazy-spec.product-config` refuses because the `spec_path` is nested
+## `/lazy-spec.product-config` does not ask about settings a nested product already has
 
-**Symptom**: The wizard rejects the derived path with a message that the `spec_path` sits inside another product's `spec_path`.
+**Symptom**: You registered a product whose `spec_path` sits inside another product's folder, and the wizard skipped questions it asks for a top-level product (asset types, language, mode, review experts), recording them as `inherited`.
 
 `<specs-cli>` stands for the specs plugin's `bin/lazycortex-specs` file — the install path that `~/.claude/plugins/installed_plugins.json` records for the plugin, or `plugins/claude/lazycortex-specs/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
-**Likely cause**: Products in lazycortex-specs are flat siblings — one product's folder must not be a subdirectory of another product's folder. A path like `Server/products/api/auth` would be rejected if `Server/products/api` is already registered.
+**Likely cause**: Products may nest, and the innermost product owns its tree. A `spec_path` under another product's `spec_path` is legal: the wizard resolves the ancestor chain and, for every step whose value the parent already carries, records `inherited` instead of asking. Nothing was skipped by mistake.
 
-**Fix**: Choose a sibling path at the same level as the other product, or introduce an optional namespace folder (e.g. `Server/products/backend/auth` alongside `Server/products/backend/api`). Re-run `/lazy-spec.product-config` with the corrected path.
+**Fix**: If the inherited value is what you want, nothing to do. To give the nested product its own value, re-run `/lazy-spec.product-config` in edit mode on it and declare the value there; an own value wins over the inherited one. For review experts, declaring them generates the product's own review classes, which win over the ancestor's by depth.
 
 ---
 
@@ -242,6 +250,16 @@ surface_sha: bfae30442f57bfd0e4624743dadf6a62c1a97583f75cc0aef138615e7c772a6c
 
 ---
 
+## `/lazy-spec.audit` FAILs a cancelled document
+
+**Symptom**: The report includes a FAIL on an asset's start document (for example `design.md` of a feature, `bug.md` of a bug) or a product's `architecture.md` carrying `spec_stage: cancelled`.
+
+**Likely cause**: An asset is abandoned as a whole, never through the document that defines it. `/lazy-spec.set-stage` refuses `cancelled` on those documents, so the value arrived by a hand edit. A `tech` document, an asset's `test-plan.md` and a release's plan documents (`code-plan`, `test-plan`) may legitimately be cancelled.
+
+**Fix**: Move the document out of `cancelled` with `/lazy-spec.set-stage`. If the whole asset is abandoned, cancel it with `/lazy-spec.flip-gate <asset> spec_cancelled`. Then re-run `/lazy-spec.audit`.
+
+---
+
 ## A content asset's design is never picked up by the `content-design` review class
 
 **Symptom**: A content asset's `design.md` is reviewed by the wrong experts, or a fresh install or product wizard run leaves no review class for content designs.
@@ -269,6 +287,26 @@ surface_sha: bfae30442f57bfd0e4624743dadf6a62c1a97583f75cc0aef138615e7c772a6c
 **Likely cause**: You passed a type nothing declares. The shipped set is `feature`, `change`, `bug`, `content`, `research`; anything else must be declared on the product first.
 
 **Fix**: Run `/lazy-spec.add-asset-type <product> <type-name>` to declare the type, then re-invoke `/lazy-spec.create-asset`.
+
+---
+
+## `/lazy-spec.create-asset` ends `refused:logical` with `target folder already exists`
+
+**Symptom**: The skill ends `refused:logical` saying the target folder already exists, and scaffolds nothing.
+
+**Likely cause**: An asset with that slug is already in the product.
+
+**Fix**: Pick another slug, or work the existing asset instead of creating a new one.
+
+---
+
+## `/lazy-spec.create-asset` ends `refused:logical` with `invalid --target token`
+
+**Symptom**: The skill ends `refused:logical` saying the `--target` token is invalid.
+
+**Likely cause**: The `--target` value is empty, has an empty segment, or steps through `.` or `..`.
+
+**Fix**: Pass the target as `<folder>/<slug>` counted from the product root, then re-invoke `/lazy-spec.create-asset`.
 
 ---
 
@@ -346,9 +384,9 @@ surface_sha: bfae30442f57bfd0e4624743dadf6a62c1a97583f75cc0aef138615e7c772a6c
 
 **Symptom**: The skill either refuses with "product not registered" or prints "product has no code binding" and stops without writing any files.
 
-**Likely cause**: For the "not registered" case, the product key is not in `products`. For the "design-only" case, the product record exists but has no `source` block binding it to a code repo.
+**Likely cause**: For the "not registered" case, the product key is not in `products`. For the "design-only" case, the product record exists but has no `source` block naming the paths of its code.
 
-**Fix**: For an unregistered product, run `/lazy-spec.product-config` first. For a design-only product, re-run `/lazy-spec.product-config` in edit mode to attach a source repo — the wizard adds the `source.repo` and `source.paths` block without clobbering the product's existing `asset_types` / `tool_types` declarations or any other field it did not ask about.
+**Fix**: For an unregistered product, run `/lazy-spec.product-config` first. For a design-only product, re-run `/lazy-spec.product-config` in edit mode to add its source paths — the wizard adds the `source.paths` block without clobbering the product's existing `asset_types` / `tool_types` declarations or any other field it did not ask about.
 
 ---
 
@@ -359,6 +397,26 @@ surface_sha: bfae30442f57bfd0e4624743dadf6a62c1a97583f75cc0aef138615e7c772a6c
 **Likely cause**: You ran the skill without giving it a raw idea, and didn't supply one when the wizard asked.
 
 **Fix**: Re-invoke `/lazy-spec.create-request` and give it a sentence or two describing the idea before the wizard's clarifying questions run.
+
+---
+
+## `/lazy-spec.create-request` finds no `requests/` folder
+
+**Symptom**: The vault-wide `requests/` inbox does not exist when you capture an idea.
+
+**Likely cause**: Nothing has created the inbox in this vault yet. Requests live in one vault-wide inbox, not in per-product folders.
+
+**Fix**: Create the `requests/` folder at the vault root and capture the idea again; the inbox is the only location the skill uses.
+
+---
+
+## `/lazy-spec.request-classify` stops or returns `unknown`
+
+**Symptom**: Classification aborts naming a file path, or answers `unknown`.
+
+**Likely cause**: Three cases. A file path was given that does not exist, and the skill deliberately does not fall back to an empty body. The request body has no readable content after the frontmatter, which yields `unknown` so the caller asks for content. Or the project settings are unreadable or missing, in which case the skill falls back to the shipped asset types (`feature`, `change`, `bug`, `content`, `research`) plus the closed meta classes and still answers.
+
+**Fix**: Correct the path, add real content to the request body, or restore the project settings (re-run `/lazy-spec.install`) so project-declared asset types take part in classification.
 
 ---
 
@@ -396,9 +454,9 @@ surface_sha: bfae30442f57bfd0e4624743dadf6a62c1a97583f75cc0aef138615e7c772a6c
 
 **Symptom**: `/lazy-spec.flip-gate <asset> <gate>` succeeded even though the gate's usual precondition (the doc it depends on isn't approved yet, or an earlier gate is still `false`) doesn't actually hold.
 
-**Likely cause**: The primitive no longer checks a gate's readiness before flipping — it performs the mutation unconditionally, refusing only when the asset is cancelled. Deciding whether a gate is actually ready is `spec.coordinator`'s job when IT calls the primitive (reasoning from `lazy-spec.coordination-playbook.md`); when you call `/lazy-spec.flip-gate` yourself, the interactive confirmation is your own chance to double-check, not a safety net the primitive re-verifies.
+**Likely cause**: The primitive no longer checks a gate's readiness before flipping — it performs the mutation unconditionally, refusing only an unknown gate name, a gate the note's own ladder does not carry, opening a middle gate on a design-only note, and any flip on a cancelled asset. Deciding whether a gate is actually ready is `spec.coordinator`'s job when IT calls the primitive (reasoning from `lazy-spec.coordination-playbook.md`); when you call `/lazy-spec.flip-gate` yourself, the interactive confirmation is your own chance to double-check, not a safety net the primitive re-verifies.
 
-**Fix**: Check the readiness table in `lazy-spec.lifecycle-protocol.md` Part 2 for what the gate SHOULD require, then flip it back with `--off` (also unconditional, refused only while cancelled) if it was flipped prematurely. `spec.coordinator` will re-derive the correct state on its next wake and, for the two derived gates, may flip it forward again on its own once the actual precondition holds.
+**Fix**: Check the readiness table in `lazy-spec.lifecycle-protocol.md` Part 2 for what the gate SHOULD require, then flip it back with `--off` (also unconditional apart from the gate-name, note-ladder and cancelled-asset refusals) if it was flipped prematurely. `spec.coordinator` will re-derive the correct state on its next wake and, for a derived gate (`spec_design_done`, or a release's `spec_plan_done`), may flip it forward again on its own once the actual precondition holds.
 
 ---
 
@@ -408,7 +466,17 @@ surface_sha: bfae30442f57bfd0e4624743dadf6a62c1a97583f75cc0aef138615e7c772a6c
 
 **Likely cause**: `spec_cancelled: true` on the asset's status folder-note freezes all gate progression. No flip — on or off — is allowed while an asset is cancelled.
 
-**Fix**: Uncancel the asset by running `/lazy-spec.flip-gate <asset> spec_cancelled --off` if you want to resume it, or leave it cancelled if the work is truly abandoned. After uncancelling, gate flips proceed normally.
+**Fix**: Uncancel the asset by running `/lazy-spec.flip-gate <asset> spec_cancelled --off` if you want to resume it (its cancelled documents return to `draft`), or leave it cancelled if the work is truly abandoned. After uncancelling, gate flips proceed normally.
+
+---
+
+## `/lazy-spec.flip-gate` refuses: gate is not on a design-only ladder, or is unknown
+
+**Symptom**: The flip is refused with "gate `<gate>` is not on a design-only ladder", "unknown gate", or "is not on the `<role>` ladder".
+
+**Likely cause**: A middle gate (`spec_plan_done`, `spec_develop_done`, `spec_tests_passing`, `spec_built`) was asked on a note other than a release's. A design-only asset has none of them, because its code lands through a release whose own note carries those gates. Otherwise the gate name is a typo, or belongs to the other ladder (an asset gate on a level note, or a level gate on an asset note).
+
+**Fix**: Pass a gate the note's own ladder carries; for the middle gates, flip them on the release's note.
 
 ---
 
@@ -428,7 +496,7 @@ surface_sha: bfae30442f57bfd0e4624743dadf6a62c1a97583f75cc0aef138615e7c772a6c
 
 **Likely cause**: `/lazy-spec.drive` drives one asset through its ladder by hand, in the same session, with no daemon in the loop — running it while the daemon is also live risks a job being dispatched twice, once by the daemon and once by the drive session, and the daemon's clean-tree invariant would conflict with the drive session's own uncommitted state.
 
-**Fix**: Stop the daemon (or remove this checkout from `daemon.run_here`) before driving by hand. Per the plugin's own contract, going back to daemon mode after a drive session requires the session to close `closed-clean` first — resolve any dirty paths `/lazy-spec.drive` reports at the end of its run before restarting the daemon.
+**Fix**: Stop the daemon, or point it at another checkout with `/lazy-core.daemon-setup` (the skill that owns `daemon.run_here`), before driving by hand. Per the plugin's own contract, going back to daemon mode after a drive session requires the session to close `closed-clean` first — resolve any dirty paths `/lazy-spec.drive` reports at the end of its run before restarting the daemon.
 
 ---
 
@@ -439,6 +507,26 @@ surface_sha: bfae30442f57bfd0e4624743dadf6a62c1a97583f75cc0aef138615e7c772a6c
 **Likely cause**: Either a genuine ladder bug — worth reporting rather than working around — or the asset is caught in a legitimate multi-round cascade that outgrew a single session's patience. The ceiling is a deliberate fixed cap, not a setting to raise.
 
 **Fix**: Re-invoke `/lazy-spec.drive` on the same asset — its resume phase picks up exactly where the loop left off, so a multi-round cascade completes over a couple of re-invocations. If the same asset keeps hitting the ceiling with no progress between runs, that is the ladder bug to report.
+
+---
+
+## `/lazy-spec.drive` reports `no-such-checkbox`, `no-such-question` or `no-such-option`
+
+**Symptom**: A menu pick fails with a gesture result carrying `reason: no-such-checkbox`, `no-such-question` or `no-such-option`.
+
+**Likely cause**: The label or index you picked names nothing on the note any more. The coordinator rewrote the gates section or the question callout after the menu was built.
+
+**Fix**: Rebuild the menu and pick again.
+
+---
+
+## `/lazy-spec.drive` reports `no-such-note`, `no-gates-section` or `no-commands-section`
+
+**Symptom**: A menu pick fails with a gesture result carrying `reason: no-such-note`, `no-gates-section` or `no-commands-section`.
+
+**Likely cause**: The note path is wrong, or the note lacks the section the gesture writes into.
+
+**Fix**: Check the path, or let the coordinator's next wake restore the section, then run the pick again.
 
 ---
 
@@ -454,11 +542,11 @@ surface_sha: bfae30442f57bfd0e4624743dadf6a62c1a97583f75cc0aef138615e7c772a6c
 
 ## `/lazy-spec.drive` aborts partway through: agent not found
 
-**Symptom**: The drive session gets partway through the ladder, then aborts naming an agent it can't locate for the job it's about to dispatch.
+**Symptom**: The drive session gets partway through the ladder, then aborts naming an agent it can't locate for the job it's about to dispatch. The message reads either `agent not found in dev plugin: <ref>` pointing at a plugin source tree, or `agents not found:` pointing at a plugin cache directory.
 
-**Likely cause**: The installed version of the plugin that should ship that agent predates it — usually because that plugin was updated on another machine or checkout but not the one you're running `/lazy-spec.drive` from.
+**Likely cause**: For the first form, the exported dev source directory for that plugin does not carry the agent this job needs. For the second, the installed version of the plugin that should ship that agent predates it — usually because that plugin was updated on another machine or checkout but not the one you're running `/lazy-spec.drive` from.
 
-**Fix**: Update the plugin that owns the missing agent to its latest published version, then re-invoke `/lazy-spec.drive` on the same asset — its resume phase picks up exactly where the abort left off.
+**Fix**: For the dev-source form, add the agent to that source tree, or drop the stale dev directory from the export. For the cache form, update the plugin that owns the missing agent to its latest published version. Then re-invoke `/lazy-spec.drive` on the same asset — its resume phase picks up exactly where the abort left off.
 
 ---
 
@@ -532,49 +620,69 @@ surface_sha: bfae30442f57bfd0e4624743dadf6a62c1a97583f75cc0aef138615e7c772a6c
 
 ---
 
+## `/lazy-spec.set-stage` refuses: `--restamp` is valid only with `approved`
+
+**Symptom**: The skill refuses, saying `--restamp` is valid only with `approved`.
+
+**Likely cause**: The `--restamp` flag was passed together with a stage other than `approved`.
+
+**Fix**: Drop the flag, or pass `approved`.
+
+---
+
+## `/lazy-spec.set-stage` refuses with a decision-promotion reason
+
+**Symptom**: Requesting `approved` refuses with a reason from the decision-promotion step, and the document keeps its previous stage.
+
+**Likely cause**: Approving a document promotes its decisions, and the owning asset is cancelled, halted, or released, so the promotion is refused. Nothing was written.
+
+**Fix**: Clear the asset's flag first (see the `/lazy-spec.record-decision promote` entry above), then request the stage again; until then commit nothing for that document.
+
+---
+
 ## `/lazy-spec.set-stage` refuses: cancelled isn't allowed on this file
 
 **Symptom**: The skill refuses to set `cancelled` on the target file.
 
-**Likely cause**: `design.md` is mandatory for every asset — both the asset-level document (`design` type) and the product-root / content-root pair (`system-design` type) — alongside `bug.md` and `architecture.md`; none of the four can be cancelled individually. Cancellation belongs on `tech.md` (`system-tech` type — a docs-only feature), `code-plan.md` (a no-code bug fix or feature), or `test-plan.md` (no dedicated functional test pass needed).
+**Likely cause**: `design.md` is mandatory for every asset — both the asset-level document (`design` type) and the product-root / content-root pair (`system-design` type) — alongside `bug.md` and the product's `architecture.md`; none of the four can be cancelled individually. Cancellation belongs on `tech.md` (`system-tech` type), `test-plan.md` (no dedicated test cases or test pass needed), or a release's `code-plan.md` (a build that needs no separate plan).
 
-**Fix**: Set `cancelled` on `tech.md`, `code-plan.md`, or `test-plan.md` instead, whichever fits the asset. If the whole asset is abandoned, cancel it at the asset level via `/lazy-spec.flip-gate` instead of a single file.
+**Fix**: Set `cancelled` on `tech.md`, `test-plan.md`, or a release's `code-plan.md` instead, whichever fits. If the whole asset is abandoned, cancel it at the asset level via `/lazy-spec.flip-gate` instead of a single file.
 
 ---
 
 ## `/lazy-spec.sync-with-code` refuses or no-ops for a product
 
-**Symptom**: The skill either refuses naming an unregistered product, or prints "product is design-only — no code binding to sync" and stops without syncing.
+**Symptom**: The skill either refuses naming an unregistered product, or reports `design-only` for a product and syncs nothing for it.
 
-**Likely cause**: The product is missing from `products` or has no `source` block.
+**Likely cause**: The product key is missing from `products`, or the product has no `source` block naming the paths of its code. A whole-tree run lists only registered keys and quietly skips design-only products with the `design-only` outcome; a run naming a single design-only product stops with that message.
 
-**Fix**: Register the product via `/lazy-spec.product-config`, or attach a source repo in edit mode. Then re-run `/lazy-spec.sync-with-code`.
-
----
-
-## `/lazy-spec.sync-with-code` aborts with "fetch failed"
-
-**Symptom**: The sync aborts early with a message that `git fetch --prune` failed.
-
-**Likely cause**: The source repo's remote is unreachable — network error, authentication failure, or no remote configured at `local_path`.
-
-**Fix**: Confirm network connectivity and credentials for the source repo. If the repo has no remote, add one (`git remote add origin <url>`). The skill refuses to operate on stale refs, so fix connectivity first, then re-run.
+**Fix**: Register the product via `/lazy-spec.product-config`, or add its source paths in edit mode. Then re-run `/lazy-spec.sync-with-code`.
 
 ---
 
 ## `/lazy-spec.sync-with-code` never proposes a `spec_develop_done` flip despite landed code
 
-**Symptom**: Commits objectively implementing an asset are on the default branch, but the sync wizard never surfaces a `spec_develop_done` proposal for it.
+**Symptom**: Commits objectively implementing an open release's included assets are on the default branch, but the sync wizard never surfaces a `spec_develop_done` proposal for the release.
 
-**Likely cause**: `spec_plan_done` doesn't read `true` yet. The skill checks this itself before proposing (`/lazy-spec.flip-gate` no longer double-checks a gate's readiness on its own — see "I flipped a gate out of order" above), so an unmet code-plan gate silently withholds the proposal rather than surfacing one that would land wrong.
+**Likely cause**: `spec_plan_done` doesn't read `true` yet. The skill checks this itself before proposing (`/lazy-spec.flip-gate` no longer double-checks a gate's readiness on its own — see "I flipped a gate out of order" above), so an unmet plan gate silently withholds the proposal rather than surfacing one that would land wrong. A design-only asset never gets this proposal: it has no `spec_develop_done` of its own, and the sync reports its landed code as implemented outside a release instead.
 
-**Fix**: Settle the code plan — the asset's `code-plan.md`, if one was ever authored, must reach `spec_stage: approved` (or absence itself satisfies the gate) — then flip `spec_plan_done` yourself via `/lazy-spec.flip-gate`, or let `spec.coordinator` derive and flip it on its next wake. Re-run `/lazy-spec.sync-with-code` afterward.
+**Fix**: Settle the release's plan — the build's architecture revision must be settled and the release's `code-plan.md`, if one was ever authored, must reach `spec_stage: approved` (or absence itself satisfies the gate) — then flip the release's `spec_plan_done` yourself via `/lazy-spec.flip-gate`, or let `spec.coordinator` derive and flip it on its next wake. Re-run `/lazy-spec.sync-with-code` afterward.
+
+---
+
+## `/lazy-spec.sync-with-code` reports `no-head`
+
+**Symptom**: The sync state check reports `reason: no-head` and the run stops.
+
+**Likely cause**: The repository's HEAD is unreadable: there is no commit yet, or the directory is not a git checkout.
+
+**Fix**: Make the first commit (or run from a git checkout), then re-invoke `/lazy-spec.sync-with-code`.
 
 ---
 
 ## A document `/lazy-spec.sync-with-code` created is ignored by the coordinator
 
-**Symptom**: After a sync run, a new asset `design.md`, `architecture.md`, or plan exists, but no coordinator wake or review reacts to it, even though the wiki's topics index already lists it.
+**Symptom**: After a sync run, a new asset `design.md` or `test-plan.md`, or a product's `architecture.md`, exists, but no coordinator wake or review reacts to it, even though the wiki's topics index already lists it.
 
 **Likely cause**: Every authored document a sync run creates is born parked at `spec_stage: deferred`, so the coordinator leaves it alone until you decide it is ready. The wiki does not wait: it curates deferred documents too, and the topics index shows `[spec_stage: deferred]` beside the entry so a reader can tell it from approved text. Editing an existing document never changes its stage.
 
@@ -582,63 +690,33 @@ surface_sha: bfae30442f57bfd0e4624743dadf6a62c1a97583f75cc0aef138615e7c772a6c
 
 ---
 
-## `/lazy-spec.sync-with-code <asset>` refuses naming a bug asset
+## An approved asset keeps showing the same drift after `/lazy-spec.sync-with-code`
 
-**Symptom**: Running the skill with an asset path instead of a bare product key refuses, saying asset mode only reconciles `design.md` / `architecture.md`.
+**Symptom**: Run after run, the report lists an asset under "approved assets left untouched", and its documents still disagree with the code.
 
-**Likely cause**: Asset mode reconciles one feature or change asset's `design.md` / `architecture.md` against the current code by anchor — a bug folder ships neither of those documents, so there's nothing for asset mode to reconcile.
+**Likely cause**: Before touching an asset that holds an approved document, the skill asks once for the whole asset whether to bring it in line. You answered `leave`, so the asset was skipped for that run. A later run finds the same drift and asks again.
 
-**Fix**: For a bug, run `/lazy-spec.sync-with-code <product>` in product mode instead — its per-asset gate proposals (Step 5) cover bugs the same way they cover features and changes.
-
----
-
-## `/lazy-spec.sync-with-code <asset>` reports `no-design-doc`
-
-**Symptom**: Asset mode reports `no-design-doc` and reconciles nothing.
-
-**Likely cause**: The asset has no `design.md` yet — most often a `--empty`-scaffolded asset that hasn't had its start document authored.
-
-**Fix**: Author and approve `design.md` for the asset first, then re-invoke asset mode. Or run `/lazy-spec.sync-with-code <product>` in product mode, which doesn't require `design.md` to already exist.
+**Fix**: Re-run `/lazy-spec.sync-with-code <product> --full` (or pass the asset itself) and answer `update`. Every finding of that asset is applied and its approved documents keep their stage.
 
 ---
 
-## `/lazy-spec.sync-with-code <asset>` reports `no-anchors` on every run
+## An asset is reported "ahead of the code" after `/lazy-spec.sync-with-code`
 
-**Symptom**: Asset mode consistently reports `no-anchors` and never surfaces a drift finding for this asset.
+**Symptom**: Run after run, the report lists an asset as ahead of the code, and its design still describes behaviour the code does not have yet. Nothing in it was rewritten.
 
-**Likely cause**: This is a valid outcome, not a failure — the asset has no `code-plan.md` / `test-plan.md` to anchor source-links against, no `wiki.domains` configured for domain-group anchors, and no `docs/structure.md` for structure anchors. The doc still gets `lazy-spec.audit`'s structural pass regardless.
+**Likely cause**: The asset's documents state a target design from review, and the code has not reached it. The skill asks once for the whole asset, whatever its stages read, whether that design still stands, because the code may simply be behind a design someone reviewed. You answered `keep`, so the asset was left untouched this run. A later run that finds the same gap asks again.
 
-**Fix**: Nothing is broken. To sharpen future runs, configure domains via `/lazy-wiki.configure domains` and run `lazy-wiki.domain-sync`, run `lazy-wiki.structure rebuild`, or author a `code-plan.md` for the asset — any one of the three gives asset mode an anchor to reconcile against.
-
----
-
-## `/lazy-spec.rebase-pins` aborts with "fetch failed"
-
-**Symptom**: The skill aborts before scanning any pinned specs, with an error naming a repo where `git fetch --prune` failed.
-
-**Likely cause**: Network error, auth failure, or no remote configured in `lazy.settings.json[repos]` for one of the registered repos.
-
-**Fix**: Fix connectivity or credentials for the affected repo, then re-run `/lazy-spec.rebase-pins`. The skill never operates on stale remote refs.
+**Fix**: If the code is meant to catch up, leave it as it is. If the design was abandoned, re-run `/lazy-spec.sync-with-code` on the product or the asset and answer `update`: the asset is brought in line with the code and its design records are marked obsolete.
 
 ---
 
-## `/lazy-spec.rebase-pins` reports "still open" for a named branch
+## `/lazy-spec.sync-with-code` finished but nothing is committed
 
-**Symptom**: When invoked with an explicit branch name, the skill reports "still open" and makes no changes.
+**Symptom**: The run reports its edits, yet `git status` shows modified, created, or deleted spec files, and the history has no new commit.
 
-**Likely cause**: The branch is not yet an ancestor of the default branch and still exists on the remote — it has not been merged.
+**Likely cause**: This is by design. The skill edits freely but commits only after you have read the whole diff and said yes. Declining the commit, or ending the session before answering, leaves the edits in the working tree.
 
-**Fix**: Merge the branch via your normal workflow. If the merge used a squash and the ancestry check therefore fails, re-run `/lazy-spec.rebase-pins <branch> --force-merged` after confirming the squash was deliberate. Alternatively, delete the branch — after `fetch --prune` the skill treats a deleted branch as merged.
-
----
-
-## `/lazy-spec.rebase-pins` never proposes a `spec_released` flip after a merge
-
-**Symptom**: A branch merged and its pins rebased cleanly, but the skill never surfaces a `spec_released` proposal for the asset.
-
-**Likely cause**: `spec_tests_passing` doesn't read `true` yet. The skill checks this itself before proposing (`/lazy-spec.flip-gate` no longer double-checks a gate's readiness on its own), so it skips the proposal instead of surfacing one that would land wrong.
-
-**Fix**: Settle the holding gate. For `spec_tests_passing`, flip it once a green test report exists for the asset's code by running `/lazy-spec.flip-gate <asset> spec_tests_passing`, or let `spec.coordinator` derive it. The branch rebase is already applied regardless — only the release proposal was withheld.
+**Fix**: Read the diff, then commit the files yourself if you accept it. Nothing is lost: the edits stay in the working tree until you decide.
 
 ---
 
@@ -648,7 +726,7 @@ surface_sha: bfae30442f57bfd0e4624743dadf6a62c1a97583f75cc0aef138615e7c772a6c
 
 **Likely cause**: The product key isn't in `lazy.settings.json[products]`, or the product record has no `source` block — a design-only product has no code to compare the spec tree against.
 
-**Fix**: Register the product via `/lazy-spec.product-config` for the first case. For the second, attach a source repo in edit mode if the product does have code; a genuinely design-only product simply has no gap-scan surface, and that is expected rather than an error.
+**Fix**: Register the product via `/lazy-spec.product-config` for the first case. For the second, add its source paths in edit mode if the product does have code; a genuinely design-only product simply has no gap-scan surface, and that is expected rather than an error.
 
 ---
 
@@ -686,69 +764,9 @@ surface_sha: bfae30442f57bfd0e4624743dadf6a62c1a97583f75cc0aef138615e7c772a6c
 
 **Symptom**: A mirrored upstream unit stays marked `new` indefinitely and never grows a launch checkbox to act on.
 
-**Likely cause**: The unit's mirrored root note (`source/<unit>.md`) carries `spec_draft: true` — a deliberate gate that withholds the checkbox until the upstream design itself drops the draft flag.
+**Likely cause**: The unit's mirrored root note (`source/<unit>.md`) is a status note without `spec_released: true` — a deliberate gate that withholds the checkbox until the upstream asset is published.
 
-**Fix**: Check the unit's own folder-note `# Actions` section for the actual state. Nothing to do until the upstream source itself marks the design non-draft; this is expected gating, not a stuck run.
-
----
-
-## `/lazy-spec.resolve-repo` aborts: repo key not registered
-
-**Symptom**: The primitive aborts, naming `<key>` as not present in `lazy.settings.json[repos]`.
-
-**Likely cause**: The repo key was never registered, or was mistyped.
-
-**Fix**: Register the repo via `/lazy-spec.product-config` — its inline repo wizard writes the `repos[<key>]` record — then re-invoke `/lazy-spec.resolve-repo <key>`.
-
----
-
-## `/lazy-spec.resolve-repo` aborts: missing `local_path` or `branch`
-
-**Symptom**: The primitive aborts saying the `repos[<key>]` record is incomplete.
-
-**Likely cause**: The repo record is missing `local_path` and/or `branch` — an incomplete manual edit, or a partially-completed inline repo wizard run.
-
-**Fix**: Re-run `/lazy-spec.product-config` and complete the repo wizard for `<key>`, supplying both `local_path` and `branch`, then re-invoke.
-
----
-
-## `/lazy-spec.resolve-repo` aborts: `local_path` is `.` but the current directory is not a git repo
-
-**Symptom**: The primitive aborts saying `git rev-parse --show-toplevel` failed for the record's same-repo (`.`) form.
-
-**Likely cause**: The repo record uses `local_path: "."` (meaning "the same checkout the skill is running in"), but the command was run from outside a git checkout, or outside the checkout that holds `.claude/lazy.settings.json`.
-
-**Fix**: Run the command from inside the checkout that holds `.claude/lazy.settings.json`, or set an explicit absolute `local_path` on the repo record via `/lazy-spec.product-config` instead of relying on `"."`.
-
----
-
-## `/lazy-spec.resolve-repo` aborts: no git remotes configured
-
-**Symptom**: The primitive aborts with "no git remotes configured" for the checkout at `local_path`.
-
-**Likely cause**: `git remote` returns nothing for that checkout — the repo was cloned without a remote, or the remote was removed.
-
-**Fix**: Add a remote inside the checkout (`git remote add origin <url>`), then re-invoke `/lazy-spec.resolve-repo <key>`.
-
----
-
-## `/lazy-spec.resolve-repo` aborts: nested GitLab subgroup path
-
-**Symptom**: The primitive aborts saying the remote URL path has more than two segments.
-
-**Likely cause**: The repo lives in a nested GitLab subgroup (`owner/group/repo`) — nested subgroups aren't supported by the automatic path parser yet.
-
-**Fix**: Set an explicit `forge:` override on the repo record via `/lazy-spec.product-config` and use a flattened two-segment owner/repo reference, or wait for subgroup support.
-
----
-
-## `/lazy-spec.resolve-repo` aborts: unknown forge
-
-**Symptom**: The primitive aborts saying the remote's hostname is not in the known-forges table.
-
-**Likely cause**: The repo is hosted on a forge instance (self-hosted GitLab, Gitea, Forgejo, …) whose hostname the plugin can't classify automatically, and no explicit override is set on the record.
-
-**Fix**: Add `forge: <key>` (one of `github`, `gitlab`, `bitbucket`, `gitea`, `forgejo`, `sourcehut`) to the repo's record via `/lazy-spec.product-config`, then re-invoke.
+**Fix**: Check the unit's own folder-note `# Actions` section for the actual state. Nothing to do until the upstream asset is published; this is expected gating, not a stuck run.
 
 ---
 
@@ -756,19 +774,19 @@ surface_sha: bfae30442f57bfd0e4624743dadf6a62c1a97583f75cc0aef138615e7c772a6c
 
 **Symptom**: The primitive refuses, naming a dependency entry that lacks a required key.
 
-**Likely cause**: The entry in the product's `dependencies` array doesn't match any of the three documented shapes — it's missing a `product:`, `repo:`, or `external:` key.
+**Likely cause**: The entry in the product's `dependencies` array doesn't match either of the two documented shapes — it has neither a `product:` nor an `external:` key.
 
-**Fix**: Fix the entry via `/lazy-spec.product-config` (edit mode) so it matches one of the three shapes, then re-invoke `/lazy-spec.resolve-dependency`.
+**Fix**: Fix the entry via `/lazy-spec.product-config` (edit mode) so it matches one of the two shapes, then re-invoke `/lazy-spec.resolve-dependency`.
 
 ---
 
-## `/lazy-spec.resolve-dependency` refuses: product or repo not found
+## `/lazy-spec.resolve-dependency` refuses: product not found
 
-**Symptom**: The primitive refuses, naming a product or repo key from a dependency entry that doesn't resolve.
+**Symptom**: The primitive refuses, naming a product key from a dependency entry that doesn't resolve.
 
-**Likely cause**: A `product:` entry points at a key that isn't in `products`, or a `repo:` entry points at a key that isn't in `repos` — unregistered, or mistyped.
+**Likely cause**: A `product:` entry points at a key that isn't in `products` — unregistered, or mistyped.
 
-**Fix**: Register the missing product or repo via `/lazy-spec.product-config`, or correct the key spelling in the dependency entry.
+**Fix**: Register the missing product via `/lazy-spec.product-config`, or correct the key spelling in the dependency entry.
 
 ---
 
@@ -816,19 +834,19 @@ surface_sha: bfae30442f57bfd0e4624743dadf6a62c1a97583f75cc0aef138615e7c772a6c
 
 **Symptom**: Once you confirm the routing, the request stays at its pre-apply state and the apply worker's error names an attach target that "does not resolve to a folder-note".
 
-**Likely cause**: The routing decision's `attach <path>` line names a repo-relative path that either doesn't exist or isn't a `<slug>/<slug>.md` folder-note — a stale or hand-typed path in the `routing-decision` block.
+**Likely cause**: The routing decision's `attach <path>` line names a repo-relative path that either doesn't exist or is neither a `<slug>/<slug>.md` folder-note nor a system document of a level — `vision.md`, `design.md` or `tech.md` at the content root or a product root, or `use-cases.md` / `ui-design.md` at a product root, which apply stamps directly — a stale or hand-typed path in the `routing-decision` block.
 
-**Fix**: Edit the `routing-decision` block in the request's `# Routing` section to the correct folder-note path, then re-confirm the routing.
+**Fix**: Edit the `routing-decision` block in the request's `# Routing` section to the correct folder-note or system-document path, then re-confirm the routing.
 
 ---
 
-## A request's apply pass refuses: attach target is a launched feature
+## The routing offers both attach and change for the same asset
 
-**Symptom**: The apply worker refuses, saying the attach target is a launched feature and routing must spawn a change instead.
+**Symptom**: The routing `[!question]` on a request's `# Routing` section lists two options for one existing asset — attach the request to it, or spawn a change that names it via `targets=` — and an apply run that once refused an attach to an implemented feature no longer does.
 
-**Likely cause**: The feature the routing named already has `spec_develop_done: true`, an active `Start implementation` job, or a `code-report.md` — it counts as launched, and a request must never attach directly to a launched feature's spec (that would edit an already-implemented feature's docs out from under the code).
+**Likely cause**: This is the intended behaviour. Whether a request revises an existing asset's own documents or travels through a separate change asset is your decision, not the routing coordinator's, so the question offers both for every existing asset the request would modify; the coordinator may only say which one it recommends. Implementation lives in the product's release, never in the asset, so apply no longer refuses an attach because of implementation signals.
 
-**Fix**: Edit the `routing-decision` block to spawn a `change` naming the feature in its `targets=` field instead of attaching — see [requests](requests.md).
+**Fix**: Tick the option you want for each asset — `attach` to have the asset's own documents revised (the documents its `drop=` names are deleted, the design is reviewed again, and no gate is flipped), or the change-spawn to leave them as they are until the change's design cascades into them. See [requests](requests.md).
 
 ---
 
@@ -844,11 +862,11 @@ surface_sha: bfae30442f57bfd0e4624743dadf6a62c1a97583f75cc0aef138615e7c772a6c
 
 ## `/lazy-spec.refresh-sources` refuses on a non-authored doc
 
-**Symptom**: The skill refuses, saying the target file's `spec_role` isn't an authored-doc role.
+**Symptom**: The skill refuses with `reason: folder-note` or `reason: no-source-docs`.
 
-**Likely cause**: `lazy-spec.refresh-sources` only operates on `design.md`, `tech.md`, `code-plan.md`, `test-plan.md`, or `bug.md` — the docs that carry `spec_source_docs` / `spec_source_requests` frontmatter. You pointed it at a folder-note (`spec_role: status`), a `code-report.md` / `test-report.md` journal, or another file type instead.
+**Likely cause**: `lazy-spec.refresh-sources` only operates on stage-bearing authored docs — `design.md`, `tech.md`, `code-plan.md`, `test-plan.md`, or `bug.md` — the docs that carry `spec_source_docs` / `spec_source_requests` frontmatter. `folder-note` means you pointed it at a status or level note. `no-source-docs` means the target's document type is undeclared or carries no stages, as with a `code-report.md` / `test-report.md` journal or another file type.
 
-**Fix**: Re-invoke `/lazy-spec.refresh-sources` against one of the five stage-bearing authored docs.
+**Fix**: Re-invoke `/lazy-spec.refresh-sources` against one of the five stage-bearing authored docs in that folder.
 
 ---
 

@@ -16,7 +16,6 @@ copied here.
 """
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -30,12 +29,15 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import core_settings as _core_settings  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import decisions_context  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import frontmatter as _fm  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+from errors import SettingsReadError  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
-_SETTINGS_REL = Path(".claude") / "lazy.settings.json"
 _SPEC_SECTION_KEY = "spec"
 _VAULT_ROOT_KEY = "vault_root"
 _DEFAULT_VAULT_ROOT = "specs"
@@ -56,7 +58,7 @@ def role_of(expert: str) -> str:
   Derive the guideline role token from a composed expert key.
 
   Args:
-    expert: The dispatched expert's key, `<domain>.<role>` (`game.data-writer`).
+    expert: The dispatched expert's key, `<domain>.<role>` (`catalog.data-writer`).
 
   Returns:
     The part after the first dot; the whole key when it carries none.
@@ -212,13 +214,13 @@ def collect(doc_path: Path, expert: str) -> dict[str, list[str]]:
   if settings_root is None:
     return { PATHS_KEY: [], WARNINGS_KEY: [] }
 
-  # Decision: read the settings file directly rather than subprocessing the specs CLI — plain
-  # data read, not a call into another plugin's code (dev.plugin-boundaries.md § 1 governs the latter)
+  # Decision: one reader of the merged view, core's `settings-get --scope merged` through `core_settings`, replacing
+  # the direct file read — the local overlay is honoured (a guideline declared only in the overlay still counts) and every reader sees the same values
 
-  # parse the settings JSON; a missing or malformed file declares nothing
+  # the merged `spec` and `products` sections; an unreadable settings layer declares nothing
   try:
-    data = json.loads((settings_root / _SETTINGS_REL).read_text(encoding = "utf-8"))
-  except (OSError, json.JSONDecodeError):
+    data = _core_settings.read_merged_sections(settings_root, _SPEC_SECTION_KEY, _PRODUCTS_KEY)
+  except SettingsReadError:
     return { PATHS_KEY: [], WARNINGS_KEY: [] }
 
   # the content root mirrors spec_paths.spec_content_root: settings_root / vault_root, default "specs"

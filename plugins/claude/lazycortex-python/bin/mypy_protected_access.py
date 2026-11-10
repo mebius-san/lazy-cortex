@@ -78,6 +78,13 @@ class ProtectedAccessPlugin(Plugin):
   # The plugin never changes the type mypy inferred for an access it checks; checking only reports.
 
   def __init__(self, options: Options) -> None:
+    """
+    Create the plugin with the exempt-path globs configured for the current project.
+
+    Args:
+      options: The mypy options of the current run, whose config file supplies the exempt paths.
+    """
+    # mypy's plugin base keeps the options every hook reads
     super().__init__(options)
 
     # the exemptions come from the config file mypy itself resolved, so IDE and CLI runs agree
@@ -95,7 +102,7 @@ class ProtectedAccessPlugin(Plugin):
       The check for a protected member, or `None` for any other name.
     """
     declaring, name = fullname.rsplit(".", 1)
-    # guard: only protected names get a check
+    # a name that is not protected gets no check
     if not _is_protected(name):
       return None
     return partial(self._check_attribute, declaring, name)
@@ -111,7 +118,7 @@ class ProtectedAccessPlugin(Plugin):
       The check for a protected member, or `None` for any other name.
     """
     name = fullname.rsplit(".", 1)[-1]
-    # guard: only protected names get a check
+    # a name that is not protected gets no check
     if not _is_protected(name):
       return None
     return partial(self._check_class_attribute, name)
@@ -127,7 +134,7 @@ class ProtectedAccessPlugin(Plugin):
       The check for a protected method, or `None` for any other name.
     """
     name = fullname.rsplit(".", 1)[-1]
-    # guard: only protected names get a check
+    # a name that is not protected gets no check
     if not _is_protected(name):
       return None
     return partial(self._check_method, name)
@@ -167,7 +174,7 @@ class ProtectedAccessPlugin(Plugin):
     # the declaring class arrives as a full name; its symbol tells whether it is a namedtuple
     symbol = self.lookup_fully_qualified(declaring)
 
-    # guard: the namedtuple API of a namedtuple is public; the same names on any other class are not
+    # the namedtuple API of a namedtuple is public; the same names on any other class are not
     if symbol is not None and isinstance(symbol.node, TypeInfo) and _is_namedtuple_api(symbol.node, name):
       return ctx.default_attr_type
 
@@ -247,14 +254,14 @@ class ProtectedAccessPlugin(Plugin):
     if not isinstance(api, TypeChecker):
       raise TypeError("protected-access plugin is built for mypy 2.1.0 and found no TypeChecker.scope")
 
-    # guard: code on an exempt path, test code by default, may touch protected members
+    # code on an exempt path, test code by default, may touch protected members
     if _is_exempt(api.path, self.exempt_paths):
       return
 
     # the innermost class enclosing the access, or none for module-level code
     accessing = next((item for item in reversed(api.scope.stack) if isinstance(item, TypeInfo)), None)
 
-    # guard: access from inside the declaring hierarchy is allowed
+    # access from inside the declaring hierarchy is allowed
     if accessing is not None and declaring in { base.fullname for base in accessing.mro }:
       return
 
@@ -275,7 +282,7 @@ def _is_protected(name: str) -> bool:
   Returns:
     `True` for a name starting with `_` that is neither a dunder nor a sunder.
   """
-  # guard: only a leading underscore can make a name protected
+  # a name without a leading underscore is never protected
   if not name.startswith("_"):
     return False
 
@@ -370,7 +377,9 @@ def _is_exempt(path: str, exempt_paths: tuple[re.Pattern[str], ...]) -> bool:
   # # Exempt paths are not checked for protected access
   # Tests reach into the internals they verify, so protected access is not reported on exempt paths, which by
   # default are every file under a directory named exactly `tests` inside the project, at any depth. A project
-  # redefines the list in its own `pyproject.toml`. Directories above the project root do not count. A file named
+  # redefines the list in its own `pyproject.toml`. For a file inside the project root, directories above the root
+  # do not count; a file outside the root has no project-relative path, so it is matched on its path as given and
+  # a `tests` directory anywhere in that path exempts it. A file named
   # `tests.py` or a directory such as `tests_util` is ordinary code under the default.
 
   # mypy runs from the project root, so only the path inside the project decides; an IDE passes absolute paths

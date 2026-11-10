@@ -4,6 +4,7 @@ Discovery primitive for the `lazy-core.setup` install chain and its headless twi
 
     lazy_setup.py discover <repo-root> [--home <dir>]
     lazy_setup.py guard <repo-root> [--ignore <prefix>]... [--snapshot <file>]
+    lazy_setup.py snapshot <repo-root> [--snapshot <file>]
     lazy_setup.py verify <repo-root> [--snapshot <file>]
     lazy_setup.py plugin-root <plugin> [--repo <root>] [--home <dir>]
 
@@ -13,9 +14,11 @@ Discovery primitive for the `lazy-core.setup` install chain and its headless twi
   in dev-mode an enabled plugin's in-repo sources outrank its cached copy.
 - `plugins` — every enabled plugin name mapped to the source root the chain reads it from.
 - `skills` — the ordered chain: `dispatch` (`<plugin>:<ns>.<name>`), `phase`, `path`,
-  `plugin`, and `live_session` (the skill declares `requires_live_session: true`, so a headless
-  executor skips it). Order is pre-install, then per-plugin with `lazy-core.install` first,
-  then post-install; alphabetical inside each band.
+  `plugin`, `live_session` (the skill declares `requires_live_session: true`, so a headless
+  executor skips it), and `last` (the skill declares `lazy_setup_last: true`). Order is pre-install,
+  then per-plugin with `lazy-core.install` first, then post-install; alphabetical inside each band,
+  except that the one skill of a band declaring `lazy_setup_last: true` closes it. Two such skills in
+  one band are an error, never a tie.
 - `skipped` — enabled plugins the machine has no sources for, with the reason.
 
 Enablement is the union of `enabledPlugins` in `.claude/settings.json` and
@@ -32,6 +35,9 @@ run may proceed, but only its own writes may reach the commit.
 The guard also records a content fingerprint of every non-conflicting dirty path in a snapshot
 file (default `<repo>/.runtime/lazy-setup-guard.json`) for `verify`.
 
+`snapshot` records the same file for an interactive run that refuses nothing: every dirty path is
+fingerprinted, under the chain's write scope or not, and the report names the file and the paths.
+
 `verify` runs after the writes: it re-reads the tree, reports as `touched` every dirty path the
 snapshot did not know (the run's own writes, `new` marking the untracked ones — the commit
 pathspec), and as `violations` every snapshot path whose fingerprint changed (the run wrote
@@ -39,11 +45,11 @@ into the operator's work). The verdict is `ok` only when there are no violations
 commits nothing otherwise.
 
 `plugin-root` prints the one directory a plugin's sources are read from, resolved in the
-order every skill must follow and none may reorder: the repo's own `plugins/claude/<plugin>/` when the
-repo authors the plugin (the sources in the tree outrank the cached copy, which lags them until
-the next publish), then the daemon-exported `$LAZYCORTEX_PLUGIN_DIRS` entry for the plugin,
-then the install `installed_plugins.json` records. The plugin name may carry its `@<marketplace>` suffix. Exit
-status 1 and an `error:` line when no stage resolves.
+order every skill must follow and none may reorder: the `$LAZYCORTEX_PLUGIN_DIRS` entry for the plugin,
+then the dev-vault sibling beside core's own plugin tree, then the repo's own `plugins/claude/<plugin>/`
+when the repo authors the plugin, and last the install `installed_plugins.json` records. The plugin name
+may carry its `@<marketplace>` suffix. Exit status 1 and an `error:` line naming every searched stage when
+no stage resolves.
 """
 
 from __future__ import annotations
@@ -63,10 +69,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
 
-
-# Decision: the skill and the agent call this primitive instead of listing the plugin cache
-# themselves — an interactive session may carry no enumeration tool at all, and a listing over
-# the whole cache is exactly what a consumer's permission layer may refuse mid-run.
 
 # waiver: external Claude Code filesystem locations, not reusable domain keys
 _INSTALLED_PLUGINS_REL = ".claude/plugins/installed_plugins.json"
@@ -88,14 +90,18 @@ _PHASES = ("pre-install", "per-plugin", "post-install")
 _PHASE_KEY = "lazy_setup_phase"
 # waiver: setup-phases contract vocabulary (lazy-core.setup-phases-contract.md)
 _LIVE_KEY = "requires_live_session"
+# waiver: setup-phases contract vocabulary (lazy-core.setup-phases-contract.md)
+_LAST_KEY = "lazy_setup_last"
 # waiver: install-skill naming convention, not a reusable domain key
 _INSTALL_SUFFIX = ".install"
 # waiver: the one installer every chain runs first — it seeds what the others read
 _FIRST_INSTALL = "lazy-core.install"
 # waiver: report vocabulary shared with the skill and the agent
 _NOT_INSTALLED = "plugin not installed on this machine"
+# Verdict words of the plugin-root miss line, right after the plugin ref
+_MISS_VERDICT = "not installed"
 # waiver: JSON report keys read by the skill and the agent
-_K_DISPATCH, _K_PHASE = "dispatch", "phase"
+_K_DISPATCH, _K_PHASE, _K_LAST = "dispatch", "phase", "last"
 
 # Decision: the prefixes the install chain and the checkup repairs write to are fixed here, not
 # derived per run — a headless agent needs the verdict BEFORE any installer runs, and every
@@ -117,10 +123,14 @@ _K_DIRTY, _K_FINGERPRINTS = "dirty", "fingerprints"
 _RENAME_STATUSES = "RC"
 # waiver: argparse sub-command names, surface strings rather than domain keys
 _VERB_DISCOVER, _VERB_GUARD, _VERB_VERIFY, _VERB_ROOT = "discover", "guard", "verify", "plugin-root"
+# waiver: argparse sub-command name, a surface string rather than a domain key
+_VERB_SNAPSHOT = "snapshot"
 # waiver: the daemon's plugin-dir export (dev.plugin-boundaries § 1c), an environment name
 _PLUGIN_DIRS_ENV = "LAZYCORTEX_PLUGIN_DIRS"
 # waiver: provenance words of a resolved plugin root, read by the skills' reports
-_SRC_REPO, _SRC_ENV, _SRC_CACHE = "repo", "env", "cache"
+_SRC_REPO, _SRC_ENV, _SRC_SIBLING, _SRC_CACHE = "repo", "env", "sibling", "cache"
+# The directory holding core's own plugin tree; in a dev vault its other children are the sibling plugins
+_SIBLING_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _read_json(path: Path) -> dict:
@@ -285,13 +295,14 @@ def _skill_entry(plugin: str, skill_md: Path) -> dict | None:
   return {
       # waiver: JSON report keys read by the skill and the agent
       _K_DISPATCH: f"{plugin}:{name}", _K_PHASE: phase, "path": str(skill_md),
-      "plugin": plugin, "live_session": fm.get(_LIVE_KEY) is True,
+      "plugin": plugin, "live_session": fm.get(_LIVE_KEY) is True, _K_LAST: fm.get(_LAST_KEY) is True,
   }
 
 
 def _order_key(entry: dict) -> tuple:
   """
-  Sort key placing phases in contract order and `lazy-core.install` first among installers.
+  Sort key placing phases in contract order, a phase's closer at its end, and `lazy-core.install` first
+  among installers.
 
   Args:
     entry: A chain entry from `_skill_entry`.
@@ -300,12 +311,9 @@ def _order_key(entry: dict) -> tuple:
     The sort tuple.
   """
 
-  # Contract:
-  # The chain order is phase band, then `lazy-core.install` ahead of every other installer, then
-  # dispatch string; callers and the setup skill rely on it verbatim.
-
   return (
       _PHASES.index(entry[_K_PHASE]),
+      entry[_K_LAST],
       not (entry[_K_PHASE] == _PHASES[1] and entry[_K_DISPATCH].endswith(":" + _FIRST_INSTALL)),
       entry[_K_DISPATCH],
   )
@@ -316,8 +324,8 @@ def discover(repo: Path, home: Path) -> dict:
   Build the install chain for a repo.
 
   Guarantees:
-    - `skills` is ordered by phase band, with `lazy-core.install` first among installers and
-      the dispatch string deciding the rest.
+    - `skills` is ordered by phase band, the band's `lazy_setup_last` skill closing it, with
+      `lazy-core.install` first among installers and the dispatch string deciding the rest.
     - An enabled plugin's in-repo sources outrank its cached copy.
 
   Args:
@@ -326,7 +334,16 @@ def discover(repo: Path, home: Path) -> dict:
 
   Returns:
     The report described in the module docstring.
+
+  Raises:
+    ValueError: Two skills of one phase band declare `lazy_setup_last: true`.
   """
+
+  # Contract:
+  # The install chain in `skills` MUST be ordered by phase band, then the band's one `lazy_setup_last`
+  # skill after every other skill of the band, then `lazy-core.install` ahead of every other installer,
+  # then dispatch string; the setup skill relies on that order verbatim. A band never has two closers.
+
   # both source kinds, in-repo first
   dev = find_dev_plugins(repo)
   cached = read_install_paths(home)
@@ -349,6 +366,12 @@ def discover(repo: Path, home: Path) -> dict:
       if (entry := _skill_entry(plugin, skill_dir / _SKILL_FILE)) is not None
   ]
   skills.sort(key = _order_key)
+
+  # a band has at most one closer; two would leave the end of the band undecided
+  for phase in _PHASES:
+    # guard: a second closer in one band is an authoring error the caller must see
+    if sum(1 for entry in skills if entry[_K_PHASE] == phase and entry[_K_LAST]) > 1:
+      raise ValueError(f"two skills claim {_LAST_KEY} in phase {phase}")
 
   # the report the skill and the agent read
   return {
@@ -385,7 +408,7 @@ def dirty_paths(repo: Path) -> list[str]:
   return sorted(set(paths))
 
 
-def _under(path: str, prefixes: tuple[str, ...] | list[str]) -> bool:
+def _is_under(path: str, prefixes: tuple[str, ...] | list[str]) -> bool:
   """
   Tell whether a repo-relative path falls under any of the prefixes.
 
@@ -426,6 +449,7 @@ def guard(repo: Path, ignore: list[str], snapshot: Path) -> dict:
     - A dirty path under an `--ignore` prefix is never a conflict, whatever else covers it.
     - The snapshot fingerprints exactly the `ignored` and `outside` paths; conflicts are not
       recorded because a `conflict` verdict means nothing runs.
+    - The snapshot file itself, left behind by an earlier run, is never a dirty path of any bucket.
 
   Args:
     repo: Repo root.
@@ -435,19 +459,16 @@ def guard(repo: Path, ignore: list[str], snapshot: Path) -> dict:
   Returns:
     The report described in the module docstring.
   """
-  dirty = dirty_paths(repo)
-  ignored = [ p for p in dirty if _under(p, ignore) ]
-  conflicts = [ p for p in dirty if p not in ignored and _under(p, WRITE_SCOPE) ]
+
+  # sort every dirty path into its bucket, the ignore prefixes first
+  dirty = [ path for path in dirty_paths(repo) if path != _relate_snapshot(repo, snapshot) ]
+  ignored = [ path for path in dirty if _is_under(path, ignore) ]
+  conflicts = [ path for path in dirty if path not in ignored and _is_under(path, WRITE_SCOPE) ]
   outside = [ p for p in dirty if p not in ignored and p not in conflicts ]
   verdict = _V_CONFLICT if conflicts else (_V_CLEAN if not dirty else _V_ALLOWED)
 
   # the snapshot is what lets `verify` prove the run stayed out of the operator's files
-  recorded = ignored + outside
-  snapshot.parent.mkdir(parents = True, exist_ok = True)
-  payload = json.dumps({ _K_DIRTY: recorded, _K_FINGERPRINTS: { p: _fingerprint(repo, p) for p in recorded } },
-                       indent = 2)
-  # waiver: stdlib encoding idiom
-  snapshot.write_text(payload, encoding = "utf-8")
+  _write_snapshot(repo, ignored + outside, snapshot)
 
   # the report the agents read; the verdict alone decides whether the chain runs
   return {
@@ -455,6 +476,70 @@ def guard(repo: Path, ignore: list[str], snapshot: Path) -> dict:
       "verdict": verdict, "dirty": dirty, "conflicts": conflicts, "ignored": ignored, "outside": outside,
       "write_scope": list(WRITE_SCOPE), "snapshot": str(snapshot),
   }
+
+
+def save_snapshot(repo: Path, target: Path) -> dict:
+  """
+  Record every dirty path of the tree before a run, so `verify` can later tell the run's writes apart.
+
+  Guarantees:
+    - Every dirty path but the snapshot file itself is fingerprinted, under the chain's write scope or not, in the
+      format `verify` reads.
+
+  Args:
+    repo: Repo root.
+    target: File the snapshot is written to.
+
+  Returns:
+    `{"snapshot": <file>, "dirty": [paths]}`.
+  """
+
+  # Contract:
+  # Every dirty path but the snapshot file MUST be recorded with its fingerprint, whatever root it sits under; the
+  # migrate skill commits a path dirty after the snapshot as the install chain's write, so a path missing here would
+  # turn the operator's work into a commit.
+
+  # every dirty path but the snapshot's own file, which the next write replaces
+  dirty = [ path for path in dirty_paths(repo) if path != _relate_snapshot(repo, target) ]
+  _write_snapshot(repo, dirty, target)
+
+  # the report names the file the next skill is handed
+  # waiver: JSON report keys read by the setup and migrate skills
+  return { "snapshot": str(target), "dirty": dirty }
+
+
+def _relate_snapshot(repo: Path, snapshot: Path) -> str:
+  """
+  Express the snapshot file as a repo-relative path, the form dirty paths are listed in.
+
+  Args:
+    repo: Repo root.
+    snapshot: The snapshot file.
+
+  Returns:
+    The repo-relative POSIX path, or an empty string when the snapshot lives outside the repo.
+  """
+  # a snapshot outside the repo is never among its dirty paths
+  try:
+    return snapshot.resolve().relative_to(repo.resolve()).as_posix()
+  except ValueError:
+    return ""
+
+
+def _write_snapshot(repo: Path, recorded: list[str], target: Path) -> None:
+  """
+  Write the snapshot file `verify` reads: the recorded paths and the fingerprint of each.
+
+  Args:
+    repo: Repo root.
+    recorded: The repo-relative paths to record.
+    target: File the snapshot is written to.
+  """
+  target.parent.mkdir(parents = True, exist_ok = True)
+  payload = json.dumps({ _K_DIRTY: recorded, _K_FINGERPRINTS: { p: _fingerprint(repo, p) for p in recorded } },
+                       indent = 2)
+  # waiver: stdlib encoding idiom
+  target.write_text(payload, encoding = "utf-8")
 
 
 def verify(repo: Path, snapshot: Path) -> dict:
@@ -465,7 +550,7 @@ def verify(repo: Path, snapshot: Path) -> dict:
     - `touched` holds only paths the snapshot did not list, so an operator's dirty file never
       enters the commit pathspec, and the snapshot file itself never does either.
     - `violations` holds every recorded path whose fingerprint changed, including one that a
-      revert made clean again.
+      revert made clean again; the snapshot file is never one, even when an older snapshot recorded it.
 
   Args:
     repo: Repo root.
@@ -475,14 +560,11 @@ def verify(repo: Path, snapshot: Path) -> dict:
     The report described in the module docstring.
   """
   before = _read_json(snapshot)
-  recorded: list[str] = list(before.get(_K_DIRTY) or [])
+  # a snapshot kept inside the repo shows up as dirty itself and never counts as a write, nor as a violation when an
+  # older snapshot recorded it
+  snapshot_rel = _relate_snapshot(repo, snapshot)
+  recorded: list[str] = [ path for path in before.get(_K_DIRTY) or [] if path != snapshot_rel ]
   fingerprints: dict = before.get(_K_FINGERPRINTS) or {}
-
-  # a snapshot kept inside the repo shows up as dirty itself and must never count as a write
-  try:
-    snapshot_rel = str(snapshot.resolve().relative_to(repo.resolve()))
-  except ValueError:
-    snapshot_rel = ""
 
   # the run's own writes are the dirty paths the snapshot did not know; untracked ones need `add -N`
   after = dirty_paths(repo)
@@ -506,39 +588,64 @@ def plugin_root(plugin: str, repo: Path, home: Path) -> dict | None:
   Resolve the directory a plugin's sources are read from.
 
   Guarantees:
-    - The repo's own `plugins/claude/<plugin>/` wins whenever the repo authors the plugin.
-    - Otherwise a `$LAZYCORTEX_PLUGIN_DIRS` entry named after the plugin wins over the cache.
+    - Stages run in a fixed order: the exported plugin directories, then the dev-vault sibling, then the
+      authoring repo's own tree, then the install registry. The first hit wins, and no stage is reordered
+      or skipped.
 
   Args:
     plugin: Plugin name, with or without its `@<marketplace>` suffix.
-    repo: Repo root whose authored plugins are checked first.
-    home: Home directory whose plugin registry resolves the cached copy.
+    repo: Repo root whose authored plugins are checked.
+    home: Home directory whose plugin registry resolves the installed copy.
 
   Returns:
-    `{"plugin", "root", "source"}` with `source` one of `repo` / `env` / `cache`, or None when no
+    `{"plugin", "root", "source"}` with `source` one of `env` / `sibling` / `repo` / `cache`, or None when no
     stage resolves.
   """
   name = plugin.split("@", 1)[0]
 
   # Contract:
-  # The stages run repo, then export, then cache, and the first hit wins; every skill that reads
-  # a plugin's sources relies on this order, so no caller may reorder or skip a stage.
+  # The stages run export, then dev-vault sibling, then the authoring repo's tree, then the install
+  # registry, and the first hit wins; every skill that reads a plugin's sources relies on this order,
+  # so no caller may reorder or skip a stage.
 
-  # stage one: the authoring repo's own tree
-  dev = find_dev_plugins(repo).get(name)
-  if dev is not None:
-    return _root_report(name, dev, _SRC_REPO)
-
-  # stage two: the daemon's export, matched on the directory name
-  raw = os.environ.get(_PLUGIN_DIRS_ENV, "")
-  for entry in filter(None, raw.split(os.pathsep)):
+  # stage one: the daemon's export, matched on the directory name
+  for entry in filter(None, os.environ.get(_PLUGIN_DIRS_ENV, "").split(os.pathsep)):
     candidate = Path(entry)
     if candidate.name == name and (candidate / _DEV_MANIFEST).is_file():
       return _root_report(name, candidate, _SRC_ENV)
 
-  # stage three: the install the machine's plugin registry records
+  # stage two: the dev-vault sibling beside core's own plugin tree
+  sibling = _SIBLING_ROOT / name
+  if (sibling / _DEV_MANIFEST).is_file():
+    return _root_report(name, sibling, _SRC_SIBLING)
+
+  # stage three: the authoring repo's own tree
+  dev = find_dev_plugins(repo).get(name)
+  if dev is not None:
+    return _root_report(name, dev, _SRC_REPO)
+
+  # stage four: the install the machine's plugin registry records
   cached = installed_plugin_root(name, home)
   return _root_report(name, cached, _SRC_CACHE) if cached is not None else None
+
+
+def format_plugin_root_miss(plugin: str, repo: Path, home: Path) -> str:
+  """
+  Compose the error line for a plugin no stage of `plugin_root` resolves.
+
+  Args:
+    plugin: Plugin name, with or without its `@<marketplace>` suffix.
+    repo: Repo root whose authored plugins were checked.
+    home: Home directory whose plugin registry was read.
+
+  Returns:
+    One `error:` line naming every stage searched and the location each one looked at.
+  """
+  name = plugin.split("@", 1)[0]
+  return (f"error: {plugin} {_MISS_VERDICT}: searched ${_PLUGIN_DIRS_ENV} "
+          f"({os.environ.get(_PLUGIN_DIRS_ENV, '') or 'unset'}), the dev-vault sibling "
+          f"{_SIBLING_ROOT / name}, the repo tree {repo / _DEV_ROOT / name}, and the install registry "
+          f"{home / _INSTALLED_PLUGINS_REL}")
 
 
 def _root_report(name: str, root: Path, source: str) -> dict:
@@ -559,14 +666,15 @@ def _root_report(name: str, root: Path, source: str) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
   """
-  Parse the arguments and print the requested report: the chain, a guard verdict, a verify
+  Parse the arguments and print the requested report: the chain, a guard verdict, a snapshot, a verify
   verdict, or a plugin root.
 
   Args:
     argv: Arguments without the program name; defaults to `sys.argv[1:]`.
 
   Returns:
-    Process exit code: 0 on success, 1 when `plugin-root` resolves nothing, 2 on a usage error.
+    Process exit code: 0 on success, 1 when `plugin-root` resolves nothing or `discover` finds a phase with
+    two closers, 2 on a usage error.
   """
   # waiver: argparse surface strings, not reusable domain keys
   parser = argparse.ArgumentParser(prog = "lazy_setup.py")
@@ -587,6 +695,12 @@ def main(argv: list[str] | None = None) -> int:
                    help = "repo-relative prefix of operator work-in-progress the run leaves alone (repeatable)")
   # waiver: argparse surface strings, not reusable domain keys
   grd.add_argument("--snapshot", default = None, help = f"snapshot file (default: <repo>/{_SNAPSHOT_REL})")
+  # waiver: argparse surface strings, not reusable domain keys
+  snap = sub.add_parser(_VERB_SNAPSHOT, help = "record every dirty path before an interactive run")
+  # waiver: argparse surface strings, not reusable domain keys
+  snap.add_argument("repo", help = "repo root the chain targets")
+  # waiver: argparse surface strings, not reusable domain keys
+  snap.add_argument("--snapshot", default = None, help = f"snapshot file (default: <repo>/{_SNAPSHOT_REL})")
   # waiver: argparse surface strings, not reusable domain keys
   ver = sub.add_parser(_VERB_VERIFY, help = "compare the tree after a run with the guard's snapshot")
   # waiver: argparse surface strings, not reusable domain keys
@@ -616,16 +730,26 @@ def main(argv: list[str] | None = None) -> int:
 
   # emit the requested report; `discover` and `plugin-root` resolve against the named home
   if args.verb == _VERB_DISCOVER:
-    report: dict | None = discover(repo, home)
+    # guard: a band with two closers is a failure the caller must see, not a chain
+    try:
+      report: dict | None = discover(repo, home)
+    except ValueError as error:
+      print(f"error: {error}", file = sys.stderr)
+      return 1
   elif args.verb == _VERB_ROOT:
     report = plugin_root(args.plugin, repo, home)
     # guard: an unresolved plugin is a failure the caller must see, not an empty report
     if report is None:
-      print(f"error: {args.plugin} not installed: no authored, exported, or cached sources", file = sys.stderr)
+      print(format_plugin_root_miss(args.plugin, repo, home), file = sys.stderr)
       return 1
   else:
-    snapshot = Path(args.snapshot).resolve() if args.snapshot else repo / _SNAPSHOT_REL
-    report = guard(repo, list(args.ignore), snapshot) if args.verb == _VERB_GUARD else verify(repo, snapshot)
+    target = Path(args.snapshot).resolve() if args.snapshot else repo / _SNAPSHOT_REL
+    if args.verb == _VERB_GUARD:
+      report = guard(repo, list(args.ignore), target)
+    elif args.verb == _VERB_SNAPSHOT:
+      report = save_snapshot(repo, target)
+    else:
+      report = verify(repo, target)
   print(json.dumps(report, indent = 2, ensure_ascii = False))
   return 0
 

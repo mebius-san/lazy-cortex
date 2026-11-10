@@ -1,11 +1,11 @@
 ---
 name: lazy-spec.request-classify
-description: "Dispatched by the `spec.coordinator` agent during a request's review loop to label one body with a `request_class` token; not for direct use. Resolves the legal class set from `lazy.settings.json` on every dispatch, so an asset type declared via `lazy-spec.add-asset-type` is recognised on the next run without a rubric edit."
+description: "Dispatched by the `spec.catalog-coordinator` agent in its routing mode during a request's review loop to label one body with a `request_class` token; not for direct use. Resolves the legal class set from `lazy.settings.json` on every dispatch, so an asset type declared via `lazy-spec.add-asset-type` is recognised on the next run without a rubric edit."
 execution-discipline-waiver: "Single-purpose primitive — one input, one classification token."
 ---
 # Classify a request
 
-Read the body of a request file and classify it. Used by `spec.coordinator` during the review loop. The output is one lowercase token drawn from the open set defined by `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.request-protocol.md` → "Class taxonomy".
+Read the body of a request file and classify it. Used by `spec.catalog-coordinator`'s routing mode during the review loop. The output is one lowercase token drawn from the open set defined by `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.request-protocol.md` → "Class taxonomy".
 
 The class taxonomy and routing implications live there; this skill never restates them. The rubric below names which signals push a body into which class — the legal set of class values is what `lazy-spec.request-protocol.md` declares.
 
@@ -54,7 +54,7 @@ Apply in priority order. First match wins. The order is set so the most domain-s
 
 ## Output
 
-Return the classification as a single lowercase token from the resolved valid set. The sole caller is `spec.coordinator` during the review loop; it consumes the value in memory to drive candidate search and to surface the class to the operator inside its routing section. Neither the coordinator nor anything else writes the value directly to `request_class` from this skill's output — the apply gate (post-finalize) derives `request_class` from the routing section's content in the deterministic worker `apply_request.py`, not an LLM-dispatched agent.
+Return the classification as a single lowercase token from the resolved valid set. The sole caller is `spec.catalog-coordinator`'s routing mode during the review loop; it consumes the value in memory to drive candidate search and to surface the class to the operator inside its routing section. Neither the coordinator nor anything else writes the value directly to `request_class` from this skill's output — the apply gate (post-finalize) derives `request_class` from the routing section's content in the deterministic worker `apply_request.py`, not an LLM-dispatched agent.
 
 ## Verify
 

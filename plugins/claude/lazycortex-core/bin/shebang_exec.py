@@ -20,9 +20,9 @@ if TYPE_CHECKING:
   pass
 
 
-# a shebang interpreter is Python when its basename is python, python3 or python3.N
-_PYTHON_NAME = re.compile(r"^python(3(\.\d+)?)?$")
-# the env trampoline carries no meaning for us — the token after it is the interpreter
+# A shebang interpreter is Python when its basename is python, python3 or python3.N
+_PYTHON_NAME = re.compile(r"^python(3(\.\d+)?)?\Z")
+# The env trampoline carries no meaning for us — the token after it is the interpreter
 _ENV_BASENAME = "env"
 
 
@@ -48,10 +48,10 @@ def read_shebang(path: Path) -> list[str]:
   """
   try:
     # waiver: stdlib encoding idiom, not a domain constant
-    with path.open("r", encoding = "utf-8", errors = "replace") as fh:
-      first = fh.readline()
-  except OSError as e:
-    raise ShebangError(f"{path}: cannot read: {e}") from e
+    with path.open("r", encoding = "utf-8", errors = "replace") as stream:
+      first = stream.readline()
+  except OSError as error:
+    raise ShebangError(f"{path}: cannot read: {error}") from error
 
   # guard: only a `#!` line declares an interpreter
   if not first.startswith("#!"):
@@ -83,8 +83,9 @@ def argv_for(path: Path, *args: str) -> list[str]:
     *args: Arguments appended after the file.
 
   Returns:
-    `[sys.executable, path, *args]` for a Python file; otherwise
-    `[interpreter, flags..., path, *args]` with the interpreter absolute.
+    `[sys.executable, *flags, path, *args]` for a Python file; otherwise
+    `[interpreter, *flags, path, *args]` with the interpreter absolute. `flags` are the
+    interpreter flags the shebang carries after the interpreter name.
 
   Raises:
     ShebangError: No usable shebang, or the interpreter is not on PATH.

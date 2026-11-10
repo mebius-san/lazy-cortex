@@ -7,17 +7,18 @@ first non-empty value wins:
 2. the owning product's `language` (resolved by attributing the doc
    path to a product's effective record via `effective_record_by_path`,
    inheriting from any enclosing product);
-3. the `spec` section's `language` in `lazy.settings.json`;
+3. the `spec` section's `language`;
 4. the top-level `language` key (repo-wide default);
 5. the hardcoded floor `en`.
 
-Settings live at `<vault>/.claude/lazy.settings.json`. Frontmatter is
-read with a minimal flat-scalar parser — no yaml dependency.
+Rungs 3-5 come from the core plugin's language verb, asked for this
+plugin's `spec` section; this module does not read the settings itself.
+Frontmatter is read with a minimal flat-scalar parser — no yaml dependency.
 """
 from __future__ import annotations
 
 import argparse
-import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -34,15 +35,19 @@ if str(_BIN) not in sys.path:
 import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: intentional suppression — bare-name sibling import resolved at runtime via sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: intentional suppression — bare-name sibling import resolved at runtime via sys.path
+import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
-_SETTINGS_REL = Path(".claude") / "lazy.settings.json"
 _SPEC_SECTION = "spec"
 _DOC_LANGUAGE_KEY = "spec_language"
 _PRODUCT_LANGUAGE_KEY = "language"
-_SPEC_LANGUAGE_KEY = "language"
-_ROOT_LANGUAGE_KEY = "language"
-_LANGUAGE_FLOOR = "en"
+# The core plugin whose language verb owns the section → repo-wide → `en` rungs.
+_CORE_CLI_NAME = "lazycortex-core"
+# Core CLI verb, flags, and this plugin's own settings section passed to it.
+_SUB_RESOLVE_LANGUAGE = "resolve-language"
+_ARG_SECTION = "--section"
+_ARG_CWD = "--cwd"
 
 
 def _parse_frontmatter(text: str) -> dict:
@@ -95,61 +100,6 @@ def _parse_frontmatter(text: str) -> dict:
   return values
 
 
-def _read_settings(vault: Path) -> dict:
-  """
-  Read the vault settings file as a dict, empty when absent or malformed.
-
-  Args:
-    vault: Vault root directory holding `.claude/lazy.settings.json`.
-
-  Returns:
-    The parsed settings dict, or an empty dict when the file is missing or is
-    not valid JSON.
-  """
-  settings_path = vault / _SETTINGS_REL
-
-  # guard: missing settings file means no configured values at all
-  if not settings_path.is_file():
-    return {}
-  try:
-    data = json.loads(settings_path.read_text(encoding = "utf-8"))
-  except (OSError, json.JSONDecodeError):
-    return {}
-  return data if isinstance(data, dict) else {}
-
-
-def _clean(value: object) -> str | None:
-  """
-  Narrow a raw settings value to a usable language tag.
-
-  Args:
-    value: Raw value read from the settings dict.
-
-  Returns:
-    The value when it is a non-empty string, else None.
-  """
-  return value if isinstance(value, str) and value else None
-
-
-def _spec_section_language(settings: dict) -> str | None:
-  """
-  Read the spec section's own `language` key from a parsed settings dict.
-
-  Args:
-    settings: The parsed `lazy.settings.json` contents.
-
-  Returns:
-    The configured spec language, or None when the section or the key is
-    absent or empty.
-  """
-  spec = settings.get(_SPEC_SECTION)
-
-  # guard: missing or malformed spec section means no configured default
-  if not isinstance(spec, dict):
-    return None
-  return _clean(spec.get(_SPEC_LANGUAGE_KEY))
-
-
 def resolve_repo_language(vault: Path) -> str:
   """
   Resolve the repo-level spec language, ignoring any per-doc override.
@@ -161,19 +111,36 @@ def resolve_repo_language(vault: Path) -> str:
     - Never returns an empty value; an unconfigured repo resolves to the floor `en`.
 
   Args:
-    vault: Vault root directory holding `.claude/lazy.settings.json`.
+    vault: Vault root directory whose language is resolved.
 
   Returns:
     The resolved language tag; never empty (falls back to `en`).
+
+  Raises:
+    RuntimeError: If the core plugin's CLI cannot be resolved, its language verb exits non-zero, or the verb
+      exits zero but answers nothing.
   """
 
   # Contract:
   # The resolved language tag is never empty; an unconfigured repo resolves to the floor `en`
   # rather than an empty string or None.
 
-  # one settings read serves both rungs of the chain
-  settings = _read_settings(vault)
-  return _spec_section_language(settings) or _clean(settings.get(_ROOT_LANGUAGE_KEY)) or _LANGUAGE_FLOOR
+  # core owns these rungs; the spec plugin only names its own section
+  cli = spec_paths.resolve_core_cli(vault)
+
+  # ask core for the section → repo-wide → floor answer
+  proc = subprocess.run(
+      [ sys.executable, str(cli), _SUB_RESOLVE_LANGUAGE, _ARG_SECTION, _SPEC_SECTION, _ARG_CWD, str(vault) ],
+      capture_output = True, text = True, check = False, encoding = "utf-8",
+  )
+
+  # guard: a non-zero exit or an empty answer — surface stdout+stderr instead of inventing a language
+  if proc.returncode != 0 or not proc.stdout.strip():
+    raise RuntimeError(
+        f"{_CORE_CLI_NAME} {_SUB_RESOLVE_LANGUAGE} exit={proc.returncode} "
+        f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    )
+  return proc.stdout.removesuffix("\n")
 
 
 def resolve_spec_language(vault: Path, doc_path: str) -> str:
@@ -188,11 +155,15 @@ def resolve_spec_language(vault: Path, doc_path: str) -> str:
     - Never returns an empty value; an unconfigured repo resolves to the floor `en`.
 
   Args:
-    vault: Vault root directory holding `.claude/lazy.settings.json`.
+    vault: Vault root directory containing the doc.
     doc_path: Doc path relative to `vault`.
 
   Returns:
     The resolved language tag; never empty (falls back to `en`).
+
+  Raises:
+    RuntimeError: If the doc and product rungs yield nothing and the core plugin's CLI cannot be resolved, its
+      language verb exits non-zero, or the verb exits zero but answers nothing.
   """
 
   # Contract:

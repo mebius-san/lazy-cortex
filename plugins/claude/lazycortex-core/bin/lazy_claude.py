@@ -4,32 +4,40 @@
 Drop-in `claude` wrapper giving third-party daemons the subscription rate-limit guard.
 
 A standalone daemon replaces the word `claude` in its launch command with the installed copy of
-this wrapper (`~/.local/bin/lazy-claude`) and gains two behaviours: a headless call under a raised
-rate-limit flag is refused with the distinctive exit code 75 before any tokens burn, and a headless
-call that streams JSON feeds the frames it sees back into the host-local flag for every other
-reader. Interactive sessions pass straight through — the guard never refuses the operator.
+this wrapper (`~/.local/bin/lazy-claude`) and gains two behaviours: a headless call whose own
+account has a closed rate-limit window is refused with the distinctive exit code 75 before any
+tokens burn, and a headless call that streams JSON feeds the frames it sees back into the
+host-local flag, stamped with the caller's account, for every reader under that account.
+Interactive sessions pass straight through — the guard never refuses the operator.
 
-Self-contained by contract: `lazy-core.install` copies this single file out of the plugin to a
-stable host path, so it imports nothing from the plugin tree and duplicates the flag-directory
-contract of `rate_limit_flag.py` on purpose. The wrapper carries no configuration: it always reads
-and always writes the flag, all triggers active; switching a daemon back to the bare `claude` word
-is the off switch.
+The wrapper is self-contained: it imports nothing from the plugin tree and carries its own copy of
+the flag contract of `rate_limit_flag.py` — the flag directory, the per-window-and-account record
+files, the account-identity resolution, and the reading rules. Windows of another account never
+refuse the call; records without an account stay host-global. Unlike the runtime, the wrapper
+carries no configuration — it always reads and always writes the flag, all triggers active, with no
+warning-utilization threshold — and its writes never raise. Switching a daemon back to the bare
+`claude` word is the off switch.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
 import sys
 import tempfile
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
 
+
+# Decision: duplicate the flag contract of `rate_limit_flag.py` here, not import it — install copies
+# this single file out of the plugin to a stable host path, where no sibling module is importable
 
 # The contract code a trained daemon reads as "rate limit — skip this tick quietly"; an untrained
 # one sees an error, which is honest too. Mirrors BSD sysexits EX_TEMPFAIL.
@@ -54,11 +62,70 @@ _OUTPUT_FORMAT_TOKEN = "--output-format"
 _STREAM_JSON = "stream-json"
 # Writer label stored on every record this wrapper writes.
 _WRITER = "lazy-claude"
+# Record field holding the account identity, shared with `rate_limit_flag.py`.
+_ACCOUNT_FIELD = "account"
+# Prefix opening every diagnostic line this wrapper writes to stderr.
+STDERR_PREFIX = "lazy-claude:"
+
+
+def read_account_identity() -> str:
+  """
+  Resolve the identity of the account the current process spends tokens under.
+
+  Names the budget a rate-limit window belongs to, so a record written for one account is recognised by
+  every reader running under that same account.
+
+  Guarantees:
+    - Resolution follows a fixed precedence: an explicit token's digest, then the machine login's account id,
+      then a shared unknown bucket — so two processes spending under the same account, wrapper or runtime,
+      always agree on the identity string.
+    - Never raises: whatever the state of the machine's login record, the call returns an identity.
+
+  Returns:
+    A short stable identity string; never empty, never the raw token.
+  """
+
+  # Contract:
+  # The identity resolves via a fixed precedence — an explicit token, then the machine
+  # login's account id, then a shared unknown bucket — so two processes spending under the
+  # same account, wrapper or runtime, always resolve to the same identity string on this host.
+
+  # Contract:
+  # Resolution NEVER raises: whatever the state of the machine's login record,
+  # the call returns an identity.
+
+  # an explicit token is the effective account, whatever the machine login says
+  # waiver: external Claude Code environment-variable name, not a domain key
+  token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")
+  if token:
+    # surrogateescape round-trips the raw bytes of a non-UTF-8 environment value instead of raising
+    # waiver: digest-length literal shared with rate_limit_flag.py, duplicated by the standalone contract
+    return "tok-" + hashlib.sha256(token.encode("utf-8", "surrogateescape")).hexdigest()[:12]
+
+  # ambient login: the account id recorded by the Claude CLI's own config
+  try:
+    # waiver: external Claude Code config path and field names, not internal keys
+    cfg = json.loads((Path.home() / ".claude.json").read_text(encoding = "utf-8"))
+    # waiver: external Claude Code config field names, not internal keys
+    uuid = str((cfg.get("oauthAccount") or {}).get("accountUuid") or "")
+  # ValueError covers both a JSON parse failure and a file that is not valid UTF-8; AttributeError
+  # covers a config that is not an object; RuntimeError is what `Path.home()` raises when no home
+  # directory resolves
+  except (OSError, ValueError, AttributeError, RuntimeError):
+    uuid = ""
+
+  # a recorded login account names the bucket by its id
+  if uuid:
+    # waiver: digest-length literal — see above
+    return "acc-" + uuid[:12]
+
+  # no token, no login record — every such process shares one bucket
+  return UNKNOWN_KEY
 
 
 def flag_dir() -> Path:
   """
-  Return the host-local directory holding one record file per rate-limit window.
+  Return the host-local directory holding one record file per rate-limit window and account.
 
   Returns:
     Absolute path to the flag directory, which need not exist yet.
@@ -70,22 +137,34 @@ def flag_dir() -> Path:
 
 def is_raised() -> bool:
   """
-  Report whether any rate-limit window is currently closed on this host.
+  Report whether a rate-limit window of the caller's own account is currently closed on this host.
 
-  Fail-open: an unreadable or malformed record never blocks the call — it is reported on stderr
-  and skipped, matching the guarantee `rate_limit_flag.live` gives every other reader.
+  Fail-open: an unreadable or malformed record, or one with an unusable reset time, never blocks the
+  call — it is reported on stderr and skipped, matching the guarantee `rate_limit_flag.read_live_records` gives
+  every other reader.
 
   Guarantees:
-    - Never raises: an unreadable or malformed record is reported on stderr and treated as
-      absent, and the call still returns a verdict.
+    - Never raises: an unreadable or malformed record, or one whose reset time is present but not a
+      number naming a calendar date, is reported on stderr naming the record file and treated as
+      absent, and the call still returns a verdict; a record with no reset time is skipped silently.
+    - A record raised under a different account identity than the caller's own never gates the call;
+      a record carrying no account field gates every caller on this host.
 
   Returns:
-    True while at least one record with an unexpired reset timestamp exists.
+    True while at least one record with an unexpired reset timestamp exists that belongs to the caller's account
+    or carries no account.
   """
 
   # Contract:
-  # An unreadable or malformed record never blocks the call; it is reported on stderr
-  # and treated as absent instead of raising.
+  # An unreadable or malformed record, and a record whose reset time is present but unusable
+  # (not a number, or not representable as a calendar date), never blocks the call; it is
+  # reported on stderr naming the record file and treated as absent instead of raising. A record
+  # with no reset time is skipped silently.
+
+  # Contract:
+  # A record raised under a different account identity than the caller's own never gates
+  # the call; a record carrying no account field gates every caller on this host,
+  # whatever account it runs under.
 
   base = flag_dir()
 
@@ -93,10 +172,13 @@ def is_raised() -> bool:
   if not base.is_dir():
     return False
   now = time.time()
+
+  # loop-invariant: the reader's own identity, checked against every record below
+  own = read_account_identity()
   try:
     names = sorted(os.listdir(base))
-  except OSError as e:
-    sys.stderr.write(f"lazy-claude: cannot list {base}: {e}\n")
+  except OSError as error:
+    sys.stderr.write(f"{STDERR_PREFIX} cannot list {base}: {error}\n")
     return False
   for name in names:
     # guard: only record files belong to this contract
@@ -105,24 +187,42 @@ def is_raised() -> bool:
       continue
     try:
       entry = json.loads((base / name).read_text(encoding = "utf-8"))
-    except (OSError, json.JSONDecodeError) as e:
-      sys.stderr.write(f"lazy-claude: ignoring unreadable record {name}: {e}\n")
+    # ValueError covers both a JSON parse failure and a file that is not valid UTF-8
+    except (OSError, ValueError) as error:
+      sys.stderr.write(f"{STDERR_PREFIX} ignoring unreadable record {name}: {error}\n")
       continue
 
-    # guard: a record that is not an object carries no window — report it like the sibling reader
+    # guard: a record that is not an object carries no window — reported so a broken writer is visible
     if not isinstance(entry, dict):
-      sys.stderr.write(f"lazy-claude: ignoring malformed record {name}\n")
+      sys.stderr.write(f"{STDERR_PREFIX} ignoring malformed record {name}\n")
       continue
     # waiver: record field name shared with rate_limit_flag.py, duplicated by the standalone contract
     resets = entry.get("resets_at")
 
-    # guard: a live window holds the flag up; anything else is expired or malformed
-    if isinstance(resets, (int, float)) and now < float(resets):
-      return True
+    # guard: a record without a reset timestamp holds nothing up
+    if resets is None:
+      continue
+
+    # guard: a reset that is not a number naming a date cannot be compared with the clock — reported so
+    # a broken writer is visible, then skipped
+    if not isinstance(resets, (int, float)) or not _is_date(resets):
+      sys.stderr.write(f"{STDERR_PREFIX} ignoring record {name}: reset time is not a number naming a date\n")
+      continue
+
+    # an expired reset timestamp holds nothing up
+    if now >= float(resets):
+      continue
+
+    # another account's window says nothing about this caller's budget; a record
+    # without the field predates the scoping and stays visible to everyone
+    owner = entry.get(_ACCOUNT_FIELD)
+    if isinstance(owner, str) and owner and owner != own:
+      continue
+    return True
   return False
 
 
-def frames(text: str) -> list[dict]:
+def parse_frames(text: str) -> list[dict]:
   """
   Extract every rate-limit payload carried by a stream-json buffer or line.
 
@@ -136,7 +236,7 @@ def frames(text: str) -> list[dict]:
   for line in text.splitlines():
     raw = line.strip()
 
-    # guard: skip the parse for every line that cannot be the frame this function wants
+    # the parse is skipped for every line that cannot be the frame this function wants
     # waiver: external Claude Code stream-json field name, not an internal key
     if not raw or "rate_limit_event" not in raw:
       continue
@@ -145,7 +245,7 @@ def frames(text: str) -> list[dict]:
     except json.JSONDecodeError:
       continue
 
-    # guard: only rate-limit events carry a payload this wrapper reads
+    # only rate-limit events carry a payload this wrapper reads
     # waiver: external Claude Code stream-json field name, not an internal key
     if not isinstance(frame, dict) or frame.get("type") != "rate_limit_event":
       continue
@@ -156,7 +256,7 @@ def frames(text: str) -> list[dict]:
   return found
 
 
-def triggered(info: dict) -> str | None:
+def evaluate_trigger(info: dict) -> str | None:
   """
   Decide whether a rate-limit payload trips the guard.
 
@@ -181,12 +281,12 @@ def triggered(info: dict) -> str | None:
   # waiver: external Claude Code stream-json field name, not an internal key
   status = info.get("status")
 
-  # guard: the two provider statuses that close a window
+  # the two provider statuses that close a window
   # waiver: provider status tokens, a fixed external contract
   if status in ("allowed_warning", "rejected"):
     return str(status)
 
-  # guard: spend has crossed into paid overage — an absent field means unknown, never "no"
+  # spend has crossed into paid overage — an absent field means unknown, never "no"
   # waiver: external Claude Code stream-json field name, not an internal key
   if info.get("isUsingOverage") is True:
     # waiver: trigger token shared with rate_limit_flag.py, duplicated by the standalone contract
@@ -194,16 +294,27 @@ def triggered(info: dict) -> str | None:
   return None
 
 
-def record(info: dict, trigger: str) -> None:
+def save_record(info: dict, trigger: str) -> None:
   """
   Persist one raised window to the host-local flag directory.
 
   Best-effort: a write failure is reported on stderr and swallowed — the guard must never take
   down the daemon it protects.
 
+  A reset the payload names that cannot be read as a date (for example milliseconds sent as seconds)
+  is reported on stderr and treated as absent, so the record carries the fallback expiry instead.
+
   Guarantees:
-    - Never raises: a write failure is reported on stderr and swallowed instead of
+    - Never raises: a write failure of any kind is reported on stderr and swallowed instead of
       propagating to the caller.
+    - A failed write leaves no temporary file behind in the flag directory.
+    - A written record carries the writer's account identity, so it gates every reader running under the
+      same account, wrapper or runtime.
+    - A record is filed per (window, account) under the same file-name scheme the runtime uses, so two accounts
+      raising the same window never overwrite each other's records.
+    - A written record always carries a reset time that can be read as a calendar date; a reset the payload
+      names that cannot be read as one is reported on stderr and replaced by the fallback expiry, exactly as
+      for a payload with no reset.
 
   Args:
     info: The rate-limit payload that raised the flag.
@@ -211,19 +322,37 @@ def record(info: dict, trigger: str) -> None:
   """
 
   # Contract:
-  # A write failure is reported on stderr and swallowed; this function never raises
+  # A write failure of any kind is reported on stderr and swallowed; this function never raises
   # and never takes down the process that called it.
+
+  # Contract:
+  # A failed write leaves no temporary file behind in the shared flag directory.
+
+  # Contract:
+  # A written record carries the writer's account identity, so it gates every reader
+  # running under the same account, whether that reader is the wrapper or the runtime.
+
+  # Contract:
+  # Records are filed per (window, account) under the same file-name scheme the runtime uses,
+  # so two accounts raising the same window never overwrite each other's records, and a record
+  # the wrapper writes is the same file the runtime would write for that window and account.
+
+  # Contract:
+  # A record written here MUST carry a reset time that can be read as a calendar date.
+  # A reset the payload names that cannot be read as one (overflow, non-finite, out of range,
+  # e.g. milliseconds sent as seconds) is reported on stderr and replaced by the fallback expiry,
+  # exactly as for a payload with no reset.
 
   now = time.time()
 
   # an overage trigger is bounded by the overage window, every other trigger by the plain one
   # waiver: external Claude Code stream-json field names, not internal keys
   first, second = ("overageResetsAt", "resetsAt") if trigger == "overage" else ("resetsAt", "overageResetsAt")
-  resets: float | None = None
+  resets: int | float | None = None
   for key in (first, second):
     value = info.get(key)
     if isinstance(value, (int, float)):
-      resets = float(value)
+      resets = value
       break
 
   # derive the per-window filename, trusting only the known alphabet as a path segment
@@ -231,14 +360,23 @@ def record(info: dict, trigger: str) -> None:
   raw_key = info.get("rateLimitType")
   window = raw_key if isinstance(raw_key, str) and raw_key and set(raw_key) <= _SAFE_KEY_CHARS else UNKNOWN_KEY
 
+  # guard: a reset no date can hold (milliseconds sent as seconds, overflow, non-finite) is
+  # repaired to absent, so every reader can still format the record it lands on
+  if resets is not None and not _is_date(resets):
+    sys.stderr.write(f"{STDERR_PREFIX} ignoring reset {resets!r} for {window} — not representable as a date\n")
+    resets = None
+
   # a record born expired protects nothing — the warning is the only clock-skew signal a
   # third-party daemon's host ever emits
   effective = resets if resets is not None else now + FALLBACK_TTL_SEC
   if effective <= now:
     sys.stderr.write(
-      f"lazy-claude: record for {window} is already expired on write "
+      f"{STDERR_PREFIX} record for {window} is already expired on write "
       f"(resets_at={effective}, now={now}) — clock skew?\n"
     )
+
+  # the identity is used twice below (record field + filename) and may cost a config read
+  account = read_account_identity()
 
   # field names shared with rate_limit_flag.py, duplicated by the standalone contract
   # waiver: record and stream-json field names, a fixed cross-writer contract
@@ -251,28 +389,55 @@ def record(info: dict, trigger: str) -> None:
     "trigger": trigger,
     "writer": _WRITER,
     "written_at": now,
+    _ACCOUNT_FIELD: account,
   }
+  # noinspection PyBroadException
   try:
-    target = flag_dir() / f"{window}.json"
+    # one file per (window, account), named exactly as rate_limit_flag.py names it — two accounts
+    # raising the same window must never overwrite each other's records
+    # waiver: filesystem suffix idiom and record-name separator, shared with rate_limit_flag.py
+    target = flag_dir() / f"{window}--{account}.json"
     target.parent.mkdir(parents = True, exist_ok = True)
 
     # atomic replace so a concurrent reader never sees a half-written record
     # waiver: temp-file naming idiom, not a domain constant
     fd, tmp = tempfile.mkstemp(prefix = ".flag.", suffix = ".tmp", dir = str(target.parent))
+    # noinspection PyBroadException
     try:
       # waiver: stdlib file-mode idiom
       with os.fdopen(fd, "w", encoding = "utf-8") as fh:
         json.dump(entry, fh, indent = 2)
       os.replace(tmp, target)
-    except OSError:
-      # best-effort cleanup of the orphan temp file before surfacing the failure below
+    except Exception:
+      # best-effort cleanup before surfacing the failure below — nothing on this host ever
+      # collects an orphan temp file in the shared flag directory
       try:
         os.unlink(tmp)
       except OSError:
         pass
       raise
-  except OSError as e:
-    sys.stderr.write(f"lazy-claude: cannot write rate-limit flag: {e}\n")
+  # waiver: the guard must never take down the daemon it protects, whatever the write failure was
+  # pylint: disable-next=broad-exception-caught
+  except Exception as error:
+    sys.stderr.write(f"{STDERR_PREFIX} cannot write rate-limit flag: {error}\n")
+
+
+def _is_date(value: int | float) -> bool:
+  """
+  Report whether an epoch-seconds value can be turned into a calendar date.
+
+  Args:
+    value: Candidate reset timestamp in epoch seconds.
+
+  Returns:
+    True when the value names a representable UTC date; False for an overflowing, non-finite,
+    or out-of-range value.
+  """
+  try:
+    datetime.fromtimestamp(float(value), tz = UTC)
+  except (OverflowError, ValueError, OSError):
+    return False
+  return True
 
 
 def find_real_claude() -> str | None:
@@ -291,11 +456,11 @@ def find_real_claude() -> str | None:
       continue
     candidate = Path(entry) / _CLAUDE
 
-    # guard: only an executable file that is not this very wrapper qualifies
+    # only an executable file that is not this very wrapper qualifies
     if not candidate.is_file() or not os.access(candidate, os.X_OK):
       continue
 
-    # guard: PATH may list the wrapper's own directory first — never wrap ourselves
+    # PATH may list the wrapper's own directory first — never wrap ourselves
     if candidate.resolve() == own:
       continue
     return str(candidate)
@@ -312,10 +477,10 @@ def is_headless(argv: list[str]) -> bool:
   Returns:
     True when a headless token is present.
   """
-  return any(a in _HEADLESS_TOKENS for a in argv)
+  return any(token in _HEADLESS_TOKENS for token in argv)
 
 
-def wants_stream_json(argv: list[str]) -> bool:
+def is_stream_json(argv: list[str]) -> bool:
   """
   Report whether the caller asked for stream-json output.
 
@@ -328,8 +493,8 @@ def wants_stream_json(argv: list[str]) -> bool:
   Returns:
     True when the stream-json output format is requested.
   """
-  for i, arg in enumerate(argv):
-    if arg == _OUTPUT_FORMAT_TOKEN and i + 1 < len(argv) and argv[i + 1] == _STREAM_JSON:
+  for idx, arg in enumerate(argv):
+    if arg == _OUTPUT_FORMAT_TOKEN and idx + 1 < len(argv) and argv[idx + 1] == _STREAM_JSON:
       return True
     if arg == f"{_OUTPUT_FORMAT_TOKEN}={_STREAM_JSON}":
       return True
@@ -361,16 +526,15 @@ def run_streaming(real: str, argv: list[str]) -> int:
 
   # stdin, stderr, and the exit code pass through untouched; only stdout is tapped
   with subprocess.Popen([ real, *argv ], stdout = subprocess.PIPE, text = True, encoding = "utf-8") as proc:
-    # guard: PIPE above guarantees a stream; the check narrows the Optional for the reader loop
+    # PIPE above guarantees a stream; the check narrows the Optional for the reader loop
     if proc.stdout is not None:
       # forward each line as it arrives, feeding the flag from the same bytes
       for line in proc.stdout:
         sys.stdout.write(line)
         sys.stdout.flush()
-        for info in frames(line):
-          trigger = triggered(info)
-          if trigger is not None:
-            record(info, trigger)
+        for info in parse_frames(line):
+          if (trigger := evaluate_trigger(info)) is not None:
+            save_record(info, trigger)
     proc.wait()
     return proc.returncode
 
@@ -394,7 +558,7 @@ def main(argv: list[str]) -> int:
   # guard: no real claude anywhere on PATH — nothing to wrap
   if real is None:
     # waiver: one-off human-facing message
-    sys.stderr.write("lazy-claude: no `claude` executable found on PATH\n")
+    sys.stderr.write(f"{STDERR_PREFIX} no `claude` executable found on PATH\n")
     return EXIT_NO_CLAUDE
 
   # Domain(runtime.job-execution):
@@ -417,11 +581,11 @@ def main(argv: list[str]) -> int:
   # guard: headless under a raised flag — refuse before any tokens burn
   if is_raised():
     # waiver: one-off human-facing message
-    sys.stderr.write("lazy-claude: rate-limit flag raised — skipping headless call\n")
+    sys.stderr.write(f"{STDERR_PREFIX} rate-limit flag raised — skipping headless call\n")
     return EXIT_RATE_LIMITED
 
   # a stream-json caller shares its frames with the host; a text caller just runs
-  if wants_stream_json(argv):
+  if is_stream_json(argv):
     return run_streaming(real, argv)
   return subprocess.run([ real, *argv ], check = False).returncode
 

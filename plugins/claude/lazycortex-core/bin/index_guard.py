@@ -10,12 +10,15 @@ onto `.git/index`, and removes the conflicted-copy litter afterwards.
 
 The heal is file-level and conservative: it runs only when no `index.lock` is present (no git
 operation in flight), and only when the newest copy carries the index signature and agrees with
-`HEAD` while the live index does not. File timestamps play no part — an ordinary `git status`
-rewrites the live index and would make a resurrected stale one look newest. Two candidates that
-both disagree with `HEAD` cannot be ranked, so they are left in place for the operator.
+`HEAD`; whether the live index agrees as well does not matter. File timestamps only choose which
+copy is examined — the newest — and never decide whether it wins: an ordinary `git status`
+rewrites the live index and would make a resurrected stale one look newest. When neither the
+newest copy nor the live index agrees with `HEAD` they cannot be ranked, so every copy is left in
+place for the operator.
 """
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import shutil
@@ -86,8 +89,8 @@ def _matches_head(repo_root: Path, index_file: Path) -> bool:
 
 def guard_index(repo_root: Path) -> dict:
   """
-  Restore the newest conflicted copy of `.git/index` when it, and not the live file, agrees with
-  `HEAD`, and remove the conflicted-copy litter.
+  Restore the newest conflicted copy of `.git/index` when it agrees with `HEAD`, and remove the
+  conflicted-copy litter.
 
   Guarantees:
     - The live index is replaced only by a signature-valid conflicted copy that agrees with
@@ -113,14 +116,16 @@ def guard_index(repo_root: Path) -> dict:
   # # Trustworthy recovery of a sync-displaced git index
   # A cloud-sync client can race a commit's rewrite of the shared index, resurrecting an older
   # version under the real name while parking the newer write aside as a conflicted copy.
-  # Recovery never trusts file timestamps for this — an unrelated command like a status check
-  # freely rewrites the live index and would make a resurrected stale copy look newest again. The
-  # one trustworthy signal is agreement with the last commit: a conflicted copy that agrees with
-  # it, when the live index does not, is the version actually written last and is restored in its
-  # place. A copy that settles nothing new — agreeing with a live index that already matches, or
-  # agreeing with neither — is treated as litter and discarded; only two candidates that each
-  # disagree with the last commit in their own way are left untouched, since nothing here can
-  # rank one over the other.
+  # Recovery never trusts file timestamps to say which state is right — an unrelated command like a
+  # status check freely rewrites the live index and would make a resurrected stale copy look newest
+  # again. Timestamps only pick which of several conflicted copies is examined: the newest one. The
+  # one trustworthy signal is agreement with the last commit: that copy, when it agrees with the
+  # last commit, replaces the live index, whether or not the live index agrees as well, and the
+  # older copies are not compared at all. Everything else is treated as litter and discarded: a
+  # copy that disagrees with the last commit while the live index agrees, a copy identical to the
+  # live index or not a valid index at all, and every copy when no live index exists to compare
+  # against. Only when neither the newest copy nor the live index agrees with the last commit are
+  # all copies left untouched, since nothing here can rank one over the other.
 
   git_dir = _git_common_dir(repo_root)
 
@@ -129,7 +134,10 @@ def guard_index(repo_root: Path) -> dict:
     return { "restored": False, "removed": 0, "skipped": "no-git" }
 
   # oldest-to-newest, so the last element is the one candidate worth restoring
-  copies = sorted(git_dir.glob(_CONFLICTED_COPY_GLOB), key = lambda p: p.stat().st_mtime)
+  copies = sorted(
+    ( git_dir / name for name in os.listdir(git_dir) if fnmatch.fnmatch(name, _CONFLICTED_COPY_GLOB) ),
+    key = lambda copy_path: copy_path.stat().st_mtime,
+  )
 
   # guard: no conflicted copies — the common case, exit without touching anything
   if not copies:
@@ -172,9 +180,9 @@ def guard_index(repo_root: Path) -> dict:
       restored = True
 
   # Contract:
-  # A conflicted copy is deleted only after it was either restored as the new live index or
-  # proved to be litter against `HEAD`; when neither candidate can be ranked against `HEAD`,
-  # every conflicted copy is left in place for the operator.
+  # Conflicted copies are removed only after the newest one was either restored as the new
+  # live index or proved to be litter; when neither the newest copy nor the live index agrees
+  # with `HEAD`, every conflicted copy is left in place for the operator.
 
   # every copy is settled now — restored, or proved litter against HEAD
   removed = 0

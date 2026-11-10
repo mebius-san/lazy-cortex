@@ -4,9 +4,9 @@
 Shared pattern library and scan primitives for the lazy-guard hook family.
 
 Owns the secret (FAIL) and PII/infrastructure (WARN) check registries, the safe-line
-suppressions, the `.guard-public.json` config loader (waivers + `public_scopes`), and the
-staged-diff / whole-file scanning helpers. Consumed by the `lazy-guard.secrets` and
-`lazy-guard.check-public` hooks and by the publish-time secret gate.
+suppressions, the `.guard-public.json` config loader (waivers, `public_scopes`, and the skip paths), and
+the staged-diff / whole-file scanning helpers. Consumed by the `lazy-guard.secrets` and
+`lazy-guard.check-public` hooks, by the core `guard-public-files` verb, and by the publish-time secret gate.
 
 CLI: `guard_checks.py scan-files <path>...` scans full file contents against the FAIL
 checks (waivers honoured, safe lines skipped) and exits non-zero when findings remain —
@@ -45,7 +45,9 @@ class Check(TypedDict):
     name: Human-readable label identifying the check in findings output.
     pattern: Compiled regular expression the check matches against scanned lines.
   """
+  # Label naming the check in findings output.
   name: str
+  # Compiled expression matched against each scanned line.
   pattern: re.Pattern[str]
 
 
@@ -143,10 +145,10 @@ def compile_scope_glob(glob: str) -> re.Pattern[str]:
   # nested further beneath it.
 
   parts = []
-  i = 0
-  while i < len(glob):
-    c = glob[i]
-    if c == "*" and i + 1 < len(glob) and glob[i + 1] == "*":
+  pos = 0
+  while pos < len(glob):
+    char = glob[pos]
+    if char == "*" and pos + 1 < len(glob) and glob[pos + 1] == "*":
 
       # Domain(guard.public-scan):
       # # A double-wildcard segment covers any depth, including none at all
@@ -155,27 +157,29 @@ def compile_scope_glob(glob: str) -> re.Pattern[str]:
       # trailing double-wildcard must still cover a file sitting directly in that directory, not
       # only files nested somewhere beneath it.
 
-      # a double-wildcard segment maps to "match anything, any length"
-      parts.append(".*")
-      i += 2
+      # step past the double wildcard itself
+      pos += 2
 
-      # consume a following slash so `dir/**/file` also matches `dir/file`
-      if i < len(glob) and glob[i] == "/":
-        parts.append("/?")
-        i += 1
-    elif c == "*":
+      # a `**/` segment matches whole leading segments or none, so `dir/**/file` matches `dir/file`
+      # but never `dir/xfile`; elsewhere the double wildcard matches anything, any length
+      if pos < len(glob) and glob[pos] == "/":
+        parts.append("(?:.*/)?")
+        pos += 1
+      else:
+        parts.append(".*")
+    elif char == "*":
       parts.append("[^/]*")
-      i += 1
-    elif c == "?":
+      pos += 1
+    elif char == "?":
       parts.append("[^/]")
-      i += 1
-    elif c in r".^$+(){}|\\":
-      parts.append(re.escape(c))
-      i += 1
+      pos += 1
+    elif char in r".^$+(){}|\\":
+      parts.append(re.escape(char))
+      pos += 1
     else:
-      parts.append(c)
-      i += 1
-  return re.compile("^" + "".join(parts) + "$")
+      parts.append(char)
+      pos += 1
+  return re.compile("^" + "".join(parts) + r"\Z")
 
 
 def in_public_scope(path: str, compiled_globs: list[re.Pattern[str]]) -> bool:
@@ -203,53 +207,120 @@ def in_public_scope(path: str, compiled_globs: list[re.Pattern[str]]) -> bool:
   # # No declared scope means the whole repository is public
   # A repository that declares no public-scope patterns at all is not treated as having no public
   # surface — it is treated as being public everywhere, matching how the guard behaved before scope
-  # narrowing existed. Declaring even one scope pattern switches the repository into narrowed mode,
-  # where only paths matching a declared pattern count as public.
+  # narrowing existed. Declaring at least one usable scope pattern switches the repository into
+  # narrowed mode, where only paths matching a usable pattern count as public.
 
   # guard: no scopes declared — treat the whole repo as public
   if not compiled_globs:
     return True
-  return any(rx.match(path) for rx in compiled_globs)
+  return any(regex.match(path) for regex in compiled_globs)
 
 
-def load_config(root: str) -> tuple[list, list[re.Pattern[str]]]:
+def load_config(root: str) -> tuple[list, list[re.Pattern[str]], list[re.Pattern[str]]]:
   """
-  Load the waivers and public-scope globs declared for a repository.
+  Load the waivers, public-scope globs, and skip-path globs declared for a repository.
 
-  Reads the guard config file at the repository root. A missing or unreadable file yields
-  an empty result. Scope-glob entries that are not non-empty strings or that fail to
-  compile are silently dropped; the remaining entries are returned in source order. An
-  empty list of scope globs signals the legacy behavior of treating the whole repo as
-  public.
+  A missing or unreadable guard config file yields three empty lists. Scope-glob and skip-path
+  entries that are not non-empty strings or that fail to compile are silently dropped; the
+  remaining entries keep their source order. An entry of the skip paths that ends in `/` covers
+  that directory and everything beneath it.
+
+  Guarantees:
+    - An empty list of scope globs means no public scope is declared, and callers treat the whole repo as public.
+    - A missing or unreadable guard config file yields that empty list.
 
   Args:
     root: Absolute path to the repository root.
 
   Returns:
-    A tuple `(waivers, compiled_scope_globs)` where `waivers` is the list of waiver dicts
-    from the file and `compiled_scope_globs` is the list of compiled scope-glob regexes.
+    A tuple `(waivers, compiled_scope_globs, compiled_skip_globs)`: the waiver dicts from the file,
+    the compiled scope-glob regexes, and the compiled regexes of the paths never scanned.
   """
+
+  # Contract:
+  # An empty list of scope globs means the repository declares no public scope, and every caller MUST then treat
+  # the whole repository as public. A missing or unreadable guard config file yields that empty list.
+
   config_path = os.path.join(root, CONFIG_FILENAME)
   try:
-    with open(config_path, encoding = "utf-8") as f:
-      data = json.load(f)
+    with open(config_path, encoding = "utf-8") as fh:
+      data = json.load(fh)
   except (json.JSONDecodeError, OSError):
-    return [], []
+    return [], [], []
   # waiver: external-format guard config field names, not internal keys
   waivers = data.get("waivers", []) or []
   # waiver: external-format guard config field name, not an internal key
   scopes_raw = data.get("public_scopes", []) or []
+  # waiver: external-format guard config field name, not an internal key
+  skips_raw = data.get("global_skip_paths", []) or []
+
+  # Domain(guard.public-scan):
+  # # Unusable path entries are dropped without notice
+  # The public scopes and the paths that are never scanned follow the same rule. An entry that is not a
+  # non-empty string, or that cannot be compiled, is dropped without notice and counts as never declared,
+  # so one bad entry does not disable the other entries of its list. A repository whose every scope entry
+  # is unusable therefore declares no scope at all and stays public everywhere. A list of never-scanned
+  # paths whose every entry is unusable skips nothing.
+
+  # compile the usable entries of both path lists in source order
+  return waivers, _compile_path_globs(scopes_raw, directory_entries = False), \
+    _compile_path_globs(skips_raw, directory_entries = True)
+
+
+def _compile_path_globs(entries: list, *, directory_entries: bool) -> list[re.Pattern[str]]:
+  """
+  Compile the usable entries of a configured path-glob list, dropping the unusable ones.
+
+  Entries that are not non-empty strings or that fail to compile are dropped without notice, so
+  one bad entry never disables the others.
+
+  Args:
+    entries: Raw entries read from the guard config.
+    directory_entries: Whether an entry ending in `/` stands for that directory and everything under it.
+
+  Returns:
+    The compiled regexes of the usable entries, in source order.
+  """
   compiled = []
-  for g in scopes_raw:
-    # guard: drop non-string or empty scope entries
-    if not isinstance(g, str) or not g:
+  for entry in entries:
+    # guard: drop non-string or empty entries
+    if not isinstance(entry, str) or not entry:
       continue
+
+    # a trailing-slash entry names a directory and covers its whole subtree
+    glob = entry + "**" if directory_entries and entry.endswith("/") else entry
     try:
-      compiled.append(compile_scope_glob(g))
+      compiled.append(compile_scope_glob(glob))
     except re.error:
       # invalid glob — skip silently so a single bad entry doesn't disable the whole config
       continue
-  return waivers, compiled
+  return compiled
+
+
+def is_skipped(path: str, compiled_skip_globs: list[re.Pattern[str]]) -> bool:
+  """
+  Return whether the given path is excluded from scanning by the configured skip paths.
+
+  Args:
+    path: Repo-root-relative path to test.
+    compiled_skip_globs: Compiled skip-path globs from the guard config.
+
+  Returns:
+    True when the path matches at least one skip-path glob; False otherwise, including when
+    no skip paths are configured.
+  """
+
+  # Domain(guard.public-scan):
+  # # Skip paths are never scanned
+  # Vendored or third-party code can be declared as skip paths, and a path they cover is never
+  # scanned by the public-scan check before a commit or a publication. Each entry is relative to the
+  # repository root and covers paths exactly as a public-scope pattern does: a double wildcard
+  # spans any depth, a single wildcard stays inside one path segment. An entry ending in a slash
+  # names a directory together with everything beneath it. Skip paths narrow only this check; the
+  # secrets check ignores them and reads only the waivers.
+
+  # a path is skipped once any skip glob covers it
+  return any(regex.match(path) for regex in compiled_skip_globs)
 
 
 def has_config(root: str) -> bool:
@@ -271,12 +342,14 @@ def is_waived(check_id: str, file_path: str, matched_text: str, waivers: list) -
 
   A waiver matches when its check identifier covers the finding (`*` or exact match), its
   scope glob covers the file path (`*` or `fnmatch`), its pattern matches the offending
-  text (case-insensitive `re.search`), and any declared expiry is still in the future.
+  text (case-insensitive `re.search`), and any declared expiry date has not yet passed. The expiry
+  date is inclusive: a waiver stays in force through its expiry day and stops applying the day after.
 
   Guarantees:
     - A finding is suppressed only when a waiver's check identifier, scope glob, and pattern
-      all match it and any declared expiry has not yet passed; missing even one of these
-      conditions leaves the finding unsuppressed.
+      all match it and any declared expiry date has not yet passed; the expiry date is
+      inclusive, so a waiver stays in force through its expiry day and stops applying the day
+      after. Missing even one of these conditions leaves the finding unsuppressed.
 
   Args:
     check_id: Identifier of the check that produced the finding (e.g. `"A3"`).
@@ -290,50 +363,54 @@ def is_waived(check_id: str, file_path: str, matched_text: str, waivers: list) -
 
   # Contract:
   # A waiver suppresses a finding only when its check identifier, its scope glob, and its
-  # pattern all match the finding, and any declared expiry has not yet passed. A finding
-  # missing even one of these conditions is never suppressed.
+  # pattern all match the finding, and any declared expiry date has not yet passed. The expiry
+  # date is inclusive: the waiver stays in force through its expiry day and stops applying the
+  # day after. A finding missing even one of these conditions is never suppressed.
 
   # Domain(guard.public-scan):
   # # A waiver only covers a finding when every one of its conditions holds
   # An accepted exception is never a blanket suppression. It applies to one finding only when its
   # check identifier covers the finding, its scope glob covers the file the finding was found in,
   # its pattern actually matches the offending text, and — when it declares an expiry — that expiry
-  # has not yet passed. Missing any one of these conditions means the waiver does not apply, and the
-  # finding still blocks the run as if no waiver existed at all.
+  # day has not yet passed: the expiry date is inclusive, so the waiver stays in force through its
+  # expiry day and stops applying only the day after.
+  # A waiver that declares no pattern at all has nothing to test and matches any offending text.
+  # Missing any one of the other conditions means the waiver does not apply, and the finding still
+  # blocks the run as if no waiver existed at all.
 
   # a waiver covers the finding only when check id, scope, pattern, and expiry all agree
   today = date.today().isoformat()
-  for w in waivers:
-    # check-id match
+  for waiver in waivers:
+    # an absent check id means the waiver names every check
     # waiver: external-format guard config field name, not an internal key
-    wcheck = w.get("check", "*")
+    wcheck = waiver.get("check", "*")
 
-    # guard: skip waivers whose check id does not match
+    # a waiver applies only to its own check id
     if wcheck not in ("*", check_id):
       continue
 
-    # scope match
+    # an absent scope means the waiver covers every file
     # waiver: external-format guard config field name, not an internal key
-    scope = w.get("scope", "*")
+    scope = waiver.get("scope", "*")
 
-    # guard: skip waivers whose scope does not cover this path
+    # a waiver applies only inside its scope
     if scope != "*" and not fnmatch(file_path, scope):
       continue
 
-    # pattern match
+    # an unparsable pattern matches nothing, so its waiver never applies
     try:
-      # guard: skip waivers whose pattern does not match the finding
-      if not re.search(w.get("pattern", ""), matched_text, re.IGNORECASE):
+      # a waiver with a pattern applies only to findings it matches
+      if not re.search(waiver.get("pattern", ""), matched_text, re.IGNORECASE):
         continue
     except re.error:
       continue
 
-    # expiry check
+    # an absent expiry means the waiver never lapses
     # waiver: external-format guard config field name, not an internal key
-    expires = w.get("expires")
+    expires = waiver.get("expires")
 
-    # guard: skip expired waivers
-    if expires and today >= expires:
+    # a waiver stays in force through its expiry day and lapses the day after
+    if expires and today > expires:
       continue
     return True
   return False
@@ -354,8 +431,8 @@ def extract_git_chdir(command: str) -> str | None:
   Returns:
     The `-C` argument when the command carries one; None otherwise.
   """
-  m = re.search(r"\bgit\s+(?:-(?!C)\S+(?:\s+[^-\s]\S*)?\s+)*-C\s+([^-\s]\S*)", command)
-  return m.group(1) if m else None
+  match = re.search(r"\bgit\s+(?:-(?!C)\S+(?:\s+[^-\s]\S*)?\s+)*-C\s+([^-\s]\S*)", command)
+  return match.group(1) if match else None
 
 
 def find_repo_root(cwd: str | None = None) -> str | None:
@@ -427,7 +504,7 @@ def collect_staged_added_lines(root: str) -> list[tuple[str, str]]:
 
   # drop .age files — they're encrypted by design
   # waiver: filesystem extension idiom (age-encrypted artifact), not a domain constant
-  return [ (f, c) for f, c in added_lines if not f.endswith(".age") ]
+  return [ (file_path, content) for file_path, content in added_lines if not file_path.endswith(".age") ]
 
 
 def scan_lines(
@@ -454,13 +531,13 @@ def scan_lines(
     # what any individual check's pattern would otherwise match on it. Such a line is skipped in
     # full before any check is even attempted, rather than being judged check by check.
 
-    # guard: skip lines matching a known safe-line pattern
-    if any(p.search(content) for p in SAFE_LINE_PATTERNS):
+    # lines matching a known safe-line pattern are exempt from the scan
+    if any(pattern.search(content) for pattern in SAFE_LINE_PATTERNS):
       continue
     for check_id, check in checks.items():
       # waiver: internal check-definition schema field name, single-source set in FAIL_CHECKS/WARN_CHECKS
-      m = check["pattern"].search(content)
-      if m and not is_waived(check_id, file_path, m.group(), waivers):
+      match = check["pattern"].search(content)
+      if match and not is_waived(check_id, file_path, match.group(), waivers):
         # waiver: internal check-definition schema field name, single-source set in FAIL_CHECKS/WARN_CHECKS
         findings.append(f"  [{check_id}] {check['name']}: {file_path}")
   return list(dict.fromkeys(findings))
@@ -483,12 +560,13 @@ def main(argv: list[str]) -> int:
   # guard: wrong verb or no paths — refuse with usage
   # waiver: one-off CLI verb literal, single call site
   if len(argv) < 2 or argv[0] != "scan-files":
+    # waiver: CLI usage text, printed once at its single call site
     sys.stderr.write("usage: guard_checks.py scan-files <path>...\n")
     return 2
 
   # the first file's repo supplies the waivers every scanned path is judged against
   root = find_repo_root(os.path.dirname(os.path.abspath(argv[1])) or None)
-  waivers, _ = load_config(root) if root else ([], [])
+  waivers, _, _ = load_config(root) if root else ([], [], [])
 
   # scan every readable file line by line; unreadable/binary files are skipped silently
   lines: list[tuple[str, str]] = []
@@ -496,8 +574,8 @@ def main(argv: list[str]) -> int:
     rel = os.path.relpath(path, root) if root else path
     try:
       # waiver: stdlib open() error-mode literal, not a domain constant
-      with open(path, encoding = "utf-8", errors = "strict") as f:
-        lines.extend((rel, line.rstrip("\n")) for line in f)
+      with open(path, encoding = "utf-8", errors = "strict") as fh:
+        lines.extend((rel, line.rstrip("\n")) for line in fh)
     except (OSError, UnicodeDecodeError):
       continue
 
@@ -512,7 +590,7 @@ def main(argv: list[str]) -> int:
   # findings decide the exit code — the publish gate branches on it
   findings = scan_lines(lines, FAIL_CHECKS, waivers)
 
-  # guard: clean scan
+  # a clean scan exits with success
   if not findings:
     return 0
   sys.stdout.write(SCAN_FINDINGS_HEADER + "\n" + "\n".join(findings) + "\n")

@@ -4,6 +4,25 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 11.0.0 — 2026-11-10 UTC
+
+- **Breaking:** The `repos` settings section is retired, and the `products` section moves to version 3, which drops `source.repo` from every product record and removes every `repo`-kind dependency, since a product's code always lives in the repository that holds its spec catalog. The settings migration applies this to `lazy.settings.json` and to the local overlay `lazy.settings.local.json`; run `/lazy-core.setup` once after updating.
+- New `lazy-core.migrate` skill applies the consumer migration steps that plugins ship. Autosetup runs these steps under a write guard, and `/lazy-core.setup` snapshots the repo first and removes the snapshot at the end. A dry run takes no snapshot.
+- Migration is sturdier. It names its repo root and commits install-chain writes first. It skips steps that no longer apply and resumes an aborted release. If a step's commit is refused, the step is rolled back. Only steps that are still unresolved and empty are marked applied.
+- New `settings-rungs` verb lists the settings-ladder keys added since a given revision.
+- Failures of routines, daemons and the agents they run now go to the error ledger only. The ledger prunes old entries and tolerates late incidents. A halt is opened and counted exactly once, however it is written.
+- A rebase that cannot start now halts until the operator clears it. Fail-open read paths no longer raise, and scheduled spawns carry a git author.
+- Job retention moved to a new `runtime-gc` verb and a daily routine. It also clears misplaced job folders and runtime files with no owner. Job collection reports clearer statuses, and a new `retire-jobs` verb retires finished jobs.
+- The git guard releases its lock after a failed MCP commit or reset. It also acts on a failure that arrives with a payload session, never raises on a malformed `git` settings section, and honours waiver expiry. A new `guard-public-files` check covers public repos.
+- `guard-public-write` keeps recorded scopes unless `--scope` or `--whole-repo` states the mode. `permission-edit` keeps the file's layout and fails rather than drop an MCP tool held by both lists.
+- New mechanics verbs for install flows: `agent-models-seed`, `permission-edit`, `guard-public-write`, `mcp-config-drop`, `context-scan` and `gitignore-ensure`. Scaffold gets `sync-plugin`, `set-entry` and `drop-entry`, and the scaffold-sync skill runs `sync-plugin`. Missing `--prefix` or `--scope` is now refused with a clear message, and verbs write to the checkout root when run from a subdirectory.
+- Audit now checks that skills, commands and agents are written in English. Audit and doctor measure always-loaded context with the same numbers `slim-context` reports, and doctor reads the context-budget grade from the verb's level.
+- `resolve-language` takes `--section`, so a plugin's own language key overrides the repo-wide one.
+- Model tiers: new `fable` tier and provider model rules, plus a default tier for the spec coherence checker.
+- The per-asset architecture review class is removed. Recover gains a `revert-retry` verb, and doctor no longer makes a dead revert commit.
+- `offer-protocols` finds installed candidates through the plugin registry instead of walking the cache. The daemon unit is pinned to a version-stable interpreter, and its shim survives a removed one.
+- `log-clean` no longer distills logs into memory. Agents, skills and the memory writer now commit by explicit pathspec, with no plain `git add`. The review audit reads merged settings, and update-plugin failure modes are clearer.
+
 ### 10.6.0 — 2026-10-24 UTC
 
 - `lazy-core.audit` now warns about any agent whose `tools:` list has `Write` but not `Edit`, and the agent-writing rule now requires both together.
@@ -786,6 +805,32 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 10.0.0 — 2026-11-10 UTC
+
+- **Breaking:** The old `spec.decisions.md` rule is renamed to `lazy-spec.decisions.md` (plugin namespace), so the update deletes the stale `.claude/rules/spec.decisions.md` copy that would otherwise load twice; `/lazy-core.setup` applies it.
+- **Breaking:** A spec document's product tag now reads `product/<spec_path>` (the product's full tree path), so the update rewrites tags on existing documents, fixes `wiki/product/` pins on documents moved into nested products, and adds the missing `wiki_pinned_topics` block; `/lazy-core.setup` applies it.
+- **Breaking:** The middle asset gates (`spec_plan_done`, `spec_develop_done`, `spec_tests_passing`), asset dependencies (`spec_depends_on`, the `blocked` state) and the level-note `Revise design` row are retired, so the update strips these keys and rows from existing spec notes; `/lazy-core.setup` applies it.
+- **Breaking:** The product-root `architecture.md` review class is now `system-architecture`, so the update renames the old settings entry; `/lazy-core.setup` applies it.
+- **Breaking:** The `experts=` field on `spawn-product` decision lines is retired, so the update removes it from open spec requests, which would otherwise fail on apply; `/lazy-core.setup` applies it.
+- **Breaking:** Source links to product code now point at files in the catalog's own repository (`/<path>`) instead of the forge web view, and the `spec_source_branches` key is retired, so the update rewrites existing links and drops that key; `/lazy-core.setup` applies it.
+- **Breaking:** Upstream unit-note `# History` sections are now grouped under one date heading per day, oldest day first, so the update reformats existing flat histories; `/lazy-core.setup` applies it.
+- **Breaking:** Implementation now happens per product release, not per asset. New release ladder with release scaffold, version, delta, deploy and publish steps, a release owner who is woken after Publish, and design-only asset types plus product-level architecture and test-plan documents.
+- **Breaking:** Product code now lives in the catalog's own repository.
+- **Breaking:** `spec_released` is the readiness flag, with a new `spec_built` gate, and un-cancelling returns an asset to draft and retracts its review verdict. Per-asset plans, per-asset architecture documents and the build-time design check are removed.
+- Review classes now come from configuration. `product-config` no longer generates role-expert classes, and it asks for a docs-writer role. The release implementer resolves from `release.implementer`, a product `implementer_chain`, or the repo-level `spec.release.implementer_chain`. A request applies whole or not at all.
+- Every approval now triggers a coherence check by a checker agent. Conflicts appear in a separate `Conflicts` group of `# Gates` with "Resolve here" / "Not a conflict" actions. `# Gates` has two groups with a fixed row order.
+- Vision is a living document that decisions are promoted from, and is opt-in for features.
+- `lazy-spec.sync-with-code` reconciles every spec document with the code, for the whole tree, one product or one asset. It writes the born-deferred stage itself and asks before rewriting a reviewed target design the code has not reached.
+- Approval is checked against the decision registry first, so a refused approval leaves the document untouched. A document left in the wrong stage by its own job wakes its coordinator once, then warns.
+- Wake failures now reach the error ledger, and a daily sweep prunes stale runtime sidecar rows.
+- Spec-note commits go by explicit pathspec and never leave a dirty path or sweep the index. Install seeds tiers through the core verb and reports the step as seeded or unchanged.
+- `lazy-spec.audit` judges type/role agreement by family, so level documents no longer raise false WARNs. It lists findings as plain bullets and reads stage, tag, attachment and gate-shape findings from a new `spec-check` verb.
+- Superseding now stamps the old record on a dedup match and refuses a self-supersede. `lazy-spec.drive` close never switches branches over uncommitted work.
+- `add-asset-type` resumes a declaration left without a playbook instead of refusing it. `release` is never used as an alias base.
+- Fixed `spec.vault_root` being treated as the repository root. An empty language answer from core is now an error rather than a language.
+- Stats blocks render as a nested markdown list, and the catalog root counts its products.
+- Failed icon repaints now reach the error ledger, and the coherence job names neighbours by path.
+
 ### 9.13.0 — 2026-10-24 UTC
 
 - Every reviewable document that sits outside a review now gets a `Review` row on its asset or level note, in any stage except cancelled and excluding append-only report journals. Ticking the row on an empty or deferred document first moves it to draft, then opens its review. A tick on a document that is still the untouched template launches nothing and the status brief says so. An operator edit alone never opens a review.
@@ -1194,6 +1239,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 6.2.0 — 2026-11-10 UTC
+
+- `tag-pages apply --templated` writes descriptions for new tag pages from a template, with no agent run needed. The tag-pages agent and the plugin skills now go through the `tag-pages`, `plugin-install` and `snippet-enable` commands.
+- A failed `plugin-install` write now restores the whole bundle, and a dry run writes nothing. An offline run with no cached catalog installs the cached bundle, the same way deploy resolves it.
+- `lazy-obsidian.install` again reports the tier-seed step as seeded or unchanged.
+- `lazy-obsidian.update-plugin` documents its failure modes more clearly.
+
 ### 6.1.3 — 2026-10-06 UTC
 
 - Icon sync now finds icon registries shipped by other installed plugins through Claude Code's install registry (`installed_plugins.json`) instead of walking the plugin cache. Previously it could pick up a stale older copy, not the version you have enabled.
@@ -1451,6 +1503,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-diagram
 
+### 2.0.3 — 2026-11-10 UTC
+
+- `/lazy-diagram.install` seeds the drawer agents' model tiers through the core plugin's seeding verb. It reports that step as `seeded` or `unchanged`, and relays a missing core tier table instead of inventing seed lines.
+- `/lazy-diagram.audit` finds the plugin root in a fixed order: the `$LAZYCORTEX_PLUGIN_DIRS` entry, then the dev-vault sibling, then the repo's own copy, then the recorded install path.
+
 ### 2.0.2 — 2026-10-06 UTC
 
 - `lazy-diagram.install` and `lazy-diagram.audit` now locate the installed plugin and the core CLI from the highest-version record in `installed_plugins.json`. They no longer pick the last record or the newest cache directory, so they act on the version actually enabled on the machine rather than a stale cached copy.
@@ -1548,6 +1605,17 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
 
 ## lazycortex-review
+
+### 6.14.0 — 2026-11-10 UTC
+
+- New `repair-structure` step fixes mechanical document damage on its own (a lone edit marker, an unclosed code fence, a stray mark in the review history section) without guessing. The coordinator runs it before calling the doc doctor, which is now dispatched only when the document still fails to parse afterwards.
+- New `configure-apply` step writes a configured review class through core settings. It takes its payload from a file, so a quoted heading survives, and it reports a core command-line failure as a clear refusal instead of a traceback.
+- Install now writes settings through core and refuses to touch an unparseable settings file.
+- Review audit and the review commands read the repo's merged settings (`.claude/lazy.settings.json` with its local overlay), not only the tracked file.
+- Submitting a document that has a pending command now opens the writer round, and the banner no longer shows ready while a writer is still owed.
+- An unclosed code fence now closes before the next review section instead of at a comment line inside the code.
+- A missing or empty review language from core is now reported as an error instead of being used as a language.
+- Removed the unused launchd and systemd unit templates that shipped with the configure skill.
 
 ### 6.13.1 — 2026-10-24 UTC
 
@@ -1803,6 +1871,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-observe
 
+### 2.2.6 — 2026-11-10 UTC
+
+- The runtime dashboard now prices provider models and lists models it cannot price as unpriced instead of leaving them out of the cost figures.
+- The dashboard's cost rows show "unpriced" only when unpriced tokens actually grew in the selected period.
+- The install step's `set-answer` now refuses any key that looks like a secret, not only two exact names. The runtime alert rules gained a new entry.
+
 ### 2.2.5 — 2026-10-06 UTC
 
 - Install now finds the `lazycortex-core` CLI through Claude Code's installed-plugins registry instead of walking the plugin cache, so it no longer picks up a stale older version left behind in the cache.
@@ -1960,6 +2034,14 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.
 
 ## lazycortex-experts
+
+### 1.10.0 — 2026-11-10 UTC
+
+- Every role now carries a validator stance: when it validates a document, it checks whether that document can serve as the input of its own stage.
+- The architect now writes or revises the product's `architecture.md` against each release's delta, and proposes missing assets from that architecture. Its routing description changed to match. The planner lists assets that are already implemented.
+- The research aspect now reads the product root's `architecture.md`.
+- `lazy-experts.install` reports the tier-seed step as seeded or unchanged again.
+- `lazy-experts.install` and `lazy-experts.audit` now find the plugin root in the correct lookup order.
 
 ### 1.9.9 — 2026-10-24 UTC
 
@@ -2164,6 +2246,18 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 4.13.0 — 2026-11-10 UTC
+
+- The pyproject template now disables the `RUF001` lint rule, since non-Latin UI strings are deliberate content.
+- New knowledge-sweep tooling covers scope, inventory, dictionary, refile and commit steps. Refiling file headers is all or nothing, and a dictionary the sweep creates now starts with its `# Domain groups` heading.
+- The `domain-writer` agent now looks up the domain-groups dictionary through the `wiki.domains.dictionary` settings key before the conventional path.
+- The code-review cache key now includes the guideline content, so edited guidelines trigger a fresh review.
+- Fixed a false positive in the parent-import check: package membership is anchored at the project root, so mirrored test trees are no longer flagged.
+- Docstring guidelines forbid inventory sentences in Summary and Scope, and the Self-Check now counts nine points. Testing guidelines forbid tests of stubs left under a TODO comment. Guidelines also say that `object` used as a stand-in for `Any` falls under the `Any` rule, that an approved behaviour change carries the tests that pinned the old behaviour, and that only the operator closes a review that has findings.
+- The audit now expects the shipped agents, and the check-style hook runs from the project directory.
+- Install reports the tier-seed step as seeded or unchanged again.
+- Private-project-specific rules and examples were removed from the shipped guidelines, agents and help.
 
 ### 4.12.0 — 2026-10-24 UTC
 
@@ -2438,6 +2532,24 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 3.7.0 — 2026-11-10 UTC
+
+- Domain docs are now one document per `Domain(…)` block, kept in a folder per group, each with a `Discrepancies` section and a `domains/discrepancy` tag. The doc hash also covers the code that owns each block, so a doc goes stale when that code changes.
+- The navigation rule now sends domain questions through the domain tree before the code.
+- Domain-doc collection no longer refuses a whole job over contract citations. It strips citations that no attributed contract accounts for, and the writer no longer carries them over. A doc that cites contracts not attributed to it is still refused.
+- Domain-doc landing now stamps `domain_hash` and the explainer itself, rather than trusting the writer's output. The owner digest now matches across Python versions.
+- `relink-all` skips nodes whose source is unchanged, so the weekly pass curates only edited or never-curated nodes.
+- `lazy-wiki.configure` now moves the topics index file when its path changes, and keeps the relink anchor.
+- The terms dictionary now has a deterministic writer. It refuses definitions that break the dictionary's form rules, and refuses a term split against itself or with a blank sibling.
+- The structure map has a deterministic writer. The curator gets its paths with exclude and depth already applied, and an entry for a vanished directory follows a rename. The structure audit takes its depths from the same resolve step.
+- The navigation rule's Coverage and Domain coverage sections are now generated by a dedicated step. Relink, configure and install use it, so these sections no longer drift from the config.
+- Curators (node, tag, terms, structure) now hand their decisions to apply steps that write and commit. Normalize-tags jobs rebuild the scope index each time, as before.
+- Curator job results are now reported reliably. Each job answers on any failure, with its result file where the runtime reads it. Finished curator jobs are retired, and an empty language answer from core is an error rather than a language.
+- Empty glosses and index write errors are now reported instead of passing silently.
+- `lazy-wiki.install` names the tier-seed outcome as `seeded-N`, `unchanged` or `no-entries` again.
+- A new `neighbours` step lists a node's See-also targets and backlinks.
+- Wiki agents and skills commit by explicit pathspec, with no plain `git add`.
 
 ### 3.6.1 — 2026-10-24 UTC
 

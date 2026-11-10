@@ -35,23 +35,16 @@ _HEADING_LINE_RE = re.compile(r"^#{1,6}(?:[ \t]|$)")
 
 def _fold_paragraphs(text: str, fold: Callable[[str], str]) -> str:
   """
-  Apply an inline-markup fold to each paragraph of `text` on its own, skipping code fences.
-
-  Guarantees:
-    - `fold` never sees text from two paragraphs at once, a heading line together with any other
-      line, or any line of a fenced code block; fenced blocks are returned byte-for-byte.
+  Apply an inline-markup fold to each paragraph and heading line of `text` on its own, skipping code fences.
 
   Args:
     text: Markdown text to fold.
     fold: Inline-markup fold applied to one paragraph at a time.
 
   Returns:
-    `text` with every paragraph folded and everything else unchanged.
+    `text` with every paragraph folded and everything else unchanged; fenced code blocks come back
+    byte-for-byte.
   """
-
-  # Contract:
-  # `fold` MUST never see text from two paragraphs at once, a heading line together with any
-  # other line, or any line of a fenced code block; fenced blocks MUST come back byte-for-byte.
 
   # Domain(review.markup):
   # # Inline edit markup never crosses a paragraph
@@ -62,7 +55,7 @@ def _fold_paragraphs(text: str, fold: Callable[[str], str]) -> str:
 
   out: list[str] = []
   for chunk in _parser.split_fenced(text):
-    # guard: fenced content is literal
+    # fenced content is literal
     if chunk.fenced:
       out.append(chunk.text)
       continue
@@ -141,29 +134,23 @@ def _diff_edit_fences(text: str) -> list[tuple[int, int, str]]:
   """
   Locate every closed `diff` fence of `text` that holds edit annotations.
 
-  Guarantees:
-    - A fence holding any line only a real unified diff carries, an unclosed fence, and a
-      `diff` fence nested inside another code block are never returned.
-
   Args:
     text: Markdown text to scan.
 
   Returns:
     One `(start, end, body)` tuple per fence: `start` is the offset of the opening fence line,
     `end` the offset just past the closing fence's text (before its line ending), and `body` the
-    lines between the two fence lines, without the line ending before the closing fence.
+    lines between the two fence lines, without the line ending before the closing fence. A fence
+    holding a line only a real unified diff carries, an unclosed fence, and a `diff` fence nested
+    inside another code block are not included.
   """
-
-  # Contract:
-  # A fence holding any line only a real unified diff carries, an unclosed fence, and a `diff`
-  # fence nested inside another code block MUST never be returned.
 
   fences: list[tuple[int, int, str]] = []
   offset = 0
   for chunk in _parser.split_fenced(text):
     lines = chunk.text.splitlines(keepends = True)
 
-    # guard: only a closed top-level `diff` fence of edit annotations counts; the closing fence
+    # collect each closed top-level `diff` fence of edit annotations; the closing fence
     # keeps its own line ending, so the blank line after it never collapses (Bug 85)
     if chunk.fenced and chunk.closed and chunk.info == _DIFF_INFO:
       body = "".join(lines[1:-1])
@@ -191,20 +178,26 @@ def _resolve_diff_block(block_body: str) -> str:
     # an empty line — a deleted / inserted blank line — and folds like its
     # content form (Bug 102): "-" drops; "+"/"!" keep an empty line. raw[2:]
     # already yields "" for a 1-char marker, so the append needs no special-case.
-    # guard: a deletion-marked diff line is dropped from the resolved output — skip before any append
+    # a deletion-marked diff line is dropped from the resolved output, before any append
     if raw == "-" or raw.startswith("- "):
       continue  # deletion accepted
+
+    # an insertion-marked line is accepted: its content joins the output without the marker
     if raw == "+" or raw.startswith("+ "):
       out_lines.append(raw[2:])
       continue
+
+    # a change-marked line carries the new text, which is kept without the marker
     if raw == "!" or raw.startswith("! "):
       out_lines.append(raw[2:])
       continue
+
+    # an unchanged context line is kept, its two-character prefix stripped
     if raw.startswith("  "):
       out_lines.append(raw[2:])
       continue
 
-    # Anything else (e.g. unknown marker): keep verbatim.
+    # anything else (e.g. unknown marker) is kept verbatim
     out_lines.append(raw)
   return "\n".join(out_lines)
 
@@ -285,8 +278,9 @@ def _strip_diff(text: str) -> str:
   # A writer revising an insertion made in an earlier round marks the prior text for removal in
   # a new diff-style edit block, alongside its replacement. The removal retracts the earliest
   # still-live insertion or emphasis line, from any earlier block anywhere in the document,
-  # whose content matches exactly; the replacement then stands in the retracted line's place,
-  # so the reviewer never sees the abandoned prior text alongside its revision. Context lines
+  # whose content matches exactly; the retracted line simply disappears from its earlier block,
+  # and the replacement stays in its own later block at that block's position in the text, so
+  # the reviewer never sees the abandoned prior text alongside its revision. Context lines
   # shown for reference are never subject to retraction, since they are not a writer's own
   # change. A removal with no matching earlier insertion falls back to being dropped from its
   # own block, the plain reading of a deletion against unedited body text.
@@ -307,14 +301,14 @@ def _strip_diff(text: str) -> str:
       for earlier_idx in range(later_idx):
         emissions = parsed[earlier_idx][0]
         for emit_idx, (cancellable, content) in enumerate(emissions):
-          # guard: non-cancellable / already-cancelled / content mismatch — skip this emission
+          # only a cancellable, not yet cancelled emission with matching content is cancelled
           if not cancellable or (earlier_idx, emit_idx) in cancelled or content != del_content:
             continue
           cancelled.add((earlier_idx, emit_idx))
           matched = True
           break
 
-        # guard: cancellation done for this deletion — stop scanning earlier fences
+        # cancellation done for this deletion — stop scanning earlier fences
         if matched:
           break
   pieces: list[str] = []
@@ -355,9 +349,9 @@ def drop_whitespace_only_diff_fences(text: str) -> str:
   Replace whitespace-only `diff` fences with their resolved content.
 
   Every `diff` fence whose `-` payload normalize-equals its `+` payload is replaced with the
-  resolved (`+`-only) text, without the fence. The writer wrapped a paragraph in `diff` even
-  though only whitespace changed; the dispatcher catches this and emits the paragraph raw so the
-  operator does not see a fake-edit. (Bug 28.)
+  resolved (`+`-only) text, without the fence. A paragraph wrapped in `diff` although only
+  whitespace changed therefore appears as plain text, so the operator does not see a fake edit.
+  (Bug 28.)
 
   Defensive layer over the writer-protocol rule "do not reflow body you do not semantically
   change" — defends against writers that reflow anyway.
@@ -365,6 +359,9 @@ def drop_whitespace_only_diff_fences(text: str) -> str:
   Guarantees:
     - A `diff` fence with any real content difference between its `-` and `+` payload is left
       in the output unchanged.
+    - A fence holding any line only a real unified diff carries, an unclosed fence, and a `diff`
+      fence nested inside another code block are never treated as edit-annotation fences and are
+      left untouched.
 
   Args:
     text: Source text possibly containing `diff` fences.
@@ -380,10 +377,18 @@ def drop_whitespace_only_diff_fences(text: str) -> str:
   # `-` and `+` payload differ solely in whitespace is replaced with its
   # resolved text.
 
+  # Contract:
+  # A fence holding any line only a real unified diff carries, an unclosed fence, and a
+  # `diff` fence nested inside another code block MUST never be treated as edit-annotation
+  # fences; they are left in the output exactly as written.
+
   def repl(body: str, fence_text: str) -> str:
     # guard: an empty fence wraps no paragraph, so there is no reflow to undo
     if not body.strip():
       return fence_text
+
+    # rebuild the old (`-`) and new (`+`) payloads: a change-marked `!` line and an unchanged
+    # context line count toward both sides, so only `-` and `+` lines can make the two differ
     minus_lines: list[str] = []
     plus_lines: list[str] = []
     for raw in body.splitlines():
@@ -397,11 +402,12 @@ def drop_whitespace_only_diff_fences(text: str) -> str:
       elif raw.startswith("  "):
         plus_lines.append(raw[2:])
         minus_lines.append(raw[2:])
+
+    # a whitespace-only fence is replaced by its resolved text directly
     if _normalize_ws("\n".join(minus_lines)) == _normalize_ws("\n".join(plus_lines)):
-      # Whitespace-only fence: emit resolved text directly.
       return _resolve_diff_block(body)
 
-    # Real content change: keep the fence intact.
+    # a real content change keeps the fence intact
     return fence_text
 
   # rebuild the text with each whitespace-only fence swapped for its resolved content
@@ -513,6 +519,12 @@ def strip_markers(text: str, *, style: str) -> str:
   Guarantees:
     - Outside code fences, the returned text never contains a run of three or more consecutive
       newlines; a fenced code block is never altered.
+    - For every style except `diff`, an inline-markup fold never spans two paragraphs, a heading
+      together with another line, or any line of a fenced code block; an unpaired opening mark
+      stays literal text instead of reaching into later content.
+    - For the `diff` style, a fence holding any line only a real unified diff carries, an unclosed
+      fence, and a `diff` fence nested inside another code block are never treated as
+      edit-annotation fences and are left untouched.
 
   Args:
     text: Source text containing edit-annotation markup.
@@ -531,22 +543,34 @@ def strip_markers(text: str, *, style: str) -> str:
   # newlines — any such run is collapsed to a single paragraph break (two newlines); a fenced
   # code block is never altered.
 
+  # Contract:
+  # For every style except `diff`, an inline-markup fold MUST never span two paragraphs, a
+  # heading together with another line, or any line of a fenced code block; an unpaired
+  # opening mark stays literal text instead of reaching into later content.
+
+  # Contract:
+  # For the `diff` style, a fence holding any line only a real unified diff carries, an
+  # unclosed fence, and a `diff` fence nested inside another code block MUST never be treated
+  # as edit-annotation fences; they come back untouched.
+
   # Domain(review.markup):
   # # Edit-annotation styles
   # A review writer marks a proposed body edit in one of several selectable markup styles: an
   # inline style with a marker per operation, a unified-diff-style fenced block with a prefix
   # per line, the CriticMarkup convention, or inline HTML edit tags. Every style carries the
   # same operations — a deletion, an insertion, an inline note not meant to survive to the
-  # final text, and a highlighted emphasis — differing only in how each is written. Whichever
+  # final text, and a highlighted emphasis — differing only in how each is written, except that
+  # the inline style has no separate form for emphasis: its highlight marker reads as an
+  # insertion. Whichever
   # style a document is configured for, every writer touching that document uses it
   # consistently, and its markup folds away entirely once a round finalizes, leaving only the
   # resolved text behind.
 
   try:
     folded = _STRIPPERS[style](text)
-  except KeyError as exc:
+  except KeyError as error:
     raise ValueError(
         f"unknown edit-annotation style {style!r}; "
         f"supported: {', '.join(SUPPORTED_STYLES)}"
-    ) from exc
+    ) from error
   return _collapse_blank_runs(folded)

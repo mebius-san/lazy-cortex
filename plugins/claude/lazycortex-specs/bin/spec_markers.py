@@ -1,10 +1,8 @@
 """
 HTML-comment marker utilities for lazycortex-specs managed regions.
 
-A specs-side counterpart to lazycortex-wiki's `Markers`, adapted for the
-heterogeneous `# Sources` container in spec entity docs. Unlike the wiki's
-homogeneous `# See also` section (one writer, one inner block), specs's
-`# Sources` is a container that hosts multiple H2 sub-sections, each
+Built for the heterogeneous `# Sources` container in spec entity docs. The
+`# Sources` section is a container that hosts multiple H2 sub-sections, each
 owned by a different writer (or by the operator). The marker pairs are
 therefore scoped to ONE sub-section at a time, not to the whole H1 inner.
 
@@ -28,20 +26,8 @@ Three nested ownership levels (full contract in
    and one writer method; operator-authored sub-kinds carry no markers
    and stay untouched.
 
-This module ships:
-
-- generic `rewrite_between` / `read_inner` primitives keyed on
-  `marker_id` — usable for any future per-kind writer;
-- `ensure_sources_container` — idempotent insert of the H1 + protected
-  tag at the end of body;
-- `ensure_requests_subsection` — idempotent insert / rewrite of the
-  `## Requests` H2 between its `auto:spec-requests` marker pair, the
-  body-projection of `spec_source_requests` frontmatter.
-
-The class is intentionally a near-clone of `lazycortex-wiki/bin/
-markers.py` rather than a shared utility: cross-plugin Python imports
-are banned by `dev.plugin-boundaries.md § 2a`, and a CLI-subprocess
-boundary is overkill for an in-memory string-rewrite helper.
+This module ships the generic marker read/rewrite primitives, the idempotent creation of the `# Sources`
+container, and the projection of the `## Requests` and `## Docs` sub-sections from frontmatter targets.
 """
 from __future__ import annotations
 
@@ -49,8 +35,12 @@ import re
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  pass
+  from collections.abc import Mapping
 
+
+# Decision: keep this class a near-clone of lazycortex-wiki's marker helper, not a shared utility —
+# cross-plugin Python imports are banned by `dev.plugin-boundaries.md § 2a`, and a CLI-subprocess boundary
+# is overkill for an in-memory string-rewrite helper.
 
 # ────────────────────────────────────────────────────────────────────────────
 class Markers:
@@ -72,6 +62,8 @@ class Markers:
     SOURCES_PROTECTED_TAG: Owner tag marking the `# Sources` section as a protected cross-plugin region.
     REQUESTS_HEADING: Heading text for the `## Requests` sub-section.
     REQUESTS_MARKER_ID: Marker identifier for the requests sub-section's managed region.
+    DOCS_HEADING: Heading text for the `## Docs` sub-section.
+    DOCS_MARKER_ID: Marker identifier for the docs sub-section's managed region.
   """
 
   # Domain(spec.notes):
@@ -116,6 +108,25 @@ class Markers:
 
   # Marker-id for the requests sub-section; expands to `<!-- auto:spec-requests:start --> / :end -->`.
   REQUESTS_MARKER_ID = "spec-requests"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # `## Docs` sub-section — auto-projected from `spec_source_docs` frontmatter.
+  # ──────────────────────────────────────────────────────────────────────────
+
+  # H2 heading text for the docs sub-section.
+  DOCS_HEADING = "## Docs"
+
+  # Marker-id for the docs sub-section; expands to `<!-- auto:spec-docs:start --> / :end -->`.
+  DOCS_MARKER_ID = "spec-docs"
+
+  # The wikilink target of a projected bullet: the bytes left of the `|` inside the first `[[…]]`.
+  _BULLET_TARGET_RE = re.compile(r"^- \[\[([^\]|]+)")
+
+  # The path separator inside a wikilink target.
+  _SEP = "/"
+
+  # The start of an H1 line, the only boundary of a protected section.
+  _H1_RE = re.compile(r"(?m)^# \S")
 
   def _start_marker(self, marker_id: str) -> str:
     """
@@ -366,6 +377,216 @@ class Markers:
     if body.endswith("\n"):
       return body + subsection
     return body + "\n" + subsection
+
+  # ──────────────────────────────────────────────────────────────────────────
+  def format_doc_display(self, target: str, products: Mapping[str, str]) -> str:
+    """
+    Return the default display text for a `## Docs` bullet pointing at `target`.
+
+    The display follows the target's place in the catalog: a document directly under a product reads
+    `<product> — product <role>`, a deeper one reads `<slug> — <role>`, and a target outside every product
+    reads as its last path segment.
+
+    Args:
+      target: Wikilink target path of the document.
+      products: Map from a product's catalog path (short and vault form) to the product key.
+
+    Returns:
+      The display text; the longest product path the target lies under decides its shape.
+    """
+
+    # Domain(spec.notes):
+    # # Default display of a document link
+    # A link in the documents list reads by the document's place in the catalog. A product's own document reads as
+    # the product name, a dash, the word product and the document's role. A document of an asset reads as the asset's
+    # folder name, a dash and the document's role. A target outside every product reads as its last path segment.
+    # When products nest, the product with the longest path that contains the target is its owner.
+
+    # the longest product path the target lies under decides its shape
+    segments = target.split(self._SEP)
+    owner = max(( path for path in products
+                  if segments[:len(path.split(self._SEP))] == path.split(self._SEP) ), key = len, default = None)
+
+    # a target under no product falls back to its last segment
+    if owner is None:
+      return segments[-1]
+
+    # the target's path below the owning product
+    rest = segments[len(owner.split(self._SEP)):]
+
+    # a product's own document names the product, an asset's names its folder
+    if len(rest) == 1:
+      return f"{products[owner]} — product {rest[0]}"
+    if len(rest) > 1:
+      return f"{rest[-2]} — {rest[-1]}"
+    return segments[-1]
+
+  # ──────────────────────────────────────────────────────────────────────────
+  def project_docs(self, body: str, targets: list[str], *, products: Mapping[str, str] | None = None,
+                   displays: Mapping[str, str] | None = None) -> str:
+    """
+    Project the `## Docs` sub-section of `body` from the frontmatter `targets`.
+
+    Guarantees:
+      - Produces one bullet per distinct target, in listed order.
+      - An existing bullet for a target is kept verbatim, so an operator's display survives.
+      - Bullets of targets no longer listed are dropped.
+      - Repeating the call on a reconciled body returns it unchanged.
+
+    Args:
+      body: Markdown body text.
+      targets: Wikilink targets in frontmatter order; duplicates collapse.
+      products: Map from a product's catalog path to its key, used for the default display of a new bullet.
+      displays: Display text per target, taking precedence over the default for a new bullet.
+
+    Returns:
+      Body text with the docs sub-section present and up to date; text outside the managed region is untouched.
+    """
+
+    # Contract:
+    # An existing bullet for a target is kept verbatim,
+    # so the operator's display text survives every projection.
+
+    # Contract:
+    # The projection holds one bullet per distinct target, in the listed order.
+
+    # Contract:
+    # A target no longer listed leaves no bullet in the projection.
+
+    # Contract:
+    # Projecting an already reconciled body returns it unchanged.
+
+    # an existing bullet keeps its display; a new one takes the given or the shape-aware default
+    kept = self._bullets_by_target(self.read_inner(body, self.DOCS_MARKER_ID) or "")
+    lines = [ kept.get(target) or
+              f"- [[{target}|{(displays or {}).get(target) or self.format_doc_display(target, products or {})}]]"
+              for target in dict.fromkeys(targets) ]
+    return self._project(body, self.DOCS_HEADING, self.DOCS_MARKER_ID, "\n".join(lines))
+
+  # ──────────────────────────────────────────────────────────────────────────
+  def project_requests(self, body: str, targets: list[str], *, today: str,
+                       displays: Mapping[str, str] | None = None) -> str:
+    """
+    Project the `## Requests` sub-section of `body` from the frontmatter `targets`.
+
+    Guarantees:
+      - Produces one bullet per distinct target, in listed order, each ending in a `YYYY-MM-DD` date.
+      - An existing bullet for a target is kept verbatim, so its display and first date survive.
+      - Bullets of targets no longer listed are dropped.
+      - Repeating the call on a reconciled body returns it unchanged.
+
+    Args:
+      body: Markdown body text.
+      targets: Wikilink targets in frontmatter order; duplicates collapse.
+      today: Date, as `YYYY-MM-DD`, stamped on each new bullet.
+      displays: Display text per target for a new bullet; the last path segment when absent.
+
+    Returns:
+      Body text with the requests sub-section present and up to date; text outside the managed region is untouched.
+    """
+
+    # Contract:
+    # An existing bullet for a target is kept verbatim,
+    # so the operator's display text and the date the target was first listed survive every projection.
+
+    # Contract:
+    # The projection holds one bullet per distinct target, in the listed order.
+
+    # Contract:
+    # Every bullet of the projection ends in a `YYYY-MM-DD` date.
+
+    # Contract:
+    # A target no longer listed leaves no bullet in the projection.
+
+    # Contract:
+    # Projecting an already reconciled body returns it unchanged.
+
+    # an existing bullet keeps its display and its first date; a new one is dated today
+    kept = self._bullets_by_target(self.read_inner(body, self.REQUESTS_MARKER_ID) or "")
+    lines = [ kept.get(target) or
+              f"- [[{target}|{(displays or {}).get(target) or target.split(self._SEP)[-1]}]] — {today}"
+              for target in dict.fromkeys(targets) ]
+    return self._project(body, self.REQUESTS_HEADING, self.REQUESTS_MARKER_ID, "\n".join(lines))
+
+  # ──────────────────────────────────────────────────────────────────────────
+  def _bullets_by_target(self, inner: str) -> dict[str, str]:
+    """
+    Index the bullet lines of a managed region by their wikilink target.
+
+    Args:
+      inner: Content between a marker pair.
+
+    Returns:
+      Map from target to the first bullet line naming it.
+    """
+    # the first bullet naming a target is the one kept
+    bullets: dict[str, str] = {}
+    for line in inner.splitlines():
+      match = self._BULLET_TARGET_RE.match(line)
+      if match and match.group(1) not in bullets:
+        bullets[match.group(1)] = line
+    return bullets
+
+  # ──────────────────────────────────────────────────────────────────────────
+  def _project(self, body: str, heading: str, marker_id: str, inner: str) -> str:
+    """
+    Place `inner` in the sub-section `heading` of the `# Sources` container, creating what is missing.
+
+    When the marker pair exists, only the bytes between the markers change. Otherwise the container is created at
+    the end of the body if missing and the sub-section is added at the end of the container, before the next H1.
+    Repeating the call on a reconciled body returns it unchanged.
+
+    Args:
+      body: Markdown body text.
+      heading: H2 heading line of the sub-section.
+      marker_id: Identifier of the sub-section's marker pair.
+      inner: Content to place between the markers.
+
+    Returns:
+      Body text with the sub-section holding `inner`.
+    """
+    start = self._start_marker(marker_id)
+    end = self._end_marker(marker_id)
+
+    # a sub-section already in place keeps its markers, and only the bytes between them change
+    if start in body and end in body:
+      return self.rewrite_between(body, marker_id, inner)
+
+    # a missing container is created at the end of the body, after one blank line
+    if not self._container_present(body):
+      body = self.ensure_sources_container(body.rstrip() + "\n")
+
+    # the sub-section closes the container, before the H1 that follows it
+    stripped = inner.strip("\n")
+    inner_block = f"{stripped}\n" if stripped else ""
+    block = f"{heading}\n{start}\n{inner_block}{end}\n"
+    cut = self._container_end(body)
+    tail = body[cut:]
+    return body[:cut].rstrip("\n") + "\n\n" + block + ("\n" + tail if tail else "")
+
+  # ──────────────────────────────────────────────────────────────────────────
+  def _container_end(self, body: str) -> int:
+    """
+    Locate the end of the `# Sources` container in `body`.
+
+    Args:
+      body: Markdown body text.
+
+    Returns:
+      Index of the first H1 after the container, or the length of `body` when none follows or the container
+      is absent.
+    """
+    # waiver: regex glue between two interpolated constants, not a domain literal worth promoting
+    pattern = re.escape(self.SOURCES_HEADING) + r"\s*\n\s*" + re.escape(self.SOURCES_PROTECTED_TAG) + r"\s*\n"
+    container = re.search(pattern, body)
+
+    # guard: no container means the body's end
+    if container is None:
+      return len(body)
+
+    # the next H1 after the container ends it
+    following = self._H1_RE.search(body, container.end())
+    return following.start() if following else len(body)
 
   # ──────────────────────────────────────────────────────────────────────────
   def _container_present(self, body: str) -> bool:

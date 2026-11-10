@@ -1,7 +1,7 @@
 ---
 name: lazy-runtime.preflight
 description: "Run before wiring a new expert or MCP server into a live routine, and when a routine's expert spawns keep timing out, die instantly, or never produce a response. Emulates each expert launch with a trivial prompt (no real work) to expose the unresolvable agent, missing aspect/protocol, bad `mcp_config` path, or MCP server that hangs at init, then proposes a concrete fix and applies it only after the operator confirms."
-allowed-tools: Read, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(git rev-parse *), Bash(date -u *), Write, Edit, AskUserQuestion, Agent
+allowed-tools: Read, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(git rev-parse *), Bash(git commit *), Bash(date -u *), Write, Edit, AskUserQuestion, Agent
 ---
 # Runtime Preflight
 
@@ -36,9 +36,9 @@ Parse the JSON on stdout. Its shape:
 - `repo[]` — checkout-level findings (`{level, message}`) that apply to every expert here: an inbox another daemon on this host already drives (`fail`), a sandbox allowlist that does not cover a location its own entries resolve to (`fail` for write, `warn` for read), a `sandbox` section declared in `lazy.settings.json` with no sandbox file to carry it (`fail`), a declared sandbox key the file records differently (`warn`), a `permissions.additionalDirectories` entry under a macOS TCC-gated location (`~/Downloads`, `~/Desktop`, `~/Documents`, iCloud, `/Volumes`) in the tracked `.claude/settings.json` (`fail` — a headless spawn blocks at startup on a consent prompt nobody can answer) or in `.claude/settings.local.json` (`warn` — the pump strips it before each spawn), and either of those two files not parsing as JSON (`fail`). The same gated-entry check runs per expert against `~/.claude/settings.json` when its `setting_sources` includes `user` (`fail` in `static[]`).
 - `summary` — one-line count.
 
-The dynamic block, when present, carries `exit`, `duration_s`, `timed_out`, `spawn_error` (a message naming the binary when the `claude` spawn could not start at all — most often because it is not on PATH — else `null`), `agent_resolved`, `servers[]` (`{name, status, detail}` where status ∈ `connected` / `timed-out` / `auth-required` / `spawn-failed` / `pending-approval` / `unknown`), and `best_effort_plugin_dirs`. One other shape exists: `{"skipped": "rate_limit"}` — the host's subscription rate-limit flag was raised, so the probe (a real `claude` spawn) was deliberately not run; the expert's verdict is unaffected by it. Render it as "probe skipped — rate limit", never as a failure.
+The dynamic block, when present, carries `exit`, `duration_s`, `timed_out`, `spawn_error` (a message naming the binary when the `claude` spawn could not start at all — most often because it is not on PATH — or, for an expert bound to a `provider`, the reason the pump would refuse that job before spawning: the provider entry does not validate or its token variable resolves nowhere; else `null`), `agent_resolved`, `servers[]` (`{name, status, detail}` where status ∈ `connected` / `timed-out` / `auth-required` / `spawn-failed` / `pending-approval` / `unknown`), and `best_effort_plugin_dirs`. One other shape exists: `{"skipped": "rate_limit"}` — the host's subscription rate-limit flag was raised, so the probe (a real `claude` spawn) was deliberately not run; the expert's verdict is unaffected by it. Render it as "probe skipped — rate limit", never as a failure.
 
-The full dynamic probe spawns `claude` per expert (up to ~90s each) and may need MCP auth. When the operator wants a fast structural sweep with no spawn, run with `--no-probe` instead — static checks only.
+The full dynamic probe spawns `claude` per expert (up to ~90s each) and may need MCP auth. An expert bound to a `provider` is probed against that provider's endpoint, on the model its job would get and with the provider's token, exactly as the pump would spawn it. When the operator wants a fast structural sweep with no spawn, run with `--no-probe` instead — static checks only.
 
 Outcome: `preflight-run` or `no-targets` (empty `experts[]`).
 
@@ -64,7 +64,7 @@ Otherwise render one markdown table row per expert:
 
 - **verdict** — `ok` or `fail`.
 - **static issues** — the `message` of each `static[]` finding, or `—` when none. Prefix each with its `level` (`fail` / `warn`).
-- **server statuses** — `<name>: <status>` per `dynamic.servers[]`, or `—` when the expert declares no MCP servers or the probe was skipped. When `dynamic.spawn_error` is set, print that message in this cell instead — the servers were never probed, and the operator needs the binary on PATH before anything else.
+- **server statuses** — `<name>: <status>` per `dynamic.servers[]`, or `—` when the expert declares no MCP servers or the probe was skipped. When `dynamic.spawn_error` is set, print that message in this cell instead — the servers were never probed, and the operator fixes what it names (the binary on PATH, or the provider entry or token) before anything else.
 
 Below the table, note any expert whose `dynamic.best_effort_plugin_dirs` is true: "plugin-dir resolution was best-effort for <expert> — a probe-only failure there may be a false negative; re-run under the daemon or with `LAZYCORTEX_PLUGIN_DIRS` set to confirm."
 
@@ -90,7 +90,7 @@ AskUserQuestion: header "Drop MCP server", question "Drop MCP server `<name>` fr
 - **drop** — remove server `<name>` from every `mcp_config` file the expert references. The expert spawns hermetically for that server.
 - **keep** — leave the config as-is. The expert stays failing until the server is fixed by hand.
 
-On **drop**: locate the offending server. The `target` is `<expert>.mcp_config:<name>`. Read `experts.<expert>.mcp_config` from `.claude/lazy.settings.json` (a path string or list). For each referenced config file, if its `mcpServers` object contains `<name>`, remove that key via `Edit` on the config JSON file (not `lazy.settings.json` — the server lives in the MCP-config file the expert points at). Confirm the file still parses. Outcome `dropped`. On **keep**: outcome `kept-per-user-choice`.
+On **drop**: locate the offending server. The `target` is `<expert>.mcp_config:<name>`. Read `experts.<expert>.mcp_config` from `.claude/lazy.settings.json` (a path string or list). For each referenced config file run `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" mcp-config-drop <config-file> <name>)` — the server lives in the MCP-config file the expert points at, not in `lazy.settings.json`. The `mcp-config-drop` verb prints `{"status": "dropped"|"absent", "path"}`; exit 1 (`status: error`) means the file is missing or does not parse and was left alone. Outcome `dropped` when at least one file reports `dropped`. On **keep**: outcome `kept-per-user-choice`.
 
 ### `mcp-login` / `pending-approval` — server needs interactive auth
 
@@ -128,7 +128,7 @@ AskUserQuestion: header "Bad mcp_config path", question "Expert `<expert>`'s mcp
 - **remove** — drop the bad path from `experts.<expert>.mcp_config` (or clear the field when it was the only entry).
 - **leave** — no change; the expert stays failing.
 
-On **correct**: ask one follow-up via `AskUserQuestion` — Where: same step, target `experts.<expert>.mcp_config`; Found: replacing `<path>`; Why asking: the path is the operator's to supply; Answers: free-form repo-relative path, written and committed in this run. Header "Replacement path", question "Which repo-relative path should replace `<path>` in expert `<expert>`'s mcp_config?". Then `Edit` `experts.<expert>.mcp_config` in `.claude/lazy.settings.json`. On **remove**: `Edit` out the bad entry (clear the field entirely if it becomes empty). On **leave**: outcome `kept-per-user-choice`. Otherwise outcome `path-fixed`.
+On **correct**: ask one follow-up via `AskUserQuestion` — Where: same step, target `experts.<expert>.mcp_config`; Found: replacing `<path>`; Why asking: the path is the operator's to supply; Answers: free-form repo-relative path, written and committed in this run. Header "Replacement path", question "Which repo-relative path should replace `<path>` in expert `<expert>`'s mcp_config?". Then write the corrected value with `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" settings-set experts --key '<expert>/mcp_config' --value '<json>')`, where `<json>` is the field's new value — the replacement path, or the list with the bad entry replaced. On **remove**: the same verb with the list minus the bad entry, or `settings-set experts --key '<expert>/mcp_config' --delete` when it was the only one. On **leave**: outcome `kept-per-user-choice`. Otherwise outcome `path-fixed`.
 
 ### `pin-model` — expert resolves no explicit model
 
@@ -137,7 +137,7 @@ Context (print before asking):
 - Where: /lazy-runtime.preflight · Step 3 — Confirm + apply fixes; target `agent_models.<group>.<dispatch>` in .claude/lazy.settings.json
 - Found: expert `<expert>` (agent `<dispatch>`) resolves no explicit model in either settings scope — headless spawns would inherit the operator's interactive CLI default
 - Why asking: a tier is a spend decision and nothing on record says which
-- Answers: `pin sonnet` / `pin opus` / `pin haiku` — that tier written for `<dispatch>` into the project file, committed in this run, never re-asked (change later via /lazy-core.agent-models); `leave` — no change, the expert stays failing and preflight re-reports it
+- Answers: `pin sonnet` / `pin opus` / `pin haiku` / `pin fable` — that tier written for `<dispatch>` into the project file, committed in this run, never re-asked (change later via /lazy-core.agent-models); `leave` — no change, the expert stays failing and preflight re-reports it
 AskUserQuestion: header "Pin model tier", question "Pin a model tier for expert `<expert>` (agent `<dispatch>`) in <repo-root>/.claude/lazy.settings.json?", options with descriptions.
 ```
 
@@ -145,6 +145,8 @@ AskUserQuestion: header "Pin model tier", question "Pin a model tier for expert 
 - **pin opus** — for heavyweight reasoning experts.
 - **pin haiku** — for mechanical/formatting experts.
 - **leave** — no change; the expert stays failing.
+
+`pin fable` — the top tier, above opus — is not a listed option because `AskUserQuestion` caps at four; the operator types it as the free-text answer, and it applies like any other `pin <tier>`.
 
 On any **pin**: write the tier as an `agent_models` entry for the expert's `agent` dispatch string into the project `.claude/lazy.settings.json` (group = the agent's plugin domain — plugin name up to the first `-`, e.g. `lazycortex`; `_project` for project-local agents) with `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" settings-set agent_models --key '<group>/<dispatch>' --value '"<tier>"')` (the same verb `lazy-core.agent-models` Step 8 uses). Commit per this step's settings-write rules. Outcome `model-pinned`. On **leave**: outcome `kept-per-user-choice`.
 
@@ -166,9 +168,9 @@ AskUserQuestion: header "Sandbox allowlist", question "Record the resolved locat
 
 On **record**: `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" sandbox-sync --repo-root "$PWD")`. The file is gitignored daemon state, so there is nothing to commit. Outcome `sandbox-synced`. On **leave**: outcome `kept-per-user-choice`.
 
-**Settings writes.** All mutations go through a careful `Edit` on the exact JSON file — never a blind overwrite. This repo ships no dedicated settings-writer CLI for surgical `experts.<expert>.mcp_config` edits (the `settings-set` CLI replaces a whole section, which would clobber sibling experts), so a scoped `Edit` on the JSON is the correct tool. NEVER mutate any settings file without a confirmed `yes` from the fix's `AskUserQuestion`.
+**Settings writes.** Every mutation goes through a verb — `settings-set` with `--key` for one nested value, `mcp-config-drop` for one server in an MCP-config file — never a blind overwrite. NEVER mutate any settings file without a confirmed `yes` from the fix's `AskUserQuestion`.
 
-Because a settings edit dirties a tracked file, commit it in the same execution: `git add .claude/lazy.settings.json` (plus any edited MCP-config file) and `git commit -m "fix(runtime): preflight drop/repair <expert> mcp_config"` — see `lazy-core.skill-writing § 6`. If the tree cannot be committed cleanly (transactional git state), do not write — report the finding and let the operator apply the fix.
+Because a settings edit dirties a tracked file, commit it in the same execution: `git commit -m "fix(runtime): preflight drop/repair <expert> mcp_config" -- .claude/lazy.settings.json` (plus any edited MCP-config file in the same pathspec) — see `lazy-core.skill-writing § 6`. If the tree cannot be committed cleanly (transactional git state), do not write — report the finding and let the operator apply the fix.
 
 Outcome: `dropped`, `path-fixed`, `login-instructed`, `model-pinned`, `sandbox-synced`, `kept-per-user-choice`, or `all-ok`.
 

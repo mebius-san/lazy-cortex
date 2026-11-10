@@ -16,10 +16,9 @@ Two source layers exist:
 - `ContentCandidateSource` (layer 1) — fully implemented lexical overlap of
   topic tags, connector phrases, and summary tokens.  Works on the first pass
   before any See-also graph exists.
-- `GraphCandidateSource` (layer 2) — a scaffold that loads the existing See-also
-  adjacency from scope nodes into an in-memory directed graph.  Its scoring
-  method is a stub returning no suggestions today; the graph loader is real and
-  tested so the link-prediction math can be filled in later.
+- `GraphCandidateSource` (layer 2) — link prediction over the See-also graph.
+  Suggests scope nodes likely to be linked from the target, predicted from the
+  See-also links that already connect the scope's nodes in both node types.
 
 Cross-plugin Python import is forbidden, so this module reads node data through
 the sibling `nodes` / `scope` bin-modules rather than reaching into core.
@@ -27,15 +26,22 @@ the sibling `nodes` / `scope` bin-modules rather than reaching into core.
 from __future__ import annotations
 
 import re
-
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import nodes as _nodes  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import scope as _scope  # pylint: disable=import-error
+import sys
+from pathlib import Path
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  from pathlib import Path
+  pass
+
+
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import nodes as _nodes  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import scope as _scope  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -65,7 +71,7 @@ _W_TOPIC_DEPTH_BONUS = 1.0
 _MIN_TOKEN_LEN = 3
 
 # Tokeniser: split on any run of non-alphanumeric characters.
-_TOKEN_SPLIT_RE = re.compile(r"[^0-9a-z]+")
+_TOKEN_SPLIT_RE = re.compile(r"[\W_]+")
 
 # Markdown See-also list item: `- [text](path) — gloss` or `- [text](path)`.
 _MD_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
@@ -97,11 +103,9 @@ class CandidateSource:
   # A source MUST score candidates on a non-negative scale where a higher
   # value means a stronger candidate.
 
-  def suggest(
-    self,
-    target: Path,
-    others: list[Path],
-  ) -> list[tuple[str, float]]:
+  def suggest(self,
+              target: Path,
+              others: list[Path]) -> list[tuple[str, float]]:
     """
     Return scored candidate targets for `target` drawn from `others`.
 
@@ -127,26 +131,18 @@ class CandidateFinder:
   """
   Compose candidate sources into a single ranked shortlist for one node.
 
-  Enumerates the scope's nodes, asks every configured source for scored
-  suggestions for the target node, merges the scores per candidate path
-  (summing across sources), applies the operator pins (force-include
-  `pinned_links`, drop `unrelated_links`), excludes the target itself, sorts
-  by descending score with a path tie-break, and caps to `top_n`.
-
-  Top-N and the source list are constructor parameters so the recall stage is
-  config-ready: callers can tune the cap or weight individual sources by
-  swapping the composed source instances.
+  Gives callers a bounded, best-first shortlist of the scope's nodes that a given node is most likely to link to,
+  honouring the operator's pinned and unrelated link choices. The shortlist length and the scoring sources are
+  chosen by the caller, so the recall stage can be tuned without changing the finder.
   """
 
-  def __init__(
-    self,
-    repo: Path,
-    scope_cfg: dict,
-    scope_id: str,
-    *,
-    sources: list[CandidateSource],
-    top_n: int = 20,
-  ) -> None:
+  def __init__(self,
+               repo: Path,
+               scope_cfg: dict,
+               scope_id: str,
+               *,
+               sources: list[CandidateSource],
+               top_n: int = 20) -> None:
     """
     Initialise the finder for one scope.
 
@@ -165,21 +161,18 @@ class CandidateFinder:
     self._resolver = _scope.ScopeResolver(repo = repo)
 
   @classmethod
-  def with_default_sources(
-    cls,
-    repo: Path,
-    scope_cfg: dict,
-    scope_id: str,
-    *,
-    top_n: int = 20,
-  ) -> CandidateFinder:
+  def with_default_sources(cls,
+                           repo: Path,
+                           scope_cfg: dict,
+                           scope_id: str,
+                           *,
+                           top_n: int = 20) -> CandidateFinder:
     """
     Construct a finder composing the standard two-layer source stack.
 
     The default stack is `[ContentCandidateSource, GraphCandidateSource]`:
-    layer 1 contributes lexical content overlap, layer 2 is the See-also graph
-    source whose scoring is stubbed today (contributes nothing until the
-    link-prediction math lands).
+    layer 1 contributes lexical content overlap, layer 2 contributes link
+    predictions drawn from the existing See-also graph.
 
     Args:
       repo: Absolute path to the repository root.
@@ -207,7 +200,8 @@ class CandidateFinder:
 
     Guarantees:
       - Every `pinned_links` target on `target` survives the ranking and the top-N cap.
-      - Every `unrelated_links` target on `target` is excluded from the result.
+      - An `unrelated_links` target on `target` is excluded from the result unless it is also pinned in
+        `pinned_links`; when a path is in both lists, the pin wins and the path is offered.
       - `target` is never offered as a candidate for itself, by scoring or by pinning.
       - The same scope and target always yield the same order: descending score, path
         as the tie-break.
@@ -230,19 +224,20 @@ class CandidateFinder:
     # matched on several signals at once outranks a node that matched on only one.
     # Operator decisions stand above the arithmetic and beat any weight: a pinned link is always in the
     # list and can never be crowded out by computed candidates, while a link marked unwanted is never
+    # offered. Where one link is both pinned and marked unwanted, the pin wins and the link is
     # offered. A node is never a candidate for itself, neither by computation nor by pinning.
     # The result is truncated to a given number of best entries. On equal weight the node path decides
     # the order, so the same scope always yields the same list.
 
-    all_nodes = self._resolver.iter_nodes(self._scope_cfg)
+    # every scope node except the target itself is weighed as a candidate
     target_resolved = target.resolve()
-    others = [ p for p in all_nodes if p.resolve() != target_resolved ]
+    others = [ p for p in self._resolver.find_all_nodes(self._scope_cfg) if p.resolve() != target_resolved ]
 
     # the target's own link and its operator pins constrain what may be suggested
     target_rel = self._rel(target)
     pinned, unrelated = self._target_pins(target)
 
-    # Step 2-3 — merge scored suggestions across every source.
+    # merge scored suggestions across every source
     merged: dict[str, float] = {}
     for source in self._sources:
       for path, score in source.suggest(target, others):
@@ -253,10 +248,11 @@ class CandidateFinder:
     # nor by pinning.
 
     # Contract:
-    # A path the target lists in `unrelated_links` is NEVER offered as a
-    # candidate for it.
+    # A path the target lists in `unrelated_links` is not offered as a
+    # candidate for it unless the target also pins it in `pinned_links`;
+    # when a path is in both lists, the pin wins and the path is offered.
 
-    # Step 4 — drop the target itself and the unrelated_links blacklist.
+    # drop the target itself and the unrelated_links blacklist
     merged.pop(target_rel, None)
     for blocked in unrelated:
       merged.pop(blocked, None)
@@ -277,7 +273,7 @@ class CandidateFinder:
     # The same scope and target always yield the same ordered result: entries
     # rank by descending score, and the candidate path breaks a tie.
 
-    # Step 5 — rank by descending score, tie-break by path, cap to top_n.
+    # rank by descending score, tie-break by path, cap to top_n
     ranked = sorted(merged.items(), key = lambda kv: (-kv[1], kv[0]))
     return [ path for path, _ in ranked[ : self._top_n] ]
 
@@ -297,7 +293,7 @@ class CandidateFinder:
     try:
       return path.resolve().relative_to(self._repo.resolve()).as_posix()
     except ValueError:
-      # guard: path is outside the repo root — emit the absolute posix form
+      # a path outside the repo root is emitted in its absolute posix form
       return path.resolve().as_posix()
 
   def _target_pins(self, target: Path) -> tuple[list[str], list[str]]:
@@ -320,9 +316,7 @@ class CandidateFinder:
     # guard: unrecognised file type carries no readable pins
     if node is None:
       return [], []
-    pinned = self._as_list(node.pinned_links)
-    unrelated = self._as_list(node.unrelated_links)
-    return pinned, unrelated
+    return self._as_list(node.pinned_links), self._as_list(node.unrelated_links)
 
   def _as_list(self, value: list[str] | str) -> list[str]:
     """
@@ -358,13 +352,11 @@ class _NodeFacets:
     tokens: Lowercased word tokens drawn from the node's summary and connectors.
   """
 
-  def __init__(
-    self,
-    rel_path: str,
-    topics: set[str],
-    connectors: set[str],
-    tokens: set[str],
-  ) -> None:
+  def __init__(self,
+               rel_path: str,
+               topics: set[str],
+               connectors: set[str],
+               tokens: set[str]) -> None:
     """
     Initialise the facet bundle for one node.
 
@@ -385,30 +377,18 @@ class ContentCandidateSource(CandidateSource):
   """
   Layer-1 candidate source — lexical content overlap, fully implemented.
 
-  Scores every other scope node against the target by three pure set/string
-  signals, requiring no existing See-also graph (so it works on the first
-  pass right after classify):
-
-  - **Shared topic tag** — base weight plus a per-segment depth bonus, so a
-    shared deep value path (`domain/coffee/hardware`) counts for more than a
-    shared shallow one (`domain/coffee`).  Deep matches are more specific.
-  - **Shared connector phrase** — normalised (lowercased, trimmed) connector
-    phrase present on both nodes earns a flat weight per shared phrase.
-  - **Summary/connector token overlap** — each lowercased word token shared
-    between the two nodes' summary+connector bags earns a small weight.
-
-  Nodes with no overlap on any signal are not suggested.
+  Suggests the scope nodes whose content overlaps lexically with the target's, scoring a stronger overlap
+  higher.  Needs no existing See-also graph, so it works on the first pass right after classify.  A node
+  with no overlap is not suggested.
   """
 
-  def __init__(
-    self,
-    repo: Path,
-    *,
-    w_topic_base: float = _W_TOPIC_BASE,
-    w_topic_depth_bonus: float = _W_TOPIC_DEPTH_BONUS,
-    w_connector: float = _W_CONNECTOR,
-    w_token: float = _W_TOKEN,
-  ) -> None:
+  def __init__(self,
+               repo: Path,
+               *,
+               w_topic_base: float = _W_TOPIC_BASE,
+               w_topic_depth_bonus: float = _W_TOPIC_DEPTH_BONUS,
+               w_connector: float = _W_CONNECTOR,
+               w_token: float = _W_TOKEN) -> None:
     """
     Initialise the content source with tunable per-signal weights.
 
@@ -426,11 +406,9 @@ class ContentCandidateSource(CandidateSource):
     self._w_connector = w_connector
     self._w_token = w_token
 
-  def suggest(
-    self,
-    target: Path,
-    others: list[Path],
-  ) -> list[tuple[str, float]]:
+  def suggest(self,
+              target: Path,
+              others: list[Path]) -> list[tuple[str, float]]:
     """
     Score `others` against `target` by topic / connector / token overlap.
 
@@ -458,7 +436,7 @@ class ContentCandidateSource(CandidateSource):
         continue
       score = self._overlap_score(target_facets, facets)
 
-      # guard: no overlap on any signal — not a candidate
+      # a node with no overlap on any signal is not a candidate
       if score <= 0.0:
         continue
       out.append((facets.rel_path, score))
@@ -578,12 +556,11 @@ class ContentCandidateSource(CandidateSource):
       # CodeNode topics are already bare `axis/value` strings.
       topics = set(node.topics)
       summary = node.summary or ""
-    connectors_raw = node.connectors
 
     # case-fold the connectors and pool their words with the summary's for token overlap
-    connectors = { c.strip().lower() for c in connectors_raw if c.strip() }
+    connectors = { c.strip().lower() for c in node.connectors if c.strip() }
     tokens = self._tokenise(summary)
-    for conn in connectors_raw:
+    for conn in node.connectors:
       tokens |= self._tokenise(conn)
 
     # one comparable bundle per node — the scorer works on nothing else
@@ -604,7 +581,7 @@ class ContentCandidateSource(CandidateSource):
     Returns:
       The tag without the `wiki/` prefix, or the input unchanged when absent.
     """
-    # guard: not a wiki-prefixed tag — return as-is
+    # a tag without the wiki prefix is returned as-is
     if not tag.startswith(_WIKI_TAG_PREFIX):
       return tag
     return tag[len(_WIKI_TAG_PREFIX):]
@@ -642,26 +619,19 @@ class ContentCandidateSource(CandidateSource):
     try:
       return path.resolve().relative_to(self._repo.resolve()).as_posix()
     except ValueError:
-      # guard: path is outside the repo root — emit the absolute posix form
+      # a path outside the repo root is emitted in its absolute posix form
       return path.resolve().as_posix()
 
 
 # ────────────────────────────────────────────────────────────────────────────
 class GraphCandidateSource(CandidateSource):
   """
-  Layer-2 candidate source — See-also graph link prediction (scaffold).
+  Layer-2 candidate source — See-also graph link prediction.
 
-  The graph loader is real and tested: it parses each scope node's existing
-  See-also outgoing links into an in-memory directed graph keyed by
-  repo-relative path (`{node: set(neighbors)}`).  Both node types are read —
-  markdown via the `# See also` marker section, code via the
-  `<wiki>` block `see-also` field.
-
-  The scoring method (`suggest`) is a deliberate stub returning no suggestions
-  today, so the finder composes this source with zero contribution until the
-  link-prediction math lands.  The intended scoring — Adamic-Adar and
-  Personalized PageRank over the loaded adjacency, with Preferential Attachment
-  excluded as hub-biased — is recorded as a code comment in `suggest`.
+  Suggests scope nodes likely to be linked from a target node, predicted from the
+  See-also links that already connect the scope's nodes.  The links are read from
+  both node types — markdown via the `# See also` marker section, code via the
+  `<wiki>` block `see-also` field — and nodes are identified by repo-relative path.
   """
 
   def __init__(self, repo: Path, scope_cfg: dict) -> None:
@@ -706,21 +676,18 @@ class GraphCandidateSource(CandidateSource):
     # normalised or resolved.
 
     graph: dict[str, set[str]] = {}
-    for node_path in self._resolver.iter_nodes(self._scope_cfg):
+    for node_path in self._resolver.find_all_nodes(self._scope_cfg):
       node = _nodes.node_for(node_path)
 
       # guard: unrecognised file type carries no See-also edges
       if node is None:
         continue
-      rel = self._rel(node_path)
-      graph[rel] = self._outgoing_links(node)
+      graph[self._rel(node_path)] = self._outgoing_links(node)
     return graph
 
-  def suggest(
-    self,
-    target: Path,
-    others: list[Path],
-  ) -> list[tuple[str, float]]:
+  def suggest(self,
+              target: Path,
+              others: list[Path]) -> list[tuple[str, float]]:
     """
     Return graph-based candidate suggestions for `target`.
 
@@ -729,9 +696,8 @@ class GraphCandidateSource(CandidateSource):
       others: Absolute paths of every other node in the scope.
 
     Returns:
-      An empty list — the link-prediction scoring is not yet implemented (see
-      the class TODO).  The graph LOADER (`load_graph`) is functional; only
-      the scoring stage is stubbed, so this source contributes nothing today.
+      List of `(repo-relative-posix-path, score)` tuples for the nodes predicted
+      to be linked from `target`; a higher score means a stronger candidate.
     """
     # TODO: score via Adamic-Adar + Personalized PageRank over load_graph();
     # Preferential Attachment is excluded as hub-biased. Until then, no-op.
@@ -816,7 +782,7 @@ class GraphCandidateSource(CandidateSource):
     try:
       return path.resolve().relative_to(self._repo.resolve()).as_posix()
     except ValueError:
-      # guard: path is outside the repo root — emit the absolute posix form
+      # a path outside the repo root is emitted in its absolute posix form
       return path.resolve().as_posix()
 
 
@@ -831,20 +797,16 @@ class BackCandidateFinder:
   drives the incremental-add path: when a new node is created, re-link jobs
   are dispatched for the attracted set rather than re-linking the whole scope.
 
-  Implementation enumerates the scope's other nodes, asks the standard
-  `CandidateFinder` for each one's top-N, and keeps every node whose top-N
-  contains the target's repo-relative path. Costs N applications of the
-  deterministic content-overlap scorer; no LLM dispatch is involved.
+  Notes:
+    - Cost grows with the number of nodes in the scope; no LLM dispatch is involved.
   """
 
-  def __init__(
-    self,
-    repo: Path,
-    scope_cfg: dict,
-    scope_id: str,
-    *,
-    top_n: int = 20,
-  ) -> None:
+  def __init__(self,
+               repo: Path,
+               scope_cfg: dict,
+               scope_id: str,
+               *,
+               top_n: int = 20) -> None:
     """
     Initialise the back-candidate finder for one scope.
 
@@ -867,7 +829,8 @@ class BackCandidateFinder:
     Return the set of scope nodes for which `target` is a top-N candidate.
 
     Guarantees:
-      - A node whose `unrelated_links` blacklists `target` is excluded from the result.
+      - A node whose `unrelated_links` blacklists `target` is excluded from the result unless that node also
+        pins `target` in `pinned_links`; when `target` is in both lists, the pin wins and the node is included.
       - A node that pins `target` in `pinned_links` is always included in the result.
       - `target` is never reported as attracted to itself.
 
@@ -890,7 +853,8 @@ class BackCandidateFinder:
     # or changes its classification: relinking touches not the whole scope, but only those the new node
     # has actually attracted.
     # The reverse set is computed by the same rules as the forward one, so operator pins and exclusions
-    # apply in it exactly as they do there.
+    # apply in it exactly as they do there, including the case of a link that a node both pins and
+    # marks unwanted: the pin wins, and the node is reported as attracted.
 
     # Contract:
     # A node is NEVER reported as attracted to itself.
@@ -900,24 +864,24 @@ class BackCandidateFinder:
     # attracted to it.
 
     # Contract:
-    # A node that lists the target in `unrelated_links` is NEVER reported as
-    # attracted to it.
+    # A node that lists the target in `unrelated_links` is not reported as
+    # attracted to it unless that node also pins the target in `pinned_links`;
+    # when the target is in both lists, the pin wins and the node is reported.
 
-    all_nodes = self._resolver.iter_nodes(self._scope_cfg)
+    # walk every scope node and collect the ones attracted to the target
     target_resolved = target.resolve()
     target_rel = self._rel(target)
     attracted: list[str] = []
-    for other in all_nodes:
-      # guard: skip the target node itself
+    for other in self._resolver.find_all_nodes(self._scope_cfg):
+      # the target itself is never reported as attracted to itself
       if other.resolve() == target_resolved:
         continue
       finder = CandidateFinder.with_default_sources(
         self._repo, self._scope_cfg, self._scope_id, top_n = self._top_n,
       )
-      others_top = finder.find(other)
 
-      # guard: target not in this node's top-N — not attracted
-      if target_rel not in others_top:
+      # a node whose top-N lacks the target is not attracted
+      if target_rel not in finder.find(other):
         continue
       attracted.append(self._rel(other))
     attracted.sort()
@@ -937,5 +901,5 @@ class BackCandidateFinder:
     try:
       return path.resolve().relative_to(self._repo.resolve()).as_posix()
     except ValueError:
-      # guard: path is outside the repo root — emit the absolute posix form
+      # a path outside the repo root is emitted in its absolute posix form
       return path.resolve().as_posix()

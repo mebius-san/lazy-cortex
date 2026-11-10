@@ -1,5 +1,5 @@
 ---
-description: What to do when a test fails — judge which side is wrong before touching either, never bend correct code to an outdated test, never edit what a test asserts or exclude it from the run without the user's explicit yes.
+description: What to do when a test fails — judge which side is wrong before touching either, never bend correct code to an outdated test, never edit what a test asserts or exclude it from the run without the user's explicit yes, except to follow a behaviour change the user approved.
 paths:
   - "**/*.py"
   - "**/pyproject.toml"
@@ -14,7 +14,7 @@ A failing test is a question, not an instruction. The answer is the user's whene
 ## 1. Decide which side is wrong
 
 - **The code is wrong** — it breaks a contract that still holds. Fix the code.
-- **The test is outdated** — the code changed on purpose and the test still encodes the old contract. Never bend the code to satisfy it. Stop, show the test, the intended change it contradicts and the proposed test diff, and ask via `AskUserQuestion`.
+- **The test is outdated** — the code changed on purpose and the test still encodes the old contract. Never bend the code to satisfy it. When the user already approved that change, rewrite the test per § 2; otherwise stop, show the test, the intended change it contradicts and the proposed test diff, and ask via `AskUserQuestion`.
 - **Unsure which** — ask. Never settle the question by changing either side.
 
 Degrading correct code to turn a test green is forbidden, whatever the form: reverting an intended change, keeping a removed parameter, field or code path alive only because a test still uses it, adding a branch for the test's input, hardcoding the expected value.
@@ -26,6 +26,8 @@ The line is behaviour, not location. Forbidden without the "yes": editing, weake
 Free without asking, because behaviour stays byte-identical: comments, docstrings, assert messages, test and helper names, formatting; renaming, moving, splitting or merging test files when every assertion survives; repeating a production rename in the tests that import or call the renamed symbol. Adding new test files is always allowed.
 
 Rule of thumb: if the edit could turn a failing test green or a passing one red, it needs the "yes".
+
+**An approved behaviour change carries its tests.** Once the user approved a change to what the code does — a new behaviour or a fix of a wrong one — every test that pins the old behaviour is rewritten to the new one without asking per test, keeping what each case meant. The approval covers the functionality, never the code: a test is never bent to a bug, to a shortcut of the implementation, or to whatever the code happens to do; that is still a stop and a question. Tests marked `DO NOT RELAX` or `INSTANT FAIL` are outside this permission.
 
 ## 3. Never take a test out of the run
 

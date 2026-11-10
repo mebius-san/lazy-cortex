@@ -45,6 +45,7 @@ object with `error` field and non-zero exit.
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import os
 import re
@@ -56,6 +57,8 @@ import asset_types  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import note_explainers  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import note_ops  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import resolve_product as product_registry  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import spec_doc_types  # pylint: disable=import-error
@@ -65,10 +68,16 @@ import spec_frontmatter  # pylint: disable=import-error
 import spec_paths  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import summary_render  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from spec_keys import SpecTargetsKey  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from spec_markers import Markers  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   from typing import NoReturn
+
+  from collections.abc import Callable
 
 
 # ----------------------------------------------------------------------------------------
@@ -79,6 +88,7 @@ class Keys:
   Attributes:
     PRODUCTS: Settings key holding the product registry.
     SPEC_PATH: Settings key naming a product's spec directory.
+    PRODUCT_TAG_PREFIX: Tag namespace every product tag sits under, ahead of the product's `spec_path`.
     ASSET_TYPES: Settings key holding a product's operator-defined asset-type declarations.
     ASSET_TYPE: Frontmatter key naming the asset's own type on its status folder-note.
     SPEC_TOOLS: Frontmatter key listing the tools the asset is realised and checked with.
@@ -120,12 +130,14 @@ class Keys:
     DOC_TOKEN_SEP: Separator inside a `--doc` value.
     ARG_SLUG: CLI positional argument name for the asset slug.
     ARG_CWD: CLI flag overriding the repo root.
+    ARG_TARGET: CLI repeatable flag naming one asset a change modifies, as `<folder>/<slug>`.
     HELP_PRODUCT: CLI help text for the product argument.
     HELP_TYPE: CLI help text for the type argument.
     HELP_DOC: CLI help text for the `--doc` flag.
     HELP_PATH: CLI help text for the `--path` flag.
     HELP_SLUG: CLI help text for the slug argument.
     HELP_CWD: CLI help text for the `--cwd` flag.
+    HELP_TARGET: CLI help text for the `--target` flag.
     OUT_FILE: Output JSON key naming a produced doc's repo-relative path.
     OUT_STAGE: Output JSON key naming a produced doc's initial stage.
     GIT_DIR: The `.git` entry checked to detect a repo checkout.
@@ -135,6 +147,8 @@ class Keys:
   PRODUCTS = "products"
   # Settings key naming a product's spec directory.
   SPEC_PATH = "spec_path"
+  # Tag namespace every product tag sits under, ahead of the product's `spec_path`.
+  PRODUCT_TAG_PREFIX = "product/"
   # Settings key holding a product's operator-defined asset-type declarations.
   ASSET_TYPES = "asset_types"
   # Frontmatter key naming the asset's own type on its status folder-note.
@@ -217,6 +231,8 @@ class Keys:
   ARG_SLUG = "slug"
   # CLI flag overriding the repo root.
   ARG_CWD = "--cwd"
+  # CLI repeatable flag naming one asset a change modifies, as `<folder>/<slug>`.
+  ARG_TARGET = "--target"
   # CLI help text for the product argument.
   HELP_PRODUCT = "Product compound-key"
   # CLI help text for the type argument.
@@ -229,6 +245,8 @@ class Keys:
   HELP_SLUG = "Asset slug (lowercase-with-hyphens)"
   # CLI help text for the `--cwd` flag.
   HELP_CWD = "Override repo root"
+  # CLI help text for the `--target` flag.
+  HELP_TARGET = "Asset the change modifies, as <folder>/<slug> under spec_path; repeatable, kept in order"
   # Output JSON keys
   OUT_FILE = "file"
   # Output JSON key naming a produced doc's initial stage.
@@ -237,11 +255,37 @@ class Keys:
   GIT_DIR = ".git"
 
 
-# The citation key's line in a template's frontmatter, in any YAML spelling, and the body region
-# the projection owns — the markers never appear outside `# Sources`.
+# The citation key's line in a template's frontmatter, in any YAML spelling.
 _FM_DOCS_KEY_RE = re.compile(rf"(?m)^{Keys.SPEC_SOURCE_DOCS}[ \t]*:")
-_DOCS_BLOCK_RE = re.compile(
-    re.escape(Keys.DOCS_MARKER_START) + r".*?" + re.escape(Keys.DOCS_MARKER_END), re.DOTALL)
+
+
+# ----------------------------------------------------------------------------------------
+class ScaffoldRefusal(Exception):
+  """
+  Refusal of a scaffold request, carrying the category and message of the CLI's error object.
+
+  Raised for every refusal of a scaffold, template or seeding request, so a caller can turn it into its own
+  outcome; a CLI entry point wrapped by `refusal_exits` leaves it as the JSON error object and exit status 1.
+
+  Attributes:
+    category: Error category — `logical` when the input is invalid, `technical` for an internal failure.
+    message: Single-line human-readable cause.
+  """
+
+  def __init__(self, category: str, message: str) -> None:
+    """
+    Record the refusal's category and message.
+
+    Args:
+      category: Error category — `logical` or `technical`.
+      message: Single-line human-readable cause.
+    """
+    # the message doubles as the exception's own text
+    super().__init__(message)
+
+    # the two halves of the CLI's error object
+    self.category = category
+    self.message = message
 
 
 def repo_root(cwd: Path) -> Path:
@@ -274,16 +318,55 @@ def _plugin_root() -> Path:
 
 def fail(category: str, message: str) -> NoReturn:
   """
-  Print a JSON error object to stdout and exit non-zero.
+  Refuse the request by raising a `ScaffoldRefusal`.
 
   Args:
     category: Error category — one of `logical` (input invalid) or `technical`
       (internal failure).
     message: Single-line human-readable cause.
+
+  Raises:
+    ScaffoldRefusal: Always, carrying the given category and message.
+  """
+  raise ScaffoldRefusal(category, message)
+
+
+def exit_refused(refusal: ScaffoldRefusal) -> NoReturn:
+  """
+  Print the refusal as the CLI's JSON error object on stdout and exit with status 1.
+
+  Args:
+    refusal: The refusal to report.
+
+  Raises:
+    SystemExit: Always, with status `1`, after printing `{"outcome": "error", "error": {"category", "message"}}`.
   """
   print(json.dumps({ "outcome": Keys.OUTCOME_ERROR,
-                     "error": { "category": category, "message": message } }))
+                     "error": { "category": refusal.category, "message": refusal.message } }))
   sys.exit(1)
+
+
+def refusal_exits(entry: Callable[[list[str]], int]) -> Callable[[list[str]], int]:
+  """
+  Wrap a CLI entry point so a `ScaffoldRefusal` raised under it leaves as the JSON error object and exit status 1.
+
+  Args:
+    entry: The CLI entry point taking the argv tail and returning an exit code.
+
+  Returns:
+    The wrapped entry point, keeping the original's name and docstring.
+  """
+
+  @functools.wraps(entry)
+  def guarded(argv: list[str]) -> int:
+    # a refusal raised anywhere under the entry point leaves as the CLI's error object and exit status
+    try:
+      return entry(argv)
+    except ScaffoldRefusal as refusal:
+      exit_refused(refusal)
+
+  # the wrapped entry point keeps the original's name and docstring
+  return guarded
 
 
 def resolve_product(repo: Path, product: str) -> dict:
@@ -298,7 +381,7 @@ def resolve_product(repo: Path, product: str) -> dict:
     The merged record dict (with at least `spec_path`).
 
   Raises:
-    SystemExit: When settings file is missing, malformed, the product key is
+    ScaffoldRefusal: When settings file is missing, malformed, the product key is
       absent, or its `spec_path` is missing.
   """
   settings_path = repo / Keys.CLAUDE_DIR / Keys.SETTINGS_FILE
@@ -337,7 +420,7 @@ def resolve_alias_base(asset_type: str, record: dict) -> str:
     The base type key, or the empty string when the type is concrete.
 
   Raises:
-    SystemExit: When `alias_of` names an unknown base, or the base is itself an alias.
+    ScaffoldRefusal: When `alias_of` names an unknown base, or the base is itself an alias.
   """
   try:
     return asset_types.alias_base(asset_type, record)
@@ -433,7 +516,7 @@ def resolve_template(repo: Path, category: str, product: str, name: str, *,
     Absolute path to the chosen template file.
 
   Raises:
-    SystemExit: When no layer carries the named template (nor, with a type expected, any template
+    ScaffoldRefusal: When no layer carries the named template (nor, with a type expected, any template
       of that type), or the first file found declares a type other than `expect_type`.
   """
 
@@ -501,7 +584,7 @@ def _type_folder(asset_type: str, record: dict, explicit: str) -> str:
     The folder path segment, relative to the product's `spec_path`.
 
   Raises:
-    SystemExit: When the explicit path would place the asset outside `spec_path`.
+    ScaffoldRefusal: When the explicit path would place the asset outside `spec_path`.
   """
 
   # Domain(spec.declarations):
@@ -533,7 +616,7 @@ def _icon_color(asset_type: str, record: dict) -> tuple[str, str]:
     The icon name and its optional colour, the colour empty when the declaration names none.
 
   Raises:
-    SystemExit: When neither the plugin nor the product declares the type.
+    ScaffoldRefusal: When neither the plugin nor the product declares the type.
   """
   pair = asset_types.icon_color(asset_type, record)
 
@@ -556,7 +639,7 @@ def parse_doc_token(token: str) -> tuple[str, str]:
     A `(filename, doc_type)` pair.
 
   Raises:
-    SystemExit: When the value does not carry exactly one separator with both halves present.
+    ScaffoldRefusal: When the value does not carry exactly one separator with both halves present.
   """
   name, sep, doc_type = token.partition(Keys.DOC_TOKEN_SEP)
 
@@ -605,9 +688,22 @@ def _inject_note_keys(text: str, asset_type: str, tools: list[str]) -> str:
   return spec_frontmatter.insert_before_close(text, "".join(f"{line}\n" for line in lines))
 
 
+def product_leaf(record: dict) -> str:
+  """
+  Derive the product's leaf — the last segment of its `spec_path`, which older product tags carried.
+
+  Args:
+    record: Product record.
+
+  Returns:
+    The leaf segment.
+  """
+  return record[Keys.SPEC_PATH].split("/")[-1]
+
+
 def product_tag(record: dict) -> str:
   """
-  Derive the product's `<product_tag>` from its `spec_path` (the leaf segment).
+  Derive the product's `<product_tag>`: its whole `spec_path` under the `product/` namespace.
 
   Args:
     record: Product record.
@@ -615,7 +711,17 @@ def product_tag(record: dict) -> str:
   Returns:
     Tag string suitable for injection into the `{{product_tag}}` template token.
   """
-  return record[Keys.SPEC_PATH].split("/")[-1]
+
+  # Domain(spec.config):
+  # # Product tag
+  # Every spec document carries the tag of the product that owns it: `product/` followed by that product's
+  # whole tree path as the registry records it (`core` → `product/core`, `core/runtime` →
+  # `product/core/runtime`), so a nested product's tag sits inside its parent product's tag. The older
+  # forms — the bare last segment of the tree path, and `product/` followed by that last segment alone —
+  # are stale.
+
+  # the registry's spec_path, verbatim, under the product namespace
+  return f"{Keys.PRODUCT_TAG_PREFIX}{record[Keys.SPEC_PATH]}"
 
 
 def resolve_owning_product(repo: Path, folder: Path, *, product: str, record: dict) -> tuple[str, dict]:
@@ -636,7 +742,7 @@ def resolve_owning_product(repo: Path, folder: Path, *, product: str, record: di
   # Domain(spec.config):
   # # Innermost product owns a nested document
   # A document inside a nested product's tree belongs to the innermost product covering it, not to an enclosing one.
-  # Its tag is the last segment of that product's own tree path and its product pin names that product,
+  # Its tag is `product/` plus that product's own whole tree path and its product pin names that product,
   # so the values of any enclosing product are stale for it, however the caller named the product.
 
   # the folder's repo-relative path is what the product resolver attributes an owner from
@@ -737,20 +843,21 @@ def _default_source_docs() -> list[tuple[str, str]]:
 
 def _set_source_docs(text: str, docs: list[tuple[str, str]]) -> str:
   """
-  Rewrite `spec_source_docs` frontmatter and project the body's `## Docs`
-  sub-section under `# Sources` from the same list.
+  Set the template's docs citations in `spec_source_docs` frontmatter and in the `## Docs` sub-section.
 
-  Frontmatter carries only the wikilink targets (canonical reference list). The
-  body bullet uses `[[<target>|<display>]]` so the rendered text reads sensibly
-  without operator rewrites; the operator may later override individual displays
-  and the projection writer (per `lazy-spec.sources-protocol`) preserves those edits.
+  Frontmatter carries only the wikilink targets. Each body bullet reads `[[<target>|<display>]]`; an operator
+  may later override a display and the projection preserves that edit.
+
+  The frontmatter key is rewritten only when the template declares it, and a template without the marked docs
+  region gains none. Bullets the template shipped in the docs marker pair never survive; only the given pairs are
+  projected.
 
   Args:
     text: Full file text with the template scaffold.
-    docs: `(wikilink_target, display)` tuples to project.
+    docs: `(wikilink_target, display)` pairs to project.
 
   Returns:
-    Text with both the frontmatter array and body projection updated.
+    Text with the frontmatter list and the body projection updated.
   """
 
   # the frontmatter half is rewritten whole in whatever YAML spelling the template carried —
@@ -760,16 +867,18 @@ def _set_source_docs(text: str, docs: list[tuple[str, str]]) -> str:
   if _FM_DOCS_KEY_RE.search(fm_lines):
     text = spec_frontmatter.write_list(
         text[:fm_end], Keys.SPEC_SOURCE_DOCS, [ f"[[{target}]]" for target, _ in docs ]) + text[fm_end:]
-  body_proj = "\n".join(f"- [[{target}|{display}]]" for target, display in docs)
-  body_replacement = (
-      f"{Keys.DOCS_MARKER_START}\n{body_proj}\n{Keys.DOCS_MARKER_END}" if docs
-      else f"{Keys.DOCS_MARKER_START}\n{Keys.DOCS_MARKER_END}"
-  )
 
-  # the whole marked region is replaced, so bullets a template shipped go with it
-  return _DOCS_BLOCK_RE.sub(lambda _m: body_replacement, text, count = 1)
+  # guard: a template without the marked region does not gain one
+  if Keys.DOCS_MARKER_START not in text or Keys.DOCS_MARKER_END not in text:
+    return text
+
+  # the whole marked region is emptied first, so bullets a template shipped go with it
+  markers = Markers()
+  return markers.project_docs(markers.rewrite_between(text, Markers.DOCS_MARKER_ID, ""),
+                              [ target for target, _ in docs ], displays = dict(docs))
 
 
+@refusal_exits
 def main(argv: list[str]) -> int:
   """
   Run the `scaffold-asset` subcommand: scaffold a new asset folder under a product.
@@ -783,7 +892,8 @@ def main(argv: list[str]) -> int:
       scaffold alone; citations a template layer ships never survive into the seeded document.
 
   Args:
-    argv: Subcommand argv tail (`<product> <type> <slug> [--doc <name>:<type> ...] [--path <dir>]`).
+    argv: Subcommand argv tail
+      (`<product> <type> <slug> [--doc <name>:<type> ...] [--path <dir>] [--target <folder>/<slug> ...]`).
 
   Returns:
     Process exit code: `0` on success, `1` on logical error, `2` on argparse failure.
@@ -797,29 +907,66 @@ def main(argv: list[str]) -> int:
   parser.add_argument(Keys.ARG_DOC, action = "append", default = [], help = Keys.HELP_DOC)
   parser.add_argument(Keys.ARG_PATH, default = None, help = Keys.HELP_PATH)
   parser.add_argument(Keys.ARG_CWD, default = None, help = Keys.HELP_CWD)
+  # waiver: argparse CLI signature -- the repeatable-flag action name
+  parser.add_argument(Keys.ARG_TARGET, action = "append", default = [], help = Keys.HELP_TARGET)
   args = parser.parse_args(argv)
 
   # an empty --doc list scaffolds the folder and its folder-note alone — documents are seeded
   # later, by the coordinator's launch checkboxes, never by the scaffold itself
   layout = [ parse_doc_token(token) for token in args.doc ]
 
-  # the product record supplies every type-scaled decision the scaffold needs
+  # the repo root pins every path; the scaffold itself takes the parsed arguments
   repo = Path(args.cwd).resolve() if args.cwd else repo_root(Path.cwd())
-  record = resolve_product(repo, args.product)
+  print(json.dumps(
+      scaffold(repo, args.product, args.asset_type, args.slug, layout = layout, path = args.path or "",
+               targets = args.target)))
+  return 0
+
+
+def scaffold(repo: Path, product: str, asset_type: str, slug: str, *, layout: list[tuple[str, str]] | None = None,
+             path: str = "", targets: list[str] | None = None) -> dict:
+  """
+  Scaffold a new asset folder under a product.
+
+  Args:
+    repo: Repository root.
+    product: The product key the asset is created under.
+    asset_type: The asset type.
+    slug: The asset slug, naming the folder and its status note.
+    layout: The documents to seed, as `(file, doc_type)` pairs; empty seeds the folder and its note alone.
+    path: Folder under the product root overriding the type's `default_path`, or empty.
+    targets: Product-relative `<folder>/<slug>` tokens of the assets a change modifies, written as the
+      folder-note's `spec_targets` in the given order; none or empty leaves the key absent.
+
+  Returns:
+    The result object: `outcome`, repo-relative `folder` and `folder_note`, the `docs` seeded with their
+    stages, and the `group_note` seeded, if any.
+
+  Raises:
+    ScaffoldRefusal: When the product, type, template or target folder refuses the scaffold, or a `targets`
+      token fails the shape rule of `note-set-key` (non-empty segments, no `.` or `..` step), before anything
+      is written.
+  """
+  # guard: a malformed target token is refused before anything is written
+  if (bad := [ token for token in targets or [] if not note_ops.is_asset_path_token(token) ]):
+    fail(Keys.CAT_LOGICAL, f"invalid --target token: {', '.join(bad)}")
+
+  # the product record supplies every type-scaled decision the scaffold needs
+  record = resolve_product(repo, product)
 
   # the asset folder the scaffold writes into, under the named product's tree
-  folder = _type_folder(args.asset_type, record, args.path or "")
+  folder = _type_folder(asset_type, record, path)
   content_root = spec_paths.spec_content_root(repo)
-  target_folder = content_root / record[Keys.SPEC_PATH] / folder / args.slug
+  target_folder = content_root / record[Keys.SPEC_PATH] / folder / slug
 
   # a `--path` reaching into a nested product's tree lands the asset in that product: its tag,
   # pins, templates, paint, tools and stages are the innermost owner's, never the caller's key's
-  owner_key, owner_record = resolve_owning_product(repo, target_folder, product = args.product, record = record)
+  owner_key, owner_record = resolve_owning_product(repo, target_folder, product = product, record = record)
 
   # an alias type borrows the base's templates; folder and icon stay its own
-  alias_base = resolve_alias_base(args.asset_type, owner_record)
-  icon, color = _icon_color(args.asset_type, owner_record)
-  tools = asset_types.default_tools(args.asset_type, owner_record)
+  alias_base = resolve_alias_base(asset_type, owner_record)
+  icon, color = _icon_color(asset_type, owner_record)
+  tools = asset_types.default_tools(asset_type, owner_record)
 
   # Contract:
   # An existing target asset folder is never merged into or overwritten; the scaffold refuses the
@@ -838,15 +985,21 @@ def main(argv: list[str]) -> int:
   # the asset's own type and — when the type declares any — the tools it is realised with. The
   # `category` token keeps its name for template compatibility and carries the type verbatim.
   tokens = { "product": owner_key, "product_tag": product_tag(owner_record),
-             "slug": args.slug, "category": args.asset_type }
+             "slug": slug, "category": asset_type }
 
   # the asset's own status folder-note, seeded from the type's template chain
-  note_template = resolve_template(repo, args.asset_type, owner_key, Keys.FOLDER_NOTE_TMPL,
+  note_template = resolve_template(repo, asset_type, owner_key, Keys.FOLDER_NOTE_TMPL,
                                     alias_base = alias_base)
   note_text = substitute(note_template.read_text(encoding = "utf-8"), tokens)
   note_text = inject_iconize(note_text, icon, color)
-  note_text = _inject_note_keys(note_text, args.asset_type, tools)
-  note_path = target_folder / f"{args.slug}.md"
+  note_text = _inject_note_keys(note_text, asset_type, tools)
+
+  # the assets a change modifies, in the order given; no targets leaves the key absent
+  if targets:
+    note_text = spec_frontmatter.write_list(note_text, SpecTargetsKey.TARGETS, targets)
+
+  # the folder-note lands on disk, healed
+  note_path = target_folder / f"{slug}.md"
   spec_paths.write_text_atomic(note_path, note_explainers.heal_note_text(note_path, note_text))
 
   # Contract:
@@ -855,8 +1008,8 @@ def main(argv: list[str]) -> int:
 
   # one doc per --doc entry, each seeded with its cross-reference block and its declared stage
   produced: list[dict] = []
-  for doc, doc_type in layout:
-    tmpl_path = resolve_template(repo, args.asset_type, owner_key, doc,
+  for doc, doc_type in layout or []:
+    tmpl_path = resolve_template(repo, asset_type, owner_key, doc,
                                   alias_base = alias_base, expect_type = doc_type)
     doc_text = substitute(tmpl_path.read_text(encoding = "utf-8"), tokens)
     doc_text = ensure_doc_type(doc_text, doc_type)
@@ -904,7 +1057,7 @@ def main(argv: list[str]) -> int:
   owner_root = content_root / owner_record[Keys.SPEC_PATH]
   seeded_group = ""
   if not group_note.exists() and group_dir != owner_root:
-    group_template = resolve_template(repo, args.asset_type, owner_key, Keys.GROUP_NOTE_TMPL,
+    group_template = resolve_template(repo, asset_type, owner_key, Keys.GROUP_NOTE_TMPL,
                                        alias_base = alias_base)
     group_text = substitute(group_template.read_text(encoding = "utf-8"), tokens)
 
@@ -923,11 +1076,10 @@ def main(argv: list[str]) -> int:
     seeded_group = str(group_note.relative_to(repo))
 
   # repo-relative paths in the result so the calling skill can quote them straight back
-  print(json.dumps({
+  return {
       "outcome": Keys.OUTCOME_SUCCESS,
       "folder": str(target_folder.relative_to(repo)),
       "folder_note": str(note_path.relative_to(repo)),
       "docs": produced,
       "group_note": seeded_group,
-  }))
-  return 0
+  }

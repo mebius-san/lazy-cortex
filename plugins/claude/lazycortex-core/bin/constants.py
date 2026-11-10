@@ -32,6 +32,7 @@ class StateKey:
 
   Attributes:
     DAEMON_HALTED: The optional halt-reason block written when the daemon stops.
+    DAEMON_PAUSED: The daemon-paused flag key; the pause itself is the `.runtime/daemon.pause` semaphore file.
     GIT_WATCH: The per-`git`-watch baseline-SHA tracking sub-map.
     LAST_RUN: The per-routine last-successful-run timestamp sub-map.
     LAST_SEEN_SHA: The per-watch baseline SHA stored inside a `git_watch` entry.
@@ -224,6 +225,10 @@ class DaemonKey:
     RETENTION_DAYS: The journal-retention window in days.
     GIT: The git-integration sub-configuration block.
     CLEANUP_RUNTIME_LOG_AFTER: The runtime-log retention window.
+    CLEANUP_COMPLETED_AFTER: The retention window of a job bundle whose response proves the work finished.
+    CLEANUP_FAILED_AFTER: The retention window of every other finished or cancelled job bundle, and the age past
+      which the runtime sweep treats misplaced bundles, ownerless runtime files and queued jobs as stale.
+    CLEANUP_DEAD_AFTER: The retention window of a job bundle marked dead.
     POLLING_INTERVAL_SEC: The main-loop polling cadence in seconds.
     STREAM_IDLE_TIMEOUT_SEC: Seconds of expert-spawn stdout silence before the watchdog re-spawns it.
     TRANSIENT_MAX_RETRIES: Transient-error budget per job bundle before the pump closes it.
@@ -253,6 +258,12 @@ class DaemonKey:
   GIT = "git"
   # The runtime-log retention window.
   CLEANUP_RUNTIME_LOG_AFTER = "cleanup_runtime_log_after"
+  # The retention window of a job bundle whose response proves the work finished.
+  CLEANUP_COMPLETED_AFTER = "cleanup_completed_after"
+  # The retention window of every other finished or cancelled job bundle, and the runtime sweep's staleness age.
+  CLEANUP_FAILED_AFTER = "cleanup_failed_after"
+  # The retention window of a job bundle marked dead.
+  CLEANUP_DEAD_AFTER = "cleanup_dead_after"
   # The main-loop polling cadence in seconds.
   POLLING_INTERVAL_SEC = "polling_interval_sec"
   # The hostname-to-checkout-path mapping deciding whether the daemon starts in this working copy.
@@ -599,6 +610,7 @@ class HookKey:
     TOOL_INPUT: The tool's input payload.
     HOOK_EVENT_NAME: The lifecycle event name (`PreToolUse`, `Stop`, ...).
     CWD: The working directory the hook payload reports.
+    SESSION_ID: The identifier of the Claude Code session the hook fired in.
   """
 
   # The tool identifier the hook fired for.
@@ -609,6 +621,8 @@ class HookKey:
   HOOK_EVENT_NAME = "hook_event_name"
   # The working directory the hook payload reports.
   CWD = "cwd"
+  # The identifier of the Claude Code session the hook fired in.
+  SESSION_ID = "session_id"
 
 
 # ----------------------------------------------------------------------------------------
@@ -623,8 +637,8 @@ class EnvVar:
       hooks run; the daemon sets it from the dispatching routine's `hooks_enabled`, and every
       process that routine spawns — expert sessions included — inherits it.
     MAX_SUBAGENT_SPAWN_DEPTH: The `claude` CLI's own subagent-nesting-depth variable name.
-    SUBAGENT_SPAWN_DEPTH_PIN: The value this runtime always sets it to — see the `Decision:`
-      comment at `expert_pump.py`'s own env-construction site for why.
+    SUBAGENT_SPAWN_DEPTH_PIN: The value this runtime always sets it to, so a change to the CLI's own default never
+      changes how deep a headless expert's subagents may nest.
     GIT_CONFIG_COUNT: git's own variable naming how many config slots the environment carries.
     GIT_CONFIG_KEY: Prefix of a slot's config-key variable; the slot index completes the name.
     GIT_CONFIG_VALUE: Prefix of a slot's config-value variable; the slot index completes it.
@@ -641,8 +655,8 @@ class EnvVar:
   HOOKS_ALLOW_LIST = "LAZYCORTEX_HOOKS_ALLOW_LIST"
   # The `claude` CLI's own subagent-nesting-depth variable name.
   MAX_SUBAGENT_SPAWN_DEPTH = "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"
-  # The value this runtime always sets it to — see the `Decision:` comment at `expert_pump.py`'s own env-construction
-  # site for why.
+  # The value this runtime always pins it to, so a change to the CLI's own default never changes how deep a headless
+  # expert's subagents may nest.
   SUBAGENT_SPAWN_DEPTH_PIN = "3"
   # git's own variable naming how many config slots the environment carries.
   GIT_CONFIG_COUNT = "GIT_CONFIG_COUNT"
@@ -796,6 +810,7 @@ class IncidentActor:
     DOCTOR: The recovery doctor primitives.
     RECOVER: The halt-recovery primitives.
     DISPATCHER: The job-dispatch primitive in the expert runtime.
+    RUNTIME_GC: The runtime garbage sweep.
   """
 
   # The runtime daemon loop itself.
@@ -808,6 +823,8 @@ class IncidentActor:
   RECOVER = "recover"
   # The job-dispatch primitive in the expert runtime.
   DISPATCHER = "dispatcher"
+  # The runtime garbage sweep.
+  RUNTIME_GC = "runtime_gc"
 
 
 # ----------------------------------------------------------------------------------------
@@ -881,6 +898,7 @@ class HaltKey:
     REASON: The closed-set halt-reason code.
     DIRTY_PATHS: The repository-relative paths reported dirty at halt time.
     RESETS_AT: The epoch-second timestamp a rate-limit halt lifts itself at.
+    METRIC_PENDING: Set by a halt writer without metrics; the daemon counts the halt and clears it.
   """
 
   # The wall-clock timestamp at which the halt was raised.
@@ -893,6 +911,8 @@ class HaltKey:
   DIRTY_PATHS = "dirty_paths"
   # The epoch-second timestamp a rate-limit halt lifts itself at.
   RESETS_AT = "resets_at"
+  # Set by a halt writer without metrics; the daemon counts the halt and clears it.
+  METRIC_PENDING = "metric_pending"
 
 
 # ----------------------------------------------------------------------------------------
@@ -907,6 +927,7 @@ class HaltReason:
     GIT_PUSH_FAILED: A post-tick push could not complete.
     GIT_REMOTE_UNAVAILABLE: The git remote could not be reached.
     GIT_LOCAL_FAILED: A local git sync command failed with no remote involved.
+    GIT_REBASE_NOT_STARTED: Git refused to start the post-tick rebase onto origin; the halt never lifts by itself.
     INBOX_COLLISION: Another checkout on this host drives the same physical inbox.
     ROUTINE_CONFIG_INVALID: A registry entry does not conform to its type schema.
     RATE_LIMIT: The subscription rate-limit window is closed; spawns pause until it reopens.
@@ -924,6 +945,8 @@ class HaltReason:
   GIT_REMOTE_UNAVAILABLE = "git_remote_unavailable"
   # A local git sync command failed with no remote involved.
   GIT_LOCAL_FAILED = "git_local_failed"
+  # Git refused to start the post-tick rebase onto origin; only an operator can clear what blocks it.
+  GIT_REBASE_NOT_STARTED = "git_rebase_not_started"
   # Another checkout on this host drives the same physical inbox.
   INBOX_COLLISION = "inbox_collision"
   # A registry entry does not conform to its type schema.
@@ -989,6 +1012,8 @@ class RuntimeFile:
     SANDBOX_SETTINGS: The Claude Code settings file that confines expert spawns to the sandbox scope.
     PAUSE: The operator's local pause semaphore — while present, the daemon skips all work.
     CONSUMED_UNPUSHED: The ledger of jobs consumed since the last publish, one `expert/job_id` per line.
+    CONSUMED_UNPUSHED_LOCK: The lock file serializing writers of the consumed-since-publish ledger.
+    RATE_LIMIT_DEFERRED: The marker remembering which rate-limit window the pump last announced.
   """
 
   # The Claude Code settings file that confines expert spawns to the sandbox scope.
@@ -997,6 +1022,114 @@ class RuntimeFile:
   PAUSE = ".runtime/daemon.pause"
   # The ledger of jobs consumed since the last publish, one `expert/job_id` per line.
   CONSUMED_UNPUSHED = ".runtime/consumed-unpushed.log"
+  # The lock file serializing writers of the consumed-since-publish ledger.
+  CONSUMED_UNPUSHED_LOCK = ".runtime/consumed-unpushed.lock"
+  # The marker remembering which rate-limit window the pump last announced.
+  RATE_LIMIT_DEFERRED = ".runtime/rate-limit-deferred.json"
+
+
+# ----------------------------------------------------------------------------------------
+class MigrationKey:
+  """
+  Frontmatter keys of a plugin migration step file — the closed vocabulary a step may carry.
+
+  Attributes:
+    SINCE: The plugin version the step was released in; empty until publication.
+    SUPERSEDES: The numbers of earlier steps this step cancels.
+    APPLIES_WHEN: The predicates that must all hold for the step to apply.
+    WRITES: The repo-relative globs the step may create, change, or delete.
+  """
+
+  # The plugin version the step was released in; empty until publication.
+  SINCE = "since"
+  # The numbers of earlier steps this step cancels.
+  SUPERSEDES = "supersedes"
+  # The predicates that must all hold for the step to apply.
+  APPLIES_WHEN = "applies_when"
+  # The repo-relative globs the step may create, change, or delete.
+  WRITES = "writes"
+
+
+# ----------------------------------------------------------------------------------------
+class MigrationFile:
+  """
+  Locations of plugin migration steps and of the per-plugin migrated-version stamp.
+
+  Attributes:
+    DIR: The directory under a plugin root that holds its migration step files.
+    STAMP: The repo-relative stamp file of one plugin, formatted with the plugin name.
+  """
+
+  # The directory under a plugin root that holds its migration step files.
+  DIR = "migrations"
+  # The repo-relative stamp file of one plugin, formatted with the plugin name.
+  STAMP = ".state/lazy-core.migrated.{plugin}.json"
+
+
+# ----------------------------------------------------------------------------------------
+class MigrationTerritory:
+  """
+  The consumer paths a migration step may write; the spec catalog root joins them at runtime.
+
+  Attributes:
+    PREFIXES: Repo-relative directory prefixes (ending in `/`) and exact file paths of the territory.
+  """
+
+  # Repo-relative directory prefixes (ending in `/`) and exact file paths of the territory.
+  PREFIXES = ( ".claude/", "docs/domains/", ".state/", "upstream/", "pyproject.toml" )
+
+
+# ----------------------------------------------------------------------------------------
+class RuntimeGcKind:
+  """
+  Kinds of garbage the runtime sweep removes, as named in its summary and journal.
+
+  Attributes:
+    EXPIRED_JOB: A job bundle past its retention window.
+    MISPLACED_JOB: A job bundle sitting directly in the queue root, outside any expert folder.
+    OWNERLESS_RUNTIME_FILE: A file in the runtime directory that neither core nor a plugin owns.
+  """
+
+  # A job bundle past its retention window.
+  EXPIRED_JOB = "expired_job"
+  # A job bundle sitting directly in the queue root, outside any expert folder.
+  MISPLACED_JOB = "misplaced_job"
+  # A file in the runtime directory that neither core nor a plugin owns.
+  OWNERLESS_RUNTIME_FILE = "ownerless_runtime_file"
+
+
+# ----------------------------------------------------------------------------------------
+class RuntimeGcKey:
+  """
+  Keys of the runtime sweep's summary and of its deletion journal lines.
+
+  Attributes:
+    DRY_RUN: Whether the sweep only reported what it would remove.
+    REMOVED: The removed paths, grouped by garbage kind.
+    STUCK_QUEUED: The queued jobs nobody claimed within the staleness age.
+    ERRORS: The deletions that failed and the journal records that were lost.
+    KIND: The garbage kind of a journal line, a failed deletion, or a lost journal record.
+    PATH: The repository-relative path of a journal line or a failed deletion, or the journal path of a lost record.
+    ERROR: The error text of a failed deletion or a lost journal record.
+    TS: The UTC time of a journal line.
+  """
+
+  # Whether the sweep only reported what it would remove.
+  DRY_RUN = "dry_run"
+  # The removed paths, grouped by garbage kind.
+  REMOVED = "removed"
+  # The queued jobs nobody claimed within the staleness age.
+  STUCK_QUEUED = "stuck_queued"
+  # The deletions that failed and the journal records that were lost.
+  ERRORS = "errors"
+  # The garbage kind of a journal line, a failed deletion, or a lost journal record.
+  KIND = "kind"
+  # The repository-relative path of a journal line or a failed deletion, or the journal path of a lost record.
+  PATH = "path"
+  # The error text of a failed deletion or a lost journal record.
+  ERROR = "error"
+  # The UTC time of a journal line.
+  TS = "ts"
 
 
 # ----------------------------------------------------------------------------------------
@@ -1040,6 +1173,7 @@ class SandboxSyncKey:
     ADDED_READ: Read-allowlist entries the sync appended.
     ADDED_WRITE: Write-allowlist entries the sync appended.
     REMOVED_READ: Read-allowlist entries the sync pruned as dead plugin-cache versions.
+    REMOVED_WRITE: Write-allowlist entries the sync pruned as dead plugin-cache versions.
     MISSING_READ: Resolved read targets no recorded entry covers.
     MISSING_WRITE: Resolved write targets no recorded entry covers.
     DRIFT: Dotted sandbox keys on which the settings' declaration and the file disagree; an undeclared
@@ -1061,6 +1195,8 @@ class SandboxSyncKey:
   ADDED_WRITE = "added_write"
   # Read-allowlist entries the sync pruned as dead plugin-cache versions.
   REMOVED_READ = "removed_read"
+  # Write-allowlist entries the sync pruned as dead plugin-cache versions.
+  REMOVED_WRITE = "removed_write"
   # Resolved read targets no recorded entry covers.
   MISSING_READ = "missing_read"
   # Resolved write targets no recorded entry covers.
@@ -1611,10 +1747,13 @@ class RoutineType:
 
   Attributes:
     INBOX: The inbox-scanning routine type.
+    SCHEDULE: The calendar-scheduled routine type.
   """
 
   # The inbox-scanning routine type.
   INBOX = "inbox"
+  # The calendar-scheduled routine type.
+  SCHEDULE = "schedule"
 
 
 # ----------------------------------------------------------------------------------------
@@ -1695,7 +1834,6 @@ class ReviewClassName:
     TEST_REPORT: The tester-facing test-report document class.
     DESIGN: The designer-facing design document class.
     BUG: The tester-facing bug-report document class.
-    ARCHITECTURE: The architect-facing architecture document class (v6 → v7).
   """
 
   # The pre-v2 class name retired via `DEV_PLAN` in favor of today's `CODE_PLAN`.
@@ -1716,5 +1854,3 @@ class ReviewClassName:
   DESIGN = "design"
   # The tester-facing bug-report document class.
   BUG = "bug"
-  # The architect-facing architecture document class (v6 → v7).
-  ARCHITECTURE = "architecture"

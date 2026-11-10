@@ -82,7 +82,7 @@ class Chunk(NamedTuple):
   closed: bool = False
 
 
-def _closes_fence(line: str, fence: str) -> bool:
+def _is_fence_close(line: str, fence: str) -> bool:
   """
   Report whether `line` closes a code block opened with `fence`.
 
@@ -113,12 +113,12 @@ def _comment_left_open(line: str, closer: str | None) -> str | None:
   Returns:
     The closing token of the comment still open after `line`, or `None` when none is.
   """
-  # guard: inside a comment, the first line holding its closer ends it
+  # inside a comment, the first line holding its closer ends it
   if closer is not None:
     return None if closer in line else closer
   start = _COMMENT_START_RE.match(line)
 
-  # guard: the line opens no comment
+  # a line that opens no comment leaves the state outside a comment
   if start is None:
     return None
   closer = _COMMENT_CLOSERS[start.group(1)]
@@ -164,8 +164,8 @@ def split_fenced(text: str) -> list[Chunk]:
     line = lines[i].rstrip("\r\n")
     opening = None if comment else _FENCE_OPEN_RE.match(line)
 
-    # guard: inside a comment, or not an opening fence line (or a backtick fence whose info
-    # string holds a backtick)
+    # a plain line — inside a comment, or not an opening fence line (or a backtick fence whose
+    # info string holds a backtick) — is kept as is and the scan moves on
     if opening is None or (opening.group(1)[0] == _BACKTICK and _BACKTICK in opening.group(2)):
       comment = _comment_left_open(line, comment)
       plain.append(lines[i])
@@ -175,7 +175,7 @@ def split_fenced(text: str) -> list[Chunk]:
     # the block runs to its closing fence line, or to the end of the text when unclosed
     fence = opening.group(1)
     j = i + 1
-    while j < len(lines) and not _closes_fence(lines[j].rstrip("\r\n"), fence):
+    while j < len(lines) and not _is_fence_close(lines[j].rstrip("\r\n"), fence):
       j += 1
     if plain:
       chunks.append(Chunk("".join(plain), False))
@@ -215,7 +215,7 @@ def sub_outside_fences(
   out: list[str] = []
   remaining = count
   for chunk in split_fenced(text):
-    # guard: fenced content is literal, and a spent budget leaves the rest untouched
+    # fenced content is literal, and a spent budget leaves the rest untouched
     if chunk.fenced or (count and remaining == 0):
       out.append(chunk.text)
       continue
@@ -265,7 +265,7 @@ def line_ending(text: str) -> str:
   return "\r\n" if "\r\n" in plain and plain.count("\n") == plain.count("\r\n") else "\n"
 
 
-def h1_headings(text: str) -> list[tuple[int, int, str]]:
+def find_all_h1_headings(text: str) -> list[tuple[int, int, str]]:
   """
   Locate every H1 heading line of `text` that sits outside a fenced code block.
 
@@ -328,9 +328,12 @@ def strip_code_fences(body: str) -> str:
   # A code fence's content is never a live callout, tick, or candidate, no matter what it
   # visually resembles — a diff-style edit block quoting a removed callout, or a fence-wrapped
   # example of callout syntax in prose, are both body content the writer meant literally, never
-  # a signal to act on. Every predicate that scans a document for its own markup treats fenced
-  # content as blank; skipping this step lets a stale or illustrative marker deadlock the
-  # review loop forever, since it never resolves the way a live one would.
+  # a signal to act on. The predicates that scan a document for open questions, ticks, and
+  # decision candidates treat fenced content as blank; skipping this step lets a stale or
+  # illustrative marker deadlock the review loop forever, since it never resolves the way a
+  # live one would. The reading of the status banner in the region above the first heading
+  # follows the same rule: fenced content there is never the banner, so a banner-shaped line
+  # inside a fence is literal content.
 
   return "".join(
       "\n" * chunk.text.count("\n") if chunk.fenced else chunk.text for chunk in split_fenced(body)
@@ -459,7 +462,7 @@ def _detect_owner(section_body: str) -> str | None:
   for raw in section_body.splitlines():
     stripped = raw.strip()
 
-    # guard: skip leading blank lines so the ownership tag is matched on the first line with content
+    # leading blank lines are passed over so the ownership tag is matched on the first line with content
     if not stripped:
       continue
     match = _TAG_LINE.match(stripped)
@@ -487,7 +490,7 @@ def is_historian_section(section_content: str) -> bool:
   for raw in section_content.splitlines():
     stripped = raw.strip()
 
-    # guard: skip leading blank lines so the History tag is matched on the first line with content
+    # leading blank lines are passed over so the History tag is matched on the first line with content
     if not stripped:
       continue
     return stripped == _HISTORY_TAG
@@ -507,27 +510,26 @@ def _enumerate_sections(body: str) -> list[Section]:
   Returns:
     Ordered list of `Section` objects, one per H1 heading, empty when none are present.
   """
-  headings = h1_headings(body)
+  headings = find_all_h1_headings(body)
+  # guard: a body with no H1 heading has no sections to enumerate
   if not headings:
     return []
   sections: list[Section] = []
   for i, (start, match_end, title) in enumerate(headings):
     # Heading line includes its trailing newline if present.
     line_end = body.find("\n", match_end)
-    if line_end == -1:
-      heading_line_end = len(body)
-    else:
+    heading_line_end = len(body)
+    if line_end != -1:
       heading_line_end = line_end + 1
     heading_line = body[start:heading_line_end]
     next_start = headings[i + 1][0] if i + 1 < len(headings) else len(body)
     content = body[heading_line_end:next_start]
-    owner = _detect_owner(content)
     sections.append(
         Section(
-            title=title,
-            heading_line=heading_line,
-            content=content,
-            owner_expert=owner,
+            title = title,
+            heading_line = heading_line,
+            content = content,
+            owner_expert = _detect_owner(content),
         )
     )
   return sections
@@ -565,13 +567,12 @@ def parse(text: str) -> Document:
   """
   meta, fm_text, body = _split_frontmatter(text)
   sections = _enumerate_sections(body)
-  top = sections[0] if sections else None
   history = next((s for s in sections if is_historian_section(s.content)), None)
   return Document(
       meta=meta,
       frontmatter_text=fm_text,
       body=body,
       sections=sections,
-      top_heading=top,
+      top_heading=sections[0] if sections else None,
       history_section=history,
   )

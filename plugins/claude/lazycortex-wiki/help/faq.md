@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about setting up scopes, running relinks, mirroring foreign repos, querying the wiki, the terms dictionary, the structure map, the domain-spec tree, the tag-values canon, and the wiki's own writing language.
-last_regen: 2026-10-24
+last_regen: 2026-11-10
 no_diagram: true
 source_skills:
   - lazy-wiki.install
@@ -13,8 +13,15 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: 33e8a296cb2bda2f7c06945ca9d46e24ed4c1858
-surface_sha: 5cf6a3ca25f95354b6847b0a81a58e76a6a0be91338b039281116e731f5bb141
+  - lazy-wiki.domain-spec-writer
+  - lazy-wiki.curator
+  - lazy-wiki.gatherer
+  - lazy-wiki.seeker
+  - lazy-wiki.structure-curator
+  - lazy-wiki.tag-curator
+  - lazy-wiki.terms-curator
+source_sha: da1672544263b333bcb2e2d1f69a8a3b386bcafc
+surface_sha: 08e3739d5808eb66b3d528d5561e25d336660903f06b3ec844495e11df3ab378
 ---
 # Frequently asked questions
 
@@ -136,13 +143,13 @@ The axis vocabulary itself — `wiki.tag_axes` — is repository-wide, not per s
 
 To narrow one scope's axes, run `/lazy-wiki.configure` for that scope and answer Phase 5 with the subset it should use. To grow or shrink the vocabulary itself for every scope at once, run `/lazy-wiki.configure vault` instead — `/lazy-wiki.configure` for a single scope offers only what `wiki.tag_axes` already contains and cannot add a new axis to it. Removing an axis at the vault level is a destructive write: the wizard names how many tagged nodes and narrowing scopes would be orphaned before you confirm it.
 
-Either way, expect a normalization pass on the next relink or on the weekly `lazy-wiki.tag-normalize` routine. On the next `/lazy-wiki.relink` run, Step 2 resolves each scope's effective axis list (vault vocabulary narrowed by the scope), and the tag-canon step dispatches the `wiki.tag-curator` expert to judge a canonical axis-value set for the scope and apply it via the deterministic `retag` primitive, consolidating any values that drifted into near-synonyms. Findings of `unknown-axis` from `/lazy-wiki.audit` indicate nodes that carry axis keys not in the current effective set — a relink clears them.
+Either way, expect a normalization pass on the next relink or on the weekly `lazy-wiki.tag-normalize` routine. On the next `/lazy-wiki.relink` run, Step 2 resolves each scope's effective axis list (vault vocabulary narrowed by the scope), and the tag-canon step dispatches the `wiki.tag-curator` expert to judge a canonical axis-value set for the scope and apply it via the deterministic `tag-apply` verb, which retags the scope and brings the tag-values dictionary in line, consolidating any values that drifted into near-synonyms. Findings of `unknown-axis` from `/lazy-wiki.audit` indicate nodes that carry axis keys not in the current effective set — a relink clears them.
 
 ---
 
 ## What is the tag-values dictionary, and how does the wiki keep tag values from drifting into synonyms?
 
-Classification happens one node at a time, so near-synonyms accumulate on an axis over time — `food` beside `coffee`, `espresso` beside `coffee/espresso`. The `wiki.tag-curator` expert is the whole-axis pass that catches this: given a surface's tag census (each value's node count and a couple of example summaries), it decides which values mean the same thing, which nest as subtypes of another, and which are genuinely distinct, then applies the result via the deterministic `retag` primitive — it never hand-edits a node's tags.
+Classification happens one node at a time, so near-synonyms accumulate on an axis over time — `food` beside `coffee`, `espresso` beside `coffee/espresso`. The `wiki.tag-curator` expert is the whole-axis pass that catches this: given a surface's tag census (each value's node count and a couple of example summaries), it decides which values mean the same thing, which nest as subtypes of another, and which are genuinely distinct, and writes a gloss for every value the dictionary does not yet record. It then hands both to the deterministic `tag-apply` verb, which retags the surface and rewrites the dictionary and its glosses — the curator never hand-edits a node's tags or the dictionary file.
 
 The consolidated vocabulary is recorded in an advisory dictionary file — `wiki.tags.dictionary` in `lazy.settings.json`, defaulting to `docs/tags.md` when the key is unset. It lists each settled value's gloss per axis, so a later classification pass reuses an existing value instead of coining a rival spelling. It constrains nothing: a classification may still coin a value the dictionary does not list, and the next canon pass records it there.
 
@@ -162,9 +169,9 @@ The regular scope branch of `/lazy-wiki.configure` still collects an `exclude_pa
 
 Every file the wiki rebuilds wholesale — node summaries and topic glosses, a scope's `topics.md`, `docs/structure.md`, `/lazy-wiki.query` answers, and dictionary entries — comes back in one resolved language, decided by a fixed precedence: `wiki.language` wins when it's set, the repository-wide top-level `language` key is the fallback, and `en` is the floor when neither is set. Leaving `wiki.language` unset is the normal case, not a gap — it just means the wiki follows whatever language the rest of the project already writes in.
 
-Set a language for the wiki alone with `/lazy-wiki.configure vault`. Its language step asks whether to inherit the repo-wide language or set one just for the wiki; choosing to set one asks for the code, any ISO 639-1 tag (`ru`, `de`, …). A value already on record is never re-asked, and a free-form language name typed in instead of a code (`Russian`, `русский`, `English`) is normalized to its code automatically — you're told which code got recorded.
+Set a language for the wiki alone with `/lazy-wiki.configure vault`. Its language step asks whether to inherit the repo-wide language or set one just for the wiki; choosing to set one asks for the code, any ISO 639-1 tag (`ru`, `de`, …). A value already on record is never re-asked, and a free-form language name typed in instead of a code (`Russian`, `English`) is normalized to its code automatically — you're told which code got recorded.
 
-One surface is the exception: the generated domain-spec tree (`wiki.domains`) is not resolved from `wiki.language` at all. Each group doc and the group index speak whatever language the code's own `Domain(…)` markers and the vault's authored docs are already written in, judged per group, so an index never ends up listing entries in a language its own content isn't.
+One surface is the exception: the generated domain-spec tree (`wiki.domains`) is not resolved from `wiki.language` at all. Each group's folder note and documents speak whatever language the code's own `Domain(…)` markers and the vault's authored docs are already written in, judged per group, so an index never ends up listing entries in a language its own content isn't.
 
 ---
 
@@ -182,7 +189,7 @@ When `wiki.domains` is configured, the audit adds a repo-level `domains` section
 
 ## How do I add a second repository to a scope's See-also links?
 
-See-also links can reference nodes in other repositories using a `@<repo-key>/<path>` notation. Both `/lazy-wiki.query` and `/lazy-wiki.relink` resolve `<repo-key>` against the `repos` map at the top level of `lazy.settings.json` — a project-wide registry that lazycortex-wiki reads but does not itself manage. If the key you need is not already present in that map, it needs to be added at the project level before cross-repo links will resolve; consult your project's setup for how that registry is maintained. Once the key exists, the curator can resolve cross-repo paths when building links, and `/lazy-wiki.query` can validate and traverse them.
+You don't link out to it — you mirror it. A See-also link written as `@<repo-key>/<path>` is a retired cross-repo notation: `/lazy-wiki.query`'s gatherer treats any link starting with `@` as dead and reports it unresolved, and `/lazy-wiki.audit` flags every surviving one as `dangling-at-prefix`, telling you whether to rewrite it to the mirrored node's local path or drop it. To bring the other repository's markdown into a scope, run `/lazy-wiki.configure mirror` (next question): its files sync under a local `mirror_path` and become ordinary nodes with ordinary local See-also links.
 
 ---
 
@@ -258,9 +265,11 @@ One structure finding is a FAIL rather than a drift report: `structure-watch-fil
 
 ## What are the domain-spec tree and `Domain(…)` markers?
 
-`wiki.domains` (configured via `/lazy-wiki.configure domains`) generates a tree of documentation — `docs/domains/` by default — synthesised from `Domain(…)` markers annotated on code, grouped by a dictionary of accepted group keys. Each generated doc carries fixed Terms, Principles, and Mechanics sections, with formulas verified against the annotated code, plus a trailing Contracts section for any attributed `Contract:` blocks. Query the generated tree with `/lazy-wiki.domains group <group-key> [<section>]` or `/lazy-wiki.domains term "<text>"` — it returns one doc's section or matching excerpts, never the whole tree, mirroring how `/lazy-wiki.structure query` works over the project-structure map instead.
+`wiki.domains` (configured via `/lazy-wiki.configure domains`) generates a tree of documentation — `docs/domains/` by default — synthesised from `Domain(…)` markers annotated on code, grouped by a dictionary of accepted group keys. Each group gets its own folder, opened by a folder note named like the folder: an overview of what the group covers plus a `Documents` list. Inside the folder sits one document per `Domain(…)` block. Every block document carries `Principles`, `Mechanics`, and `Related` sections, with behaviour verified against the annotated code; `Terms`, `Contracts` (for attributed `Contract:` blocks), and `Discrepancies` (where the comment and the code disagree — the code is the truth there) appear only when the block has such content. A `domains.md` index at the top lists the groups and flags the documents that carry discrepancies.
 
-Each generated doc also carries `wiki/<axis>/<value>` tags in its own frontmatter, drawn from the same repository-wide `wiki.tag_axes` vocabulary the wiki scopes use, and reusing a value already settled in the tag-values dictionary where one fits. You never set these by hand — the domain-spec writer chooses them from the group's `Domain(…)` blocks, carrying forward any tags an existing doc already had rather than re-minting them on every regeneration.
+Query the generated tree with `/lazy-wiki.domains group <group-key> [<doc-slug>] [<section>]` or `/lazy-wiki.domains term "<text>"`. With only a group key you get the folder note's overview and its document list; add a `<doc-slug>` (a document's file name without `.md`, taken from that list) to read one document, and a `<section>` to read just one of its `##` sections. A `<section>` is meaningful only together with a `<doc-slug>`. The query never returns a whole document or the whole tree, mirroring how `/lazy-wiki.structure query` works over the project-structure map.
+
+Each generated file — folder note and block document alike — also carries `wiki/<axis>/<value>` tags in its own frontmatter, drawn from the same repository-wide `wiki.tag_axes` vocabulary the wiki scopes use, and reusing a value already settled in the tag-values dictionary where one fits. You never set these by hand — the domain-spec writer chooses them from the group's `Domain(…)` blocks, carrying forward any tags a file already had rather than re-minting them on every regeneration.
 
 Setting up `wiki.domains` for the first time only asks you for the code globs to scan; the dictionary path (`docs/guidelines/domain-groups.md`) and the output directory (`docs/domains`) are taken from their shipped defaults without a question, and the dictionary is seeded from a skeleton template the first time it's missing. The language of the generated docs — an ISO 639-1 code — is proposed from a sample of the vault's own authored docs and asked once; moving either path, or changing the language, afterwards is an `/lazy-wiki.configure domains` edit-mode run, not a fresh-setup question. This is a separate, per-group language judgment — it does not read or follow `wiki.language`, since the domain tree stays in whatever language the code and its surrounding docs are already written in.
 
@@ -268,7 +277,7 @@ Setting up `wiki.domains` for the first time only asks you for the code globs to
 
 ## How do I regenerate the domain-spec tree, and do I need the background daemon?
 
-Run `/lazy-wiki.domain-sync` — it works entirely inside your current session, with no daemon required. It computes what changed since the last generation, dispatches the domain-spec writer per changed group, removes docs whose group no longer has any markers or was renamed out of the dictionary, rebuilds the `domains.md` index, and makes one commit. If your project does run the background daemon, the same regeneration happens automatically: a git-watch routine reacts per commit, and a weekly routine does a full sweep — `/lazy-wiki.domain-sync` is the manual equivalent for a checkout without it, or for right after a `/lazy-python.knowledge-sweep` backfill.
+Run `/lazy-wiki.domain-sync` — it works entirely inside your current session, with no daemon required. It computes what changed since the last generation, dispatches the domain-spec writer per changed group — which rewrites the group's folder note and the documents of only those `Domain(…)` blocks whose content changed — removes docs whose block or group no longer exists or was renamed out of the dictionary, repairs moved anchors and dead `Related` links, rebuilds the `domains.md` index, and makes one commit. An optional group key limits the run to that group. If a group's writer returns a missing or empty file, none of that group's files are landed and the run moves on to the next group, so a folder note never describes documents that were not rewritten. If your project does run the background daemon, the same regeneration happens automatically: a git-watch routine reacts per commit, and a weekly routine does a full sweep — `/lazy-wiki.domain-sync` is the manual equivalent for a checkout without it, or for right after a `/lazy-python.knowledge-sweep` backfill.
 
 ---
 
@@ -283,3 +292,15 @@ If a generated doc carries a `wiki/<axis>/…` tag whose axis is not declared in
 ## `/lazy-wiki.domain-sync` reports `unknown_groups` — what do I do?
 
 It means code carries `Domain(<group>)` markers whose group key is not listed in the domain-groups dictionary, so that group's doc is skipped this run rather than generated under an unrecognised name. Either add the group to the dictionary by hand and re-run, or run `/lazy-python.knowledge-sweep`, which grows the dictionary together with the operator and refiles the markers under the accepted groups before the next sync. The sweep is the better route when several groups turn up at once, when markers sit under `Domain(unfiled):`, or after a dictionary rename left the old group name behind in the code.
+
+---
+
+## `/lazy-wiki.domain-sync` reports `untitled_blocks` — what do I do?
+
+Each `Domain(…)` block becomes one document, named after the block's title. A block that does not open with a `# # <title>` line has no title, so it gets no document this run. Add the title line to the block in the code and re-run `/lazy-wiki.domain-sync`.
+
+---
+
+## `/lazy-wiki.domains` says "not a document of" a group — why?
+
+The `<doc-slug>` you passed names no file in that group's folder. Query the group with just its key to get the folder note's `Documents` list, take the slug from there, and ask again.

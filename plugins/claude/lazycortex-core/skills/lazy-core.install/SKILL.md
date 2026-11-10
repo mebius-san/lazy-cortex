@@ -28,7 +28,7 @@ This skill has 22 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 10.5 — Bootstrap .memory/ directory`
    - `Step 10.7 — Install lazy-claude wrapper`
    - `Step 11 — Register expert candidates`
-   - `Step 12 — Bootstrap built-in routines (expert pump, doctor tick, index guard, weekly autocheckup)`
+   - `Step 12 — Bootstrap built-in routines (expert pump, doctor tick, index guard, daily runtime GC, weekly autocheckup)`
    - `Step 12.5 — Restore externally-sourced working directories`
    - `Step 13 — Remove a stray supervisor unit`
    - `Step 13.5 — Configure expert-spawn sandbox in .runtime/sandbox.settings.json`
@@ -137,7 +137,7 @@ then run `/plugin install lazycortex/lazycortex-core`.
 
 ## Step 2: Determine paths
 
-Enumerate every rule file shipped by the plugin via `Bash(ls <installPath>/rules/*.md)` — never hardcode filenames. `<installPath>` is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-core` prints: the authoring repo's own `plugins/claude/lazycortex-core/` when this checkout ships the plugin, else the daemon's exported plugin dir, else the install `~/.claude/plugins/installed_plugins.json` records. Never read `installed_plugins.json` for it by hand — in a repo that authors the plugin that hands back the previous publish instead of the sources at hand, and every role, rule, template, or tier row added since is silently missed.
+Enumerate every rule file shipped by the plugin via `Bash(ls <installPath>/rules/*.md)` — never hardcode filenames. `<installPath>` is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-core` prints: the first of, in this order, a `$LAZYCORTEX_PLUGIN_DIRS` entry for the plugin, the dev-vault sibling `plugins/claude/lazycortex-core/` beside core's own tree, the authoring repo's own `plugins/claude/lazycortex-core/` when this checkout ships the plugin, and last the install `~/.claude/plugins/installed_plugins.json` records; a miss exits 1 with an `error:` line naming every place it searched. Never read `installed_plugins.json` for it by hand — in a repo that authors the plugin that hands back the previous publish instead of the sources at hand, and every role, rule, template, or tier row added since is silently missed.
 
 For each source file `<installPath>/rules/<name>.md`, the target is:
 
@@ -182,23 +182,23 @@ One deterministic primitive resolves both halves — it takes the shipped file w
 Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold sync-rule --src <installPath>/rules/lazy-core.scaffold.md --registry <targetRulesDir>/lazy-core.scaffold.md)
 ```
 
-`<core-cli>` is `<installPath>/bin/lazycortex-core`, run through the interpreter like every other verb — the file carries no exec bit. Status is `installed` (target absent — shipped file lands with its empty `{}` block, Step 4 then populates it), `unchanged`, `refreshed` (stale prose replaced, block carried over), `failed` (the write did not verify), or `error` (the consumer's block does not parse — report it and leave the file alone). Never hand-merge this file: surgical per-key registry writes are `scaffold-sync`'s job, and the prose is the primitive's.
+`<core-cli>` is `<installPath>/bin/lazycortex-core`, run through the interpreter like every other verb — the file carries no exec bit. Status is `installed` (target absent — shipped file lands with its empty `{}` block, Step 4 then populates it), `unchanged`, `refreshed` (stale prose replaced, block carried over), `failed` (the write did not verify), or `error` (the consumer's block does not parse — report it and leave the file alone). Never hand-merge this file: surgical per-key registry writes are the `scaffold sync-plugin` verb's job, and the prose is the primitive's.
 
 ## Step 4: Sync authoring templates
 
-Authoring-template copy **and** scaffold-registry population are both done by `lazy-core.scaffold-sync`, invoked for `lazycortex-core` itself — core registers through the same path as any other plugin (dogfood).
+Authoring-template copy **and** scaffold-registry population are both done by the `scaffold sync-plugin` verb, run for `lazycortex-core` itself — core registers through the same path as any other plugin (dogfood).
 
-Resolve this plugin's own `<installPath>` (via `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-core`, the same resolution the rules mirror used above) and the detected `<scope>` (`project` / `user`), then dispatch:
+Resolve this plugin's own `<installPath>` (via `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-core`, the same resolution the rules mirror used above) and the detected `<scope>` (`project` / `user`), then run:
 
 ```
-Skill(skill: "lazycortex-core:lazy-core.scaffold-sync", args: "plugin=lazycortex-core installPath=<installPath> scope=<scope>")
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" scaffold sync-plugin --plugin lazycortex-core --install-path <installPath> --scope <scope>)
 ```
 
-The skill discovers `<installPath>/templates/core/scaffold.entries.json`, copies `templates/core/*` (excluding the manifest) into `<consumerScope>/.claude/templates/core/` as install-managed mirrors (stale targets overwritten from the shipped source), and upserts the `lazycortex-core` registry key from the manifest via `scaffold upsert` (surgical — the consumer's `_local` and any sibling-plugin keys stay byte-for-byte; per §5a the rest of `lazy-core.scaffold.md` is untouched).
+The verb prints one JSON line; its `templates` array carries one copy state per template and its `status` is the registry outcome (`registered`, `unchanged`, `created-and-registered`, `none`, `collision`, `error`). Exit 3 means a template write did not verify — the `failed` array names it.
 
 ### Outcome
 
-The `scaffold-sync` report: per-template copy states plus the registry upsert status.
+One line per `templates` entry (`<group>/<file>: <state>`), then the `status` value. The step succeeded only when that `status` came back from the verb; never report the sync without its reply.
 
 ## Step 5: Verify
 
@@ -262,7 +262,7 @@ Before calling `Write` on a **newly-created** file (target was missing or unpars
 
 > Creating `<targetPath>` at **<scope>** scope (`user` = `~/.claude/lazy.settings.json` applies to every project; `project` = `<repo-root>/.claude/lazy.settings.json` applies to this repo only).
 >
-> This file routes subagent dispatches to model tiers (`haiku` / `sonnet` / `opus` / `default`). Structure:
+> This file routes subagent dispatches to model tiers (`haiku` / `sonnet` / `opus` / `fable` / `default`). Structure:
 > - `_builtin` — defaults for the three built-in subagent types (seeded now).
 > - `_user` — your globally-authored agents (filled later by `/lazy-core.agent-models`, writes to the global file).
 > - `_project` — this project's agents (filled later by `/lazy-core.agent-models`, writes to the project file).
@@ -474,7 +474,7 @@ Register every expert candidate the enabled plugins ship — there is no per-can
 
 List agent files that may carry `expert_protocol:` frontmatter at three scopes, one `Bash(ls …)` per pattern below — never `find`, a walk, or a glob over the plugin cache (`~/.claude/plugins/cache/*/*/*/` lists every version ever installed, and the stale ones sort first). Installed plugins come from the plugin registry, each resolved to the one directory its sources are read from:
 
-- `Bash(jq -r '.plugins | keys[]' ~/.claude/plugins/installed_plugins.json)` — every installed `<plugin>@<marketplace>` key; for each, `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" plugin-root <plugin> --cwd <repo-root>)` prints the authored sources in a checkout that ships the plugin, else the install `installed_plugins.json` records; then `Bash(ls <printed root>/agents/*.md)`. A non-zero exit means the plugin ships no resolvable sources — skip it.
+- `Bash(jq -r '.plugins | keys[]' ~/.claude/plugins/installed_plugins.json)` — every installed `<plugin>@<marketplace>` key; for each, `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" plugin-root <plugin> --cwd <repo-root>)` prints the one root it resolves — a `$LAZYCORTEX_PLUGIN_DIRS` entry, then the dev-vault sibling tree, then the authored sources in a checkout that ships the plugin, and last the install `installed_plugins.json` records; then `Bash(ls <printed root>/agents/*.md)`. A non-zero exit means the plugin ships no resolvable sources — skip it.
 - `~/.claude/agents/*.md`
 - `<repo-root>/.claude/agents/*.md`
 
@@ -503,15 +503,15 @@ Append both to the candidate list unconditionally:
 - `agent_name`: `lazy-runtime.doctor` (expert key `runtime.doctor`) — `plugin`: `lazycortex-core`; no protocol (the doctor routine supplies its context bundle directly; there is nothing to resolve).
 - `agent_name`: `lazy-core.autocheckup` (expert key `core.autocheckup`) — `plugin`: `lazycortex-core`; no protocol (the weekly `lazy-core.autocheckup` schedule routine — seeded by Step 12's bootstrap — dispatches it with a bare `{"repo": "."}` request).
 
-Each then flows through §§ 2–4 exactly like a scanned candidate (skipped if already registered, bot `git_author`), with one addition these two candidates carry and a scanned one does not: their entry is `{agent, git_author, can_commit_in_repo: true}`. Both exist to commit — the doctor commits the reverts and the system-noise cleanups it decides on, the autocheckup commits the mechanical fixes it applied — and without the flag the pump appends the no-commit clause and their whole output strands. Unlike the other install-managed fields, this one is seeded on creation only: an existing entry carrying an explicit `false` is the operator's choice and stays.
+Each then flows through §§ 2–4 exactly like a scanned candidate (skipped if already registered, bot `git_author`), with one addition these two candidates carry and a scanned one does not: their entry is `{agent, git_author, can_commit_in_repo: true}`. Both exist to commit — the doctor commits the system-noise cleanups it decides on, the autocheckup commits the mechanical fixes it applied — and without the flag the pump appends the no-commit clause and their whole output strands. Unlike the other install-managed fields, this one is seeded on creation only: an existing entry carrying an explicit `false` is the operator's choice and stays.
 
-Additionally, ensure lazycortex-core's own agent-model tiers — the doctor's included — exist in the **project** `agent_models.lazycortex` (the expert runtime resolves models from `<repo-root>/.claude/lazy.settings.json` only). Dogfood the shared seeding primitive instead of hand-rolling the SOT lookup (same pattern as Step 4 dispatching `lazy-core.scaffold-sync`):
+Additionally, ensure lazycortex-core's own agent-model tiers — the doctor's included — exist in the **project** `agent_models.lazycortex` (the expert runtime resolves models from `<repo-root>/.claude/lazy.settings.json` only). Run the shared seeding verb instead of hand-rolling the SOT lookup (same pattern as Step 4 running `scaffold sync-plugin`):
 
 ```
-Skill(skill: "lazycortex-core:lazy-core.agent-models-seed", args: "prefix=lazycortex-core scope=project")
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" agent-models-seed --prefix lazycortex-core --scope project)
 ```
 
-`scope=project` (NOT Step 1's install scope) because Steps 9–13.5 always target the runtime repo and the doctor's tier must land in `<repo-root>/.claude/lazy.settings.json` for expert-runtime resolution. The primitive reads the same SOT (`default-tiers.json`, same missing-file FAIL as Step 6), seeds every `lazycortex-core:<agent>` key — the doctor plus its sibling agents — under the `lazycortex` group, and never clobbers an operator override. State per the primitive's report: **tier-added** (entries seeded), **tier-kept-local** (operator overrides preserved), or **unchanged**. Fold its per-key block into the Step 14 report.
+`--scope project` (NOT Step 1's install scope) because Steps 9–13.5 always target the runtime repo and the doctor's tier must land in `<repo-root>/.claude/lazy.settings.json` for expert-runtime resolution. The verb prints one JSON line: `outcome` is `seeded-N`, `unchanged`, or `no-entries` (exit 0), or a refusal — `sot-missing`, `settings-unparseable` (exit 1); `entries` carries one `{dispatch, tier, state}` line per key. The step's outcome is that `outcome` value; never report a seed the verb did not answer. Fold the `entries` lines into the Step 14 report.
 
 ### 2. Filter already-registered candidates
 
@@ -544,9 +544,9 @@ The two names differ on purpose: the key is the § 3 `<domain>.<role>` form, the
 
 State one line per candidate: `<expert_key>: registered`.
 
-## Step 12: Bootstrap built-in routines (expert pump, doctor tick, index guard, weekly autocheckup)
+## Step 12: Bootstrap built-in routines (expert pump, doctor tick, index guard, daily runtime GC, weekly autocheckup)
 
-If Step 9 was skipped (outcome `skipped-not-in-git-repo`), inherit the same outcome and skip this step. A registered routine is not daemon-only config: `/lazy-runtime.tick` runs the same set, in the same priority order, on a checkout that never starts a daemon.
+If Step 9 was skipped (outcome `skipped-not-in-git-repo`), inherit the same outcome and skip this step. A registered routine is not daemon-only config: `/lazy-runtime.tick` runs the same set, in the same priority order, on a checkout that never starts a daemon. The set is `lazy-expert.pump`, `lazy-runtime.doctor`, `lazy-core.index-guard`, `lazy-core.runtime-gc` (a daily `runtime-gc` sweep that removes expired job bundles, job folders without an expert folder and ownerless `.runtime/` files, and reports jobs stuck in the queue to the error ledger), and `lazy-core.autocheckup`.
 
 Otherwise, check one condition: the `experts` section of `<repo-root>/.claude/lazy.settings.json` contains at least one expert entry (a key that is not `_version` and whose value is a dict).
 
@@ -710,7 +710,7 @@ Substitute `<repo-root>` with the absolute path of the current repo. The plugin 
   --allow-read ~/.claude/plugins/cache/lazycortex
 ```
 
-The repo root is granted read+write implicitly. The call also lays the `sandbox` section of `lazy.settings.json` over the file — the operator's network allowlist above all, in Claude Code's own `sandbox` shape; the file's `sandbox` block becomes the declaration, only `enabled`, `allowUnsandboxedCommands` and the two path allowlists survive undeclared, and a declared path allowlist entry joins the recorded list (`lazy-core.expert-runtime-schema.md` § Sandbox). The call is idempotent: it appends only what is missing, never overwrites a recorded `enabled` or `allowUnsandboxedCommands` except with a declared value, and never drops or reorders a recorded entry — with one exception: a recorded read grant that names a version-pinned `<plugin>/<version>` directory under the plugin cache root and whose directory no longer exists on disk (a dead pin left behind by a past `/plugin update`) is pruned. The write allowlist is never pruned, and a read entry outside the plugin cache root stays even when its path is missing. An unrecorded `allowUnsandboxedCommands` is written `false`: Claude Code defaults it to `true`, under which a command the sandbox blocks is retried unsandboxed and only meets the permission check — which Block 2's bare `Bash` allow passes — so a confined spawn could still delete outside its write scope on the second try.
+The repo root is granted read+write implicitly. The call also lays the `sandbox` section of `lazy.settings.json` over the file — the operator's network allowlist above all, in Claude Code's own `sandbox` shape; the file's `sandbox` block becomes the declaration, only `enabled`, `allowUnsandboxedCommands` and the two path allowlists survive undeclared, and a declared path allowlist entry joins the recorded list (`lazy-core.expert-runtime-schema.md` § Sandbox). The call is idempotent: it appends only what is missing, never overwrites a recorded `enabled` or `allowUnsandboxedCommands` except with a declared value, and never drops or reorders a recorded entry — with one exception: a recorded grant, in either allowlist, that names a version-pinned `<plugin>/<version>` directory under the plugin cache root and whose directory no longer exists on disk (a dead pin left behind by a past `/plugin update`) is pruned from both lists, so every write entry stays a read entry too. An entry outside the plugin cache root stays even when its path is missing. An unrecorded `allowUnsandboxedCommands` is written `false`: Claude Code defaults it to `true`, under which a command the sandbox blocks is retried unsandboxed and only meets the permission check — which Block 2's bare `Bash` allow passes — so a confined spawn could still delete outside its write scope on the second try.
 
 Block 2 — `<repo-root>/.claude/settings.local.json` (permission scope; loaded by every session in the checkout):
 
@@ -736,7 +736,7 @@ No `deny` list is seeded. What a spawn may reach on disk is the sandbox's busine
 Run the `sandbox-sync` call above and read its JSON result:
 
 1. `changed: true` and `present: false` → State **sandbox-created**.
-2. `changed: true` and `present: true` → State **sandbox-merged** (`added_read` / `added_write` name what was appended, `removed_read` names any dead plugin-cache version pin pruned).
+2. `changed: true` and `present: true` → State **sandbox-merged** (`added_read` / `added_write` name what was appended, `removed_read` / `removed_write` name any dead plugin-cache version pin pruned from each).
 3. `changed: false` → State **sandbox-unchanged**.
 4. `enabled: false` → the checkout has confinement recorded as off, which contradicts the required `true`; the CLI left it alone. When the `sandbox` section of `lazy.settings.json` itself declares `enabled: false`, the file only mirrors that declaration and a write here would be undone by the next sync: do not ask, state **sandbox-conflict** and name the declaration as the place to flip it. Otherwise raise one `AskUserQuestion` per the consumer-owned-config policy and state **sandbox-conflict** when the operator keeps it off:
 
@@ -783,7 +783,7 @@ Report to the user:
 - Experts directory bootstrap outcome (Step 10)
 - `.memory/` directory bootstrap outcome (Step 10.5)
 - Expert registration outcome (Step 11)
-- lazycortex-core agent-model tier seed outcome (Step 11 §1b, via `lazy-core.agent-models-seed`)
+- lazycortex-core agent-model tier seed outcome (Step 11 §1b, via the `agent-models-seed` verb)
 - Expert-pump routine registration outcome (Step 12)
 - External working-directory outcome (Step 12.5), including every `skipped (was …)` line, the ignore-coverage outcome with each appended `.gitignore` line (or, on `ignores-declined`, the WARN naming every path git can still see)
 - Stray supervisor unit outcome (Step 13)

@@ -2,7 +2,7 @@
 name: lazy-repo.mark-public
 description: "Use when preparing a local/private repo — or a subtree inside one — to become public. Runs the full lazy-guard.check-public audit, walks through fixes and waivers, creates .guard-public.json to enable the pre-commit hook, and optionally flips the repo to public on GitHub. Accepts an optional scope argument to mark a subtree public (e.g., `plugins/claude/**`) without touching GitHub visibility."
 argument-hint: "[scope-glob ...]  # optional; e.g. 'plugins/claude/** README.public.md .gitignore' for subtree-public mode"
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git ls-files*), Bash(git remote*), Bash(gh repo*), Bash(gh api*), Bash(mkdir -p *), Bash(date *), Agent
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git ls-files*), Bash(git remote*), Bash(git add -N *), Bash(git commit *), Bash(gh repo*), Bash(gh api*), Bash(mkdir -p *), Bash(date *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
 ---
 # Make a Repo (or Subtree) Public
 
@@ -46,8 +46,8 @@ Invoke the `/lazy-guard.check-public` skill. Follow its full Phase 1-4 (Prepare,
 
 **Passing the scope**: if Step 1b selected subtree-public mode, the easiest way to scope the audit is:
 
-1. If `.guard-public.json` already exists, read it, add/overwrite `public_scopes` with the Step 1b globs, re-write the file.
-2. If it doesn't exist, create a minimal scaffold: ```json { "version": 1, "public_scopes": [ ... ], "waivers": [] } ```
+1. Write the Step 1b globs with one call, one `--scope` per glob: `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" guard-public-write --scope <glob>)`.
+2. The `guard-public-write` verb creates the file when it is absent and otherwise replaces only `public_scopes`; its JSON `status` (`created`, `updated`, `unchanged`) is this step's outcome.
 
 This way the check-public skill and the hook immediately see the scope. The file will be completed with accepted waivers in Step 4.
 
@@ -71,24 +71,18 @@ If any FAIL findings remain unresolved, do NOT proceed to Step 4.
 
 ## Step 4: Create `.guard-public.json`
 
-Write the waiver file to the repo root with all accepted waivers from Step 3. This also marks the repo public and activates the PII/infra pre-commit hook (`lazy-guard.check-public.py`) for future commits. The secrets hook (`lazy-guard.secrets.py`) runs in every repo and never needed this opt-in.
+Write the accepted waivers from Step 3 to the repo root's `.guard-public.json` in one call — one `--waiver '<json object>'` per accepted waiver, one `--scope` per Step 1b glob in subtree-public mode or `--whole-repo` in whole-repo mode, one `--skip-path` per vendored or third-party directory the audit identified. This also marks the repo public and activates the PII/infra pre-commit hook (`lazy-guard.check-public.py`) for future commits. The secrets hook (`lazy-guard.secrets.py`) runs in every repo and never needed this opt-in.
 
-Include `public_scopes` if Step 1b selected subtree-public mode. Include `global_skip_paths` for vendored/third-party directories if the audit identified any.
-
-```json
-{
-  "version": 1,
-  "public_scopes": [ ...from Step 1b, omit in whole-repo mode... ],
-  "waivers": [
-    ...collected from Step 3...
-  ],
-  "global_skip_paths": [
-    ...if any...
-  ]
-}
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" guard-public-write --scope <glob> --waiver '<json object>' --skip-path <path>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" guard-public-write --whole-repo --waiver '<json object>' --skip-path <path>)
 ```
 
-Commit the waiver file.
+The first form is subtree-public mode, the second whole-repo mode.
+
+The `guard-public-write` verb merges waivers and skip paths into what the file already holds, replaces `public_scopes` with the `--scope` globs passed or clears them with `--whole-repo` (a call with neither keeps them), and never commits; its JSON carries `status`, `waivers` (the count) and `public_scopes`. Exit 1 means a `--waiver` was not a JSON object, or `--scope` and `--whole-repo` were both passed, and nothing was written.
+
+Commit the waiver file: register a new file first with `git add -N .guard-public.json`, then `git commit -m "chore: mark repo public (lazy-guard)" -- .guard-public.json`. The step succeeded only when git reports the commit.
 
 ## Step 5: Go public on GitHub (whole-repo mode only)
 

@@ -61,9 +61,9 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
     "agent": "lazycortex-experts:lazy-experts.designer",
     "aspects": ["lazycortex-experts:lazy-experts.claude-plugin-aspect"]
   },
-  "game.designer": {
+  "data-pipeline.designer": {
     "agent": "lazycortex-experts:lazy-experts.designer",
-    "aspects": ["lazycortex-experts:lazy-experts.game-dev-aspect"]
+    "aspects": ["lazycortex-experts:lazy-experts.data-pipeline-aspect"]
   }
 }
 ```

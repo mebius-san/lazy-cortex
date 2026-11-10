@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Go from a bare repo to a fully-wired Obsidian vault — tag pages, Iconize sync, diagram glue, click-to-zoom — one chained install.
-last_regen: 2026-10-06
+last_regen: 2026-11-10
 diagram_spec:
   anchor: "Journey at a glance"
   request: "Sequence diagram showing the vault bootstrap journey: user runs /lazy-obsidian.install, which installs Dataview, chains into /lazy-obsidian.iconize-install (installs folder-notes, obsidian-icon-folder, iconize-reloader, scaffolds icon-map and repaint routine), then itself syncs and enables its CSS snippets (mermaid-fit.css, ascii-fit.css, callouts.css) in appearance.json, and finally chains into /lazy-obsidian.diagram-install (installs mermaid-popup for click-to-zoom), ending with the user reloading Obsidian and verifying."
@@ -10,8 +10,8 @@ source_skills:
   - lazy-obsidian.iconize-install
   - lazy-obsidian.diagram-install
   - lazy-obsidian.gen-tag-pages
-source_sha: 2b8e9e79da15a0e25e187f4c05ae6011a36f0740
-surface_sha: dea47a26654a038bd1a269522d52af32fe5af9c4a18b77c12d450e1a2188e6eb
+source_sha: 0fbf083425e77d4114828956e4ab35cfecddbc4d
+surface_sha: 1bcd5ad0e625b4b8009dd7fb622b5547f99cb5b9798030a114486169ed6c6f85
 ---
 # How do I wire up a fresh vault from scratch?
 
@@ -101,13 +101,15 @@ For each plugin, `/lazy-obsidian.update-plugin`:
   `templates/obsidian/plugin-settings.json` onto the vault's `data.json`,
   registering the plugin in `community-plugins.json`.
 
-After the plugins land, the chain asserts the three Iconize frontmatter-feature
+After the plugins land, the chain checks the three Iconize frontmatter-feature
 settings (`iconInFrontmatterEnabled`, `iconInFrontmatterFieldName`,
-`iconColorInFrontmatterFieldName`) directly in Iconize's `data.json`. These
+`iconColorInFrontmatterFieldName`) in Iconize's `data.json`. These
 must be set to the exact keys the worker writes (`iconize_icon` /
-`iconize_color`) for Iconize to paint icons from frontmatter. The merge is
-silent unless a value directly contradicts one you set deliberately — in that
-case a single prompt asks which wins.
+`iconize_color`) for Iconize to paint icons from frontmatter. The check only
+reads: it reports **asserted** when the values are current, and
+**refused** (quoting the reason) when they are not. It never prompts and never
+writes, so a refused result means icons will not paint from frontmatter until
+those settings carry the shipped values.
 
 **Verification gate:** if any hard dependency returns FAIL the chain surfaces the
 error and stops. Check network connectivity, run
@@ -183,13 +185,14 @@ After the snippets land, the base install enables all three in
 array. `/lazy-obsidian.diagram-install` only declares the two diagram-fit
 snippets it depends on; it does not install or enable them itself. On a re-run
 after a plugin update that withdraws a snippet, the install also drops that
-snippet's now-dead entry from the array — you'll see it called out as
-**retired** in the Step 6 report.
+snippet's now-dead entry from the array.
 
 **Verification gate:** if the report shows any snippet outcome of `deferred`
 (snippet file absent — can happen if a conflict earlier in the run was
 kept-local in a way that prevented writing), re-run `/lazy-obsidian.install`
-after resolving the conflict.
+after resolving the conflict. If it shows `refused` with a reason, the
+`appearance.json` file could not be edited safely and was left as it was;
+fix what the reason names and re-run.
 
 ### Step 5 — Diagram chain: click-to-zoom
 
@@ -209,9 +212,13 @@ alone, and you can re-run `/lazy-obsidian.update-plugin mermaid-popup` later.
 Both chains and the snippet step print a structured report at the end of the
 single `/lazy-obsidian.install` invocation. Scan it for:
 
-- Any **kept-local** outcome (icon-map merge conflict, Iconize frontmatter
-  settings conflict, or CSS snippet conflict you chose to keep) — note the key
-  or region so you can reconcile it later.
+- Any **kept-local** outcome (icon-map merge conflict or CSS snippet conflict
+  you chose to keep) — note the key or region so you can reconcile it later.
+- A **refused** outcome on the Iconize frontmatter settings (Step 2) —
+  Iconize is not configured to paint from frontmatter; no prompt was raised and
+  nothing was written. Fix the settings the quoted reason names, then re-run.
+- A **refused** outcome on the snippet enable step (Step 4) — see the
+  verification gate there.
 - Any **kept-orphan** notes — a pre-1.0.0 vault-local protocol doc or a
   stale PostToolUse entry in `.claude/settings.json` that the chain left in
   place. The report names each file; remove them manually if you want a clean
@@ -221,9 +228,6 @@ single `/lazy-obsidian.install` invocation. Scan it for:
 - Any **enabled** outcome from the snippet sync step (Step 4) — this means you
   need to **reload Obsidian** (or click ↻ next to each snippet in Settings →
   Appearance → CSS snippets) before the snippets take effect mid-session.
-- Any **retired:`<name>`** outcome from the snippet sync step (Step 4) — a
-  snippet entry a previous install wrote is now removed because the plugin no
-  longer ships that file; nothing for you to do.
 - Any **refreshed** outcome on the repaint routine (Step 3) — a previous
   install wrote an older shape of the routine (its command, watch trigger,
   `ignore_halt` flag, or bot identity) and this run brought it current; your
@@ -260,8 +264,7 @@ plugin settings for Iconize and confirm the frontmatter field names are
 
 The install is idempotent — re-run `/lazy-obsidian.install` any time to pick
 up template changes after a plugin update, bring a newly cloned repo up to the
-same baseline, or reconcile an older run's repaint routine and snippet array
-to the current shape.
+same baseline, or reconcile an older run's repaint routine to the current shape.
 
 **Generate your first tag pages.** The template scaffolded in Step 1 doesn't
 populate `Tags/` by itself. Ask Claude to regenerate tag pages (e.g.

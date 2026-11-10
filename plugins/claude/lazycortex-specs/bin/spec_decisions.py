@@ -2,9 +2,9 @@
 Decisions-registry primitive — the sole writer of every `decisions.md` in the spec catalog.
 
 Four operations, dispatched from the `decide` CLI subcommand: `add` (a fresh record),
-`supersede` (a fresh record that also marks an older one `superseded-by`), `obsolete` (marks a
+`supersede` (marks an older record `superseded-by` its replacement), `obsolete` (marks a
 record `obsolete — <reason>`), and `promote` (transfers `[!decision]` blocks out of a living
-doc's body — `design.md` / `bug.md` / `tech.md` / `architecture.md` — into its sibling registry,
+doc's body — `vision.md` / `design.md` / `bug.md` / `tech.md` / `architecture.md` — into its sibling registry,
 replacing each block with a self-describing reference line: the record link followed by the
 thesis). `decisions.md` is never scaffolded: the file is
 created lazily, with its own header + frontmatter, on the first record written into it.
@@ -40,6 +40,8 @@ if str(_BIN) not in sys.path:
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import note_commit  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -50,6 +52,26 @@ import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-impo
 
 # The document type this module's registry files declare themselves as.
 _DECISIONS_TYPE = "decisions"
+
+# Seconds a writer waits for the registry lock before it gives up with a timeout.
+_LOCK_WAIT_SECONDS = 30.0
+# Age in seconds past which a held lock counts as abandoned and is broken.
+_LOCK_MAX_HOLD_SECONDS = 600.0
+# Lower and upper bound, in seconds, of the randomized pause between two lock attempts.
+_LOCK_POLL_MIN_S = 0.05
+_LOCK_POLL_MAX_S = 0.2
+
+# A registry record heading `## D-NNN — <thesis>`, capturing the number and the thesis.
+_HEADING_RE = re.compile(r"(?m)^## D-(\d{3,}) — (.*)$")
+
+# The opening line of a `[!decision]` callout in a living doc, capturing its thesis.
+_DECISION_OPEN_RE = re.compile(r"^> \[!decision\] (.+?) #spec/decision\s*$")
+# The opening line of any callout, which ends the decision callout being read.
+_CALLOUT_HEAD_RE = re.compile(r"^> \[!")
+# A whole-text wikilink to a registry record, capturing the target path and the record number.
+_WIKILINK_RE = re.compile(r"^\[\[([^#|\]]+)#D-(\d{3,})[^|\]]*(?:\|[^\]]*)?\]\]$")
+# The `**Supersedes.**` line of a decision callout, capturing the text after the label.
+_SUPERSEDES_LINE_RE = re.compile(r"^\*\*Supersedes\.\*\*\s*(.*)$")
 
 
 # ----------------------------------------------------------------------------------------
@@ -79,7 +101,7 @@ class _K:
     ID: An operation result's record-id field.
     FILE: An operation result's registry-file-path field.
     OLD_ID: `supersede`'s result field naming the superseded record.
-    NEW_ID: `supersede`'s result field naming the fresh record.
+    NEW_ID: `supersede`'s result field naming the replacing record, freshly written or already present.
     REASON: A refusal result's reason field.
     TOUCHED_PATHS: `promote`'s result field listing every path it wrote.
     RECORDS: `promote`'s result field listing every fresh record it wrote.
@@ -97,6 +119,10 @@ class _K:
     ARG_JUSTIFICATION: CLI positional argument name for a record's justification prose.
     FLAG_ORIGIN: CLI flag name for the `Origin:` field.
     FLAG_TODAY: CLI flag name overriding the recorded date.
+    FLAG_COMMIT: CLI flag name committing the touched paths after a writing outcome.
+    COMMIT: The result field naming the commit `--commit` made.
+    SHA: The commit field's hash entry.
+    ACTION_STORE_TRUE: The argparse action of an on/off flag.
     PROG: CLI program name shown in `--help` output.
   """
 
@@ -141,7 +167,7 @@ class _K:
   FILE = "file"
   # `supersede`'s result field naming the superseded record.
   OLD_ID = "old_id"
-  # `supersede`'s result field naming the fresh record.
+  # `supersede`'s result field naming the replacing record, freshly written or already present.
   NEW_ID = "new_id"
   # A refusal result's reason field.
   REASON = "reason"
@@ -177,6 +203,14 @@ class _K:
   FLAG_ORIGIN = "--origin"
   # CLI flag name overriding the recorded date.
   FLAG_TODAY = "--today"
+  # CLI flag name committing the touched paths after a writing outcome.
+  FLAG_COMMIT = "--commit"
+  # The result field naming the commit `--commit` made.
+  COMMIT = "commit"
+  # The commit field's hash entry.
+  SHA = "sha"
+  # The argparse action of an on/off flag.
+  ACTION_STORE_TRUE = "store_true"
   # CLI program name shown in `--help` output.
   PROG = "lazycortex-specs decide"
 
@@ -189,7 +223,7 @@ class _Result:
   Attributes:
     ADDED: A fresh record was written.
     DUPLICATE: A dedup match already existed — nothing was written.
-    SUPERSEDED: A fresh record was written and an older one marked `superseded-by`.
+    SUPERSEDED: An older record was marked `superseded-by` its replacement, freshly written or already present.
     OBSOLETED: An existing record was marked `obsolete`.
     PROMOTED: One or more `[!decision]` blocks were transferred out of a living doc.
     NOOP: `promote` found no `[!decision]` blocks — nothing was written.
@@ -200,7 +234,7 @@ class _Result:
   ADDED = "added"
   # A dedup match already existed — nothing was written.
   DUPLICATE = "duplicate"
-  # A fresh record was written and an older one marked `superseded-by`.
+  # An older record was marked `superseded-by` its replacement, freshly written or already present.
   SUPERSEDED = "superseded"
   # An existing record was marked `obsolete`.
   OBSOLETED = "obsoleted"
@@ -214,12 +248,18 @@ class _Result:
 
 DECISIONS_BASENAME = "decisions.md"
 
+# The outcomes that wrote a file, the only ones `--commit` commits after.
+_WRITING_OUTCOMES = frozenset({ _Result.ADDED, _Result.SUPERSEDED, _Result.OBSOLETED, _Result.PROMOTED })
+
+# The subject every `--commit` commit carries: the operation and its record id or document stem.
+_COMMIT_SUBJECT = "docs(spec-decisions): {op} {target}"
+
 # `spec_role` values a `promote` call is willing to read blocks from — the living docs. A CLOSED,
 # named set: any OTHER role defaults to candidates-only (lazy-spec.set-stage's own trigger prose states
 # this as a rule). Plans are a decomposition of already-accepted decisions and die with their
 # feature; reports carry only candidates, never decisions themselves (spec-decisions-design.md
 # § on how a decision enters the registry file).
-_LIVING_ROLES = frozenset({"design", "bug", "tech", "architecture"})
+_LIVING_ROLES = frozenset({"vision", "design", "bug", "tech", "architecture"})
 
 # The three asset-terminal flags `promote` refuses on, checked against the owning asset's own
 # status folder-note — unconditionally, regardless of caller (spec-decisions-design.md
@@ -264,14 +304,12 @@ def resolve_context(target_path: Path) -> _Context:
   """
   Resolve the product/asset placement of a `decisions.md` path or a living doc's own path.
 
-  Reads `.claude/lazy.settings.json[products]` and matches the target's parent directory
-  (relative to the spec content-root) against each product's `spec_path`, picking the longest
-  (most specific) match. A parent equal to the content-root itself is project-level; a parent
-  equal to a product's `spec_path` is product-level; a parent one or more segments deeper is
-  asset-level, its asset being the nearest folder up to the product root whose folder-note
-  carries `spec_role: status` — any depth, nested inside another asset or straight at the
-  product root alike. The category comes from the group folder holding the asset; an asset at
-  the product root sits in none, so its own declared asset type names it instead.
+  A target sitting directly in the spec content-root is project-level; one sitting directly in a
+  product's root folder is product-level; one deeper inside a product is asset-level, owned by
+  the nearest enclosing folder whose folder-note carries `spec_role: status` — at any depth,
+  nested inside another asset or straight at the product root alike. The category comes from the
+  group folder holding the asset; an asset at the product root sits in none, so its own declared
+  asset type names it instead.
 
   Args:
     target_path: The `decisions.md` path (may not yet exist) or a living doc's own path; only
@@ -288,7 +326,7 @@ def resolve_context(target_path: Path) -> _Context:
   settings_root = spec_paths.find_settings_root(target_dir)
   content_root = spec_paths.spec_content_root(settings_root).resolve()
 
-  # guard: the target sits loose at the content-root itself — project-level, no product at all
+  # the target sits loose at the content-root itself — project-level, no product at all
   if target_dir == content_root:
     return _Context(content_root = content_root, product = None,
                     category = None, slug = None, asset_dir = None)
@@ -306,7 +344,7 @@ def resolve_context(target_path: Path) -> _Context:
   # derive the placement fields shared by both product- and asset-level shells
   remainder = rel_str[len(best_spec_path):].strip("/")
 
-  # guard: target dir IS the product root — product-level, no category/slug
+  # target dir IS the product root — product-level, no category/slug
   if not remainder:
     return _Context(content_root = content_root, product = best_key,
                     category = None, slug = None, asset_dir = None)
@@ -396,12 +434,6 @@ def _nearest_asset_dir(start: Path, product_root: Path) -> Path | None:
 # consider themselves the holder; an exclusive create never does, so only one process can ever
 # hold this lock at a time.
 
-_LOCK_WAIT_SECONDS = 30.0        # mirrors staging_lock.DEFAULT_WAIT_SECONDS by meaning
-_LOCK_MAX_HOLD_SECONDS = 600.0   # mirrors staging_lock.DEFAULT_MAX_HOLD_SECONDS by meaning
-_LOCK_POLL_MIN_S = 0.05
-_LOCK_POLL_MAX_S = 0.2
-
-
 def _git_repo_root(start: Path) -> Path:
   """
   Walk up from `start` to the nearest ancestor holding a `.git` entry.
@@ -411,7 +443,7 @@ def _git_repo_root(start: Path) -> Path:
   """
   cur = start.resolve()
   while cur != cur.parent:
-    # guard: found the repo root
+    # the first ancestor carrying `.git` is the repo root
     if (cur / _K.GIT_DIR).exists():
       return cur
     cur = cur.parent
@@ -502,8 +534,6 @@ def _decisions_lock(decisions_path: Path) -> Iterator[None]:
 
 # ----------------------------------------------------------------------------------------
 # Record parsing, formatting, insertion.
-
-_HEADING_RE = re.compile(r"(?m)^## D-(\d{3,}) — (.*)$")
 
 
 def _split(text: str) -> tuple[str, str]:
@@ -609,6 +639,9 @@ def _parse_records(body: str) -> list[dict]:
   for idx, (line_no, m) in enumerate(headings):
     next_line_no = headings[idx + 1][0] if idx + 1 < len(headings) else content_end
     meta_lines = lines[line_no + 1:next_line_no]
+
+    # the header lines under the heading carry `Status:`, `Date:` and `Origin:`; each one sets its
+    # own field, and a field the record omits stays empty
     status = date = origin = ""
     body_start = 0
     for k, ln in enumerate(meta_lines):
@@ -697,8 +730,10 @@ def _set_status(body: str, number: int, new_status: str) -> tuple[str, bool]:
   # # A decision record's lifecycle
   # A record starts out active. Later it may be marked obsolete, carrying the reason it no
   # longer applies, or marked as superseded, carrying a link to the record that replaces it.
-  # Either mark is final for the record's own life span, but the record itself is never removed
-  # from the registry — it stays as history, just no longer read as the live word on the subject.
+  # The mark is the record's current status and nothing guards it: a later mark replaces an earlier
+  # one, so a superseded record can still be marked obsolete and the reverse. The record itself
+  # is never removed from the registry — it stays as history, just no longer read as the live
+  # word on the subject.
 
   # the record's own heading line — a copy quoted inside a code fence is content, never the record
   lines = spec_frontmatter.split_lines(body, keepends = True)
@@ -724,11 +759,8 @@ def _insert_record(body: str, record_text: str) -> str:
   """
   Insert a formatted record at the end of the CONTENT, before a `#protected/`-tagged H1 section.
 
-  Mirrors `flip_gate.append_under_heading`'s treatment of a `#protected/...` tag line as NOT a
-  heading boundary in spirit, but this primitive has no named container heading to insert under —
-  `decisions.md` records are top-level `## D-NNN` blocks, so the insertion point is simply "before
-  the first H1 whose first non-blank content line is a `#protected/` tag", or end-of-body when no
-  such section exists.
+  The record lands after the existing records and ahead of any `#protected/`-tagged H1 section,
+  or at the end of the body when no such section exists. A protected section is left untouched.
 
   Args:
     body: The registry file's body text (everything after the frontmatter, including its own
@@ -875,7 +907,7 @@ def add(decisions_path: Path, thesis: str, body: str, *,
   today_str = flip_gate.effective_today(today)
 
   # Contract:
-  # concurrent callers never allocate the same `D-NNN` number — the whole
+  # Concurrent callers never allocate the same `D-NNN` number — the whole
   # read-count-write sequence below runs under the registry's own exclusive lock
 
   # read the current file (or its lazy shell) inside the lock, so the count below is never stale
@@ -898,17 +930,17 @@ def add(decisions_path: Path, thesis: str, body: str, *,
         (r for r in existing if _dedup_key(r[_K.THESIS], r[_K.BODY]) == key), None,
     )
 
-    # guard: an existing record already carries this exact content — write nothing
+    # an existing record already carries this exact content — report the duplicate, write nothing
     if dup is not None:
       return {_K.STATUS: _Result.DUPLICATE, _K.ID: f"D-{dup[_K.NUMBER]:03d}",
               _K.FILE: str(decisions_path)}
 
     # Contract:
-    # the record's body text is written exactly as given — never rewritten, summarized, or
+    # The record's body text is written exactly as given — never rewritten, summarized, or
     # reduced to a subset of its own fields before it lands in the registry file.
 
     # Contract:
-    # a foreign `#protected/<owner>/...` H1 section already in the registry file — owned by
+    # A foreign `#protected/<owner>/...` H1 section already in the registry file — owned by
     # another plugin — is preserved byte-for-byte and never treated as registry content: no
     # record is written into it and its text is never read as part of a record.
 
@@ -932,8 +964,7 @@ def _write_status(decisions_path: Path, number: int, new_status: str) -> bool:
   if not decisions_path.is_file():
     return False
   with _decisions_lock(decisions_path):
-    text = spec_paths.read_text(decisions_path)
-    fm_text, body = _split(text)
+    fm_text, body = _split(spec_paths.read_text(decisions_path))
     new_body, changed = _set_status(body, number, new_status)
 
     # guard: no such record — nothing written
@@ -946,7 +977,16 @@ def _write_status(decisions_path: Path, number: int, new_status: str) -> bool:
 def supersede(decisions_path: Path, old_id: str, thesis: str, body: str, *,
               origin: str = "—", today: str | None = None) -> dict:
   """
-  Write a fresh record and mark an older one `superseded-by` it, in the same registry file.
+  Mark an older record `superseded-by` its replacement in the same registry file.
+
+  The replacement is a newly written record, or the existing record the content already matches; the older record
+  is marked `superseded-by` the replacement in either case.
+
+  Guarantees:
+    - On success the older record is always marked `superseded-by` its replacement, whether the
+      replacement was freshly written or is an existing record the content dedup-matched.
+    - A record never supersedes itself: when the replacing content dedups onto the superseded
+      record, the call returns `refused` and the older record stays unchanged.
 
   Args:
     decisions_path: The registry file's path.
@@ -958,7 +998,7 @@ def supersede(decisions_path: Path, old_id: str, thesis: str, body: str, *,
 
   Returns:
     `{"status": "superseded", "old_id", "new_id"}` on success, or `{"status": "refused",
-    "reason"}` when `old_id` does not exist in this file.
+    "reason"}` when `old_id` does not exist in this file or the replacing content is the superseded record itself.
 
   Raises:
     ValueError: `old_id` isn't a `D-NNN` token, or (via `add`) `decisions_path` needs lazy
@@ -974,17 +1014,35 @@ def supersede(decisions_path: Path, old_id: str, thesis: str, body: str, *,
   if not any(r[_K.NUMBER] == old_number for r in existing):
     return {_K.STATUS: _Result.REFUSED, _K.REASON: f"no such record: D-{old_number:03d}"}
 
-  # the fresh record itself is written through `add`, which owns dedup/lock/lazy-create; the
-  # supersede stamp on the old record only applies on a genuine write — a dedup hit means the
-  # "new" record already existed and its supersede link was already applied by whichever call
-  # created it, so re-stamping Status here would be a no-op repeat, not a correctness need
-  result = add(decisions_path, thesis, body, origin = origin, today = today)
-  new_id = result[_K.ID]
-  if result[_K.STATUS] == _Result.ADDED:
-    # the vault root the new record's link is built against, found from the registry's own placement
-    settings_root = spec_paths.find_settings_root(resolve_context(decisions_path).content_root)
-    _write_status(decisions_path, old_number,
-                  f"superseded-by {_self_link(decisions_path, new_id, thesis, settings_root)}")
+  # the replacing record is written through `add`, which owns dedup/lock/lazy-create; a dedup hit
+  # names the record that already says the same thing, and that record is the replacement
+  new_id = add(decisions_path, thesis, body, origin = origin, today = today)[_K.ID]
+
+  # Contract:
+  # A record never supersedes itself: when the replacing content dedups onto the superseded
+  # record, the call returns `refused` and the older record stays unchanged.
+
+  # guard: the replacing content is the superseded record itself — nothing replaces it
+  if new_id == f"D-{old_number:03d}":
+    return {_K.STATUS: _Result.REFUSED, _K.REASON: f"D-{old_number:03d} cannot supersede itself"}
+
+  # Contract:
+  # On success the older record is always marked `superseded-by` its replacement, whether the
+  # replacement was freshly written or is an existing record the content dedup-matched.
+
+  # the vault root the replacement's link is built against, found from the registry's own placement
+  settings_root = spec_paths.find_settings_root(resolve_context(decisions_path).content_root)
+
+  # the link anchors on the replacement's stored heading — a dedup match ignores whitespace, so the
+  # caller's spelling of the thesis may differ from the heading the anchor has to name
+  new_number = _parse_id(new_id)
+  records = _parse_records(_split(spec_paths.read_text(decisions_path))[1])
+  stored_thesis = next(r[_K.THESIS] for r in records if r[_K.NUMBER] == new_number)
+
+  # the old record is stamped on a fresh write and on a dedup hit alike — a record created by a
+  # plain `add` never carried the link, so skipping the stamp would leave the old one active
+  _write_status(decisions_path, old_number,
+                f"superseded-by {_self_link(decisions_path, new_id, stored_thesis, settings_root)}")
   return {_K.STATUS: _Result.SUPERSEDED, _K.OLD_ID: f"D-{old_number:03d}", _K.NEW_ID: new_id}
 
 
@@ -1006,20 +1064,15 @@ def obsolete(decisions_path: Path, record_id: str, reason: str) -> dict:
     TimeoutError: The registry's exclusive lock could not be acquired in time.
   """
   number = _parse_id(record_id)
-  ok = _write_status(decisions_path, number, f"obsolete — {reason}")
 
   # guard: no such record
-  if not ok:
+  if not _write_status(decisions_path, number, f"obsolete — {reason}"):
     return {_K.STATUS: _Result.REFUSED, _K.REASON: f"no such record: D-{number:03d}"}
   return {_K.STATUS: _Result.OBSOLETED, _K.ID: f"D-{number:03d}"}
 
 
 # ----------------------------------------------------------------------------------------
 # `promote` — transfer `[!decision]` blocks out of a living doc's body.
-
-_DECISION_OPEN_RE = re.compile(r"^> \[!decision\] (.+?) #spec/decision\s*$")
-_CALLOUT_HEAD_RE = re.compile(r"^> \[!")
-_WIKILINK_RE = re.compile(r"^\[\[([^#|\]]+)#D-(\d{3,})[^|\]]*(?:\|[^\]]*)?\]\]$")
 
 
 def _find_decision_blocks(body: str) -> list[dict]:
@@ -1074,9 +1127,6 @@ def _find_decision_blocks(body: str) -> list[dict]:
         continue
     i += 1
   return blocks
-
-
-_SUPERSEDES_LINE_RE = re.compile(r"^\*\*Supersedes\.\*\*\s*(.*)$")
 
 
 def _split_supersedes_and_body(raw_lines: list[str]) -> tuple[str, list[str]]:
@@ -1147,12 +1197,87 @@ def _resolve_supersedes_link(text: str, settings_root: Path) -> tuple[Path | Non
           int(m.group(2)))
 
 
+def promote_refusal(doc_path: Path) -> str | None:
+  """
+  Report why transferring a document's `[!decision]` blocks would be refused, without writing anything.
+
+  Owns the decision registry's refusal rule for a transfer. Callers that must know the outcome before acting,
+  such as a stage change that precedes the transfer, ask this first.
+
+  Guarantees:
+    - Writes nothing to disk.
+    - A transfer attempted for the same document is refused if and only if this returns a reason.
+
+  Args:
+    doc_path: The document's path.
+
+  Returns:
+    The human-readable refusal reason, or `None` when the transfer would be accepted.
+
+  Raises:
+    ValueError: The document's own directory isn't covered by any registered product's `spec_path`.
+  """
+
+  # Contract:
+  # A transfer of the document's decisions is refused if and only if this function returns a reason.
+  # Every condition that refuses a transfer MUST be decided here, so that a caller asking first
+  # sees exactly the outcome the transfer will have.
+
+  # guard: doc must exist
+  if not doc_path.is_file():
+    return f"no such doc: {doc_path}"
+
+  # Domain(spec.decisions):
+  # # Decisions can only be promoted out of a living document
+  # A decision only enters the registry when it comes from a document that still tracks the
+  # feature it concerns: a vision, a design, a bug report, a piece of tech work, or an
+  # architecture write-up. A vision's decisions are about goals and scope. A plan merely
+  # breaks an already-accepted decision into tasks and disappears with
+  # the feature it belongs to, so it is never itself a source. A report only ever carries
+  # candidate decisions still under discussion, never ones that were actually made, so it is
+  # never a source either.
+
+  # only a living doc (the closed `_LIVING_ROLES` set) is a legal source for a promote call
+  fm_values, _fm_end = flip_gate.parse_frontmatter(spec_paths.read_text(doc_path))
+  role = fm_values.get(_K.SPEC_ROLE, "")
+
+  # guard: only living docs are a source for promoted decisions — plans decompose already-accepted
+  # decisions and reports carry only candidates (spec-decisions-design.md § on candidates sourced
+  # from reports)
+  if role not in _LIVING_ROLES:
+    return f"spec_role '{role}' is not a living doc ({'/'.join(sorted(_LIVING_ROLES))})"
+
+  # Domain(spec.decisions):
+  # # No new decisions on a closed asset
+  # An asset that has been cancelled, halted, or already released is considered closed: nothing
+  # further is decided about it. Moving the decisions a document of such an asset holds into the
+  # registry is refused outright rather than silently applied, whoever asks for it and however
+  # it is triggered. The refusal covers that transfer only: writing, replacing or retiring a
+  # registry record directly is not checked against the asset's state.
+
+  # a product-level doc has no owning asset and so no terminal/halt flags to check at all; an
+  # asset-level doc's owning asset gates every promote call regardless of who invoked it (auto on
+  # approve, or a manual /lazy-spec.record-decision promote)
+  ctx = resolve_context(doc_path)
+  if ctx.asset_dir is not None:
+    status_note = ctx.asset_dir / f"{ctx.slug}.md"
+    if status_note.is_file():
+      note_fm, _ = flip_gate.parse_frontmatter(status_note.read_text(encoding = "utf-8"))
+      for flag in _HALT_FLAGS:
+        # guard: the owning asset carries a terminal/halt flag — refuse the whole call
+        if flip_gate.is_true(note_fm, flag):
+          return f"asset flag {flag} is true"
+
+  # every guard passed: the registry accepts the transfer
+  return None
+
+
 def promote(doc_path: Path, *, today: str | None = None) -> dict:
   """
   Transfer every `[!decision]` block in a living doc's body into its sibling `decisions.md`.
 
   Refuses (no mutation) when `doc_path` doesn't exist, when the doc's `spec_role` is not one of
-  `design` / `bug` / `tech` / `architecture`, or — for an asset-level doc — when the owning
+  `vision` / `design` / `bug` / `tech` / `architecture`, or — for an asset-level doc — when the owning
   asset's status folder-note currently carries `spec_cancelled` / `spec_halted` / `spec_released`
   as true. Each transferred block is replaced in the doc with a self-describing reference line —
   the wikilink to its new (or dedup-matched existing) record followed by the thesis, with a
@@ -1187,63 +1312,25 @@ def promote(doc_path: Path, *, today: str | None = None) -> dict:
   """
 
   # Contract:
-  # every returned dict — refused, noop, or promoted — carries both `records` and
+  # Every returned dict — refused, noop, or promoted — carries both `records` and
   # `touched_paths`, so a caller (e.g. lazy-spec.set-stage) can read `result["touched_paths"]`
   # unconditionally without branching on `status` first
 
-  # guard: doc must exist
-  if not doc_path.is_file():
-    return {_K.STATUS: _Result.REFUSED, _K.REASON: f"no such doc: {doc_path}",
-            _K.TOUCHED_PATHS: [], _K.RECORDS: []}
+  # guard: the registry will not accept this doc's transfer — refuse with no mutation
+  if (reason := promote_refusal(doc_path)) is not None:
+    return {_K.STATUS: _Result.REFUSED, _K.REASON: reason, _K.TOUCHED_PATHS: [], _K.RECORDS: []}
 
-  # Domain(spec.decisions):
-  # # Decisions can only be promoted out of a living document
-  # A decision only enters the registry when it comes from a document that still tracks the
-  # feature it concerns: a design, a bug report, a piece of tech work, or an architecture
-  # write-up. A plan merely breaks an already-accepted decision into tasks and disappears with
-  # the feature it belongs to, so it is never itself a source. A report only ever carries
-  # candidate decisions still under discussion, never ones that were actually made, so it is
-  # never a source either.
-
-  # only a living doc (the closed `_LIVING_ROLES` set) is a legal source for a promote call
+  # the doc's text and placement feed the transfer below
   text = spec_paths.read_text(doc_path)
-  fm_values, fm_end = flip_gate.parse_frontmatter(text)
-  role = fm_values.get(_K.SPEC_ROLE, "")
-
-  # guard: only living docs are a source for promoted decisions — plans decompose already-accepted
-  # decisions and reports carry only candidates (spec-decisions-design.md § on candidates sourced
-  # from reports)
-  if role not in _LIVING_ROLES:
-    return {_K.STATUS: _Result.REFUSED,
-            _K.REASON: f"spec_role '{role}' is not a living doc ({'/'.join(sorted(_LIVING_ROLES))})",
-            _K.TOUCHED_PATHS: [], _K.RECORDS: []}
-
-  # Domain(spec.decisions):
-  # # No new decisions on a closed asset
-  # An asset that has been cancelled, halted, or already released is considered closed: nothing
-  # further is decided about it, regardless of who is asking or through what path. Any attempt to
-  # record a new decision against such an asset is refused outright rather than silently applied.
-
-  # a product-level doc has no owning asset and so no terminal/halt flags to check at all; an
-  # asset-level doc's owning asset gates every promote call regardless of who invoked it (auto on
-  # approve, or a manual /lazy-spec.record-decision promote)
+  _fm_values, fm_end = flip_gate.parse_frontmatter(text)
   ctx = resolve_context(doc_path)
-  if ctx.asset_dir is not None:
-    status_note = ctx.asset_dir / f"{ctx.slug}.md"
-    if status_note.is_file():
-      note_fm, _ = flip_gate.parse_frontmatter(status_note.read_text(encoding = "utf-8"))
-      for flag in _HALT_FLAGS:
-        # guard: the owning asset carries a terminal/halt flag — refuse the whole call
-        if flip_gate.is_true(note_fm, flag):
-          return {_K.STATUS: _Result.REFUSED, _K.REASON: f"asset flag {flag} is true",
-                  _K.TOUCHED_PATHS: [], _K.RECORDS: []}
 
   # Contract:
-  # two `[!decision]` blocks with no blank line between them are never merged into one record —
+  # Two `[!decision]` blocks with no blank line between them are never merged into one record —
   # each becomes its own.
 
   # Contract:
-  # a `[!decision]` block inside a foreign `#protected/...` or `#expert/...` H1 section is never
+  # A `[!decision]` block inside a foreign `#protected/...` or `#expert/...` H1 section is never
   # transferred — such a section is owned by another plugin or by a review cycle, and its content
   # is never read as this document's own decision content.
 
@@ -1265,12 +1352,12 @@ def promote(doc_path: Path, *, today: str | None = None) -> dict:
   lines = spec_frontmatter.split_lines(body)
 
   # Contract:
-  # promoting the same document a second time performs no duplicate work — a block whose
+  # Promoting the same document a second time performs no duplicate work — a block whose
   # thesis and body already match an existing record writes no new record, so a repeat call
   # is safe to retry.
 
   # Contract:
-  # every content line of a transferred block that is not itself a `**Supersedes.**` command
+  # Every content line of a transferred block that is not itself a `**Supersedes.**` command
   # reaches its record unmodified and in source order — a block's body is copied verbatim, never
   # reconstructed from a parsed subset of its own fields.
 
@@ -1324,13 +1411,54 @@ def promote(doc_path: Path, *, today: str | None = None) -> dict:
 # ----------------------------------------------------------------------------------------
 # CLI
 
+def _commit(args: argparse.Namespace, result: dict) -> dict[str, str | None]:
+  """
+  Commit exactly the paths a writing `decide` outcome touched, in one commit.
+
+  Commits what the operation wrote under the `docs(spec-decisions): <op> <target>` subject and reports whether a
+  commit was made or there was nothing to commit.
+
+  Args:
+    args: The parsed command line of the operation that just ran.
+    result: The operation's result dict, whose status is a writing outcome.
+
+  Returns:
+    `{"status": "committed" | "nothing-to-commit", "sha": <commit hash or None>}`.
+
+  Raises:
+    subprocess.CalledProcessError: The commit fails.
+  """
+  target_path = ( args.doc_path if args.op == _K.OP_PROMOTE else args.decisions_path ).resolve()
+
+  # the touched paths and the subject's target: the registry and its record for a record operation, the
+  # primitive's own touched paths and the document's stem for a promote
+  if args.op == _K.OP_PROMOTE:
+    paths = list(result[_K.TOUCHED_PATHS])
+    target = target_path.stem
+  else:
+    paths = [ str(target_path) ]
+    target = result[_K.OLD_ID] if args.op == _K.OP_SUPERSEDE else result[_K.ID]
+
+  # one commit of exactly those paths under the runtime's identity
+  done = note_commit.commit_paths(flip_gate.repo_root(target_path.parent), paths,
+                                  subject = _COMMIT_SUBJECT.format(op = args.op, target = target))
+  return { _K.STATUS: done.status, _K.SHA: done.sha }
+
+
 def main(argv: list[str]) -> int:
   """
   Run one `decide` operation from the command line, printing the result as JSON.
 
+  Every operation accepts `--commit`. With it, an `added` / `superseded` / `obsoleted` / `promoted` result also
+  carries a `commit` field `{status, sha}` and the touched paths are committed in one commit. A `refused`,
+  `duplicate` or `noop` result commits nothing and carries no `commit` field. Without the flag nothing is
+  committed.
+
   Guarantees:
-    - The exit code names the outcome for every process that subprocesses this CLI: 0 on any
-      non-refused status, 1 on "refused" — no other exit code is ever returned.
+    - For a command line that parses and a run that completes, the exit code names the outcome for every
+      process that subprocesses this CLI: 0 on any non-refused status, 1 on "refused".
+    - A command line that does not parse exits 2, and a registry lock timeout is not translated into an
+      exit code.
 
   Args:
     argv: Subcommand argv tail (the operation name plus its own arguments).
@@ -1342,6 +1470,7 @@ def main(argv: list[str]) -> int:
     SystemExit: With code `2`, raised by `argparse` itself on missing/invalid arguments.
     TimeoutError: A registry's exclusive lock could not be acquired in time — not caught here,
       since it names an operational failure rather than a business refusal `ValueError` covers.
+    subprocess.CalledProcessError: With `--commit`, the commit of a writing outcome fails.
   """
   parser = argparse.ArgumentParser(prog = _K.PROG)
   sub = parser.add_subparsers(dest = _K.OP, required = True)
@@ -1353,6 +1482,7 @@ def main(argv: list[str]) -> int:
   p_add.add_argument(_K.ARG_JUSTIFICATION)
   p_add.add_argument(_K.FLAG_ORIGIN, default = "—")
   p_add.add_argument(_K.FLAG_TODAY, default = None)
+  p_add.add_argument(_K.FLAG_COMMIT, action = _K.ACTION_STORE_TRUE)
 
   # `supersede <decisions_path> <old_id> <thesis> <justification> [--origin] [--today]`
   p_sup = sub.add_parser(_K.OP_SUPERSEDE)
@@ -1362,17 +1492,20 @@ def main(argv: list[str]) -> int:
   p_sup.add_argument(_K.ARG_JUSTIFICATION)
   p_sup.add_argument(_K.FLAG_ORIGIN, default = "—")
   p_sup.add_argument(_K.FLAG_TODAY, default = None)
+  p_sup.add_argument(_K.FLAG_COMMIT, action = _K.ACTION_STORE_TRUE)
 
   # `obsolete <decisions_path> <record_id> <reason>`
   p_obs = sub.add_parser(_K.OP_OBSOLETE)
   p_obs.add_argument(_K.ARG_DECISIONS_PATH, type = Path)
   p_obs.add_argument(_K.ARG_RECORD_ID)
   p_obs.add_argument(_K.ARG_REASON)
+  p_obs.add_argument(_K.FLAG_COMMIT, action = _K.ACTION_STORE_TRUE)
 
   # `promote <doc_path> [--today]`
   p_pro = sub.add_parser(_K.OP_PROMOTE)
   p_pro.add_argument(_K.ARG_DOC_PATH, type = Path)
   p_pro.add_argument(_K.FLAG_TODAY, default = None)
+  p_pro.add_argument(_K.FLAG_COMMIT, action = _K.ACTION_STORE_TRUE)
 
   # parse first — every branch below reads only its own operation's arguments
   args = parser.parse_args(argv)
@@ -1394,11 +1527,17 @@ def main(argv: list[str]) -> int:
   except ValueError as error:
     result = {_K.STATUS: _Result.REFUSED, _K.REASON: str(error)}
 
-  # Contract:
-  # the exit code names the outcome for every process that subprocesses this CLI: 0 on any
-  # non-refused status (including a dedup "duplicate"), 1 on "refused" — never any other code.
+  # an opted-in commit follows only an outcome that wrote something
+  if args.commit and result[_K.STATUS] in _WRITING_OUTCOMES:
+    result[_K.COMMIT] = _commit(args, result)
 
-  # print the result the same way every other lazycortex-specs verb does
+  # Contract:
+  # For a command line that parses and a run that completes, the exit code names the outcome
+  # for every process that subprocesses this CLI: 0 on any non-refused status (including a
+  # dedup "duplicate"), 1 on "refused". A command line that does not parse exits 2, and a
+  # registry lock timeout is not translated into an exit code.
+
+  # the result goes to stdout as one JSON object; a refusal maps to exit 1, every other status to 0
   print(json.dumps(result))
   return 0 if result[_K.STATUS] != _Result.REFUSED else 1
 

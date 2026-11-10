@@ -5,7 +5,7 @@ description: Terms-dictionary protocol for the wiki.terms-curator expert — pay
 ---
 # lazy-wiki.terms-protocol v1
 
-Canonical contract for jobs dispatched to `wiki.terms-curator` (or any consumer producing terms-curator-shaped jobs). The dictionary is one markdown file per scope whose every `## <term>` section is a term and whose body is that term's definition. The curator is a C-hybrid expert: it has Bash, edits the dictionary file itself, and commits. Which documents a scope covers, and where its dictionary lives, is consumer configuration — out of scope for this wire contract.
+Canonical contract for jobs dispatched to `wiki.terms-curator` (or any consumer producing terms-curator-shaped jobs). The dictionary is one markdown file per scope whose every `## <term>` section is a term and whose body is that term's definition. The curator is a C-hybrid expert: it has Bash, decides the dictionary operations, and hands them to the deterministic `terms-write` verb, which writes the dictionary, commits it, and writes the job's response. Which documents a scope covers, and where its dictionary lives, is consumer configuration — out of scope for this wire contract.
 
 ## Request shape (`request.json`)
 
@@ -25,7 +25,7 @@ Field notes:
 - `kind` — see `## Kind enum` below.
 - `files` — the repo-relative paths of the documents whose change triggered this job. The curator reads each document at its path in the working tree; the same paths decide which scope the documents belong to, matched against the scope's globs.
 - **A request carries a batch, and one document is a batch of one.** A watch groups the documents of one directory into a single job, because a directory's documents describe one subject and their terms are decided against each other rather than one at a time. The singular key `file` remains legal for a consumer dispatching its own terms-curator-shaped jobs; a request carrying it is read as a batch of one, and a request carrying both forms uses the list.
-- **The batch is answered as a whole**: every operation the documents produce lands in one `result/terms.json`, followed by one commit of the dictionary. A batch whose documents introduce nothing is a `noop` for the whole batch.
+- **The batch is answered as a whole**: every operation the documents produce lands in one `result/terms.json`, and `terms-write` lands them in one commit of the dictionary. A batch whose documents introduce nothing is a `noop` for the whole batch.
 - No extra fields.
 
 ### `report` dispatch
@@ -94,8 +94,8 @@ Fields:
 - `op` — one of `add` (a term the dictionary did not carry), `extend` (an existing term's definition widened to cover a new shade, name unchanged), `rename` (an existing bare heading rewritten as the qualified name of the same concept, definition kept or tightened), `split` (the document introduced a neighbouring concept under a name already taken: a second term is added and both definitions are reworded so the difference is explicit).
 - `term` — the section heading, written in the form the scope's documents use and as a name: a qualifying noun whenever the bare word has an everyday or a second meaning.
 - `from` — present on `rename` only: the bare heading the section carried before.
-- `definition` — the section body. At most three physical lines.
-- `sibling` / `sibling_definition` — present on `split` only: the existing term whose definition was reworded alongside the new one. Each of the two definitions names the other term, which is how a freshly split term is told apart from a dead one.
+- `definition` — the section body. `terms-write` refuses one its form check does not admit, so a definition stays readable at a glance.
+- `sibling` / `sibling_definition` — present on `split` only: the existing term whose definition was reworded alongside the new one. `terms-write` refuses a split whose two definitions do not name each other, because that mark is how a freshly split term is told apart from a dead one.
 
 An empty `operations` array is not written — a curator with nothing to apply reports `noop` instead.
 
@@ -112,7 +112,7 @@ Format and configuration findings are the dispatching skill's own; the curator n
 
 ## Side-effect rules
 
-- The expert MAY edit the scope's dictionary file in place, and commit it under the git identity its environment carries.
+- The expert changes the scope's dictionary only through `terms-write`: section placement, the anchor and form checks behind the `technical` refusal, and the commit are the verb's, and the commit carries the git identity the job's environment holds, so the dictionary is attributed to the curator and to nothing else.
 - The expert MUST NOT edit the document that triggered the job, or any other document of the scope. A document naming a concept differently from the dictionary is a `report` finding, never a silent rewrite of someone else's text.
 - The expert MUST NOT touch any tracked file except the dictionary.
 - On `report` the expert writes nothing at all.

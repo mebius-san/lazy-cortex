@@ -6,7 +6,9 @@ execution-discipline-waiver: "thin dispatcher — work lives in bin/submit.py (o
 ---
 # lazy-review.submit
 
-A single, idempotent operation that opens a document for review without running the opening main-writer round. The bin script applies the same bootstrap as `start` (`review_active: true`, `review_round: 1`, `approved: false`, Waiting banner), additionally pre-seeds `review_main_done` so the main-pending set is empty on the first tick, and produces ONE operator commit under the caller's git identity (no `Doc-Review-*` trailer). The document lands directly on the operator's Ready banner.
+A single, idempotent operation that opens a document for review without running the opening main-writer round. The bin script applies the same bootstrap as `start` (`review_active: true`, `review_round: 1` seeded when absent, `review_approved` reset to `false`, Waiting banner), additionally pre-seeds `review_main_done` so the main-pending set is empty on the first tick, and produces ONE operator commit under the caller's git identity, carrying a `Doc-Review-Phase: initial` trailer. The document lands directly on the operator's Ready banner, unless it carries an open command (see below).
+
+Submit enters a new review cycle: `review_approved` is reset to `false` whatever a stopped cycle left behind. A document that carries a non-empty `[!todo] #review/command` callout when it is submitted is not leapfrogged — the command is the opening round's input, so the document enters in the writer state (`review_phase: main`, empty `review_main_done`, round not advanced, `Waiting: writer` banner) and the coordinator's entry wake carries the command out. The operator is never shown the Ready banner while a writer round is owed.
 
 `--expert <name>` (optional) writes a `review_expert` per-document override of the class `experts.main` list, honoured by the dispatcher.
 

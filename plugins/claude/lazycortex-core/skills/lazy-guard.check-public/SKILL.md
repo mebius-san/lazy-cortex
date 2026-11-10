@@ -1,7 +1,7 @@
 ---
 name: lazy-guard.check-public
 description: "Use when auditing a public repo (or a public subtree inside an otherwise private repo) for leaked secrets, PII, infrastructure details, or hardcoded local paths. Run before making a repo/subtree public, after adding new configs, or as a periodic hygiene check. Reads .guard-public.json for accepted exceptions and optional `public_scopes` globs."
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git ls-files*), Bash(mkdir -p *), Bash(date *), Agent
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git ls-files*), Bash(mkdir -p *), Bash(date *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
 ---
 # Public Repo Security Audit
 
@@ -27,13 +27,7 @@ This skill has 5 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 ## Phase 1 — Prepare (main session)
 
-### 1a. Get tracked files
-
-```bash
-git ls-files
-```
-
-### 1b. Load waivers
+### 1a. Load waivers
 
 Read `.guard-public.json` from repo root. If absent, use empty waiver set.
 
@@ -67,18 +61,29 @@ Schema:
 
 `public_scopes` (optional, default: empty) narrows the guard to a subtree of the repo. Globs support `**` (any depth) and `*` (single segment), relative to repo root. Absent or empty = legacy whole-repo-public mode (scan everything).
 
+`global_skip_paths` (optional, default: empty) lists paths that are never scanned — vendored or third-party code. Each entry is relative to repo root and matches the way a `public_scopes` glob does: `**` covers any depth and `*` stays inside one path segment. An entry ending in `/` means that directory and everything under it (`vendor/` skips `vendor/a.js` and `vendor/lib/b.js`). The `lazy-guard.check-public.py` pre-commit hook skips the same paths.
+
 `public_author` (optional, default: absent) records the approved public identity for this repo. Shape: `{ "name": "<string>", "email": <string|null>, "notes": "<string>" }`. When set, B4 matches equal to `public_author.name` (or `public_author.email`, if set) auto-flip to WAIVED in Phase 3. When absent, every B4 match stays WARN and the user must confirm the intended value before any author field is written.
 
-### 1c. Build the scan file list
+### 1b. Build the scan file list
 
-Apply filters in this order:
+Get the tracked files with the first three filters already applied, from the same code the pre-commit hook uses:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" guard-public-files)
+```
+
+The `guard-public-files` verb starts from `git ls-files` and applies, in this order:
 
 1. If `public_scopes` is non-empty, retain only files matching at least one glob.
 2. Remove `*.age` files (encrypted).
-3. Remove paths matching `global_skip_paths` globs.
-4. Remove binary files (images, fonts, compiled assets).
+3. Remove paths matching `global_skip_paths` entries.
 
-Report: "Scanning N files in public scope (O outside scope, M encrypted, K excluded by skip paths)" — or drop the scope counts if `public_scopes` is empty.
+It prints one JSON object: `files` (the remaining paths, in `git ls-files` order) and the counts each filter dropped — `outside_scope`, `encrypted`, `skipped`. Exit 1 means the tracked files could not be listed; stop and report its `message`.
+
+4. From `files`, remove binary files (images, fonts, compiled assets).
+
+Report: "Scanning N files in public scope (O outside scope, M encrypted, K excluded by skip paths — `outside_scope`, `encrypted`, `skipped`)" — or drop the scope counts if `public_scopes` is empty.
 
 Hand the final file list to every dispatched agent.
 
@@ -145,7 +150,7 @@ For each finding the agent records: `check_id`, `file_path`, `line_number`, `mat
    - `waiver.check` equals `finding.check_id` OR `waiver.check == "*"`
    - `waiver.scope` glob matches `finding.file_path` (or scope is `"*"`)
    - `waiver.pattern` regex matches `finding.matched_text` (case-insensitive)
-   - If `waiver.expires` is set, today's date < expiry
+   - If `waiver.expires` is set, today's date <= expiry (the waiver still applies on its expiry day)
    Matched findings flip to severity `WAIVED`.
 5. **Count**: totals per category and severity.
 
@@ -213,7 +218,7 @@ For each confirmed fix strategy:
   "added": "<today>"
 }
 ```
-Show for approval, then append to `.guard-public.json` (create file if needed).
+Show for approval, then write it with `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" guard-public-write --waiver '<waiver json>')`. The `guard-public-write` verb creates the file when needed and merges the waiver into the ones on record, leaving the recorded `public_scopes` as they are; its JSON `status` is the outcome.
 
 **Author identity**: prefer setting `public_author` at the top of `.guard-public.json` over writing per-match B4 waivers. One `public_author` record governs every author field under `public_scopes`, survives scope changes, and makes the intended identity discoverable instead of scattering it across waiver entries.
 

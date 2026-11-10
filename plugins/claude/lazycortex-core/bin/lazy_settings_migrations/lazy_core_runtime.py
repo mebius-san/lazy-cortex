@@ -1,6 +1,6 @@
 """
 Migrations for the lazycortex-core runtime sections of `lazy.settings.json`
-(`daemon`, `routines`, `experts`, `git`, `repos`).
+(`daemon`, `routines`, `experts`, `git`).
 
 Empty — this module is not a section key anyone reads. Per-section ladders live
 in the correctly-keyed sibling modules: `routines.py` owns the

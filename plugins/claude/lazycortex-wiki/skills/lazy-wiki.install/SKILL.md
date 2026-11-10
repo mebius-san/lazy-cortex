@@ -114,21 +114,21 @@ Target files outside the `lazy-wiki` namespace (other plugins, user-authored rul
 
 ### Compose the navigation rule
 
-The shipped `lazy-wiki.navigation.md` carries a placeholder `## Coverage` section; the installed copy must carry the scope list instead. Build the target text in memory before touching disk:
+The shipped `lazy-wiki.navigation.md` carries placeholder `## Coverage` and `## Domain coverage` sections; the installed copy must carry the scope list and the domain tree instead. One call composes and lands it:
 
-1. `Read` the shipped `<installPath>/rules/lazy-wiki.navigation.md`.
-2. When `lazy.settings.json[wiki.scopes]` is non-empty, replace everything between the `## Coverage` heading and the next `##` with one bullet per scope, in id order, in exactly the shape `/lazy-wiki.configure` Phase 9 defines — that phase is the authority for the bullet format. When it is empty, the shipped text is the target as is (`/lazy-wiki.configure` renders Coverage later).
-3. `Read` `<rulesDir>/lazy-wiki.navigation.md` when it exists and compare it to the target byte for byte. Identical → **unchanged**, no write. Absent → `Write` the target, **installed**. Different → `Write` the target, **refreshed**.
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" render-navigation-rule --rules-dir <rulesDir> --create --repo <target-root>)
+```
 
-One `Write` of the finished text, never a copy followed by an edit: a run that dies between the two would leave the always-loaded rule stating a MANDATORY "query before Grep" duty with no glob it applies to. The comparison is against the composed target, never against the shipped source — the shipped source is the copy that carries the placeholder, so a mirror byte-identical to it is exactly the stale state this step exists to replace.
+The verb renders both sections from `lazy.settings.json` into the shipped text — with no scopes yet, Coverage keeps the shipped text and `/lazy-wiki.configure` renders it later — compares the result with `<rulesDir>/lazy-wiki.navigation.md` byte for byte, and writes the finished text in one write only when it differs. Read `status` (`installed` / `refreshed` / `unchanged`), `coverage` and `domain_coverage` from its one-line JSON. The comparison is against the composed target, never against the shipped source: a mirror byte-identical to the shipped placeholder is exactly the stale state this step exists to replace.
 
-Outcome (one line per rule): `<name>.md: <state>`, plus the receipt's `counts` line verbatim for the synced rules and `coverage: <rendered|no-scopes>` for the composed one.
+Outcome (one line per rule): `<name>.md: <state>`, plus the receipt's `counts` line verbatim for the synced rules and `coverage: <rendered|no-scopes>` plus `domain-coverage: <rendered|no-domains>` for the composed one.
 
 ## Step 5: Seed wiki + structure + terms settings sections
 
-Read the target `lazy.settings.json`. If missing or unparseable, initialise as `{"_version": 1}`.
+Read each section from the target file with `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get <section> --cwd <target-root>)` (`<target-root>` is `~` at user scope or `<repo-root>` at project scope — the Step 2 split), and write every missing key with one `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set <section> --key '<key>' --value '<json>' --cwd <target-root>)` call — the verb writes that one key and leaves every other value in the file as it was. A section absent altogether is seeded key by key the same way. A target file that is not valid JSON makes `settings-set` refuse instead of overwriting it: stop the step and report it.
 
-Ensure the `wiki` key exists. If absent, add:
+Ensure the `wiki` key exists. If absent, seed:
 
 ```json
 {
@@ -145,7 +145,7 @@ The stamp is `2` because a section seeded here is already in the post-hoist shap
 
 Both keys are completed at every depth, never merely checked for at the top: when `wiki` is already present but lacks one of them, add just that key and leave every existing value byte-for-byte. A section carrying only `{"_version": …}` is a partial write to finish, not an entry to accept — `settings-get` returns exactly that stub for a section that was never written, so a top-level presence test cannot tell the two apart and reports a seeded section either way.
 
-Ensure the `structure` key exists. If absent, add:
+Ensure the `structure` key exists. If absent, seed:
 
 ```json
 {
@@ -157,11 +157,11 @@ Ensure the `structure` key exists. If absent, add:
 
 `exclude` seeds with two mandatory entries and nothing else. `docs/structure.md` is the map itself, which `lazy-wiki.structure`'s `rebuild` mode would otherwise describe inside the map. `.memory/**` is the experts' own memory tree: every note is a tracked file landed by its own commit, so without the entry a note wakes the scan, the scan dispatches the curator, and a curator that writes a note wakes the scan again. Both entries exist for the same reason — a writer's own output must not be what triggers it.
 
-`exclude` is mandatory and is completed on a present section exactly as the `wiki` keys above are: a `structure` section holding only `_version` is the stub `settings-get` returns for an unwritten section, and accepting it leaves the map describing itself. Completion is per entry, so a section written before `.memory/**` was mandatory gains it on the next run without any other value moving.
+`exclude` is mandatory and is completed on a present section exactly as the `wiki` keys above are: a `structure` section holding only `_version` is the stub `settings-get` returns for an unwritten section, and accepting it leaves the map describing itself. Completion is per entry, so a section written before `.memory/**` was mandatory gains it on the next run without any other value moving: write the existing `exclude` array with the missing entries appended, through the same `settings-set` call.
 
 **`depth_profiles` seeds empty**; classes are per-repo, and `/lazy-wiki.configure structure` is the wizard that collects and writes them.
 
-Ensure the `terms` key exists. If absent, add:
+Ensure the `terms` key exists. If absent, seed:
 
 ```json
 {
@@ -172,9 +172,7 @@ Ensure the `terms` key exists. If absent, add:
 
 `scopes` seeds empty: which documents a dictionary serves, where its file lives, and which of them are term sources are per-repo decisions made by `/lazy-wiki.configure terms`, which also registers the scope's scan routine.
 
-Never overwrite an existing `wiki`, `structure`, or `terms` key or any nested key within any of them. State **seeded** if added, **already-present** if the key was there — independently per section.
-
-Write the file if any mutation happened.
+Never overwrite an existing `wiki`, `structure`, or `terms` key or any nested key within any of them — a key already present gets no `settings-set` call. State **seeded** if added, **already-present** if the key was there — independently per section.
 
 Outcome: `wiki-section: <seeded|already-present>` (with `tag_axes: <seeded|already-present>` and `exclude: <seeded|already-present>` appended), `structure-section: <seeded|already-present>`, `terms-section: <seeded|already-present>`.
 
@@ -196,21 +194,20 @@ Outcome: `doc-kind-axis: <added|unchanged|axes-cli-failed>`.
 
 ## Step 7: Seed agent_models
 
-Delegate the entire seed to the shared primitive — do not hand-roll SOT lookup, `lazycortex-wiki:` filtering, or per-key apply:
+The `agent-models-seed` verb seeds the `agent_models.lazycortex` group with every `lazycortex-wiki:` subagent the core tier table lists. The step is here so the curator experts Step 8 registers resolve a model when the runtime dispatches them.
 
 ```
-Skill(skill: "lazycortex-core:lazy-core.agent-models-seed", args: "prefix=lazycortex-wiki scope=<scope>")
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> agent-models-seed --prefix lazycortex-wiki --scope <scope>)
 ```
 
-`<scope>` is the value resolved in Step 1 (`project` or `user`). The primitive locates `lazycortex-core`'s `default-tiers.json`, selects every `lazycortex-wiki:*` entry, applies absent/equal/different (`added` / `unchanged` / `kept-local`) semantics against `agent_models.lazycortex`, and writes back only on a mutation.
-
-Fold the primitive's returned `agent-models-seed(...)` block into the Step 10 report verbatim. Surface its outcome:
+`<scope>` is the value resolved in Step 1 (`project` or `user`). The verb prints one JSON line: `outcome` is `seeded-N`, `unchanged`, or `no-entries` (exit 0), or a refusal — `sot-missing`, `missing-prefix`, `missing-scope`, `settings-unparseable` (exit 1, with a `message`); `entries` carries one `{dispatch, tier, state}` line per key, `state` being `added` / `unchanged` / `refreshed` / `kept-local`. Fold the `entries` lines into the Step 10 report. Act on the `outcome`:
 
 - `sot-missing` → abort the install (`lazycortex-core` not installed) — same FAIL as Step 2's defaults check.
+- any other refusal → stop the step and relay its `message`; write no seed lines.
 - `no-entries` → surface plainly (`default-tiers.json` is missing this plugin's agents); not an abort.
 - `seeded-N` / `unchanged` → the normal path.
 
-Outcome: `agent-models: <seeded-N|unchanged|no-entries>`.
+Outcome: `agent-models: <seeded-N|unchanged|no-entries>`, the verb's own value; never report a seed the verb did not answer.
 
 ## Step 8: Register curator experts + routines
 
@@ -343,7 +340,7 @@ The `filter` block is the earliest cut, on two criteria. `frontmatter` drops a c
 
 Same `<current-branch>` substitution as `lazy-wiki.scan`. No `filter` block — a deleted file has no frontmatter to read; `prune-node` itself skips paths that resolve to no scope. The consumer is deterministic (no curator dispatch): it drops See-also lines pointing at the deleted node, rebuilds `topics.md`, and commits — `git_author` stamps those commits with the routine's own bot identity instead of the daemon process's, so loop-detect and coordinator author checks see a bot, not the operator.
 
-**`lazy-wiki.relink-weekly`** — weekly full rescan:
+**`lazy-wiki.relink-weekly`** — weekly full rescan, the insurance against a missed `lazy-wiki.scan` wake: it walks every node of every scope and dispatches a classify job only for a node whose operator source changed since its last curation (or that was never curated); a node whose stored `wiki_src_hash` still matches its source is left alone, exactly as `process-file` leaves it:
 
 ```json
 "lazy-wiki.relink-weekly": {
@@ -402,7 +399,7 @@ Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=<name> <cfg ke
 }
 ```
 
-No `can_commit_in_repo` here, unlike the curators: the writer returns its document through the job's `result/` and never touches the working tree, so the pump's no-commit clause is exactly its contract. The `lazy-wiki.domain-collect` routine below lands the document, refreshes the index, and commits.
+No `can_commit_in_repo` here, unlike the curators: the writer returns its files through the job's `result/` and never touches the working tree, so the pump's no-commit clause is exactly its contract. The `lazy-wiki.domain-collect` routine below lands the files, refreshes the index, and commits.
 
 **An existing entry loses the flag.** Absent-only seeding leaves a `wiki.domain-writer` entry composed by an earlier release carrying `can_commit_in_repo: true`, which keeps the pump's no-commit clause out of the writer's prompt. That key is this plugin's own knowledge, not an operator choice, so when the existing entry carries it, remove that one key and leave every other key as it is; report `flag-dropped`, otherwise nothing.
 
@@ -432,7 +429,7 @@ No `can_commit_in_repo` here, unlike the curators: the writer returns its docume
 }
 ```
 
-**`lazy-wiki.domain-collect`** — the landing channel: every minute it lands each finished `wiki.domain-writer` job — writes the returned document at the request's `doc_path`, refreshes `domains.md`, commits exactly those two paths under this routine's identity, and retires the job. A job that cannot be landed (writer error, empty result, a `doc_path` outside the output tree) fails the tick, which the daemon records as a routine error:
+**`lazy-wiki.domain-collect`** — the landing channel: every minute it lands each finished `wiki.domain-writer` job — writes every returned file — the group's folder note and the docs of its changed blocks — at the path the request names, refreshes `domains.md`, commits exactly those paths under this routine's identity, and retires the job. A job that cannot be landed (writer error, an empty or missing result file, a file the request never named, a path outside the output tree) fails the tick, which the daemon records as a routine error:
 
 ```json
 "lazy-wiki.domain-collect": {
@@ -572,6 +569,7 @@ One line per task in the canonical list above, with its outcome word.
 ## Failure modes
 
 - **`/lazy-wiki.install` aborts: "plugin not enabled"** — `lazycortex-wiki@lazycortex` absent or empty in `~/.claude/plugins/installed_plugins.json` → add `"lazycortex-wiki@lazycortex": true` to `enabledPlugins`, restart Claude Code, re-run.
-- **`/lazy-wiki.install` aborts: "lazycortex-core not installed"** — `default-tiers.json` not found → install `lazycortex-core` first, then re-run.
+- **`/lazy-wiki.install` aborts: "lazycortex-core not installed"** — Step 7's `agent-models-seed` verb answered `sot-missing` → install `lazycortex-core` first, then re-run.
 - **`/lazy-wiki.install` aborts: "plugin cache is empty"** — rule glob returned zero files → run `/plugin update lazycortex-wiki@lazycortex`, then re-run.
+- **Step 5 stops on a `settings-set` error** — the target `lazy.settings.json` is not valid JSON, and the verb refuses to overwrite it → repair the file by hand, then re-run.
 - **Curator never runs after install** — the routines are registered but nothing fires them: this checkout has no daemon supervising it → tick them by hand with `/lazy-runtime.tick`, or run `/lazy-core.daemon-setup` to enable the daemon and install a supervisor.

@@ -2,8 +2,8 @@
 
 The settings-root holds `.claude/lazy.settings.json`; the content-root holds the
 subsystem folders and the `requests/` inbox, and is `settings-root/<vault_root>`
-(default `specs`). Bin code reads config from the settings-root but joins spec
-content under the content-root.
+(default `specs`), always a sub-directory of the settings-root. Bin code reads config from the
+settings-root but joins spec content under the content-root.
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import json
 import os
 import stat
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -22,6 +22,16 @@ DEFAULT_VAULT_ROOT = "specs"
 _SETTINGS_REL = Path(".claude") / "lazy.settings.json"
 _SPEC_SECTION = "spec"
 _VAULT_ROOT_KEY = "vault_root"
+_PARENT_SEGMENT = ".."
+# One-off operator message -- names the setting, the refused value, why, and the one way out
+_VAULT_ROOT_REFUSAL = (
+    "spec.vault_root {value!r} in .claude/lazy.settings.json {reason}; the spec catalog must live in a "
+    "sub-directory of the repository: move the catalog into one (the default is `specs`) and set "
+    "spec.vault_root to that directory"
+)
+_REASON_REPO_ROOT = "names the repository root"
+_REASON_ABSOLUTE = "is an absolute path"
+_REASON_PARENT = "climbs out through `..`"
 # waiver: sibling-plugin CLI env contract per dev.plugin-boundaries § 1c
 _ENV_PLUGIN_DIRS = "LAZYCORTEX_PLUGIN_DIRS"
 # waiver: external Claude Code registry path and record keys, not internal keys
@@ -30,6 +40,10 @@ _REG_PLUGINS = "plugins"
 _REG_VERSION = "version"
 _REG_INSTALL_PATH = "installPath"
 _BIN_DIR = "bin"
+# The core plugin, whose CLI every caller of `resolve_core_cli` reaches.
+_CORE_CLI_NAME = "lazycortex-core"
+# The plugin tree a checkout that authors the plugins carries them under.
+_PLUGIN_TREE_REL = Path("plugins") / "claude"
 _TMP_SUFFIX = ".tmp"
 _ENCODING = "utf-8"
 _WRITE_MODE = "w"
@@ -42,6 +56,18 @@ _CRLF_BYTES = b"\r\n"
 _LF_BYTES = b"\n"
 _MD = ".md"
 _SEP = "/"
+
+
+class VaultRootError(BaseException):
+  """
+  Refusal of a `spec.vault_root` value that is not a sub-directory of the settings-root.
+
+  The message names the setting and tells the operator to move the catalog into a sub-directory and
+  point the setting at it.
+  """
+
+  # Decision: chose a `BaseException` subclass, not `Exception` -- a per-item `except Exception` in a routine
+  # tick would otherwise record the refusal and carry on, while every verb resolving the content-root must stop
 
 
 def find_settings_root(start: Path) -> Path:
@@ -71,25 +97,64 @@ def _vault_root_value(settings_root: Path) -> str:
     settings_root: Dir holding `.claude/lazy.settings.json`.
 
   Returns:
-    The configured vault-root segment, or `specs` when unset/malformed.
+    The configured vault-root sub-directory, relative to the settings-root, or `specs` when the
+    value is unset, empty, or not a string.
+
+  Raises:
+    VaultRootError: When the value names the settings-root itself (`.`), is an absolute path, or
+      climbs out through `..`.
   """
+
+  # Contract:
+  # The returned vault root is always a sub-directory strictly below the settings-root: a value naming
+  # the settings-root itself, an absolute path, or one with a `..` segment is refused, never replaced by
+  # the default; only an unset, empty, or non-string value falls back to `specs`.
+
   path = settings_root / _SETTINGS_REL
 
   # guard: no settings file — use the default root
   if not path.is_file():
     return DEFAULT_VAULT_ROOT
+
+  # the spec section of the tracked settings
   data = json.loads(path.read_text(encoding = "utf-8"))
   spec = data.get(_SPEC_SECTION)
 
   # guard: missing/malformed spec section — default
   if not isinstance(spec, dict):
     return DEFAULT_VAULT_ROOT
+
+  # the configured segment, when the section names one
   value = spec.get(_VAULT_ROOT_KEY)
 
   # guard: only a non-empty string overrides the default
-  if isinstance(value, str) and value:
-    return value
-  return DEFAULT_VAULT_ROOT
+  if not isinstance(value, str) or not value:
+    return DEFAULT_VAULT_ROOT
+
+  # Domain(spec.config):
+  # # The spec catalog lives in its own sub-directory
+  # The spec catalog always occupies a named sub-directory of the repository, never the repository root
+  # itself and never a place outside it. With the catalog at the root, every markdown file of the
+  # repository — READMEs, documentation beside code — would fall under the catalog's watch, and the
+  # promise that upgrades never touch the project's own code could not be kept. A setting that points at
+  # the root, at an absolute location, or out of the repository is refused with an instruction to move
+  # the catalog into a sub-directory; it is never silently replaced by the default location.
+
+  # the configured value read as a relative POSIX path
+  rel = PurePosixPath(value)
+
+  # guard: an absolute path is not a sub-directory of the settings-root
+  if rel.is_absolute():
+    raise VaultRootError(_VAULT_ROOT_REFUSAL.format(value = value, reason = _REASON_ABSOLUTE))
+
+  # guard: a `..` segment climbs out of the settings-root
+  if _PARENT_SEGMENT in rel.parts:
+    raise VaultRootError(_VAULT_ROOT_REFUSAL.format(value = value, reason = _REASON_PARENT))
+
+  # guard: a value with no segment left (`.`, `./`) names the settings-root itself
+  if not rel.parts:
+    raise VaultRootError(_VAULT_ROOT_REFUSAL.format(value = value, reason = _REASON_REPO_ROOT))
+  return rel.as_posix()
 
 
 def spec_content_root(settings_root: Path) -> Path:
@@ -101,6 +166,10 @@ def spec_content_root(settings_root: Path) -> Path:
 
   Returns:
     `settings_root / <spec.vault_root>` (default `specs`).
+
+  Raises:
+    VaultRootError: When `spec.vault_root` names the settings-root itself, an absolute path, or a
+      path climbing out through `..`.
   """
 
   # Domain(spec.config):
@@ -132,29 +201,35 @@ def _version_sort_key(name: str) -> tuple[int, ...]:
   return tuple(out)
 
 
-def installed_plugin_root(name: str, home: Path | None = None) -> Path | None:
+def installed_plugin_root(name: str, *, home: Path | None = None) -> Path | None:
   """
   Resolve a plugin's installed source root from Claude Code's plugin registry.
 
   The registry (`~/.claude/plugins/installed_plugins.json`) records one entry per project and
   version that installed the plugin, each naming its `installPath`; the highest recorded version
-  wins. The plugin cache itself is never searched: it keeps every version ever installed, so a walk
-  across it returns copies the registry no longer names.
+  wins. The plugin cache is never searched.
 
   Args:
     name: Plugin name without its `@<marketplace>` suffix.
-    home: Home directory holding the registry; the current user's when omitted.
+    home: Keyword-only home directory holding the registry; the current user's when omitted.
 
   Returns:
     The recorded install root when it exists on disk, else None.
   """
+
+  # the registry names the one install per version; the cache keeps every version ever installed
+
+  # the registry as it stands on disk; an unreadable one records nothing
   registry = (home or Path.home()) / _INSTALLED_PLUGINS_REL
   try:
     data = json.loads(registry.read_text(encoding = "utf-8"))
   except (OSError, ValueError):
     return None
+
   # the registry nests its map under `plugins` in newer files and is the map itself in older ones
   plugins = data.get(_REG_PLUGINS, data) if isinstance(data, dict) else {}
+
+  # every recorded install of this plugin, under any marketplace suffix
   records = [
     rec
     for key, entries in plugins.items() if key.split("@", 1)[0] == name
@@ -168,14 +243,15 @@ def installed_plugin_root(name: str, home: Path | None = None) -> Path | None:
   return root if root.is_dir() else None
 
 
-def resolve_plugin_cli(name: str) -> Path | None:
+def resolve_plugin_cli(name: str, *, dev_repo: Path | None = None) -> Path | None:
   """
   Locate a sibling plugin's CLI binary by name.
 
   Lets a plugin's bin script reach another plugin's published CLI without assuming a fixed
-  install layout; each caller applies its own error handling to a missing result. The plugin-dirs
-  environment (exported by the daemon) is walked first; outside the daemon, the sibling's install
-  root is read from Claude Code's plugin registry (`installed_plugin_root`).
+  install layout; each caller applies its own error handling to a missing result. Lookup order: the
+  plugin-dirs environment (exported by the daemon), the dev-vault sibling beside this plugin's own
+  tree, the given repository's own plugin tree, and last the sibling's install root read from Claude
+  Code's plugin registry (`installed_plugin_root`).
 
   Guarantees:
     - When both the plugin-dirs environment and the plugin registry carry a matching CLI, the
@@ -183,10 +259,10 @@ def resolve_plugin_cli(name: str) -> Path | None:
 
   Args:
     name: Name of the CLI binary to look for under each plugin directory's `bin/` folder.
+    dev_repo: Repository root whose own plugin tree is searched before the registry, or None to skip it.
 
   Returns:
-    The resolved binary path, or None when neither the plugin-dirs environment nor the plugin
-    registry carries the named CLI.
+    The resolved binary path, or None when none of the lookup stages carries the named CLI.
   """
 
   # Contract:
@@ -202,7 +278,20 @@ def resolve_plugin_cli(name: str) -> Path | None:
     if cli.is_file():
       return cli
 
-  # registry fallback — a session (hook, skill) has no daemon export to walk
+  # dev-vault sibling — this file sits at plugins/claude/lazycortex-specs/bin/, so a neighbour's own
+  # bin/ is two levels up and back down; it precedes the registry (§ 2b) so a checkout runs the
+  # sources at hand rather than whatever version happens to be installed
+  sibling = Path(__file__).resolve().parents[2] / name / _BIN_DIR / name
+  if sibling.is_file():
+    return sibling
+
+  # the caller's checkout, when it authors the plugins — a dev tree of its own, still before the registry
+  if dev_repo is not None:
+    in_repo = dev_repo / _PLUGIN_TREE_REL / name / _BIN_DIR / name
+    if in_repo.is_file():
+      return in_repo
+
+  # registry fallback — the last stage, for a consumer install with no daemon export and no dev tree
   root = installed_plugin_root(name)
 
   # guard: no registry record for the sibling — nothing further to try
@@ -210,6 +299,70 @@ def resolve_plugin_cli(name: str) -> Path | None:
     return None
   cli = root / _BIN_DIR / name
   return cli if cli.is_file() else None
+
+
+def require_plugin_cli(name: str, repo: Path) -> Path:
+  """
+  Find a required sibling plugin's CLI binary or raise.
+
+  Args:
+    name: Name of the CLI binary to look for under each plugin directory's `bin/` folder.
+    repo: The repository root whose own plugin tree is searched.
+
+  Returns:
+    Absolute path to the resolved binary.
+
+  Raises:
+    RuntimeError: When no lookup stage finds a binary, naming every stage searched.
+  """
+
+  # Domain(plugin.boundaries):
+  # # Reaching a neighbouring plugin's binary: sources at hand first, the install registry last
+  # Before a neighbouring plugin's published command can be run as a subprocess, its binary has
+  # to be found. The search tries four places in a fixed order and takes the first hit. First,
+  # the plugin directories a spawning process was handed. Second, the neighbour's own source
+  # sitting right beside this plugin in a development checkout. Third, the plugin tree of the
+  # repository the caller works in. Last, the install that Claude Code's plugin registry
+  # records for the neighbour. The installed plugin cache is never walked: it keeps every
+  # version ever installed, so its newest directory need not be the version this machine has
+  # enabled; only the registry names that one.
+  # The order puts sources ahead of installs on purpose. A checkout that authors the plugins
+  # must run the sources at hand, not whichever version happens to be installed, or a stale
+  # copy would silently answer in place of the code being developed. The registry stays the
+  # final stage so that a consumer install, which has no spawning process's directory list and
+  # no development tree, still reaches the neighbour.
+  # The neighbour is required. When no place yields a binary, the lookup fails and names every
+  # place it searched, rather than carrying on without the neighbour.
+
+  # env-declared plugin dirs, then the dev-vault sibling beside this plugin, then this repo's own
+  # plugin tree, and only then the install the plugin registry records (§ 2b: registry last)
+  cli = resolve_plugin_cli(name, dev_repo = repo)
+  if cli is not None:
+    return cli
+
+  # no stage found a binary — name every stage searched, the two dev-tree locations by path
+  raise RuntimeError(
+      f"{name} CLI not resolvable: ${_ENV_PLUGIN_DIRS} and the plugin registry yield no match, "
+      f"{repo / _PLUGIN_TREE_REL / name / _BIN_DIR / name} is absent from this repo and "
+      f"{Path(__file__).resolve().parents[2] / name / _BIN_DIR / name} is absent beside "
+      f"this plugin"
+  )
+
+
+def resolve_core_cli(repo: Path) -> Path:
+  """
+  Find the `lazycortex-core` CLI binary or raise.
+
+  Args:
+    repo: The repository root whose own plugin tree is searched.
+
+  Returns:
+    Absolute path to the resolved `lazycortex-core` binary.
+
+  Raises:
+    RuntimeError: When no lookup stage finds a binary, naming every stage searched.
+  """
+  return require_plugin_cli(_CORE_CLI_NAME, repo)
 
 
 def spec_roots(start: Path) -> tuple[Path, Path]:
@@ -259,7 +412,7 @@ def build_wikilink_target(path: Path, settings_root: Path) -> str:
   # document's full path from the vault root; in both cases `resolve_wikilink` maps it back to
   # the same document.
 
-  # Domain(unfiled):
+  # Domain(spec.links):
   # # Catalog links name one document and nothing else
   # A link to a spec document uses its path from the content-root, without extension, as long as
   # that short form names the document alone. Obsidian matches a link by path suffix, so the short
@@ -354,7 +507,7 @@ def _disk_ending(target: Path) -> str:
   return _CRLF if first > 0 and raw[first - 1:first + 1] == _CRLF_BYTES else _LF
 
 
-def write_text_atomic(path: Path, text: str, newline: str | None = None) -> None:
+def write_text_atomic(path: Path, text: str, *, newline: str | None = None) -> None:
   """
   Replace a file's content in one step, so a reader never sees it half-written.
 
@@ -380,6 +533,23 @@ def write_text_atomic(path: Path, text: str, newline: str | None = None) -> None
   Raises:
     OSError: If the write, chmod, or rename into place fails for any reason.
   """
+
+  # Contract:
+  # A write to a symlink lands in the file the link points to; the symlink itself is never
+  # replaced.
+
+  # Contract:
+  # The line ending written is the one the target on disk uses at write time — CRLF when its first
+  # line break is CRLF, LF for a new file — unless the caller names the ending explicitly.
+
+  # Contract:
+  # An existing target keeps its own permission mode; a new file gets the mode a plain write
+  # would give it under the current umask.
+
+  # Contract:
+  # When the write fails, the exception reaches the caller, the target is left exactly as it was,
+  # and no temporary file remains.
+
   target = path.resolve()
 
   # the ending comes from the caller or from the file as it is on disk now, never from an earlier read

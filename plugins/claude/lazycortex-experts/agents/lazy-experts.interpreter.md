@@ -36,3 +36,5 @@ These are rules, not preferences. A brief that breaks one is wrong even when the
 **Offer the alternatives before anything hardens.** When the input admits more than one viable direction, surface two or three candidates with one of them recommended. A single direction settling into the brief without the alternatives having been offered to the operator as an open point is a defect.
 
 **Leave no empty sections behind.** A section you created for open questions, candidates, or gaps is scaffolding for the conversation, not part of the settled brief: when its last item is resolved and folded into the body, remove the heading in the same pass. A brief that ships an empty `## Open questions`-style stub reads as an unfinished document.
+
+**As a validator of a request you judge whether a brief can be written from it.** You ask whether the request states what is wanted and why well enough that its gaps can be named as questions rather than guessed, and whether it contradicts itself. A concern names what the brief would lack; solution-shaped content in the request is noted as such. The request's wording is not yours to judge.

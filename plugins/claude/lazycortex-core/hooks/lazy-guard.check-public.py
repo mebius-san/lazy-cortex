@@ -23,8 +23,9 @@ Gates (cross-cutting):
 - A `-C <dir>` flag on the Bash git command retargets the scan to that repository.
 - `.guard-public.json` may declare a `public_scopes` list of globs; when set, only staged
   files matching one of those globs are scanned and everything else is treated as private
-  and ignored. When the field is absent or empty, the whole repo is scanned. Waivers from
-  the same file suppress known-acceptable findings.
+  and ignored. When the field is absent or empty, the whole repo is scanned. Staged files
+  under a `global_skip_paths` entry (vendored or third-party code) are never scanned. Waivers
+  from the same file suppress known-acceptable findings.
 """
 
 from __future__ import annotations
@@ -60,8 +61,8 @@ def main() -> None:
   commit to scan, walks the staged diff of the target repository for added lines hitting
   PII / infrastructure patterns inside the declared public scope, and surfaces surviving
   findings as advisory context. No-op on any unsupported tool call, on repos without
-  `.guard-public.json`, when no staged diff is present, and when scope filtering drops
-  every staged file.
+  `.guard-public.json`, when no staged diff is present, and when skip-path or scope
+  filtering drops every staged file.
   """
   # Enablement gate — first action. An expert spawn short-circuits here via a pure env check.
   # guard: hook disabled in the current context
@@ -122,14 +123,25 @@ def main() -> None:
   if not added_lines:
     return
 
-  # the repo's own waivers and public scopes govern what counts as a finding here
-  waivers, scope_globs = guard_checks.load_config(root)
+  # the repo's own waivers, public scopes and skip paths govern what counts as a finding here
+  waivers, scope_globs, skip_globs = guard_checks.load_config(root)
+
+  # skip paths (vendored or third-party code) are never scanned
+  added_lines = [
+    (file_path, content) for file_path, content in added_lines
+    if not guard_checks.is_skipped(file_path, skip_globs)
+  ]
+
+  # guard: nothing remains after dropping the skip paths
+  if not added_lines:
+    return
 
   # subtree-public mode: drop changes outside the declared public scopes.
   # No scopes declared -> treat the whole repo as public (legacy behavior).
   if scope_globs:
     added_lines = [
-      (f, c) for f, c in added_lines if guard_checks.in_public_scope(f, scope_globs)
+      (file_path, content) for file_path, content in added_lines
+      if guard_checks.in_public_scope(file_path, scope_globs)
     ]
 
     # guard: nothing remains after scope filtering

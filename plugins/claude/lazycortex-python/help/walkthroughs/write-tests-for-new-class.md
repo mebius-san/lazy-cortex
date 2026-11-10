@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Dispatch lazy-python.test-writer against a new class and get a test file that covers all nine Paranoid-Testing categories, verified by tst-py.
-last_regen: 2026-10-24
+last_regen: 2026-11-10
 diagram_spec:
   anchor: "How test-writer walks a class"
   request: "Sequence diagram showing: user invokes lazy-python.test-writer for a target class; agent reads plugin canon (testing-guidelines + checking-guidelines) then project overlay (testing_guidelines.md, checking_guidelines.md, CLAUDE.md ## Testing section); agent identifies test targets (init paths, public methods, properties, documented guarantees, exceptions, operator overloads, Contract: blocks, Domain(...): blocks, opt: clauses); agent writes test file covering all 9 Paranoid-Testing categories; agent runs chk-py per file then chk-py all then tst-py on the module. Show the guideline read order (canon first, overlay second, CLAUDE.md ## Testing third) and the three-step toolchain verification."
@@ -9,8 +9,8 @@ source_skills:
   - lazy-python.test-writer
   - lazy-python.testing-guidelines
   - tst
-source_sha: 33e8a296cb2bda2f7c06945ca9d46e24ed4c1858
-surface_sha: 08946b92a701377dbe16f372959faa3ff109e6b6fbb75e2e0b98f1e7a9b24bfc
+source_sha: ebfaa6a161ee1d915510a691a7009986168325ef
+surface_sha: f88857418eaef555364f74cad4e483c552f3aa0ec3704bf12669a08672a1412e
 ---
 # Generate tests that cover all nine Paranoid-Testing categories for a new class
 
@@ -45,6 +45,8 @@ Open the production class file and check that each public method and the class i
 - Every `Domain(…):` block — the agent works two or three inputs through the formula or rule by hand and asserts the code matches, never reading the expected value off the implementation. `Domain(unfiled):` counts the same; an unfiled group parks the block's name, not its test.
 - Every `opt:` clause on a cache, memo, or precomputed table — the agent writes a test that violates the assumption the clause names (the cached input changes after the first call, the source a table was built from moves) and asserts the result stays correct or the cache is dropped.
 
+A method whose body is only a placeholder under a `# TODO:` comment is a stub, and the agent writes no test for it: a test asserting the placeholder value would restate the stub and need rewriting the day the method is implemented. If a test method has to exist anyway, it stays empty under a `# TODO:` comment naming the stub it waits for.
+
 A class with only stub docstrings (`"""TODO"""`) gives the agent nothing to anchor to for categories 1–7. Sparse docstrings produce correspondingly sparse tests, and a cache or documented formula with no marker on it skips categories 8 and 9 entirely.
 
 If the docstrings are thin, stop here and run:
@@ -63,8 +65,8 @@ Open `docs/guidelines/testing_guidelines.md`. Find (or add) the section that map
 ## Base test classes
 
 - Plain classes: inherit from `BaseTest` (module: `tests.base`).
-- Entity-style classes (those inheriting from `Entity`): inherit from `EntityBaseTest` (module: `tests.entity_base`).
-- Data-set-style classes (those whose init accepts `data` / `mode` keywords): inherit from `DataSetBaseTest` (module: `tests.dataset_base`).
+- Model classes (those inheriting from `Model`): inherit from `ModelBaseTest` (module: `tests.model_base`).
+- Plugin classes (those inheriting from `Plugin`): inherit from `PluginBaseTest` (module: `tests.plugin_base`).
 ```
 
 The agent reads this mapping in Step 1 of its own execution. If the overlay is silent, the agent falls back to a `<YourBaseTest>` placeholder and asks you before proceeding — which interrupts the flow. Writing the mapping in advance keeps the dispatch non-interactive.
@@ -125,6 +127,8 @@ After the agent completes, open the test file at the mirrored path. Check:
 - **Coverage**: scan the nine categories above. Each category should have at least the minimums the guidelines require, where the source has markers or docstring sections to drive it.
 - **Tests left red**: any test the agent named in its report as failing against the current implementation (Step 6 outcome `<N>-mismatches-flagged`, `Status: blocked`). These are not errors in the test file — they are signals that the production code does not yet satisfy its own documented contract. Decide whether to fix the implementation or update the docstring; once the fix lands, the test goes green with nothing to remove. The always-loaded `lazy-python.failing-tests` rule governs how you settle it: judge which side is wrong before touching either, never bend correct code to satisfy an outdated test, and treat an edit to what a test asserts, or any new `skip` / `skipif` / `xfail` marker, as something that needs your explicit yes.
 - **Assertion messages**: every `assert` statement should carry an f-string message showing both expected and actual values.
+- **Public contract through the public API**: the agent may test a private helper directly, but public and protected behavior is never covered only through private helpers.
+- **Stubs**: a method that is only a placeholder under a `# TODO:` comment has no test asserting its placeholder value; at most an empty test method waits under a `# TODO:` comment naming the stub.
 
 ### Step 6 — Run the suite yourself
 

@@ -18,61 +18,51 @@ class LazyReviewError(Exception):
 
 
 class ParseError(LazyReviewError):
-  """Frontmatter / document parsing failed.
+  """
+  Failure to parse a document's frontmatter or body.
 
-    `text_excerpt` carries up to 200 characters of the offending
-    region so doc_doctor can be dispatched with concrete context.
-    """
+  Carries an excerpt of the offending region so doc_doctor can be dispatched with concrete context.
+
+  Attributes:
+    text_excerpt: Excerpt of the document region that failed to parse.
+  """
 
   def __init__(self, message: str, *, text_excerpt: str | None = None) -> None:
+    """
+    Create the error with a message and an optional excerpt of the offending text.
+
+    Args:
+      message: Human-readable description of the parse failure.
+      text_excerpt: Excerpt of the document region that failed to parse.
+    """
+    # the base exception carries the message
     super().__init__(message)
+
+    # the excerpt is kept for callers that report where parsing failed
     self.text_excerpt = text_excerpt
 
 
 class PayloadError(LazyReviewError):
-  """Agent request / response payload violated the protocol.
+  """
+  Protocol violation in an agent request or response payload.
 
-    Used for malformed JSON, missing required fields, invalid outcome
-    enums, response result/ paths pointing outside the job dir, and an
-    attachment entry that resolves to anything but a plain filename
-    inside the job's own `result/`.
-    """
-
-
-class OwnershipViolation(LazyReviewError):
-  """An expert tried to mutate content it does not own.
-
-    Section writer changed body prose, main writer touched a `#expert/<name>`
-    owned section, final writer added body edits — every cross-ownership
-    write surfaces here. The dispatcher refuses to apply such a response.
-    """
-
-
-class ProtectedFieldError(LazyReviewError):
-  """Agent response tried to overwrite a reserved frontmatter key.
-
-    `review_active` and `review_round` are dispatcher-owned. Attempts
-    by experts to overwrite them are silently dropped at reapply time,
-    but the dispatcher logs the violation through this exception type.
-    """
+  Raised when a payload is malformed, incomplete, or carries values or file references the protocol does not allow.
+  """
 
 
 class GitOpsError(LazyReviewError):
-  """A local git operation failed.
-
-    Lazy-review owns no remote operations; this surfaces only on local
-    `add` / `commit` / `log` / `show` failures.
-    """
-
-
-class RepairExhausted(LazyReviewError):
   """
-  `doc_doctor` failed to repair a broken document after N attempts.
+  Failure of a local git operation.
+
+  Lazy-review owns no remote operations; this surfaces only on local
+  `add` / `commit` / `log` / `show` failures.
   """
 
-  def __init__(self, file_path: str, attempts: int) -> None:
-    super().__init__(
-        f"doc_doctor failed to repair {file_path} after {attempts} attempts"
-    )
-    self.file_path = file_path
-    self.attempts = attempts
+
+class SettingsReadError(LazyReviewError):
+  """
+  Failure of the core CLI to read a section of the consumer's settings.
+
+  Raised when `lazycortex-core settings-get` exits non-zero or prints something that is not a JSON object —
+  typically a tracked settings file or local overlay that is not valid JSON.
+  """

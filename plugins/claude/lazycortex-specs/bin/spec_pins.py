@@ -9,9 +9,10 @@ than template-rendered). Files created before the pin landed in a template — o
 per-product / per-category override the plugin update never touches — carry no pin. This module
 walks the spec content-root once, adds the pin to every role-bearing document missing it, and
 reports the count touched. It also repairs a document relocated into a nested product that still
-carries the enclosing product's tag and `wiki/product/` pin. Idempotent: a document whose pin
-and product values are already right is left alone. Never commits — the caller owns that,
-per `dev.plugin-boundaries.md`'s no-silent-side-effects convention for a one-shot primitive.
+carries the enclosing product's tag and `wiki/product/` pin, and migrates an older-form product tag
+(the owner's or an enclosing product's bare leaf, or `product/<leaf>`) to the `product/<spec_path>` form.
+Idempotent: a document whose pin and product values are already right is left alone. Never commits —
+the caller owns that, per `dev.plugin-boundaries.md`'s no-silent-side-effects convention for a one-shot primitive.
 """
 from __future__ import annotations
 
@@ -79,6 +80,9 @@ class Keys:
     ENCODING: File encoding used throughout this module.
     ARG_CWD: CLI flag overriding the repository root.
     ARG_CWD_HELP: CLI help text for `--cwd`.
+    ARG_CHECK: CLI flag that reports without writing and answers through the exit code.
+    ARG_CHECK_HELP: CLI help text for `--check`.
+    EXIT_FAILED: Exit code of a failed run, told apart from both `--check` answers.
     PROG: CLI program name shown in `--help` output.
     ENV_REPO_ROOT: Env var naming the repository root, read when `--cwd` is not passed.
   """
@@ -105,6 +109,12 @@ class Keys:
   ARG_CWD = "--cwd"
   # CLI help text for `--cwd`.
   ARG_CWD_HELP = "Repository root (defaults to $LAZY_REPO_ROOT or cwd)."
+  # CLI flag that reports without writing and answers through the exit code.
+  ARG_CHECK = "--check"
+  # CLI help text for `--check`.
+  ARG_CHECK_HELP = "Write nothing; exit 0 when a document would change, 1 when none would, 2 on failure."
+  # Exit code of a failed run, told apart from both `--check` answers.
+  EXIT_FAILED = 2
   # CLI program name shown in `--help` output.
   PROG = "lazycortex-specs pins"
   # Env var naming the repository root, read when `--cwd` is not passed.
@@ -160,9 +170,10 @@ def _insert_pin(fm_text: str, role: str, product: str | None, category: str | No
 
 def _repair_owner(fm_text: str, products: dict, product: str | None) -> str:
   """
-  Rewrite an enclosing product's tag and product pin to the owning product's own.
+  Rewrite an enclosing product's tag and product pin, and any older-form product tag, to the owner's own.
 
-  Only block-form lists are read.
+  An older-form tag — the owner's or an enclosing product's bare leaf, or `product/<leaf>` — is rewritten
+  like a stale enclosing value; the current form is `product/<spec_path>`. Only block-form lists are read.
 
   Args:
     fm_text: The document's frontmatter text.
@@ -176,10 +187,12 @@ def _repair_owner(fm_text: str, products: dict, product: str | None) -> str:
   # Domain(spec.config):
   # # Innermost product owns a nested document
   # A document inside a nested product's tree belongs to the innermost product covering it, not to an enclosing one.
-  # Its tag is the last segment of that product's own tree path and its product pin names that product,
+  # Its tag is `product/` plus that product's own whole tree path and its product pin names that product,
   # so the values of any enclosing product are stale for it. A document relocated into a nested product
   # keeps the old enclosing values until repaired: each is replaced by the innermost owner's value,
-  # or dropped when the owner's value is already listed.
+  # or dropped when the owner's value is already listed. The older tag forms — the bare last segment of a
+  # tree path, and `product/` plus that last segment alone, the owner's own or an enclosing product's —
+  # are stale the same way.
 
   record = products.get(product) if product is not None else None
 
@@ -187,12 +200,15 @@ def _repair_owner(fm_text: str, products: dict, product: str | None) -> str:
   if product is None or not isinstance(record, dict) or not isinstance(record.get(Keys.SPEC_PATH), str):
     return fm_text
 
-  # the owner's own values, and the values every enclosing product would have written in their place;
-  # an enclosing value equal to the owner's own (a leaf repeated up the chain) is correct, never stale
+  # the owner's own values, and the values the owner and every enclosing product wrote in the current or an
+  # older tag form; one equal to the owner's own current value (a top-level product's `product/<leaf>`)
+  # is correct, never stale
   ancestor_keys = resolve_product.ancestor_chain(Path("."), product, products = products)
   own = { Keys.TAGS: scaffold_asset.product_tag(record), Keys.WIKI_PINNED_TOPICS: f"{Keys.PRODUCT_PIN}{product}" }
   stale = { Keys.TAGS: { scaffold_asset.product_tag(products[key]) for key in ancestor_keys },
             Keys.WIKI_PINNED_TOPICS: { f"{Keys.PRODUCT_PIN}{key}" for key in ancestor_keys } }
+  for leaf in { scaffold_asset.product_leaf(products[key]) for key in [ product, *ancestor_keys ] }:
+    stale[Keys.TAGS].update({ leaf, f"{scaffold_asset.Keys.PRODUCT_TAG_PREFIX}{leaf}" })
   for axis, value in own.items():
     stale[axis].discard(value)
 
@@ -217,7 +233,7 @@ def _repair_owner(fm_text: str, products: dict, product: str | None) -> str:
   return "".join(out)
 
 
-def backfill(repo: Path) -> dict:
+def backfill(repo: Path, *, dry_run: bool = False) -> dict:
   """
   Walk the spec content-root, add `wiki_pinned_topics` where missing, and repair stale product values.
 
@@ -225,17 +241,27 @@ def backfill(repo: Path) -> dict:
   outside the closed pin-eligible set (`request` above all — see `_PIN_ROLES`), is not a
   candidate and is not counted at all. A candidate missing the pin gains it; a candidate inside
   a nested product still carrying an enclosing product's tag or `wiki/product/` pin has both
-  rewritten to the owning product's. A candidate needing neither is left untouched and counted
+  rewritten to the owning product's, and an older-form product tag becomes the owner's
+  `product/<spec_path>`. A candidate needing none of these is left untouched and counted
   `skipped`; so is one whose parent directory resolves to no registered product (the same
   product/asset context resolution the `decide` primitive uses, raising `ValueError`).
 
+  Guarantees:
+    - A dry run writes no file and reports the same counts a real run would.
+
   Args:
     repo: Absolute repository root (holds `.claude/lazy.settings.json`).
+    dry_run: When True, count what would change and write nothing.
 
   Returns:
-    `{"touched": N, "skipped": M}` — `N` documents gained the pin or had stale product values
-    repaired, `M` role-bearing documents were left alone (already correct, or unresolvable).
+    `{"touched": N, "skipped": M}` — `N` documents gained (or would gain) the pin or had stale product
+    values repaired, `M` role-bearing documents were left alone (already correct, or unresolvable).
   """
+
+  # Contract:
+  # A dry run MUST write no file and MUST report the same counts a real run over the same tree would, so
+  # `--check` answers exactly whether a real run has work.
+
   settings_root = spec_paths.find_settings_root(repo)
   products = resolve_product.load_products(settings_root)
   touched = 0
@@ -265,8 +291,8 @@ def backfill(repo: Path) -> dict:
           # covered by no registered product — nothing to pin against, the doc stays as is
           pass
 
-      # an enclosing product's tag or pin left behind by a relocation becomes the innermost owner's,
-      # attributed from the document's repo-relative path
+      # an enclosing product's tag or pin left behind by a relocation, or an older-form product tag, becomes
+      # the innermost owner's, attributed from the document's repo-relative path
       new_fm = _repair_owner(new_fm, products, resolve_product.resolve_product_by_path(
           settings_root, path.relative_to(settings_root).as_posix(), products = products)[0])
 
@@ -274,7 +300,10 @@ def backfill(repo: Path) -> dict:
       if new_fm == fm_text:
         skipped += 1
         continue
-      spec_paths.write_text_atomic(path, new_fm + text[fm_end:])
+
+      # a dry run only counts the document it would rewrite
+      if not dry_run:
+        spec_paths.write_text_atomic(path, new_fm + text[fm_end:])
       touched += 1
   return { Keys.TOUCHED: touched, Keys.SKIPPED: skipped }
 
@@ -283,20 +312,51 @@ def main(argv: list[str]) -> int:
   """
   Run the `pins` subcommand: backfill `wiki_pinned_topics` and repair stale product values across the spec catalog.
 
+  Guarantees:
+    - With `--check`, writes nothing and exits 0 when at least one document would change, 1 when none would.
+    - Any failure exits 2 under every flag and prints no result, never an answer `--check` gives.
+
   Args:
-    argv: Subcommand argv tail (only the optional `--cwd` flag).
+    argv: Subcommand argv tail: the optional `--cwd` flag, and `--check`, which reports without writing and
+      answers through the exit code whether anything is left to do.
 
   Returns:
-    Process exit code: always `0`.
+    Process exit code: with `--check`, 0 when a document would change and 1 when none would; 0 otherwise; 2 on
+    any failure.
+
+  Raises:
+    SystemExit: With code 2, when an argument is unknown or malformed; also told apart from both `--check` answers.
   """
+
+  # Contract:
+  # With `--check` the verb MUST write nothing and exit 0 when at least one document would change, 1 when none
+  # would; any failure MUST exit 2, so a migration step's `applies_when` predicate never reads a failure as an answer.
+
   parser = argparse.ArgumentParser(prog = Keys.PROG)
   parser.add_argument(Keys.ARG_CWD, default = None, help = Keys.ARG_CWD_HELP)
+  # waiver: argparse CLI signature, not a domain key
+  parser.add_argument(Keys.ARG_CHECK, action = "store_true", help = Keys.ARG_CHECK_HELP)
   args = parser.parse_args(argv)
 
   # resolve the repo the same way every other lazycortex-specs subcommand does: explicit flag,
   # then the daemon-exported env var, then cwd
   repo_raw = args.cwd or os.environ.get(Keys.ENV_REPO_ROOT) or os.getcwd()
-  print(json.dumps(backfill(Path(repo_raw).resolve())))
+
+  # a check runs dry; any failure exits 2, so no flag ever reads a failure as an answer
+  try:
+    result = backfill(Path(repo_raw).resolve(), dry_run = args.check)
+  # waiver: broad catch is the boundary of the migration step's `applies_when` predicate, which reads exit 1 as
+  # "nothing to do"; an uncaught error would exit 1 too, so every failure must leave as exit 2
+  except Exception as error:  # pylint: disable=broad-exception-caught
+    sys.stderr.write(f"{Keys.PROG}: {error!r}\n")
+    return Keys.EXIT_FAILED
+
+  # the result goes to stdout for the caller to read
+  print(json.dumps(result))
+
+  # only a check answers through its exit code
+  if args.check:
+    return 0 if result[Keys.TOUCHED] else 1
   return 0
 
 

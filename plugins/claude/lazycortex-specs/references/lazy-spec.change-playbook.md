@@ -1,82 +1,69 @@
 ---
 name: lazy-spec.change-playbook
-description: Type playbook for change assets — the feature-shaped definition flow plus the five-phase cascade that folds the delta into every declared target and the regression it triggers once implemented.
+description: Type playbook for change assets — the feature-shaped design-only definition flow plus the two-phase cascade that folds the delta into every declared target's design and test cases; the change itself ships in the product's release once the cascade has converged.
 ---
 # Change playbook — the `change` asset type
 
-This document is the coordinator's law on any asset whose status folder-note carries `spec_asset_type: change`. It covers the definition half of the flow — the documents, the code-bearing judgment, tool determination, the first two gates and their launch checkboxes — plus the cascade, which is what makes a change different from every other type. Implementation and verification belong to the playbooks of the tools declared in `spec_tools`.
+This document is the coordinator's law on any asset whose status folder-note carries `spec_asset_type: change`. It covers the definition flow — the documents, tool determination, the two gates and their launch checkboxes — plus the cascade, which is what makes a change different from every other type. Implementation and verification belong to the product's release (`lazy-spec.release-playbook.md`): a change enters the release delta once its design is approved and its cascade has converged.
 
 ## What this type is
 
-`spec_asset_type: change` is a full-mode asset: the complete S0..S5 ladder, the complete launch-checkbox set, its own plans and reports for every declared tool.
+`spec_asset_type: change` is a design-only asset like a feature: the ladder is `spec_design_done`, then `spec_released`, with the `spec_cancelled` overlay, and the status folder-note carries no `spec_plan_done`, `spec_develop_done`, `spec_tests_passing` or `spec_built` key. What a change adds is the cascade and its own terminal cascade state, `spec_cascade_done`, which the release delta reads: a change whose cascade has not converged is held back from the delta as `cascade-pending`, because the implementer builds from the targets' folded designs, never from the change's own text.
 
 The primary document is `design.md`, of document type `design`: a change describes the delta it introduces the same way a feature describes what it builds. Nothing seeds it at spawn — spawn lands only the asset folder and its status folder-note (with its `## Source requests` section), and `design.md`, like every other definition document, launches later through its own checkbox on that note.
 
 **Place is not the type.** `default_path` files new changes under its own folder, but a change is legal anywhere in the product's catalog, including nested under another asset. The type is read from the key, never inferred from the folder.
 
-The definition half of a change's flow is the same as a feature's, PLUS the cascade into its targets. Targets are declared as the `spec_targets` list on the status folder-note; the tokens are paths relative to the product's `spec_path`, and a nested asset is addressed by its full path.
+The definition flow of a change is the same as a feature's, PLUS the cascade into its targets. Targets are declared as the `spec_targets` list on the status folder-note; the tokens are paths relative to the product's `spec_path`, and a nested asset is addressed by its full path.
 
 ## Definition documents
 
 - `design` (`design.md`) — mandatory. Never `cancelled`: the stage primitive refuses it exactly as it refuses a cancelled `bug.md`.
-- `architecture` (`architecture.md`) — mandatory the moment the asset is judged code-bearing. Never `cancelled` either.
-- Plans and reports are the tools' property. Which ones exist and what they are called is declared by the tool playbooks through their own `plan_doc` / `report_doc` declarations; this playbook does not enumerate them.
+- `vision` (`vision.md`), `use-cases` (`use-cases.md`), `ui-design` (`ui-design.md`) — opt-in, below.
+- `test-plan` (`test-plan.md`) — opt-in; the change's OWN test cases, covering the change's own modifications and never duplicating a target's. A definition document: reviewed and approved like `design.md`, in no gate of this note, read by the release's tester.
+- A change carries no `architecture.md` and no plans or reports: the product's root `architecture.md` is revised by the architect at the start of each release build, and `code-plan.md`, `code-report.md`, `test-report.md` are the release's.
 - `decisions.md` — the registry of recorded decisions, written only by the `lazy-spec.record-decision` primitive. It carries no stage and takes no part in any gate.
 
 ## Use-cases and ui-design
 
-The change's own `vision.md` (designer, per the type record's `vision: opt-in` contract), `use-cases.md` (use-case-writer), and `ui-design.md` (ui-designer) are opt-in: neither is on the mandatory list above, and neither exists until its launch checkbox is ticked — or the product or the change declares it mandatory (below). These describe the CHANGE's own delta, not a cascade target's; folding that delta into a target's own use cases or screens, where the target carries them, is the target's own definition-half business once the cascade reaches it, not something this chapter tracks.
+The change's own `vision.md` (designer, per the type record's `vision: opt-in` contract), `use-cases.md` (use-case-writer), and `ui-design.md` (ui-designer) are opt-in: neither is on the mandatory list above, and neither exists until its launch checkbox is ticked — or the product or the change declares it mandatory (below). These describe the CHANGE's own delta, not a cascade target's; folding that delta into a target's own use cases or screens, where the target carries them, is the target's own definition business once the cascade reaches it, not something this chapter tracks.
 
-**The queue.** `Write architecture`'s own precondition (below) already carries the architect's side of this hold: the row doesn't appear until `ui-design.md` is absent, `approved`, or `cancelled`, so a tick recorded while `ui-design.md` is still in review simply has no row to enact yet — the row appears, and the architect reads `ui-design.md`, on the wake where it reaches `approved` (a cancelled `ui-design.md` releases the hold with nothing for the architect to read). Enacting that tick is then the same ordinary seed-then-start flow as any other `Write` row (below), never a special-cased hold.
+The change's `design.md` launches through its own `Write design` checkbox like the rest, so its hold is a precondition on continuing its review: when `vision.md` or `use-cases.md` exists, the designer is not continued on the change's `design.md` until each existing one reaches `approved` or `cancelled`, and reads them once approved. The general rule: a document's review proceeds only after every EXISTING upstream sibling in the reading chain (vision → use-cases → design) is `approved`; an absent opt-in document never blocks.
 
-The change's `design.md` launches through its own `Write design` checkbox like the rest, so its hold is a precondition on continuing its review: when `vision.md` or `use-cases.md` exists, the designer is not continued on the change's `design.md` until each existing one reaches `approved` or `cancelled`, and reads them once approved. The general rule: a document's review proceeds only after every EXISTING upstream sibling in the reading chain (vision → use-cases → design → tech) is `approved`; an absent opt-in document never blocks.
+**The windows.** `Write vision` and `Write use-cases` close the moment `spec_design_done` closes. Past that window, a further use-case revision on this delta is a new change, not a reopening of this one. `Write ui-design` and `Write test-plan` stay open while their document does not exist, including while the change is already in an open release's `spec_includes`; `Write test-plan` still waits for `spec_cascade_done` (below). A new or re-approved `test-plan.md` or `ui-design.md` of an included change hangs `Rebuild` on the release note, which pulls it into the next build.
 
-**The windows.** `Write vision` and `Write use-cases` close the moment `spec_design_done` closes. `Write ui-design` closes on the change's `architecture.md` reaching `approved` — or, for a change that never becomes code-bearing, on `spec_plan_done` closing instead. Past either window, a further use-case or screen revision on this delta is a new change, not a reopening of this one.
-
-**Late edits.** An edit to `vision.md`, `use-cases.md`, or `ui-design.md` after the document it feeds (`design.md`, `architecture.md`) has already reached `approved` gets no auto-cascade — the coordinator drops a `[!attention]` callout into that downstream document and names the edit in `# Status brief`, rather than reopening anything on its own.
+**Late edits.** An edit to `vision.md`, `use-cases.md`, or `ui-design.md` after `design.md` has already reached `approved` gets no auto-cascade — the coordinator drops a `[!attention]` callout into `design.md` and names the edit in `# Status brief`, rather than reopening anything on its own.
 
 **Declaring it mandatory.** The `vision` contract comes from the type declaration (`asset_types.<name>.vision`); for `use-cases.md` / `ui-design.md`, a product, the change's group folder, or this change may declare either document mandatory in its `# Coordinator rules` section, in which case the coordinator runs the same seed-then-start enactment directly, without a tick — the same rule-driven verb calls behind every other "runs automatically" clause (`lazy-spec.coordination-playbook.md` Chapter 1, "Automation 'by rule' is still verb calls").
 
-## Code-bearing
-
-Code-bearing is the coordinator's own judgment, not a script-level flag.
-
-An explicit declaration settles it outright: a product or a type declaring itself code-bearing (or docs-only) in its guidelines or in a `# Coordinator rules` section closes the question without reading a document.
-
-Absent an explicit declaration, the coordinator reads the change's own design document for whether the delta describes a change to code. A docs-only change is never charged the architecture step — the `Write architecture` checkbox never hangs, `architecture.md` never comes into existence, and the architecture clause drops out of the `spec_plan_done` precondition.
-
 ## Tool determination
 
-**When.** Tools are determined on design approval — and on architecture approval too, where architecture exists. Until that moment the note carries no `spec_tools`, and that state means "not determined": the definition half runs normally, implementation does not start.
+**When.** Tools are determined on design approval, on the same wake that closes `spec_design_done`. Until then the note carries no `spec_tools`, and that state means "not determined" — the release implementer stops on an included asset whose tool set is still open, so the determination is this coordinator's to make before the asset reaches a release.
 
-**From what.** The direct statements of the design and architecture documents about what is actually being made — code, data, documentation, tests. The architect's conclusions take priority over the design's phrasing wherever the two diverge.
+**From what.** The direct statements of the design document about what is actually being made — code, data, documentation, tests.
 
-**Written how.** The coordinator writes the list through `note-set-key`; until the key is written, no implementation checkbox hangs. An unobvious choice is never guessed — the coordinator raises a `[!question]` listing the candidates and waits for the operator's tick.
+**Written how.** The coordinator writes the list through `note-set-key`. An unobvious choice is never guessed — the coordinator raises a `[!question]` listing the candidates, names in `# Status brief` that the change is not ready for a release, and waits for the operator's tick.
 
 A tool that lands in `spec_tools` with no declaration in `tool_types` is a finding, not a guess: the coordinator raises the question rather than inventing behaviour for a playbook that does not exist.
 
-## The gates of the definition half
+## The gates
 
-- **`spec_design_done`** — closes once `design.md` reaches `spec_stage ∈ {approved, cancelled}`. A derived gate: its precondition is fully computable from sibling doc state, so the coordinator flips it itself the same cycle the precondition starts holding.
-- **`spec_plan_done`** — closes once the previous gate is true AND — for a code-bearing asset — `architecture.md` is `approved` too, AND every declared tool carrying a declared `plan_doc` has its plan at `spec_stage ∈ {approved, cancelled}`, or has no plan at all. Absence is "no plan needed" and the gate is free; presence is "intent to plan", and then the plan must clear review. Derived as well.
+- **`spec_design_done`** — closes once `design.md` reaches `spec_stage ∈ {approved, cancelled}`. A derived gate: its precondition is fully computable from sibling doc state, so the coordinator flips it itself the same cycle the precondition starts holding. Its crossing reaches the release owner's level note as the `asset-approved` hop, which only re-hangs rows and rewrites the product's brief.
+- **`spec_released`** — closed by the release that ships the change: the `Publish` tick on the release note sets it, stamps its moment and adds the version tag to the note. Between approval and that publish the change reads `awaiting-release` (or `cascade-pending` in the delta listing while the cascade runs), and `in-release` while an open release lists it.
 
-The architecture clause adds no sixth boolean — it rides inside the same `spec_plan_done` precondition, between the design check and the plan checks.
+**Downward reconciliation.** `spec_design_done` goes back to `false` (`flip-gate --off`, auto) when `design.md` reappears at a stage other than `approved`; the downward flip commits atomically and the coordinator immediately re-runs its upward checks against the fresh state. A re-approved `design.md` of an already released change turns `spec_released` off (`lazy-spec.coordination-playbook.md` Chapter 4), and the change — and its cascade — run again. A `test-plan.md` or `ui-design.md` stays `approved` when its `design.md` is re-approved; contradictions between documents are caught by the coherence check after approval (`lazy-spec.coordination-playbook.md` Chapter 19).
 
-**Downward reconciliation.** A gate already true goes stale when its governing document reappears un-accepted. `spec_plan_done` goes back to `false` (`flip-gate --off`, auto) when a declared tool's plan exists at a stage outside `{approved, cancelled}` while the gate reads true. The downward flip commits atomically and the coordinator immediately re-runs its upward checks against the fresh state, so a dependent checkbox disappears the same cycle rather than lagging a tick. A dependent document whose source was re-approved after it goes stale — back to `draft` where it carries a stage — and its gate turns off by the source-staleness rule of `lazy-spec.coordination-playbook.md`; the table there names the source of every document of this type.
-
-## The launch checkboxes of the definition half
+## The launch checkboxes
 
 | Checkbox | Appears when | On tick |
 |---|---|---|
 | `Write design` | asset exists AND `design.md` doesn't exist | seed `design.md:design`, then the seed-then-start flow below |
 | `Write vision` | asset exists AND `design.md` is not `approved` AND `vision.md` doesn't exist | seed `vision.md:vision`, then the seed-then-start flow below |
 | `Write use-cases` | asset exists AND `design.md` is not `approved` AND `use-cases.md` doesn't exist | seed `use-cases.md:use-cases`, then the seed-then-start flow below |
-| `Write architecture` | `spec_design_done` true AND the asset is code-bearing AND `architecture.md` doesn't exist AND (`ui-design.md` is absent, `approved`, or `cancelled`) | seed `architecture.md:architecture`, then the seed-then-start flow below |
-| `Write ui-design` | `spec_design_done` true AND `ui-design.md` doesn't exist AND (`architecture.md` is absent OR not `approved`) | seed `ui-design.md:ui-design`, then the seed-then-start flow below |
-| `Write <tool>-plan` | `spec_design_done` true AND (the asset is NOT code-bearing OR `architecture.md` is `approved`) AND that tool's plan doesn't exist | seed that tool's `plan_doc` (doc name and type from the tool's own declaration), then the seed-then-start flow below |
-| `Publish` | `spec_released` true AND `spec_draft` still true | no job — the tick clears `spec_draft` through `note-set-key` and the coordinator removes the checkbox |
+| `Write ui-design` | `spec_design_done` true AND `ui-design.md` doesn't exist | seed `ui-design.md:ui-design`, then the seed-then-start flow below |
+| `Write test-plan` | `spec_cascade_done` true AND `test-plan.md` doesn't exist | seed `test-plan.md:test-plan`, then the seed-then-start flow below |
 
-`Write <tool>-plan` hangs once per declared tool of the asset whose declaration carries a `plan_doc`. A tool without a `plan_doc` gets no planning checkbox at all.
+No `Publish`, no `Start …`, no `Write code-plan` and no `Write architecture` row hangs on a change: those labels are the release playbook's.
 
 `<specs-cli>` stands for the specs plugin's `bin/lazycortex-specs` file — the copy under `~/.claude/plugins/cache/lazycortex/lazycortex-specs/<version>/` that `~/.claude/plugins/installed_plugins.json` records as installed, or `plugins/claude/lazycortex-specs/` in a checkout that authors the plugin. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
@@ -84,29 +71,23 @@ The architecture clause adds no sixth boolean — it rides inside the same `spec
 
 **A parked document hangs no `Write` row.** Every row of this table reads "the document doesn't exist", and a document at `spec_stage: deferred` exists — so its row stays down and nothing seeds a replacement beside it, ever. The row that hangs for it instead is the review-launch `Review <doc>` block, whose deferred-document case (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.coordination-playbook.md` Chapter 5) unparks and resubmits the document in one commit when the operator ticks it.
 
-**The one difference from a feature on this table, and it is hard:** the change's OWN `Write test-plan` does NOT hang until the phase-II cascade has converged. Every target's test-plan must reflect the delta before the change starts writing its own — otherwise the change's own plan is written against a contract that is about to change.
+**The one difference from a feature on this table, and it is hard:** the change's OWN `Write test-plan` does NOT hang until the phase-II cascade has converged. Every target's test cases must reflect the delta before the change writes its own — otherwise the change's own cases are written against a contract that is about to change.
 
-Implementation checkboxes are declared by the tool playbooks, not by this document. With several tools in play their labels are parameterized by tool (`Start implementation (code)`), so two tools never contend for one slot.
-
-Ticking is the operator's gesture and only theirs; the coordinator never ticks a checkbox under any circumstance. Every ticked `Write` row is enacted through seed-then-start above, never a job bundle. `dispatch-job` mechanics belong to the implementation-ladder rows the tool playbooks declare, where dispatch stays deduplicated by key — the status note's path relative to `spec_path` plus the label.
+Ticking is the operator's gesture and only theirs; the coordinator never ticks a checkbox under any circumstance. Every ticked `Write` row is enacted through seed-then-start above, never a job bundle. `dispatch-job` mechanics belong to the cascade folds below and to the release's build jobs, where dispatch stays deduplicated by key — the status note's path relative to `spec_path` plus the label.
 
 `spec_halted: true` overrides this table unconditionally: no checkbox hangs, and any un-ticked one comes down. A ticked one (`- [x]`) stays — the operator's tick has already happened.
 
-## The cascade — five phases, strictly ordered
+## The cascade — two phases, strictly ordered
 
-A `change` asset carries the FULL launch-checkbox ladder like any other asset — the plans of its declared tools (of whatever scale the change's own implementation needs, or none at all), its own `test-plan.md` (testing the change's OWN modifications, never a duplicate of a target's test-plan), the reports of its own tools. This chapter is the coordinator's prose for the parts that are specific to a change: folding its delta into the assets it targets, and the regression it triggers once implemented.
+This chapter is the coordinator's prose for the parts that are specific to a change: folding its delta into the assets it targets. The change's own implementation and the regression that follows it are the release's: the implementer builds the targets' folded designs, and the release's tests cover the whole product, so no per-target regression phase exists any more.
 
 **How a fold lands.** Every phase below dispatches a writer to fold the change's delta into a document belonging to ANOTHER asset, and no such writer ever edits that document in the working tree. The fold job carries the target document's repo-relative path as `target_doc` in its dispatch payload (`lazy-spec.lifecycle-protocol.md` Part 3 § Dispatch) and returns the whole folded document through its own `result/`, first entry, attachments after it. On the job's `job-done` wake the coordinator lands it itself — `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> land-result <job_dir> <asset_dir> --target <target asset>/<doc>` — because the destination lies outside the dispatching asset's folder and `lazy-spec.gate-tick`'s own landing only places a document inside it. The verb commits the document and its attachments under its own bot identity; only then does the coordinator open the target document's review.
 
-**(I) Design convergence + counter-check.** Once the change's OWN `design.md` is approved, the coordinator dispatches a designer job per declared target in `spec_targets` (one at a time, not in parallel) to fold the change's delta into that target's `design.md`; the folded document lands by the route above, and the target's `design.md` re-enters review. Once that review closes approved, the coordinator dispatches a counter-check job: the change's OWN writer, with the now-updated target delta in context, verifies the change's own spec still matches what actually landed and revises if not. This repeats to a fixed point — a change touching several targets runs this convergence loop per target, and any target's re-approval after a cascade fold triggers the same counter-check pattern generically: a re-approved doc downstream always earns its paired writer a verification pass. Each target folded to completion joins the `spec_cascade_targets_done` list on the change's status folder-note; once every `spec_targets` entry is accounted for there, `spec_cascade_done` flips to `true` — the change's terminal cascade state, separate from its own launch-checkbox ladder finishing.
+**(I) Design convergence + counter-check.** Once the change's OWN `design.md` is approved, the coordinator dispatches a designer job per declared target in `spec_targets` (one at a time, not in parallel) to fold the change's delta into that target's `design.md`; the folded document lands by the route above, and the target's `design.md` re-enters review. Once that review closes approved, the coordinator dispatches a counter-check job: the change's OWN writer, with the now-updated target delta in context, verifies the change's own spec still matches what actually landed and revises if not. This repeats to a fixed point — a change touching several targets runs this convergence loop per target, and any target's re-approval after a cascade fold triggers the same counter-check pattern generically: a re-approved doc downstream always earns its paired writer a verification pass. A target's re-approved `design.md` turns that target's `spec_released` off when it was released (`lazy-spec.coordination-playbook.md` Chapter 4), so the target stands in the delta beside the change. Each target folded to completion joins the `spec_cascade_targets_done` list on the change's status folder-note.
 
-**(II) Test-plans, only after convergence.** Once every declared target's design fold has converged, the tester folds the same delta into each target's `test-plan.md` (the target's living contract for functional behaviour — it must reflect what the feature now actually does), returned and landed by the same route as a design fold. Only once this phase completes does `Write test-plan` hang for the CHANGE's own test-plan.
+**(II) Test cases, only after convergence.** Once every declared target's design fold has converged, the tester folds the same delta into each target's `test-plan.md` where the target carries one — the target's test cases must reflect what the target now does — returned and landed by the same route as a design fold. Once every `spec_targets` entry is accounted for in `spec_cascade_targets_done`, `spec_cascade_done` flips to `true` — the change's terminal cascade state, which lets it into the release delta — and only then does `Write test-plan` hang for the CHANGE's own test cases.
 
-**(III) The change's own `code-plan.md`.** Targets' `code-plan.md` siblings are dead weight by this point — a target's code plan is a one-shot artifact of ITS OWN original build, and the FIRST change ever cascaded into a given target drops that target's `code-plan.md` from the worktree entirely (history lives in git and in the target's own `code-report.md`; the plan-absence precondition on `spec_plan_done` already tolerates this). A SECOND change cascading into an already-cascaded target later finds no `code-plan.md` left to drop — nothing to do, not an error. The change's OWN `code-plan.md` is authored fresh against the change's own scope via the ordinary `Write code-plan` checkbox.
-
-**(IV) Implementation and testing of the change itself.** Runs through the ordinary ladder — the implementation checkbox and `Start testing` on the change asset, same as any asset. The change's implementation is what actually lands the folded delta in code; the targets' own docs were already updated in phases I–II, targets' code is not separately re-implemented by the coordinator.
-
-**(V) Regression.** Closing the change's implementation (its `spec_develop_done` flipping true) flips `spec_tests_passing` back to `false` on every one of its `spec_targets` — an ordinary `flip-gate --off` call per target, the exact same downward-reconciliation primitive that takes a gate down on a stale test-plan, just triggered here by the change's own completion instead of a doc regression. Nothing bespoke follows: the SAME reconciliation pass that runs on every state change re-hangs each target's `Start testing` checkbox on its own, because the checkbox's precondition (`spec_develop_done` true AND `test-plan.md` approved) is untouched by the gate flip and the slot is free again — no special-cased "re-testing" code path exists. The change's OWN `spec_released` waits until every target is green again. On a red re-run, the change's `Start testing` tick (or the retest itself) drops a `> [!attention] regression failed on <target> — [[<path to the bug asset>]]` callout plus a `# History` line on the CHANGE asset; findings become bug assets exactly per the ordinary proposal mechanism — an expert drops an `[!asset-proposal]`, the coordinator materializes it through the scaffold primitive — and the bug asset's `# Sources` carries a wikilink back to the change (a two-way link). A red regression run is NOT a halt — it is the ordinary outcome the bug-asset mechanism exists to handle.
+A target's `code-plan.md` and reports no longer exist to be dropped: the release's plans are written against the folded designs at the next build.
 
 ## Conflicting changes on one feature
 
@@ -116,10 +97,10 @@ The "one active feature — one active change" lock does not exist: a new change
 
 A cascade fold that cannot apply cleanly, or a target that vanishes mid-flight, is handled by the ordinary halt mechanism: the coordinator calls `flip-gate --halt` with `HaltReason.MERGE_CONFLICT` or `HaltReason.PLAN_DROP_PARTIAL`, exactly as any other halting caller would. It does not invent new halt phrasing.
 
-Halt silences the automation — checkboxes, cascade dispatch, rule-driven dispatch — but never the five gate booleans themselves, and never `# Coordinator commands`: an operator gesture runs on a halted asset too, and that is precisely how the operator directs recovery.
+Halt silences the automation — checkboxes, cascade dispatch, rule-driven dispatch — but never the gate booleans themselves, and never `# Coordinator commands`: an operator gesture runs on a halted asset too, and that is precisely how the operator directs recovery.
 
-## Pre-launch rollback
+## Attach before a release
 
-When a change has not launched yet and routing decides to attach a new request onto it, the attach line carries a `drop=` list: `architecture.md` plus the plans of the declared tools. Reports and `design.md` are never dropped.
+When a change is in no release's `spec_includes` and routing decides to attach a new request onto it, the attach line carries a `drop=` list: the change's own `test-plan.md`, when it exists. `design.md` is never dropped, and a change has no plans of its own to drop.
 
-The rollback itself is an atomic primitive: it refuses on its own when the asset is cancelled or halted, no matter who calls it. The coordinator's judgment picks whether to invoke it; the primitive still enforces its own safety.
+The attach drop itself is an atomic primitive (`lazy-spec.attach-drop-playbook.md`): it deletes only the named documents, flips no gate, and refuses on its own when the asset is cancelled or halted, no matter who calls it. The coordinator composes the `drop=` list; the primitive still enforces its own safety. Whether a request attaches to an asset a release already carries in `spec_includes`, or to a released one, or becomes a separate change, is the operator's tick at routing; an attach there takes this same path, and the release's own `Rebuild` is how the re-approved design reaches the build.

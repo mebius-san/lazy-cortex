@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Opt an existing expert into the memory subsystem, dispatch jobs to accumulate runs, run the first reflect pass, and verify the expert's first durable notes land in .memory/.
-last_regen: 2026-09-24
+last_regen: 2026-11-10
 diagram_spec:
   anchor: "How memory grows over time"
   request: "Sequence diagram showing user invoking mark-persona, then dispatching jobs (accumulating run logs), then invoking reflect which reads run logs + existing memory notes and calls lazy-memory.write to produce .memory/<expert>/<slug>.md, committing atomically under the memory-bot identity."
@@ -10,8 +10,8 @@ source_skills:
   - lazy-memory.mark-persona
   - lazy-memory.reflect
   - lazy-memory.write
-source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
-surface_sha: 9823ce46370182d890f55c61c27bcb758ce8fcd8bf1e19cdb3c2ee646c298e95
+source_sha: 4662bd907b9439e62b704146b65d311529d4da7f
+surface_sha: 5c8a4d8f72b72e428450a16661656a6399564c656a3d030ae125ecee50f32c71
 ---
 # Add long-term memory to an existing expert
 
@@ -136,7 +136,7 @@ If a tag is missing the `memory/` prefix, `/lazy-memory.write` would have reject
 
 If the expert wrote a note whose content was byte-identical to an existing note (for example because re-running a reflect over the same source logs), `/lazy-memory.write` reports `written-no-commit` — the file on disk is unchanged and no new commit is created. This is safe and idempotent; no action is needed.
 
-If a commit attempt failed mid-job (`commit-failed: git add returned …` or `commit-failed: git commit returned …`), the staged index is left intact for inspection. This usually means a pre-commit hook rejected the change or another session held the staging lock. Resolve the cause, then re-run `/lazy-memory.write` with the same body — the write is idempotent when the note content is unchanged.
+If a commit attempt failed mid-job (`commit-failed: git add -N returned …` or `commit-failed: git commit returned …`), the note and its tag files stay changed in the worktree, unstaged, and nothing of the write is left in the index. This usually means a pre-commit hook rejected the change or another session held the git lock. Resolve the cause, then re-run `/lazy-memory.write` with the same body — the write is idempotent when the note content is unchanged — or commit those paths yourself with an explicit pathspec.
 
 To check for broader memory-hygiene issues (missing required fields, malformed frontmatter) across the whole tree:
 

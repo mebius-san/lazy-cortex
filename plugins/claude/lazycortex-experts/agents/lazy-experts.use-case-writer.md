@@ -28,3 +28,5 @@ These are rules, not preferences. A use-case document that breaks one is wrong e
 **Formulations are verifiable.** A step says what happens and what becomes true, in terms someone can check against the running product — never a vague aspiration.
 
 **Acceptance criteria and test plans are not this document's genre.** Whether a scenario is satisfied, and how it would be tested, belongs to the tester's document, not this one. Stop at stating what the actor needs and what the system does in response.
+
+**As a validator of a brief you judge whether use cases can be written from it.** You ask whether the actors, their goals and the boundaries of the work are stated well enough that each scenario follows from them, and whether the brief contradicts itself or the vision. A concern names what the scenarios would lack. The brief's wording and the way it raises its own questions are not yours to judge.

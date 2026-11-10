@@ -49,7 +49,7 @@ import error_ledger  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import hook_gate  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from constants import HookName, IncidentKey, IncidentKind, IncidentPhase  # noqa: E402
+from constants import HookKey, HookName, IncidentKey, IncidentKind, IncidentPhase  # noqa: E402
 
 # Pick the platform's file-lock module: fcntl does not exist on Windows, msvcrt exists only there.
 # waiver: platform literal; the lock attempt below branches on the same test
@@ -301,16 +301,16 @@ def should_run(payload: dict) -> bool:
   Decide whether the current hook invocation corresponds to a successful git commit.
 
   Args:
-    payload: The Claude Code hook payload parsed from stdin. Expected to carry `tool_name`,
-      `tool_input`, and optionally `tool_response`.
+    payload: The Claude Code hook payload parsed from stdin. Expected to carry `hook_event_name`,
+      `tool_name` and `tool_input`. Claude Code fires `PostToolUse` only after a call succeeds and
+      `PostToolUseFailure` after one fails (a `Bash` command that exited non-zero).
 
   Returns:
     - True when the payload represents a `mcp__git__git_commit` call, or a `Bash` call containing a
       `git commit` invocation anywhere in the command — leading, chained (`git add X && git commit
-      -m "..." && git push`), or flag-prefixed (`git -C dir commit`) — whose recorded exit code is
-      zero or unknown, or a failed such `Bash` call whose `HEAD` commit is nonetheless fresh (in a
-      chain the exit code belongs to the last failed segment, so a successful commit followed by a
-      failed push still records).
+      -m "..." && git push`), or flag-prefixed (`git -C dir commit`) — that succeeded, or a failed
+      such `Bash` call whose `HEAD` commit is nonetheless fresh (in a chain the failure belongs to
+      the last failed segment, so a successful commit followed by a failed push still records).
     - False for every other tool invocation, and for `Bash` git commits that left `HEAD` stale.
     - Quoted look-alikes (e.g. `echo "git commit"`) are accepted false positives: the hook is
       deliberately permissive, `get_commit_info()` still requires a real `HEAD`, and the caller's
@@ -332,18 +332,12 @@ def should_run(payload: dict) -> bool:
     # `-c k=v`, `--no-pager`). Flag arguments with embedded whitespace
     # (`git -C "dir with space" commit`) still don't match — accepted gap.
     if re.search(r"\bgit\b(?:\s+-\S+(?:\s+[^-\s]\S*)?)*\s+commit\b", command):
-      # in PostToolUse a non-zero exit code belongs to the LAST failed segment of a chain, so a
-      # successful commit followed by a failed push must still record; consult HEAD freshness
-      # waiver: external-format hook-payload field name, not an internal key
-      response = payload.get("tool_response", {})
-
-      # response may carry "exit_code" or similar; be permissive when the field is absent
-      # waiver: external-format hook-payload field name, not an internal key
-      exit_code = response.get("exit_code")
-
-      # guard: failed call — record only when HEAD is fresh (a genuinely failed `git commit`
-      # leaves HEAD at the old, stale commit; the caller's SHA dedup covers re-commit retries)
-      if exit_code is not None and exit_code != 0:
+      # a failed call arrives as PostToolUseFailure, and in a chain the failure belongs to the LAST
+      # failed segment, so a successful commit followed by a failed push must still record: a failed
+      # call records only when HEAD is fresh (a genuinely failed `git commit` leaves HEAD at the old,
+      # stale commit; the caller's SHA dedup covers re-commit retries)
+      # waiver: external Claude Code hook-event name, not a domain key
+      if payload.get(HookKey.HOOK_EVENT_NAME) == "PostToolUseFailure":
         return head_is_fresh()
       return True
   return False

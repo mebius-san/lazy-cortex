@@ -1,7 +1,7 @@
 ---
 name: lazy-review.audit
-description: "Run when the operator asks whether the review setup is sane, or when review misbehaves in a way that smells like config — a document never enters the loop, a class points at an expert that was never registered, commits land under the wrong identity. Read-only check of the `review` section in `.claude/lazy.settings.json`; reports `PASS` / `INFO` / `WARN` / `FAIL` and writes no file — fixes come from `/lazy-review.configure` or `/lazy-review.install`."
-allowed-tools: Read, Write, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse *), Agent
+description: "Run when the operator asks whether the review setup is sane, or when review misbehaves in a way that smells like config — a document never enters the loop, a class points at an expert that was never registered, commits land under the wrong identity. Read-only check of the `review` section of the repo's merged settings, `.claude/lazy.settings.json` with its local overlay merged on; reports `PASS` / `INFO` / `WARN` / `FAIL` and writes no file — fixes come from `/lazy-review.configure` or `/lazy-review.install`."
+allowed-tools: Read, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(date *), Bash(git rev-parse *), Agent
 ---
 # lazy-review.audit
 
@@ -22,13 +22,13 @@ This skill has 3 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 ## Phase 1 — Run audit script
 
-`"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/audit.py" --settings .claude/lazy.settings.json`. The script prints a JSON record `{level: PASS|WARN|FAIL, findings: [{severity, check, message}, ...]}` and exits 0/1/2 respectively.
+`"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/audit.py" --settings .claude/lazy.settings.json`. The `--settings` path only locates the repo root, the parent of the file's directory; the script audits that repo's merged settings, the tracked `.claude/lazy.settings.json` with `.claude/lazy.settings.local.json` merged on. The script prints a JSON record `{level: PASS|WARN|FAIL, findings: [{severity, check, message}, ...]}` and exits 0/1/2 respectively.
 
 Outcome: `audited`.
 
 ## Phase 2 — Render findings
 
-If the report has findings, print one bullet per finding grouped by severity (FAIL first, then WARN, then INFO, then PASS). Each bullet carries the check name, the settings key or artifact it names, what is wrong, and the route that repairs it — all in that one line; a route shared by several findings is repeated on each of them rather than collected into a section of its own. The routes the script's checks map onto are `/lazy-review.install` (nothing configured yet), `/lazy-review.configure` (a class, an expert entry, a section writer, or the edit-marker style), and `/lazy-spec.product-config <key>` (a product-scoped class's globs) — the `## Failure modes` section below names which finding takes which. If there are none, print `audit: PASS (no issues)`.
+If the report has findings, print one bullet per finding grouped by severity (FAIL first, then WARN, then INFO, then PASS). Each bullet carries the check name, the settings key or artifact it names, what is wrong, and the route that repairs it — all in that one line; a route shared by several findings is repeated on each of them rather than collected into a section of its own. The routes the script's checks map onto are `/lazy-review.install` (nothing configured yet) and `/lazy-review.configure` (a class, including a product-scoped class's globs, an expert entry, a section writer, or the edit-marker style) — the `## Failure modes` section below names which finding takes which. If there are none, print `audit: PASS (no issues)`.
 
 Outcome: `rendered`.
 
@@ -41,4 +41,4 @@ One line per task with its outcome word, followed by the summary line `audit: <L
 - **Phase 1 reports `settings_present FAIL`** — operator hasn't run `/lazy-review.install` → run install first, then re-run audit.
 - **Phase 1 reports `expert_<name>_missing FAIL`** — a class references an expert name that isn't in the top-level `experts` dict → run `/lazy-review.configure` to register the expert, or remove the class member.
 - **Phase 1 reports `watch_root_coverage FAIL`** — a class glob can match documents outside `review.watch_root`, so the coordinator's git-watch never sees their commits and review stalls silently → re-run `/lazy-review.install`, which widens the root to cover every class.
-- **Phase 1 reports `override_glob_depth WARN`** — a product-scoped `<type>@<key>` class carries a glob that fixes the asset depth, so an asset at the product root or nested deeper falls out of it and loses the product's own experts → re-run `/lazy-spec.product-config <key>` in edit mode to regenerate the class's globs.
+- **Phase 1 reports `override_glob_depth WARN`** — a product-scoped `<type>@<key>` class carries a glob that fixes the asset depth, so an asset at the product root or nested deeper falls out of it and loses the product's own experts → fix the class entry's `paths` via `/lazy-review.configure` (a `**` segment below the product root reaches every depth).

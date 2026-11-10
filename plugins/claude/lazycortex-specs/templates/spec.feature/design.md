@@ -13,7 +13,7 @@ spec_source_requests: []
 spec_source_docs: []
 ---
 # {{slug}} — design
-<!-- What the feature is and how it behaves: its parts, the reasons behind them, the scenarios it runs through, and the frame it works within. It answers the sibling vision and does not restate it. How the code is arranged lives in the sibling architecture, and the screens in the sibling ui-design. -->
+<!-- What the feature is and how it behaves: its parts, the reasons behind them, the scenarios it runs through, and the frame it works within. It answers the sibling vision and does not restate it. How the code is arranged lives in the product's architecture, and the screens in the sibling ui-design. -->
 
 ## Overview
 <!-- What the feature is. A few sentences of prose that open with a link to the sibling vision. Why it exists, its goals and its value live in the vision and are not restated here. -->

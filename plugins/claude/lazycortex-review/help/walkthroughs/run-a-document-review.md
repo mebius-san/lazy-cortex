@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Take one document through a full review cycle from opt-in to finalize.
-last_regen: 2026-09-24
+last_regen: 2026-11-10
 diagram_spec:
   anchor: "How the review loop flows"
   request: "Sequence diagram showing: operator runs /lazy-review.start → banner inserted + commit → daemon dispatches expert jobs per section → operator reads suggestions and ticks approve → operator checks status via /lazy-review.status → all sections approved → operator runs /lazy-review.finalize → finalized commit with Doc-Review-Phase: finalize trailer"
@@ -10,8 +10,8 @@ source_skills:
   - lazy-review.start
   - lazy-review.status
   - lazy-review.finalize
-source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
-surface_sha: 4ca777fc0e47d8913103f1d871c09fe972e850793466ece6a26f725026cc4b64
+source_sha: 2000c19f9ba6873134098a25704427b1bf0423f4
+surface_sha: be4f4bd56b88377ca6b184291792c896eeeef67d66a55797e2ce054b6780634e
 ---
 # Run a document through the review loop
 
@@ -28,11 +28,11 @@ You have a markdown document — a spec, RFC, or design doc — that needs struc
 
 ### Step 1 — Opt the document in
 
-Run `/lazy-review.start <file>` with the path to your markdown document. The skill sets `review_active: true` unconditionally into the document's frontmatter, then seeds the rest of the loop's keys — `review_round: 1`, `review_approved: false`, and a couple of internal bookkeeping fields — only where they are not already present. It also seats an empty `# History` section at the end of the body (or reconciles its explainer line if the section is already there) and clears any `review_result` left behind by an earlier finalize. It then inserts a Waiting banner above the first H1 and produces a single commit under your git identity.
+Run `/lazy-review.start <file>` with the path to your markdown document. The skill sets `review_active: true` unconditionally into the document's frontmatter, then seeds the rest of the loop's keys — `review_round: 1`, `review_approved: false`, `review_phase: main`, an empty `review_main_done`, and the `review_marker_style` pin — only where they are not already present. Because the loop opens at the writing round, the expert chain drafts first; if the content is already written and only needs reviewing, use `/lazy-review.submit` instead. You can pass `--expert <name>` to pin a per-document main-writer override. It also seats an empty `# History` section at the end of the body (or reconciles its explainer line if the section is already there) and clears any `review_result` left behind by an earlier finalize. It then inserts a Waiting banner above the first H1 and produces a single commit under your git identity.
 
 It also pins the review cycle's edit-marker style into a `review_marker_style` frontmatter field — read from your repo's configured `edit_marker_style` review setting (falling back to `simple` when unset). Every later step in the cycle reads that pin off the document itself rather than re-reading settings, so changing the setting mid-cycle never reaches a review that is already open.
 
-If the document is already opted in, the command is a no-op — it exits cleanly without a new commit.
+If the document is already opted in, the command is a no-op — it exits cleanly without a new commit (`already opted-in: <file>`). Run on a document that `/lazy-review.stop` parked, it resumes at the round and phase where it was stopped, since every other key is still in place.
 
 After this step the daemon sees a human commit and begins the first dispatch cycle: one expert job per section, routed according to your review class configuration.
 
@@ -74,7 +74,7 @@ Once every section in the final round is approved, run `/lazy-review.finalize <f
 - Strips the Waiting banner, approve checkboxes, and system callouts.
 - Preserves the `# History` section the coordinator built up across rounds.
 - Unsets every `review_*` key in frontmatter except `review_result` — a finalized document carries no `review_active` at all, unlike a stopped one, which keeps `review_active: false`.
-- Commits with the `Doc-Review-Phase: finalize` trailer.
+- Commits with the `Doc-Review-Phase: finalize` trailer under the bot identity, and reports `finalized: <file> (sha=<short-sha>)`.
 
 If the body still carries an unfolded `[!decision-candidate]` callout — ticked or not — or a `[!todo] #review/command` callout whose mini-plan is still unfinished, finalize refuses instead of writing anything, naming the offending line numbers. Don't delete the callout by hand to get past this: the fold belongs to the main writer round, so the fix is letting the document reopen at the main round and re-dispatch, the same way any other unfolded round is picked back up.
 

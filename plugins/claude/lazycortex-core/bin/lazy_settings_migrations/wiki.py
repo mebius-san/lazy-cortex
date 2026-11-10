@@ -7,8 +7,9 @@ repository-wide `wiki.tag_axes`, and each scope's own list is kept as the narrow
 means. Because every scope's list is a subset of the union it contributed to, the effective set
 of axes per scope is unchanged by the move. The same step seeds the section-level `wiki.exclude`
 list from the fixed project-structure map, which the configure wizard used to append to each
-scope's `exclude_paths` one by one. Idempotent: a section already carrying `tag_axes` and
-`exclude` is passed through unchanged.
+scope's `exclude_paths` one by one. Idempotent: a `tag_axes` or `exclude` list already present on the section
+is kept as found rather than rebuilt, but the structure-map entry is removed from every scope's `exclude_paths`
+on each run, including for a section that already carries both lists.
 
 v2 -> v3 (`MIGRATIONS[2]`) admits draft and deferred documents into a scope that still carries
 the stage predicate the specs install used to seed, which let in only approved and stageless
@@ -74,8 +75,7 @@ def _hoisted_axes(data: dict) -> list[str]:
   """
   axes: list[str] = []
   for cfg in _scope_entries(data):
-    declared = cfg.get(_TAG_AXES_KEY) or []
-    for axis in declared:
+    for axis in cfg.get(_TAG_AXES_KEY) or []:
       # guard: not an axis name, or already collected from an earlier scope
       if not isinstance(axis, str) or axis in axes:
         continue
@@ -128,10 +128,14 @@ def _migrate_hoist_axes(data: dict) -> dict:
 
   # Domain(settings.versioning):
   # # A migration never rebuilds what the operator already edited
-  # An upgrade step that seeds a new setting runs on every load of an old file, so the seed must recognise its own
-  # earlier work: a value already present — whether the seed wrote it or the operator reshaped it since — is left
-  # exactly as found, and only a section that has never carried the key gets the derived default. Re-running the
-  # same step is therefore always free, and an operator's edit survives any number of upgrades.
+  # An upgrade step that seeds a new setting may be run more than once over the same file, whenever an install,
+  # a doctor pass or an explicit migration is asked for, so the seed must recognise its own earlier work: a
+  # list already present under the key — whether the seed wrote it or the operator reshaped it since — is left
+  # exactly as found, and only a section that has no such list gets the derived default; a value of any other
+  # shape under the key is not an operator's list and is replaced by the seed. The one deliberate removal is
+  # the project-structure map, which the step strips from every scope's own exclude list wherever it stands,
+  # because the section-level exclusion now carries it. Re-running the same step is therefore free, and an
+  # operator's list survives any number of upgrades.
 
   # work on a copy — the ladder contract hands back a new section dict
   hoisted = dict(data)

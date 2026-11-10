@@ -35,7 +35,7 @@ spec_source_docs: []
 <!-- Optional. When the document has nothing to say here, the section is removed together with its heading. Where the bug shows: platform, version, configuration, data. One bullet per element of the environment. A code location or log lives in Related code / logs. -->
 
 ## Related code / logs
-<!-- Optional. When the document has nothing to say here, the section is removed together with its heading. The code locations, log excerpts and traces that point at the cause. One bullet per location, as a forge URL made with `lazy-spec.source-url`; a source URL is permitted in this section only. The environment the bug shows in lives in Environment. -->
+<!-- Optional. When the document has nothing to say here, the section is removed together with its heading. The code locations, log excerpts and traces that point at the cause. One bullet per location, as a root link to the file made with `lazy-spec.source-url` (a folder is named in backticks, never linked); a source link is permitted in this section only. The environment the bug shows in lives in Environment. -->
 
 # Sources
 #protected/spec/sources

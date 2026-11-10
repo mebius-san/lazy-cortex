@@ -5,14 +5,19 @@ This module backs the `settings-get` / `settings-set` subcommands — the blesse
 cross-plugin contract that lets a sibling plugin
 read and write a top-level section of the consumer's `lazy.settings.json` without
 importing any `lazycortex-core` Python. The wire shape is JSON in via stdin, JSON
-out via stdout.
+out via stdout. It also backs `mcp-config-drop`, which removes one server from an MCP
+config file.
 
 Reads default to `lazy_settings.load_tracked_section` (tracked layer only, no local
 overlay — the correct layer for a read-modify-write round-trip); `--scope local` reads
 the overlay alone and `--scope merged` the effective view. Writes go through
-`lazy_settings.save_section` (atomic, version-stamped, never touches the local overlay)
+`lazy_settings.save_section` (atomic, never touches the local overlay; a section is stamped only with
+the version the file's own section stands on, or the current one when the file does not carry it)
 or, with `--scope local`, `lazy_settings.save_local_section`. A slash-separated `--key` narrows
-either verb to one nested value inside the section.
+either verb to one nested value inside the section. `--verbatim` makes `settings-get` print the
+tracked section exactly as stored (`null` when the file does not carry it, no stub, no overlay) and
+`settings-set` write the whole tracked section without any version stamp; it takes neither `--key`
+nor another `--scope`.
 The settings file is resolved as `<cwd>/.claude/lazy.settings.json`, where `<cwd>`
 follows the same convention every other subcommand uses: the `LAZY_REPO_ROOT` env var,
 falling back to the process working directory, overridable per-call with `--cwd`;
@@ -29,10 +34,13 @@ from pathlib import Path
 from constants import SettingsFile  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from lazy_settings import (  # pylint: disable=import-error
-  load_local_only_section, load_section, load_tracked_section, save_local_section, save_section,
+  load_local_only_section, load_section, load_tracked_section, load_verbatim_tracked_section, save_local_section,
+  save_section,
 )
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from repo_root import resolve_repo_root  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from runtime_state import atomic_write_text  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -50,6 +58,10 @@ _WRITERS: dict[str, Callable[[Path, str, dict[str, object]], None]] = {
   "tracked": save_section,
   "local": save_local_section,
 }
+# The settings layer a verbatim read or write is confined to.
+_TRACKED = "tracked"
+# The MCP config file's map of server names to their launch specs.
+_MCP_SERVERS = "mcpServers"
 
 
 
@@ -63,6 +75,8 @@ class ConfirmKey:
     SECTION: The section the write landed in.
     KEY: The nested key path a keyed write touched.
     ERROR: The failure text of a rejected call.
+    PATH: The file an MCP-config verb acted on.
+    MESSAGE: The failure sentence of a refused MCP-config call.
   """
 
   # The outcome word of a successful write.
@@ -73,6 +87,10 @@ class ConfirmKey:
   KEY = "key"
   # The failure text of a rejected call.
   ERROR = "error"
+  # The file an MCP-config verb acted on.
+  PATH = "path"
+  # The failure sentence of a refused MCP-config call.
+  MESSAGE = "message"
 
 
 
@@ -84,17 +102,26 @@ class Outcome:
   Attributes:
     WRITTEN: The section or nested value was stored.
     DELETED: The nested key was removed, or was already absent.
+    DROPPED: The MCP server was removed from the config file.
+    ABSENT: The config file names no such MCP server; nothing was written.
+    FAILED: The config file could not be read as a JSON object.
   """
 
   # The section or nested value was stored.
   WRITTEN = "written"
   # The nested key was removed, or was already absent.
   DELETED = "deleted"
+  # The MCP server was removed from the config file.
+  DROPPED = "dropped"
+  # The config file names no such MCP server; nothing was written.
+  ABSENT = "absent"
+  # The config file could not be read as a JSON object.
+  FAILED = "error"
 
 
 
 # ----------------------------------------------------------------------------------------
-def _resolve_settings_path(cwd: Path | str | None, *, home: bool = False) -> Path:
+def resolve_settings_path(cwd: Path | str | None, *, home: bool = False) -> Path:
   """
   Resolve the tracked settings-file path from an optional explicit working directory.
 
@@ -180,10 +207,10 @@ def _resolve_parent(section: dict[str, object], key: str, *, create: bool) -> tu
   return node, leaf
 
 
-def settings_get(section: str, *,
-                 cwd: Path | str | None = None,
-                 home: bool = False,
-                 scope: str = "tracked") -> dict[str, object]:
+def load_settings_section(section: str, *,
+                          cwd: Path | str | None = None,
+                          home: bool = False,
+                          scope: str = "tracked") -> dict[str, object]:
   """
   Load one section of the consumer's `lazy.settings.json` from the requested layer.
 
@@ -226,7 +253,29 @@ def settings_get(section: str, *,
   # machine is never silently overridden by a section another plugin wrote.
 
   # the requested layer's reader answers straight from the resolved file
-  return _READERS[scope](_resolve_settings_path(cwd, home = home), section)
+  return _READERS[scope](resolve_settings_path(cwd, home = home), section)
+
+
+def load_verbatim_section(section: str, *, cwd: Path | str | None = None, home: bool = False) -> dict | None:
+  """
+  Load one tracked section of the consumer's `lazy.settings.json` exactly as it is stored.
+
+  Unlike `load_settings_section`, an absent section is reported as absent rather than as a
+  version-stamped stub, and the local overlay is not applied.
+
+  Args:
+    section: Name of the top-level section to read.
+    cwd: Repository root override; resolves the settings file under `<cwd>/.claude/`.
+    home: Read the user-scope `~/.claude/lazy.settings.json` instead of the repo file.
+
+  Returns:
+    The section dict as stored, or `None` when the file is missing or does not carry the section.
+
+  Raises:
+    json.JSONDecodeError: If the settings file is not valid JSON.
+  """
+  # the tracked file answers as stored: no stub, no overlay
+  return load_verbatim_tracked_section(resolve_settings_path(cwd, home = home), section)
 
 
 def settings_set(section: str,
@@ -236,7 +285,8 @@ def settings_set(section: str,
                  home: bool = False,
                  scope: str = "tracked",
                  key: str | None = None,
-                 delete: bool = False) -> dict[str, object]:
+                 delete: bool = False,
+                 verbatim: bool = False) -> dict[str, object]:
   """
   Persist one section — or one nested value inside it — of the consumer's `lazy.settings.json`.
 
@@ -257,14 +307,16 @@ def settings_set(section: str,
     scope: Layer to write — `tracked` (default) or `local` (the gitignored overlay).
     key: Slash-separated key path inside the section; `None` replaces the whole section.
     delete: With `key`, remove that key instead of setting it.
+    verbatim: Write the whole tracked section without a version stamp.
 
   Returns:
     A confirmation dict of the shape `{"status": "written", "section": <name>}`, with a
     `key` field added and `status` set to `deleted` for a `delete` call.
 
   Raises:
-    ValueError: If `value` is not a JSON object (dict) for a whole-section write, or a
-      `key` path runs through a non-object segment.
+    ValueError: If `value` is not a JSON object (dict) for a whole-section write, a
+      `key` path runs through a non-object segment, or `verbatim` is combined with `key` or
+      a scope other than `tracked`.
     KeyError: If `scope` is not `tracked` or `local`.
     json.JSONDecodeError: If the existing settings file on the target layer is not valid JSON.
     OSError: If the target settings file or its parent directory cannot be written.
@@ -275,8 +327,12 @@ def settings_set(section: str,
   # is preserved untouched and the other layer's file is never written.
 
   # the file and the writer are fixed by the target scope before either branch touches them
-  path = _resolve_settings_path(cwd, home = home)
+  path = resolve_settings_path(cwd, home = home)
   writer = _WRITERS[scope]
+
+  # guard: a verbatim write replaces a whole tracked section; a keyed or local one has no verbatim form
+  if verbatim and (key is not None or scope != _TRACKED):
+    raise ValueError("verbatim writes a whole tracked section; it takes neither a key nor another scope")
 
   # whole-section replace: the legacy contract, value must be a JSON object
   if key is None:
@@ -285,8 +341,11 @@ def settings_set(section: str,
       # waiver: naming the rejected JSON type in a CLI error message; no class registry exists here
       raise ValueError(f"section value must be a JSON object, got {type(value).__name__}")
 
-    # the whole section is replaced on the chosen layer and the write confirmed
-    writer(path, section, value)
+    # the whole section is replaced on the chosen layer and the write confirmed; a verbatim one is never stamped
+    if verbatim:
+      save_section(path, section, value, stamp = False)
+    else:
+      writer(path, section, value)
     return { ConfirmKey.STATUS: Outcome.WRITTEN, ConfirmKey.SECTION: section }
 
   # nested read-modify-write on the same layer the write lands on
@@ -334,31 +393,59 @@ def _add_common_args(parser: argparse.ArgumentParser, scopes: tuple[str, ...]) -
   parser.add_argument("--cwd", default = None, help = "Repository root (default: $LAZY_REPO_ROOT or cwd)")
 
 
+def _add_verbatim_arg(parser: argparse.ArgumentParser) -> None:
+  """
+  Attach the `--verbatim` switch shared by both verbs.
+
+  Args:
+    parser: Parser to extend.
+  """
+  # waiver: argparse CLI signature and help strings, not domain keys
+  parser.add_argument("--verbatim", action = "store_true",
+                      help = "Whole tracked section as stored: no version stub on read, no version stamp on write")
+
+
 def cmd_settings_get(argv: list[str]) -> int:
   """
   Run the `settings-get` subcommand: print one section, or one nested value, as JSON to stdout.
 
   Args:
     argv: Argument vector after the subcommand name (section plus optional `--key`,
-      `--scope`, `--home`, `--cwd`).
+      `--scope`, `--verbatim`, `--home`, `--cwd`).
 
   Returns:
-    Process exit code: 0 on success.
+    Process exit code: 0 on success, 1 when a `--verbatim` read meets a settings file that is not
+    valid JSON (an `error` JSON is printed).
 
   Raises:
-    SystemExit: On an argument error, with exit code 2, raised by the argument parser.
-    json.JSONDecodeError: If the settings file read is not valid JSON.
+    SystemExit: On an argument error, with exit code 2, raised by the argument parser; this
+      includes `--verbatim` combined with `--key` or a scope other than `tracked`.
+    json.JSONDecodeError: If the settings file read is not valid JSON on a non-verbatim read.
   """
   # the verb's command line: the shared section / key / scope / root arguments with every read scope
   # waiver: argparse CLI signature and help strings, not domain keys
   parser = argparse.ArgumentParser(prog = "lazycortex-core settings-get")
   # waiver: CLI --scope vocabulary, fixed by the settings-get contract
   _add_common_args(parser, ("tracked", "local", "merged"))
+  _add_verbatim_arg(parser)
   args = parser.parse_args(argv)
+
+  # a verbatim read prints the tracked section as stored, or null when the file does not carry it
+  if args.verbatim:
+    # guard: a verbatim read is one whole tracked section
+    if args.key is not None or args.scope != _TRACKED:
+      # waiver: one-off argparse usage message
+      parser.error("--verbatim reads a whole tracked section; it takes neither --key nor another --scope")
+    try:
+      print(json.dumps(load_verbatim_section(args.section, cwd = args.cwd, home = args.home)))
+    except json.JSONDecodeError as error:
+      print(json.dumps({ ConfirmKey.ERROR: f"{resolve_settings_path(args.cwd, home = args.home)}: {error}" }))
+      return 1
+    return 0
 
   # the section is printed whole, or narrowed to the one nested value --key names
   # waiver: read in both arms of the ternary below; inlining would repeat the settings read
-  section = settings_get(args.section, cwd = args.cwd, home = args.home, scope = args.scope)
+  section = load_settings_section(args.section, cwd = args.cwd, home = args.home, scope = args.scope)
   print(json.dumps(section if args.key is None else _find_nested_value(section, args.key)))
   return 0
 
@@ -369,14 +456,15 @@ def cmd_settings_set(argv: list[str]) -> int:
 
   Args:
     argv: Argument vector after the subcommand name (section plus optional `--key`,
-      `--value`, `--delete`, `--scope`, `--home`, `--cwd`).
+      `--value`, `--delete`, `--scope`, `--verbatim`, `--home`, `--cwd`).
 
   Returns:
     Process exit code: 0 on success, 1 on malformed / non-object input or when the existing
     settings file on the target layer is not valid JSON.
 
   Raises:
-    SystemExit: On an argument error, with exit code 2, raised by the argument parser.
+    SystemExit: On an argument error, with exit code 2, raised by the argument parser; this
+      includes `--verbatim` combined with `--key` or a scope other than `tracked`.
     OSError: If the target settings file or its parent directory cannot be written.
   """
   # the verb's command line: the shared arguments with the write scopes, plus the keyed-write switches
@@ -388,7 +476,13 @@ def cmd_settings_set(argv: list[str]) -> int:
   parser.add_argument("--value", default = None, help = "JSON value to store under --key")
   # waiver: argparse CLI signature and help strings, not domain keys
   parser.add_argument("--delete", action = "store_true", help = "Remove --key instead of setting it")
+  _add_verbatim_arg(parser)
   args = parser.parse_args(argv)
+
+  # guard: a verbatim write is one whole tracked section
+  if args.verbatim and (args.key is not None or args.scope != _TRACKED):
+    # waiver: one-off argparse usage message
+    parser.error("--verbatim writes a whole tracked section; it takes neither --key nor another --scope")
 
   # guard: --value or --delete given without --key
   if args.key is None and (args.value is not None or args.delete):
@@ -415,10 +509,90 @@ def cmd_settings_set(argv: list[str]) -> int:
     print(json.dumps(settings_set(
       args.section, value,
       cwd = args.cwd, home = args.home, scope = args.scope, key = args.key, delete = args.delete,
+      verbatim = args.verbatim,
     )))
   except ValueError as error:
     print(json.dumps({ ConfirmKey.ERROR: str(error) }))
     return 1
 
   # the confirmation on stdout is the success signal the caller reads
+  return 0
+
+
+def delete_mcp_server(path: Path, server: str) -> str:
+  """
+  Remove one server from an MCP config file.
+
+  Guarantees:
+    - A server the file does not name leaves the file byte for byte as it is.
+    - Only the named server is removed; every other key keeps its place.
+
+  Args:
+    path: MCP config file.
+    server: Name of the server to remove.
+
+  Returns:
+    `Outcome.DROPPED` when the server was removed, `Outcome.ABSENT` when the file does not name it.
+
+  Raises:
+    ValueError: If the file is missing, not valid JSON, or not a JSON object.
+  """
+
+  # Contract:
+  # A server the file does not name leaves the file byte for byte as it is.
+
+  # Contract:
+  # Only the named server is removed; every other key keeps its place.
+
+  # a config file that is missing or does not parse is refused, never recreated
+  try:
+    data = json.loads(path.read_text(encoding = "utf-8"))
+  except (OSError, json.JSONDecodeError) as error:
+    raise ValueError(f"{path}: {error}") from error
+
+  # guard: a config that parses but is not an object is refused, never recreated
+  if not isinstance(data, dict):
+    raise ValueError(f"{path}: not a JSON object")
+
+  # a server the file does not name leaves the file byte for byte as it is
+  servers = data.get(_MCP_SERVERS)
+  if not isinstance(servers, dict) or server not in servers:
+    return Outcome.ABSENT
+
+  # only the one server leaves; every other key keeps its place
+  del servers[server]
+  atomic_write_text(path, json.dumps(data, indent = 2) + "\n")
+  return Outcome.DROPPED
+
+
+def cmd_mcp_config_drop(argv: list[str]) -> int:
+  """
+  Run the `mcp-config-drop` subcommand: remove one server from an MCP config file and print the outcome as JSON.
+
+  Args:
+    argv: Argument vector after the subcommand name (config file, then server name).
+
+  Returns:
+    Process exit code: `0` on success, `1` when the file cannot be read as a JSON object.
+  """
+  # the verb names one config file and one server in it
+  # waiver: argparse CLI signature, not a domain key
+  parser = argparse.ArgumentParser(prog = "lazycortex-core mcp-config-drop")
+  # waiver: argparse CLI signature, not a domain key
+  parser.add_argument("file")
+  # waiver: argparse CLI signature, not a domain key
+  parser.add_argument("server")
+  args = parser.parse_args(argv)
+
+  # a refusal is one JSON line naming the file, never a traceback
+  try:
+    status = delete_mcp_server(Path(args.file), args.server)
+  except ValueError as error:
+    print(json.dumps({
+      ConfirmKey.STATUS: Outcome.FAILED, ConfirmKey.PATH: args.file, ConfirmKey.MESSAGE: str(error),
+    }))
+    return 1
+
+  # the outcome word and the file it concerns
+  print(json.dumps({ ConfirmKey.STATUS: status, ConfirmKey.PATH: args.file }))
   return 0

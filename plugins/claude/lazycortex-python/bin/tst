@@ -29,7 +29,7 @@ function print_help() {
   echo "run Python tests via pytest"
   echo "usage: tst [<module>]"
   echo
-  echo "  <module>   one of the names under tests/ (e.g., 'core', 'rpg'), or 'all'"
+  echo "  <module>   one of the names under tests/ (e.g., 'core', 'api'), or 'all'"
   echo "             omit (or pass 'all') to run the whole suite"
   echo
   echo "  -q         accepted as no-op (lazy-python.style.md compat)"

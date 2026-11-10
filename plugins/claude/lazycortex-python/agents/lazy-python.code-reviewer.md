@@ -9,7 +9,7 @@ description: |
   </example>
   <example>
   Context: The user wants an existing file reviewed for guideline conformance.
-  user: "Review src/core/entity.py against our guidelines"
+  user: "Review src/billing/invoice.py against our guidelines"
   assistant: "I'll use the lazy-python.code-reviewer agent to review that file."
   </example>
 model: inherit
@@ -63,7 +63,7 @@ Walk every item for every file under review. Each is a clause no checker enforce
 
 1. **Comment substance.** `pcf`'s `check_block_comments` already proves a comment sits on the first line of every block, so do not re-report its absence unless the checker is disabled for the file. Your half is whether the comment earns its line: a restatement of the code below it (`# return the result` above `return result`), a label that names the syntax rather than the intent, or a stale comment describing something the block no longer does is a finding. Complex logic (branching decisions, math, reshaping, batching, protocol interplay) is explained, not restated. Applies to production, tests, and stubs equally.
 2. **Logical-block structure.** Blank lines separate logical blocks; sequential blocks are not packed together, and a single logical step is not split across blank lines for no reason.
-3. **`# guard:` semantics.** The marker labels a defensive early-exit only — a branch whose body leaves the current scope (`return` / `continue` / `break` / `raise` / an always-raising call). An accumulation branch, an ordinary `if`/`else`, or a path-selection branch carrying `# guard:` is a finding, and so is a guard branch missing it.
+3. **`# guard:` semantics.** The marker labels a protective branch only — an `if` or `case` that shields the code below from an invalid, missing, or degenerate input or state, either by leaving early (`return` / `continue` / `break` / `raise` / an always-raising call) or by repairing the state (a default for a missing value, a normalised input). A branch that carries the regular work — the main path, a regular outcome, an accumulation, one branch of a dispatch — carrying `# guard:` is a finding, even when its body exits; so is a protective branch, leaving or repairing, that lacks it.
 4. **`# opt:` / `# limit:` / `# Decision:` semantics.** `pcf` proves only that the clause after the colon is non-empty; whether it says the right thing is yours. `opt:` annotates a choice made for performance, and its clause names the assumption outside the marked lines that keeps it correct — on code with no performance motive it is a finding, and so is a clause stating the speed win instead of the assumption, or a cache, memo, or precomputed table carrying no `opt:` at all (`pcf` catches only the `functools` decorators; hand-rolled ones are yours). `limit:` annotates a deliberate simplification that is correct at the current scale: the clause must name the ceiling and the upgrade path past it, and the code must be finished as written — a `limit:` on unfinished work is a `TODO:` mislabelled, and a `limit:` whose clause names no condition under which the code stops being adequate is a finding. `Decision:` records a real design fork: judge it by the canon's three tests (a fork existed, revisiting is costly, the why is not recoverable from the code) — a marker on the only viable move, on a repo convention, or with a thesis whose why is obvious from the code is a finding. Docstring prose that retells why the code is written one way and not another is a candidate for extraction into a `Decision:` marker — flag it.
 5. **Naming semantics.** Method prefixes match behaviour per the canon's prefix table (`is_`/`has_`/`can_`/`check_` for pure booleans, `fetch_`/`query_` for network, `list_` for generators, `_async` suffix for `async def`, `db_`/`repo_` for storage, and so on). A noun-named method is not a finding when it only reports a characteristic of its object, reads unambiguously, has no side effects and returns no newly built structure (`distance_to(point)`, `area()`); a noun name that hides a construction, a state change or I/O still is. Cardinality matches the return type. Names are within the length budget without cryptic abbreviations.
 6. **Useless intermediate variables.** A local used exactly once, or aliasing a trivial accessor, is a finding unless it is an expensive result reused, a loop-invariant hoist, a named complex expression, or an access chain two or more objects deep read more than once.
@@ -138,7 +138,7 @@ Write JSON to `findings_path`:
   "scope_key": "<copied verbatim from the manifest>",
   "findings": [
     {
-      "file": "src/core/entity.py",
+      "file": "src/billing/invoice.py",
       "line": 42,
       "severity": "WARN",
       "rule": "comment-substance",

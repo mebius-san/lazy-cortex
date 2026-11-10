@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes during lazycortex-experts setup — symptoms, likely causes, and fixes.
-last_regen: 2026-10-24
+last_regen: 2026-11-10
 no_diagram: true
 source_skills:
   - lazy-experts.install
@@ -22,8 +22,8 @@ source_skills:
   - lazy-experts.editor
   - lazy-experts.fiction-writer
   - lazy-experts.fiction-editor
-source_sha: 33e8a296cb2bda2f7c06945ca9d46e24ed4c1858
-surface_sha: 830a292079eea6b57c08abb6938fc4252dcf20f304a6b228e752a281a2f9abd8
+source_sha: 94bcae6d8529797e085b2e53adf9c9593919fb13
+surface_sha: e8067df971778384259f4152e4f03ad6957b38002cc23134e62bbc076073f4dc
 ---
 # Troubleshooting
 
@@ -41,7 +41,7 @@ surface_sha: 830a292079eea6b57c08abb6938fc4252dcf20f304a6b228e752a281a2f9abd8
 
 **Symptom**: Running `/lazy-experts.install` stops with `lazycortex-core not installed; install it before /lazy-experts.install`.
 
-**Likely cause**: The defaults file that `lazy-experts.install` reads from `lazycortex-core`'s plugin cache was not found. This means `lazycortex-core` is either not installed or its cache was cleared and not repopulated. `lazycortex-core` is a declared dependency — it must be present so that agent-model tiers can be seeded from its `default-tiers.json`.
+**Likely cause**: When the install reaches the step that seeds agent-model tiers, the `agent-models-seed` verb answered `sot-missing` — it could not find `lazycortex-core`'s `default-tiers.json`. This means `lazycortex-core` is either not installed or its cache was cleared and not repopulated. `lazycortex-core` is a declared dependency — it must be present so that agent-model tiers can be seeded from its `default-tiers.json`.
 
 **Fix**: Install `lazycortex-core` first by running `/plugin install lazycortex/lazycortex-core`, then re-run `/lazy-experts.install`. If `lazycortex-core` is already installed but its cache appears incomplete, run `/plugin update` to refresh the cache and try again.
 
@@ -161,7 +161,7 @@ surface_sha: 830a292079eea6b57c08abb6938fc4252dcf20f304a6b228e752a281a2f9abd8
 
 **Symptom**: The `agent_models` portion of the report shows `sot-missing` or `no-entries` instead of the usual per-key `added` / `unchanged` / `kept-local` list.
 
-**Likely cause**: Seeding `agent_models` is delegated to a shared tier-seeding primitive that locates `lazycortex-core`'s `default-tiers.json` and reads the `lazycortex-experts:*` rows out of it. `sot-missing` means the primitive couldn't find that file at all — the same root cause as the "lazycortex-core not installed" abort above, just surfaced from inside the primitive instead of at the top of the run. `no-entries` means the file was found but carries no `lazycortex-experts:*` rows yet — usually a version mismatch after `lazycortex-experts` was updated ahead of `lazycortex-core`.
+**Likely cause**: Seeding `agent_models` is delegated to a shared tier-seeding primitive that locates `lazycortex-core`'s `default-tiers.json` and reads the `lazycortex-experts:*` rows out of it. `sot-missing` means the primitive couldn't find that file at all — this is the very answer that raises the "lazycortex-core not installed" abort above, so the two share one root cause. `no-entries` means the file was found but carries no `lazycortex-experts:*` rows yet — usually a version mismatch after `lazycortex-experts` was updated ahead of `lazycortex-core`.
 
 **Fix**: Run `/plugin update lazycortex-core@lazycortex` to refresh the tiers file (add `/plugin update lazycortex-experts@lazycortex` too if `no-entries` persists), then re-run `/lazy-experts.install`.
 
@@ -171,7 +171,7 @@ surface_sha: 830a292079eea6b57c08abb6938fc4252dcf20f304a6b228e752a281a2f9abd8
 
 **Symptom**: Running `/lazy-experts.audit` stops immediately with `FAIL plugin-root-unresolved` before any other check runs.
 
-**Likely cause**: The audit couldn't find `lazycortex-experts@lazycortex`'s `installPath` in `~/.claude/plugins/installed_plugins.json`, and this repo isn't the one authoring the plugin's own sources — so there is no shipped agent/reference tree to check your composed experts against.
+**Likely cause**: The audit resolves the plugin root through the `plugin-root` verb, which tries four stages in turn: a `$LAZYCORTEX_PLUGIN_DIRS` entry, a dev-vault sibling plugin tree, a `plugins/claude/lazycortex-experts/` tree in the current repo, and finally the `installPath` recorded in `~/.claude/plugins/installed_plugins.json`. This failure appears only when all four come up empty — a missing registry entry alone does not trigger it when one of the earlier stages finds the plugin. With no shipped agent/reference tree, there is nothing to check your composed experts against.
 
 **Fix**: Run `/plugin install lazycortex/lazycortex-experts`, then re-run `/lazy-experts.audit`.
 

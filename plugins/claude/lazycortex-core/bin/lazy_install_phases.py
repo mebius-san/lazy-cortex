@@ -8,8 +8,11 @@ initial materialisation.
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 # waiver: flat sibling import inside the plugin's bin/ dir — resolved at runtime via PYTHONPATH, not by pylint
@@ -228,7 +231,7 @@ def ensure_gitattributes_lf(repo: Path | str) -> str:
   return "updated" if existed else "created"
 
 
-def index_has_crlf(repo: Path | str) -> bool:
+def has_index_crlf(repo: Path | str) -> bool:
   """
   Report whether git's index holds a text file with CRLF line endings.
 
@@ -457,12 +460,16 @@ def bootstrap_lazyignore(repo: Path | str, template: Path | str) -> str:
   `.gitignore`) that every tree-walking routine honours via git's ignore engine —
   venvs, `node_modules`, `__pycache__`, and in-tree worktrees. The consumer's own
   edits are authoritative: an existing `.lazyignore` is never overwritten, so the
-  seed only ever creates a missing file. No-op when the template source is absent.
-  Idempotent.
+  seed only ever creates a missing file. Only the seeding is skipped when the
+  template source is absent. Idempotent.
 
   Guarantees:
     - An existing `.lazyignore` is never overwritten; the consumer's own content is
       always left exactly as it was.
+
+  Notes:
+    - Every call ensures the configured worktree root directory is listed in the repository's `.gitignore`,
+      whether or not `.lazyignore` already exists and even when the template source is absent.
 
   Args:
     repo: Path to the repository root.
@@ -597,6 +604,63 @@ def record_python_env(repo: Path | str, command: str, executable: str) -> str:
   return "recorded"
 
 
+def resolve_unit_interpreter(repo: Path | str) -> str:
+  """
+  Return the interpreter path a supervisor unit should record for the runtime daemon.
+
+  Args:
+    repo: Path to the repository root.
+
+  Returns:
+    The operator's `LAZYCORTEX_PYTHON` pin from `.claude/settings.local.json` when it names an existing
+    file, or the absolute location of the command when it names a command found on `PATH`; else the
+    `python3` found on `PATH` when it is the running interpreter and no virtual environment is
+    active; else the running interpreter's own path.
+
+  Raises:
+    json.JSONDecodeError: If the local settings file exists but is not valid JSON.
+  """
+
+  # Domain(install.reconciliation):
+  # # Which interpreter a supervised daemon is pinned to
+  # A supervised daemon outlives the session that installed it, and the interpreter path in its
+  # unit must outlive a routine upgrade of the language too. A path naming one minor version
+  # disappears when the package manager retires that version, and the daemon then cannot start at
+  # all. So an interpreter the operator pinned on purpose is honoured first, but only while the
+  # pin still resolves: it either names an existing file, or it is a command name found on the
+  # search path. A command name is recorded as that command's absolute location, because a
+  # supervised unit runs with a minimal search path and could not find a bare name. A pin that
+  # resolves neither way is stale and is ignored. Otherwise the unit
+  # takes the version-neutral launcher on the search path, which the package manager moves to the
+  # new version itself, provided it is the very interpreter running the install. An interpreter
+  # inside a virtual environment is never swapped for the global one, because the environment's
+  # own packages would be lost with it.
+
+  # the operator's deliberate pin, honoured only while it still names a file
+  path = Path(repo) / _SETTINGS_LOCAL_JSON_REL
+  # waiver: stdlib encoding idiom
+  settings = json.loads(path.read_text(encoding = "utf-8")) if path.exists() else {}
+  # waiver: external Claude Code settings field name, not an internal key
+  pinned = (settings.get("env") or {}).get(_PYTHON_ENV_VAR)
+
+  # a pin names the interpreter by path or by a command on the search path; the unit needs the absolute path
+  pin_path = None
+  if isinstance(pinned, str) and pinned:
+    pin_path = pinned if Path(pinned).is_file() else shutil.which(pinned)
+
+  # a pin that still resolves is the operator's choice, so nothing else is consulted
+  if pin_path:
+    return pin_path
+
+  # the version-neutral launcher on the search path, a candidate only when it is this very interpreter
+  launcher = shutil.which(_DEFAULT_PYTHON_COMMAND)
+
+  # no launcher, an active virtual environment, or a launcher that is another interpreter keeps the running one
+  if not launcher or sys.prefix != sys.base_prefix or os.path.realpath(launcher) != os.path.realpath(sys.executable):
+    return sys.executable
+  return launcher
+
+
 def _installed_entries(installed_plugins: Path, plugin_key: str) -> list:
   """
   Read the install-record entries for one plugin key from an `installed_plugins.json` manifest.
@@ -622,7 +686,7 @@ def _installed_entries(installed_plugins: Path, plugin_key: str) -> list:
   return plugins.get(plugin_key) or []
 
 
-def _plugin_enabled(plugin_key: str, *settings_paths: Path) -> bool:
+def _is_plugin_enabled(plugin_key: str, *settings_paths: Path) -> bool:
   """
   Report whether a plugin key is activated across a precedence-ordered set of settings files.
 
@@ -656,9 +720,7 @@ def _plugin_enabled(plugin_key: str, *settings_paths: Path) -> bool:
   return bool(merged.get(plugin_key))
 
 
-def detect_install_scope(
-    plugin_key: str, project_root: Path | str = ".", home: Path | str | None = None
-) -> str:
+def detect_install_scope(plugin_key: str, project_root: Path | str = ".") -> str:
   """
   Resolve which scope a plugin's config should target.
 
@@ -669,7 +731,6 @@ def detect_install_scope(
   Args:
     plugin_key: The `<plugin>@<marketplace>` key to detect.
     project_root: Path whose `.claude/` holds the project settings and is the project scope.
-    home: Home directory holding the global `.claude/`; defaults to the current user's home.
 
   Returns:
     `"project"` when the plugin is enabled at the project scope, `"user"` when it is enabled
@@ -687,7 +748,7 @@ def detect_install_scope(
   # settings scope shows the plugin active does the original install record's own scope decide,
   # preferring the project scope when the record lists both.
 
-  home = Path.home() if home is None else Path(home)
+  home = Path.home()
   project_root = Path(project_root)
 
   # the shared cache is the sole proof the plugin is installed on this machine
@@ -700,7 +761,7 @@ def detect_install_scope(
 
   # project activation is the strongest signal — it wins even when the install record's own
   # scope says "user" (install-scope records where /plugin install ran, not where it is active)
-  if _plugin_enabled(
+  if _is_plugin_enabled(
       plugin_key,
       project_root / _SETTINGS_JSON_REL,
       project_root / _SETTINGS_LOCAL_JSON_REL,
@@ -709,7 +770,7 @@ def detect_install_scope(
     return "project"
 
   # enabled only in the global settings → target the user scope
-  if _plugin_enabled(
+  if _is_plugin_enabled(
       plugin_key,
       home / _SETTINGS_JSON_REL,
       home / _SETTINGS_LOCAL_JSON_REL,
@@ -752,9 +813,10 @@ def bootstrap_daemon_git(repo: Path | str) -> str:
   # # Derived-only automation git block
   # The checkout's own git state is the sole source for the settings a daemon's git behaviour
   # reads — never a question asked of the operator — because the checkout already carries the
-  # one true answer: which branch is checked out, and whether a remote exists to publish routine
-  # commits to. A checkout with no remote has nowhere to publish generated commits, so nothing is
-  # assumed there. Once an operator has written anything into this block by hand, it is never
+  # one true answer: which branch is checked out, and whether a remote named `origin` exists to
+  # publish routine commits to. A checkout with no such remote has nowhere to publish generated
+  # commits, so nothing is assumed there — this holds even for a checkout whose only remote goes by
+  # another name, which receives the branch alone. Once an operator has written anything into this block by hand, it is never
   # touched again by this derivation, on any later run.
 
   repo = Path(repo)

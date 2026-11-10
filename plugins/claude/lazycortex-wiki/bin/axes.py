@@ -1,14 +1,10 @@
 """
-Idempotent union into the repository-wide `tag_axes` — the `ensure-axes` CLI subcommand.
+Access to the `wiki` settings section and its idempotent, non-interactive seeding — the `ensure-axes` CLI subcommand.
 
-`lazycortex-wiki` has no Python writer of its own settings section — the only
-existing writer is the `lazy-wiki.configure` wizard, an interactive LLM skill.
-`wiki.install` needs a non-interactive, idempotent way to add the mandatory
-`doc-kind` axis to the repository's vocabulary (and `lazy-spec.install` needs the same
-for `product` / `category`) without overwriting an operator's own `tag_axes` entries. The write itself goes through `lazycortex-core`'s
-`settings-get` / `settings-set` CLI (the §1c cross-plugin contract) rather than
-touching `lazy.settings.json` directly, so this module never duplicates core's
-atomic-write / version-stamping logic.
+Gives the wiki CLI and sibling modules one door to the `wiki` section of the repository settings: locating the
+`lazycortex-core` CLI, reading a section, and adding classification axes and per-scope defaults without ever
+overwriting an operator's own entries. Reads and writes go through core's settings CLI rather than touching
+`lazy.settings.json` directly, so core stays the only owner of how settings are persisted.
 """
 from __future__ import annotations
 
@@ -18,12 +14,17 @@ import subprocess
 import sys
 from pathlib import Path
 
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import plugin_registry as _plugin_registry  # pylint: disable=import-error
-
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  pass
+  from typing import Literal
+
+
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import plugin_registry as _plugin_registry  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 class _K:
@@ -39,6 +40,7 @@ class _K:
     SUB_SETTINGS_GET: Core CLI subcommand name for a section read.
     SUB_SETTINGS_SET: Core CLI subcommand name for a section write.
     ARG_CWD: Core CLI flag naming the repository root.
+    ARG_SCOPE: Core CLI flag naming the settings layer a read targets.
     STATUS: Result-dict key naming one scope's outcome.
     STATUS_ADDED: Outcome value when at least one axis was newly unioned in.
     STATUS_UNCHANGED: Outcome value when every requested axis was already declared.
@@ -56,6 +58,9 @@ class _K:
     INDEX_BADGES: Per-scope key listing the frontmatter keys the topic index shows as badges on node lines.
     ERROR: Top-level result key used only for the malformed-`wiki.tag_axes` guard, in place of
       the normal status-keyed result shape.
+    REGISTRY_STAGE: Name of the install-registry lookup stage, as the core-CLI resolution error
+      reports it.
+    MSG_CORE_CLI_UNRESOLVABLE: Leading text of the error message raised when no lookup stage finds the core CLI.
   """
 
   # Settings section name carrying the axis vocabulary.
@@ -74,6 +79,8 @@ class _K:
   SUB_SETTINGS_SET = "settings-set"
   # Core CLI flag naming the repository root.
   ARG_CWD = "--cwd"
+  # Core CLI flag naming the settings layer a read targets.
+  ARG_SCOPE = "--scope"
   # Result-dict key naming one scope's outcome.
   STATUS = "status"
   # Outcome value when at least one axis was newly unioned in.
@@ -107,27 +114,22 @@ class _K:
   # Top-level result key used only for the malformed-`wiki.tag_axes` guard, in place of the normal status-keyed
   # result shape.
   ERROR = "error"
+  # Name of the install-registry lookup stage, as the core-CLI resolution error reports it.
+  REGISTRY_STAGE = "Claude Code's plugin registry"
+  # Opening of the error raised when no lookup stage finds the core CLI.
+  MSG_CORE_CLI_UNRESOLVABLE = "lazycortex-core CLI not resolvable"
 
 
-def _resolve_core_cli() -> Path:
+def resolve_core_cli() -> Path:
   """
-  Locate the `lazycortex-core` CLI binary this module dispatches settings reads/writes to.
-
-  Three stages, in order: walk `$LAZYCORTEX_PLUGIN_DIRS` — set by the daemon for every
-  subprocess routine it spawns, per the inter-plugin boundary contract's § 1c CLI-subprocess
-  pattern; fall back to the dev-vault sibling layout (`plugins/claude/lazycortex-core/bin/` next to
-  this plugin's own `plugins/claude/lazycortex-wiki/`), so the resolver also works from a plain shell
-  or a test run inside this repo, where the daemon never exported the env var; finally read
-  Claude Code's plugin registry (`~/.claude/plugins/installed_plugins.json`) for the install root
-  it records for `lazycortex-core`, since a plain interactive install-time session (no daemon, no
-  dev-vault checkout) exports neither of the first two. Mirrors `mirror.py`'s `_resolve_core_cli`
-  in this same plugin stage for stage.
+  Locate the `lazycortex-core` CLI binary this module dispatches settings reads and writes to.
 
   Returns:
     Resolved binary usable as a subprocess argument.
 
   Raises:
-    RuntimeError: When none of the three stages finds one.
+    RuntimeError: If the binary is found neither under the plugin directories named by the environment, nor in the
+      dev-vault sibling layout, nor in the plugin registry's recorded install of `lazycortex-core`.
   """
   env_dirs = os.environ.get(_K.ENV_PLUGIN_DIRS, "").split(os.pathsep)
   for dir_path in env_dirs:
@@ -168,30 +170,32 @@ def _resolve_core_cli() -> Path:
   # is diagnosable
   searched = [ dir_path for dir_path in env_dirs if dir_path ] or [ "<unset>" ]
   raise RuntimeError(
-    f"lazycortex-core CLI not resolvable: no {_K.BIN_SEGMENT}/{_K.CORE_PLUGIN_NAME} under any "
+    f"{_K.MSG_CORE_CLI_UNRESOLVABLE}: no {_K.BIN_SEGMENT}/{_K.CORE_PLUGIN_NAME} under any "
     f"directory named by ${_K.ENV_PLUGIN_DIRS} (searched: {', '.join(searched)}), no dev-vault "
-    f"sibling at '{sibling}', and no {_K.CORE_PLUGIN_NAME} install recorded in Claude Code's plugin "
-    f"registry."
+    f"sibling at '{sibling}', and no {_K.CORE_PLUGIN_NAME} install recorded in {_K.REGISTRY_STAGE}."
   )
 
 
-def _settings_get(repo: Path, section: str) -> dict:
+def settings_get(repo: Path, section: str, *, layer: Literal["tracked", "merged"] = "tracked") -> dict:
   """
-  Read one tracked settings section via `lazycortex-core settings-get`.
+  Read one settings section via `lazycortex-core settings-get`.
 
   Args:
     repo: Absolute repository root the section is read from.
     section: Top-level settings-section name.
+    layer: Settings layer to read — `tracked` (no local overlay) or `merged` (the effective view).
 
   Returns:
-    The section dict (the tracked layer — no local overlay), per `settings-get`'s contract.
+    The section dict of the requested layer, per `settings-get`'s contract.
 
   Raises:
     RuntimeError: When the `lazycortex-core` CLI cannot be resolved or exits non-zero.
   """
-  cli = _resolve_core_cli()
   proc = subprocess.run(
-    [ sys.executable, str(cli), _K.SUB_SETTINGS_GET, section, _K.ARG_CWD, str(repo) ],
+    [
+      sys.executable, str(resolve_core_cli()), _K.SUB_SETTINGS_GET, section,
+      _K.ARG_SCOPE, layer, _K.ARG_CWD, str(repo),
+    ],
     capture_output = True, text = True, check = False, encoding = "utf-8",
   )
 
@@ -216,9 +220,8 @@ def _settings_set(repo: Path, section: str, value: dict) -> None:
   Raises:
     RuntimeError: When the `lazycortex-core` CLI cannot be resolved or exits non-zero.
   """
-  cli = _resolve_core_cli()
   proc = subprocess.run(
-    [ sys.executable, str(cli), _K.SUB_SETTINGS_SET, section, _K.ARG_CWD, str(repo) ],
+    [ sys.executable, str(resolve_core_cli()), _K.SUB_SETTINGS_SET, section, _K.ARG_CWD, str(repo) ],
     input = json.dumps(value), capture_output = True, text = True, check = False, encoding = "utf-8",
   )
 
@@ -234,10 +237,8 @@ def ensure_axes(repo: Path, axes: list[str]) -> dict:
   """
   Idempotently union `axes` into the repository-wide `wiki.tag_axes` list.
 
-  Reads the `wiki` settings section (tracked layer only, per `settings-get`'s contract), unions
-  the requested axis names into the section-level `tag_axes` list (order preserved, no
-  duplicates, an operator's existing axes never dropped), and writes the section back only when
-  the list actually changed.
+  Makes the requested axes part of the vocabulary the whole repository classifies by, keeping
+  every axis the operator already declared. Applying the same request again changes nothing.
 
   Guarantees:
     - Axes already declared are never dropped, reordered, or duplicated; missing ones are
@@ -263,7 +264,7 @@ def ensure_axes(repo: Path, axes: list[str]) -> dict:
   # to the repository, and a scope only ever narrows what the repository already declares.
 
   # read the current axis vocabulary before unioning in the requested axes
-  wiki = _settings_get(repo, _K.WIKI_SECTION)
+  wiki = settings_get(repo, _K.WIKI_SECTION)
   declared = wiki.get(_K.TAG_AXES)
 
   # guard: malformed `wiki.tag_axes` (e.g. an object) — report cleanly instead of unioning into it
@@ -288,7 +289,7 @@ def ensure_axes(repo: Path, axes: list[str]) -> dict:
   # growing list will hold, not only against what it already held
   missing: list[str] = []
   for axis in axes:
-    # guard: already declared, or already collected earlier in this same request
+    # collect only an axis neither declared nor already collected earlier in this same request
     if axis in existing or axis in missing:
       continue
     missing.append(axis)
@@ -297,7 +298,7 @@ def ensure_axes(repo: Path, axes: list[str]) -> dict:
   # The `wiki` section is written at most once per call, and only when `tag_axes` actually
   # changed; a call that adds nothing MUST leave the settings untouched.
 
-  # guard: every requested axis is already declared — no write at all
+  # every requested axis is already declared — report it unchanged, with no write at all
   if not missing:
     return { _K.STATUS: _K.STATUS_UNCHANGED }
 
@@ -307,14 +308,12 @@ def ensure_axes(repo: Path, axes: list[str]) -> dict:
   return { _K.STATUS: _K.STATUS_ADDED, _K.ADDED: missing }
 
 
-def ensure_scope_config(
-  repo: Path,
-  scope_id: str,
-  *,
-  filter_frontmatter: dict | None = None,
-  exclude: list[str] | None = None,
-  index_badges: list[str] | None = None,
-) -> dict:
+def ensure_scope_config(repo: Path,
+                        scope_id: str,
+                        *,
+                        filter_frontmatter: dict | None = None,
+                        exclude: list[str] | None = None,
+                        index_badges: list[str] | None = None) -> dict:
   """
   Idempotently seed filter predicates, exclude globs, and index badges on one configured scope.
 
@@ -358,7 +357,7 @@ def ensure_scope_config(
     `wiki.scopes` itself is not an object, the result is instead the single-key
     `{"error": "wiki.scopes must be an object"}`.
   """
-  wiki = _settings_get(repo, _K.WIKI_SECTION)
+  wiki = settings_get(repo, _K.WIKI_SECTION)
   scopes = wiki.get(_K.SCOPES) or {}
 
   # guard: malformed `wiki.scopes` (e.g. a list) — report cleanly instead of crashing below
@@ -396,7 +395,7 @@ def ensure_scope_config(
   changed_excludes: list[str] = []
   existing_excludes: list[str] = list(cfg.get(_K.EXCLUDE_PATHS) or [])
   for glob in exclude or []:
-    # guard: already listed, or repeated inside this same request
+    # collect only a glob neither listed nor already collected earlier in this same request
     if glob in existing_excludes or glob in changed_excludes:
       continue
     changed_excludes.append(glob)
@@ -410,7 +409,7 @@ def ensure_scope_config(
   changed_badges: list[str] = []
   if _K.INDEX_BADGES not in cfg:
     for key in index_badges or []:
-      # guard: repeated inside this same request
+      # collect each badge key once, however often the request repeats it
       if key in changed_badges:
         continue
       changed_badges.append(key)
@@ -423,7 +422,7 @@ def ensure_scope_config(
   frontmatter: dict = fm_raw if isinstance(fm_raw, dict) else {}
   changed_keys: list[str] = []
   for key, predicate in (filter_frontmatter or {}).items():
-    # guard: the operator already judges this key — their predicate wins
+    # seed only a key the operator does not judge yet — an existing predicate wins
     if key in frontmatter:
       continue
     frontmatter = { **frontmatter, key: predicate }
@@ -433,7 +432,7 @@ def ensure_scope_config(
   # The `wiki` section is written at most once per call, and only when the scope actually
   # changed; a call that seeds nothing MUST leave the settings untouched.
 
-  # guard: everything requested was already in place — no write at all
+  # everything requested was already in place — report it unchanged, with no write at all
   if not changed_excludes and not changed_keys and not changed_badges:
     return { _K.STATUS: _K.STATUS_UNCHANGED }
 

@@ -36,7 +36,7 @@ Outcome: `validated` or `aborted`.
 Shell out to the worker:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-memory.write/bin/write.py" <expert> [--slug <slug>] [--consolidate <path>]... <<EOF
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/write.py" <expert> [--slug <slug>] [--consolidate <path>]... <<EOF
 <body>
 EOF
 )
@@ -65,4 +65,4 @@ consolidated: <count of dropped paths>
 - **"frontmatter-invalid: tag must be prefixed `memory/`"** → every tag entry must read `memory/<topic>` (e.g. `memory/auth`).
 - **"consolidate-out-of-scope: <path>"** → `--consolidate` only accepts paths under `.logs/` or `.memory/`. Move the file or remove it from the consolidate list.
 - **"consolidate-target-missing: <path>"** → a non-fatal warning; the note still writes. Verify the path was correct or remove it from the consolidate list.
-- **"commit-failed: git add returned …" / "commit-failed: git commit returned …"** → the staged index is left intact for operator inspection. Usually means a pre-commit hook rejected the change or git was busy with another session's lock. Resolve the underlying cause and re-run the write (idempotent if the note body is unchanged) or commit the staged paths by hand.
+- **"commit-failed: git add -N returned …" / "commit-failed: git commit returned …"** → the note and its tag files stay changed in the worktree, unstaged; nothing of the write is left in the index. Usually means a pre-commit hook rejected the change or git was busy with another session's lock. Resolve the underlying cause and re-run the write (idempotent if the note body is unchanged) or commit those paths by hand with an explicit pathspec.

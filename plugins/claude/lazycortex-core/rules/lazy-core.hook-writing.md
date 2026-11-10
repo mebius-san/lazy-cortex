@@ -117,7 +117,7 @@ The variable's *presence* is the signal: the daemon exports it for every routine
 - Python hooks call `hook_gate.is_enabled(<short-name>)` as their first action.
 - Shell hooks read the variable directly — one string comparison; reaching into the plugin tree from a git hook has no legal path anyway (`${CLAUDE_PLUGIN_ROOT}` is not exported to git hooks).
 
-Why: a developer hook is written for a human at a keyboard. Under the daemon the same hook fires on autonomous commits — one that rewrites files after the commit is assembled leaves a dirty tree, and `runtime_daemon._check_working_tree` halts the whole runtime on it until an operator intervenes.
+Why: a developer hook is written for a human at a keyboard. Under the daemon the same hook fires on autonomous commits — one that rewrites files after the commit is assembled leaves a dirty tree, and `runtime_daemon.check_working_tree` halts the whole runtime on it until an operator intervenes.
 
 Read-only hooks that neither touch the tree nor call git are out of this clause.
 

@@ -1,7 +1,7 @@
 """
 Centralized frontmatter key names for the lazy-review lifecycle.
 
-The review state machine reads and writes a fixed set of `review_*` frontmatter
+The review plugin reads and writes a fixed set of `review_*` frontmatter
 keys across many modules. Defining them once here means a mistyped key surfaces
 as an `AttributeError` at import time rather than as silent state corruption in
 the running loop.
@@ -11,19 +11,35 @@ strings: audit severities, writer-phase / outcome value tokens, record / payload
 dict-key names, tag prefixes, and job-dir filenames. Each container below holds
 plain `str` constants whose values are byte-identical to the literals they
 replace — they are NOT enums, so `value == Container.X` stays a string
-comparison and parsed strings keep matching.
+comparison and parsed strings keep matching. The one exception is `LangId`, a
+`StrEnum` whose members still compare equal to the plain code strings.
 """
 from __future__ import annotations
+
+from enum import StrEnum
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
 
 
-# The shipped language floor: the code every per-language string table is guaranteed to hold,
-# and what the language resolver returns when a vault names none. One definition for the whole
-# plugin — `note_ops`, `start` and `banner` all read this one.
-LANG_EN = "en"
+# ----------------------------------------------------------------------------------------
+class LangId(StrEnum):
+  """
+  The ISO 639-1 codes the review plugin carries texts in.
+
+  One definition for the whole plugin — `note_ops`, `start` and `banner` all key their
+  per-language string tables by these members.
+
+  Attributes:
+    EN: English — the shipped floor every lookup falls back to and the language resolver
+      returns when a vault names none.
+    RU: Russian.
+  """
+
+  EN = "en"
+  RU = "ru"
+
 
 # The autorun cycle cap a review class gets when its config names none.
 DEFAULT_AUTORUN_MAX_CYCLES = 7
@@ -235,47 +251,6 @@ class Outcome:
 
 
 # ----------------------------------------------------------------------------------------
-class Action:
-  """
-  Dispatcher tick-action `kind` value tokens compared as strings.
-
-  Produced by the state machine's `decide` and matched by the dispatcher's apply dispatch.
-  Pipeline-phase actions (`main`, `finalize`) and the `skip` / `repair` no-action kinds carry
-  their tokens in `Phase` / `Outcome`; the tokens below are the mechanical / barrier actions.
-
-  Attributes:
-    APPROVE_MIRROR: Mirror the operator's whole-document approval into frontmatter.
-    APPROVE_AUTORUN_MIRROR: Mirror the operator's approve-with-autorun gesture into frontmatter.
-    APPROVE_SKIP_VALIDATION_MIRROR: Mirror the operator's approve-without-validation gesture into frontmatter.
-    AUTORUN_ADVANCE: Advance an autorunning document into its next cycle without waiting for the operator.
-    BANNER_REPAINT: Repaint the top banner to the desired state.
-    RESET_APPROVAL: Reset approval and re-open the validator barrier.
-    BARRIER_DISPATCH: Queue every pending writer of the active barrier at once.
-    BARRIER_COLLECT: Sweep-collect the drained barrier in a single pass.
-    REVERT_TO_MAIN: Revert a final-concerns document back to the main-writer round.
-  """
-
-  # Mirror the operator's whole-document approval into frontmatter.
-  APPROVE_MIRROR = "approve-mirror"
-  # Mirror the operator's approve-with-autorun gesture into frontmatter.
-  APPROVE_AUTORUN_MIRROR = "approve-autorun-mirror"
-  # Mirror the operator's approve-without-validation gesture into frontmatter.
-  APPROVE_SKIP_VALIDATION_MIRROR = "approve-skip-validation-mirror"
-  # Advance an autorunning document into its next cycle without waiting for the operator.
-  AUTORUN_ADVANCE = "autorun-advance"
-  # Repaint the top banner to the desired state.
-  BANNER_REPAINT = "banner-repaint"
-  # Reset approval and re-open the validator barrier.
-  RESET_APPROVAL = "reset-approval"
-  # Queue every pending writer of the active barrier at once.
-  BARRIER_DISPATCH = "barrier-dispatch"
-  # Sweep-collect the drained barrier in a single pass.
-  BARRIER_COLLECT = "barrier-collect"
-  # Revert a final-concerns document back to the main-writer round.
-  REVERT_TO_MAIN = "revert-to-main"
-
-
-# ----------------------------------------------------------------------------------------
 class JobKey:
   """
   Record / payload / config dict-key names compared as strings.
@@ -377,7 +352,6 @@ class JobKey:
     REPAIRED_HISTORY_SECTION: A historian-response repaired-section field.
     SECTION_COMMITS: A barrier-collect summary section-commits field.
     NEW_VALIDATION_ROUND: A validator-barrier summary new-validation-round field.
-    DECISION_COMMIT_SHA: A retired decision summary commit-sha field that no code sets or reads.
     HISTORY_PICKUP: A consume-pass summary history-pickup field.
     CONTEXT_FROM_FRONTMATTER: A class-config frontmatter-key-list field for job-context resolution.
     WARNINGS: A tick-summary non-fatal-warnings-list field.
@@ -575,8 +549,6 @@ class JobKey:
   SECTION_COMMITS = "section_commits"
   # A validator-barrier summary new-validation-round field.
   NEW_VALIDATION_ROUND = "new_validation_round"
-  # A retired decision summary commit-sha field that no code sets or reads.
-  DECISION_COMMIT_SHA = "decision_commit_sha"
   # A consume-pass summary history-pickup field.
   HISTORY_PICKUP = "history_pickup"
   # A class-config frontmatter-key-list field for job-context resolution.
@@ -595,6 +567,7 @@ class Tag:
     REVIEW_PREFIX: The system-callout tag prefix `#review/`.
     PROTECTED_PREFIX: The cross-plugin persistent-owner tag prefix `#protected/`.
     HISTORY: The persistent ownership tag of the `# History` section.
+    STATUS_PREFIX: The terminal status-callout tag prefix `#status/`.
   """
 
   # The ownership-tag prefix `#expert/`.
@@ -605,6 +578,8 @@ class Tag:
   PROTECTED_PREFIX = "#protected/"
   # The persistent ownership tag of the `# History` section.
   HISTORY = "#protected/review/history"
+  # The terminal status-callout tag prefix `#status/`.
+  STATUS_PREFIX = "#status/"
 
 
 # ----------------------------------------------------------------------------------------
@@ -810,10 +785,14 @@ class EnvVar:
 
   Attributes:
     LAZY_REPO_ROOT: The expert-runtime repo-root environment variable.
+    PLUGIN_DIRS: The path-separated list of plugin source trees the runtime daemon exports to its subprocesses.
   """
 
   # The expert-runtime repo-root environment variable.
   LAZY_REPO_ROOT = "LAZY_REPO_ROOT"
+
+  # The path-separated list of plugin source trees the runtime daemon exports to its subprocesses.
+  PLUGIN_DIRS = "LAZYCORTEX_PLUGIN_DIRS"
 
 
 # ----------------------------------------------------------------------------------------
@@ -839,6 +818,8 @@ class CoreCommand:
     LOOKUP_EXPERT: Resolve an expert entry by name.
     COLLECT_JOB: Collect a completed job's result.
     CONSUME_JOB: Mark a collected job consumed.
+    RESOLVE_LANGUAGE: Resolve the repository's configured language.
+    SETTINGS_GET: Read one settings section.
   """
 
   # Queue a new expert job.
@@ -849,6 +830,10 @@ class CoreCommand:
   COLLECT_JOB = "collect-job"
   # Mark a collected job consumed.
   CONSUME_JOB = "consume-job"
+  # Resolve the repository's configured language.
+  RESOLVE_LANGUAGE = "resolve-language"
+  # Read one settings section.
+  SETTINGS_GET = "settings-get"
 
 
 # ----------------------------------------------------------------------------------------

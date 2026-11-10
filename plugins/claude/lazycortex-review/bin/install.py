@@ -21,6 +21,9 @@ from every review class. Every run widens `review.watch_root` until each
 review class's globs fall under it. `review._version` is left alone throughout —
 `lazycortex-core` owns that ladder and stamps it from its own migrations.
 
+The settings file is read and written only through the core CLI's settings verbs; this script
+never opens it itself, and a file the verbs cannot read or write ends the run as a refusal.
+
 The CLI prints a summary of what changed.
 
 This script does NOT touch `.gitignore`; the consumer is told what
@@ -29,6 +32,7 @@ entries to add (see the install SKILL.md).
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import os
 import subprocess
@@ -46,6 +50,8 @@ if str(_BIN) not in sys.path:
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import doc_class as _doc_class  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import git_ops as _git_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from keys import JobKey, Paths, ReviewKey  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
@@ -95,6 +101,14 @@ class _CoreCommand:
   CWD_FLAG = "--cwd"
   # Result key holding the verb's outcome word.
   STATUS = "status"
+  # Subcommand reading one settings section.
+  SETTINGS_GET = "settings-get"
+  # Subcommand writing one settings section.
+  SETTINGS_SET = "settings-set"
+  # Flag asking for the section exactly as stored and written as given.
+  VERBATIM_FLAG = "--verbatim"
+  # Result key holding a refused call's failure text.
+  ERROR = "error"
 
 
 _REQUIRED_DIRS = (
@@ -114,6 +128,10 @@ _PROTOCOLS = "protocols"
 # a consumer that wants a different markdown canon edits `review.protocols`, never the agent.
 _DEFAULT_PROTOCOLS = [ "lazycortex-core:lazy-core.markdown-style" ]
 _HISTORY_GROUP = "history"
+
+# Sections this install reads, and the subset it writes back — in the order a fresh file gains them.
+_READ_SECTIONS = ( JobKey.REVIEW, JobKey.EXPERTS, _SettingsKey.ROUTINES, _SettingsKey.DAEMON )
+_WRITTEN_SECTIONS = ( JobKey.REVIEW, JobKey.EXPERTS, _SettingsKey.ROUTINES )
 
 _RETIRED_SCAN_ROUTINE = "lazy-review.scan"
 _COLLECT_ROUTINE = "lazy-review.collect"
@@ -140,7 +158,7 @@ _MANAGED_FIELDS = {
 }
 
 # Whole-repo watch scope, used when nothing narrower can be derived. Collapses the
-# pathspec to `:(glob)**/*.md`, mirroring how `spec.vault_root: "."` is resolved.
+# pathspec to `:(glob)**/*.md`.
 _REPO_ROOT_WATCH = "."
 
 # `branch` is required by the git-routine schema but vestigial for a `changed_files` watch —
@@ -149,6 +167,31 @@ _REPO_ROOT_WATCH = "."
 # limit: literal fallback when neither settings nor git can name a branch; the routine is
 # inert without a daemon anyway, and `/lazy-core.install` seeds `daemon.git.base_branch`.
 _FALLBACK_BRANCH = "main"
+
+
+# ----------------------------------------------------------------------------------------
+class SettingsRefusedError(Exception):
+  """
+  Refusal raised when the core CLI cannot read or write the settings file.
+
+  Callers catch it to report the refusal instead of failing with a traceback.
+
+  Attributes:
+    reason: The refusal text, naming the settings file.
+  """
+
+  def __init__(self, reason: str) -> None:
+    """
+    Create the refusal carrying the text that names the settings file.
+
+    Args:
+      reason: The refusal text, naming the settings file.
+    """
+    # the base exception carries the reason as its message
+    super().__init__(reason)
+
+    # the reason the caller prints in its refusal
+    self.reason = reason
 
 
 def _common_root(roots: list[str]) -> str:
@@ -188,7 +231,7 @@ def _resolve_watch_root(existing: dict) -> str:
     base = recorded.rstrip("/") or _REPO_ROOT_WATCH
   else:
     scan_paths = existing.get(_SettingsKey.ROUTINES, {}).get(_RETIRED_SCAN_ROUTINE, {}).get(JobKey.PATHS)
-    base = _common_root([ _doc_class.glob_root(g) for g in scan_paths or [] ])
+    base = _common_root([ _doc_class.glob_root(pattern) for pattern in scan_paths or [] ])
 
   # every class glob must fall under the watch, or its documents' commits never wake the coordinator
   class_roots = [
@@ -213,9 +256,11 @@ def _resolve_branch(repo: Path, existing: dict) -> str:
   """
   recorded = existing.get(_SettingsKey.DAEMON, {}).get(_SettingsKey.GIT, {}).get(_SettingsKey.BASE_BRANCH)
 
-  # guard: the daemon's own base branch is authoritative when the consumer has one
+  # the daemon's own base branch is authoritative when the consumer has one
   if isinstance(recorded, str) and recorded:
     return recorded
+
+  # without one, the checkout's current branch, else the literal fallback when git cannot name it
   proc = subprocess.run(
       ["git", "-C", str(repo), "rev-parse", "--abbrev-ref", "HEAD"],
       capture_output = True, text = True, check = False, encoding = "utf-8",
@@ -260,7 +305,7 @@ def _default_settings(repo: Path, existing: dict) -> dict:
       "experts": {
           "_version": 1,
           # Plugin-shipped system experts, registered unconditionally so a review
-          # class (or the lazy-spec.product-config wizard) can reference them without a
+          # class can reference them without a
           # separate wiring step. Absent-only merge — never overwrites local edits.
           "review.coordinator": {
               "agent": "lazycortex-review:lazy-review.coordinator",
@@ -327,14 +372,118 @@ def _default_settings(repo: Path, existing: dict) -> dict:
   }
 
 
+def resolve_core_cli() -> Path:
+  """
+  Resolve the `lazycortex-core` CLI file.
+
+  Returns:
+    Path of the core CLI file.
+
+  Raises:
+    RuntimeError: When none of the three lookup stages finds a core CLI; the message names all three.
+  """
+  return _git_ops.require_core_cli()
+
+
+def _run_core_settings(cli: Path, repo: Path, verb: str, *, section: str, payload: dict | None = None) -> object:
+  """
+  Run one core settings verb on a section of `repo`'s settings file.
+
+  Args:
+    cli: Path of the core CLI file.
+    repo: Repository root whose settings file the verb targets.
+    verb: The core settings subcommand, `settings-get` or `settings-set`.
+    section: Name of the settings section the verb works on.
+    payload: Section value written by `settings-set`; `None` for a read.
+
+  Returns:
+    The verb's parsed standard output.
+
+  Raises:
+    SettingsRefusedError: When the verb exits non-zero; the reason names the settings file and carries the error
+      text core reported.
+  """
+  proc = subprocess.run(
+      [ sys.executable, str(cli), verb, section, _CoreCommand.VERBATIM_FLAG, _CoreCommand.CWD_FLAG, str(repo) ],
+      input = None if payload is None else json.dumps(payload),
+      capture_output = True, text = True, check = False, encoding = "utf-8",
+  )
+
+  # guard: the verb refused — its error text, else its stderr, is the reason
+  if proc.returncode != 0:
+    lines = proc.stdout.strip().splitlines()
+    try:
+      reason = json.loads(lines[-1])[_CoreCommand.ERROR] if lines else proc.stderr.strip()
+    except (json.JSONDecodeError, KeyError, TypeError):
+      reason = proc.stdout.strip() or proc.stderr.strip()
+    settings_path = str(repo / Paths.CLAUDE_DIR / Paths.SETTINGS_FILE)
+    raise SettingsRefusedError(reason if str(reason).startswith(settings_path) else f"{settings_path}: {reason}")
+  return json.loads(proc.stdout)
+
+
+def read_section(cli: Path, repo: Path, section: str) -> object:
+  """
+  Read one section of `repo`'s settings file through the core CLI.
+
+  Guarantees:
+    - When core cannot read the settings file, the call raises `SettingsRefusedError`, which callers must handle.
+
+  Args:
+    cli: Path of the core CLI file.
+    repo: Repository root whose settings file is read.
+    section: Name of the settings section to read.
+
+  Returns:
+    The section exactly as stored, or `None` when the file carries no such section.
+
+  Raises:
+    SettingsRefusedError: When core cannot read the settings file.
+  """
+
+  # Contract:
+  # When core cannot read the settings file, the call raises SettingsRefusedError;
+  # callers MUST handle it, since no other exception type reports this condition.
+
+  # the section exactly as the file carries it, or None when it carries none
+  return _run_core_settings(cli, repo, _CoreCommand.SETTINGS_GET, section = section)
+
+
+def write_section(cli: Path, repo: Path, section: str, *, value: dict) -> None:
+  """
+  Store one section of `repo`'s settings file through the core CLI.
+
+  Guarantees:
+    - The section is stored exactly as given, with no version stamp added.
+    - When core cannot write the settings file, the call raises `SettingsRefusedError`, which callers must handle.
+
+  Args:
+    cli: Path of the core CLI file.
+    repo: Repository root whose settings file is written.
+    section: Name of the settings section to store.
+    value: The section content to store.
+
+  Raises:
+    SettingsRefusedError: When core cannot write the settings file.
+  """
+
+  # Contract:
+  # The section is stored exactly as given, with no version stamp added;
+  # the version ladder of a section belongs to the core plugin alone.
+
+  # Contract:
+  # When core cannot write the settings file, the call raises SettingsRefusedError;
+  # callers MUST handle it, since no other exception type reports this condition.
+
+  # the section is stored exactly as given, with no version stamp added
+  _run_core_settings(cli, repo, _CoreCommand.SETTINGS_SET, section = section, payload = value)
+
+
 def _reconcile_routines(repo: Path, cfgs: dict) -> dict:
   """
   Bring each of this plugin's routine registrations in `repo` back to its shipped shape.
 
-  Goes through the core CLI's `reconcile-routine` verb rather than importing
-  `lazycortex-core` Python — the § 1c contract of `dev.plugin-boundaries.md`. Each call
-  writes the keys named in `_MANAGED_FIELDS`, fills in any shipped key the registration
-  never carried, and leaves every other key exactly as recorded.
+  Each registration ends up with its plugin-owned keys corrected to the shipped value and any shipped key it
+  lacked filled in; every other key stays exactly as recorded.
 
   Args:
     repo: Repository root whose settings file carries the registrations.
@@ -346,20 +495,8 @@ def _reconcile_routines(repo: Path, cfgs: dict) -> dict:
   Raises:
     RuntimeError: When the core CLI cannot be resolved, or a call exits non-zero.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-  import collect_ops as _collect_ops  # pylint: disable=import-error
-  # waiver: the resolver is the collector's own copy of the § 1c lookup, reused rather than duplicated a fourth time
-  cli = _collect_ops._resolve_core_cli()  # pylint: disable=protected-access
-
-  # guard: no lookup stage found a binary — the routines this plugin ships would stay on
-  # whatever shape the consumer installed years ago, silently
-  if cli is None:
-    raise RuntimeError(
-        "lazycortex-core CLI not resolvable: $LAZYCORTEX_PLUGIN_DIRS yields no match, no "
-        "dev-vault sibling tree carries bin/lazycortex-core, and the plugin registry records no "
-        "lazycortex-core install with a bin/lazycortex-core entry."
-    )
+  # the core CLI owns the write; without it the routines would stay on whatever shape they were installed with
+  cli = resolve_core_cli()
   outcomes: dict[str, str] = {}
   for name, cfg in cfgs.items():
     proc = subprocess.run(
@@ -395,19 +532,19 @@ def _migrate(existing: dict) -> list[str]:
   """
   migrated: list[str] = []
 
-  # The md-scan routine is retired — its `process-file` consumer no longer exists, so a
+  # the md-scan routine is retired — its `process-file` consumer no longer exists, so a
   # surviving registration is a routine the daemon runs into a missing subcommand.
   if existing.get(_SettingsKey.ROUTINES, {}).pop(_RETIRED_SCAN_ROUTINE, None) is not None:
     migrated.append(f"{_SettingsKey.ROUTINES}.{_RETIRED_SCAN_ROUTINE} (removed)")
 
-  # The historian is gone; the coordinator writes `# History` inline, so a `history`
+  # the historian is gone; the coordinator writes `# History` inline, so a `history`
   # link in a class points at an expert nothing dispatches.
   review = existing.get(JobKey.REVIEW, {})
   for idx, cls in enumerate(review.get(JobKey.CLASSES) or []):
     if cls.get(JobKey.EXPERTS, {}).pop(_HISTORY_GROUP, None) is not None:
       migrated.append(f"{JobKey.REVIEW}.{JobKey.CLASSES}[{idx}].{JobKey.EXPERTS}.{_HISTORY_GROUP} (removed)")
 
-  # Both cleanups above are version-independent, and `review._version` stays untouched on purpose:
+  # both cleanups above are version-independent, and `review._version` stays untouched on purpose:
   # the ladder is `lazycortex-core`'s, and it skips any section already standing at or beyond its
   # own target, so a number written here would strand core's next step unrun.
   return migrated
@@ -422,9 +559,9 @@ def _ensure_dirs(repo: Path) -> list[str]:
   """
   created: list[str] = []
   for rel in _REQUIRED_DIRS:
-    d = repo / rel
-    if not d.exists():
-      d.mkdir(parents=True, exist_ok=True)
+    path = repo / rel
+    if not path.exists():
+      path.mkdir(parents=True, exist_ok=True)
       created.append(rel)
   return created
 
@@ -442,7 +579,7 @@ def _merge_defaults(existing: dict, defaults: dict, added: list[str], prefix: st
   for key, value in defaults.items():
     path = f"{prefix}.{key}" if prefix else key
 
-    # guard: absent at this depth — write the default whole, dict or scalar alike
+    # absent at this depth — write the default whole, dict or scalar alike
     if key not in existing:
       existing[key] = value
       added.append(path)
@@ -464,24 +601,39 @@ def _ensure_settings(repo: Path) -> dict:
   removed, and this plugin's three routines are reconciled through the core CLI, which owns
   the write for those entries.
 
+  Notes:
+    - The settings file is read and written only through the core CLI; of the `review`, `experts`,
+      and `routines` sections, only those that changed are written back.
+
+  Args:
+    repo: Repository root whose settings file is updated.
+
   Returns:
     A dict with the settings file path, the list of keys that were added, the list of
     migrations applied, and the reconcile outcome per routine name.
+
+  Raises:
+    SettingsRefusedError: When core cannot read or write the settings file.
+    RuntimeError: When the core CLI cannot be resolved, or a routine reconcile call exits non-zero.
   """
   settings_dir = repo / Paths.CLAUDE_DIR
   settings_dir.mkdir(parents=True, exist_ok=True)
   settings_path = settings_dir / Paths.SETTINGS_FILE
-  if settings_path.exists():
-    existing = json.loads(settings_path.read_text(encoding = "utf-8"))
-  else:
-    existing = {}
+  cli = resolve_core_cli()
 
-  # The seed is built against what is already on disk: the watch root and branch it
+  # the sections this install reads, exactly as the file carries them; an absent one stays absent
+  existing: dict = {}
+  for name in _READ_SECTIONS:
+    if (section := read_section(cli, repo, name)) is not None:
+      existing[name] = section
+  before = copy.deepcopy(existing)
+
+  # the seed is built against what is already on disk: the watch root and branch it
   # declares are derived from the consumer's own state, so it must be built before
   # the merge and before the migration strips what it derives from.
   defaults = _default_settings(repo, existing)
 
-  # The routine bodies leave the absent-only merge: a registration already on record would
+  # the routine bodies leave the absent-only merge: a registration already on record would
   # keep whatever shape it was installed with, and the owned keys are exactly what a plugin
   # update needs to correct. Everything else in the `routines` section — the `_version` meta
   # key — still rides the merge.
@@ -499,8 +651,10 @@ def _ensure_settings(repo: Path) -> dict:
     migrated.append(f"{JobKey.REVIEW}.{_WATCH_ROOT} ({recorded!r} -> {widened!r})")
     review[_WATCH_ROOT] = widened
 
-  # one write carries the merge, the migrations and the widening together
-  settings_path.write_text(json.dumps(existing, indent=2) + "\n", encoding = "utf-8")
+  # each section the merge, the migrations or the widening changed is written back as it now stands
+  for name in _WRITTEN_SECTIONS:
+    if name in existing and existing[name] != before.get(name):
+      write_section(cli, repo, name, value = existing[name])
 
   # after the write, so the core CLI reconciles against the section this install just left
   # on disk rather than racing it
@@ -530,6 +684,7 @@ def install(repo: Path) -> dict:
     `reconciled`.
 
   Raises:
+    SettingsRefusedError: When the core CLI cannot read or write the repository's settings file.
     RuntimeError: When the `lazycortex-core` CLI cannot be resolved, or its
       `reconcile-routine` verb refuses one of this plugin's routine configs.
   """
@@ -542,12 +697,10 @@ def install(repo: Path) -> dict:
   # value and every review class glob's root — never narrowed.
 
   repo = repo.resolve()
-  dirs = _ensure_dirs(repo)
-  settings_info = _ensure_settings(repo)
   return {
       "repo": str(repo),
-      "created_dirs": dirs,
-      **settings_info,
+      "created_dirs": _ensure_dirs(repo),
+      **_ensure_settings(repo),
   }
 
 
@@ -555,18 +708,30 @@ def main(argv: list[str]) -> int:
   """
   Run the install bootstrap and print the JSON report to stdout.
 
+  A refused settings file prints `{"status": "refused", "reason": ...}` instead of the report.
+
   Args:
     argv: Command-line arguments, excluding the program name.
 
   Returns:
-    Exit code: always 0.
+    Exit code: 0 on success, 1 when the settings file was refused.
+
+  Raises:
+    RuntimeError: When the core CLI cannot be resolved, or the install bootstrap's routine reconcile refuses and
+      exits non-zero; it propagates uncaught.
   """
   # waiver: argparse CLI signature, not a domain key
   parser = argparse.ArgumentParser(prog="lazy-review.install")
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--cwd", type=Path, default=Path.cwd())
   args = parser.parse_args(argv)
-  report = install(args.cwd)
+
+  # a settings file core cannot read or write ends the run as a refusal naming the file, not a traceback
+  try:
+    report = install(args.cwd)
+  except SettingsRefusedError as refusal:
+    print(json.dumps({ "status": "refused", "reason": refusal.reason }))
+    return 1
   print(json.dumps(report, indent=2))
   return 0
 

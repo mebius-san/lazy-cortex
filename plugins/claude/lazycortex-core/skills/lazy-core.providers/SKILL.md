@@ -6,7 +6,7 @@ allowed-tools: Read, Write, AskUserQuestion, Bash(mkdir -p *), Bash(date *), Bas
 ---
 # Provider Registry
 
-Manages the `providers` block: named LLM endpoints (base URL, token variable, four-tier model map) an expert-job spawn can be pointed at instead of Anthropic. Each entry is a machine fact — the endpoint and its credential name — not a shared team decision, so it lives only in the gitignored local overlay, never in the tracked settings file. Which expert uses which provider is a separate, content-level decision recorded on the expert's own entry and out of scope here.
+Manages the `providers` block: named LLM endpoints (base URL, token variable, four-tier model map) an expert-job spawn can be pointed at instead of Anthropic. Each entry is a machine fact — the endpoint and its credential name — not a shared team decision, so it lives only in the gitignored local overlay, never in the tracked settings file. Which expert uses which provider is a separate, content-level decision recorded on the expert's own entry and out of scope here. An expert bound to a provider reaches its models only through this tier map: its own `model` field, when set, must be one of the four tier aliases `fable` / `opus` / `sonnet` / `haiku` — any other value (a full model id, a provider-native name, `default`) is refused at dispatch and fails `/lazy-runtime.preflight`.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -173,6 +173,7 @@ One line per step in the canonical list, with its outcome word. For `add`/`updat
 - **"`base_url` is required" / "`token_env` is required"** — the wizard left a mandatory field empty → re-run and answer both.
 - **"models must cover tiers [...]"** — one or more of `fable`/`opus`/`sonnet`/`haiku` is missing or blank → supply all four.
 - **"claude-\* literal in tiers [...]"** — a tier was given a `claude-*` model name, which cannot pass through a foreign endpoint or the local proxy → use the provider's own model identifier.
+- **"expert ... model ... must be one of the tier aliases"** at dispatch or in preflight — an expert bound to a provider pins `model` to something other than `fable` / `opus` / `sonnet` / `haiku` → set the expert's `model` to a tier alias (or drop it and let its agent's tier apply), and put the provider's own model name into this registry's tier map instead.
 - **"openai tiers [...] must use the rt-openai/ prefix"** — the `openai` provider's tiers must route through the proxy's `rt-openai/` wildcard, never the bare `openai/*` interactive-key route → prefix every tier value with `rt-openai/`.
 - **"token variable `<token_env>` not found in the environment or ~/.claude/.env"** — neither location defines it → export it or add it to `~/.claude/.env`, then retry.
 - **"endpoint ... returned \<code\>, expected 200" / "endpoint ... unreachable"** — the base URL doesn't answer `/v1/models` with a 200 for this token → check the URL and the token, or if the endpoint is a public Anthropic-compatible host that isn't `api.anthropic.com`, point it at a local proxy instead (the `claude` CLI rejects non-`claude-*` model names against public base URLs before making the call; only `localhost`/`127.0.0.1` and `api.anthropic.com` are exempt).

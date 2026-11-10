@@ -150,7 +150,7 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core"
 Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" settings-set daemon --key supervisor/dev_mode --value <true|false> --cwd <repo-root>)
 ```
 
-- **python** = the absolute interpreter the unit hands to the shim: `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" install-phase interpreter)`, held as `<PYTHON>`. launchd and systemd exec the shim with a minimal `PATH`, so the unit needs the absolute path. It is written into the unit file only — never into `lazy.settings.json` or `.claude/settings.local.json`.
+- **python** = the absolute interpreter the unit hands to the shim: `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" install-phase interpreter)`, held as `<PYTHON>`. The verb prints an operator-pinned `LAZYCORTEX_PYTHON` from `.claude/settings.local.json` when it still names a file; otherwise the version-neutral `python3` on `PATH` when it is the running interpreter outside a virtualenv; otherwise the running interpreter itself — so a minor Python upgrade does not leave the unit pointing at a removed version. launchd and systemd exec the shim with a minimal `PATH`, so the unit needs the absolute path; if that path stops resolving anyway, the shim reports it and falls back to `python3` on the login `PATH`. It is written into the unit file only — never into `lazy.settings.json` or `.claude/settings.local.json`.
 - **login-shell / env-files** = operator-provided supervisor options, read verbatim from the `daemon.supervisor` block (a missing or `null` key is off / empty):
 
 ```bash

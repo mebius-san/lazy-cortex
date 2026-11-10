@@ -1,10 +1,8 @@
 """
 Cross-plugin dispatch for lazycortex-wiki.
 
-Implements the §1c CLI-subprocess contract from
-The inter-plugin boundary contract — lazycortex-wiki reaches
-lazycortex-core exclusively via its published CLI binary, never by
-importing core Python modules.
+Reaches lazycortex-core only through core's published CLI, run as a subprocess,
+and never by importing core Python modules.
 """
 from __future__ import annotations
 
@@ -14,20 +12,24 @@ import subprocess
 import sys
 from pathlib import Path
 
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import plugin_registry as _plugin_registry  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import tags as _tags  # pylint: disable=import-error
-
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
 
 
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import axes as _axes  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import tags as _tags  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+
+
 # lazycortex-wiki reaches lazycortex-core ONLY via its published CLI —
 # no Python-import coupling, and no plugin-cache walk: the binary comes
-# from the $LAZYCORTEX_PLUGIN_DIRS contract, or else from the install root
-# Claude Code's plugin registry records.  See the inter-plugin boundary
+# from the wiki's one core resolver.  See the inter-plugin boundary
 # contract for the full pattern.
 
 # ----------------------------------------------------------------------------------------
@@ -41,9 +43,7 @@ class CoreDispatch:
 
   Guarantees:
     - `lazycortex-core` is reached only through its published CLI binary, never by importing a
-      core Python module; the binary is located via `$LAZYCORTEX_PLUGIN_DIRS`, falling back to
-      the `lazycortex-core` install root Claude Code's plugin registry records when the
-      environment names none.
+      core Python module.
 
   Attributes:
     EXPERT_NAME: Expert name as it appears in `lazy.settings.json[experts]`.
@@ -57,9 +57,7 @@ class CoreDispatch:
 
   # Contract:
   # `lazycortex-core` is reached ONLY through its published CLI binary, NEVER by importing a core
-  # Python module. The binary is located by walking `$LAZYCORTEX_PLUGIN_DIRS` first, falling back
-  # to the `lazycortex-core` install root Claude Code's plugin registry records when the
-  # environment names none.
+  # Python module.
 
   # Expert name as it appears in `lazy.settings.json[experts]`.
   EXPERT_NAME = "wiki.curator"
@@ -85,25 +83,41 @@ class CoreDispatch:
   _CMD_LIST_JOBS = "list-jobs"
   _CMD_COLLECT   = "collect-job"
   _CMD_CONSUME   = "consume-job"
+  _CMD_RETIRE    = "retire-jobs"
 
-  # `list-jobs` flags, and the `{expert, job_id}` body keys `collect-job` / `consume-job` read.
-  _ARG_EXPERT = "--expert"
-  _ARG_CWD    = "--cwd"
-  _JOB_EXPERT = "expert"
-  _JOB_ID     = "job_id"
-
-  # Result file the domain-spec writer returns its whole document in.
-  _RESULT_DOMAIN_DOC = "doc.md"
+  # `list-jobs` flags, the `{expert, job_id}` body keys `collect-job` / `consume-job` read, and the
+  # `{expert, dedup_key}` body `retire-jobs` reads.
+  _ARG_EXPERT    = "--expert"
+  _ARG_CWD       = "--cwd"
+  _JOB_EXPERT    = "expert"
+  _JOB_ID        = "job_id"
+  _JOB_DEDUP_KEY = "dedup_key"
 
   # Environment variable name core reads to locate the repo.
   _ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 
-  # Plugin-dirs env var set by the daemon for subprocess routines.
-  _ENV_PLUGIN_DIRS = "LAZYCORTEX_PLUGIN_DIRS"
+  # `error-record` verb, its flags and wire values, as the core error ledger reads them.
+  _CMD_ERROR_RECORD   = "error-record"
+  _ARG_KIND           = "--kind"
+  _ARG_CAUSE          = "--cause"
+  _ARG_INCIDENT       = "--incident"
+  _ARG_SEVERITY       = "--severity"
+  _ARG_DETAIL         = "--detail"
+  _ARG_RESOLVE        = "--resolve"
+  _KIND_PLUGIN_ERROR  = "plugin_error"
+  _SEVERITY_WARN      = "warn"
 
-  # Path components used in binary resolution.
-  _CORE_PLUGIN_NAME = "lazycortex-core"
-  _BIN_SEGMENT      = "bin"
+  # Repo-relative directory of the markers this plugin keeps for the ledger incidents it opened and has not closed,
+  # so a success learns whether it has anything to close without spawning core.
+  # opt: a marker exists only while the core ledger holds its incident open, which stays true because this plugin
+  # is the only writer of the retire incidents it marks; an incident closed by anyone else leaves a stale marker
+  # that sends one extra, harmless resolve on the next successful retire and is then removed.
+  _OPEN_INCIDENTS_REL = ".runtime/lazy-wiki/open-incidents"
+
+  # Stable cause a failed retire of finished jobs reports, and the incident-key prefix it folds under,
+  # followed by the expert whose jobs were not retired.
+  _CAUSE_RETIRE_FAILED     = "retire-finished-failed"
+  _INCIDENT_RETIRE_PREFIX  = "wiki-retire:"
 
   # Valid kind values that the curator protocol recognises. Callers place one
   # of these as the payload's `kind` field; the payload is written verbatim to
@@ -125,34 +139,22 @@ class CoreDispatch:
     Resolve the `lazycortex-core` CLI binary on construction.
 
     Raises:
-      RuntimeError: When neither `$LAZYCORTEX_PLUGIN_DIRS` nor the
-        plugin registry names a usable `lazycortex-core` binary.
+      RuntimeError: When no lookup stage finds a usable `lazycortex-core` binary.
     """
-    self._cli = self._resolve_core_cli()
+    self._cli = _axes.resolve_core_cli()
 
   # ------------------------------------------------------------------
-  def dispatch_curator(
-    self,
-    *,
-    repo: Path,
-    node_path: Path,
-    payload: dict,
-  ) -> dict:
+  def dispatch_curator(self, *,
+                       repo: Path,
+                       node_path: Path,
+                       payload: dict) -> dict:
     """
     Queue a `wiki.curator` job for one node via `dispatch-job`.
 
-    Builds the full job bundle and forwards it to `lazycortex-core
-    dispatch-job`.  Core owns the job-dir layout, config.json
-    composition, READY ordering, and git_author/aspects/model
-    resolution — none of those leak into this caller (§1c §3).
-
-    The caller's `payload` is forwarded to `request.json`; the curation
-    `kind` (`classify` / `link`) MUST be carried inside `payload["kind"]`
-    by the caller so it reaches the curator's `request.json` — this
-    method never injects it.  A `classify` payload's `existing_tags`
-    anchor is the one field this method extends: the advisory tag
-    dictionary's per-axis values are unioned into it, so a value that
-    was canonised but is worn by no node today still anchors the
+    The curator receives the caller's `payload` as given. The curation `kind` (`classify` / `link`) MUST be
+    carried inside `payload["kind"]` by the caller — this method never supplies it. A `classify` payload's
+    `existing_tags` anchor is the one field this method extends: the advisory tag dictionary's per-axis
+    values are added to it, so a value that was canonised but is worn by no node today still anchors the
     curator.
 
     Guarantees:
@@ -163,6 +165,8 @@ class CoreDispatch:
         dispatches for the same kind and node collapse into one pending job while classify and
         link for the same node remain independent jobs.
       - A node lying outside the repository is refused before anything is queued.
+      - A finished earlier job under the same `dedup_key` never blocks the dispatch, so a node edited again
+        after its job finished gets a new job; a queued or running job still collapses the repeat.
 
     Args:
       repo: Absolute path to the repository root.
@@ -194,6 +198,10 @@ class CoreDispatch:
     # A node lying outside the repository is refused before anything is queued — no job bundle ever
     # reaches core carrying a source manifest the pump cannot resolve.
 
+    # Contract:
+    # A finished earlier job under the same `dedup_key` MUST NOT block the dispatch;
+    # a queued or running job still collapses the repeat into itself.
+
     # Domain(runtime.jobs):
     # # Collapsing repeated requests in the queue
     # A request for expert work carries a deduplication key: while an identical request is still waiting
@@ -204,14 +212,9 @@ class CoreDispatch:
     # is reduced to one canonical written form, otherwise the same target named two ways yields two keys
     # and two requests instead of one.
 
-    # Resolve the path to its absolute form so relative/absolute callers
-    # collapse to the same dedup_key. Prepend `kind` so classify and link
-    # for the same node do not dedup against each other (a DONE-but-not-
-    # CONSUMED classify-job would otherwise swallow the chained link
-    # dispatch from its own tail).
+    # resolve the path to its absolute form so relative/absolute callers
+    # collapse to the same dedup_key.
     abs_node = node_path.resolve() if node_path.is_absolute() else (Path(repo) / node_path).resolve()
-    kind = str(payload.get(self._PAYLOAD_KIND, ""))
-    dedup_key = f"{kind}:{abs_node}"
 
     # the bundle names the node; the pump copies it when it claims the job, so the curator sees
     # the file as it stands then rather than as it stood when the dispatch was queued
@@ -222,25 +225,26 @@ class CoreDispatch:
       # fail the job at claim, so the dispatch is refused here where the caller can still see why
       raise RuntimeError(f"node {abs_node} lies outside the repository at {repo}") from err
 
-    # the bundle core reads off stdin — layout, config.json and READY ordering stay core's
+    # the bundle core reads off stdin — layout, config.json and READY ordering stay core's; the
+    # dedup_key is prefixed with the payload `kind` so classify and link for the same node do not
+    # dedup against each other (a DONE-but-not-CONSUMED classify-job would otherwise swallow the
+    # chained link dispatch from its own tail)
     bundle: dict = {
       "expert":    self.EXPERT_NAME,
       "payload":   self._merge_dictionary_anchor(repo, payload),
       "source":    [ node_rel ],
       "result":    [ "curation.json" ],
-      "dedup_key": dedup_key,
+      "dedup_key": f"{payload.get(self._PAYLOAD_KIND, '')}:{abs_node}",
     }
+    self._retire_finished(repo, bundle)
     return self._call_core(self._CMD_DISPATCH, bundle, repo)
 
   # ------------------------------------------------------------------
-  def dispatch_tag_curator(
-    self,
-    *,
-    repo: Path,
-    surface: str,
-    payload: dict,
-    collected_tags: dict,
-  ) -> dict:
+  def dispatch_tag_curator(self, *,
+                           repo: Path,
+                           surface: str,
+                           payload: dict,
+                           collected_tags: dict) -> dict:
     """
     Queue a `wiki.tag-curator` job for one tag surface via `dispatch-job`.
 
@@ -254,6 +258,8 @@ class CoreDispatch:
       - The `dedup_key` combines the normalize-tags kind with the surface id, so repeated
         dispatches for one surface collapse into one pending job while other surfaces stay
         independent.
+      - A finished earlier job for the surface never blocks the dispatch; a queued or running job still
+        collapses the repeat.
 
     Args:
       repo: Absolute path to the repository root.
@@ -276,6 +282,10 @@ class CoreDispatch:
     # The `dedup_key` MUST combine the normalize-tags kind with the surface id, so repeated
     # dispatches for one surface collapse into one pending job while other surfaces stay independent.
 
+    # Contract:
+    # A finished earlier job for the surface MUST NOT block the dispatch;
+    # a queued or running job still collapses the repeat into itself.
+
     # the census exists only in memory, so it rides as inline context rather than a path manifest
     bundle: dict = {
       "expert":         self.EXPERT_TAG_CURATOR,
@@ -284,7 +294,187 @@ class CoreDispatch:
       "result":         [ self._RESULT_ALIAS_MAP ],
       "dedup_key":      f"{self.KIND_NORMALIZE_TAGS}:{surface}",
     }
+    self._retire_finished(repo, bundle)
     return self._call_core(self._CMD_DISPATCH, bundle, repo)
+
+  # ------------------------------------------------------------------
+  def _retire_finished(self, repo: Path, bundle: dict) -> None:
+    """
+    Retire the finished jobs that would hold the bundle's dedup key, via `retire-jobs`.
+
+    Best-effort: a failed call is reported to the core error ledger and the dispatch still goes ahead, answering
+    `already-queued` exactly as it would without the retire, so the caller still sees why nothing new was queued.
+
+    Notes:
+      - A failed `retire-jobs` call is reported to the core error ledger as a warning incident keyed per expert; the
+        plugin remembers that incident as open for the repository only when core recorded the report, and a report
+        that could not be delivered or that core refused leaves nothing remembered.
+      - The next successful retire for the same expert in the same repository closes that incident through core's
+        `error-record --resolve`.
+      - A success with no incident remembered as open spawns nothing.
+      - A close that core did not accept stays remembered as open and is retried on the next success.
+
+    Args:
+      repo: Absolute path to the repository root.
+      bundle: The dispatch bundle about to be queued; its `expert` and `dedup_key` address the jobs to retire.
+    """
+
+    # Domain(runtime.jobs):
+    # # Releasing a finished request nobody collects
+    # A request whose answer is applied by the expert itself, with no one reading the answer back, is
+    # never acknowledged by its caller, so a finished request would hold its deduplication key until the
+    # queue is cleaned up days later and every repeat ask would be swallowed. Such a caller therefore
+    # releases the finished requests under the key just before it asks again; a request still waiting or
+    # running is left alone and the repeat joins it. The release is a courtesy, not a condition: when it
+    # fails, the ask still goes out and simply meets the old request, as it did before.
+
+    # the expert's retire incident and the local marker that records it as open
+    incident = f"{self._INCIDENT_RETIRE_PREFIX}{bundle[self._JOB_EXPERT]}"
+    marker = self._incident_marker(repo, incident)
+
+    # a failed retire must not stop the dispatch — it goes to the error ledger and is marked open here, and the
+    # dispatch's own answer reports what happened to the request
+    try:
+      self._call_core(
+        self._CMD_RETIRE,
+        { self._JOB_EXPERT: bundle[self._JOB_EXPERT], self._JOB_DEDUP_KEY: bundle[self._JOB_DEDUP_KEY] },
+        repo,
+      )
+    except (RuntimeError, json.JSONDecodeError) as error:
+      # only a report core recorded opened an incident, so only that one is remembered as open
+      # waiver: a stdlib exception carries no class_name accessor; its class name is the varying detail of the report
+      if self._report_warning(repo, cause = self._CAUSE_RETIRE_FAILED, incident = incident,
+                              detail = f"{type(error).__name__}: {error}"):
+        self._mark_open(marker)
+      return
+
+    # guard: no incident of this expert is marked open, so the success needs nothing from core
+    if not marker.is_file():
+      return
+
+    # the success is the proof the condition cleared; the marker goes only once core took the close
+    if self._resolve_incident(repo, incident):
+      self._clear_mark(marker)
+
+  # ------------------------------------------------------------------
+  @classmethod
+  def _incident_marker(cls, repo: Path, incident: str) -> Path:
+    """
+    Locate the record that tells whether an incident is remembered as open for a repository.
+
+    Args:
+      repo: Absolute path to the repository root.
+      incident: Stable incident key in the core error ledger.
+
+    Returns:
+      The path of the open-incident record; it exists only while the incident is remembered as open.
+    """
+    # the incident key with its separator made filename-safe on every host
+    return Path(repo) / cls._OPEN_INCIDENTS_REL / incident.replace(":", ".")
+
+  # ------------------------------------------------------------------
+  @staticmethod
+  def _mark_open(marker: Path) -> None:
+    """
+    Remember an incident as open.
+
+    Notes:
+      - A record that cannot be written is dropped and never raised into the caller.
+
+    Args:
+      marker: Open-incident record path of the incident to remember.
+    """
+    # a marker that cannot be written leaves the incident to the operator, never breaks the dispatch
+    try:
+      marker.parent.mkdir(parents = True, exist_ok = True)
+      marker.touch()
+    # waiver: best-effort boundary — an unwritable runtime directory must not fail the dispatch it reports on
+    except OSError:
+      pass
+
+  # ------------------------------------------------------------------
+  @staticmethod
+  def _clear_mark(marker: Path) -> None:
+    """
+    Forget an incident that core has accepted as closed.
+
+    Notes:
+      - A record that cannot be removed is left in place and never raised into the caller; the close is retried
+        on the next successful retire.
+
+    Args:
+      marker: Open-incident record path of the incident to forget.
+    """
+    # a marker that cannot be removed only costs one more resolve on the next success
+    try:
+      marker.unlink(missing_ok = True)
+    # waiver: best-effort boundary — a stale marker is harmless, the next success resolves again
+    except OSError:
+      pass
+
+  # ------------------------------------------------------------------
+  def _resolve_incident(self, repo: Path, incident: str) -> bool:
+    """
+    Ask core to close an incident in its error ledger via `error-record --resolve`.
+
+    Notes:
+      - A close that cannot be delivered is reported as not done and never raised into the caller.
+
+    Args:
+      repo: Absolute path to the repository root whose ledger holds the incident.
+      incident: Stable incident key to close.
+
+    Returns:
+      `True` when core accepted the close, `False` otherwise.
+    """
+    # core's ledger lives under the working directory of the verb, so it runs from the repo root;
+    # an undeliverable close is reported as not done, never raised into the dispatch
+    try:
+      # waiver: stdlib subprocess idiom, the arguments are the error-record wire contract
+      done = subprocess.run(
+        [ sys.executable, str(self._cli), self._CMD_ERROR_RECORD, self._ARG_INCIDENT, incident, self._ARG_RESOLVE ],
+        cwd = repo, capture_output = True, text = True, check = False, encoding = "utf-8",
+      )
+    # waiver: best-effort boundary — a close that cannot be delivered leaves the marker for the next success
+    except (OSError, ValueError):
+      return False
+
+    # only a clean exit means core recorded the close
+    return done.returncode == 0
+
+  # ------------------------------------------------------------------
+  def _report_warning(self, repo: Path, *, cause: str, incident: str, detail: str) -> bool:
+    """
+    Open, or add to, a `plugin_error` incident at warning severity in the core error ledger.
+
+    Notes:
+      - A report that cannot be delivered is dropped and never raised into the caller.
+
+    Args:
+      repo: Absolute path to the repository root whose ledger records the event.
+      cause: Stable cause token of the failure.
+      incident: Stable incident key repeated reports of the same condition fold into.
+      detail: One line describing this occurrence.
+
+    Returns:
+      `True` when `error-record` exited 0, `False` when the report could not be delivered or core refused it.
+    """
+    # core's ledger lives under the working directory of the verb, so it runs from the repo root;
+    # a report that cannot be delivered is dropped, never raised into the work it reports on
+    try:
+      # waiver: stdlib subprocess idiom, the arguments are the error-record wire contract
+      done = subprocess.run(
+        [ sys.executable, str(self._cli), self._CMD_ERROR_RECORD, self._ARG_KIND, self._KIND_PLUGIN_ERROR,
+          self._ARG_CAUSE, cause, self._ARG_INCIDENT, incident, self._ARG_SEVERITY, self._SEVERITY_WARN,
+          self._ARG_DETAIL, detail ],
+        cwd = repo, capture_output = True, text = True, check = False, encoding = "utf-8",
+      )
+    # waiver: best-effort boundary — an undeliverable report is dropped, never raised into the caller
+    except (OSError, ValueError):
+      return False
+
+    # only a clean exit means core recorded the event and holds the incident open
+    return done.returncode == 0
 
   # ------------------------------------------------------------------
   @classmethod
@@ -312,7 +502,7 @@ class CoreDispatch:
     # value appearing once whichever side it came from, and a value the census never saw is marked as worn
     # by no one — evidence enough to reuse it, and honest about how little is behind it.
 
-    # guard: only classify carries an anchor — every other kind is forwarded verbatim
+    # only classify carries an anchor — every other kind is forwarded verbatim
     if payload.get(cls._PAYLOAD_KIND) != cls.KIND_CLASSIFY:
       return payload
     listed = _tags.dictionary_values(repo)
@@ -336,18 +526,16 @@ class CoreDispatch:
     return { **payload, cls._PAYLOAD_EXISTING_TAGS: { **anchor, _tags.COLLECT_AXES: axes } }
 
   # ------------------------------------------------------------------
-  def dispatch_domain_writer(
-    self,
-    *,
-    repo: Path,
-    group: str,
-    payload: dict,
-  ) -> dict:
+  def dispatch_domain_writer(self, *,
+                             repo: Path,
+                             group: str,
+                             payload: dict,
+                             result_names: list[str]) -> dict:
     """
     Queue a `wiki.domain-writer` job for one domain group via `dispatch-job`.
 
-    The job returns its document as a result file, which `domain-collect`
-    later lands in the generated tree.
+    The job returns the group's folder note and its stale block docs as result
+    files, which `domain-collect` later lands in the generated tree.
 
     Guarantees:
       - The caller's `payload` reaches `request.json` unchanged; no field is added, renamed, or
@@ -358,8 +546,10 @@ class CoreDispatch:
     Args:
       repo: Absolute path to the repository root.
       group: Dot-separated domain group key the job regenerates.
-      payload: Caller-assembled request dict (`kind`, group, gloss, blocks,
-        language, doc_path, hash).
+      payload: Caller-assembled request dict (`kind`, group, gloss, docs,
+        stale_docs, folder_note_path, hash, language, catalog_blocks, catalog_groups).
+      result_names: File names the job returns under `result/` — the folder note's
+        and every stale doc's.
 
     Returns:
       Parsed JSON response from `dispatch-job`, typically
@@ -375,11 +565,11 @@ class CoreDispatch:
     # for one group collapse into one pending job while other groups stay independent.
 
     # the bundle core reads off stdin — layout, config.json and READY ordering stay core's; the
-    # writer returns its document in the declared result file, never in the working tree
+    # writer returns its files in the declared result slots, never in the working tree
     bundle: dict = {
       "expert":    self.EXPERT_DOMAIN_WRITER,
       "payload":   payload,
-      "result":    [ self._RESULT_DOMAIN_DOC ],
+      "result":    list(result_names),
       "dedup_key": f"{self.KIND_DOMAIN_SPEC}:{group}",
     }
     return self._call_core(self._CMD_DISPATCH, bundle, repo)
@@ -516,66 +706,3 @@ class CoreDispatch:
         f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
       )
     return json.loads(proc.stdout)
-
-  # ------------------------------------------------------------------
-  @staticmethod
-  def _resolve_core_cli() -> Path:
-    """
-    Locate the `lazycortex-core` CLI binary.
-
-    Walks `$LAZYCORTEX_PLUGIN_DIRS` — set by the daemon for every subprocess
-    routine it spawns — for `<dir>/bin/lazycortex-core`, matching the shape
-    `runtime_daemon.resolve_routine_command` uses on the daemon side, then falls
-    back to the install root Claude Code's plugin registry
-    (`~/.claude/plugins/installed_plugins.json`) records for core.
-
-    Returns:
-      Resolved `Path` to a usable `lazycortex-core` binary.
-
-    Raises:
-      RuntimeError: When neither the environment nor the plugin registry carries the binary.
-    """
-
-    # Domain(plugin.boundaries):
-    # # Finding a neighbour inside a job the runtime started
-    # This work only ever runs as a job the runtime starts, and the runtime hands every process it spawns the
-    # list of directories where the enabled plugins live. Under that guarantee the neighbour's address is taken
-    # from that list alone and nothing else is consulted: the entries are tried in the order given, and the
-    # first one that actually carries the published command wins. An empty list means the job was started
-    # outside the runtime; the one other place looked at is the registry of installed plugins, which records
-    # where the neighbour's enabled version was installed. The store of downloaded copies is never searched,
-    # since it keeps every version ever installed and its newest copy need not be the one enabled. The wider
-    # ladder of sources a resolver needs when it must also serve a development checkout is described where
-    # that resolver lives, and is not repeated here.
-
-    # take the first directory that actually carries the binary — order is the caller's priority
-    env_dirs = os.environ.get(CoreDispatch._ENV_PLUGIN_DIRS, "").split(os.pathsep)
-    for d in env_dirs:
-      # guard: skip empty segments produced by a leading/trailing colon
-      if not d:
-        continue
-      cli = Path(d) / CoreDispatch._BIN_SEGMENT / CoreDispatch._CORE_PLUGIN_NAME
-      if cli.is_file():
-        return cli
-
-    # registry fallback — a consumer install's own session has no daemon export to walk; the
-    # install root Claude Code recorded for core's highest installed version
-    installed = _plugin_registry.installed_plugin_root(CoreDispatch._CORE_PLUGIN_NAME)
-    if installed is not None:
-      cli = installed / CoreDispatch._BIN_SEGMENT / CoreDispatch._CORE_PLUGIN_NAME
-      if cli.is_file():
-        return cli
-
-    # the environment and the plugin registry are the only sanctioned discovery channels — see
-    # dev.plugin-boundaries § 1c; name what was searched so a misconfigured runner is diagnosable
-    # from the message alone
-    searched = [d for d in env_dirs if d] or ["<unset>"]
-    raise RuntimeError(
-      f"lazycortex-core CLI not resolvable: no "
-      f"{CoreDispatch._BIN_SEGMENT}/{CoreDispatch._CORE_PLUGIN_NAME} under any directory named by "
-      f"${CoreDispatch._ENV_PLUGIN_DIRS} (searched: {', '.join(searched)}) and no "
-      f"{CoreDispatch._CORE_PLUGIN_NAME} install recorded in Claude Code's plugin registry. "
-      f"This worker runs as a daemon subprocess, which exports that variable; "
-      f"running it from a plain shell without an installed core requires exporting "
-      f"${CoreDispatch._ENV_PLUGIN_DIRS} to the enabled plugin directories first."
-    )

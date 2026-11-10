@@ -1,7 +1,7 @@
 ---
 name: lazy-experts.install
 description: "Run when the operator asks to set up lazycortex-experts in a repo, to add or complete an expert class (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, `sci-fi`, `fantasy`), or when dispatching an expert fails because `lazy.settings.json` has no matching `experts` entry or no model tier for a generic agent. Unlike the sibling install skills, it syncs no rules — it only seeds composed expert entries per the class map plus agent-model tiers, asks for classes only on a project that has none yet, and never overwrites what an operator chose — the one thing it completes on an existing entry is a missing mandatory cross-cutting aspect. Idempotent and quiet on re-run; install scope is detected."
-allowed-tools: Read, Write, Edit, Glob, Skill, AskUserQuestion, Bash(mkdir -p *), Bash(git rev-parse*), Bash(test *), Bash(date *), Bash(ls *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
+allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, Bash(mkdir -p *), Bash(git rev-parse*), Bash(test *), Bash(date *), Bash(ls *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
 ---
 # Install lazycortex-experts
 
@@ -71,7 +71,7 @@ The expert "classes" are the domain aspects this plugin ships. Enumerate the ava
 
 ### Enumerate available classes and roles
 
-- `<installPath>` is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-experts` prints: the authoring repo's own `plugins/claude/lazycortex-experts/` when this checkout ships the plugin, else the daemon's exported plugin dir, else the install `~/.claude/plugins/installed_plugins.json` records. Never read `installed_plugins.json` for it by hand — in a repo that authors the plugin that hands back the previous publish instead of the sources at hand, and every role, rule, template, or tier row added since is silently missed.
+- `<installPath>` is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-experts` prints: the `$LAZYCORTEX_PLUGIN_DIRS` entry first, then the dev-vault sibling, then the repo's own `plugins/claude/lazycortex-experts/`, and last the `installPath` the install `~/.claude/plugins/installed_plugins.json` records. Never read `installed_plugins.json` for it by hand — in a repo that authors the plugin that hands back the previous publish instead of the sources at hand, and every role, rule, template, or tier row added since is silently missed.
 - **Classes (domain aspects)**: `Glob <installPath>/references/lazy-experts.*-aspect.md`, minus the cross-cutting aspects `discipline`, `research`, `tech-writing`, `terms`, and `structure` (they compose onto experts, they are not classes). The class key is the basename minus the `lazy-experts.` prefix and the `-aspect.md` suffix — currently `claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, `sci-fi`, `fantasy`.
 - **Roles (agents)**: `Glob <installPath>/agents/lazy-experts.*.md`. The agent basenames minus the `lazy-experts.` prefix and `.md` suffix are the agent set — currently `interpreter`, `designer`, `architect`, `planner`, `use-case-writer`, `ui-designer`, `implementer`, `data-implementer`, `docs-writer`, `debugger`, `researcher`, `reviewer`, `tester`, `editor`, `fiction-writer`, `fiction-editor`. Which roles a class seeds — and which agent each role resolves to (three roles map onto an agent of a different basename, see Step 5's mapping table) — is decided by the class map in Step 5.
 
@@ -105,15 +105,15 @@ Outcome: `classes: <comma-list> (asked|derived)`.
 
 ## Step 4: Seed agent_models
 
-Dispatch the shared seeding primitive — it locates `lazycortex-core`'s `default-tiers.json` (the SOT), selects the `lazycortex-experts:*` keys, and applies them to `agent_models.lazycortex` in the target `lazy.settings.json` with absent→add / equal→unchanged / different→kept-local semantics (never clobbers an operator override, never touches other groups):
+The `agent-models-seed` verb seeds the `agent_models.lazycortex` group in the target `lazy.settings.json` with every `lazycortex-experts:` agent the core tier table lists. The step is here so every expert Step 5 composes resolves a model for its generic agent at dispatch time.
 
 ```
-Skill(skill: "lazycortex-core:lazy-core.agent-models-seed", args: "prefix=lazycortex-experts scope=<scope>")
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> agent-models-seed --prefix lazycortex-experts --scope <scope>)
 ```
 
-`<scope>` is the value resolved in Step 1 (`user` or `project`). Capture the primitive's report block — its `sot:` path and per-key states — verbatim; Step 7 folds it into the install report and surfaces `sot-missing` / `no-entries` if the primitive returns them.
+`<scope>` is the value resolved in Step 1 (`user` or `project`). The verb prints one JSON line: `outcome` is `seeded-N`, `unchanged`, or `no-entries` (exit 0), or a refusal — `sot-missing`, `missing-prefix`, `missing-scope`, `settings-unparseable` (exit 1, with a `message`); `sot` names the tier table it read; `entries` carries one `{dispatch, tier, state}` line per key, `state` being `added` / `unchanged` / `refreshed` / `kept-local`. Capture that JSON; Step 7 folds it into the install report.
 
-Outcome: `seeded` (entries added) or `unchanged` (nothing to add).
+Outcome: `seeded` (the verb answered `seeded-N`) or `unchanged` (it answered `unchanged` or `no-entries`); never report a seed the verb did not answer.
 
 ## Step 5: Seed expert entries
 
@@ -197,7 +197,7 @@ The `researcher` is deliberately NOT one of them: its only product is a catalog 
 
 ### Apply
 
-Ensure `experts` exists as an object with `_version: 1` (create if absent — never overwrite). For each composed entry, per-key semantics matching Step 4:
+Ensure `experts` exists as an object with `_version: 1` (create if absent — never overwrite). For each composed entry, per-key semantics:
 
 - **absent** → add the entry verbatim. State `added`.
 - **present** (any shape) → leave every field the operator owns untouched. State `kept-local`. Do NOT overwrite a differing `agent` ref, `git_author`, `workspace`, or the domain aspect — operators may have customized. Two exceptions complete what an older run left out rather than overriding anything: the mandatory cross-cutting aspects below, and a `workspace` key absent from one of the five isolated roles (above). Both are gaps, not choices — a differing value is a choice and stays.
@@ -232,7 +232,7 @@ Each plugin declares the expert keys its own install registers, in its `.claude-
 "provides_experts": ["wiki.curator", "wiki.terms-curator", "wiki.tag-curator", "wiki.structure-curator", "wiki.domain-writer"]
 ```
 
-Build the registry at run time: for every installed plugin, read `provides_experts` from its manifest (the install `~/.claude/plugins/installed_plugins.json` records, or the dev-vault source when this repo ships it) and take the union, remembering which plugin declared each key. The plugin's own install skill is the fix for any key it declares.
+Build the registry at run time: for every installed plugin, read `provides_experts` from its manifest under the root `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root <plugin>` prints and take the union, remembering which plugin declared each key. The plugin's own install skill is the fix for any key it declares.
 
 A hardcoded table here would name only the roles that existed when someone last edited this step, so every role added since reads as `unknown` — a false alarm on a healthy install and silence on a real absence. `lazy-core.hygiene` § Dynamic content forbids exactly that; the manifest is the machine-readable source it requires. A plugin with no `provides_experts` key declares no system experts, which is a valid answer and not a finding.
 
@@ -258,7 +258,7 @@ Outcome: `system-experts: complete` or `system-experts: <N> missing`.
   - Scope detected.
   - Plugin version + commit synced from (from `installed_plugins.json`).
   - Class set + whether it was `asked` or `derived` (Step 3).
-  - The `agent_models` seed result: fold in the Step 4 primitive's report block (its `sot:` defaults path + per-key states). If the primitive returned `sot-missing` or `no-entries`, surface that line prominently.
+  - The `agent_models` seed result: fold in the Step 4 verb's answer (its `sot` path, its `outcome`, and one line per `entries` key). If the `outcome` is a refusal or `no-entries`, surface that line prominently.
   - Per-key outcome for `experts`. Every technical class set includes `<domain>.data-writer`, `<domain>.use-case-writer`, `<domain>.ui-designer`, `<domain>.researcher`, and `<domain>.editor`, seeded by the class map's technical row; every fiction class set includes `<domain>.fiction-editor` beside `<domain>.fiction-writer`.
   - System-expert check result (Step 6): the `system-experts:` outcome plus one line per missing/unknown key.
   - One line per entry the Step 5 completion pass touched, naming the aspects appended: `experts.<expert-key> (completed: <aspect>[, <aspect>…])`.
@@ -272,7 +272,7 @@ One line per task in the canonical list above, with its outcome word.
 ## Failure modes
 
 - **`/lazy-experts.install` aborts: "plugin not enabled"** — `lazycortex-experts@lazycortex` has no entry in `~/.claude/plugins/installed_plugins.json` → add `"lazycortex-experts@lazycortex": true` to `enabledPlugins` in `settings.json`, restart Claude Code, re-run.
-- **`/lazy-experts.install` aborts: "lazycortex-core not installed"** — the defaults file glob returned nothing → install `lazycortex-core` first (`/plugin install lazycortex/lazycortex-core`), then re-run.
+- **`/lazy-experts.install` aborts: "lazycortex-core not installed"** — Step 4's `agent-models-seed` verb answered `sot-missing` → install `lazycortex-core` first (`/plugin install lazycortex/lazycortex-core`), then re-run.
 - **`/lazy-experts.install` aborts: "plugin-cache-incomplete"** — the agents or references glob under `<installPath>` returned nothing → run `/plugin update lazycortex-experts@lazycortex` to restore the cache, then re-run.
 
 ## Notes

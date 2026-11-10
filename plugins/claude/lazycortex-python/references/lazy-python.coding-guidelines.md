@@ -134,7 +134,7 @@ conventions.
 - Correct examples.
 ```python
 def _build_worker(self, *,
-                  mode: RunMode = RunMode.INVALID,
+                  mode: RunMode = RunMode.STRICT,
                   store: Store | None = None) -> Worker | None:
 
 def move(self,
@@ -149,7 +149,7 @@ def move(self,
 ```python
 def _build_worker(
                   self, *,
-                  mode: RunMode = RunMode.INVALID,
+                  mode: RunMode = RunMode.STRICT,
                   store: Store | None = None
                  ) -> Worker | None:
 
@@ -297,23 +297,23 @@ from typing import cast
 - `# type: ignore` must remain on each affected line (mypy only supports line-level suppression); the class-level waiver eliminates only the per-member `# waiver:` comments.
 - Before (per-member waivers):
 ```python
-class StatsInit(BaseInit, Generic[FieldType]):
+class LimitsInit(BaseInit, Generic[FieldType]):
   """..."""
 
   # waiver: assignment — default is float; base class converts to FieldType at init
-  health:  FieldType = 0.0  # type: ignore[assignment]
+  timeout: FieldType = 0.0  # type: ignore[assignment]
   # waiver: assignment — default is float; base class converts to FieldType at init
-  mana:    FieldType = 0.0  # type: ignore[assignment]
+  backoff: FieldType = 0.0  # type: ignore[assignment]
 ```
 - After (class-level waiver):
 ```python
-class StatsInit(BaseInit, Generic[FieldType]):
+class LimitsInit(BaseInit, Generic[FieldType]):
   """..."""
 
   # waiver: assignment — default is float; base class converts to FieldType at init
 
-  health:  FieldType = 0.0  # type: ignore[assignment]
-  mana:    FieldType = 0.0  # type: ignore[assignment]
+  timeout: FieldType = 0.0  # type: ignore[assignment]
+  backoff: FieldType = 0.0  # type: ignore[assignment]
 ```
 
 
@@ -447,13 +447,13 @@ if TYPE_CHECKING:
 - Abstract base public classes: **prefix** `Base`. Examples: `BaseService`, `BaseRepository`.
 - Mixins: **suffix** `Mixin`. Examples: `LoggingMixin`, `SlotAccessMixin`.
 - Structural interfaces: **suffix** `Protocol`. Examples: `EntityViewProtocol`, `PathfinderProtocol`.
-- Exceptions: **suffix** `Error`. Examples: `ValidationError`, `RealmConfigError`.
-- Enums (categorical): **mandatory suffix** that clearly marks the name as an enum. Approved enum suffixes: `Type`, `Mode`, `Phase`, `State`, `Level`, `Layer`, `Kind`, `Scope`, `Role`, `Policy`, `Category`, `Depth`, `Prop`, `Id`. Choose the suffix that best describes the enum's semantic role. Examples: `PlatformType`, `RunMode`, `LifecyclePhase`, `JobState`, `LogLevel`, `MapLayer`, `TargetKind`, `TargetScope`, `UserRole`, `SharingPolicy`, `EventCategory`, `RenderDepth`, `EntityProp`, `FeatureId`.
+- Exceptions: **suffix** `Error`. Examples: `ValidationError`, `TenantConfigError`.
+- Enums (categorical): **mandatory suffix** that clearly marks the name as an enum. Approved enum suffixes: `Type`, `Mode`, `Phase`, `State`, `Level`, `Layer`, `Kind`, `Scope`, `Role`, `Policy`, `Category`, `Depth`, `Prop`, `Id`. Choose the suffix that best describes the enum's semantic role. Examples: `PlatformType`, `RunMode`, `LifecyclePhase`, `JobState`, `LogLevel`, `CacheLayer`, `TargetKind`, `TargetScope`, `UserRole`, `SharingPolicy`, `EventCategory`, `RenderDepth`, `FieldProp`, `FeatureId`.
 - Bitmask enums: **suffix** `Flags`. Example: `PermissionFlags`.
-- Data access and services: **suffix** `Repository` or `Service`. Examples: `UserRepository`, `CombatService`.
-- Factories and builders: **suffix** `Factory` or `Builder`. Examples: `EnemyFactory`, `LoadoutBuilder`.
-- Registries and managers: **suffix** `Registry` or `Manager`. Examples: `SkillRegistry`, `EventManager`.
-- Data carriers: **suffix** `Dto` or `Record`. Examples: `CharDto`, `DamageRecord`.
+- Data access and services: **suffix** `Repository` or `Service`. Examples: `UserRepository`, `PaymentService`.
+- Factories and builders: **suffix** `Factory` or `Builder`. Examples: `ParserFactory`, `QueryBuilder`.
+- Registries and managers: **suffix** `Registry` or `Manager`. Examples: `PluginRegistry`, `EventManager`.
+- Data carriers: **suffix** `Dto` or `Record`. Examples: `UserDto`, `AuditRecord`.
 - Value objects: clear noun; `Value` or `Vo` suffix acceptable if helpful. Examples: `PriceValue`, `RangeVo`.
 
 ### Acronyms.
@@ -483,6 +483,7 @@ if TYPE_CHECKING:
 
 ### `Any` in Annotations.
 - **Avoid `Any` in type annotations.** Prefer specific types, protocols, or generics.
+- **`object` is not a stand-in for `Any`.** An `object` annotation says just as little; it falls under the same rule and needs the real type or a `# waiver: <reason>` comment.
 - **Auto-exempt** (no waiver needed): `*args: Any`, `**kwargs: Any`, and any `Any` inside dunder methods (`__init__`, `__eq__`, `__add__`, `__getitem__`, etc.).
 - When `Any` is truly unavoidable elsewhere, add a `# waiver: <reason>` comment.
 
@@ -570,7 +571,7 @@ if TYPE_CHECKING:
 - Events and hooks: handlers `on_`, hooks `before_` and `after_`.
 - Alternative constructors: `from_`.
 - Repository and storage: repository abstractions `repo_`, direct storage calls `db_`.
-- Execution and main loops: `run_` for lifecycle or round-based logic execution.
+- Execution and main loops: `run_` for lifecycle or iteration-based logic execution.
 - Construction: `build_` for step-by-step assembly of complex structures.
 - Collection manipulation: add items — `add_`, remove structural references — `remove_`.
 - Deletion: remove entities or records from storage — `delete_`.
@@ -670,8 +671,6 @@ if TYPE_CHECKING:
 - Map enum values to standard library constants when appropriate.
 - Always include documentation for the constants to the enum class docstring in the `Attributes` section.
 - Use `enum.IntEnum`, `enum.StrEnum`, or `enum.IntFlag` from the standard library; reach for a project-specific base only when the project already defines one.
-- Always add INVALID member to all enums with value `-1` or `'~inv~'` and do not document it in the class docstring.
-- **Use `INVALID` instead of `None` for optional enum parameters.** When a function accepts an optional enum argument, use the enum's `INVALID` member as the default value instead of `None`. This preserves type consistency and avoids `| None` union types. Check for the sentinel with `!= EnumType.INVALID` instead of `is not None`.
 - **Enum placement**: all enum classes must live in a dedicated `types.py` file at the package level, never co-located in a class/logic module. Each package that defines enums should have its own `types.py`. The package `__init__.py` must re-export via `from .types import *`.
   - **Exception — low-level utility packages**: low-level utility packages that use stdlib enums (`enum.IntEnum`, `enum.StrEnum`) and have no `types.py` convention may keep enums co-located when they are private (`_`-prefixed) or tightly coupled to a single class.
 
@@ -680,7 +679,7 @@ if TYPE_CHECKING:
 
 ## General Type Hinting Rules
 - **Always** provide type hints for all method parameters and return values.
-- **Avoid `Any`** — use specific types, protocols, or generics. `Any` is auto-exempt in `*args`/`**kwargs` and dunder methods; elsewhere it requires a `# waiver: <reason>` comment.
+- **Avoid `Any`** — use specific types, protocols, or generics; `object` as a stand-in for `Any` falls under the same rule. `Any` is auto-exempt in `*args`/`**kwargs` and dunder methods; elsewhere it requires a `# waiver: <reason>` comment.
 - Use Union types or `|` syntax for multiple possible types (prefer `|` for Python 3.12+).
 - Use `None` as default for optional parameters with proper type hints.
 - Use `Self` for methods that return the same class instance.
@@ -718,8 +717,8 @@ def transform(self, vector, *, ndim: int | None = None) -> None:
   ```python
   # All params have defaults — * immediately after self:
   def __init__(self, *,
-               proto: ProtoEntity | None = None,
-               source: SkillSourceType = SkillSourceType.INVALID,
+               config: Config | None = None,
+               retry_policy: RetryPolicy = RetryPolicy.BACKOFF,
                **kwargs: Any) -> None:
 
   # bid is required, root_path has default — * after bid:
@@ -755,7 +754,7 @@ def transform(self, vector, *, ndim: int | None = None) -> None:
 - Examples.
 ```python
 def _build_worker(self, *,
-                  mode: RunMode = RunMode.INVALID,
+                  mode: RunMode = RunMode.STRICT,
                   allow_create: bool = False,
                   store: Store | None = None) -> Worker | None:
     ...
@@ -1036,61 +1035,61 @@ def process_arrays(self, data: np.ndarray) -> np.ndarray:
 - For magic methods that combine two operands (e.g., `__matmul__`, `__add__`), always return `NotImplemented` for unsupported operand types instead of rising within the method. This allows Python to:
   - Try the reverse operator on the other operand (`__rmatmul__`, `__radd__`, etc.).
   - Raise a consistent `TypeError` with the standard "unsupported operand type(s)" message if neither side supports the operation.
-- Implement the corresponding reverse operator when a natural reversed form exists (e.g. support both `roll @ dataset` and `dataset @ roll`).
+- Implement the corresponding reverse operator when a natural reversed form exists (e.g. support both `vector * 2.0` and `2.0 * vector`).
 - Example pattern:
 ```python
-def __matmul__(self, other: Any) -> Any:
+def __mul__(self, other: Any) -> Any:
   """
-  Combine this Roll with a DataSet to produce a DataVal.
+  Scale this Vector by a number.
   """
-  if not isinstance(other, DataSet):
+  if not isinstance(other, (int, float)):
     return NotImplemented
   # ... perform operation ...
 
 
-def __rmatmul__(self, other: Any) -> Any:
+def __rmul__(self, other: Any) -> Any:
   """
-  Combine this Roll with a DataSet to produce a DataVal.
+  Scale this Vector by a number written on the left.
   """
-  if isinstance(other, DataSet):
-    return self.__matmul__(other)
+  if isinstance(other, (int, float)):
+    return self.__mul__(other)
   return NotImplemented
 ```
 
 ## Dataclass Post-Init and Dynamic Docstrings
 - Always call `super().__init__()` in `__post_init__` to ensure proper initialization of base classes.
 - For dataclasses with fields that depend on constructor parameters, declare them with `init = False` and initialize them in `__post_init__`.
-- If instances benefit from dynamic docstrings for debugging or tests, set `self.__doc__` in `__post_init__` to a deterministic value (e.g., `f"Roll for {self._val_cls.__name__}."`).
-- When instantiating types provided by users (like `val_cls`), guard with try/except and re-raise as a clear `ValueError` while preserving the cause (`raise ... from error`).
+- If instances benefit from dynamic docstrings for debugging or tests, set `self.__doc__` in `__post_init__` to a deterministic value (e.g., `f"Sampler for {self.buffer_cls.__name__}."`).
+- When instantiating types provided by users (like `buffer_cls`), guard with try/except and re-raise as a clear `ValueError` while preserving the cause (`raise ... from error`).
 ```python
 @dataclass
-class Roll(Generic[T]):
+class Sampler(Generic[T]):
   """
-  Carries random samples to convert a DataSet into a concrete DataVal.
+  Holds the current and the previous batch of samples of a caller-supplied buffer type.
   """
 
-  # The class of the DataVal to produce
-  val_cls: type[T]
+  # The class of the sample buffers to produce
+  buffer_cls: type[T]
 
-  # Random samples for uniform and normal distributions
-  uniform: T = field(init = False)
+  # Samples of the current batch
+  current: T = field(init = False)
 
-  # Random samples for normal distribution
-  normal: T = field(init = False)
+  # Samples of the previous batch
+  previous: T = field(init = False)
 
 
   def __post_init__(self) -> None:
     """
-    Initialize uniform and normal samples and set dynamic docstring.
+    Initialize both sample buffers and set dynamic docstring.
     """
     # call init for the base class
     super().__init__()
 
-    self.__doc__ = f"Roll for {self._val_cls.__name__}."
+    self.__doc__ = f"Sampler for {self.buffer_cls.__name__}."
     try:
-      self.uniform = self._val_cls()
-      self.normal = self._val_cls()
+      self.current = self.buffer_cls()
+      self.previous = self.buffer_cls()
     except Exception as error:
-      raise ValueError(f"failed to instantiate {self._val_cls.__name__}: {error}") from error
-    self.reroll()
+      raise ValueError(f"failed to instantiate {self.buffer_cls.__name__}: {error}") from error
+    self.resample()
 ```

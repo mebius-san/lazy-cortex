@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Run-log housekeeping and change-history access — clean up orphaned log directories and ask "why was X changed?" across every source at once.
-last_regen: 2026-10-24
+last_regen: 2026-11-10
 diagram_spec:
   anchor: "How the members fit together"
   request: "Architecture diagram showing the two groups of members in the change-history block: (1) lazy-log.clean prunes the .logs/claude/ tree; (2) lazy-log.recall, lazy-log.timeline, and lazy-log.summary read from run logs + commits.jsonl + git log + memory to answer history queries; (3) lazy-log.bullets reads git commits to draft a release block."
@@ -11,8 +11,8 @@ source_skills:
   - lazy-log.timeline
   - lazy-log.summary
   - lazy-log.bullets
-source_sha: 33e8a296cb2bda2f7c06945ca9d46e24ed4c1858
-surface_sha: a9f9284915b7c55224db487f6db24c5fb4999e1a2b7e0d84c4c26399ab8a33d5
+source_sha: 3fadd77433a2100975275f22c7c7e8cb8e544c9d
+surface_sha: 2a62bff7ba6d9c5e23aabd9cbc952812e222e2cd919f10d7c36e3c15b00f383b
 ---
 # Change history and run-log housekeeping
 
@@ -20,9 +20,9 @@ Every commit your project lands is recorded, and every skill or agent that opts 
 
 ## What's in this block
 
-**`lazy-log.clean`** is the interactive log-tree janitor. It resolves the live set of canonical skill, agent, and command names from your vault, then classifies every subdirectory of `.logs/claude/` into buckets: canonical, unlogged (a live artifact that no longer opts into logging, so its folder is leftover residue), rename-candidate (fuzzy-matched against a known name), pattern-clustered orphan (anonymous `task-N` or `subagent-task-N` folders), and unknown. For each non-canonical bucket it asks you what to do — merge into the canonical name, archive the substantive logs into memory and then delete, delete outright, or leave — and applies every choice in one final pass.
+**`lazy-log.clean`** is the interactive log-tree janitor. It resolves the live set of canonical skill, agent, and command names from your vault (and which of them still opt into logging), then classifies every subdirectory of `.logs/claude/` into buckets: canonical, unlogged (a live artifact that no longer opts into logging, so its folder is leftover residue), rename-candidate (fuzzy-matched against a known name), pattern-clustered orphan (anonymous `task-N` or `subagent-task-N` folders), and unknown. It walks the buckets one at a time and asks you what to do, one question per folder or cluster: canonical folders whose newest log is more than 30 days old can be kept or deleted; rename candidates can be merged into the canonical name, deleted, or left; pattern clusters can be deleted or left all at once, or decided folder by folder; unlogged folders can be deleted, left, or all deleted at once; unknown folders can be deleted or left. Each prompt shows how many logs the folder holds, the date range, and a preview of what the logs recorded. Every choice is applied in one final pass.
 
-**`lazy-log.recall`** answers point-in-time questions: "why was X changed?" or "when did we touch Y?". You give it a natural-language query; it decomposes the query into keywords (including plural and singular variants and obvious synonyms), searches run logs, `.logs/commits.jsonl`, git log (both message and diff-content search), and project memory, ranks matches by source quality, deduplicates by commit SHA, and returns a table you can jump from with `git show <sha>`.
+**`lazy-log.recall`** answers point-in-time questions: "why was X changed?" or "when did we touch Y?". You give it a natural-language query; it decomposes the query into keywords (including plural and singular variants and obvious synonyms), searches run logs, `.logs/commits.jsonl`, git log (both message and diff-content search), and project memory, ranks matches by source quality (a keyword hit in a run log's actions or result outranks a commit message, which outranks a diff-only hit, which outranks a memory note), deduplicates by commit SHA so one change corroborated by several sources appears once, and returns roughly the top ten as a table you can jump from with `git show <sha>`. It is read-only, and when your query is ambiguous it shows both interpretations rather than guessing.
 
 **`lazy-log.timeline`** takes a date range or topic — or both combined — and produces a chronological, newest-first, day-by-day listing of everything that matches, drawn from the same sources. It is the right tool when you want a "what happened when" overview rather than a specific answer. If no date range is given it defaults to the last 7 days.
 
@@ -34,7 +34,7 @@ Every commit your project lands is recorded, and every skill or agent that opts 
 
 The block divides into two groups: **maintenance** and **querying**.
 
-On the maintenance side, `/lazy-log.clean` is the keeper of record quality. Run it when `.logs/claude/` has accumulated folders from renamed or retired skills — it removes the noise without destroying historical value, offering an archive-to-memory path for any logs worth keeping. The raw commit feed needs no maintenance: the `lazy-log.commit-recorder` hook appends one line to `.logs/commits.jsonl` after every successful commit — including commits made through a chained Bash command — and the runtime daemon keeps the journal within its size budget.
+On the maintenance side, `/lazy-log.clean` is the keeper of record quality. Run it when `.logs/claude/` has accumulated folders from renamed or retired skills — it removes the noise without destroying historical value: a renamed skill's logs are merged into its current folder rather than lost, and anything you answer "leave" to is untouched and asked about again next run. The raw commit feed needs no maintenance: the `lazy-log.commit-recorder` hook appends one line to `.logs/commits.jsonl` after every successful commit — including commits made through a chained Bash command — and the runtime daemon keeps the journal within its size budget.
 
 On the query side, the three search agents draw from the same four sources — run logs, raw commits, git log, memory — and differ in the shape of question each answers:
 
@@ -53,13 +53,14 @@ All three return git SHAs so you can `git show <sha>` to inspect the exact chang
 ## Common adjustments
 
 - Run logs exist only for artifacts whose frontmatter declares `logging: true`; a skill you expect to see under `.logs/claude/` and do not has simply not opted in — see the `lazy-log.logging` rule.
-- `/lazy-log.clean` holds all deletions in memory until you have answered every prompt; if you change your mind mid-run, abort and re-run — no changes land until the final apply step.
+- `/lazy-log.clean` holds all merges and deletions until you have answered every prompt; if you change your mind mid-run, abort and re-run — no changes land until the final apply step. A merge or delete the final step cannot carry out (an invalid name, a folder that has vanished, a file already present in the merge target) is reported by name and left on disk.
+- If `.logs/claude/` does not exist yet, `/lazy-log.clean` reports every step as absent; run any logging skill once to create it.
 - `lazy-log.bullets` expects coordinate-style input (`plugin`, `plugin_dir`, `range`, `new_version`, `date`) and is typically dispatched by the publish pipeline rather than invoked directly.
 
 ## Where this fits
 
 - [runtime](runtime.md) — the daemon that rotates `.logs/commits.jsonl` alongside its other journals.
-- [memory](memory.md) — `/lazy-log.clean`'s archive-to-memory path writes into the same Hindsight memory that persona-marked experts use.
+- [memory](memory.md) — project memory notes are one of the sources `lazy-log.recall`, `lazy-log.timeline`, and `lazy-log.summary` search.
 
 ## How the members fit together
 

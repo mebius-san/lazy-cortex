@@ -1,6 +1,6 @@
 ---
 name: lazy-core.scaffold-local
-description: "Run when the operator asks to add or drop a repo-specific template type — a `_local` scaffold entry with its own group, kind, and path globs, so new files matching those globs start from that template. Use instead of hand-editing the registry in `.claude/rules/lazy-core.scaffold.md`; plugin-shipped entries belong to `/lazy-core.scaffold-sync`."
+description: "Run when the operator asks to add or drop a repo-specific template type — a `_local` scaffold entry with its own group, kind, and path globs, so new files matching those globs start from that template. Use instead of hand-editing the registry in `.claude/rules/lazy-core.scaffold.md`; plugin-shipped entries belong to the `scaffold sync-plugin` verb each plugin's install runs."
 allowed-tools: Read, Write, Glob, Bash(find *), Bash(ls *), Bash(test *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), AskUserQuestion, Agent
 ---
 # Manage Local Scaffold Entries
@@ -66,7 +66,7 @@ Ask one `AskUserQuestion` at a time. Wait for each answer before the next. Print
 
 **3a. Collect the groups the installed plugins supply (`add` only).**
 
-A `_local` template must not share a group with a plugin. The plugin re-syncs that whole directory on every install, so a file filed there is a namesake collision waiting to happen — `/lazy-core.scaffold-sync` protects it once it is registered, but the operator should never be put in that position to begin with. Read the registry before asking for anything:
+A `_local` template must not share a group with a plugin. The plugin re-syncs that whole directory on every install, so a file filed there is a namesake collision waiting to happen — the `scaffold sync-plugin` verb protects it once it is registered, but the operator should never be put in that position to begin with. Read the registry before asking for anything:
 
 ```bash
 "${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold list --registry <regPath>
@@ -117,7 +117,7 @@ Context (print before asking):
 - Where: /lazy-core.scaffold-local · Step 3 — Gather user inputs; target registry entry `.claude/templates/<group>/<kind>-template.md` in <regPath>
 - Found: globs already registered under `_local`: <list, or none>
 - Why asking: which new files start from this template is a repo convention only the operator can state
-- Answers: free-form, one glob per line — written as the entry's glob list in Step 4c, checked for overlap in Step 5; re-run `add` to change them
+- Answers: free-form, one glob per line — written as the entry's glob list in Step 4b, checked for overlap in Step 5; re-run `add` to change them
 AskUserQuestion: header "Match globs", question "Which file globs should start from .claude/templates/<group>/<kind>-template.md (one per line, e.g. `.claude/rules/*.md` or `plugins/claude/*/references/*-schema.md`)?", free-form text.
 ```
 
@@ -125,7 +125,7 @@ AskUserQuestion: header "Match globs", question "Which file globs should start f
 
 **For `remove` only:**
 
-After collecting `group` and `kind`, read the current `_local` map (Step 4 — `scaffold list`) to confirm the entry exists. If the entry is absent → FAIL with:
+After collecting `group` and `kind`, run `scaffold list --registry <regPath>` (the command in 3a) and look the entry up in `registry._local` to confirm it exists. If the entry is absent → FAIL with:
 
 > `scaffold-local: entry \`.claude/templates/<group>/<kind>-template.md\` not found in the _local registry map`
 
@@ -163,7 +163,7 @@ Context (print before asking):
 - Where: /lazy-core.scaffold-local · Step 4 — Execute add (4a); target <repo-root>/.claude/templates/<group>/<kind>-template.md
 - Found: file present — <size> bytes, first heading "<heading>"
 - Why asking: overwriting replaces an authored template with the bare seed — irreversible outside git
-- Answers: `keep` — file untouched, only the registry entry is upserted in 4c; `overwrite` — file replaced with the seed header, then the registry upsert
+- Answers: `keep` — file untouched, only the registry entry is written in 4b; `overwrite` — file replaced with the seed header, then the registry upsert
 AskUserQuestion: header "Template exists", question "Template .claude/templates/<group>/<kind>-template.md already exists — keep it or overwrite it with a fresh seed?", options with descriptions.
 ```
 
@@ -171,84 +171,36 @@ AskUserQuestion: header "Template exists", question "Template .claude/templates/
   - **keep** → no file write. State **kept**.
   - **overwrite** → write the seed as above. State **overwritten**.
 
-**4b. Read the current `_local` map.**
-
-Run:
+**4b. Register the entry.**
 
 ```bash
-"${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold list --registry <regPath>
+"${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold set-entry --registry <regPath> --plugin _local --template .claude/templates/<group>/<kind>-template.md --glob <glob1> --glob <glob2>
 ```
 
-Parse the JSON output. Extract `registry._local` — if the key is absent, start with `{}`.
-
-**4c. Merge and upsert.**
-
-Add or update the entry:
-
-```json
-".claude/templates/<group>/<kind>-template.md": ["<glob1>", "<glob2>", ...]
-```
-
-Write the updated `_local` map to `~/tmp/scaffold-local-entries-<timestamp>.json`:
-
-```bash
-mkdir -p ~/tmp
-```
-
-Then `Write` the JSON to that path.
-
-Run:
-
-```bash
-"${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold upsert --plugin _local --entries @~/tmp/scaffold-local-entries-<timestamp>.json --registry <regPath>
-```
-
-Capture the JSON output. On `error` status → FAIL, surfacing the full output.
+The `scaffold set-entry` verb writes the template's globs under `_local` and leaves every other key as it is. Capture the JSON output. On `error` status → FAIL, surfacing the full output.
 
 State outcome: value of `status` from the returned JSON.
 
 ### `remove` path
 
-**4a. Read the current `_local` map.**
-
-Run:
+**4a. Drop the entry.**
 
 ```bash
-"${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold list --registry <regPath>
+"${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold drop-entry --registry <regPath> --plugin _local --template .claude/templates/<group>/<kind>-template.md
 ```
 
-Parse `registry._local`. If the key is absent or the target entry is missing → FAIL with:
+The `scaffold drop-entry` verb removes the template from `_local`, and the whole `_local` key once it is empty. Capture the JSON output. Status `not-found` (exit 1) → FAIL with:
 
 > `scaffold-local: entry \`.claude/templates/<group>/<kind>-template.md\` not found; nothing to remove`
 
-**4b. Drop the entry and write.**
+On `error` → FAIL. State outcome: value of `status` from the returned JSON (`removed-entry` or `removed-plugin`).
 
-Remove the key `.claude/templates/<group>/<kind>-template.md` from the map.
-
-- If the resulting map is empty → run:
-
-  ```bash
-  "${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold remove --plugin _local --registry <regPath>
-  ```
-
-  Capture JSON output. On `error` → FAIL.
-  State outcome: `removed-plugin`.
-
-- If the map still has entries → write the reduced map to `~/tmp/scaffold-local-entries-<timestamp>.json`, then:
-
-  ```bash
-  "${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold upsert --plugin _local --entries @~/tmp/scaffold-local-entries-<timestamp>.json --registry <regPath>
-  ```
-
-  Capture JSON output. On `error` → FAIL.
-  State outcome: value of `status` from returned JSON.
-
-**4c. Delete the template file (confirm first).**
+**4b. Delete the template file (confirm first).**
 
 ```
 Context (print before asking):
-- Where: /lazy-core.scaffold-local · Step 4 — Execute remove (4c); target <repo-root>/.claude/templates/<group>/<kind>-template.md
-- Found: registry entry removed in 4b; file <present — <size> bytes | absent>
+- Where: /lazy-core.scaffold-local · Step 4 — Execute remove (4b); target <repo-root>/.claude/templates/<group>/<kind>-template.md
+- Found: registry entry removed in 4a; file <present — <size> bytes | absent>
 - Why asking: deleting an authored template is irreversible outside git
 - Answers: `delete` — file removed now; `keep` — file stays on disk, referenced by no registry entry
 AskUserQuestion: header "Delete template file", question "Also delete the now-unregistered template file .claude/templates/<group>/<kind>-template.md?", options with descriptions.
@@ -286,7 +238,7 @@ Entry: .claude/templates/<group>/<kind>-template.md
   Validation: <verdict>
 ```
 
-Template file state is one of: `created`, `kept`, `overwritten`, `deleted`, `absent`. Registry status is the value returned by the core CLI (`registered`, `unchanged`, `created-and-registered`, `removed-plugin`, `removed`, `absent`). Validation verdict is one of: `clean`, `warned`.
+Template file state is one of: `created`, `kept`, `overwritten`, `deleted`, `absent`. Registry status is the value returned by the core CLI (`registered`, `unchanged`, `created-and-registered`, `removed-entry`, `removed-plugin`). Validation verdict is one of: `clean`, `warned`.
 
 ## Failure modes
 
@@ -295,5 +247,5 @@ Template file state is one of: `created`, `kept`, `overwritten`, `deleted`, `abs
 - **`scaffold-local: core CLI not found at <path>`** — the `installPath` in `installed_plugins.json` points to a missing path → run `/plugin update lazycortex-core@lazycortex` to refresh, then re-run.
 - **`scaffold-local: group \`<group>\` is supplied by installed plugin \`<plugin>\``** — the named group is one an installed plugin re-syncs on every install, so a `_local` template there would collide with a shipped namesake → re-invoke `add` with a group name of your own. Removing an entry already filed in such a group is not blocked.
 - **`scaffold-local: entry … not found in the _local registry map`** — attempting to remove an entry that is not registered → check the entry name with `scaffold list --registry <regPath>`.
-- **`scaffold upsert` / `scaffold remove` returns `error`** — the core CLI rejected the operation → inspect the full error output, fix the input, then re-run.
+- **`scaffold set-entry` / `scaffold drop-entry` returns `error`** — the core CLI rejected the operation → inspect the full error output, fix the input, then re-run.
 - **`scaffold validate` returns FAIL-level findings** — the registry has structural errors after the upsert → inspect the validation output and edit `.claude/rules/lazy-core.scaffold.md` directly to resolve, then validate again.

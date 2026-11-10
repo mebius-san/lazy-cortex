@@ -1,7 +1,7 @@
 ---
 name: lazy-guard.allow-mcp
 description: "Use when the user says 'allow context7 mcp', 'allow all mcp tools', 'trust the brave-search MCP server', or asks to stop being prompted for one server's tools on every call. Classifies each tool into three buckets — safe/reversible into `permissions.allow`, truly destructive into `permissions.ask`, medium-risk into neither so Claude Code still prompts per call — and writes them to the gitignored `settings.local.json` so personal permission choices never land in tracked settings."
-allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(date -u *), Bash(git rev-parse *), AskUserQuestion, Agent
+allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(date -u *), Bash(git rev-parse *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), AskUserQuestion, Agent
 lazy_setup_phase: post-install
 requires_live_session: true
 ---
@@ -104,10 +104,6 @@ Concrete examples (canonical servers seen in this project):
 | `mcp__git__git_add` / `git_create_branch`                                           | allow  |
 | `mcp__git__git_commit`                                                              | skip   |
 | `mcp__git__git_reset` / `git_checkout`                                              | ask    |
-| `mcp__memory-*__get_*` / `list_*` / `recall` / `reflect` / `refresh_mental_model`   | allow  |
-| `mcp__memory-*__retain` / `sync_retain` / `create_directive` / `create_mental_model` / `update_bank` / `update_mental_model` | allow |
-| `mcp__memory-*__cancel_operation`                                                   | skip   |
-| `mcp__memory-*__delete_*` / `clear_memories`                                        | ask    |
 
 Build the per-server output as three sets: `to_allow`, `to_ask`, `to_skip`.
 
@@ -232,24 +228,13 @@ For each target settings file (always a `settings.local.json` unless user overro
 
 ## Phase 6: Write
 
-For each approved file:
+For each approved file, one call with the sets Phase 5 approved — one `--allow` per `to_allow_new` entry, one `--ask` per `to_ask_new` entry, one `--move-to-ask` per `to_move_to_ask` entry:
 
-- If the file exists: use the `Edit` tool to apply the changes from Phase 5, in order:
-  1. Remove `to_move_to_ask` entries from the `allow` array.
-  2. Append `to_allow_new` entries to the `allow` array.
-  3. Append `to_ask_new ∪ to_move_to_ask` entries to the `ask` array (creating the array if absent).
-  Preserve original formatting, comments, and unrelated keys. Separate `Edit` calls per array are acceptable when ranges don't overlap.
-- If the file doesn't exist: use the `Write` tool to create it with `{"permissions":{"allow":[<to_allow_new>],"ask":[<to_ask_new>]}}` plus a trailing newline. Omit either key if its list is empty.
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" permission-edit <target file> --allow <tool> --ask <tool> --move-to-ask <tool>)
+```
 
-Never introduce any non-`mcp__*` entries. No `Bash(*)`, no `Edit`, no `Write` — MCP tool names only. The `lazy-guard.settings.py` PreToolUse hook will reject broad or destructive additions to `allow`.
-
-After writing, re-read each file and assert:
-- JSON still parses.
-- Every `to_allow_new` entry is now in `allow`.
-- Every `to_ask_new` and `to_move_to_ask` entry is now in `ask`.
-- No `to_move_to_ask` entry remains in `allow`.
-- No tool appears in both lists simultaneously.
-- Skip-bucket entries that were pre-existing in `allow` or `ask` remain exactly where they were (the skill never touches them).
+The `permission-edit` verb is the one writer of these lists: it edits only `mcp__<server>__<tool>` names, keeps every other entry and key in place, creates a missing file, re-reads it and holds the one-list-per-tool invariant. It prints one JSON line — `status` (`written`, `unchanged`) plus the `allow_added`, `ask_added`, `moved_to_ask` lists Phase 8 reports. Exit 1 (`status: error`) means the write was refused or the invariant broke; report it and stop for that file. Skip-bucket entries are never passed, so they stay where they are.
 
 ## Phase 6.5: Strip cross-scope leaks
 
@@ -275,13 +260,12 @@ Permission entries should not live in tracked `settings.json`. Once the target `
    - Where: /lazy-guard.allow-mcp · Phase 6.5a — Paired tracked settings.json; target `<tracked-file, absolute>`
    - Found: `<entry>` in `permissions.<allow | ask>` of tracked `<tracked-file>`; the same server's permissions now live in `<target settings.local.json>`
    - Why asking: removing a tracked entry is a per-entry operator decision; the skill never removes silently
-   - Answers: `remove` — dropped from the tracked file via a minimal `Edit` (step 6), `[]` left if the array empties; `keep` — untouched, recorded as a "user-kept leak" note in Phase 8; re-asked next run
+   - Answers: `remove` — dropped from the tracked file by `permission-edit --remove` (step 6), `[]` left if the array empties; `keep` — untouched, recorded as a "user-kept leak" note in Phase 8; re-asked next run
    AskUserQuestion: header "Remove tracked leak", question "`<entry>` is in tracked `<tracked-file>` — permissions belong in `settings.local.json`. Remove it from the tracked file?", options `remove` (default) / `keep` with the descriptions above.
    ```
 
    On `keep`, leave untouched and record as a "user-kept leak" note in Phase 8.
-6. For every leak the user approved, use `Edit` with minimal old/new replacements to drop just that entry. Preserve all other keys, entries, formatting, and comments. If a removal empties an array, leave `"allow": []` / `"ask": []` — do not delete the key.
-7. Re-read the file; assert JSON still parses and each approved removal is gone.
+6. Drop every leak the user approved in one call, one `--remove` per entry: `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" permission-edit <tracked-file> --remove <entry>)`. The verb's `removed` list is the outcome; an emptied array stays as `[]`.
 
 ### 6.5b. Opposite-scope `settings.local.json` (permissions in the wrong *scope*)
 
@@ -301,13 +285,12 @@ A project-scoped server's permissions should live in `./.claude/settings.local.j
    - Where: /lazy-guard.allow-mcp · Phase 6.5b — Opposite-scope settings.local.json; target `<opposite-file, absolute>`
    - Found: `<entry>` in `permissions.<allow | ask>` of `<opposite-file>`; `<server>` is routed to `<target-scope>` (Phase 4)
    - Why asking: removing an entry from the other scope is a per-entry operator decision; the skill never removes silently
-   - Answers: `remove` — dropped from `<opposite-file>` via a minimal `Edit` (step 6); `keep` — out-of-scope entry retained, recorded as a "user-kept wrong-scope entry" note in Phase 8; re-asked next run
+   - Answers: `remove` — dropped from `<opposite-file>` by `permission-edit --remove` (step 6); `keep` — out-of-scope entry retained, recorded as a "user-kept wrong-scope entry" note in Phase 8; re-asked next run
    AskUserQuestion: header "Remove wrong-scope entry", question "`<entry>` is in `<opposite-file>` (wrong scope — `<server>` is routed to `<target-scope>`). Remove it from `<opposite-file>`?", options `remove` (default) / `keep` with the descriptions above.
    ```
 
    On `keep`, record as a "user-kept wrong-scope entry" note in Phase 8.
-6. For every leak the user approved, `Edit` with minimal old/new replacements. Same preservation rules as 6.5a.
-7. Re-read and re-verify.
+6. Drop every leak the user approved in one call, one `--remove` per entry: `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" permission-edit <opposite-file> --remove <entry>)`. The verb's `removed` list is the outcome.
 
 ### Safety
 
@@ -369,7 +352,7 @@ Routing rules (mirror Phase 4b's "infer first, ask only if undetermined"):
    - Answers: `Project (./.claude/settings.local.json) (Recommended)` — hook written / merged there; in the Both case the other scope is left as-is and noted in Phase 8; `Global (~/.claude/settings.local.json)` — same, at global scope. Inferred from hook presence on later runs.
    AskUserQuestion: header "Preload hook scope", question "Write the preload hook for `<server list>` into which gitignored file — project `./.claude/settings.local.json` of `<repo>` or global `~/.claude/settings.local.json`?", options:
    - `Project (./.claude/settings.local.json) (Recommended)` — description: "Smaller blast radius; easier to revert by deleting the hook entry. Right choice when the servers being registered are project-specific."
-   - `Global (~/.claude/settings.local.json)` — description: "One install covers every project on this machine (personal preference — not shared with other contributors since this is gitignored). Right choice when the server is always loaded everywhere (e.g. `git`, `memory-personal`)."
+   - `Global (~/.claude/settings.local.json)` — description: "One install covers every project on this machine (personal preference — not shared with other contributors since this is gitignored). Right choice when the server is always loaded everywhere (e.g. `git`, `context7`)."
    ```
 
 If the user chose **No** on a prior run, re-ask on subsequent runs — hook presence/absence is the only persistent state; don't treat a past decline as permanent.
@@ -462,7 +445,7 @@ Print a short summary:
 | Server          | Source      | Target file                        | → allow | → ask | skipped | allow→ask | Removed from tracked | Preload hook |
 |-----------------|-------------|------------------------------------|---------|-------|---------|-----------|----------------------|--------------|
 | context7        | ./.mcp.json | ./.claude/settings.local.json      |    2    |   0   |    0    |     0     |          0           | project (+2) |
-| memory-project  | ./.mcp.json | ./.claude/settings.local.json      |   19    |   6   |    1    |     0     |          3           | project (+26)|
+| brave-search    | ./.mcp.json | ./.claude/settings.local.json      |    2    |   0   |    0    |     0     |          1           | project (+2) |
 | git             | ~/.mcp.json | ./.claude/settings.local.json      |    9    |   2   |    1    |     3     |          0           | global (+12) |
 ```
 

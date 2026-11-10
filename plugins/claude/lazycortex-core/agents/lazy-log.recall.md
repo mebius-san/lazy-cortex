@@ -33,7 +33,7 @@ A natural-language query, e.g.:
 ## Sources (in priority order)
 
 1. **`.logs/claude/**/*.md`** — run logs of the artifacts that opt into logging. Each has `git_sha` in frontmatter.
-2. **`.logs/commits.jsonl`** — raw commit metadata (sha, date, author, message, files).
+2. **`.logs/commits.jsonl`** — raw commit metadata, one JSON row per commit (`sha`, `date`, `author`, `branch`, `subject`, `body`, `files`, `insertions`, `deletions`); the commit message is split across `subject` and `body` — search both.
 3. **Git log** — `git log --all --grep "<keywords>" --format="%H %cI %s"` for message search, and `git log --all -S "<keywords>"` for diff content search.
 4. **Memory files** — `~/.claude/projects/<project-key>/memory/*.md`. Project-key format: the project's absolute path with every `/` replaced by `-` (e.g., `/Users/<user>/<path>/<to>/<repo>` → `-Users-<user>-<path>-<to>-<repo>`).
 

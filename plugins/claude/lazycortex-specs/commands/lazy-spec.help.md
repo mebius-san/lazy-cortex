@@ -8,7 +8,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 
 **lazycortex-specs** — specification and design skills for Claude Code.
 
-Authors product / feature / change / bug (and operator-defined) specs as Markdown notes in an Obsidian-friendly vault, scaffolds a gate-driven folder structure, and keeps the spec aligned with the source repo. Product config lives in `lazy.settings.json[products]`; asset state is five flat boolean gates per asset folder-note.
+Authors product / feature / change / bug (and operator-defined) specs as Markdown notes in an Obsidian-friendly vault, scaffolds a gate-driven folder structure, and keeps the spec aligned with the product's code in the same repository. Product config lives in `lazy.settings.json[products]`; asset state is five flat boolean gates per asset folder-note.
 
 ## Bootstrap
 
@@ -29,8 +29,8 @@ Authors product / feature / change / bug (and operator-defined) specs as Markdow
 - `lazy-spec.flip-gate` — The single channel for flipping one asset gate (`spec_design_done` … `spec_released`); flips unconditionally once confirmed (refuses only a cancelled asset) — interactive confirm, or `--auto`.
 - `lazy-spec.gate-tick` (worker) — Script-only md-scan worker: polls an asset's active expert job for a terminal marker and structurally checks the folder-note. Dispatched by the `lazy-spec.gate-tick` routine.
 - `spec.coordinator` (agent, `lazy-spec.coordinator-watch` and `lazy-spec.coordinator-deletes` git-watch routines) — Decides gate readiness, promotes doc stages, and dispatches launch-checkbox / cascade jobs, woken on a commit that reaches the daemon's own checkout; see `lazy-spec.coordination-playbook.md`.
+- `spec.coherence-checker` (agent, dispatched by the coordinators through `coherence-dispatch`) — After every approval or re-approval, compares the approved document with its approved neighbours and returns the contradictions it finds; `lazy-spec.gate-tick` hangs each one as a `[!warning] Conflict with …` callout in the `## Conflicts` group of `# Gates` with two boxes, `Resolve here` (send that document back to its writer) and `Not a conflict` (take that conflict down; it is not raised again until a re-approval). A conflict blocks nothing and paints the folder fuchsia.
 - `lazy-spec.set-stage` — Change one authored doc's `spec_stage` (`empty | draft | approved | rejected | cancelled | deferred`), mirror the `spec/<stage>` tag, and log to the folder-note `# History` section.
-- `lazy-spec.rebase-pins` — Rebase pinned specs back to the repo's default branch after a source branch is merged or deleted; propose `spec_released` flips.
 
 ## Request processing
 
@@ -51,9 +51,8 @@ Authors product / feature / change / bug (and operator-defined) specs as Markdow
 
 ## Primitives (called by other skills)
 
-- `lazy-spec.resolve-repo` — Resolve a repo key (from the `lazy.settings.json[repos]` section) to runtime metadata (`local_path`, `branch`, `host`, `owner`, `repo`, `forge`, `base_url`).
-- `lazy-spec.resolve-dependency` — Resolve a product's `dependencies` entry to concrete links (spec wikilink, source URL).
-- `lazy-spec.source-url` — Build a single forge-correct source URL for a file in a source repo.
+- `lazy-spec.resolve-dependency` — Resolve a product's `dependencies` entry (`product` or `external`) to concrete links (spec wikilink, plus the source URL of an external tool).
+- `lazy-spec.source-url` — Build a root link (`[<basename>](/<path>)`) to one file of the product's code in this repository; a folder comes back as a backticked path.
 - `lazy-spec.refresh-sources` — Re-project a doc's body `# Sources` sub-sections (`## Requests`, `## Docs`) from its `spec_source_requests` / `spec_source_docs` frontmatter, preserving operator-authored glosses.
 - `lazy-spec.lookup` — Bounded research slice of the spec tree around a product or asset: a question or token plus an optional anchor, returning matching paths with short excerpts, never whole documents.
 
@@ -62,7 +61,7 @@ See `${CLAUDE_PLUGIN_ROOT}/references/` for the protocol contracts each skill re
 <!-- help-block:start -->
 **Documentation:**
 
-- [asset-to-release](https://github.com/mebius-san/lazy-cortex/blob/main/plugins/claude/lazycortex-specs/help/walkthroughs/asset-to-release.md) — Take one spec asset from a blank slate through all five readiness gates to a confirmed release.
+- [asset-to-release](https://github.com/mebius-san/lazy-cortex/blob/main/plugins/claude/lazycortex-specs/help/walkthroughs/asset-to-release.md) — Take one spec asset from a blank slate through its approved design to its publication in a product release.
 - [new-product-from-code](https://github.com/mebius-san/lazy-cortex/blob/main/plugins/claude/lazycortex-specs/help/walkthroughs/new-product-from-code.md) — Register a product bound to existing code, generate vision/design/tech docs from source, then gap-scan for anything missed.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/plugins/claude/lazycortex-specs/help/troubleshooting.md) — Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
 - [faq](https://github.com/mebius-san/lazy-cortex/blob/main/plugins/claude/lazycortex-specs/help/faq.md) — FAQ on products, nested products, assets, vision/design docs, gates, requests, decisions, coverage gaps, and spec lookups.

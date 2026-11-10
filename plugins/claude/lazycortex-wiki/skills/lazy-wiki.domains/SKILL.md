@@ -1,6 +1,6 @@
 ---
 name: lazy-wiki.domains
-description: "Use when a question needs domain knowledge synthesised from code's `Domain(…)` markers — defining a term, looking up a mechanic or formula, or surveying a group of related domain concepts — and `wiki.domains` is configured in this repo. A research skill: given a group key or a search term, hands back a bounded slice of the domain-spec tree (`docs/domains/` by default, materialized by `/lazy-wiki.domain-sync`) — one doc's section, or matching excerpts — never the whole group doc or the whole tree. Mirrors `lazy-wiki.structure`'s query mode, over the domain tree instead of the project structure map."
+description: "Use when a question needs domain knowledge synthesised from code's `Domain(…)` markers — defining a term, looking up a mechanic or formula, or surveying a group of related domain concepts — and `wiki.domains` is configured in this repo. A research skill: given a group key or a search term, hands back a bounded slice of the domain-spec tree (`docs/domains/` by default, materialized by `/lazy-wiki.domain-sync`) — a group's overview and document list, one document's section, or matching excerpts — never a whole document or the whole tree. Mirrors `lazy-wiki.structure`'s query mode, over the domain tree instead of the project structure map."
 research: true
 allowed-tools: Read, Grep, Glob, Agent, AskUserQuestion, Bash(test -f *), Bash(git rev-parse *), Bash(mkdir -p *), Bash(date -u *), Write
 ---
@@ -8,7 +8,7 @@ allowed-tools: Read, Grep, Glob, Agent, AskUserQuestion, Bash(test -f *), Bash(g
 
 Query the domain-spec tree — the `docs/domains/` output `wiki.domains` materializes from code's `Domain(…)` markers — without loading a whole group doc, let alone the whole tree, into the caller's context. This skill never writes the tree itself; that is `/lazy-wiki.domain-sync`'s and the daemon routine's job. It runs agentless: `Read`/`Grep`/`Glob` directly against the generated `domains.md` index and group docs, no seeker/gatherer dispatch — the tree is a handful of small, already-synthesised files, cheap enough to read straight.
 
-Invocation: `/lazy-wiki.domains group <group-key> [<section>]` or `/lazy-wiki.domains term "<text>"`
+Invocation: `/lazy-wiki.domains group <group-key> [<doc-slug>] [<section>]` or `/lazy-wiki.domains term "<text>"`
 
 Prerequisites: `wiki.domains` is configured (`.claude/lazy.settings.json[wiki][domains]`, via `/lazy-wiki.configure domains`) and the tree has been generated at least once (`/lazy-wiki.domain-sync` or the daemon routine).
 
@@ -37,7 +37,7 @@ Outcome: `loaded` or `not-configured`.
 
 ## Phase 2 — Resolve query target
 
-Parse the invocation: `group <group-key> [<section>]` or `term "<text>"`. `<group-key>` is the dot-separated dictionary key (e.g. `mechanics.actions`); `<section>` is one of `Terms` / `Principles` / `Mechanics` / `Contracts`, case-insensitive, and optional. `Terms`, `Principles`, `Mechanics` are always present; `Contracts` is optional — the writer omits it when the group has no attributed `Contract:` blocks.
+Parse the invocation: `group <group-key> [<doc-slug>] [<section>]` or `term "<text>"`. `<group-key>` is the dot-separated dictionary key (e.g. `billing.invoices`). Each group is a folder holding a folder note and one document per `Domain(…)` block; `<doc-slug>` names one of those documents by its file stem (e.g. `late-fee`), and `<section>` is a `##` section of that document, case-insensitive. A block document always carries `Principles`, `Mechanics` and `Related`, and carries `Terms`, `Contracts` or `Discrepancies` only when it has such content. `<section>` is meaningful only with `<doc-slug>`.
 
 Neither keyword given → ask.
 
@@ -45,8 +45,8 @@ Context (print before asking):
 - Where: /lazy-wiki.domains · Phase 2 — Resolve query target; target `<output>/domains.md`
 - Found: the invocation carried neither `group` nor `term`; groups listed in the index `<n>`
 - Why asking: the query kind and its key are the caller's intent
-- Answers: `group` — Phase 3 returns one group doc's overview or one `##` section, after asking for the key and optional section; `term` — Phase 4 greps the tree and returns excerpts, after asking for the text; read-only, nothing persisted
-AskUserQuestion: header "Domain query", question "Query one domain group's doc under `<output>`, or search a term across the whole domain tree?", options `group` / `term` with those descriptions. Follow up, free text — on `group`: header "Group key", question "Group key (dot-separated, e.g. `mechanics.actions`) and optional section (Terms / Principles / Mechanics / Contracts)?"; on `term`: header "Search term", question "Text to search across `<output>/**/*.md`?".
+- Answers: `group` — Phase 3 returns one group's overview and document list, or one document's section, after asking for the key, an optional document and an optional section; `term` — Phase 4 greps the tree and returns excerpts, after asking for the text; read-only, nothing persisted
+AskUserQuestion: header "Domain query", question "Query one domain group under `<output>`, or search a term across the whole domain tree?", options `group` / `term` with those descriptions. Follow up, free text — on `group`: header "Group key", question "Group key (dot-separated, e.g. `billing.invoices`), optionally a document slug and a section?"; on `term`: header "Search term", question "Text to search across `<output>/**/*.md`?".
 
 Outcome: `resolved: <group|term>`.
 
@@ -54,21 +54,22 @@ Outcome: `resolved: <group|term>`.
 
 **mode=group only.** If the resolved mode is `term`, mark this task `skipped` with outcome `skipped-per-mode` and proceed to Phase 4.
 
-1. Derive the group's doc path from its key, mirroring the writer's own layout: split `<group-key>` on `.`; every segment but the last becomes a subdirectory under `<output>`, the last segment plus `.md` is the filename (`mechanics.actions` → `<output>/mechanics/actions.md`; a one-segment key `simulation` → `<output>/simulation.md`).
-2. `Bash(test -f <repo-root>/<doc-path>)` — absent → answer *"Group `<group-key>` is not in the domain tree — it may be new, not yet generated, or misspelled; check `<output>/domains.md` for the group list."*, outcome `no-such-group`, done.
-3. Present → `Read` the file.
-   - **No `<section>` given**: return the overview paragraph (the prose between the H1 title and the first `##` heading) plus the list of `##` headings actually present in the doc (`Terms` / `Principles` / `Mechanics` always, plus `Contracts` when the group has attributed contracts) — enough for the caller to ask a follow-up narrowly. Never the full body.
-   - **`<section>` given**: match it case-insensitively against the doc's `##` headings; no match → answer *"`<section>` is not a section of this doc — sections are Terms, Principles, Mechanics, and (when present) Contracts."*, outcome `no-such-section`. A match → return that one `##` block (the heading line through the line before the next `##`, or EOF) — nothing else from the file.
+1. Derive the group's folder from its key, mirroring the writer's own layout: every segment of `<group-key>` becomes a directory under `<output>`, and the folder note is the file named like the last segment inside it (`billing.invoices` → `<output>/billing/invoices/invoices.md`).
+2. `Bash(test -f <repo-root>/<folder-note>)` — absent → answer *"Group `<group-key>` is not in the domain tree — it may be new, not yet generated, or misspelled; check `<output>/domains.md` for the group list."*, outcome `no-such-group`, done.
+3. **No `<doc-slug>` given**: `Read` the folder note and return its overview (the prose between the explainer line under the H1 and the first `##` heading) and its `## Documents` list — each line names one document and links its file, enough for the caller to ask for one document narrowly. Never the full body of any document.
+4. **`<doc-slug>` given**: `Bash(test -f <repo-root>/<folder>/<doc-slug>.md)` — absent → answer *"`<doc-slug>` is not a document of `<group-key>` — the folder note's Documents list names them."*, outcome `no-such-doc`. Present → `Read` it.
+   - **No `<section>` given**: return the H1 title and the list of `##` headings actually present.
+   - **`<section>` given**: match it case-insensitively against the document's `##` headings; no match → answer *"`<section>` is not a section of this document — its sections are <the headings present>."*, outcome `no-such-section`. A match → return that one `##` block (the heading line through the line before the next `##`, or EOF) — nothing else from the file.
 
 Never paste the full doc file into the response or into this session's context.
 
-Outcome: `answered: group=<group-key>[/<section>]`, `no-such-group`, `no-such-section`, or `skipped-per-mode`.
+Outcome: `answered: group=<group-key>[/<doc-slug>[/<section>]]`, `no-such-group`, `no-such-doc`, `no-such-section`, or `skipped-per-mode`.
 
 ## Phase 4 — Answer a term query
 
 **mode=term only.** If the resolved mode is `group`, mark this task `skipped` with outcome `skipped-per-mode` and proceed to Logging.
 
-1. `Grep` the term, case-insensitive with word boundaries (`\b<term>\b` — a short term like `AP` otherwise false-positive-matches inside unrelated words such as "map"), across `<output>/domains.md` and every group doc under `<output>/**/*.md`, with a line or two of surrounding context per hit.
+1. `Grep` the term, case-insensitive with word boundaries (`\b<term>\b` — a short term like `AP` otherwise false-positive-matches inside unrelated words such as "map"), across `<output>/domains.md` and every folder note and block document under `<output>/**/*.md`, with a line or two of surrounding context per hit.
 2. No match anywhere → answer *"`<text>` not found in the domain tree."*, outcome `no-match`.
 3. Match(es) → return, per matched file, its repo-relative path and the matched excerpt lines only — never the full file.
 
@@ -82,5 +83,6 @@ One line per task in the canonical list, with its outcome word.
 
 - **Reports "Domain service not configured"** — `wiki.domains` is absent from `lazy.settings.json`, or the tree was never generated → run `/lazy-wiki.configure domains`, then `/lazy-wiki.domain-sync` (or wait for the daemon routine), then re-run.
 - **Group query reports "not in the domain tree"** — the key is new, not yet generated, or misspelled → check `<output>/domains.md` for the current group list.
-- **Group query reports "not a section of this doc"** — `Terms` / `Principles` / `Mechanics` always exist on a generated doc; `Contracts` exists only when the group has attributed `Contract:` blocks → re-query with a section actually present (check the no-`<section>` heading list).
+- **Group query reports "not a document of"** — the slug names no file in the group's folder → take the slug from the folder note's Documents list and re-query.
+- **Group query reports "not a section of this document"** — `Principles` / `Mechanics` / `Related` always exist on a block document; `Terms`, `Contracts` and `Discrepancies` exist only when the document has such content → re-query with a section the answer listed.
 - **Term query reports "not found"** — the term is not referenced anywhere in the generated tree yet, or the tree is stale → run `/lazy-wiki.domain-sync` to refresh, then re-run.

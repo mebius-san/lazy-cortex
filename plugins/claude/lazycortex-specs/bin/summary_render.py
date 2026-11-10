@@ -1,4 +1,5 @@
-"""Folder-note `# Summary` rendering — skeleton + deterministic stats projection.
+"""
+Folder-note `# Summary` rendering — skeleton + deterministic stats projection.
 
 The précis half is operator/LLM-written; this module owns only the deterministic
 stats half (between the `spec:stats` markers) and the empty skeleton emitted at
@@ -10,16 +11,22 @@ import re
 import sys
 from pathlib import Path
 
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import note_explainers  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import spec_paths  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from spec_keys import Gate, GATE_ORDER, SpecKey, SpecValue  # pylint: disable=import-error
-
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
+
+
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import note_explainers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# pylint: disable-next=import-error,wrong-import-position
+from spec_keys import Gate, GATE_ORDER, AssetTypeKey, ReleaseKey, SpecKey, SpecValue  # noqa: E402
 
 
 SUMMARY_TAG = "#protected/spec/summary"
@@ -34,6 +41,25 @@ _BUCKET_IN_PROGRESS = "in_progress"
 _BUCKET_NOT_STARTED = "not_started"
 _BUCKET_PRODUCT = "product"
 _BUCKET_SHELF = "shelf"
+
+# The container stats block's wording: a markdown list of `<count> <label>` total items, each total
+# followed by its non-zero breakdown items one level deeper
+_STATS_LINE_SEPARATOR = "\n"
+_STATS_ITEM = "- {count} {label}"
+_STATS_SUB_ITEM = "  - {count} {label}"
+_STATS_ASSET_ONE = "asset"
+_STATS_ASSET_MANY = "assets"
+_STATS_PRODUCT_ONE = "product"
+_STATS_PRODUCT_MANY = "products"
+_STATS_RELEASED = "released"
+_STATS_IN_PROGRESS = "in progress"
+_STATS_NOT_STARTED = "not started"
+_STATS_CANCELLED = "cancelled"
+# The requests-inbox stats block's wording: the request total, then one item per non-zero status
+_STATS_REQUEST_ONE = "request"
+_STATS_REQUEST_MANY = "requests"
+# Request statuses the requests-inbox stats block counts, in the order their items appear.
+_REQUEST_STATUSES = ("draft", "accepted", "rejected")
 # waiver: one-off CLI usage string -- argparse-style usage printed to stderr by main()
 _USAGE = "usage: lazycortex-specs render-container-stats <note_path>\n"
 
@@ -100,6 +126,21 @@ def _frontmatter(note_text: str) -> str:
   return note_text[: end if end > 0 else len(note_text) ]
 
 
+def _is_release(fm: str) -> bool:
+  """
+  Judge whether a status note's frontmatter declares the release asset type.
+
+  Args:
+    fm: The note's frontmatter block.
+
+  Returns:
+    True when the block carries `spec_asset_type: release` on a whole line.
+  """
+  # anchored on the whole line and the whole value, like the role match
+  pattern = rf"^{re.escape(AssetTypeKey.TYPE)}:\s*{re.escape(ReleaseKey.ASSET_TYPE)}\s*$"
+  return re.search(pattern, fm, re.MULTILINE) is not None
+
+
 def _has_role(fm: str, role: str) -> bool:
   """
   Judge whether a frontmatter block declares exactly `role`.
@@ -131,43 +172,45 @@ def classify(note_text: str) -> str:
 
   # Domain(spec.lifecycle):
   # # Container summary buckets rank cancellation and release above raw progress
-  # A container's summary line reads a child's ROLE first — a nested product runs its own
+  # A container's summary stats read a child's ROLE first — a nested product runs its own
   # ladder and is counted apart from the assets, and a folder-note claiming neither the status
-  # nor the product role is a shelf the line does not count at all. An asset is then sorted
+  # nor the product role is a shelf the stats do not count at all. An asset is then sorted
   # into exactly one of four buckets by checking cancellation first, then release, then whether
   # any ladder step at all has opened, and only calling an asset not started when none of those
   # hold. Cancellation always wins the reading because a cancelled asset stopped counting toward
   # progress the moment it was cancelled, whatever it had reached before; release is checked
   # next because it is the more informative fact about where an asset stands than merely being
-  # under way.
+  # under way. A release is the product's own unit of shipping, not one of the assets it ships,
+  # so its note is read like a shelf and counted toward nothing.
 
   fm = _frontmatter(note_text)
 
-  # guard: a nested product is not an asset of the folder holding it — it runs its own ladder,
+  # a nested product is not an asset of the folder holding it — it runs its own ladder,
   # and its gate booleans (if any) describe that ladder, never progress on an asset
   if _has_role(fm, SpecValue.ROLE_PRODUCT):
     return _BUCKET_PRODUCT
 
-  # guard: a folder-note claiming neither role is a shelf — a group folder holding assets, or
+  # a folder-note claiming neither role is a shelf — a group folder holding assets, or
   # any other operator-zone folder. It has no ladder of its own, so it is nothing to count
   if not _has_role(fm, SpecValue.ROLE_STATUS):
     return _BUCKET_SHELF
 
-  # guard: cancelled overlay wins over all other states
+  # a release note is the product's unit of shipping, never one of the assets it counts
+  if _is_release(fm):
+    return _BUCKET_SHELF
+
+  # cancelled overlay wins over all other states
   if _read_gate(fm, Gate.SPEC_CANCELLED):
     return _BUCKET_CANCELLED
 
-  # guard: released is the next highest-priority bucket
+  # released is the next highest-priority bucket
   if _read_gate(fm, Gate.RELEASED):
     return _BUCKET_RELEASED
 
-  # guard: any true ladder gate means work has started
+  # any true ladder gate means work has started
   if any(_read_gate(fm, g) for g in GATE_ORDER):
     return _BUCKET_IN_PROGRESS
   return _BUCKET_NOT_STARTED
-
-
-_REQUEST_STATUSES = ("draft", "accepted", "rejected")
 
 
 def _read_request_status(text: str) -> str | None:
@@ -205,28 +248,29 @@ def _is_requests_inbox(container_dir: Path) -> bool:
   # Domain(spec.requests):
   # # A requests container is told apart from an asset category by shape, not by count
   # A folder is read as a requests inbox — counted by intake status rather than by the asset
-  # ladder — the moment it holds no asset subfolders of its own, because a container that holds
-  # assets is always a category and never an inbox, no matter what loose files sit beside them.
+  # ladder — the moment it holds no subfolders of its own, because any subfolder is taken for an
+  # asset, and a container that holds assets is always a category and never an inbox, no matter
+  # what loose files sit beside them.
   # Within such a folder, the canonical inbox name settles the reading even while still empty,
   # and any other folder qualifies the moment one file inside it has already opted into intake.
 
   dir_name = container_dir.name
   has_request_file = False
   for entry in container_dir.iterdir():
-    # guard: asset subfolders disqualify requests-inbox mode
+    # asset subfolders disqualify requests-inbox mode
     if entry.is_dir():
       return False
 
-    # guard: skip non-files (symlinks, etc.)
+    # guard: not a regular file — nothing to read as a request
     if not entry.is_file():
       continue
 
-    # guard: only markdown files are request candidates
+    # only markdown files are request candidates
     # waiver: magic literal '.md' -- markdown extension is a fixed protocol token
     if not entry.name.endswith(".md"):
       continue
 
-    # guard: skip the folder-note itself
+    # the folder-note itself is no request
     if entry.name == f"{dir_name}.md":
       continue
     if _read_request_status(entry.read_text(encoding = "utf-8")) is not None:
@@ -239,35 +283,41 @@ def _is_requests_inbox(container_dir: Path) -> bool:
 
 def _render_requests_stats(container_dir: Path) -> str:
   """
-  Compute the stats line for a requests inbox.
+  Compute the stats block for a requests inbox.
 
   Args:
     container_dir: The requests inbox folder.
 
   Returns:
-    A `· `-joined line of `<status> <count>` segments; zero-count omitted.
-    Returns `0 requests` when all counts are zero.
+    A multi-line markdown list headed by a request total item, with one nested item per non-zero
+    request status beneath it. An empty inbox yields the single item `- 0 requests`.
   """
   dir_name = container_dir.name
   counts: dict[str, int] = dict.fromkeys(_REQUEST_STATUSES, 0)
   for entry in container_dir.iterdir():
-    # guard: skip non-files (symlinks, etc.)
+    # guard: not a regular file — nothing to read as a request
     if not entry.is_file():
       continue
 
-    # guard: only markdown files are request candidates
+    # only markdown files are request candidates
     # waiver: magic literal '.md' -- markdown extension is a fixed protocol token
     if not entry.name.endswith(".md"):
       continue
 
-    # guard: skip the folder-note itself
+    # the folder-note itself is no request
     if entry.name == f"{dir_name}.md":
       continue
     status = _read_request_status(entry.read_text(encoding = "utf-8"))
     if status in counts:
       counts[status] += 1
-  segs = [f"{status} {count}" for status, count in counts.items() if count]
-  return " · ".join(segs) if segs else "0 requests"
+
+  # the request total heads the block, each non-zero status nests under it in the fixed status order
+  total = sum(counts.values())
+  lines = [ _STATS_ITEM.format(count = total, label = _STATS_REQUEST_ONE if total == 1 else _STATS_REQUEST_MANY) ]
+  lines.extend(
+      _STATS_SUB_ITEM.format(count = count, label = status) for status, count in counts.items() if count
+  )
+  return _STATS_LINE_SEPARATOR.join(lines)
 
 
 def is_shelf_note(note: Path) -> bool:
@@ -281,7 +331,7 @@ def is_shelf_note(note: Path) -> bool:
     note: The folder's own folder-note.
 
   Returns:
-    True when the note declares neither the asset status role nor a level role.
+    True when the note declares neither the asset status role nor the product role.
   """
   return classify(note.read_text(encoding = "utf-8")) == _BUCKET_SHELF
 
@@ -314,12 +364,12 @@ def _tally_children(container_dir: Path, buckets: dict[str, int], *,
   # reached folders is what bounds the descent rather than the depth of the tree on disk
   seen = { container_dir.resolve() } if visited is None else visited
   for entry in sorted(container_dir.iterdir()):
-    # guard: only subfolders carrying a same-named folder-note count
+    # only subfolders carrying a same-named folder-note count
     if not entry.is_dir():
       continue
     note = entry / f"{entry.name}.md"
 
-    # guard: skip entries that lack the expected same-named folder-note
+    # guard: the expected same-named folder-note is missing — nothing to read
     if not note.is_file():
       continue
     resolved = entry.resolve()
@@ -330,7 +380,7 @@ def _tally_children(container_dir: Path, buckets: dict[str, int], *,
     seen.add(resolved)
     bucket = classify(note.read_text(encoding = "utf-8"))
 
-    # guard: a group folder is transparent — it is never counted, and the tally reads through it
+    # a group folder is transparent — it is never counted, and the tally reads through it
     if bucket == _BUCKET_SHELF:
       _tally_children(entry, buckets, visited = seen)
       continue
@@ -341,20 +391,34 @@ def _tally_children(container_dir: Path, buckets: dict[str, int], *,
 
 def render_container_stats(container_dir: Path) -> str:
   """
-  Compute the stats line for a group container from the assets below it.
+  Compute the stats block for a group container from the assets below it.
 
   Detects a requests inbox (flat `*.md` files with `request_status`) and emits
   request-status counts; otherwise falls back to the asset-ladder counts. A nested product
-  among the children is counted in its own trailing segment rather than as an asset, and a
+  among the children is counted in an item of its own rather than as an asset, and a
   group folder is transparent — its own children count here, the folder itself never does.
 
   Args:
     container_dir: The group folder (e.g. `bugs/`) or requests inbox.
 
   Returns:
-    A `· `-joined stats line; zero-count segments omitted.
+    A multi-line markdown list. Total items sit at the top level and their breakdown items nest one
+    level beneath them; zero-count breakdown items are omitted. A products item comes first when
+    nested products exist, and the asset item is left out when its count is zero beside products.
   """
-  # guard: delegate to requests mode when the inbox heuristic matches
+
+  # Domain(spec.notes):
+  # # How a container presents its counts
+  # Nested products are counted as their own total and listed first, apart from the assets,
+  # because each of them runs its own ladder and answers for its own assets. The asset total
+  # follows, with one nested count for every non-zero lifecycle state beneath it, even when only
+  # one state is present, so the reader always sees which state the assets are in. An asset total
+  # of zero is left out beside products, where it would only repeat that the products hold
+  # everything, but an empty container still shows a zero asset count so the counts are never
+  # blank. A requests inbox lists its request total, with one nested count for every non-zero
+  # request status beneath it.
+
+  # delegate to requests mode when the inbox heuristic matches
   if _is_requests_inbox(container_dir):
     return _render_requests_stats(container_dir)
   buckets = {
@@ -363,29 +427,33 @@ def render_container_stats(container_dir: Path) -> str:
   }
   _tally_children(container_dir, buckets)
 
-  # a nested product is counted beside the assets, never among them — it has its own ladder
-  total = sum(count for bucket, count in buckets.items() if bucket != _BUCKET_PRODUCT)
-  unit = "asset" if total == 1 else "assets"
-  segs = [ f"{total} {unit}" ]
-  labels = [
-      (_BUCKET_RELEASED, "released"), (_BUCKET_IN_PROGRESS, "in progress"),
-      (_BUCKET_NOT_STARTED, "not started"), (_BUCKET_CANCELLED, "cancelled"),
-  ]
-  for key, label in labels:
-    # emit only non-zero buckets to keep the line short
-    if buckets[key]:
-      segs.append(f"{buckets[key]} {label}")
+  # a nested product is counted beside the assets, never among them — it has its own ladder,
+  # so its total heads the block as an item of its own
+  products = buckets[_BUCKET_PRODUCT]
+  lines = []
+  if products:
+    lines.append(_STATS_ITEM.format(
+        count = products, label = _STATS_PRODUCT_ONE if products == 1 else _STATS_PRODUCT_MANY))
 
-  # the nested-product count closes the line, after the asset total and its own breakdown
-  if buckets[_BUCKET_PRODUCT]:
-    products = buckets[_BUCKET_PRODUCT]
-    segs.append(f"{products} {'product' if products == 1 else 'products'}")
-  return " · ".join(segs)
+  # the asset total is left out when it is zero beside products; an empty container still shows it as zero
+  total = sum(count for bucket, count in buckets.items() if bucket != _BUCKET_PRODUCT)
+  if total or not products:
+    lines.append(_STATS_ITEM.format(count = total, label = _STATS_ASSET_ONE if total == 1 else _STATS_ASSET_MANY))
+
+  # each non-zero lifecycle bucket nests under the asset total
+  labels = [
+      (_BUCKET_RELEASED, _STATS_RELEASED), (_BUCKET_IN_PROGRESS, _STATS_IN_PROGRESS),
+      (_BUCKET_NOT_STARTED, _STATS_NOT_STARTED), (_BUCKET_CANCELLED, _STATS_CANCELLED),
+  ]
+  lines.extend(_STATS_SUB_ITEM.format(count = buckets[key], label = label) for key, label in labels if buckets[key])
+  return _STATS_LINE_SEPARATOR.join(lines)
 
 
 def apply_container_stats(note_path: Path) -> bool:
   """
   Rewrite the `spec:stats` region of a container note from its sibling children.
+
+  The region is replaced by the multi-line markdown stats list the container's children produce.
 
   Args:
     note_path: The container folder-note (e.g. `bugs/bugs.md`).
@@ -399,17 +467,16 @@ def apply_container_stats(note_path: Path) -> bool:
   # guard: no stats markers, nothing this function owns
   if _STATS_START not in text or _STATS_END not in text:
     return False
-  line = render_container_stats(note_path.parent)
   new = re.sub(
       re.escape(_STATS_START) + r".*?" + re.escape(_STATS_END),
-      f"{_STATS_START}\n{line}\n{_STATS_END}",
+      f"{_STATS_START}\n{render_container_stats(note_path.parent)}\n{_STATS_END}",
       text, flags = re.DOTALL,
   )
 
   # every stats refresh also re-heals the note's section explainer lines
   new = note_explainers.heal_note_text(note_path, new)
 
-  # guard: skip the write when nothing changed
+  # nothing changed — the note is left unwritten
   if new == text:
     return False
   spec_paths.write_text_atomic(note_path, new)
@@ -447,8 +514,8 @@ def parent_container_note(asset_dir: Path) -> Path | None:
   if not note.is_file():
     return None
 
-  # guard: the folder above is the catalog root, whose region counts products rather than
-  # assets — an asset flip below it moves nothing the line reports
+  # the folder above is the catalog root, whose region counts products rather than
+  # assets — an asset flip below it moves nothing the block reports
   if _is_catalog_root(note):
     return None
   return note

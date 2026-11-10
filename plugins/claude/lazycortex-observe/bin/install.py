@@ -6,7 +6,8 @@ binary discovery, service load/unload helpers for both macOS launchd and Linux
 systemd, and a best-effort smoke test against the lazycortex-core metrics
 endpoint. Stdlib-only — the embedded template engine handles only the small
 `{{ name }}` / `{% if/elif/endif %}` / `{% for %}` dialect used by the shipped
-templates, and rejects anything else to fail loudly on Jinja2-style mistakes.
+templates. An unsupported block directive raises `SyntaxError`, while an unsupported value expression is
+read as a plain variable name and renders that variable's value, or an empty string when it is unbound.
 """
 from __future__ import annotations
 
@@ -46,83 +47,120 @@ LOG_DIR_MAC = Path.home() / "Library" / "Logs" / "lazycortex-observe"
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 DASHBOARD_DIR = Path(__file__).resolve().parent.parent / "dashboards"
 
-# answer-file keys that carry credential material and are refused by the non-secret writer
-_SECRET_ANSWER_KEYS = ("token", "LAZYCORTEX_OBSERVE_TOKEN")
+# Lowercase key-name fragments that mark credential material; a key containing any is refused
+_SECRET_KEY_FRAGMENTS = ("token", "secret", "password", "passwd", "key")
+# Refusal text the non-secret writer raises for a secret key, formatted with the offending `key`
+SECRET_KEY_REFUSAL = "refused to write secret key {key!r} into the answer file"
+# Rendering-error text for a template directive outside the dialect, formatted with the `directive`
+UNSUPPORTED_DIRECTIVE_ERROR = "unsupported template directive: {directive!r}"
+# Rendering-error text for a template that ends inside an open block, formatted with the `block` keyword
+UNCLOSED_BLOCK_ERROR = "template ended with unclosed {{% {block} %}} block"
+# Rendering-error text for a `for` directive over a value that cannot be iterated, formatted with the `seq`
+NON_ITERABLE_ERROR = "non-iterable in for: {seq!r}"
+# Host-detection error for a platform no service manager here drives, formatted with the `platform` token
+UNSUPPORTED_PLATFORM_ERROR = "unsupported platform: {platform!r}"
+# Headline of the error the core-CLI resolver raises when no discovery stage finds the binary
+CORE_CLI_NOT_FOUND = "lazycortex-core CLI not found"
+# Placeholder the not-found error names as the searched plugin-dirs stage when the env carries no entry
+UNSET_PLUGIN_DIRS = "<unset>"
+# Clause of the not-found error naming the install-registry stage that found no record
+NO_REGISTERED_INSTALL = "no registered install"
+# Full not-found error, formatted with the `headline`, the binary `name`, the `searched` dirs, the probed
+# `sibling`, the registry `clause`, and the registry `place`
+_CORE_CLI_NOT_FOUND_ERROR = (
+  "{headline}: no bin/{name} under any directory named by "
+  "$LAZYCORTEX_PLUGIN_DIRS (searched: {searched}), no dev-vault sibling at '{sibling}', "
+  "and {clause}{place}"
+)
+# Registry place of the not-found error when an install root is recorded, formatted with the `root`
+_REGISTRY_ROOT_PLACE = " under {root}"
+# Registry place of the not-found error when no install root is recorded, formatted with the registry `rel` path
+_REGISTRY_FILE_PLACE = " in ~/{rel}"
+# Error text for a core-CLI verb that exits non-zero, formatted with the `verb` and its `stderr` excerpt
+CORE_CLI_FAILED_ERROR = "lazycortex-core {verb} failed: {stderr}"
+# Error text for a core-CLI verb whose stdout is not JSON, formatted with the `verb` and the decode `error`
+CORE_CLI_UNPARSEABLE_ERROR = "lazycortex-core {verb} printed unparseable JSON: {error}"
 # TOML boolean literals as they appear in the answer file, one per Python truth value
 _TOML_TRUE = "true"
 _TOML_FALSE = "false"
-# owner-read-write-only mode the token file is tightened to
+# Owner-read-write-only mode the token file is tightened to
 _TOKEN_FILE_MODE = 0o600
-# suffix of the sibling temp file every atomic write goes through
+# Suffix of the sibling temp file every atomic write goes through
 _TMP_SUFFIX = ".tmp"
-# default mode of a newly created file before the process umask is applied
+# Default mode of a newly created file before the process umask is applied
 _NEW_FILE_MODE = 0o666
-# answer-file key written bare; any other key is written as a quoted TOML key
+# Answer-file key written bare; any other key is written as a quoted TOML key
 _BARE_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
-# a line that opens with a bare or quoted key followed by `=`
 # A double-quoted value as the old answer-file writer emitted it: only `\` and `"` escaped inside.
 _LEGACY_QUOTED_RE = re.compile(r'"((?:[^"\\]|\\["\\])*)"', re.DOTALL)
+# A line that opens with a bare or quoted key followed by `=`
 _ANSWER_LINE_RE = re.compile(r'^(?:"(?:[^"\\]|\\.)*"|[A-Za-z_][A-Za-z0-9_-]*)\s*=\s*(.*)$')
-# metric-family name of the core runtime's own exposition
+# Metric-family name of the core runtime's own exposition
 _RUNTIME_METRIC_FAMILY = "lazycortex_runtime"
-# number of leading bytes of the metrics body the probe inspects for the runtime family
+# Number of leading bytes of the metrics body the probe inspects for the runtime family
 _METRICS_PROBE_READ_BYTES = 4096
-# agent-kind tokens of the observe.toml contract, each mapped to its external binary names in priority order
+# Agent-kind tokens of the observe.toml contract, each mapped to its external binary names in priority order
 _AGENT_BINARY_CANDIDATES = {
   "alloy":   [ "alloy", "grafana-alloy" ],
   "otelcol": [ "otelcol", "otelcol-contrib" ],
 }
 
-# sibling plugin CLI binary name — the § 1c boundary contract
+# Sibling plugin CLI binary name — the § 1c boundary contract
 _CORE_CLI_NAME = "lazycortex-core"
+# Core-CLI verb that lists the host's registered daemons
+# waiver: external core-CLI subcommand, not an internal key
+_DAEMON_LIST_VERB = "daemon-list"
+# Core-CLI verb that writes the scrape-target file
+# waiver: external core-CLI subcommand, not an internal key
+_SCRAPE_FILE_VERB = "metrics-scrape-file"
 # waiver: external Claude Code registry path, not an internal key
 _INSTALLED_PLUGINS_REL = ".claude/plugins/installed_plugins.json"
-# subprocess wall-clock cap in seconds for the registry call
+# Subprocess wall-clock cap in seconds for the registry call
 _CORE_CLI_TIMEOUT_SEC = 30
-# number of leading stderr characters a failed core-CLI call carries into its error message
+# Number of leading stderr characters a failed core-CLI call carries into its error message
 _STDERR_EXCERPT_LEN = 300
-# external scraper process names probed by the coverage pre-flight
+# External scraper process names probed by the coverage pre-flight
 _SCRAPER_PROCESS_NAMES = ("prometheus", "otelcol", "alloy", "grafana-agent")
 
-# external Grafana process-table markers
+# External Grafana process-table markers
 _GRAFANA_SERVER_MARKERS = ("grafana server", "grafana-server")
-# external Grafana CLI flag naming the config file
+# External Grafana CLI flag naming the config file
 _GRAFANA_CONFIG_FLAG = "--config="
-# external Grafana CLI flag naming the homepath
+# External Grafana CLI flag naming the homepath
 _GRAFANA_HOMEPATH_FLAG = "--homepath="
-# external grafana.ini section holding the path settings
+# External grafana.ini section holding the path settings
 _GRAFANA_PATHS_SECTION = "paths"
-# external grafana.ini key naming the provisioning directory
+# External grafana.ini key naming the provisioning directory
 _GRAFANA_PROVISIONING_KEY = "provisioning"
 # Grafana's own documented default, relative to its homepath
 _GRAFANA_DEFAULT_PROVISIONING = "conf/provisioning"
-# external Grafana provisioning-tree layout name
+# External Grafana provisioning-tree layout name
 _GRAFANA_DASHBOARDS_SUBDIR = "dashboards"
-# packaged grafana.ini locations probed when no running server names its own config
+# Packaged grafana.ini locations probed when no running server names its own config
 _GRAFANA_CONFIG_CANDIDATES = (
   XDG_CONFIG_HOME / "grafana" / "grafana.ini",
   Path("/opt/homebrew/etc/grafana/grafana.ini"),
   Path("/usr/local/etc/grafana/grafana.ini"),
   Path("/etc/grafana/grafana.ini"),
 )
-# answer-file key of the operator's dashboards-directory override
+# Answer-file key of the operator's dashboards-directory override
 _ANSWER_KEY_DASHBOARD_DIR = "grafana_dashboards_dir"
-# subprocess wall-clock cap in seconds for the process-table read
+# Subprocess wall-clock cap in seconds for the process-table read
 _PS_TIMEOUT_SEC = 5
-# file suffix of a shipped dashboard
+# File suffix of a shipped dashboard
 _JSON_SUFFIX = ".json"
 
-# launchd label of the shipper's user agent, fixed by the service-unit template contract
+# Launchd label of the shipper's user agent, fixed by the service-unit template contract
 _LAUNCHD_LABEL = "com.lazycortex.observe"
-# systemd user unit of the shipper, fixed by the service-unit template contract
+# Systemd user unit of the shipper, fixed by the service-unit template contract
 _SYSTEMD_UNIT = "lazycortex-observe.service"
-# launchd plist path of the shipper's user agent
+# Launchd plist path of the shipper's user agent
 _DEFAULT_PLIST = Path.home() / "Library" / "LaunchAgents" / f"{_LAUNCHD_LABEL}.plist"
-# default wall-clock cap in seconds for the post-load metrics wait
+# Default wall-clock cap in seconds for the post-load metrics wait
 _WAIT_DEFAULT_SEC = 30
-# poll interval in seconds between two metrics probes
+# Poll interval in seconds between two metrics probes
 _WAIT_POLL_SEC = 1
-# answer-file key the agent-kind default is read from
+# Answer-file key the agent-kind default is read from
 _ANSWER_KEY_AGENT_KIND = "agent_kind"
 
 
@@ -149,23 +187,14 @@ def detect_host() -> str:
     return "linux"
 
   # any other platform has no service manager this installer knows how to drive
-  raise ValueError(f"unsupported platform: {sys.platform!r}")
+  raise ValueError(UNSUPPORTED_PLATFORM_ERROR.format(platform = sys.platform))
 
 
 def _write_atomic(target: Path, data: str | bytes, *, mode: int | None = None) -> None:
   """
   Replace the target file's content in one atomic step through a sibling temp file.
 
-  Guarantees:
-    - An interrupted, killed, or crashed call always leaves either the previous complete file
-      content or the new complete content at `target`, never a partial write.
-    - A symlink target is written through: the symlink itself is left in place, pointing at the
-      same file, and the new content lands in the file it resolves to.
-    - The written file's permission mode is `mode` when supplied, otherwise the file's own
-      existing mode, otherwise the umask-derived default for a newly created file; the mode is
-      applied before the first byte of content is written.
-    - The temp file is created fresh under a unique name and never reuses or overwrites an
-      existing file before the final rename.
+  A symlink target is written through: the symlink stays in place and the content lands in the file it resolves to.
 
   Args:
     target: Final path the content lands at; its parent directory must already exist. A symlink
@@ -177,24 +206,6 @@ def _write_atomic(target: Path, data: str | bytes, *, mode: int | None = None) -
   Raises:
     OSError: If the temp file cannot be written or moved into place.
   """
-
-  # Contract:
-  # An interrupted, killed, or crashed call always leaves either the previous complete file
-  # content or the new complete content at `target`, never a partial write.
-
-  # Contract:
-  # When `target` is a symlink, the call writes through it: the symlink itself is left in place,
-  # pointing at the same file, and the new content lands in the file it resolves to.
-
-  # Contract:
-  # The written file's permission mode is `mode` when the caller supplies one, otherwise the
-  # file's own existing mode, otherwise the umask-derived default for a newly created file; this
-  # mode is applied before the first byte of content is written, so the file is never briefly
-  # readable under a different mode.
-
-  # Contract:
-  # The temp file is created fresh under a unique name; the call never reuses or overwrites any
-  # existing file, including a leftover from a previous crashed run, before the final rename.
 
   # a symlink is written through to the file it names; the mode comes from the caller, the file
   # being replaced, or the umask default for a new file
@@ -234,11 +245,11 @@ def render(template_name: str, vars: dict[str, object]) -> str:
 
   The dialect covers `{{ key }}` and `{{ key | default('foo') }}` substitutions, `{% if cond %}` /
   `{% elif cond %}` / `{% else %}` / `{% endif %}` conditionals, and `{% for item in seq %}` /
-  `{% endfor %}` loops; anything else fails loudly rather than pretending Jinja2 compatibility.
+  `{% endfor %}` loops; any other block directive fails loudly rather than pretending Jinja2 compatibility.
 
   Guarantees:
-    - An unsupported template construct always raises instead of being silently skipped,
-      partially substituted, or rendered as literal text.
+    - An unsupported block directive always raises instead of being silently skipped, partially
+      substituted, or rendered as literal text.
 
   Args:
     template_name: File name of the template under the shipped `templates/`
@@ -256,7 +267,7 @@ def render(template_name: str, vars: dict[str, object]) -> str:
   """
 
   # Contract:
-  # An unsupported template construct always raises rather than being silently skipped,
+  # An unsupported block directive always raises rather than being silently skipped,
   # partially substituted, or rendered as literal text.
 
   # Domain(observe.install-state):
@@ -264,9 +275,11 @@ def render(template_name: str, vars: dict[str, object]) -> str:
   # The files an install step hands to the host's service manager, and the config a shipping agent
   # reads on startup, are produced from templates, but the substitution language is deliberately
   # smaller than a general templating engine: a fixed set of variable substitution, branching, and
-  # simple loops, nothing else. A construct outside that small vocabulary is a rendering error, not a
-  # silent no-op or a partial substitution, so a template mistake surfaces immediately during install
-  # rather than shipping a config that looks plausible but is subtly wrong.
+  # simple loops, nothing else. An unsupported block directive is a rendering error, not a silent
+  # no-op or a partial substitution, so that kind of template mistake surfaces immediately during
+  # install. The guard is narrower for value expressions: one written in an unsupported form, such
+  # as another filter or an attribute access, raises nothing and is read as a plain variable name,
+  # so it renders as an empty string, and in a branch condition it reads as false.
 
   # read the raw template text and hand it to the mini template engine for substitution
   return _Template((TEMPLATE_DIR / template_name).read_text(encoding = "utf-8"), vars).render()
@@ -283,6 +296,10 @@ def render_to(template_name: str, vars: dict[str, object], target: Path) -> Path
     - The write is atomic — an interrupted, killed, or crashed call always leaves either the
       previous complete file content or the new complete content at `target`, never a partial
       write.
+    - A symlinked `target` is written through: the symlink stays in place and the new content lands
+      in the file it resolves to.
+    - An existing `target` keeps its permission mode across the rewrite; a newly created one gets the
+      umask default.
 
   Args:
     template_name: File name of the template under the shipped `templates/`
@@ -305,6 +322,14 @@ def render_to(template_name: str, vars: dict[str, object], target: Path) -> Path
   # The write is atomic; an interrupted, killed, or crashed call never leaves a partially
   # written file at `target` — it always keeps either the previous complete content or gains
   # the new complete content.
+
+  # Contract:
+  # A symlinked `target` is written through: the symlink stays in place and the new content
+  # lands in the file it resolves to.
+
+  # Contract:
+  # An existing `target` keeps its permission mode across the rewrite; a newly created `target`
+  # gets the umask default mode.
 
   # render before the parent directory exists so a template error creates nothing on disk
   # waiver: `body` is read once but must be produced ahead of the mkdir for that ordering
@@ -367,8 +392,7 @@ def write_token_file(token: str) -> Path:
   # file instead, and that file's permissions are tightened to owner-read-write-only so other local
   # users on the same host cannot read the credential off disk.
 
-  # create the file already restricted (the open mode only applies on creation, under the umask), then
-  # tighten the open descriptor so a pre-existing loose file is closed down before the token is written
+  # the token lands through an atomic write that applies 0600 before any byte is written
   TOKEN_FILE.parent.mkdir(parents = True, exist_ok = True)
   _write_atomic(TOKEN_FILE, token + "\n", mode = _TOKEN_FILE_MODE)
   return TOKEN_FILE
@@ -431,7 +455,7 @@ def _toml_value(value: object) -> str:
   if isinstance(value, dict):
     return "{ " + ", ".join(f"{_toml_key(str(k))} = {_toml_value(v)}" for k, v in value.items()) + " }"
 
-  # guard: TOML has no null and no other types; refuse rather than write a lossy stand-in
+  # TOML has no null and no other types; refuse rather than write a lossy stand-in
   raise ValueError(f"answer value {value!r} has no TOML representation")
 
 
@@ -440,11 +464,13 @@ def write_answer_file(answers: dict[str, object]) -> Path:
   Persist non-secret operator answers to a trivial top-level TOML file.
 
   Only top-level `key = "value"` pairs are emitted, each value written as a single-line TOML
-  literal — a string, boolean, integer, float, list, or string-keyed dict nested freely. Token-like
-  keys are refused so that secret material never accidentally leaks into the file.
+  literal — a string, boolean, integer, float, list, or string-keyed dict nested freely. Secret-looking
+  keys — those whose name contains token, secret, password, passwd or key, ignoring case — are refused
+  so that secret material never accidentally leaks into the file.
 
   Guarantees:
-    - A token-like key is refused before the answer file is written; the file is never left
+    - A secret-looking key, one whose name contains token, secret, password, passwd or key
+      ignoring case, is refused before the answer file is written; the file is never left
       with partial content or with a secret-looking key present.
     - An interrupted, killed, or crashed call leaves the previous complete answer file in place,
       never a partial one.
@@ -462,13 +488,14 @@ def write_answer_file(answers: dict[str, object]) -> Path:
     The path to the answer file that was written.
 
   Raises:
-    ValueError: If `answers` contains a token-like key such as `token` or
-      `LAZYCORTEX_OBSERVE_TOKEN`, or a value with no TOML representation, such as `None`.
+    ValueError: If `answers` contains a secret-looking key — one whose name contains token, secret,
+      password, passwd or key, ignoring case — or a value with no TOML representation, such as `None`.
     OSError: If the answer file or its parent directory cannot be written.
   """
 
   # Contract:
-  # A token-like key is refused before the answer file is written; the file is never left
+  # A secret-looking key, one whose name contains token, secret, password, passwd or key
+  # ignoring case, is refused before the answer file is written; the file is never left
   # with partial content or with a secret-looking key present.
 
   # Contract:
@@ -491,17 +518,17 @@ def write_answer_file(answers: dict[str, object]) -> Path:
 
   # Domain(observe.install-state):
   # # Secret-looking answer keys are refused, not filtered
-  # The plain settings file only ever accepts answers whose keys are known in advance to be
-  # non-secret. Before any answer is written, its key is checked against the closed set of names
-  # known to carry credential material; a match aborts the whole write rather than silently dropping
-  # just that one key, so a caller cannot accidentally leak a token into world-readable configuration
-  # by extending the answer set with a badly-named field.
+  # The plain settings file only ever accepts answers that carry no credential material. Before any
+  # answer is written, its key is checked, ignoring case, for a fragment that marks a credential:
+  # token, secret, password, passwd or key. Any key containing one of them is refused, so a
+  # differently named token or password field is recognised too. A match aborts the whole write
+  # rather than silently dropping just that one key.
 
   # render each answer as a TOML literal line, refusing anything that looks like a secret first
   for key, value in sorted(answers.items()):
     # guard: never persist secret keys via the non-secret answer file
-    if key in _SECRET_ANSWER_KEYS:
-      raise ValueError(f"refused to write secret key {key!r} into the answer file")
+    if any(fragment in key.lower() for fragment in _SECRET_KEY_FRAGMENTS):
+      raise ValueError(SECRET_KEY_REFUSAL.format(key = key))
 
     # a value with no TOML form refuses the whole write here, before the file is touched
     lines.append(f"{_toml_key(key)} = {_toml_value(value)}")
@@ -734,7 +761,7 @@ def load_service_linux(*, unit_name: str = _SYSTEMD_UNIT) -> tuple[bool, str]:
   return (proc.returncode == 0, proc.stderr)
 
 
-def unload_service_linux(unit_name: str = _SYSTEMD_UNIT) -> tuple[bool, str]:
+def unload_service_linux(*, unit_name: str = _SYSTEMD_UNIT) -> tuple[bool, str]:
   """
   Disable and stop the systemd user unit for the lazycortex-observe agent.
 
@@ -826,7 +853,7 @@ def _compute_version_key(name: str) -> tuple[int, ...]:
   return tuple(out)
 
 
-def installed_plugin_root(name: str, home: Path | None = None) -> Path | None:
+def installed_plugin_root(name: str) -> Path | None:
   """
   Resolve a plugin's installed source root from Claude Code's plugin registry.
 
@@ -837,12 +864,11 @@ def installed_plugin_root(name: str, home: Path | None = None) -> Path | None:
 
   Args:
     name: Plugin name without its `@<marketplace>` suffix.
-    home: Home directory holding the registry; the current user's when omitted.
 
   Returns:
     The recorded install root when it exists on disk, else None.
   """
-  registry = (home or Path.home()) / _INSTALLED_PLUGINS_REL
+  registry = Path.home() / _INSTALLED_PLUGINS_REL
   try:
     data = json.loads(registry.read_text(encoding = "utf-8"))
   except (OSError, ValueError):
@@ -931,12 +957,16 @@ def resolve_core_cli() -> Path:
     return registered
 
   # nothing found by any of the three means the sibling is unreachable from here; name every stage searched
-  searched = [ entry for entry in env_dirs if entry ] or [ "<unset>" ]
+  searched = [ entry for entry in env_dirs if entry ] or [ UNSET_PLUGIN_DIRS ]
   raise RuntimeError(
-    f"lazycortex-core CLI not found: no bin/{_CORE_CLI_NAME} under any directory named by "
-    f"$LAZYCORTEX_PLUGIN_DIRS (searched: {', '.join(searched)}), no dev-vault sibling at '{sibling}', "
-    f"and no registered install"
-    f"{f' under {registered_root}' if registered_root is not None else f' in ~/{_INSTALLED_PLUGINS_REL}'}"
+    _CORE_CLI_NOT_FOUND_ERROR.format(
+      headline = CORE_CLI_NOT_FOUND, name = _CORE_CLI_NAME, searched = ", ".join(searched), sibling = sibling,
+      clause = NO_REGISTERED_INSTALL,
+      place = (
+        _REGISTRY_ROOT_PLACE.format(root = registered_root) if registered_root is not None
+        else _REGISTRY_FILE_PLACE.format(rel = _INSTALLED_PLUGINS_REL)
+      ),
+    )
   )
 
 
@@ -968,20 +998,22 @@ def read_local_scrape_targets() -> list[dict[str, object]]:
   # ask the core registry for every daemon it knows about
   # waiver: external core-CLI subcommand and flag, not internal keys
   proc = subprocess.run(
-    [ sys.executable, str(resolve_core_cli()), "daemon-list", "--json" ],
+    [ sys.executable, str(resolve_core_cli()), _DAEMON_LIST_VERB, "--json" ],
     capture_output = True, text = True, check = False, timeout = _CORE_CLI_TIMEOUT_SEC, encoding = "utf-8",
   )
 
   # guard: a failing registry call must abort loudly, not render an empty shipper config
   if proc.returncode != 0:
-    raise RuntimeError(f"lazycortex-core daemon-list failed: {proc.stderr.strip()[:_STDERR_EXCERPT_LEN]}")
+    raise RuntimeError(
+      CORE_CLI_FAILED_ERROR.format(verb = _DAEMON_LIST_VERB, stderr = proc.stderr.strip()[:_STDERR_EXCERPT_LEN])
+    )
 
   # guard: unparseable registry output aborts just as loudly
   try:
     # waiver: external JSON contract field name of the core daemon-list CLI
     rows = json.loads(proc.stdout).get("daemons", [])
   except json.JSONDecodeError as error:
-    raise RuntimeError(f"lazycortex-core daemon-list printed unparseable JSON: {error}") from error
+    raise RuntimeError(CORE_CLI_UNPARSEABLE_ERROR.format(verb = _DAEMON_LIST_VERB, error = error)) from error
 
   # Domain(observe.coverage-detection):
   # # Scrape targets are drawn only from daemons that opted into metrics
@@ -1058,7 +1090,7 @@ def render_scrape_targets_block(targets: list[dict[str, object]], agent_kind: st
   return "\n".join(lines)
 
 
-def detect_existing_coverage(*, targets: list[dict[str, object]] | None = None) -> dict[str, object]:
+def detect_existing_coverage() -> dict[str, object]:
   """
   Read-only pre-flight: is something on this host already collecting the daemons' metrics?
 
@@ -1071,11 +1103,9 @@ def detect_existing_coverage(*, targets: list[dict[str, object]] | None = None) 
       host as covered.
 
   Notes:
-    - Reads the host's service manager, process table, and established TCP connections; nothing
-      on the host is modified.
-
-  Args:
-    targets: Optional pre-computed `read_local_scrape_targets()` rows; computed when omitted.
+    - Reads the host's service manager, process table, and established TCP connections, and
+      consults the core CLI for the host's metrics-enabled daemons; nothing on the host is modified.
+    - The daemon list is best-effort: when the core registry cannot be read, no port probes run.
 
   Returns:
     `{"covered": bool, "verdict": "already-covered"|"clear", "signals": [<str>, ...]}` —
@@ -1083,8 +1113,7 @@ def detect_existing_coverage(*, targets: list[dict[str, object]] | None = None) 
 
   Raises:
     ValueError: If the current platform is neither macOS nor Linux.
-    subprocess.TimeoutExpired: If the core CLI, consulted when `targets` is omitted, does not exit
-      within the wall-clock cap.
+    subprocess.TimeoutExpired: If the core CLI does not exit within the wall-clock cap.
   """
 
   # Contract:
@@ -1136,12 +1165,11 @@ def detect_existing_coverage(*, targets: list[dict[str, object]] | None = None) 
       process_hits += 1
 
   # signal class 3: something holds live connections to a daemon's metrics port
-  if targets is None:
-    try:
-      targets = read_local_scrape_targets()
-    except RuntimeError:
-      # the pre-flight stays read-only and best-effort — no registry, no port probes
-      targets = []
+  try:
+    targets = read_local_scrape_targets()
+  except RuntimeError:
+    # the pre-flight stays read-only and best-effort — no registry, no port probes
+    targets = []
   for row in targets:
     # waiver: external JSON contract field name of the core daemon-list CLI
     port = row["port"]
@@ -1165,10 +1193,11 @@ def detect_existing_coverage(*, targets: list[dict[str, object]] | None = None) 
   # Domain(observe.coverage-detection):
   # # Coverage verdict weighs signal strength, not signal count alone
   # Before installing a metrics shipper on a host, a pre-flight check decides whether something is
-  # already collecting this host's metrics. Evidence splits into strong signals, such as an installed
-  # collector service already running for this project or a live network connection into a metrics
-  # port, and weak signals, such as a process that merely looks like a known scraper by name and could
-  # just as easily be serving something unrelated. The host counts as already covered when even one
+  # already collecting this host's metrics. Evidence splits into strong signals, such as this project's
+  # collector service being known to the host's service manager (loaded on macOS, active on Linux, so
+  # on macOS a loaded service counts even if it is not currently running) or a live network
+  # connection into a metrics port, and weak signals, such as a process that merely looks like a
+  # known scraper by name and could just as easily be serving something unrelated. The host counts as already covered when even one
   # strong signal is present, or when at least two independent weak signals show up together; a single
   # weak signal alone is never enough to call the host covered, since it could be a false positive.
 
@@ -1194,20 +1223,22 @@ def write_scrape_file_via_core(*, out: Path | None = None) -> dict[str, object]:
   """
   # hand the write to the core CLI, forwarding the output override when one was given
   # waiver: external core-CLI subcommand and flag, not internal keys
-  argv = [ sys.executable, str(resolve_core_cli()), "metrics-scrape-file" ] + ([ "--out", str(out) ] if out else [])
+  argv = [ sys.executable, str(resolve_core_cli()), _SCRAPE_FILE_VERB ] +([ "--out", str(out) ] if out else [])
   proc = subprocess.run(
     argv, capture_output = True, text = True, check = False, timeout = _CORE_CLI_TIMEOUT_SEC, encoding = "utf-8",
   )
 
   # guard: a failing scrape-file write must surface, not pass silently
   if proc.returncode != 0:
-    raise RuntimeError(f"lazycortex-core metrics-scrape-file failed: {proc.stderr.strip()[:_STDERR_EXCERPT_LEN]}")
+    raise RuntimeError(
+      CORE_CLI_FAILED_ERROR.format(verb = _SCRAPE_FILE_VERB, stderr = proc.stderr.strip()[:_STDERR_EXCERPT_LEN])
+    )
 
   # guard: an unparseable CLI result surfaces just as loudly
   try:
     return json.loads(proc.stdout)
   except json.JSONDecodeError as error:
-    raise RuntimeError(f"lazycortex-core metrics-scrape-file printed unparseable JSON: {error}") from error
+    raise RuntimeError(CORE_CLI_UNPARSEABLE_ERROR.format(verb = _SCRAPE_FILE_VERB, error = error)) from error
 
 
 # ----------------------------------------------------------------------------------------
@@ -1267,14 +1298,10 @@ def _resolve_provisioning_dir(config: Path, homepath: Path | None) -> Path | Non
   """
   Resolve the provisioning directory a Grafana config file points at.
 
-  Guarantees:
-    - A relative provisioning path always resolves against Grafana's homepath, matching
-      Grafana's own resolution rule.
-
   Args:
     config: Path to the `grafana.ini` file to read.
-    homepath: Grafana's homepath, used to resolve a relative provisioning path, or `None`
-      when unknown.
+    homepath: Grafana's homepath, which a relative provisioning path resolves against as Grafana itself does, or
+      `None` when unknown.
 
   Returns:
     The resolved provisioning directory, or `None` when the config is malformed or the
@@ -1296,10 +1323,6 @@ def _resolve_provisioning_dir(config: Path, homepath: Path | None) -> Path | Non
     parser.get(_GRAFANA_PATHS_SECTION, _GRAFANA_PROVISIONING_KEY, fallback = "").strip()
     or _GRAFANA_DEFAULT_PROVISIONING
   ))
-
-  # Contract:
-  # A relative provisioning path always resolves against Grafana's homepath, matching
-  # Grafana's own resolution rule.
 
   # Grafana resolves a relative provisioning path against its homepath
   if not path.is_absolute():
@@ -1327,6 +1350,9 @@ def detect_grafana_dashboards_dir() -> Path | None:
     - Absent a recorded override, the fixed detection order decides the result: a running
       Grafana server's own config, then the packaged `grafana.ini` locations, and the first
       candidate that resolves to an existing dashboards directory wins.
+    - A relative provisioning path declared in a Grafana config always resolves against Grafana's
+      homepath, never against the working directory of the calling process, matching Grafana's own
+      resolution rule.
 
   Notes:
     - Reads the host's running process list to look for a live Grafana server; if that read
@@ -1347,12 +1373,14 @@ def detect_grafana_dashboards_dir() -> Path | None:
   # installer discovers that directory rather than assuming a fixed location for it. An operator's own
   # recorded answer for this host is authoritative and stops the search immediately. Absent that, a
   # currently running instance of the tool is asked for its own configuration, since a live instance
-  # reflects what the operator actually deployed rather than a guessed default; only when nothing is
-  # running does the search fall back to the handful of locations the tool's own packaging conventionally
-  # installs its configuration to. A relative provisioning path declared in that configuration is never
-  # resolved against the working directory of whatever process reads it — it resolves against the tool's
-  # own home directory, matching the tool's own resolution rule, so the same relative path always names the
-  # same directory regardless of where it happens to be read from.
+  # reflects what the operator actually deployed rather than a guessed default. That configuration is
+  # only the first candidate: it is tried before, not instead of, the handful of locations the tool's own
+  # packaging conventionally installs its configuration to, so when the running instance's configuration
+  # yields no existing dashboards directory the packaged locations are tried too. A relative provisioning
+  # path declared in that configuration is never resolved against the working directory of whatever
+  # process reads it — it resolves against the tool's own home directory, matching the tool's own
+  # resolution rule. That home directory is known only from the running instance, so without one a
+  # candidate with a relative path, the tool's default included, is skipped and yields nothing.
 
   # Contract:
   # A recorded operator override is authoritative and terminal: its resolved directory,
@@ -1367,6 +1395,11 @@ def detect_grafana_dashboards_dir() -> Path | None:
   # Absent a recorded override, the probes run in a fixed order — the running Grafana
   # server's own config, then the packaged `grafana.ini` locations — and the first
   # candidate that resolves to an existing dashboards directory wins.
+
+  # Contract:
+  # A relative provisioning path declared in a Grafana config always resolves against Grafana's
+  # homepath, never against the working directory of the calling process, matching Grafana's own
+  # resolution rule.
 
   # build the config candidates, the running instance's own outranking the packaged locations
   running_config, homepath = _read_grafana_process_config()
@@ -1405,7 +1438,7 @@ def _lf_bytes(data: bytes) -> bytes:
   return data.replace(b"\r\n", b"\n")
 
 
-def deploy_dashboards(target_dir: Path | None = None) -> dict[str, object]:
+def deploy_dashboards() -> dict[str, object]:
   """
   Copy the plugin's shipped Grafana dashboards into the host's provisioning directory.
 
@@ -1420,12 +1453,8 @@ def deploy_dashboards(target_dir: Path | None = None) -> dict[str, object]:
 
   Notes:
     - Writes dashboard files into a host directory outside the repository.
-    - When no destination is supplied, resolution reads the host's process table and
-      Grafana's own configuration files.
-
-  Args:
-    target_dir: Destination provisioning directory to write into. Detected automatically when
-      omitted.
+    - The destination is detected from the host: its process table and Grafana's own
+      configuration files are read.
 
   Returns:
     A mapping with `outcome` (`installed`, `unchanged`, or `skipped-no-grafana`), `dir` (the
@@ -1436,8 +1465,8 @@ def deploy_dashboards(target_dir: Path | None = None) -> dict[str, object]:
     PermissionError: If the process lacks permission to write into the target directory, such
       as a root-owned provisioning tree.
   """
-  # guard: reject the copy when neither the caller nor this host names a Grafana provisioning tree
-  if (target := target_dir or detect_grafana_dashboards_dir()) is None:
+  # guard: reject the copy when this host names no Grafana provisioning tree
+  if (target := detect_grafana_dashboards_dir()) is None:
     # waiver: outcome tokens of the dashboard-provisioning step contract
     return { "outcome": "skipped-no-grafana", "dir": None, "written": [], "unchanged": [] }
 
@@ -1460,7 +1489,7 @@ def deploy_dashboards(target_dir: Path | None = None) -> dict[str, object]:
     # of the payload counts as identical), is left untouched and counted as unchanged rather
     # than rewritten.
 
-    # guard: reject a rewrite of a payload already identical on disk once both are read as LF
+    # a payload already identical on disk once both are read as LF is counted as unchanged
     if installed.is_file() and _lf_bytes(installed.read_bytes()) == _lf_bytes(payload):
       unchanged.append(name)
       continue
@@ -1494,13 +1523,13 @@ class _LoopFrame(TypedDict):
     active: Whether the loop sits inside an active conditional branch.
   """
 
-  # name of the loop variable bound per iteration
+  # Name of the loop variable bound per iteration
   var: str
-  # items the body is replayed over; empty when the loop sits inside an inactive branch
+  # Items the body is replayed over; empty when the loop sits inside an inactive branch
   seq: list[object]
-  # buffered `(kind, payload)` fragments — literal text or a deferred expression
+  # Buffered `(kind, payload)` fragments — literal text or a deferred expression
   body: list[tuple[str, str]]
-  # whether the loop sits inside an active conditional branch
+  # Whether the loop sits inside an active conditional branch
   active: bool
 
 
@@ -1644,7 +1673,7 @@ class _Template:
       if active:
         # guard: refuse to iterate over a non-iterable value
         if not isinstance(seq := self._evaluate_value(match.group(2)), Iterable):
-          raise TypeError(f"non-iterable in for: {seq!r}")
+          raise TypeError(NON_ITERABLE_ERROR.format(seq = seq))
 
         # open the live frame with the materialised sequence
         # waiver: loop-frame field names, internal to the engine
@@ -1678,7 +1707,7 @@ class _Template:
 
     # anything outside the dialect is a rendering error, never a silent skip
     else:
-      raise SyntaxError(f"unsupported template directive: {directive!r}")
+      raise SyntaxError(UNSUPPORTED_DIRECTIVE_ERROR.format(directive = directive))
 
 
   def _is_truthy(self, expr: str) -> bool:
@@ -1723,13 +1752,15 @@ class _Template:
     # the filter form `name | default('...')` is tried first so a piped expression never reads as a
     # bare variable name
     if match := re.match(r"(\w+)\s*\|\s*default\(\s*'([^']*)'\s*\)$", expr):
-      # guard: an unbound or empty variable yields the filter's default
+      # an unbound or empty variable yields the filter's default
       if (value := self.vars.get(match.group(1))) is None or value == "":
         return match.group(2)
 
       # a bound, non-empty variable renders as itself
       return str(value)
 
+    # limit: an unknown filter or an attribute access is read as a bare variable name and renders empty,
+    # upgrade by rejecting unsupported value expressions with a `SyntaxError` as block directives are
     # a bare name renders its bound value, or nothing when unbound
     return str(self.vars.get(expr, ""))
 
@@ -1797,11 +1828,11 @@ class _Template:
 
     # guard: every {% if %} must be closed before the template ends
     if len(stack) != 1:
-      raise SyntaxError("template ended with unclosed {% if %} block")
+      raise SyntaxError(UNCLOSED_BLOCK_ERROR.format(block = "if"))
 
     # guard: every {% for %} must be closed before the template ends
     if loop_stack:
-      raise SyntaxError("template ended with unclosed {% for %} block")
+      raise SyntaxError(UNCLOSED_BLOCK_ERROR.format(block = "for"))
 
     # the fully rendered text
     return "".join(out)
@@ -1952,7 +1983,8 @@ def cmd_set_answer(argv: list[str]) -> None:
     argv: One or more `key=value` pairs; a JSON-looking value decodes, anything else stays text.
 
   Raises:
-    ValueError: If a pair carries no `=`, or a key is a token-like secret key the answer file refuses.
+    ValueError: If a pair carries no `=`, or a key is secret-looking — its name contains token, secret,
+      password, passwd or key, ignoring case — and the answer file refuses it.
     OSError: If the answer file cannot be read or written.
     SystemExit: If `argv` does not parse; argparse exits with status 2 after printing the usage.
   """
@@ -2010,6 +2042,12 @@ def cmd_render_config(argv: list[str]) -> None:
   Guarantees:
     - A target already byte-identical to the fresh render is left untouched and reported as
       `unchanged`; every other case writes and reports `rendered`.
+    - A write is atomic — an interrupted, killed, or crashed call always leaves either the previous
+      complete file content or the new complete content at the target, never a partial write.
+    - A symlinked target is written through: the symlink stays in place and the new content lands
+      in the file it resolves to.
+    - An existing target keeps its permission mode across the rewrite; a newly created one gets the
+      umask default.
 
   Args:
     argv: Template name, `--target <path>`, optional `--agent-kind <kind>`, repeatable `--var key=value`.
@@ -2047,11 +2085,23 @@ def cmd_render_config(argv: list[str]) -> None:
   # A target already byte-identical to the fresh render is left untouched and reported as
   # `unchanged`; every other case writes and reports `rendered`.
 
+  # Contract:
+  # A write is atomic; an interrupted, killed, or crashed call always leaves either the previous
+  # complete content or the new complete content at the target, never a partial file.
+
+  # Contract:
+  # A symlinked target is written through: the symlink stays in place and the new content
+  # lands in the file it resolves to.
+
+  # Contract:
+  # An existing target keeps its permission mode across the rewrite; a newly created target
+  # gets the umask default mode.
+
   # settle the target path and the fresh render the byte-identical check compares against
   target = Path(os.path.expanduser(args.target))
   body = render(args.template, variables)
 
-  # guard: the target already carries the fresh render — nothing to write
+  # a target that already carries the fresh render is reported unchanged and not rewritten
   # waiver: stdlib encoding/mode/escape idiom
   if target.is_file() and target.read_text(encoding = "utf-8") == body:
     # waiver: outcome tokens of the skill's render-step contract
@@ -2173,8 +2223,9 @@ def main(argv: list[str]) -> int:
     RuntimeError: If a subcommand needs the core CLI and it cannot be found, exits non-zero, or
       prints unparseable JSON.
     subprocess.TimeoutExpired: If the core CLI does not exit within the wall-clock cap.
-    ValueError: If a `key=value` pair carries no `=`, a secret-looking answer key is refused, or
-      the platform is neither macOS nor Linux.
+    ValueError: If a `key=value` pair carries no `=`, an answer key is refused as secret-looking — its name
+      contains token, secret, password, passwd or key, ignoring case — or the platform is neither macOS
+      nor Linux.
     FileNotFoundError: If a template named for rendering does not exist.
     SyntaxError: If a rendered template uses an unsupported directive or has an unclosed block.
     TypeError: If a rendered template iterates a `{% for %}` over a non-iterable value.

@@ -36,10 +36,6 @@ def _compute_age_sec(jdir: Path, now: float) -> int:
   """
   Compute a bundle's age from its lifecycle markers.
 
-  Guarantees:
-    - The age is measured from the first marker present in the order `DONE`, `DEAD`, `READY`; a
-      bundle carrying none of them reports `-1`.
-
   Args:
     jdir: Absolute job-bundle directory.
     now: Reference wall-clock time in epoch seconds.
@@ -49,14 +45,9 @@ def _compute_age_sec(jdir: Path, now: float) -> int:
     when the bundle carries none of them.
   """
 
-  # Contract:
-  # The age is measured from the first marker present in the order DONE, DEAD, READY, so a finished
-  # bundle ages from its completion and a queued one from its readiness; a bundle carrying none of
-  # them reports -1. The list-jobs skill renders the value as is.
-
   # the first marker present decides — a finished bundle ages from DONE, a queued one from READY
   for name in _AGE_MARKERS:
-    # guard: the first present marker settles the age
+    # the first present marker settles the age
     if (marker := jdir / name).exists():
       return int(now - marker.stat().st_mtime)
 
@@ -68,6 +59,10 @@ def cmd_list_jobs(argv: list[str]) -> int:
   """
   Run the `list-jobs` subcommand: print the queue listing as a JSON array.
 
+  Guarantees:
+    - A listed bundle's `age_sec` is measured from the first marker present in the order `DONE`, `DEAD`,
+      `READY`; a bundle carrying none of them reports `-1`.
+
   Args:
     argv: Argument vector after the subcommand name (`--expert`, `--status`, `--cwd`).
 
@@ -77,6 +72,11 @@ def cmd_list_jobs(argv: list[str]) -> int:
   Raises:
     SystemExit: On an argument error, with exit code 2, raised by the argument parser.
   """
+
+  # Contract:
+  # A listed bundle's `age_sec` MUST be measured from the first marker present in the order `DONE`,
+  # `DEAD`, `READY`; a bundle carrying none of them MUST report `-1`.
+
   # the verb's command line: the two listing filters and the repo-root override
   # waiver: argparse CLI signature and help strings, not domain keys
   parser = argparse.ArgumentParser(prog = "lazycortex-core list-jobs")

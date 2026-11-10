@@ -262,17 +262,25 @@ def output_allow_with_message(message: str) -> None:
   """
   Emit a non-blocking system message alongside an implicit allow, then exit the hook process.
 
-  The function writes a Claude Code hook protocol response that injects a `systemMessage`
-  visible to Claude without vetoing the in-flight tool call, then terminates the hook with
+  The function writes a Claude Code hook protocol response that surfaces the message to both
+  readers without vetoing the in-flight tool call — to Claude as the PreToolUse
+  `additionalContext`, and to the user as the `systemMessage` — then terminates the hook with
   exit code 0.
 
   Args:
-    message: Human-readable text to surface as the `systemMessage` payload.
+    message: Human-readable text to surface to Claude and to the user.
 
   Raises:
     SystemExit: Always — the hook terminates with exit code 0 after emitting the message.
   """
-  json.dump({ "systemMessage": message }, sys.stdout)
+  # Claude Code shows `systemMessage` to the user only; `additionalContext` is what reaches Claude
+  json.dump({
+    "systemMessage": message,
+    "hookSpecificOutput": {
+      "hookEventName": "PreToolUse",
+      "additionalContext": message,
+    },
+  }, sys.stdout)
   sys.exit(0)
 
 

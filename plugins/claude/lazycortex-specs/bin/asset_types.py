@@ -229,7 +229,7 @@ def alias_base(asset_type: str, record: dict) -> str:
     The base type's name, or the empty string when the type is concrete or undeclared.
 
   Raises:
-    ValueError: When the alias names an unknown base, or a base that is itself an alias.
+    ValueError: When the alias names an unknown base, a base that is itself an alias, or the `release` type.
   """
 
   # Domain(spec.declarations):
@@ -240,11 +240,18 @@ def alias_base(asset_type: str, record: dict) -> str:
   # the default folder, the starting document, and the implied tools always stay the alias's
   # own. The base a declaration names must itself be a concrete type, never another alias, so
   # resolving which playbook a type ultimately uses never depends on the order aliases happen
-  # to be declared in.
+  # to be declared in. The release type can never be an alias base: a release is created only
+  # by the product's release-start step, and the release gate ladder belongs to the release
+  # type alone.
 
   # guard: a concrete type borrows nothing — nothing further to validate
   if not (base := (resolve(asset_type, record) or {}).get(AssetTypeField.ALIAS_OF, "")):
     return ""
+
+  # guard: a release note is scaffolded only by `Start release`, and its ladder belongs to the literal type alone
+  if base == spec_keys.ReleaseKey.ASSET_TYPE:
+    raise ValueError(f"{AssetTypeField.ALIAS_OF} of {asset_type!r} names {base!r} — "
+                     "a release is never an alias base")
 
   # guard: an alias pointing at nothing has no declaration to borrow
   if (target := resolve(base, record)) is None:

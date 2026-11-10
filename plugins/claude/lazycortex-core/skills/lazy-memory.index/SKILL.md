@@ -30,7 +30,7 @@ If `absent`, state outcome `absent` and skip Step 2 (Report still runs).
 ## Step 2 — Rebuild tag index via worker
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-memory.index/bin/reindex.py" --repo .)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/reindex.py" --repo .)
 ```
 
 Parse the JSON summary `{experts, notes, tags}`.

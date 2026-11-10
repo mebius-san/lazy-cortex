@@ -76,6 +76,9 @@ _COL0_KEY_RE = re.compile(r"[^\s#-][^:]*:(\s|$)")
 # The frontmatter block's closing fence, when the scan runs over a text without a matched block.
 _CLOSE_FENCE_RE = re.compile(r"---[ \t]*\r?\n?\Z")
 
+# The list key every mirror tag lives under.
+_TAGS = "tags"
+
 # The line break every line splitter here honours; `\r\n` is the same break with a carriage return.
 _LF = "\n"
 _CR = "\r"
@@ -505,6 +508,70 @@ def write_list(fm_text: str, key: str, values: list[str]) -> str:
       kept[-1] += "\n"
     replacement = "".join([ *kept, *pending ])
   return fm_text[:start] + replacement + fm_text[end:]
+
+
+def drop_key(fm_text: str, key: str) -> str:
+  """
+  Remove a key from the frontmatter block together with every line its value runs on.
+
+  Guarantees:
+    - Removes the key's whole value span — a scalar, a flow list continued on later lines even at column 0, or a
+      block list with blank or comment lines inside — so no member of its value is left behind.
+    - Removes every occurrence of a key written more than once.
+    - Leaves every other byte of the text in place, the body included; a text without a frontmatter block comes back
+      unchanged.
+
+  Args:
+    fm_text: The full note text carrying a leading frontmatter block.
+    key: The key's name.
+
+  Returns:
+    The text without the key's lines; unchanged when the text has no frontmatter block or the block does not carry
+    the key.
+  """
+
+  # Contract:
+  # Every occurrence of the key leaves together with its whole value span, and every other byte of the text stays in
+  # place; a text without a frontmatter block is never touched. Migration verbs edit operator-owned notes through
+  # this and promise to touch nothing else.
+
+  # guard: without a frontmatter block there is no key to drop, and a body line is never one
+  if _BLOCK_RE.match(fm_text) is None:
+    return fm_text
+
+  # each pass removes the first occurrence left, until none remains
+  while (span := _value_span(fm_text, key)) is not None:
+    fm_text = fm_text[:span[0]] + fm_text[span[1]:]
+  return fm_text
+
+
+def sweep_tag(fm_text: str, prefix: str, member: str) -> str:
+  """
+  Leave exactly one tag of a prefixed family in a frontmatter block.
+
+  The first tag starting with `prefix` is replaced in place by `member`, any other tag with that prefix is
+  dropped, and `member` is appended when no such tag existed. Tags outside the family are kept.
+
+  Args:
+    fm_text: The frontmatter text carrying the `tags` list.
+    prefix: The family prefix shared by the tags to sweep.
+    member: The tag the family is left with.
+
+  Returns:
+    The frontmatter text with the swept tag list.
+  """
+  # the first `prefix` member is replaced in place, every other one dropped, the rest kept
+  members: list[str] = []
+  for tag in read_list(fm_text, _TAGS):
+    if not tag.startswith(prefix):
+      members.append(tag)
+    elif member not in members:
+      members.append(member)
+
+  # a list carrying no `prefix` member yet gains the new one at its end
+  if member not in members:
+    members.append(member)
+  return write_list(fm_text, _TAGS, members)
 
 
 def _fence_scan(lines: list[str]) -> tuple[list[bool], str]:

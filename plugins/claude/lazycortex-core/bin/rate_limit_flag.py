@@ -3,8 +3,8 @@ Host-local subscription-rate-limit flag shared by every token-burning process on
 
 The flag lives outside any repository, so a daemon in one checkout, a daemon in another, and the
 `lazy-claude` wrapper in a third-party repository all observe the same windows. One file per
-rate-limit window keeps writers of different windows from ever contending; two writers of the same
-window race harmlessly, since both describe the same window.
+rate-limit window and account keeps writers of different windows or accounts from ever contending;
+two writers of the same window and account race harmlessly, since both describe the same window.
 
 Every read failure is fail-open: an unreadable or malformed record is treated as not raised and
 reported on stderr, never raised as an exception into the caller's flow.
@@ -17,6 +17,7 @@ import os
 import sys
 import tempfile
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -40,12 +41,14 @@ WARNING_THRESHOLD_DEFAULT = 0.9
 FALLBACK_TTL_SEC = 5 * 3600
 # Filename stem for a frame that named no window type.
 UNKNOWN_KEY = "unknown"
+# Prefix opening every diagnostic line this module writes to stderr.
+STDERR_PREFIX = "rate-limit flag:"
 # Window-type characters accepted into a filename; anything else is filed as unknown rather
 # than trusted as a path segment.
 _SAFE_KEY_CHARS = set("abcdefghijklmnopqrstuvwxyz0123456789_-")
 
 
-def account_identity() -> str:
+def read_account_identity() -> str:
   """
   Resolve the identity of the account the current process spends tokens under.
 
@@ -56,6 +59,7 @@ def account_identity() -> str:
     - Resolution follows a fixed precedence: an explicit token's digest, then the machine
       login's account id, then a shared unknown bucket for a process with neither — so two
       processes spending under the same account always agree on the identity string.
+    - Never raises: whatever the state of the machine's login record, the call returns an identity.
 
   Returns:
     A short stable identity string; never empty, never the raw token.
@@ -65,6 +69,10 @@ def account_identity() -> str:
   # The identity resolves via a fixed precedence — an explicit token, then the machine
   # login's account id, then a shared unknown bucket — so two processes spending under the
   # same account always resolve to the same identity string on this host.
+
+  # Contract:
+  # Resolution NEVER raises: whatever the state of the machine's login record,
+  # the call returns an identity.
 
   # Domain(runtime.job-execution):
   # # Per-account rate-limit scoping
@@ -79,16 +87,23 @@ def account_identity() -> str:
   # an explicit token is the effective account, whatever the machine login says
   token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")
   if token:
+    # surrogateescape round-trips the raw bytes of a non-UTF-8 environment value instead of raising
     # waiver: digest-length literal — 12 hex chars are ample for a per-host account set
-    return "tok-" + hashlib.sha256(token.encode()).hexdigest()[:12]
+    return "tok-" + hashlib.sha256(token.encode("utf-8", "surrogateescape")).hexdigest()[:12]
 
   # ambient login: the account id recorded by the Claude CLI's own config
   try:
     # waiver: external Claude Code config path and field names, not internal keys
     cfg = json.loads((Path.home() / ".claude.json").read_text(encoding = "utf-8"))
+    # waiver: external Claude Code config field names, not internal keys
     uuid = str((cfg.get("oauthAccount") or {}).get("accountUuid") or "")
-  except (OSError, json.JSONDecodeError):
+  # ValueError covers both a JSON parse failure and a file that is not valid UTF-8; AttributeError
+  # covers a config, or an `oauthAccount` value, that is not an object; RuntimeError is what
+  # `Path.home()` raises when no home directory resolves
+  except (OSError, ValueError, AttributeError, RuntimeError):
     uuid = ""
+
+  # a recorded login account names the bucket by its id
   if uuid:
     # waiver: digest-length literal — see above
     return "acc-" + uuid[:12]
@@ -99,7 +114,7 @@ def account_identity() -> str:
 
 def flag_dir() -> Path:
   """
-  Return the host-local directory holding one record file per rate-limit window.
+  Return the host-local directory holding one record file per rate-limit window and account.
 
   Returns:
     Absolute path to the flag directory, which need not exist yet.
@@ -120,7 +135,7 @@ def flag_dir() -> Path:
   return Path(base) / FLAG_REL
 
 
-def config(daemon: dict) -> dict:
+def resolve_config(daemon: dict) -> dict:
   """
   Resolve the guard configuration from a `daemon` settings section.
 
@@ -166,7 +181,7 @@ def config(daemon: dict) -> dict:
   }
 
 
-def frames(stdout: str) -> list[dict]:
+def parse_frames(stdout: str) -> list[dict]:
   """
   Extract every rate-limit payload carried by a stream-json stdout buffer.
 
@@ -189,7 +204,7 @@ def frames(stdout: str) -> list[dict]:
   for line in stdout.splitlines():
     raw = line.strip()
 
-    # guard: skip the parse for every line that cannot be the frame this function wants —
+    # the parse is skipped for every line that cannot be the frame this function wants —
     # a transcript is megabytes and only these few lines carry the marker
     # waiver: external Claude Code stream-json field name, not an internal key
     if not raw or "rate_limit_event" not in raw:
@@ -199,7 +214,7 @@ def frames(stdout: str) -> list[dict]:
     except json.JSONDecodeError:
       continue
 
-    # guard: only rate-limit events carry a payload this module reads
+    # only rate-limit events carry a payload this module reads
     # waiver: external Claude Code stream-json field name, not an internal key
     if not isinstance(frame, dict) or frame.get("type") != "rate_limit_event":
       continue
@@ -213,7 +228,7 @@ def frames(stdout: str) -> list[dict]:
   return found
 
 
-def triggered(info: dict, cfg: dict) -> str | None:
+def evaluate_trigger(info: dict, cfg: dict) -> str | None:
   """
   Decide whether a rate-limit payload trips the guard under the given configuration.
 
@@ -222,7 +237,7 @@ def triggered(info: dict, cfg: dict) -> str | None:
 
   Args:
     info: One rate-limit payload as carried by a stream frame.
-    cfg: The effective guard configuration, as returned by `config`.
+    cfg: The effective guard configuration, as returned by `resolve_config`.
 
   Returns:
     The trigger token that fired, or None when the payload is benign or its trigger is disabled.
@@ -243,7 +258,7 @@ def triggered(info: dict, cfg: dict) -> str | None:
   # share of the window, letting work continue through the early portion of a warning window and
   # stopping only as the window's true exhaustion approaches.
 
-  # guard: a warning stops the daemon only at a measured utilization at or above the
+  # a warning stops the daemon only at a measured utilization at or above the
   # threshold — the provider marks frames `allowed_warning` long before exhaustion, and a
   # frame with no reading never stops (unknown is not at-threshold)
   if status == RateLimitTrigger.ALLOWED_WARNING and cfg.get(RateLimitGuardKey.ON_ALLOWED_WARNING, True):
@@ -254,11 +269,11 @@ def triggered(info: dict, cfg: dict) -> str | None:
       return RateLimitTrigger.ALLOWED_WARNING
     return None
 
-  # guard: the window is already closed
+  # a window already closed stops the daemon
   if status == RateLimitTrigger.REJECTED and cfg.get(RateLimitGuardKey.ON_REJECTED, True):
     return RateLimitTrigger.REJECTED
 
-  # guard: spend has crossed into paid overage — an absent field means unknown, never "no"
+  # spend has crossed into paid overage — an absent field means unknown, never "no"
   # waiver: external Claude Code stream-json field name, not an internal key
   if info.get("isUsingOverage") is True and cfg.get(RateLimitGuardKey.ON_OVERAGE, True):
     return RateLimitTrigger.OVERAGE
@@ -273,11 +288,19 @@ def record(info: dict, trigger: str, *, writer: str) -> Path:
   on stderr; readers ignore it, so a clock skew degrades to no protection rather than to a
   permanent stop.
 
+  A reset the payload names that cannot be read as a date (for example milliseconds sent as seconds)
+  is reported on stderr and treated as absent, so the record carries the fallback expiry instead.
+
   Guarantees:
     - A written record stays visible to every reader running under the same account identity as
       the writer, until the window's reset time passes, regardless of which process or checkout
       wrote it.
     - A legacy record carrying no account field stays visible to every reader on this host.
+    - A record is filed per (window, account) under the same file-name scheme the `lazy-claude` wrapper
+      uses, so two accounts raising the same window never overwrite each other's records.
+    - A written record always carries a reset time that can be read as a calendar date; a reset the payload
+      names that cannot be read as one is reported on stderr and replaced by the fallback expiry, exactly as
+      for a payload with no reset.
 
   Args:
     info: The rate-limit payload that raised the flag.
@@ -286,6 +309,9 @@ def record(info: dict, trigger: str, *, writer: str) -> Path:
 
   Returns:
     Path to the record file written.
+
+  Raises:
+    OSError: If the flag directory cannot be created or the record cannot be written.
   """
 
   # Contract:
@@ -294,21 +320,45 @@ def record(info: dict, trigger: str, *, writer: str) -> Path:
   # of which process or checkout wrote it. A legacy record carrying no account field stays
   # visible to every reader on this host, whatever account it runs under.
 
+  # Contract:
+  # Records are filed per (window, account) under the same file-name scheme the `lazy-claude`
+  # wrapper uses, so two accounts raising the same window never overwrite each other's records,
+  # and a record either writer stores for a given window and account is the same file.
+
+  # Contract:
+  # A record written here MUST carry a reset time that can be read as a calendar date.
+  # A reset the payload names that cannot be read as one (overflow, non-finite, out of range,
+  # e.g. milliseconds sent as seconds) is reported on stderr and replaced by the fallback expiry,
+  # exactly as for a payload with no reset.
+
   # Domain(runtime.job-execution):
-  # # Fallback expiry for a window with no reported reset
-  # Not every rate-limit frame names when its window reopens. When one does not, the raised flag
-  # still needs a lifetime, so it is bounded by the shortest window the provider is known to
-  # enforce rather than left open-ended — a record that outlives its true window merely blocks
-  # work a little longer than necessary, while a record with no expiry at all would block it
-  # forever.
+  # # Fallback expiry for a window with no usable reset
+  # Not every rate-limit frame names when its window reopens, and not every named time can be
+  # trusted: a reset that cannot be read as a calendar date, typically milliseconds sent where
+  # seconds are expected, says nothing reliable about the window. Such a reset is rejected,
+  # reported on the error stream, and treated exactly like a frame that names none. In either
+  # case the raised flag still needs a lifetime, so it is bounded by the shortest window the
+  # provider is known to enforce rather than left open-ended — a record that outlives its true
+  # window merely blocks work a little longer than necessary, while a record with no expiry at
+  # all, or one expiring at an unreadable time, would block it forever.
 
   now = time.time()
 
   # the identity is used twice below (record field + filename) and may cost a config read
-  account = account_identity()
+  account = read_account_identity()
+
+  # the reset the payload names for the window this trigger closed, as the provider sent it
+  resets = _resets_at(info, trigger)
+
+  # guard: a reset no date can hold (milliseconds sent as seconds, overflow, non-finite) is
+  # repaired to absent, so every reader can still format the record it lands on
+  if resets is not None and not is_date(resets):
+    sys.stderr.write(
+      f"{STDERR_PREFIX} ignoring reset {resets!r} for {_window_key(info)} — not representable as a date\n"
+    )
+    resets = None
 
   # a frame carrying no reset timestamp still bounds the record — by the shortest window
-  resets = _resets_at(info, trigger)
   effective = resets if resets is not None else now + FALLBACK_TTL_SEC
   entry = {
     RateLimitRecordKey.RESETS_AT:        effective,
@@ -325,7 +375,7 @@ def record(info: dict, trigger: str, *, writer: str) -> Path:
   # a record born expired protects nothing — say so where the operator will see it
   if effective <= now:
     sys.stderr.write(
-      f"rate-limit flag: record for {_window_key(info)} is already expired on write "
+      f"{STDERR_PREFIX} record for {_window_key(info)} is already expired on write "
       f"(resets_at={effective}, now={now}) — clock skew?\n"
     )
 
@@ -355,12 +405,14 @@ def record(info: dict, trigger: str, *, writer: str) -> Path:
   return target
 
 
-def live() -> list[dict]:
+def read_live_records() -> list[dict]:
   """
   Read every record whose window has not yet reopened.
 
   Guarantees:
-    - An unreadable, malformed, or non-object record is reported on stderr and treated as not raised.
+    - An unreadable, malformed, or non-object record, or one whose reset time is present but not a number
+      naming a calendar date, is reported on stderr naming the record file and treated as not raised;
+      a record with no reset time is skipped silently.
     - A read failure never reaches the caller as an exception.
     - A record whose window has already reopened is excluded, regardless of when it was written.
     - A record raised under a different account identity than the caller's own is excluded;
@@ -372,9 +424,11 @@ def live() -> list[dict]:
   """
 
   # Contract:
-  # Every read path treats an unreadable, malformed, or non-object record as NOT raised: the
-  # condition is reported on stderr and the read continues. A read failure NEVER propagates as
-  # an exception into the caller's flow.
+  # Every read path treats an unreadable, malformed, or non-object record, and a record whose
+  # reset time is present but unusable (not a number, or not representable as a calendar date),
+  # as NOT raised: the condition is reported on stderr naming the record file and the read
+  # continues. A record with no reset time is skipped silently. A read failure NEVER propagates
+  # as an exception into the caller's flow.
 
   # Contract:
   # A record MUST stop being reported as raised once its window's reset time passes; expiry
@@ -391,9 +445,21 @@ def live() -> list[dict]:
   # act as a hard security boundary. When a record cannot be trusted — missing, unreadable, or
   # malformed — the guard treats the affected window as not raised rather than refusing to
   # proceed, so a broken or corrupted flag degrades to no protection instead of leaving every
-  # process on the host stuck waiting on a signal it can no longer read.
+  # process on the host stuck waiting on a signal it can no longer read. An unreadable file,
+  # text that is not valid structured data, and a record that is not an object are reported on
+  # the error stream when skipped. A record carrying no reopening time has no window to keep
+  # closed and is skipped silently. A record whose reopening time is present but is not a number,
+  # or is a number no calendar date can hold (overflowing, a millisecond value, infinity, not a
+  # number), is reported on the error stream and skipped like an unreadable record. An old or
+  # corrupted record must never keep a window closed forever, nor stop the reader.
 
-  base = flag_dir()
+  # RuntimeError is what `Path.home()` raises when no home directory resolves and no
+  # cache-home override is set; with no locatable directory nothing can be raised
+  try:
+    base = flag_dir()
+  except RuntimeError as e:
+    sys.stderr.write(f"{STDERR_PREFIX} cannot locate the flag directory: {e}\n")
+    return []
 
   # guard: no writer has ever raised the flag on this host
   if not base.is_dir():
@@ -401,12 +467,12 @@ def live() -> list[dict]:
   now = time.time()
 
   # loop-invariant: the reader's own identity, checked against every record below
-  own = account_identity()
+  own = read_account_identity()
   raised: list[dict] = []
   try:
     names = sorted(os.listdir(base))
   except OSError as e:
-    sys.stderr.write(f"rate-limit flag: cannot list {base}: {e}\n")
+    sys.stderr.write(f"{STDERR_PREFIX} cannot list {base}: {e}\n")
     return []
   for name in names:
     # guard: only record files belong to this contract
@@ -415,23 +481,34 @@ def live() -> list[dict]:
       continue
     try:
       entry = json.loads((base / name).read_text(encoding = "utf-8"))
-    except (OSError, json.JSONDecodeError) as e:
-      sys.stderr.write(f"rate-limit flag: ignoring unreadable record {name}: {e}\n")
+    # ValueError covers both a JSON parse failure and a file that is not valid UTF-8
+    except (OSError, ValueError) as e:
+      sys.stderr.write(f"{STDERR_PREFIX} ignoring unreadable record {name}: {e}\n")
       continue
 
     # guard: a record that is not an object cannot carry a window
     if not isinstance(entry, dict):
-      sys.stderr.write(f"rate-limit flag: ignoring malformed record {name}\n")
+      sys.stderr.write(f"{STDERR_PREFIX} ignoring malformed record {name}\n")
       continue
     resets = entry.get(RateLimitRecordKey.RESETS_AT)
 
-    # guard: no usable reset timestamp, or the window has already reopened
-    if not isinstance(resets, (int, float)) or now >= float(resets):
+    # guard: a record without a reset timestamp has no window to keep closed
+    if resets is None:
       continue
-    owner = entry.get(RateLimitRecordKey.ACCOUNT)
 
-    # guard: another account's window says nothing about this reader's budget; a record
+    # guard: a reset that is not a number naming a date cannot be compared with the clock — an old
+    # or corrupted record is reported and skipped like an unreadable one
+    if not isinstance(resets, (int, float)) or not is_date(resets):
+      sys.stderr.write(f"{STDERR_PREFIX} ignoring record {name}: reset time is not a number naming a date\n")
+      continue
+
+    # a window that has already reopened is no longer live
+    if now >= float(resets):
+      continue
+
+    # another account's window says nothing about this reader's budget; a record
     # without the field predates the scoping and stays visible to everyone
+    owner = entry.get(RateLimitRecordKey.ACCOUNT)
     if isinstance(owner, str) and owner and owner != own:
       continue
     raised.append(entry)
@@ -440,22 +517,22 @@ def live() -> list[dict]:
 
 def is_raised() -> bool:
   """
-  Report whether any rate-limit window is currently closed on this host.
+  Report whether a rate-limit window of the caller's own account is currently closed on this host.
 
   Returns:
-    True while at least one unexpired record exists.
+    True while at least one unexpired record exists that belongs to the caller's account or carries no account.
   """
-  return bool(live())
+  return bool(read_live_records())
 
 
-def resets_at() -> float | None:
+def read_resets_at() -> float | None:
   """
   Report when the last currently-closed window reopens.
 
   Returns:
     The largest reset timestamp across unexpired records, or None when nothing is raised.
   """
-  raised = live()
+  raised = read_live_records()
 
   # guard: nothing raised — there is no reopening to wait for
   if not raised:
@@ -480,13 +557,31 @@ def _window_key(info: dict) -> str:
   if not isinstance(raw, str) or not raw:
     return UNKNOWN_KEY
 
-  # a provider-supplied string becomes a path segment here — accept only the known alphabet
+  # guard: a window type outside the safe alphabet would become an unsafe path segment
   if not set(raw) <= _SAFE_KEY_CHARS:
     return UNKNOWN_KEY
   return raw
 
 
-def _resets_at(info: dict, trigger: str) -> float | None:
+def is_date(value: int | float) -> bool:
+  """
+  Report whether an epoch-seconds value can be turned into a calendar date.
+
+  Args:
+    value: Candidate reset timestamp in epoch seconds.
+
+  Returns:
+    True when the value names a representable UTC date; False for an overflowing, non-finite,
+    or out-of-range value.
+  """
+  try:
+    datetime.fromtimestamp(float(value), tz = UTC)
+  except (OverflowError, ValueError, OSError):
+    return False
+  return True
+
+
+def _resets_at(info: dict, trigger: str) -> int | float | None:
   """
   Pick the reset timestamp that describes the window the given trigger closed.
 
@@ -495,7 +590,8 @@ def _resets_at(info: dict, trigger: str) -> float | None:
     trigger: The trigger token that fired for this payload.
 
   Returns:
-    The reset timestamp in epoch seconds, or None when the payload carried neither field.
+    The reset timestamp in epoch seconds as the payload carried it, or None when the payload
+    carried neither field.
   """
   # waiver: external Claude Code stream-json field name, not an internal key
   window = info.get("resetsAt")
@@ -512,7 +608,7 @@ def _resets_at(info: dict, trigger: str) -> float | None:
   # an overage trigger is bounded by the overage window, every other trigger by the plain one
   first, second = (overage, window) if trigger == RateLimitTrigger.OVERAGE else (window, overage)
   for value in (first, second):
-    # guard: keep the first field that actually carried a number
+    # the first field that actually carried a number is the answer
     if isinstance(value, (int, float)):
-      return float(value)
+      return value
   return None

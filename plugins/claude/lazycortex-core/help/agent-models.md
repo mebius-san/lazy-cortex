@@ -1,14 +1,14 @@
 ---
 chapter_type: block
 summary: Assign model tiers to every agent, prune dead entries, and register non-Anthropic provider endpoints for expert jobs to spawn against.
-last_regen: 2026-10-06
+last_regen: 2026-11-10
 no_diagram: true
 source_skills:
   - lazy-core.agent-models
   - lazy-core.agent-models-seed
   - lazy-core.providers
-source_sha: 2b8e9e79da15a0e25e187f4c05ae6011a36f0740
-surface_sha: d26a40a701e6cecec070fdf43cff44315ae3cfaee1f1a873e447b7b64d8727cb
+source_sha: 3fadd77433a2100975275f22c7c7e8cb8e544c9d
+surface_sha: 3aab3d349ec22393035812af41f92460a821f29a28492f37454bb4f1e9b829a8
 ---
 # Per-agent model routing
 
@@ -60,6 +60,11 @@ Before writing anything, the skill validates the candidate entry against the sam
 
 Assigning a provider to a specific expert is a separate, content-level decision made on that expert's own `provider` field in `lazy.settings.json` — out of scope for this skill, which owns only the registry of available endpoints.
 
+Two constraints are worth knowing before you register an endpoint:
+
+- **The base URL must be `api.anthropic.com` or a local proxy.** The current `claude` CLI rejects non-`claude-*` model names against a public `ANTHROPIC_BASE_URL` before any network call is made; only `localhost` and `127.0.0.1` are exempt. A public Anthropic-compatible host that is neither will fail to spawn no matter what the wizard writes, so point such a provider at a local proxy instead. The wizard repeats this reminder in the base URL question and again if the liveness probe fails.
+- **An expert bound to a provider reaches its models only through the tier map.** If that expert sets its own `model` field, the value must be one of the four tier aliases `fable`, `opus`, `sonnet` or `haiku`. Any other value — a full model id, a provider-native name, `default` — is refused at dispatch and fails `/lazy-runtime.preflight`. Put the provider's own model names into the registry's tier map, and keep the expert's `model` a tier alias (or drop it and let the agent's tier apply).
+
 ## Common adjustments
 
 **Preview before writing.** Run `/lazy-core.agent-models --dry-run` to see exactly which entries would be written and to which file, without making any changes.
@@ -71,6 +76,8 @@ Assigning a provider to a specific expert is a separate, content-level decision 
 **Changing an existing tier.** `/lazy-core.agent-models` never overwrites existing entries; it only adds missing ones. To override a tier that is already set globally, run `/lazy-core.agent-models --scope=project` — the project entry shadows the global one. To remove that project-level override and fall back to the global tier, delete the entry from `./.claude/lazy.settings.json` via `/lazy-core.slim-context` Phase 7, which re-prompts for any entries that go missing after cleanup.
 
 **Relationship to install.** Every plugin's own install skill pre-seeds curated tiers for the agents it ships, through the same shared seeding step every LazyCortex plugin install calls — it reads the identical curated-tiers table this wizard uses, so a tier never drifts between the two paths. The seeding step finds that table through the core plugin's own resolution — the authoring repo's tree first, then the install registry — and never by scanning the plugin cache; if it cannot find the table it stops with a `sot-missing` error telling you to install `lazycortex-core` first, rather than falling back to a guess. An entry already seeded that way, or one already set to `default`, doesn't reappear in the wizard's missing list. `/lazy-core.agent-models` fills the remaining per-agent entries — anything not curated, plus your own project agents — across all discovered sources interactively. They do not overlap — install handles the bootstrap, this wizard handles everything discovered afterwards. That bootstrap step stays live on every re-install, too: if you never touched a seeded entry and the plugin later ships a different curated tier for that agent, the next install run silently rewrites it to match — a stale shipped default isn't something you decided, so it doesn't need your say-so to catch up. The moment you touch a seeded entry yourself — through this wizard, or by hand-editing the tier so it no longer matches what it was seeded from — that entry becomes your pin, and install leaves it alone for good, whatever the curated table says afterward.
+
+**Seeding tiers for a plugin's agents.** Seeding is the install-time half of the same routing. A plugin's install step seeds the `lazycortex` group of `lazy.settings.json` with the curated tiers for the agents that plugin ships, at the install scope (project or user) it already resolved. A plugin install that can run the core command-line tool does this directly through its `agent-models-seed` verb; one that cannot dispatches the `lazy-core.agent-models-seed` skill, which runs that same verb. You do not invoke the skill yourself. It is idempotent — a re-run with unchanged inputs writes nothing — and it reports one line per agent with a state: `added` (new entry), `unchanged`, `refreshed` (an untouched seed moved to the plugin's new curated tier) or `kept-local` (you pinned the tier, so it was left alone). The overall outcome is `seeded-N`, `unchanged` or `no-entries`; the verb never claims a seed it did not perform.
 
 **After an automated rollout.** If a repo was brought current by `lazy-core.autosetup` rather than by you running the install chain by hand, expect only the curated-default agents to already have tiers. Run `/lazy-core.agent-models` yourself afterward to finish routing the rest — it picks up exactly where the automated run left off.
 
@@ -91,6 +98,14 @@ Assigning a provider to a specific expert is a separate, content-level decision 
 **`/lazy-core.providers` fails: "provider `<name>` is not registered".** `remove` or `update` named a provider that isn't in the merged registry. Run `/lazy-core.providers list` to see the actual names.
 
 **`/lazy-core.providers` fails validation on add/update.** A `claude-*` literal in one of the four tiers, a missing tier, an `openai` provider tier missing the `rt-openai/` prefix, a token variable that can't be found in your environment or `~/.claude/.env`, or an endpoint that doesn't answer `<base_url>/v1/models` with `200` — each aborts the write with the specific check that failed, before anything is saved. Fix the named field and re-run.
+
+**A plugin install reports `sot-missing` while seeding tiers.** The curated tier table (`default-tiers.json`) shipped with the core plugin could not be found. Install the core plugin first, then re-run the plugin's install.
+
+**A plugin install reports `settings-unparseable`.** The target `lazy.settings.json` is not valid JSON, and the seeding step leaves it untouched. Repair the file's JSON syntax, then re-run the install.
+
+**Seeding reports `no-entries` for a plugin that ships agents.** The plugin's `<prefix>:<agent>` dispatch strings are missing from the core plugin's curated tier table, so there was nothing to seed. Until the table gains those entries, run `/lazy-core.agent-models` to assign the tiers yourself.
+
+**An expert bound to a provider fails at dispatch or in preflight with "model must be one of the tier aliases".** The expert's own `model` field holds something other than `fable`, `opus`, `sonnet` or `haiku`. Change it to a tier alias (or drop it), and keep the provider's own model names in the registry's tier map.
 
 **`/lazy-core.providers` refuses to write: "`.claude/lazy.settings.local.json` is not gitignored".** The local overlay path was removed from `.gitignore`. Restore the entry before the skill will write provider entries — it never writes machine-local endpoint facts into a path git would track.
 

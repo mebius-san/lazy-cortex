@@ -118,7 +118,7 @@ def main() -> None:
   # public or private, so the config's scope globs are deliberately discarded.
 
   # waivers suppress known false positives
-  waivers, _ = guard_checks.load_config(root)
+  waivers, _, _ = guard_checks.load_config(root)
 
   # secret findings decide the branch: any survivor denies the commit
   findings = guard_checks.scan_lines(added_lines, guard_checks.FAIL_CHECKS, waivers)

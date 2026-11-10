@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Per-expert memory tracked in git: consult notes before work, write new ones as a job side-effect, consolidate via reflect passes.
-last_regen: 2026-09-24
+last_regen: 2026-11-10
 diagram_spec:
   anchor: "How the four skills compose"
   request: "Flow diagram showing the four memory skills and how they compose: mark-persona opts an expert in (writes lazy.settings.json experts entry); write is the only blessed note writer (writes .memory/<expert>/ notes, regenerates .tags/); reflect dispatches a kind=reflect job that feeds run logs and existing notes to the expert, which then calls write; index rebuilds .tags/ from note frontmatter as a recovery path. Show .memory/<expert>/ and .memory/.tags/ as shared state that write maintains and reflect reads."
@@ -10,8 +10,8 @@ source_skills:
   - lazy-memory.index
   - lazy-memory.reflect
   - lazy-memory.mark-persona
-source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
-surface_sha: d149748336cffaf2d040561f93031a566dcd00091738df19767e8d50a785a8c8
+source_sha: 4662bd907b9439e62b704146b65d311529d4da7f
+surface_sha: 53c208a8d910c52694fe6c0591abaf2aa6261ffad735badb571c4c4ffc0e6e15
 ---
 # Expert memory — notes that survive runs
 
@@ -23,11 +23,11 @@ Four skills make this possible: one to opt an expert in, one to write notes atom
 
 **`lazy-memory.mark-persona`** is the gate. Until an expert carries the persona aspect, none of the other memory skills will touch it. The skill reads the expert's current entry in `lazy.settings.json`, appends `lazycortex-core:lazy-memory.persona-aspect` to its `aspects[]`, and saves. From the next dispatch onward the expert's runtime context includes the aspect's obligations — consult `.memory/<self>/.tags/*.md` before primary work, write notes only through `/lazy-memory.write`, handle `kind=reflect` jobs when dispatched. The skill is idempotent: re-running on an already-marked expert reports the current state and stops.
 
-**`lazy-memory.write`** is the only path for creating or updating notes. It validates the note's frontmatter — `title`, `tags` (every entry prefixed `memory/`), `type` (one of `persona | rule | example | warning | fact`), `summary` — picks a non-colliding slug from the title, writes the file under `.memory/<expert>/`, regenerates the local `.memory/<expert>/.tags/<topic>.md` and global `.memory/.tags/<topic>.md` tag files for every topic the note touches, then commits the entire change set atomically under a `memory.<expert>` bot identity. The caller — whether the expert itself during a job or the operator running a manual reflect — never needs to commit memory paths. The skill owns that git visibility completely. Optionally, a `--consolidate` list of paths under `.logs/` or `.memory/` can be dropped atomically with the write, so superseded log entries disappear in the same commit that creates the consolidated note.
+**`lazy-memory.write`** is the only path for creating or updating notes. It validates the note's frontmatter — `title`, `tags` (every entry prefixed `memory/`), `type` (one of `persona | rule | example | warning | fact`), `summary` — picks a non-colliding slug from the title, writes the file under `.memory/<expert>/`, regenerates the local `.memory/<expert>/.tags/<topic>.md` and global `.memory/.tags/<topic>.md` tag files for every topic the note touches, then commits the entire change set atomically under a `memory.<expert>` bot identity. The caller — whether the expert itself during a job or the operator running a manual reflect — never needs to commit memory paths. The skill owns that git visibility completely. When an expert runs inside a daemon-driven job, the commit identity comes from that job's git author; on the operator-driven path it falls back to the expert's configured git author, and the `memory.` prefix is always applied. Re-running a write whose note body is byte-identical is a harmless no-op that reports no commit. If the commit step fails (for example a pre-commit hook rejects the change, or another session holds the git lock), the note and its tag files stay changed in the worktree, unstaged, and nothing is left in the index; fix the cause and re-run the same write. Optionally, a `--consolidate` list of paths under `.logs/` or `.memory/` can be dropped atomically with the write, so superseded log entries disappear in the same commit that creates the consolidated note.
 
 **`lazy-memory.reflect`** converts accumulated experience into durable knowledge. It dispatches a `kind=reflect` job to one persona-marked expert, bundling recent run logs (last 30 days by default) and every current note under `.memory/<expert>/` as the job's source. The daemon picks up the job and the expert reads the material, identifies patterns worth retaining, and calls `/lazy-memory.write` one or more times with consolidated insights. The job returns `outcome=edited` when notes changed, or `outcome=empty` when nothing new emerged. You collect the job with `/lazy-expert.collect-job` and the new notes are already committed.
 
-**`lazy-memory.index`** is the recovery tool. Under normal operation you will never need it — `/lazy-memory.write` keeps the tag tree in sync atomically. When a note has been hand-edited outside the subsystem, the tag files can drift from the actual frontmatter. Running `/lazy-memory.index` walks every expert under `.memory/`, recomputes the topic set from live frontmatter, regenerates both the local and global `.tags/` trees, and removes stale tag files that no longer have a backing note. If the `.memory/` directory is absent entirely (the subsystem was never initialized), the skill reports that state rather than failing; run `/lazy-core.install` to bootstrap the directory.
+**`lazy-memory.index`** is the recovery tool. Under normal operation you will never need it — `/lazy-memory.write` keeps the tag tree in sync atomically. When a note has been hand-edited or moved outside the subsystem, the tag files can drift from the actual frontmatter — an audit may report a note carrying a `memory/<topic>` tag that its tag file does not list, or a global tag file pointing at a missing local one; `/lazy-core.slim-context` may offer this skill for the same reason. Running `/lazy-memory.index` walks every expert under `.memory/`, recomputes the topic set from live frontmatter, regenerates both the local and global `.tags/` trees, and removes stale tag files that no longer have a backing note. It finishes by reporting how many experts, notes, and tags it processed. If the `.memory/` directory is absent entirely (the subsystem was never initialized), the skill reports that state rather than failing; run `/lazy-core.install` to bootstrap the directory.
 
 ## How they work together
 
@@ -54,6 +54,12 @@ Four skills make this possible: one to opt an expert in, one to write notes atom
 - **Updating a note's tags.** Edit the note's `tags:` frontmatter by hand, then run `/lazy-memory.index` to reconcile the tag tree. If you want to keep the atomic-commit guarantee, re-run `/lazy-memory.write` with the same `--slug` override instead — the writer regenerates `.tags/` and the now-orphaned entry disappears from both the local and global tag files.
 
 - **Slug overrides.** By default `/lazy-memory.write` derives a slug from the note title and appends a counter to avoid collisions. Pass `--slug <name>` to pin the file name — useful when you want a reflect pass to overwrite a specific existing note rather than create a new one.
+
+- **Reflect with nothing to consolidate.** If an expert has no recent run logs and no notes yet, `/lazy-memory.reflect` still dispatches but the job has nothing to fold in. Skip it until the expert has run some jobs.
+
+- **A stale `--consolidate` path.** If a path passed to `--consolidate` no longer exists, `/lazy-memory.write` warns and still writes the note. Check the path, or drop it from the list.
+
+- **Unknown or unmarked expert.** Both `/lazy-memory.write` and `/lazy-memory.reflect` refuse an expert that is not marked persona; run `/lazy-memory.mark-persona <expert>` and retry. `/lazy-memory.mark-persona` itself stops if the expert is not registered at all — check the name, or register the expert via `/lazy-core.install` first.
 
 ## Where this fits
 

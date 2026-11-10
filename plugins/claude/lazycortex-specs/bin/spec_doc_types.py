@@ -177,7 +177,7 @@ def _plugin_root() -> Path:
   return Path(__file__).resolve().parent.parent
 
 
-def shipped_defaults() -> dict[str, dict]:
+def read_shipped_defaults() -> dict[str, dict]:
   """
   Read the plugin's own document-type declarations.
 
@@ -212,6 +212,8 @@ def _product_types(repo: Path, product: str | None) -> dict[str, dict]:
   # guard: no settings file — nothing a product could have declared
   if not path.is_file():
     return {}
+
+  # guard: a malformed settings file declares nothing a product could have added
   try:
     record = resolve_product.effective_record(repo, product)
   except json.JSONDecodeError:
@@ -244,11 +246,11 @@ def declared_types(repo: Path, product: str | None = None) -> dict[str, dict]:
   # icon, its starting template, or any other property the shipped declaration already settled.
 
   # Contract:
-  # a product's own declaration for a type is merged flag-by-flag over the shipped one —
+  # A product's own declaration for a type is merged flag-by-flag over the shipped one —
   # setting one flag never requires the product to restate any other flag, icon, or template
   # the shipped declaration already carries.
 
-  merged = shipped_defaults()
+  merged = read_shipped_defaults()
   for name, decl in _product_types(repo, product).items():
     merged[name] = { **_FLAG_DEFAULTS, **merged.get(name, {}), **decl }
   return merged
@@ -324,7 +326,9 @@ def _derive_type(path: Path, role: str) -> str:
   # A type describes what a piece of content is. A note that only marks a place in the
   # catalog's own structure — the status note of an asset, or the level note of a product or of
   # the catalog root — is not content, so it is never eligible to carry a type: a legacy stamp
-  # found on one of these is corrected back off rather than kept.
+  # found on the level note of a product or of the catalog root is corrected back off rather than
+  # kept; the status note of an asset is simply never given one, and a stamp it already carries
+  # is left as it is.
 
   # guard: a folder-note is a folder marker, not a typed document — the status note of an asset
   # and the level note of a product or of the catalog root alike
@@ -341,7 +345,7 @@ def _derive_type(path: Path, role: str) -> str:
 
   # no role to read: fall back to the filename, accepted only when it names a shipped type
   stem = path.name[: -len(_MD_SUFFIX)]
-  return stem if stem in shipped_defaults() else ""
+  return stem if stem in read_shipped_defaults() else ""
 
 
 def _insert_type(fm_text: str, doc_type: str) -> tuple[str, int]:
@@ -408,13 +412,18 @@ def backfill(repo: Path) -> dict:
     repo: Absolute repository root (holds `.claude/lazy.settings.json`).
 
   Returns:
-    `{"touched": N, "skipped": M, "cleaned": K}` — `N` documents gained the key, `M` already
-    carried it, `K` level notes had a stale one taken back off.
+    `{"touched": N, "skipped": M, "cleaned": K}` — `N` documents gained the key, `M` candidates
+    were left as they are (they already carried the key, or have no frontmatter fence to write it
+    into), `K` level notes had a stale one taken back off.
   """
-  # Contract: idempotent and commit-free — a second run touches nothing and leaves every file
-  # byte-identical, and the migration never stages or commits what it wrote. Callers chain this
-  # into their own commit (`lazy-spec.install` Step 7c does exactly that), so a hidden commit
-  # here would land unreviewed content under the caller's identity.
+
+  # Contract:
+  # Idempotent and commit-free — a second run touches nothing and leaves every file
+  # byte-identical, and the migration never stages or commits what it wrote. Callers fold the
+  # result into their own commit, so a hidden commit here would land unreviewed content under
+  # the caller's identity.
+
+  # walk every markdown document under the content root, counting each outcome
   content_root = spec_paths.spec_content_root(spec_paths.find_settings_root(repo))
   touched = 0
   skipped = 0
@@ -445,13 +454,13 @@ def backfill(repo: Path) -> dict:
       if not doc_type:
         continue
 
-      # guard: already typed — idempotent no-op
+      # an already-typed document is counted as skipped and left as it is
       if _K.DOC_TYPE in fm_values:
         skipped += 1
         continue
       new_fm, count = _insert_type(text[:fm_end], doc_type)
 
-      # guard: no anchor line to insert after — leave the file for the doctor to report
+      # guard: no frontmatter fence to write into — leave the file for the doctor to report
       if count != 1:
         skipped += 1
         continue
@@ -465,7 +474,7 @@ def doc_type_of(path: Path) -> str:
   Read one document's `spec_doc_type` frontmatter value.
 
   Guarantees:
-    - The basename is never consulted — a document named `races.md` carrying
+    - The basename is never consulted — a document named `pricing.md` carrying
       `spec_doc_type: design` is a design document.
 
   Args:
@@ -476,12 +485,49 @@ def doc_type_of(path: Path) -> str:
   """
 
   # Contract:
-  # the type is read only from the `spec_doc_type` frontmatter key — a document's basename is
+  # The type is read only from the `spec_doc_type` frontmatter key — a document's basename is
   # never consulted, even when it happens to match a type name.
 
   # waiver: sibling-module frontmatter parser -- the one parser every specs primitive shares
   fm_values, _fm_end = flip_gate.parse_frontmatter(path.read_text(encoding = _K.ENCODING))
   return fm_values.get(_K.DOC_TYPE, "")
+
+
+def is_ladder_document(path: Path, basenames: frozenset[str] | None = None) -> bool:
+  """
+  Check whether one changed path is a document the woken note's own ladder tracks.
+
+  A level ladder tracks a closed set of filenames named by the caller. An asset ladder tracks
+  any freely-named markdown document that carries a non-empty `spec_doc_type`, whatever its kind.
+
+  Args:
+    path: The changed path to classify.
+    basenames: The level ladder's closed document set, on a level note; None on an asset, where
+      the `spec_doc_type` predicate decides instead.
+
+  Returns:
+    True when `path` is a file this ladder tracks as one of its documents; False when the path
+    is gone between scan and dispatch, is its own folder's note, or carries no document type.
+  """
+  # guard: a path gone between scan and dispatch is no document on either ladder
+  if not path.is_file():
+    return False
+
+  # the level ladder's membership is the closed set and nothing else
+  if basenames is not None:
+    return path.name in basenames
+
+  # guard: an expert's non-markdown attachment carries no frontmatter to read, and a folder's own
+  # note is the coordination object rather than one of its documents
+  if path.suffix != _MD_SUFFIX or path.name == f"{path.parent.name}{_MD_SUFFIX}":
+    return False
+
+  # Decision: mirror the `lazy-spec.coordinator-watch` routine's `filter.any_of` predicate (presence of a
+  # non-null `spec_doc_type`), not a filename list or a review-tracked-kind list — the layout protocol gives an
+  # authored document's basename no semantics, and a typed document with nothing to transition is harmless.
+
+  # the asset ladder's membership is the routine's own predicate, read off the file
+  return bool(doc_type_of(path))
 
 
 def _rename_declaration(old: str, new: str) -> bool:
@@ -660,6 +706,8 @@ def _rename_classes(repo: Path, old: str, new: str) -> int:
   # guard: no settings file — no class registry to rewrite
   if not path.is_file():
     return 0
+
+  # guard: a malformed settings file has no class registry to rewrite
   try:
     data = json.loads(path.read_text(encoding = _K.ENCODING))
   except json.JSONDecodeError:
@@ -720,13 +768,17 @@ def rename(repo: Path, old: str, new: str) -> dict:
     followed, how many other template files were moved or retyped in place, and how many
     documents had their `spec_role` rewritten.
   """
-  # Contract: idempotent, commit-free, and overwrite-free — a second run finds nothing under the
+
+  # Contract:
+  # Idempotent, commit-free, and overwrite-free — a second run finds nothing under the
   # retired name and reports zero in every counter, and nothing is ever staged or committed:
   # every change lands in the worktree for the caller to fold into its own commit. A file already
   # existing under the new name — template copy, linear template, or catalog document — keeps its
   # own content, the source staying in place and the pair uncounted. The on-disk rename fires
   # only on a `spec_doc_type` match; a document retyped through `spec_role` alone keeps its
   # filename.
+
+  # resolve the content root and zero every counter the summary reports
   content_root = spec_paths.spec_content_root(spec_paths.find_settings_root(repo))
   docs = 0
   files = 0
@@ -750,7 +802,7 @@ def rename(repo: Path, old: str, new: str) -> dict:
       if typed and name == f"{old}{_MD_SUFFIX}":
         renamed = path.with_name(f"{new}{_MD_SUFFIX}")
 
-        # guard: never overwrite — a sibling already under the new name keeps its own content
+        # move the file only when no sibling already holds the new name — that one keeps its content
         if not renamed.exists():
           shutil.copy2(path, renamed)
           path.unlink()
@@ -794,7 +846,11 @@ def main(argv: list[str]) -> int:
   p_resolve = sub.add_parser(_VERB_RESOLVE)
   # waiver: argparse CLI signature -- positional argument name
   p_resolve.add_argument("doc_type")
-  p_list = sub.add_parser(_VERB_LIST)
+  for verb_parser in (p_resolve, sub.add_parser(_VERB_LIST)):
+    # waiver: argparse CLI signature -- option flag + default
+    verb_parser.add_argument("--product", default = None)
+    # waiver: argparse CLI signature -- option flag + default
+    verb_parser.add_argument("--cwd", default = None)
   p_backfill = sub.add_parser(_VERB_BACKFILL)
   # waiver: argparse CLI signature -- option flag + default
   p_backfill.add_argument("--cwd", default = None)
@@ -805,11 +861,6 @@ def main(argv: list[str]) -> int:
   p_rename.add_argument("new")
   # waiver: argparse CLI signature -- option flag + default
   p_rename.add_argument("--cwd", default = None)
-  for verb_parser in (p_resolve, p_list):
-    # waiver: argparse CLI signature -- option flag + default
-    verb_parser.add_argument("--product", default = None)
-    # waiver: argparse CLI signature -- option flag + default
-    verb_parser.add_argument("--cwd", default = None)
   args = parser.parse_args(argv)
 
   # `of` needs no repo at all — the answer lives in the document's own frontmatter

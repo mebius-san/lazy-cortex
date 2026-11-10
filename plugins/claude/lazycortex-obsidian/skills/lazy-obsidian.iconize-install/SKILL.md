@@ -64,7 +64,7 @@ Every mutating command below MUST target `<repo-root>` / `<vault>` explicitly (`
 
 Three MANDATORY hard deps. No prompt, no skip. The user opted into iconize-install — iconize-sync is non-functional without all three, so asking "install folder-notes?" here would be pointless ceremony and (worse) invites the agent to silently treat "skip" as a valid outcome.
 
-`update-plugin` is version-aware and idempotent — always invoke it; never short-circuit because a manifest probe looked green. "Manifest present" does NOT mean "already current" — that's `update-plugin`'s job.
+The `plugin-install` verb is version-aware and idempotent — always run it; never short-circuit because a manifest probe looked green. "Manifest present" does NOT mean "already current" — that's the verb's job.
 
 | id | flag |
 |---|---|
@@ -74,9 +74,9 @@ Three MANDATORY hard deps. No prompt, no skip. The user opted into iconize-insta
 
 For each row, in order (each is its own ledger entry — 1.5a / 1.5b / 1.5c):
 
-1. Invoke `/lazy-obsidian.update-plugin <id> [<flag>]`.
-2. Record the state tuple (`binary=... overrides=... community=...`) for the Step 6 report.
-3. If `update-plugin` returns **FAIL** → **ABORT the entire skill** with a clear error: "Hard dependency `<id>` could not be installed/updated (`<reason>`). iconize-sync requires all three. Resolve and re-run." Do not continue to subsequent rows or steps. No silent `skipped`, no continue-anyway. A failed hard dep is a failed install.
+1. Run `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-obsidian" plugin-install <id> [<flag>] --vault <vault>)`. It prints one JSON line.
+2. Record the state tuple `binary=<binary> overrides=<overrides> community=<community>` from the JSON fields of those names, plus every `warnings` entry, for the Step 6 report.
+3. If the verb exits 1 (`status: refused`) → **ABORT the entire skill** with a clear error: "Hard dependency `<id>` could not be installed/updated (`<reason>`). iconize-sync requires all three. Resolve and re-run.", where `<reason>` is the JSON `reason`. Do not continue to subsequent rows or steps. No silent `skipped`, no continue-anyway. A failed hard dep is a failed install.
 
 ## Step 2 — Detect legacy protocol doc
 
@@ -121,26 +121,14 @@ The worker writes icon/color into frontmatter under `iconize_icon` and `iconize_
 | `iconInFrontmatterFieldName` | `"iconize_icon"` |
 | `iconColorInFrontmatterFieldName` | `"iconize_color"` |
 
-This is a clean deep-merge of opinionated plugin settings onto the existing `data.json` — apply silently unless a value directly contradicts an existing one.
+These three keys are the `obsidian-icon-folder` block of `${CLAUDE_PLUGIN_ROOT}/templates/obsidian/plugin-settings.json`, which Step 1.5b's `plugin-install` already merged into `data.json` (creating it when absent) or aborted the skill. This step verifies that result and writes nothing.
 
 Procedure:
 
-1. Read `<vault>/plugins/obsidian-icon-folder/data.json`. If missing → WARN: "Iconize is not installed or hasn't been launched once. Re-run `/lazy-obsidian.update-plugin obsidian-icon-folder` or open Obsidian once to let it initialize its `data.json`, then re-run this skill." Skip this step (return to Step 2.7). Outcome: **iconize-absent**.
-2. Extract `settings.iconInFrontmatterEnabled`, `settings.iconInFrontmatterFieldName`, `settings.iconColorInFrontmatterFieldName`.
-3. Classify each of the three keys:
-   - **Absent or already equal to the required value** → set/leave it to the required value silently (a missing key or an equal key is not a conflict — the shipped default applies cleanly). Preserve all other `settings` keys and all other top-level keys (`rules`, `recentlyUsedIcons`, path-keyed entries). Atomic write (`data.json.tmp` → `mv`) only when something changed. Outcome contribution: **asserted** (already equal) / **merged** (set from absent).
-   - **Present with a non-default value the user deliberately set** (e.g. a custom `iconInFrontmatterFieldName` pointing at a different frontmatter key) → this is a genuine conflict: the shipped value and the local value disagree about the same setting and we can't tell which should win. This is the ONLY case that prompts.
-4. If any key is a genuine conflict, ask once for the whole frontmatter-feature block — the three settings are conceptually a single toggle and make no sense partial:
-
-   ```
-   Context (print before asking):
-   - Where: /lazy-obsidian.iconize-install · Step 2.6 — Assert Iconize frontmatter-feature settings; target <vault>/plugins/obsidian-icon-folder/data.json → `settings`
-   - Found: `<key>`: local `<local value>` vs required `<required value>` — one line per conflicting key
-   - Why asking: you set a non-default value deliberately; frontmatter-driven icons paint from `iconize_icon` / `iconize_color` only with the shipped values in effect, and nothing can tell which should win
-   - Answers: `merge-shipped` — conflicting keys rewritten to the required values, everything else preserved, atomic write (outcome **merged**); `keep-local` — your values stay and frontmatter-driven icons will not paint until you reconcile Iconize settings by hand (outcome **kept-local**); not persisted, asked again on the next run while the conflict stands
-   AskUserQuestion: header "Iconize settings", question "Iconize frontmatter settings in <vault>/plugins/obsidian-icon-folder/data.json conflict with the shipped defaults — which wins?", options `merge-shipped` — "set the three keys to the shipped values; icons paint from frontmatter", `keep-local` — "keep your values; icons from frontmatter stay off".
-   ```
-5. Report state (aggregate across the three keys): **asserted** / **merged** / **kept-local** / **iconize-absent**.
+1. Run `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/plugin_json.py" merge-overrides "${CLAUDE_PLUGIN_ROOT}/templates/obsidian/plugin-settings.json" obsidian-icon-folder <vault>/plugins/obsidian-icon-folder/data.json --dry-run)`.
+2. Output `overrides-current` → outcome **asserted**.
+3. Any other output, or a non-zero exit → outcome **refused: `<output>`**, quoting the command's output: Iconize is not configured to paint from frontmatter. No write, no prompt; continue to Step 2.7.
+4. Report state: **asserted** / **refused: `<output>`**.
 
 ## Step 2.7 — Icon-map scaffold (schema-aware, file-sync policy)
 
@@ -301,11 +289,10 @@ Iconize (`obsidian-icon-folder`) stores the vault's full icon-mapping database (
 Because this step runs only inside `iconize-install`, the opt-in is implicit: the user is scaffolding iconize-sync, so they clearly intend to use it.
 
 1. `entry = ".obsidian/plugins/obsidian-icon-folder/data.json"` (repo-root relative — the path iconize writes regardless of vault subdir, because the vault is `.obsidian/` under the repo root per Step 1).
-2. Target: `<repo-root>/.gitignore`. This is the one `.gitignore` write the skill is allowed to make (pre-existing, intentional behavior — runtime state must not be tracked). Apply it silently — no create/skip prompt:
-   - **File absent** → create `<repo-root>/.gitignore` containing just `entry`. State: **gitignore-created**.
-   - **File present** → read it. If any non-comment line equals `entry` → no write. State: **already-ignored**.
-   - **File present, entry absent** → append `entry` on its own line (prepend `\n` if the file doesn't end in one). State: **added**.
-3. Check whether the file is currently tracked: `git ls-files --error-unmatch <entry>`. Exit 0 → emit a one-line WARN in the report reminding the user to run `git rm --cached <entry>` to stop tracking it. Never auto-`git rm` — that's a history-touching action, user's call.
+2. Resolve `<core-cli>` — the core plugin's `bin/lazycortex-core`: `<repo-root>/plugins/claude/lazycortex-core/bin/lazycortex-core` when this repo authors the core plugin, else `<installPath>/bin/lazycortex-core` from the highest-`version` `lazycortex-core@lazycortex` record in `$HOME/.claude/plugins/installed_plugins.json`. Then write the line through the core verb, silently — no create/skip prompt; this is the one `.gitignore` line the skill manages, and the verb never touches other lines:
+   `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> gitignore-ensure .obsidian/plugins/obsidian-icon-folder/data.json --cwd <repo-root>)`
+   It prints one JSON line. Map its `state`: `created` → **gitignore-created**, `updated` → **added**, `already-present` → **already-ignored**.
+3. When the JSON `tracked` list names `entry`, emit a one-line WARN in the report reminding the user to run `git rm --cached <entry>` to stop tracking it. Never auto-`git rm` — that's a history-touching action, user's call.
 
 Idempotent: re-running reports **already-ignored** every time after the first write. This is the only `.gitignore` line the skill manages — it never touches other entries.
 
@@ -339,20 +326,20 @@ One bullet per step, in order — missing bullet = skipped step, back up and run
 - **Step 2** legacy protocol doc: **kept-orphan** / **not-present**.
 - **Step 2.5** legacy PostToolUse: **kept-orphan** (count) / **not-present**.
 - **Step 2.55** legacy pre-commit shim: **legacy-shim-removed** (+ **hooksPath-unset**) / **kept-foreign** / **not-present**.
-- **Step 2.6** Iconize frontmatter settings: **asserted** / **merged** / **kept-local** / **iconize-absent**.
+- **Step 2.6** Iconize frontmatter settings: **asserted** / **refused: `<output>`**.
 - **Step 2.7** icon-map: **installed** / **unchanged** / **merged** (with `additions=N conflicts-kept-authored=N conflicts-took-shipped=N`; append `paint-roots-seeded=<vault_root>` when the key was introduced this run) / **migrated-v`N`-to-v`SCHEMA_VERSION`** / **migration-path-missing** / **blocker-plugin-too-old**. Prepend **path-migrated** when the v1.0.0 legacy-path pre-flight moved the file; **kept-orphan** for the legacy path when both old and new paths exist.
 - **Step 3.5** repaint routine: **registered** / **refreshed** / **unchanged** / **no-daemon**, plus the legacy-identity prune (**identity-pruned** / **identity-absent**) and backfill outcomes.
 - **Step 4** callbacks dir: **created** / **already-present** / **.gitkeep-added**.
-- **Step 4.5** `.gitignore` (iconize data.json): **added** / **already-ignored** / **gitignore-created**; WARN if `git ls-files --error-unmatch` exits 0 (user runs `git rm --cached`, never auto).
+- **Step 4.5** `.gitignore` (iconize data.json): **added** / **already-ignored** / **gitignore-created**; WARN when the verb's `tracked` list names the entry (user runs `git rm --cached`, never auto).
 - **Step 4.6** plugin registries: **registries-visible-<count>** (one line per registry) / **no-registries**.
 - **Step 5** verify: `check-versions` status + `reconcile --dry-run` summary.
 
-Next steps: "run `lazy-obsidian.iconize-config` to seed registries, then `lazy-obsidian.iconize-sync reconcile`." Add consequence lines for any **kept-local** outcome (2.6, 2.7, 3) and for any **kept-orphan** (2, 2.5 — note the file is a retired duplicate the user can delete by hand). Hard-dep failures abort before Step 6.
+Next steps: "run `lazy-obsidian.iconize-config` to seed registries, then `lazy-obsidian.iconize-sync reconcile`." Add consequence lines for any **kept-local** outcome (2.7, 3), for a **refused** Step 2.6 (icons will not paint from frontmatter until Iconize settings carry the shipped values; re-run after fixing them) and for any **kept-orphan** (2, 2.5 — note the file is a retired duplicate the user can delete by hand). Hard-dep failures abort before Step 6.
 
 ## Failure modes
 
 - **`/lazy-obsidian.iconize-install` aborts: no `.obsidian/` found** — the repo root has no Obsidian vault directory → initialize Obsidian in this repo first, then re-run.
-- **`/lazy-obsidian.iconize-install` aborts: "Hard dependency `<id>` could not be installed/updated"** — `/lazy-obsidian.update-plugin` returned FAIL for `folder-notes`, `obsidian-icon-folder`, or `iconize-reloader` (network failure or registry lookup error) → check network connectivity, run `/lazy-obsidian.update-plugin <id>` manually to see the underlying error, then re-run.
+- **`/lazy-obsidian.iconize-install` aborts: "Hard dependency `<id>` could not be installed/updated"** — the `plugin-install` verb refused `folder-notes`, `obsidian-icon-folder`, or `iconize-reloader`; the quoted reason is its `reason` (registry unreachable, id not in the registry, release fetch failed with nothing cached, or the vault's `community-plugins.json` not an array) → fix what the reason names, then re-run.
 
 ## Idempotency
 
@@ -360,4 +347,4 @@ Safe to re-run. Quiet file-sync prompts only on a genuine same-region/same-key c
 
 ## Conflict-prompt discipline
 
-The skill is quiet by default. The only `AskUserQuestion` prompts it raises are genuine conflicts, each as its own one-question prompt: per-conflicting-key icon-map merges (Step 2.7 case 2 / can't-reconcile case 3a) and the Iconize frontmatter-feature conflict (Step 2.6, one prompt for the three-key block). Orphans and clean applies are silent. "Conflict" means the same key/region carries incompatible values on both sides — bytes differing is not a conflict.
+The skill is quiet by default. The only `AskUserQuestion` prompts it raises are genuine conflicts, each as its own one-question prompt: per-conflicting-key icon-map merges (Step 2.7 case 2 / can't-reconcile case 3a). Orphans and clean applies are silent. "Conflict" means the same key/region carries incompatible values on both sides — bytes differing is not a conflict.

@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -100,19 +99,12 @@ def _vault_root() -> Path:
   Locate the vault root the callback was invoked against.
 
   Returns:
-    The resolved repository root, falling back to the working directory when git cannot
-    answer.
+    The process working directory, which the iconize worker sets to the vault root.
   """
-  try:
-    proc = subprocess.run(
-      ["git", "rev-parse", "--show-toplevel"],
-      capture_output = True, text = True, check = True, encoding = "utf-8",
-    )
-    return Path(proc.stdout.strip())
-  except (OSError, subprocess.CalledProcessError):
-    # the worker invokes callbacks with the vault as cwd; the shipped file's own parents
-    # point into the plugin tree, never at the vault
-    return Path.cwd()
+  # the iconize worker launches every callback with the vault root as cwd and sends a path relative to
+  # that root; the vault may sit below the git toplevel, and the shipped file's own parents point into
+  # the plugin tree, so neither of those can stand in for it
+  return Path.cwd()
 
 
 def _banner_tag(text: str) -> str | None:

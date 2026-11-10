@@ -11,8 +11,9 @@ Commit functions all share the same shape:
 
 - They expect the working tree to already reflect the desired state
   (mutated by `body.py` / `banner.py`).
-- They stage the single path argument (`git add <path>`) and commit
-  it; nothing else is added.
+- They commit under an explicit pathspec, never the shared index as a
+  whole: the path argument, plus the extra paths and icon repaints that
+  `commit_mechanical` folds in.
 - The commit subject is taken from the `message` argument verbatim;
   the `Doc-Review-Phase` trailer is appended in the commit body,
   separated by a blank line.
@@ -21,31 +22,25 @@ Commit functions all share the same shape:
   fight over `git config`.
 
 Trailer format — every commit carries exactly one `Doc-Review-Phase`
-trailer; readers parse the value via :func:`parse_phase_trailer`:
+trailer:
 
-    Doc-Review-Phase: <phase>[; expert=<flat-name>][; round=<N>]
+    Doc-Review-Phase: <phase>
 
 Phases used by each commit kind:
 
-- :func:`commit_review_round` — `main` or `section` with paired
-  `expert=` and `round=` segments. The phase is supplied by the
-  caller and matches the writer's role.
-- :func:`commit_empty` — same phase / expert / round as
-  `commit_review_round` but with an empty diff (`--allow-empty`).
-  Used when an agent returned `outcome: empty` so the next tick
-  can move past this writer.
 - :func:`commit_mechanical` — phase `mechanical`. Used for bootstrap,
   banner-tick, scaffold-strip commits, and the coordinator's own
   `# History` / question / command writes.
 - :func:`commit_final` — phase `finalize`.
 
-:func:`history_for_file` returns most-recent-first list of commit records
-with the parsed trailer, ready for the state machine to scan.
+:func:`read_history_for_file` returns most-recent-first list of commit records
+with the parsed trailer.
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -54,7 +49,7 @@ from pathlib import Path
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from errors import GitOpsError  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from keys import BotIdentity, JobKey, Phase, Trailer  # pylint: disable=import-error
+from keys import BotIdentity, EnvVar, JobKey, Paths, Phase, Plugin, Trailer  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -67,7 +62,7 @@ if TYPE_CHECKING:
 @dataclass
 class CommitRecord:
   """
-  Single commit entry returned by `history_for_file`.
+  Single commit entry returned by `read_history_for_file`.
 
   Callers inspect the parsed trailers to classify each commit by phase and expert without
   re-running git commands.
@@ -121,13 +116,13 @@ def _run_git(
         capture_output=capture,
         text=True,
         # waiver: stdlib encoding/mode idiom
-        env={**__import__("os").environ, **(env or {})}, encoding = "utf-8",
+        env={**os.environ, **(env or {})}, encoding = "utf-8",
     )
-  except subprocess.CalledProcessError as exc:
+  except subprocess.CalledProcessError as error:
     raise GitOpsError(
         f"git command failed: {' '.join(args)}\n"
-        f"  stdout: {exc.stdout!r}\n  stderr: {exc.stderr!r}"
-    ) from exc
+        f"  stdout: {error.stdout!r}\n  stderr: {error.stderr!r}"
+    ) from error
   return (proc.stdout or "").strip()
 
 
@@ -145,6 +140,17 @@ def _build_message(
   Returns:
     The formatted commit message, terminated by a newline.
   """
+
+  # Domain(review.lifecycle):
+  # # Commit phase vocabulary
+  # Every commit the review system makes carries exactly one phase token recording which
+  # step of the review cycle produced it. A mechanical commit — bootstrap, a banner repaint,
+  # a scaffold strip, the coordinator's own history and command writes — carries no writer
+  # identity, since no round advanced. A finalize commit closes the cycle and carries no
+  # writer identity either. A commit with no phase token at all was not made by the review
+  # system.
+
+  # subject first, then the phase trailer set off by a blank line
   parts = [subject]
   if trailers:
     parts.append("")  # blank line separating body from trailers
@@ -197,9 +203,12 @@ def _add_and_commit(
     Full SHA of the newly created commit.
   """
 
-  # Contract:
-  # The commit carries exactly `path` plus `extra_paths` — content staged by anyone else
-  # stays in the index, unpublished.
+  # Domain(runtime.git-safety):
+  # # A review commit never snapshots the shared index
+  # The checkout's index is shared with routines, expert subprocesses and the operator, so
+  # whatever it holds at commit time is not the review system's to publish. A review commit
+  # therefore carries exactly the document it commits plus the extra paths its caller staged
+  # for it. Content anyone else has staged stays in the index, unpublished.
 
   # stage the document, then commit under the explicit pathspec
   # waiver: git CLI vocabulary
@@ -212,75 +221,6 @@ def _add_and_commit(
   )
   # waiver: git CLI vocabulary
   return _run_git(repo, "rev-parse", "HEAD")
-
-
-# --------------------------------------------------- Doc-Review-Phase trailer
-
-
-def _phase_trailer(
-    phase: str,
-    *,
-    expert: str | None = None,
-    round_: int | None = None,
-) -> str:
-  """
-  Format the `Doc-Review-Phase` trailer value.
-
-  Returns:
-    Trailer value string: `<phase>` optionally followed by `; expert=<name>`
-    and `; round=<N>` segments.
-  """
-
-  # Domain(review.lifecycle):
-  # # Commit phase vocabulary
-  # Every commit the review system makes carries exactly one phase token recording which
-  # step of the round machine produced it. A round-writer commit — the main writer or a
-  # section writer — carries its writer's identity and the round number it acted in; an
-  # empty-outcome commit carries the same identity and round with no content change, so
-  # the round machine can still advance past a writer that had nothing to add. A
-  # mechanical commit — bootstrap, a banner repaint, a scaffold strip, the coordinator's
-  # own history and command writes — carries no writer identity, since no round advanced.
-  # A finalize commit closes the cycle and carries no writer identity either. A commit
-  # with no phase token at all was not made by the review system.
-
-  parts = [phase]
-  if expert:
-    parts.append(f"expert={expert}")
-  if round_ is not None:
-    parts.append(f"round={round_}")
-  return "; ".join(parts)
-
-
-def parse_phase_trailer(trailers: Mapping[str, str]) -> tuple[str, str, int | None]:
-  """
-  Parse the `Doc-Review-Phase` trailer into its component fields.
-
-  Returns:
-    Tuple of `(phase, expert, round_)` where `phase` is the empty string when
-    no trailer is present (operator commit), `expert` is the empty string when
-    the trailer carries no `expert=` segment, and `round_` is `None` when the
-    trailer carries no `round=` segment or the value is not parseable as an int.
-  """
-  raw = trailers.get(Trailer.PHASE, "")
-  if not raw:
-    return "", "", None
-  segments = [s.strip() for s in raw.split(";")]
-  phase = segments[0]
-  expert = ""
-  round_: int | None = None
-  for segment in segments[1:]:
-    # waiver: regex / format fragment, not a domain key
-    if segment.startswith("expert="):
-      # waiver: regex / format fragment, not a domain key
-      expert = segment[len("expert="):]
-    # waiver: regex / format fragment, not a domain key
-    elif segment.startswith("round="):
-      try:
-        # waiver: regex / format fragment, not a domain key
-        round_ = int(segment[len("round="):])
-      except ValueError:
-        round_ = None
-  return phase, expert, round_
 
 
 # ----------------------------------------------------------- commit_* api
@@ -307,7 +247,7 @@ def _version_sort_key(name: str) -> tuple[int, ...]:
 _INSTALLED_PLUGINS_REL = ".claude/plugins/installed_plugins.json"
 
 
-def installed_plugin_root(name: str, home: Path | None = None) -> Path | None:
+def installed_plugin_root(name: str) -> Path | None:
   """
   Resolve a plugin's installed source root from Claude Code's plugin registry.
 
@@ -318,12 +258,11 @@ def installed_plugin_root(name: str, home: Path | None = None) -> Path | None:
 
   Args:
     name: Plugin name without its `@<marketplace>` suffix.
-    home: Home directory holding the registry; the current user's when omitted.
 
   Returns:
     The recorded install root when it exists on disk, else None.
   """
-  registry = (home or Path.home()) / _INSTALLED_PLUGINS_REL
+  registry = Path.home() / _INSTALLED_PLUGINS_REL
   try:
     data = json.loads(registry.read_text(encoding = "utf-8"))
   except (OSError, ValueError):
@@ -345,6 +284,62 @@ def installed_plugin_root(name: str, home: Path | None = None) -> Path | None:
   # waiver: field of Claude Code's external registry schema, not an internal key
   root = Path(str(best["installPath"]))
   return root if root.is_dir() else None
+
+
+def resolve_core_cli() -> Path | None:
+  """
+  Find the `lazycortex-core` CLI binary.
+
+  Returns:
+    The path to the resolved binary, preferring `$LAZYCORTEX_PLUGIN_DIRS` over the dev-vault sibling
+    tree and that over the install registry, or `None` when no lookup finds one.
+  """
+  # env stage — the plugin source trees the runtime daemon exports come first
+  for entry in os.environ.get(EnvVar.PLUGIN_DIRS, "").split(os.pathsep):
+    # guard: empty path segment (from a trailing/double pathsep) — skip it
+    if not entry:
+      continue
+    cli = Path(entry) / Paths.BIN_DIR / Plugin.CORE
+    if cli.is_file():
+      return cli
+
+  # dev-vault stage — this file sits at plugins/claude/lazycortex-review/bin/, so core's own bin/ is two
+  # levels up and back down the sibling tree; it precedes the registry (§ 2b) so a checkout runs the
+  # sources at hand rather than whatever version happens to be installed
+  sibling = Path(__file__).resolve().parents[2] / Plugin.CORE / Paths.BIN_DIR / Plugin.CORE
+  if sibling.is_file():
+    return sibling
+
+  # registry stage — the install root Claude Code's plugin registry records for core
+  root = installed_plugin_root(Plugin.CORE)
+
+  # guard: core was never installed on this machine — nothing further to try
+  if root is None:
+    return None
+  cli = root / Paths.BIN_DIR / Plugin.CORE
+  return cli if cli.is_file() else None
+
+
+def require_core_cli() -> Path:
+  """
+  Resolve the `lazycortex-core` CLI file, or fail.
+
+  Returns:
+    Path of the core CLI file.
+
+  Raises:
+    RuntimeError: When none of the three lookup stages finds a core CLI; the message names all three.
+  """
+  cli = resolve_core_cli()
+
+  # guard: no lookup stage found a binary — whatever the caller needs from core cannot happen
+  if cli is None:
+    raise RuntimeError(
+        "lazycortex-core CLI not resolvable: $LAZYCORTEX_PLUGIN_DIRS yields no match, no "
+        "dev-vault sibling tree carries bin/lazycortex-core, and the plugin registry records no "
+        "lazycortex-core install with a bin/lazycortex-core entry."
+    )
+  return cli
 
 
 def repaint_inline(repo: Path, paths: list[str]) -> list[str]:
@@ -375,7 +370,7 @@ def repaint_inline(repo: Path, paths: list[str]) -> list[str]:
 
   # walk the plugin-dir registry for the obsidian CLI; absence means no repaint here
   cli = None
-  for entry in os.environ.get("LAZYCORTEX_PLUGIN_DIRS", "").split(os.pathsep):
+  for entry in os.environ.get(EnvVar.PLUGIN_DIRS, "").split(os.pathsep):
     # guard: empty segments appear when the variable is unset or ends with a separator
     if not entry:
       continue
@@ -397,6 +392,7 @@ def repaint_inline(repo: Path, paths: list[str]) -> list[str]:
   if cli is None:
     # waiver: sibling plugin's on-disk CLI layout per dev.plugin-boundaries § 1c, not a domain key
     root = installed_plugin_root("lazycortex-obsidian")
+    # waiver: sibling plugin's on-disk CLI layout per dev.plugin-boundaries § 1c, not a domain key
     installed = None if root is None else root / "bin" / "lazycortex-obsidian"
     if installed is not None and installed.is_file():
       cli = installed
@@ -423,35 +419,6 @@ def repaint_inline(repo: Path, paths: list[str]) -> list[str]:
   return [p for p in touched if isinstance(p, str)]
 
 
-def commit_review_round(
-    repo: Path,
-    path: Path,
-    *,
-    round_: int,
-    expert: str,
-    author: Mapping[str, str],
-    history_message: str,
-    phase: str = Phase.MAIN,
-) -> str:
-  """
-  Commit the working-tree state of `path` under `expert`'s identity with the review-round phase trailer.
-
-  `phase` is one of `main` or `section`; recorded along with `expert` and `round_` in the single
-  `Doc-Review-Phase` trailer.
-
-  Returns:
-    Full SHA of the new commit.
-  """
-  trailers = [
-      (Trailer.PHASE, _phase_trailer(phase, expert=expert, round_=round_)),
-  ]
-  return _add_and_commit(
-      repo, path,
-      author=author,
-      message_text=_build_message(history_message, trailers),
-  )
-
-
 def commit_mechanical(
     repo: Path,
     path: Path,
@@ -461,7 +428,7 @@ def commit_mechanical(
     extra_paths: tuple[str, ...] = (),
 ) -> str:
   """
-  Commit a dispatcher-side mechanical edit (bootstrap, banner repaint, scaffold strip).
+  Commit a mechanical edit made by the review system itself (bootstrap, banner repaint, scaffold strip).
 
   The commit also carries the icon repaint for the committed note when the obsidian
   plugin is available — one commit, payload and paint together — plus every path named in
@@ -489,63 +456,20 @@ def commit_mechanical(
 
   # fold the note's icon repaint and the landed attachments into this same commit so no
   # separate commit — and no operator-edit wake off a foreign identity — follows
-  doc_rel = str(path.relative_to(repo))
-  repainted = repaint_inline(repo, [doc_rel, *extra_paths])
+  repainted = repaint_inline(repo, [str(path.relative_to(repo)), *extra_paths])
   extras = tuple(dict.fromkeys([*extra_paths, *repainted]))
   for extra in extras:
     # waiver: git CLI vocabulary
     _run_git(repo, "add", "--", extra)
 
   # the mechanical-phase trailer marks the commit as the system's own for the recogniser
-  trailers = [("Doc-Review-Phase", Phase.MECHANICAL)]
+  trailers = [(Trailer.PHASE, Phase.MECHANICAL)]
   return _add_and_commit(
       repo, path,
       author=author,
       message_text=_build_message(message, trailers),
       extra_paths=extras,
   )
-
-
-def commit_empty(
-    repo: Path,
-    *,
-    round_: int,
-    expert: str,
-    author: Mapping[str, str],
-    message: str,
-    phase: str = Phase.MAIN,
-) -> str:
-  """
-  Commit an empty commit recording that `expert` completed round `round_` with no content change.
-
-  `phase` is one of `main` or `section`; see `commit_review_round`.
-
-  Guarantees:
-    - The commit carries no content change; content staged by anyone else in the shared
-      index stays there, unpublished.
-
-  Returns:
-    Full SHA of the new commit.
-  """
-
-  # Contract:
-  # The commit carries no content change — content staged by anyone else
-  # in the shared index stays there, unpublished.
-
-  trailers = [
-      (Trailer.PHASE, _phase_trailer(phase, expert=expert, round_=round_)),
-  ]
-
-  # No path → don't stage; --allow-empty drives the commit through, and --only with no
-  # paths pins the tree to HEAD so a concurrently staged foreign file is never published
-  commit_args = [
-      *_author_flags(author),
-      "commit", "-q", "--only", "--allow-empty",
-      "-m", _build_message(message, trailers),
-  ]
-  _run_git(repo, *commit_args)
-  # waiver: git CLI vocabulary
-  return _run_git(repo, "rev-parse", "HEAD")
 
 
 def commit_final(
@@ -567,7 +491,7 @@ def commit_final(
   Returns:
     Full SHA of the new commit.
   """
-  trailers = [("Doc-Review-Phase", Phase.FINALIZE)]
+  trailers = [(Trailer.PHASE, Phase.FINALIZE)]
   return _add_and_commit(
       repo, path,
       author=author,
@@ -575,10 +499,10 @@ def commit_final(
   )
 
 
-# ------------------------------------------------------- history_for_file
+# ------------------------------------------------------- read_history_for_file
 
 
-_TRAILER_RE = __import__("re").compile(r"^([A-Za-z][\w-]*):\s+(.*)$")
+_TRAILER_RE = re.compile(r"^([A-Za-z][\w-]*):\s+(.*)$")
 
 
 def _parse_trailers(body: str) -> dict[str, str]:
@@ -618,7 +542,7 @@ def _parse_trailers(body: str) -> dict[str, str]:
 _GIT_LOG_FORMAT = "%H%x00%an%x00%ae%x00%s%x00%B%x1e"
 
 
-def history_for_file(repo: Path, path: Path) -> list[CommitRecord]:
+def read_history_for_file(repo: Path, path: Path) -> list[CommitRecord]:
   """
   Return commits touching `path`, most recent first.
 

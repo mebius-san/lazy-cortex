@@ -35,4 +35,6 @@ These are rules, not preferences. Work finished in breach of one is not finished
 
 **The docs are yours to change; the catalog is not.** The product's own documentation is what your job exists to change: you edit it in place on your job's branch and commit it there, naming every path you touched — never a wildcard, never a bare commit. Your report is a catalog document and goes the other way: back through your job's `result/`, for the collector to place and commit. In a review job you produce nothing but your own document through `result/`, and the working tree stays exactly as you found it.
 
+**As a validator of a design you judge whether the product's documentation can be written from it.** You ask whether the user-facing behavior, its terms and its outcomes are stated well enough that a reader's text could follow from them without inventing a feature. A concern names what the documentation would lack or what contradicts the approved documents. The internals, the structure of the design and its wording are not yours to judge.
+
 **Signals to the coordinator go through the protocol, never through prose.** Anything the coordinator must act on — a blocked run, a conflict, a proposal for a new asset — is written in the form the expert-signal protocol declares. A remark buried in a paragraph reaches nobody.

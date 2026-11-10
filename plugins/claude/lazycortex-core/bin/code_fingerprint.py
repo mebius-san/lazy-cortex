@@ -18,8 +18,7 @@ class _ImportObserver:
   """
   Meta-path observer that records a watched module's source hash at the moment it is imported.
 
-  It never loads anything itself: it looks the module up the way the path finder will, records the
-  source it is about to load, and declines, so the regular finders load the module as usual.
+  It observes imports of watched modules without ever loading or altering them.
   """
 
   def __init__(self, fingerprint: CodeFingerprint) -> None:
@@ -45,6 +44,8 @@ class _ImportObserver:
     """
     # a lookup failure here must never break the import it merely observes
     try:
+      # waiver: `path` / `target` are typed `object` to accept whatever the import system passes; PathFinder
+      # declares narrower types, and narrowing here would add checks the import machinery already guarantees
       spec = PathFinder.find_spec(name, path, target)  # type: ignore[arg-type]
     # waiver: broad except — observing an import must never be what makes it fail
     except Exception:  # pylint: disable=broad-except
@@ -65,51 +66,48 @@ class CodeFingerprint:
   half-written update does not trigger a premature restart).
   """
 
-  def __init__(self, *, roots: list[Path] | None = None, paths: list[Path] | None = None) -> None:
+  def __init__(self, *, roots: list[Path] | None = None) -> None:
     """
-    Create a fingerprint tracker scoped to the given plugin roots or an explicit path list.
+    Create a fingerprint tracker scoped to the given plugin roots.
 
     Args:
       roots: Plugin source directories under which loaded `.py` modules are tracked.
-      paths: Explicit file list to track instead of discovering modules under `roots`;
-        intended for tests.
     """
-    self._roots = [ Path(r).resolve() for r in ( roots or [] ) ]
-    self._explicit = [ Path(p) for p in paths ] if paths is not None else None
+    self._roots = [ Path(root).resolve() for root in ( roots or [] ) ]
     self._base: dict[str, str] = {}
     self._pending: dict[str, str] | None = None
     # source hashes taken at import time for watched modules imported after construction
     self._imported: dict[str, str] = {}
 
     # a module imported later is baselined from what it loaded, not from its first sighting
-    # ponytail: the observer stays on sys.meta_path for the process lifetime (one per daemon)
-    if self._explicit is None and self._roots:
+    # limit: the observer stays on sys.meta_path for the process lifetime, remove it on shutdown if trackers multiply
+    if self._roots:
       sys.meta_path.insert(0, _ImportObserver(self))
 
-  def _watched(self, p: Path) -> bool:
+  def _is_watched(self, src_path: Path) -> bool:
     """
     Tell whether a resolved source path lives under a watched plugin root.
 
     Args:
-      p: Resolved absolute source path.
+      src_path: Resolved absolute source path.
 
     Returns:
-      True when `p` is under one of the watched roots.
+      True when `src_path` is under one of the watched roots.
     """
-    return any(str(p).startswith(str(r)) for r in self._roots)
+    return any(src_path.is_relative_to(root) for root in self._roots)
 
-  def record_import(self, p: Path) -> None:
+  def record_import(self, src_path: Path) -> None:
     """
     Record a watched module's source hash as it is being imported.
 
     Args:
-      p: Resolved absolute source path of the module about to load.
+      src_path: Resolved absolute source path of the module about to load.
     """
     # guard: outside the watched roots, or already recorded by an earlier import
-    if not self._watched(p) or str(p) in self._imported:
+    if not self._is_watched(src_path) or str(src_path) in self._imported:
       return
     try:
-      self._imported[str(p)] = hashlib.sha256(p.read_bytes()).hexdigest()
+      self._imported[str(src_path)] = hashlib.sha256(src_path.read_bytes()).hexdigest()
     except OSError:
       return
 
@@ -118,8 +116,7 @@ class CodeFingerprint:
     Resolve the current set of source file paths this instance tracks.
 
     Returns:
-      The explicit path list when one was supplied at construction, otherwise every loaded
-      module's file path that lives under a watched plugin root.
+      Every loaded module's file path that lives under a watched plugin root.
     """
 
     # Domain(runtime.self-update):
@@ -129,45 +126,35 @@ class CodeFingerprint:
     # from elsewhere — a dependency, the interpreter's own standard library — is never in scope,
     # no matter how it was reached at runtime.
 
-    # guard: explicit override (tests) — use it verbatim
-    if self._explicit is not None:
-      return list(self._explicit)
+    # collect every loaded module's source file that lives under a watched plugin root
     out: list[Path] = []
     for mod in list(sys.modules.values()):
-      f = getattr(mod, "__file__", None)
+      file_name = getattr(mod, "__file__", None)
 
       # guard: module has no source file (built-in or frozen)
-      if not f:
+      if not file_name:
         continue
-      p = Path(f).resolve()
+      src_path = Path(file_name).resolve()
 
       # only modules living under a watched plugin root are our own code
-      if self._watched(p):
-        out.append(p)
+      if self._is_watched(src_path):
+        out.append(src_path)
     return out
 
-  def _hashes(self) -> dict[str, str]:
+  def _read_hashes(self) -> dict[str, str]:
     """
     Compute the current content hash of every tracked source file.
-
-    Guarantees:
-      - A tracked path that cannot be read when this is called is omitted from the result
-        rather than raising.
 
     Returns:
       Mapping from absolute file path string to its SHA-256 hex digest. A tracked path that
       cannot be read is omitted rather than raising.
     """
 
-    # Contract:
-    # A tracked path that cannot be read when this is called is silently omitted from the
-    # result rather than raising; it never causes the call to fail.
-
     # hash every tracked path, skipping any that cannot currently be read
     out: dict[str, str] = {}
-    for p in self._tracked_paths():
+    for src_path in self._tracked_paths():
       try:
-        out[str(p)] = hashlib.sha256(p.read_bytes()).hexdigest()
+        out[str(src_path)] = hashlib.sha256(src_path.read_bytes()).hexdigest()
       except OSError:
         continue
     return out
@@ -176,30 +163,23 @@ class CodeFingerprint:
     """
     Record the current hashes as the accepted baseline.
     """
-    self._base = self._hashes()
+    self._base = self._read_hashes()
     self._pending = None
 
-  def changed(self) -> bool:
+  def has_changed(self) -> bool:
     """
     Return True only when a hash change is stable across two consecutive observations.
 
-    Comparison on each call is restricted to paths present in both the baseline and the current
-    observation. A path seen for the first time joins the baseline immediately with its current
-    hash, so the discovery itself never signals a change — a later edit to that path is then
-    detected the same way as an edit to a path already present at startup. A path that disappears
-    from the current observation (rare — would require a module unload) is excluded from the
-    comparison and never by itself signals a change.
-
     Guarantees:
-      - Returns True only once the same difference from the accepted baseline has been
-        observed on two consecutive calls in a row.
-      - A tracked path discovered for the first time joins the baseline with the hash it had
-        when it was imported, when an import was observed, or with its hash at first sighting
-        otherwise; either way the discovery never by itself triggers a change, and a later
-        edit to that path is then detected under the same two-observation stability rule as a
-        path present at startup.
-      - A tracked path that disappears between two observations is excluded from the
-        comparison and never by itself triggers a change.
+    - Returns True only once the same difference from the accepted baseline has been
+      observed on two consecutive calls in a row.
+    - A tracked path discovered for the first time joins the baseline with the hash it had
+      when it was imported, when an import was observed, or with its hash at first sighting
+      otherwise; either way the discovery never by itself triggers a change, and a later
+      edit to that path is then detected under the same two-observation stability rule as a
+      path present at startup.
+    - A tracked path that disappears between two observations is excluded from the
+      comparison and never by itself triggers a change.
 
     Returns:
       True if the same change was observed on both this and the previous call; False otherwise.
@@ -212,7 +192,7 @@ class CodeFingerprint:
     # never reported as a change.
 
     # observe the current hashes to compare against the accepted baseline
-    now = self._hashes()
+    now = self._read_hashes()
 
     # Contract:
     # A tracked path discovered for the first time since the baseline was taken joins the
@@ -250,7 +230,7 @@ class CodeFingerprint:
     # later edit to that same file is then detected under the identical two-observation
     # stability rule as a file that was already part of the baseline at startup.
 
-    # guard: identical to the accepted baseline on the shared key set — no change
+    # identical to the accepted baseline on the shared key set means no change
     if now_shared == base_shared:
       self._pending = None
       return False

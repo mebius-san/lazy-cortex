@@ -20,16 +20,22 @@ GitPython, per the project tech conventions.  Node hashing reuses the
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
-
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import nodes as _nodes  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import scope as _scope  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
+
+
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import nodes as _nodes  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import scope as _scope  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -112,6 +118,8 @@ class RelinkPlanner:
       - In `incremental` and `anchor-lost` mode a node whose curated text has not moved
         on is never planned, so a pass over a scope with no operator edits since the
         last one yields nothing to classify and nothing to link.
+      - An `anchor-lost` plan never drops a node; its empty drop list is not proof that
+        no node left the scope.
 
     Returns:
       Dict shaped `{"mode": ..., "synced_sha": <sha-or-None>,
@@ -129,6 +137,10 @@ class RelinkPlanner:
     # moved on is NEVER planned, so a pass over a scope with no operator edits
     # since the last one yields nothing to classify and nothing to link.
 
+    # Contract:
+    # An `anchor-lost` plan NEVER drops a node. Callers must not read its empty
+    # drop list as proof that no node left the scope.
+
     # Domain(wiki.graph):
     # # Where a relink pass picks up from
     # A scope remembers the point in the repository's history at which its nodes were last brought up to
@@ -143,12 +155,12 @@ class RelinkPlanner:
     # read the mark the scope was last brought up to date at
     synced_sha = self._read_synced_sha()
 
-    # guard: no anchor or no index file → full initial pass
+    # no anchor or no index file → full initial pass
     if synced_sha is None:
       return self._plan_initial(synced_sha)
 
-    # guard: anchor unreachable / not an ancestor → content-hash backstop
-    if not self._anchor_reachable(synced_sha):
+    # anchor unreachable / not an ancestor → content-hash backstop
+    if not self._is_anchor_reachable(synced_sha):
       return self._plan_anchor_lost(synced_sha)
 
     # anchor is usable — plan from the git delta since it
@@ -166,7 +178,7 @@ class RelinkPlanner:
     Returns:
       The plan dict.
     """
-    nodes = [ str(p) for p in self._resolver.iter_nodes(self._cfg) ]
+    nodes = [ str(p) for p in self._resolver.find_all_nodes(self._cfg) ]
     return {
       self._K_MODE:       self.MODE_INITIAL,
       self._K_SYNCED_SHA: synced_sha,
@@ -181,11 +193,8 @@ class RelinkPlanner:
 
     Each scope node whose current `source_hash` differs from its stored
     `wiki_src_hash` (or that has no stored hash) is reclassified and re-linked;
-    nothing is dropped (git cannot tell us what was deleted without the anchor).
-
-    Guarantees:
-      - An `anchor-lost` plan never drops a node; its empty drop list is not proof that
-        no node left the scope.
+    nothing is dropped (git cannot tell us what was deleted without the anchor), so the
+    drop list is always empty and is not proof that no node left the scope.
 
     Args:
       synced_sha: The unreachable anchor value; echoed back for diagnosis.
@@ -193,10 +202,6 @@ class RelinkPlanner:
     Returns:
       The plan dict.
     """
-
-    # Contract:
-    # An `anchor-lost` plan NEVER drops a node; callers MUST NOT read its empty
-    # drop list as proof that no node left the scope.
 
     # Domain(wiki.graph):
     # # What a lost history hides
@@ -209,7 +214,7 @@ class RelinkPlanner:
 
     # collect the nodes whose authored text no longer matches what was curated
     changed: list[str] = []
-    for node_path in self._resolver.iter_nodes(self._cfg):
+    for node_path in self._resolver.find_all_nodes(self._cfg):
       node = _nodes.node_for(node_path)
 
       # guard: unrecognised file type — skip
@@ -252,12 +257,12 @@ class RelinkPlanner:
       abs_path = (self._repo / rel).resolve()
       if status == self._STATUS_DELETE:
         # A deleted file: include only if it resolved into this scope by path.
-        if self._resolves_into_scope(rel, apply_filter = False):
+        if self._is_in_scope(rel, apply_filter = False):
           drop.append(str(abs_path))
         continue
 
       # Added / modified: must resolve into this scope AND still exist on disk.
-      if self._resolves_into_scope(rel) and abs_path.is_file():
+      if self._is_in_scope(rel) and abs_path.is_file():
         node = _nodes.node_for(abs_path)
 
         # guard: unrecognised file type — skip
@@ -275,7 +280,7 @@ class RelinkPlanner:
         # comparison finds unchanged. This is what lets a repeated pass over an untouched
         # document converge to nothing left to do.
 
-        # guard: operator content unchanged since last curation — only managed
+        # operator content unchanged since last curation — only managed
         # regions moved (e.g. this relink's own commit). Skip so a re-run with no
         # real edits converges to an empty plan (idempotent); same content-hash
         # backstop the anchor-lost mode uses.
@@ -313,10 +318,9 @@ class RelinkPlanner:
     # guard: index file does not exist yet — no anchor
     if not index_path.is_file():
       return None
-    text = index_path.read_text(encoding = self._ENCODING)
-    return _nodes.get_scalar_field(text, self._KEY_WIKI_SYNCED_SHA)
+    return _nodes.get_scalar_field(index_path.read_text(encoding = self._ENCODING), self._KEY_WIKI_SYNCED_SHA)
 
-  def _anchor_reachable(self, sha: str) -> bool:
+  def _is_anchor_reachable(self, sha: str) -> bool:
     """
     Return True when `sha` exists as a commit AND is an ancestor of HEAD.
 
@@ -330,19 +334,17 @@ class RelinkPlanner:
     Returns:
       True when the anchor is a usable base for `git diff`, False otherwise.
     """
-    exists = self._git_ok([ "cat-file", "-e", f"{sha}^{{commit}}" ])
-
     # guard: commit object is gone (gc / shallow / rewritten history)
-    if not exists:
+    if not self._is_git_ok([ "cat-file", "-e", f"{sha}^{{commit}}" ]):
       return False
-    return self._git_ok([ "merge-base", "--is-ancestor", sha, "HEAD" ])
+    return self._is_git_ok([ "merge-base", "--is-ancestor", sha, "HEAD" ])
 
   def _diff_name_status(self, sha: str) -> list[tuple[str, str]]:
     """
     Return `(status, rel_path)` pairs from `git diff --name-status <sha>..HEAD`.
 
     The full repo delta is returned unfiltered; scope membership is decided
-    afterwards by `_resolves_into_scope`, which applies the project's own
+    afterwards by `_is_in_scope`, which applies the project's own
     glob semantics rather than git's pathspec matcher (git treats a `**`
     pathspec literally unless `:(glob)` magic is used, so passing the scope
     globs to git would silently drop changes).  Rename entries (`R…`) are
@@ -354,8 +356,10 @@ class RelinkPlanner:
     Returns:
       List of `(status_letter, repo-relative-posix-path)` tuples.
     """
-    cmd = [ "git", "-C", str(self._repo), "diff", "--name-status", f"{sha}..HEAD" ]
-    proc = subprocess.run(cmd, capture_output = True, text = True, check = False, encoding = "utf-8")
+    proc = subprocess.run(
+      [ "git", "-C", str(self._repo), "diff", "--name-status", f"{sha}..HEAD" ],
+      capture_output = True, text = True, check = False, encoding = "utf-8",
+    )
 
     # guard: git failed — yield no delta rather than crashing the plan
     if proc.returncode != 0:
@@ -382,7 +386,7 @@ class RelinkPlanner:
       out.append((status[0], parts[1]))
     return out
 
-  def _resolves_into_scope(self, rel_path: str, apply_filter: bool = True) -> bool:
+  def _is_in_scope(self, rel_path: str, *, apply_filter: bool = True) -> bool:
     """
     Return True when `rel_path` resolves into THIS scope.
 
@@ -406,16 +410,15 @@ class RelinkPlanner:
     # document that vanished counts as a departure from the wiki only when the place it vanished from was
     # the scope's own.
 
-    # a path belongs here only when it resolves into this very scope
-    result = self._resolver.resolve_scope_by_path(rel_path, apply_filter = apply_filter)
-
     # guard: path matches no scope at all
-    if result is None:
+    if (result := self._resolver.resolve_scope_by_path(rel_path, apply_filter = apply_filter)) is None:
       return False
+
+    # a path belongs here only when it resolves into this very scope
     matched_id, _ = result
     return matched_id == self._scope_id
 
-  def _git_ok(self, args: list[str]) -> bool:
+  def _is_git_ok(self, args: list[str]) -> bool:
     """
     Run a quiet `git` command in the repo and report whether it exited zero.
 
@@ -425,9 +428,11 @@ class RelinkPlanner:
     Returns:
       True on a zero exit, False on any non-zero exit or when git is absent.
     """
-    cmd = [ "git", "-C", str(self._repo), *args ]
     try:
-      proc = subprocess.run(cmd, capture_output = True, text = True, check = False, encoding = "utf-8")
+      proc = subprocess.run(
+        [ "git", "-C", str(self._repo), *args ],
+        capture_output = True, text = True, check = False, encoding = "utf-8",
+      )
     except OSError:
       # guard: git binary not found / not executable
       return False

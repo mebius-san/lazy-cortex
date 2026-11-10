@@ -49,6 +49,8 @@ import collect_ops as _collect_ops  # noqa: E402  # pylint: disable=import-error
 # pylint: disable-next=import-error,wrong-import-position
 import coordinator_dispatch as _coordinator_dispatch  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+from errors import ParseError  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import frontmatter as _fm  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import job_markers as _job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -58,7 +60,7 @@ from keys import JobFile, JobKey, JobMarker, JobStatus, Outcome, ReviewKey  # no
 
 
 # Bundle-state token for an `active_job` marker whose job directory left no trace on disk —
-# `_job_status` has no word for it because it classifies an existing directory.
+# `read_job_status` has no word for it because it classifies an existing directory.
 _STATUS_VANISHED = "vanished"
 
 # The banner states in which a silent review loop is the operator's turn, not a stuck loop —
@@ -74,8 +76,13 @@ _BOOL_TRUE = "true"
 # folds into one queued job.
 _DEDUP_HINT = "sanitize"
 
+# Stderr trace of one document the sweep skipped or failed on, filled with the document and the error.
+SKIP_TRACE_TEMPLATE = "sanitize: {subject}: {error}\n"
+# The summary's `error` field, filled with the failed-document count and their comma-joined names.
+FAILURE_SUMMARY_TEMPLATE = "{count} document(s) failed to sanitize: {names}"
 
-def _job_bundle_dir(repo: Path, job_id: str) -> Path | None:
+
+def _find_job_bundle_dir(repo: Path, job_id: str) -> Path | None:
   """
   Locate the job bundle directory named `job_id` under any expert's queue.
 
@@ -95,7 +102,7 @@ def _job_bundle_dir(repo: Path, job_id: str) -> Path | None:
   if not jobs_root.is_dir():
     return None
   for expert_dir in sorted(jobs_root.iterdir()):
-    # guard: only expert subdirectories hold job bundles
+    # only expert subdirectories hold job bundles
     if not expert_dir.is_dir():
       continue
     jdir = expert_dir / job_id
@@ -104,7 +111,7 @@ def _job_bundle_dir(repo: Path, job_id: str) -> Path | None:
   return None
 
 
-def _done_outcome(jdir: Path) -> str:
+def _read_done_outcome(jdir: Path) -> str:
   """
   Read a DONE bundle's response outcome.
 
@@ -161,17 +168,17 @@ def _repair_lost_wake(repo: Path, doc: Path, entry: dict) -> bool:
     return False
 
   # classify the tracked bundle; a running one keeps its turn untouched
-  jdir = _job_bundle_dir(repo, job_id)
+  jdir = _find_job_bundle_dir(repo, job_id)
   # waiver: type: ignore — collect_ops is a deferred/late-bound sibling import; mypy cannot resolve it
-  status = _STATUS_VANISHED if jdir is None else _collect_ops._job_status(jdir)  # type: ignore[attr-defined]
+  status = _STATUS_VANISHED if jdir is None else _collect_ops.read_job_status(jdir)  # type: ignore[attr-defined]
 
-  # guard: still running — not stuck, not this sweep's business
+  # a still-running bundle is not stuck and not this sweep's business
   if status == JobStatus.PENDING:
     return False
 
-  # guard: DONE with a deliverable payload — `collect-tick`'s own minutely sweep re-raises this
+  # a DONE bundle with a deliverable payload — `collect-tick`'s own minutely sweep re-raises this
   # wake itself; doubling it here would be a second mechanism for a covered case
-  if status == JobStatus.DONE and jdir is not None and _done_outcome(jdir) == Outcome.EDITED:
+  if status == JobStatus.DONE and jdir is not None and _read_done_outcome(jdir) == Outcome.EDITED:
     return False
 
   # the DONE-without-payload shape keeps its marker for the coordinator to judge off; every
@@ -212,23 +219,23 @@ def _is_orphaned(repo: Path, doc: Path) -> bool:
 
   entry = _job_markers.read(repo, doc)
 
-  # guard: a tracked writer job or a raised wake means the loop still has a next move
+  # a tracked writer job or a raised wake means the loop still has a next move
   if entry.get(JobMarker.ACTIVE_JOB) or entry.get(JobMarker.PENDING_WAKE):
     return False
-  coordinator_job = entry.get(JobMarker.COORDINATOR_JOB)
 
-  # guard: a live coordinator job owns the turn — silence is it working
+  # a live coordinator job owns the turn — silence is it working
+  coordinator_job = entry.get(JobMarker.COORDINATOR_JOB)
   # waiver: type: ignore — coordinator_dispatch is a deferred/late-bound sibling import; mypy cannot resolve it
   if isinstance(coordinator_job, str) and coordinator_job \
-      and _coordinator_dispatch._is_job_live(repo, coordinator_job):  # type: ignore[attr-defined]
+      and _coordinator_dispatch.is_job_live(repo, coordinator_job):  # type: ignore[attr-defined]
     return False
-  _meta, body = _fm.parse(doc.read_text(encoding = "utf-8"))
 
   # an operator-waiting banner makes the silence legitimate: the turn is the operator's
+  _meta, body = _fm.parse(doc.read_text(encoding = "utf-8"))
   return _banner.extract(body) not in _OPERATOR_WAITING_STATES
 
 
-def _review_active_docs(repo: Path) -> list[Path]:
+def _find_all_review_active_docs(repo: Path) -> list[Path]:
   """
   Enumerate every tracked markdown document carrying `review_active: true`.
 
@@ -256,7 +263,10 @@ def _review_active_docs(repo: Path) -> list[Path]:
       continue
     try:
       meta, _body = _fm.parse(path.read_text(encoding = "utf-8"))
-    except OSError:
+    # an unreadable or unparsable document cannot be shown to be under review — skipped as
+    # not-a-problem, never a repair failure, but traced on stderr so the skip stays visible
+    except (OSError, UnicodeDecodeError, ParseError) as error:
+      sys.stderr.write(SKIP_TRACE_TEMPLATE.format(subject = rel, error = error))
       continue
     if meta.get(ReviewKey.ACTIVE, "").strip().lower() == _BOOL_TRUE:
       active.append(path)
@@ -297,36 +307,41 @@ def sanitize(repo: Path) -> dict:
   # review-without-a-document first: an entry keying a vanished path is dropped before the
   # lost-wake pass below would try to dispatch a coordinator on it
   cleared = 0
-  for key in sorted(_job_markers._read_store(repo)):
+  for key in sorted(_job_markers.read_store(repo)):
     doc = repo / key
-    if not doc.is_file():
-      _job_markers.clear(repo, doc)
-      cleared += 1
+    try:
+      if not doc.is_file():
+        _job_markers.clear(repo, doc)
+        cleared += 1
+    # waiver: per-document error boundary — one failed prune must not stop the sweep
+    except Exception as error:
+      sys.stderr.write(SKIP_TRACE_TEMPLATE.format(subject = key, error = error))
+      failed.append(key)
 
   # lost writer wakes, over the entries that survived the prune
   lost = 0
-  for key in sorted(_job_markers._read_store(repo)):
+  for key in sorted(_job_markers.read_store(repo)):
     doc = repo / key
     try:
       if _repair_lost_wake(repo, doc, _job_markers.read(repo, doc)):
         lost += 1
     # waiver: per-document error boundary — one failed dispatch must not stop the sweep
-    except Exception as exc:
-      sys.stderr.write(f"sanitize: {key}: {exc}\n")
+    except Exception as error:
+      sys.stderr.write(SKIP_TRACE_TEMPLATE.format(subject = key, error = error))
       failed.append(key)
 
   # orphaned reviews, re-reading each document's markers so a wake the pass above just raised
   # (or the coordinator job it just stamped) reads as the loop moving again
   orphaned = 0
-  for doc in _review_active_docs(repo):
+  for doc in _find_all_review_active_docs(repo):
     try:
       if _is_orphaned(repo, doc):
         # waiver: type: ignore — coordinator_dispatch is a deferred/late-bound sibling import; mypy cannot resolve it
         _coordinator_dispatch.dispatch_job_done(repo, doc, _DEDUP_HINT)  # type: ignore[attr-defined]
         orphaned += 1
     # waiver: per-document error boundary — one failed dispatch must not stop the sweep
-    except Exception as exc:
-      sys.stderr.write(f"sanitize: {doc}: {exc}\n")
+    except Exception as error:
+      sys.stderr.write(SKIP_TRACE_TEMPLATE.format(subject = doc, error = error))
       failed.append(str(doc))
 
   # the "error" field is additive — a clean sweep's summary stays exactly the three counts
@@ -335,7 +350,7 @@ def sanitize(repo: Path) -> dict:
 
   # a sweep with failures must not report success via exit 0 (the error-ledger contract)
   if failed:
-    summary[JobKey.ERROR] = f"{len(failed)} document(s) failed to sanitize: {', '.join(failed)}"
+    summary[JobKey.ERROR] = FAILURE_SUMMARY_TEMPLATE.format(count = len(failed), names = ", ".join(failed))
   return summary
 
 

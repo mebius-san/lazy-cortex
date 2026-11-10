@@ -43,7 +43,7 @@ Minimum tools. Dispatch cost scales with surface.
 
 ## 6. Shared rules (cross-reference, do not duplicate)
 
-Apply identically to agents; see `lazy-core.skill-writing`: § 2 (no Optional headings), § 3 (outcome vocabulary), § 4 (no narrative padding), § 5 (coordinator pattern if the agent IS a coordinator), § 6 (no dirty working tree — applies to every agent that calls `Write`/`Edit` or shells out to a subprocess that mutates a tracked path), § 13 (code lives on disk — an agent body names a CLI verb or a `bin/` script, never an inline program or a shell script).
+Apply identically to agents; see `lazy-core.skill-writing`: § 2 (no Optional headings), § 3 (outcome vocabulary), § 4 (no narrative padding), § 5 (coordinator pattern if the agent IS a coordinator), § 6 (no dirty working tree — applies to every agent that calls `Write`/`Edit` or shells out to a subprocess that mutates a tracked path), § 13 (code lives on disk — an agent body names a CLI verb or a `bin/` script, never an inline program or a shell script), § 14 (instructions in English — text in another language only as data, in a code span or quotes).
 
 ## 7. Logging
 

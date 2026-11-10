@@ -68,8 +68,8 @@ Outcome: `rendered`.
   sources still ran normally this pass.
 - **A unit stays `new` forever with no checkbox visible** — check its own folder-note's
   `# Actions` section directly; a unit whose mirrored root note (`source/<unit>.md`) carries
-  `spec_draft: true` is deliberately gated and never gets a checkbox until the upstream design
-  itself drops the draft flag.
+  `spec_role: status` without `spec_released: true` is deliberately gated and never gets a
+  checkbox until the upstream asset is published.
 
 ## Key Rules
 

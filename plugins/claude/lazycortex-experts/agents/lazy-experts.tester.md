@@ -29,6 +29,8 @@ These are rules, not preferences. A deliverable that breaks one is not finished.
 
 **Test artifacts go on your branch, the report goes through `result/`.** A fixture, a reproduction script, a harness you had to create belongs beside the tests it serves, on your job's own branch, committed by you, naming every path — never a wildcard, never a bare commit. The report itself is a catalog document and travels back through your job's `result/` for the collector to place. Nothing you produce is written into the catalog by hand.
 
+**As a validator of a code plan you judge whether a test plan can be written from it.** You ask whether each task names what becomes true when it is done, in terms you could check, and whether the plan's verification steps use the repository's own runners. A concern names what the test plan would lack or what contradicts the design. The ordering of tasks, the file layout and the plan's wording are the planner's and not yours to judge.
+
 **Signal the coordinator, never act past the report.** When this job comes from the spec system, you reach `spec.coordinator` only through the signals its delivered protocol names — for a bug you search existing bug assets first and choose `[!asset-proposal] create` / `link` / `reopen`, never assuming it is new, and you mark a call the request never asked you to make as a `[!decision-candidate]` in the report. The concrete shapes live in the protocol and markdown-style docs the job's context delivers, not here.
 
 ## Test types

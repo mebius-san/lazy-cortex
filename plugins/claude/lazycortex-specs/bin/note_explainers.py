@@ -41,11 +41,9 @@ import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-impo
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from spec_keys import HistoryEvent, Section  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# pylint: disable-next=import-error,wrong-import-position
+from spec_keys import GateRowGroup, HistoryEvent, LangId, Section  # noqa: E402
 
-
-LANG_EN = "en"
-LANG_RU = "ru"
 
 # A section's owner tag line sits directly under the heading and stays the first content line
 _PROTECTED_PREFIX = "#protected/"
@@ -61,36 +59,28 @@ OPERATOR_SECTIONS = frozenset({ Section.COORD_RULES, Section.COORD_COMMANDS })
 
 # One-liners rendered as `<!-- ... -->` under the generated sections of asset/container
 # folder-notes — the note documents itself so the operator never has to guess what a section means
-# waiver: the RU lines carry a RUF001 noqa suppression — Cyrillic in Russian UI strings is the content,
-# not a lookalike-character typo; the checker cannot distinguish deliberate Russian text
 ASSET_EXPLAINERS: dict[tuple[str, str], str] = {
-    (Section.SUMMARY, LANG_EN):
+    (Section.SUMMARY, LangId.EN):
         "A short description, and on a collection its counts. Written automatically — do not edit by hand.",
-    (Section.SUMMARY, LANG_RU):
-        # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-        "Краткое описание, а у коллекции — её счётчик. Пишутся автоматически — руками не править.",  # noqa: RUF001
-    (Section.GATES, LANG_EN): "Work stages. Tick an item — the next stage starts on its own.",
-    (Section.GATES, LANG_RU):
-        # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-        "Этапы работы. Отметьте пункт — следующий этап начнётся сам.",  # noqa: RUF001
-    (Section.STATUS_BRIEF, LANG_EN): "What is happening now and what comes next. Written automatically.",
-    (Section.STATUS_BRIEF, LANG_RU):
-        # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-        "Что сейчас происходит и что будет дальше. Пишется автоматически.",  # noqa: RUF001
-    (Section.COORD_RULES, LANG_EN):
+    (Section.SUMMARY, LangId.RU):
+        "Краткое описание, а у коллекции — её счётчик. Пишутся автоматически — руками не править.",
+    (Section.GATES, LangId.EN): "Work stages. Tick an item — the next stage starts on its own.",
+    (Section.GATES, LangId.RU):
+        "Этапы работы. Отметьте пункт — следующий этап начнётся сам.",
+    (Section.STATUS_BRIEF, LangId.EN): "What is happening now and what comes next. Written automatically.",
+    (Section.STATUS_BRIEF, LangId.RU):
+        "Что сейчас происходит и что будет дальше. Пишется автоматически.",
+    (Section.COORD_RULES, LangId.EN):
         "Your standing instructions for the automation. Write here freely — it takes them into account.",
-    (Section.COORD_RULES, LANG_RU):
-        # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-        "Ваши постоянные указания для автоматики. Пишите сюда свободно — она их учитывает.",  # noqa: RUF001
-    (Section.COORD_COMMANDS, LANG_EN):
+    (Section.COORD_RULES, LangId.RU):
+        "Ваши постоянные указания для автоматики. Пишите сюда свободно — она их учитывает.",
+    (Section.COORD_COMMANDS, LangId.EN):
         "A one-off instruction: write it here — it will be carried out, and the outcome moves to # History.",
-    (Section.COORD_COMMANDS, LANG_RU):
-        # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-        "Разовое поручение: напишите здесь — оно будет выполнено, а итог переедет в # History.",  # noqa: RUF001
-    (Section.HISTORY, LANG_EN): "What has already happened. Filled in automatically.",
-    (Section.HISTORY, LANG_RU):
-        # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-        "Что уже произошло. Заполняется автоматически.",  # noqa: RUF001
+    (Section.COORD_COMMANDS, LangId.RU):
+        "Разовое поручение: напишите здесь — оно будет выполнено, а итог переедет в # History.",
+    (Section.HISTORY, LangId.EN): "What has already happened. Filled in automatically.",
+    (Section.HISTORY, LangId.RU):
+        "Что уже произошло. Заполняется автоматически.",
 }
 
 # Narrative line templates the bin primitives land on notes — `# History` tails plus the halt
@@ -99,53 +89,82 @@ ASSET_EXPLAINERS: dict[tuple[str, str], str] = {
 # language-neutral). A key whose rendering is a substring of another key's — `HALTED_CALLOUT`
 # under `HALTED` — is a fragment key: `history_fragments` renders it in every language so a
 # caller can recognize the event in a body regardless of how the note was authored.
-# waiver: the RU lines carry a RUF001 noqa suppression — Cyrillic in Russian UI strings is the content,
-# not a lookalike-character typo; the checker cannot distinguish deliberate Russian text
 HISTORY_LINES: dict[tuple[str, str], str] = {
-    (HistoryEvent.SCAFFOLDED, LANG_EN): "scaffolded {asset_type} '{slug}' under {product}",
-    (HistoryEvent.SCAFFOLDED, LANG_RU):
-        # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-        "создан каркас {asset_type} '{slug}' под {product}",  # noqa: RUF001
-    (HistoryEvent.HALTED, LANG_EN): "{reason} — asset halted",
-    (HistoryEvent.HALTED, LANG_RU):
-        # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-        "{reason} — ассет остановлен",  # noqa: RUF001
-    (HistoryEvent.HALTED_CALLOUT, LANG_EN): "asset halted: {reason}",
-    (HistoryEvent.HALTED_CALLOUT, LANG_RU):
-        # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-        "ассет остановлен: {reason}",  # noqa: RUF001
-    (HistoryEvent.JOB_DONE, LANG_EN): "job {job_id} ({label}) done",
-    (HistoryEvent.JOB_DONE, LANG_RU):
-        # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-        "job {job_id} ({label}) завершён",  # noqa: RUF001
-    (HistoryEvent.JOB_CANCELLED, LANG_EN): "job {job_id} ({label}) cancelled",
-    (HistoryEvent.JOB_CANCELLED, LANG_RU):
-        # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-        "job {job_id} ({label}) отменён",  # noqa: RUF001
-    (HistoryEvent.JOB_DEAD, LANG_EN):
+    (HistoryEvent.SCAFFOLDED, LangId.EN): "scaffolded {asset_type} '{slug}' under {product}",
+    (HistoryEvent.SCAFFOLDED, LangId.RU):
+        "создан каркас {asset_type} '{slug}' под {product}",
+    (HistoryEvent.HALTED, LangId.EN): "{reason} — asset halted",
+    (HistoryEvent.HALTED, LangId.RU):
+        "{reason} — ассет остановлен",
+    (HistoryEvent.HALTED_CALLOUT, LangId.EN): "asset halted: {reason}",
+    (HistoryEvent.HALTED_CALLOUT, LangId.RU):
+        "ассет остановлен: {reason}",
+    (HistoryEvent.JOB_DONE, LangId.EN): "job {job_id} ({label}) done",
+    (HistoryEvent.JOB_DONE, LangId.RU):
+        "job {job_id} ({label}) завершён",
+    (HistoryEvent.JOB_CANCELLED, LangId.EN): "job {job_id} ({label}) cancelled",
+    (HistoryEvent.JOB_CANCELLED, LangId.RU):
+        "job {job_id} ({label}) отменён",
+    (HistoryEvent.JOB_DEAD, LangId.EN):
         "WARNING: coordinator job {job_id} ({trigger}) died — cleared the coordinator-job marker, "
         "asset NOT halted; a pending operator edit, if any, survives for the next genuine wake",
-    (HistoryEvent.JOB_DEAD, LANG_RU):
-        # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-        "WARNING: координаторский job {job_id} ({trigger}) умер — маркер coordinator-job снят, "  # noqa: RUF001
-        # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-        "ассет НЕ остановлен; незавершённая правка оператора, если была, доживёт до следующего "  # noqa: RUF001
-        # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-        "настоящего пробуждения",  # noqa: RUF001
-    (HistoryEvent.REQUEST_PROCESSED, LANG_EN): "request [[{wikilink}]] accepted → processed",
-    (HistoryEvent.REQUEST_PROCESSED, LANG_RU):
-        # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-        "запрос [[{wikilink}]] принят → обработан",  # noqa: RUF001
+    (HistoryEvent.JOB_DEAD, LangId.RU):
+        "WARNING: координаторский job {job_id} ({trigger}) умер — маркер coordinator-job снят, "
+        "ассет НЕ остановлен; незавершённая правка оператора, если была, доживёт до следующего "
+        "настоящего пробуждения",
+    (HistoryEvent.STAGE_LAG, LangId.EN):
+        "WARNING: {doc} is still at draft after its {review_result} review — the coordinator did not promote it; "
+        "not waking it again for this verdict",
+    (HistoryEvent.STAGE_LAG, LangId.RU):
+        "WARNING: {doc} всё ещё в draft после ревью {review_result} — координатор не повысил стадию; "
+        "по этому вердикту повторного пробуждения не будет",
+    (HistoryEvent.REQUEST_PROCESSED, LangId.EN): "request [[{wikilink}]] accepted → processed",
+    (HistoryEvent.REQUEST_PROCESSED, LangId.RU):
+        "запрос [[{wikilink}]] принят → обработан",
+    (HistoryEvent.DEPLOYED, LangId.EN): "deployed to {target} (log: {log})",
+    (HistoryEvent.DEPLOYED, LangId.RU):
+        "развёрнуто на {target} (лог: {log})",
+    (HistoryEvent.DEPLOY_FAILED, LangId.EN): "deploy to {target} failed with exit code {code} (log: {log})",
+    (HistoryEvent.DEPLOY_FAILED, LangId.RU):
+        "деплой на {target} провалился с кодом {code} (лог: {log})",
+    (HistoryEvent.PUBLISHED, LangId.EN): "published {version}: {count} asset(s) released",
+    (HistoryEvent.PUBLISHED, LangId.RU):
+        "опубликована версия {version}: выпущено ассетов — {count}",
+    (HistoryEvent.VERSION_SET, LangId.EN): "version set to {version} by the operator",
+    (HistoryEvent.VERSION_SET, LangId.RU):
+        "оператор задал версию {version}",
+    (HistoryEvent.COHERENCE_CHECKED, LangId.EN): "coherence check of {doc}: {count} conflict(s)",
+    (HistoryEvent.COHERENCE_CHECKED, LangId.RU):
+        "сверка {doc}: конфликтов — {count}",
+    (HistoryEvent.COHERENCE_FAILED, LangId.EN):
+        "WARNING: coherence check of {doc} (job {job_id}) delivered no usable result",
+    (HistoryEvent.COHERENCE_FAILED, LangId.RU):
+        "WARNING: сверка {doc} (job {job_id}) не дала пригодного результата",
+    (HistoryEvent.COHERENCE_TRIMMED, LangId.EN):
+        "coherence check of {doc}: {count} neighbour(s) dropped over the size budget",
+    (HistoryEvent.COHERENCE_TRIMMED, LangId.RU):
+        "сверка {doc}: соседей отброшено по лимиту размера — {count}",
+    (HistoryEvent.COHERENCE_CHECKED_TRIMMED, LangId.EN):
+        "coherence check of {doc}: {count} conflict(s), {dropped} neighbour(s) dropped over the size budget",
+    (HistoryEvent.COHERENCE_CHECKED_TRIMMED, LangId.RU):
+        "сверка {doc}: конфликтов — {count}, соседей отброшено по лимиту размера — {dropped}",
 }
 
 # The fourth line of a `Review <file>` gate block, under the checkbox, keyed by language; `{file}`
 # is the basename the block opens review on
-# waiver: the RU line carries a RUF001 noqa suppression — Cyrillic in Russian UI strings is the content,
-# not a lookalike-character typo; the checker cannot distinguish deliberate Russian text
 REVIEW_HELPER: dict[str, str] = {
-    LANG_EN: "tick to open review: {file} re-enters the loop at the reviewer round",
-    # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-    LANG_RU: "отметьте, чтобы открыть ревью {file}",  # noqa: RUF001
+    LangId.EN: "tick to open review: {file} re-enters the loop at the reviewer round",
+    LangId.RU: "отметьте, чтобы открыть ревью {file}",
+}
+
+# The `##` sub-headings the `review-rows` verb writes inside `# Gates`, one per row group, keyed by group and language
+GATE_GROUP_HEADINGS: dict[tuple[str, str], str] = {
+    (GateRowGroup.NEXT, LangId.EN): "## Next step",
+    (GateRowGroup.NEXT, LangId.RU): "## Следующий шаг",
+    (GateRowGroup.REREVIEW, LangId.EN): "## Re-review",
+    (GateRowGroup.REREVIEW, LangId.RU): "## Повторное ревью",
+    (GateRowGroup.CONFLICTS, LangId.EN): "## Conflicts",
+    (GateRowGroup.CONFLICTS, LangId.RU): "## Конфликты",
 }
 
 
@@ -189,7 +208,7 @@ def explainer_text(heading: str, lang: str, table: dict[tuple[str, str], str]) -
   Returns:
     The explainer text, or None when the heading has no entry in any language.
   """
-  return table.get((heading, lang)) or table.get((heading, LANG_EN))
+  return table.get((heading, lang)) or table.get((heading, LangId.EN))
 
 
 def with_explainer(section: str, lang: str, table: dict[tuple[str, str], str]) -> str:
@@ -351,7 +370,7 @@ def history_line_for_lang(lang: str, key: str, **fields: str) -> str:
     The rendered line tail (the part after the `· ` separator).
   """
   # unknown languages land on the English floor, exactly like the explainer tables
-  template = HISTORY_LINES.get((key, lang)) or HISTORY_LINES[(key, LANG_EN)]
+  template = HISTORY_LINES.get((key, lang)) or HISTORY_LINES[(key, LangId.EN)]
   return template.format(**fields)
 
 

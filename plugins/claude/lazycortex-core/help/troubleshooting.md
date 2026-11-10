@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-10-24
+last_regen: 2026-11-10
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, generic iteration loops, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys, seed data gaps), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models, plugin-path resolution, stale source paths at claim time), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources, worker import errors), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
@@ -17,6 +17,7 @@ source_skills:
   - lazy-core.git-unlock
   - lazy-core.install
   - lazy-core.iterate
+  - lazy-core.migrate
   - lazy-core.providers
   - lazy-core.scaffold-local
   - lazy-core.scaffold-sync
@@ -37,11 +38,12 @@ source_skills:
   - lazy-routine.offer-protocols
   - lazy-routine.register
   - lazy-routine.unregister
+  - lazy-runtime.doctor
   - lazy-runtime.preflight
   - lazy-runtime.recover
   - lazy-runtime.tick
-source_sha: 33e8a296cb2bda2f7c06945ca9d46e24ed4c1858
-surface_sha: 83ab23a233eaa6b2d5def21d40481dc554b8442253b825b89db17be58d91ea3c
+source_sha: 68b0497d19be92e1b5870e3e2931715ddf0ec87b
+surface_sha: 6b362363da59b4aba9a73a8131a7f84471e482cad2b846b6bc1871befea48534
 ---
 # Troubleshooting
 
@@ -61,7 +63,7 @@ surface_sha: 83ab23a233eaa6b2d5def21d40481dc554b8442253b825b89db17be58d91ea3c
 
 **Likely cause**: Every lazycortex skill and hook runs its Python helpers as `"${LAZYCORTEX_PYTHON:-python3}" <script>` instead of relying on the script's own executable bit — that bit means nothing once a git client that is blind to file modes (obsidian-git on Android, a mode-blind Windows checkout) strips it on clone or pull. In an interactive session the variable is normally unset and `python3` resolves from your `PATH`. A path that does not exist therefore comes from somewhere that sets the variable explicitly: an `env.LAZYCORTEX_PYTHON` entry left in `.claude/settings.local.json` by an older install (the step that wrote it is gone), or a shell profile exporting a value copied from another machine.
 
-**Fix**: Delete the `env.LAZYCORTEX_PYTHON` entry from this checkout's `.claude/settings.local.json` (and any export of it in your shell profile) and open a new session — skills and hooks then fall back to `python3` from `PATH`. The daemon's supervisor unit is the one place that legitimately carries the absolute path; if that one is stale, re-run `/lazy-core.daemon-setup` — it re-derives the interpreter and re-renders the unit.
+**Fix**: Delete the `env.LAZYCORTEX_PYTHON` entry from this checkout's `.claude/settings.local.json` (and any export of it in your shell profile) and open a new session — skills and hooks then fall back to `python3` from `PATH`. The daemon's supervisor unit is the one place that legitimately carries an absolute interpreter path, because launchd and systemd start it with a minimal `PATH`. `/lazy-core.daemon-setup` writes the version-neutral `python3` when that is the running interpreter outside a virtualenv (so a minor Python upgrade does not leave the unit pointing at a removed version), and the shim falls back to `python3` on the login `PATH` if the recorded path stops resolving. If the unit still names a stale interpreter, re-run `/lazy-core.daemon-setup` — it re-derives the interpreter and re-renders the unit.
 
 ---
 
@@ -99,17 +101,21 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ---
 
-## Any plugin's install fails seeding agent-model tiers (`sot-missing` or `no-entries`)
+## Any plugin's install fails seeding agent-model tiers (`sot-missing`, `no-entries`, or `settings-unparseable`)
 
-**Symptom**: Installing any lazycortex plugin — not only `lazycortex-core` — stops during its agent-model tier seeding step with an error like "`sot-missing`" or "`no-entries`", instead of finishing silently the way tier seeding normally does.
+**Symptom**: Installing any lazycortex plugin — not only `lazycortex-core` — stops during its agent-model tier seeding step with an error like "`sot-missing`", "`no-entries`", or "`settings-unparseable`", instead of finishing silently the way tier seeding normally does.
 
-**Likely cause (`sot-missing`)**: Every plugin's install skill hands its dispatchable agents to `lazy-core.agent-models-seed`, which reads `lazycortex-core`'s `default-tiers.json` as the single source of truth for built-in tiers. If that file can't be found on `$LAZYCORTEX_PLUGIN_DIRS` or in the plugin cache — because `lazycortex-core` itself is missing, only partially cached, or was never installed on this host — the seed step has nothing to read and fails outright rather than guess a tier.
+**Likely cause (`sot-missing`)**: Every plugin's install skill hands its dispatchable agents to `lazy-core.agent-models-seed`, which reads `lazycortex-core`'s `default-tiers.json` as the single source of truth for built-in tiers. If that file can't be found — because `lazycortex-core` itself is missing, only partially cached, or was never installed on this host — the seed step has nothing to read and fails outright rather than guess a tier.
 
 **Likely cause (`no-entries`)**: `lazycortex-core` is installed fine, but `default-tiers.json` simply has no curated tier for the plugin's agents yet — this happens for a newly added or third-party agent that has not been added to the shared defaults.
+
+**Likely cause (`settings-unparseable`)**: The target `lazy.settings.json` is not valid JSON. The seed step leaves the file untouched rather than overwrite something it cannot read.
 
 **Fix (`sot-missing`)**: Install or reinstall `lazycortex-core` (`/plugin update lazycortex-core@lazycortex`, then `/lazy-core.install`) so `default-tiers.json` is present on disk, then re-run the plugin's own install.
 
 **Fix (`no-entries`)**: There is no default to seed — this is not repairable by reinstalling. Run `/lazy-core.agent-models` to pin a tier for the affected agent by hand; the wizard prompts for exactly the entries that have no curated default.
+
+**Fix (`settings-unparseable`)**: Fix the JSON syntax in the settings file by hand, then re-run the plugin's install.
 
 ---
 
@@ -297,6 +303,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ---
 
+## An expert bound to a provider is refused: "model ... must be one of the tier aliases"
+
+**Symptom**: Dispatching to an expert that has a `provider` set, or running `/lazy-runtime.preflight` for it, fails with a message like "expert ... model ... must be one of the tier aliases".
+
+**Likely cause**: The expert pins its own `model` to something other than a tier alias (`fable`, `opus`, `sonnet`, or `haiku`). A provider-bound expert always names its model through a tier; the provider's own model name belongs in the provider's tier map, not in the expert.
+
+**Fix**: Set the expert's `model` to one of the four tier aliases, or drop it and let the agent's tier apply. Put the provider's real model name into that provider's tier map with `/lazy-core.providers update <name>`.
+
+---
+
 ## `/lazy-core.providers` fails: unrecognised mode, unknown provider name, or gitignore missing
 
 **Symptom**: Running `/lazy-core.providers` (or `/lazy-core.providers add|update|remove <name>`) fails immediately with "mode must be one of list|add|update|remove", "provider `<name>` is not registered", or "`.claude/lazy.settings.local.json` is not gitignored".
@@ -461,39 +477,43 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ---
 
-## `/lazy-core.scaffold-local` rejects an entry, or an upsert / validate step fails
+## `/lazy-core.scaffold-local` rejects an entry, or a registry write / validate step fails
 
-**Symptom**: `/lazy-core.scaffold-local` fails with "`entry … not found in the _local registry map`" while removing an entry, an underlying `scaffold upsert` / `scaffold remove` call returns `error`, or the closing `scaffold validate` step reports FAIL-level findings.
+**Symptom**: `/lazy-core.scaffold-local` fails with "`entry … not found in the _local registry map`" while removing an entry, an underlying `scaffold set-entry` / `scaffold drop-entry` call returns `error`, the add is refused with "group `<group>` is supplied by installed plugin `<plugin>`", or the closing `scaffold validate` step reports FAIL-level findings.
 
 **Likely cause (entry not found)**: The entry name passed for removal does not match anything currently registered under the `_local` key.
 
-**Likely cause (upsert/remove error)**: The core CLI rejected the write — malformed input, or a registry-write failure underneath.
+**Likely cause (group supplied by a plugin)**: The group you chose for the new template is one an installed plugin re-syncs on every install, so your own template there would collide with a shipped namesake.
 
-**Likely cause (validate FAIL)**: The registry has a structural problem left over after the upsert — usually a hand-edit to `.claude/rules/lazy-core.scaffold.md` made outside this skill.
+**Likely cause (set-entry/drop-entry error)**: The core CLI rejected the write — malformed input, or a registry-write failure underneath.
+
+**Likely cause (validate FAIL)**: The registry has a structural problem left over after the write — usually a hand-edit to `.claude/rules/lazy-core.scaffold.md` made outside this skill.
 
 **Fix (entry not found)**: List the current `_local` entries with `scaffold list --registry <regPath>` to see the exact name on record, then retry with that name.
 
-**Fix (upsert/remove error)**: Read the full error output from the failed call, correct the input it points at, then re-run `/lazy-core.scaffold-local`.
+**Fix (group supplied by a plugin)**: Re-invoke `add` with a group name of your own. Removing an entry already filed in such a group is not blocked.
+
+**Fix (set-entry/drop-entry error)**: Read the full error output from the failed call, correct the input it points at, then re-run `/lazy-core.scaffold-local`.
 
 **Fix (validate FAIL)**: Open `.claude/rules/lazy-core.scaffold.md` directly, fix the structural issue the validation output names, and validate again.
 
 ---
 
-## A plugin install silently skips scaffold registration, or fails with a scaffold-sync error
+## A plugin install silently skips scaffold registration, or reports a scaffold-sync collision or error
 
-**Symptom**: A plugin's install skill reports its scaffold-template step as `none` with nothing copied, or fails outright with "`scaffold-sync: collision — template path "<key>" declared by …`", "`cannot resolve core CLI — lazycortex-core not installed`", "`core CLI not found at <path>`", or a `scaffold upsert` step returning `error`.
+**Symptom**: A plugin's install skill reports its scaffold-template step as `none` with nothing copied, or reports `collision` or `error` for it instead.
 
 **Likely cause (`none`, nothing copied)**: `/lazy-core.scaffold-sync` runs as an internal step of a plugin's own install (`lazy-core.install` Step 4, `lazy-python.install` Step 6) and found no `templates/*/scaffold.entries.json` manifest to copy — the plugin genuinely ships no authoring templates. This is a normal outcome, not an error.
 
-**Likely cause (collision)**: Two of the plugin's own template groups declare the same template path with different globs — an authoring bug in the plugin's own `scaffold.entries.json` manifests, not something this repo's config can fix.
+**Likely cause (`collision`)**: Two of the plugin's own template groups declare the same template path with different globs — an authoring bug in the plugin's own `scaffold.entries.json` manifests, not something this repo's config can fix. Nothing was written; the report's message names the key and both groups.
 
-**Likely cause (core CLI unresolved)**: Same underlying cause as the `lazy-core.scaffold-local` entry above — `lazycortex-core` is missing or its cached `installPath` is stale.
+**Likely cause (`error`)**: The `lazy-core.scaffold.md` registry in your repo does not parse. Nothing was written; the report's message carries the findings.
 
 **Fix (`none`)**: No action needed.
 
-**Fix (collision)**: This is a defect in the plugin shipping the colliding manifests, not something to fix locally — report it against that plugin so its `scaffold.entries.json` files are edited to stop overlapping.
+**Fix (`collision`)**: This is a defect in the plugin shipping the colliding manifests, not something to fix locally — report it against that plugin so its `scaffold.entries.json` files are edited to stop overlapping.
 
-**Fix (core CLI unresolved)**: Install or refresh `lazycortex-core` (`/lazy-core.install`, or `/plugin update lazycortex-core@lazycortex` for a stale cache), then re-run the plugin's own install so it re-dispatches `/lazy-core.scaffold-sync`.
+**Fix (`error`)**: Fix the registry block the message names in `.claude/rules/lazy-core.scaffold.md`, then re-run the plugin's own install so it re-dispatches `/lazy-core.scaffold-sync`.
 
 ---
 
@@ -662,7 +682,7 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Symptom**: `/lazy-core.doctor` reports a WARN like "`<key> holds "<value>", not an ISO 639-1 code`" or an INFO like "`review.language is present but no longer read`" against `.claude/lazy.settings.json`.
 
-**Likely cause (`settings.language-not-a-code`)**: One of the settings schema's language keys — the root `language`, `spec.language`, `wiki.language`, `wiki.domains.language`, or a `products[<key>].language` entry — holds a free-form name (`русский`, `english`) instead of the ISO 639-1 code the code that reads it compares against. A value the wiki plugin's compatibility table can map (`русский`/`russian` → `ru`, `english` → `en`) gets a proposed rewrite in the finding's `detail:`; a value with no known mapping is reported with `detail: no known mapping` and left for you to correct by hand.
+**Likely cause (`settings.language-not-a-code`)**: One of the settings schema's language keys — the root `language`, `spec.language`, `wiki.language`, `wiki.domains.language`, or a `products[<key>].language` entry — holds a free-form name (`russian`, `english`) instead of the ISO 639-1 code the code that reads it compares against. A value the wiki plugin's compatibility table can map (`russian` → `ru`, `english` → `en`) gets a proposed rewrite in the finding's `detail:`; a value with no known mapping is reported with `detail: no known mapping` and left for you to correct by hand.
 
 **Likely cause (`settings.language-review-key`)**: `review.language` is still present in `.claude/lazy.settings.json`, but review no longer reads that key at all — it is dead configuration, not a functional problem.
 
@@ -686,7 +706,7 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Symptom**: An agent you assigned a tier via `/lazy-core.agent-models` (e.g. `opus`) runs on the default model instead.
 
-**Likely cause**: The tier value stored in `lazy.settings.json` is not one of the three recognised strings (`haiku`, `sonnet`, `opus`). A typo (e.g. `"sonnet-3-7"`, `"claude-opus"`) causes the hook to treat the entry as unset and fall through to the default model. The hook emits a warning to stderr but never blocks the dispatch.
+**Likely cause**: The tier value stored in `lazy.settings.json` is not one of the recognised tier strings (`haiku`, `sonnet`, `opus`, `fable`). A typo (e.g. `"sonnet-3-7"`, `"claude-opus"`) causes the hook to treat the entry as unset and fall through to the default model. The hook emits a warning to stderr but never blocks the dispatch.
 
 **Fix**: Run `/lazy-core.agent-models` to review and correct the entries. The skill fills only missing entries by default — to replace an incorrect value, remove the bad entry from `lazy.settings.json` first (the skill will then detect it as missing and prompt you to fill it in), or run `/lazy-core.doctor` which flags unrecognised tier values as a configuration error and offers to fix them.
 
@@ -706,9 +726,9 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Symptom**: You set `LAZY_AGENT_MODEL_FLOOR` in your environment to cap the maximum model tier, but agents still dispatch at a higher tier than intended.
 
-**Likely cause**: The env var value is not one of the three recognised tier names (`haiku`, `sonnet`, `opus`). The hook logs a warning to stderr and ignores an unrecognised floor value entirely.
+**Likely cause**: The env var value is not one of the recognised tier names (`haiku`, `sonnet`, `opus`, `fable`). The hook logs a warning to stderr and ignores an unrecognised floor value entirely.
 
-**Fix**: Confirm the value of `LAZY_AGENT_MODEL_FLOOR` in your shell environment (`echo $LAZY_AGENT_MODEL_FLOOR`). Correct it to one of `haiku`, `sonnet`, or `opus`, then restart Claude Code so the hook picks up the updated environment.
+**Fix**: Confirm the value of `LAZY_AGENT_MODEL_FLOOR` in your shell environment (`echo $LAZY_AGENT_MODEL_FLOOR`). Correct it to one of `haiku`, `sonnet`, `opus`, or `fable`, then restart Claude Code so the hook picks up the updated environment.
 
 ---
 
@@ -928,6 +948,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ---
 
+## `/lazy-runtime.preflight` shows a provider message instead of server statuses
+
+**Symptom**: For an expert bound to a `provider`, the preflight table shows a message in the server-statuses cell and no MCP server was probed.
+
+**Likely cause**: The pump would refuse that job before spawning it — the provider entry does not validate, or its `token_env` variable resolves in neither the environment nor `~/.claude/.env`.
+
+**Fix**: Act on what the message names. Correct the provider entry with `/lazy-core.providers update <name>`, or export the token variable (or add it to `~/.claude/.env`), then re-run `/lazy-runtime.preflight`.
+
+---
+
 ## `/lazy-runtime.preflight` warns "plugin-dir resolution was best-effort"
 
 **Symptom**: The preflight report includes a note that plugin-dir resolution was best-effort, and a server that should be fine shows up as failing.
@@ -1050,7 +1080,7 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Symptom**: `/lazy-expert.collect-job` reports `status: missing`, or `/lazy-expert.cancel-job` reports "Job `<job_id>` not found for expert `<expert_name>`."
 
-**Likely cause**: The job directory was never created — the dispatch failed silently, or the `job_id` / `expert_name` was mistyped.
+**Likely cause**: The job directory does not exist — it was never created (the dispatch failed silently), it was already removed, or the `job_id` / `expert_name` was mistyped.
 
 **Fix**: Verify the `job_id` and `expert_name` match exactly what `/lazy-expert.dispatch-job` returned. Run `/lazy-expert.list-jobs` to see all active jobs and confirm whether the job was dispatched. If the job is absent, re-dispatch with the correct payload and expert name.
 
@@ -1088,11 +1118,11 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ## `/lazy-expert.list-jobs` rejects the status filter
 
-**Symptom**: Running `/lazy-expert.list-jobs` with a `status` argument fails immediately with "status must be one of: queued, active, cancelled, dead, done, failed."
+**Symptom**: Running `/lazy-expert.list-jobs` with a `status` argument fails immediately with "status must be one of: queued, active, cancelled, dead, done, deferred, failed."
 
-**Likely cause**: The value passed to the `status` filter is not one of the six recognised strings. Common mistakes include `pending` (old vocabulary), `IN_PROGRESS`, `DONE` (uppercase), `ready`, or `CANCELLED` (uppercase — the filter is case-sensitive).
+**Likely cause**: The value passed to the `status` filter is not one of the seven recognised strings. Common mistakes include `pending` (old vocabulary), `IN_PROGRESS`, `DONE` (uppercase), `ready`, or `CANCELLED` (uppercase — the filter is case-sensitive).
 
-**Fix**: Use one of the six valid filter values: `queued`, `active`, `cancelled`, `dead`, `done`, or `failed`. To see all jobs regardless of status, omit the `status` argument entirely.
+**Fix**: Use one of the seven valid filter values: `queued`, `active`, `cancelled`, `dead`, `done`, `deferred`, or `failed`. A `deferred` job (work postponed, input untouched) answers neither the `done` nor the `failed` filter, so ask for `deferred` explicitly. To see all jobs regardless of status, omit the `status` argument entirely.
 
 ---
 
@@ -1126,13 +1156,13 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ---
 
-## `/lazy-routine.unregister` refuses to remove `lazy-expert.pump`
+## `/lazy-routine.unregister` refuses to remove `lazy-expert.pump` or `lazy-runtime.doctor`
 
-**Symptom**: Running `/lazy-routine.unregister lazy-expert.pump` fails with "`lazy-expert.pump` is the built-in expert pump; removing it breaks the experts pipeline."
+**Symptom**: Running `/lazy-routine.unregister lazy-expert.pump` (or `lazy-runtime.doctor`) fails with a message saying the routine is a built-in and that removing it breaks the runtime.
 
-**Likely cause**: The skill protects the built-in pump routine from accidental removal. Without `lazy-expert.pump`, the runtime daemon stops draining the job queue and expert jobs queue indefinitely.
+**Likely cause**: The skill protects two built-in routines from accidental removal: `lazy-expert.pump`, which processes expert jobs, and `lazy-runtime.doctor`, which repairs stuck jobs and halts. Without the pump, expert jobs queue indefinitely; without the doctor, stuck jobs and halts wait for you.
 
-**Fix**: If removal is intentional, pass the `--force` flag: `/lazy-routine.unregister lazy-expert.pump --force`. Expert jobs will stop being processed until the routine is re-registered. To restore it later, re-run `/lazy-core.install` — the install skill re-registers the pump if experts are configured.
+**Fix**: If removal is intentional, pass the `--force` flag: `/lazy-routine.unregister lazy-expert.pump --force`. That routine's work stops until it is re-registered. To restore it later, re-run `/lazy-core.install` — the install skill re-registers the built-in routines.
 
 ---
 
@@ -1227,6 +1257,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: The daemon now tells apart a purely local git failure during its pre- or post-tick sync from a genuine remote-reachability problem, instead of folding every non-network git failure into `git_remote_unavailable` and sending the operator to chase a network issue that was never the cause. A held `.git/index.lock` that outlasted the daemon's own short retry backoff, a bad ref, or a checkout-permission error now surfaces honestly as `git_local_failed`. A transient lock contention -- racing an expert job's own commit, for instance -- is retried in place first and never reaches a halt at all; only a lock still held past that backoff halts.
 
 **Fix**: Often none needed: when the halt's `triggered_by` is a sync step (`_git_pre` / `_git_post`), the hourly doctor tick probes the remote once the halt is an hour old and resumes the daemon by itself if git answers — this covers the common case of a network failure whose stderr the transport classifier didn't recognise. If it persists past that, inspect the checkout directly with `git status`. If `.git/index.lock` is present and you've confirmed no other process actually holds it, remove it by hand. Resolve whatever the local failure was -- a bad ref, a checkout permission problem -- then run `/lazy-runtime.recover` to clear the halt.
+
+---
+
+## `/lazy-runtime.recover` reports a `git_rebase_not_started` halt
+
+**Symptom**: `/lazy-runtime.recover` (or the daemon's state file) reports a halt with reason `git_rebase_not_started`, raised by the post-tick publish step.
+
+**Likely cause**: The daemon found operator commits on origin and git refused to even start replaying the daemon's own commits onto them — typically an untracked file in the checkout sits where a file from origin must land. Nothing was replayed or discarded: the daemon's commits are still local and unpublished. Git's own message, naming the blocking file, is in the halt detail.
+
+**Fix**: Read the detail with `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> error-list --kind daemon_halt`, or from the newest `.logs/lazy-core/runtime/<date>.jsonl` record named `_git_post`. Move, commit, or delete the file it names, then confirm `git rebase origin/<branch>` can start (abort it with `git rebase --abort` if you only wanted the check). This halt never clears itself, because a reachable remote says nothing about it; run `/lazy-runtime.recover` once the rebase can start.
 
 ---
 
@@ -1346,11 +1386,11 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ## `/lazy-memory.write` fails with "commit-failed"
 
-**Symptom**: `/lazy-memory.write` reaches the commit step but fails with "commit-failed: git add returned …" or "commit-failed: git commit returned …".
+**Symptom**: `/lazy-memory.write` reaches the commit step but fails with "commit-failed: git add -N returned …" or "commit-failed: git commit returned …".
 
-**Likely cause**: A pre-commit hook rejected the staged change, or another Claude Code session holds the staging lock (`lazy-core.git-guard`) and the write couldn't acquire it. The skill leaves the staged index intact for inspection.
+**Likely cause**: A pre-commit hook rejected the change, or git was busy with another Claude Code session's lock (`lazy-core.git-guard`) and the write couldn't commit. The note and its tag files stay changed in the worktree, unstaged — nothing of the write is left in the index.
 
-**Fix**: Wait for the other session to finish staging, or check the `.git/lazy-git.lock` timestamp to gauge how long it has been held. Then re-run `/lazy-memory.write` — the write is idempotent when the note body is unchanged, so it will complete cleanly on retry.
+**Fix**: Resolve the underlying cause — wait for the other session to finish, or check the `.git/lazy-git.lock` timestamp to gauge how long it has been held. Then re-run `/lazy-memory.write` — the write is idempotent when the note body is unchanged, so it will complete cleanly on retry. Alternatively commit those paths yourself with an explicit pathspec (`git commit -m "..." -- <path> <path>`).
 
 ---
 
@@ -1405,6 +1445,42 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Fix (absent)**: Run any logged skill once (for example `/lazy-core.audit`) to create `.logs/claude/` and at least one log file. Then re-run `/lazy-log.clean`.
 
 **Fix (Step 1)**: Check the reason string in the error. Ensure `lazycortex-core` is properly installed by re-running `/lazy-core.install`. If the error mentions Python, verify that `python3` resolves to 3.12 or higher in the current shell environment.
+
+---
+
+## `/lazy-core.setup` or `/lazy-core.migrate` reports a step `failed` or `blocked`
+
+**Symptom**: The migration part of a `/lazy-core.setup` run (or a direct `/lazy-core.migrate`) lists a step as `failed: dirty: <paths>`, `failed: commit-refused: <message>`, `failed: snapshot-missing: <file>`, `failed: outside-writes: <paths>`, or a failed step followed by the same plugin's later steps as `blocked`.
+
+**Likely cause (`dirty`)**: Uncommitted work sits on paths the step rewrites, so it did not start. Under `/lazy-core.setup` these are paths that were already uncommitted before the setup run, since the install chain's own writes are committed first.
+
+**Likely cause (`commit-refused` or `snapshot-missing` on the install chain)**: The files the install chain changed could not be committed before the steps ran, so steps writing them end `failed: dirty`.
+
+**Likely cause (`commit-refused` on a step)**: The git guard or a hook refused the step's commit, typically because the index holds staged content. The skill rolled the step's changes back and blocked the plugin's later steps.
+
+**Likely cause (`failed` / `blocked`)**: A command in the step failed or its completion check did not hold. The step's own changes were rolled back.
+
+**Likely cause (`outside-writes`)**: The step changed files it did not declare. The skill rolled back every path the step changed and left your earlier uncommitted work alone.
+
+**Fix**: Commit or discard the changes on the paths the message names (or clear what the refusal names), then re-run `/lazy-core.setup`, which offers the step again. The plugin stays unstamped until every step ends `applied` or `not-applicable`. For `outside-writes`, report the step to the plugin's maintainer; the plugin stays unstamped until a fixed step applies.
+
+---
+
+## `/lazy-core.migrate` reports a step `not-applicable`, or an `invalid` row
+
+**Symptom**: `/lazy-core.migrate` lists a step as `not-applicable`, or lists an `invalid` row, or its planning phase ends `failed: <reason>`.
+
+**Likely cause (`not-applicable`)**: A command of the step exited with the "nothing to do here" code — something the step needs is absent in this repository, such as a feature that is not configured. Anything the step changed was rolled back and the plugin's later steps still ran.
+
+**Likely cause (`invalid`)**: A step file, a stamp file, or a step condition could not be read or judged.
+
+**Likely cause (planning failed)**: The planning step refused, usually because `.claude/lazy.settings.json` is not valid JSON.
+
+**Fix (`not-applicable`)**: Nothing to fix. The step does not keep the plugin from being stamped, and once the plugin is stamped the step is not offered again, even if the missing piece is configured later.
+
+**Fix (`invalid`)**: Update the plugin. A broken stamp file under `.state/` can be deleted, and the next run re-judges every step.
+
+**Fix (planning failed)**: Fix the settings file's JSON and re-run `/lazy-core.migrate`.
 
 ---
 

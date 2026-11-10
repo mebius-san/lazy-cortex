@@ -2,8 +2,8 @@
 Top-of-body status callout (the "banner").
 
 Pure-function module. Recognises and renders the banner states
-defined by the spec § Top-banner. The state machine owns the *when*
-of repaints; this module owns the *what*.
+defined by the spec § Top-banner. This module decides *what* the banner
+shows; callers decide *when* to repaint it.
 
 Key invariants enforced here:
 
@@ -20,7 +20,8 @@ Key invariants enforced here:
 - The ready banner carries ONE approval checkbox when the autorun stopped clean or no validation round has run, and
   the three gestures only when a validation round has run and the autorun did not stop clean.
 - Banner is anchored above the first H1 of the body. Mid-body banner-
-  shaped callouts (stale, mis-pasted) are ignored by :func:`extract`.
+  shaped callouts (stale, mis-pasted) are ignored by :func:`extract`, and so is
+  banner-shaped text inside a code fence above the first H1 (a literal example).
 """
 from __future__ import annotations
 
@@ -32,7 +33,7 @@ import re
 # waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
 import parser as _parser  # pylint: disable=import-error,deprecated-module
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from keys import LANG_EN as _LANG_EN, AutorunState, Bucket, Phase  # pylint: disable=import-error
+from keys import AutorunState, Bucket, LangId, Phase  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -127,12 +128,14 @@ def extract(body: str) -> State | None:
       callout's marker style (`[!hint]`, `[!caution]`, etc.) is never read.
     - Only the region above the document's first top-level heading is searched; a
       banner-shaped callout appearing later in the body is never recognized.
+    - Content inside a code fence in that region is never read as the banner; a document whose only
+      banner-shaped line is a fenced example yields `None`.
 
   Args:
     body: Full document text to search.
 
   Returns:
-    The `State` encoded in the banner tag, or `None` if no banner is found above the first H1.
+    The `State` encoded in the banner tag, or `None` if no banner is found above the first H1 outside code fences.
   """
 
   # Contract:
@@ -143,6 +146,10 @@ def extract(body: str) -> State | None:
   # Only the region above the document's first top-level heading MUST be searched; a
   # banner-shaped line appearing later in the body MUST NEVER be recognized.
 
+  # Contract:
+  # Content inside a code fence in the searched region MUST NEVER be read as the banner; when
+  # the only banner-shaped line is a fenced example, the result MUST be `None`.
+
   # Domain(review.markup):
   # # Banner recognition by tag, not by callout style
   # The status banner at the top of a review document is identified by its `#review/<tag>`
@@ -150,14 +157,17 @@ def extract(body: str) -> State | None:
   # same visual style but without the tag is not read as a banner at all. Only the region above
   # the document's first top-level heading is searched, because a banner-shaped line appearing
   # later in the body is a leftover scaffold trace or a stale snapshot, never the live status.
+  # Within that region, a banner-shaped line inside a code fence is a literal example, not the
+  # banner.
 
-  headings = _parser.h1_headings(body)
+  # the region above the first H1, with fenced content blanked: a banner-shaped line inside a fence is literal
+  headings = _parser.find_all_h1_headings(body)
   scan_end = headings[0][0] if headings else len(body)
-  region = body[:scan_end]
+  region = _parser.strip_code_fences(body[:scan_end])
   for line in region.splitlines():
     match = _FIRST_LINE_RE.match(line)
 
-    # guard: skip non-banner lines in the pre-H1 region so only the first banner-tag line decides the state
+    # non-banner lines in the pre-H1 region are passed over, so the first banner-tag line decides the state
     if match is None:
       continue
     return _TAG_TO_STATE.get(match.group(1))
@@ -174,13 +184,15 @@ def extract_block(body: str) -> str:
     - The banner is taken only from the region above the first top-level heading, or from the whole body when
       there is none.
     - Any other callout, before or after the banner, is never part of the returned text.
+    - Content inside a code fence is never returned as the banner: a fenced banner-shaped example above the
+      real banner is skipped in favour of the real one, and a fenced example alone yields an empty string.
 
   Args:
     body: Document body text to search for the banner callout.
 
   Returns:
     The banner callout block, including its continuation lines and any blank lines right after it, or an empty
-    string when no banner callout sits above the first top-level heading.
+    string when no banner callout outside a code fence sits above the first top-level heading.
   """
 
   # Contract:
@@ -188,13 +200,22 @@ def extract_block(body: str) -> str:
   # the quoted lines that continue it — taken only from the region above the first top-level
   # heading; any other callout, before or after the banner, MUST NEVER be part of it.
 
+  # Contract:
+  # Content inside a code fence MUST NEVER be returned as the banner: a fenced banner-shaped
+  # example preceding the real banner MUST be skipped in favour of the real one, and when only
+  # a fenced example exists the result MUST be an empty string.
+
   # the banner lives only above the first H1, the same region `extract` reads; the strip pattern also matches
   # the retired concerns-decision callout, which carries no state, so only a block `extract` reads as a state
-  # banner qualifies
-  headings = _parser.h1_headings(body)
+  # banner qualifies; fenced chunks are skipped, since a banner-shaped line inside a fence is literal content
+  headings = _parser.find_all_h1_headings(body)
   scan_end = headings[0][0] if headings else len(body)
   found = next(
-      ( block for block in _BANNER_BLOCK_RE.finditer(body[:scan_end]) if extract(block.group(0)) is not None ),
+      (
+          block
+          for chunk in _parser.split_fenced(body[:scan_end]) if not chunk.fenced
+          for block in _BANNER_BLOCK_RE.finditer(chunk.text) if extract(block.group(0)) is not None
+      ),
       None,
   )
 
@@ -235,14 +256,14 @@ def _find_callout_block(body: str, header_match: re.Match[str]) -> str:
   lines = body[start:].splitlines()
   collected: list[str] = []
   for line in lines:
-    # guard: the first line without a `>` prefix ends the callout block
+    # the first line without a `>` prefix ends the callout block
     if not line.startswith(">"):
       break
     collected.append(line)
   return "\n".join(collected)
 
 
-def _any_unanswered_question(body: str) -> bool:
+def _has_unanswered_question(body: str) -> bool:
   """
   Report whether `body` contains an open question callout with no operator tick.
 
@@ -275,15 +296,16 @@ def _has_unanswered_candidate(body: str) -> bool:
   # Domain(review.markup):
   # # Decision-candidate identity and answered state
   # A decision-candidate callout carries no `#review/…` tag; the callout type token itself is
-  # its identity. Every candidate must carry the mandatory accept/reject option pair, and it
-  # counts as answered only when a ticked option sits inside that same candidate's own block —
-  # no carve-outs apply, per callout. An unanswered candidate is an operator-facing block that
+  # its identity. Every candidate is expected to carry the accept/reject option pair; a
+  # candidate counts as answered when any ticked option sits inside that same candidate's own
+  # block — no carve-outs apply, per callout. An unanswered candidate is an operator-facing block that
   # holds the review banner at "Action needed" exactly like an unanswered question. Callout-
   # shaped lines that appear inside a code fence are inert body content, never a live candidate.
 
   # same per-callout gate as questions: a candidate is answered only by a tick inside its
   # own block (the coordination playbook's finalize gate has no carve-outs)
   scan_body = _parser.strip_code_fences(body)
+  # limit: the accept/reject pair is not verified per candidate, add a shape check if candidates arrive malformed
   for match in _CANDIDATE_OPEN_RE.finditer(scan_body):
     block = _find_callout_block(scan_body, match)
     if not _TICKED_OPTION_RE.search(block):
@@ -298,29 +320,13 @@ def desired_state(
     approved: bool = False,
     domain_ready: bool = True,
     review_phase: str | None = None,
+    command_pending: bool = False,
 ) -> State:
   """
   Compute the banner state appropriate for the current tick.
 
-  - `OPERATOR_COMMITTED` / `CHAIN_IN_PROGRESS` → always `State.IN_PROCESS` (agents work next; operator waits).
-  - `CHAIN_EXHAUSTED` → recompute by the spec table:
-
-    1. open `#review/question` or unanswered `[!decision-candidate]` → ACTION_NEEDED
-    2. consumer's `domain_ready` predicate False → ACTION_NEEDED
-    3. `approved == True` → phase-aware:
-         - `review_phase in {"validators", "terminals"}` → `IN_PROCESS`. Validators (stage 5) and
-           terminals (stage 6) are post-approve barriers that run BEFORE finalize; the caller passes
-           a matching `waiting_context` to `replace_banner` so the rendered title reads "Waiting:
-           validators" / "Waiting: terminals". Without this branch the generic post-tick repaint
-           paints "Waiting: finalize" while validators or terminals are still in flight, which
-           misrepresents the current phase to the operator.
-         - `review_phase in {None, "finalizing"}` (or any other value) → `FINALIZING`. Finalize is
-           in flight, no further waiting work; the chain is heading to the finalize commit, not
-           back to the pre-approve `Ready to approve` callout. (Bug 114 — without this gate the
-           post-approve banner-tick would repaint over the approved-mirror, showing
-           `- [ ] approve the whole document` on top of a doc whose frontmatter already carries
-           `review_approved: true`.)
-    4. else → READY
+  Tells the operator whether agents are still working, the document needs their input, an approved document is
+  being finalized, or the document is ready for approval.
 
   Guarantees:
     - Returns `State.IN_PROCESS` whenever `dispatch_state` is not `CHAIN_EXHAUSTED`,
@@ -328,18 +334,25 @@ def desired_state(
     - Once the dispatch has exhausted, the result follows a fixed priority: an unanswered
       question, an undecided candidate, or a failed `domain_ready` check outranks
       approval; and only once none of those hold does `approved` decide between
-      `IN_PROCESS` / `FINALIZING` and `READY`.
+      `IN_PROCESS` / `FINALIZING` and the unapproved outcomes.
+    - Returns `State.READY` only for an unapproved document whose `review_phase` is not `main`
+      and that has no pending operator command; the operator is never shown "ready to approve"
+      while a writer round or a command is still owed.
 
   Args:
     body: Full document text, scanned for open questions and decision candidates.
     dispatch_state: Current phase of the dispatch cycle.
-    approved: Frontmatter-mirrored approve flag; `True` after the dispatcher has mirrored the operator's
-      `- [x] approve the whole document` tick into `review_approved`.
+    approved: Frontmatter-mirrored approve flag; `True` once the operator's
+      `- [x] approve the whole document` tick has been mirrored into `review_approved`.
     domain_ready: Consumer-supplied predicate; `False` forces `ACTION_NEEDED`.
     review_phase: Frontmatter `review_phase` value (`validators` / `terminals` /
       `finalizing` / `main` / `awaiting-operator` / `bootstrapping`) or `None` when absent. When
-      `approved == True` and `dispatch_state == CHAIN_EXHAUSTED`, drives the validators/terminals →
-      `IN_PROCESS` vs finalizing → `FINALIZING` branch above. Ignored when `approved == False`.
+      `approved == True` and `dispatch_state == CHAIN_EXHAUSTED`, decides between `IN_PROCESS`
+      (validators and terminals still running) and `FINALIZING`. When `approved == False`, the
+      phase `main` (a writer round still owed) yields `IN_PROCESS` instead of `READY`.
+    command_pending: Whether the document carries an operator command the coordinator has not yet
+      executed. When `approved == False` and the chain is exhausted, `True` yields `IN_PROCESS`
+      instead of `READY`.
 
   Returns:
     The `State` the banner should display for this tick.
@@ -349,7 +362,13 @@ def desired_state(
   # When `dispatch_state` is not `CHAIN_EXHAUSTED`, the result MUST be `State.IN_PROCESS`
   # regardless of every other argument. Once exhausted, an open question, undecided
   # candidate, or a failed `domain_ready` check MUST outrank approval; and only once none
-  # of those hold does `approved` decide between `IN_PROCESS` / `FINALIZING` and `READY`.
+  # of those hold does `approved` decide between `IN_PROCESS` / `FINALIZING` and the
+  # unapproved outcomes.
+
+  # Contract:
+  # `State.READY` MUST be returned only for an unapproved document whose `review_phase` is
+  # not `main` and that has no pending operator command. The operator is never shown
+  # "ready to approve" while a writer round or a command is still owed.
 
   # Domain(review.markup):
   # # Banner state priority once the work chain has emptied
@@ -362,19 +381,27 @@ def desired_state(
   # ready-to-approve banner. Only once none of these hold does approval take over: an approved document
   # still reports work in progress while post-approval validation is still running, and only
   # reports "finalizing" once that work is done. A document that clears every gate without yet
-  # being approved is simply ready for the operator to approve.
+  # being approved is simply ready for the operator to approve. An unapproved document that
+  # is still owed its main writer round, or that carries an operator command nobody has
+  # executed yet, is not ready: it reports work in progress, because the operator would
+  # otherwise be asked to approve text that is about to change.
 
   if dispatch_state is not DispatchState.CHAIN_EXHAUSTED:
     return State.IN_PROCESS
-  if _any_unanswered_question(body) or _has_unanswered_candidate(body):
+  if _has_unanswered_question(body) or _has_unanswered_candidate(body):
     return State.ACTION_NEEDED
   if not domain_ready:
     return State.ACTION_NEEDED
   if approved:
-    # guard: validators / terminals run BEFORE finalize; caller passes waiting_context to replace_banner
+    # validators / terminals run BEFORE finalize; caller passes waiting_context to replace_banner
     if review_phase in ("validators", "terminals"):
       return State.IN_PROCESS
     return State.FINALIZING
+
+  # an owed main writer round or an unexecuted operator command keeps the operator waiting;
+  # every other unapproved phase with nothing owed hands the turn over
+  if review_phase == Phase.MAIN or command_pending:
+    return State.IN_PROCESS
   return State.READY
 
 
@@ -397,10 +424,12 @@ _WAITING_CONTEXT_LABELS: dict[str, str] = {
 # Bare "Waiting" title — what an unknown or absent waiting context renders.
 _WAITING_BARE = "Waiting"
 
+# The in-process banner's first line, shared by every language: `{title}` takes a waiting label.
+_IN_PROCESS_TITLE_LINE = "> [!hint] {title} #review/in-process\n"
+
 _TEMPLATES: dict[str, dict[State, str]] = {
-    _LANG_EN: {
-        State.IN_PROCESS: (
-            "> [!hint] {title} #review/in-process\n"
+    LangId.EN: {
+        State.IN_PROCESS: _IN_PROCESS_TITLE_LINE + (
             "{autorun}"
             "> To intervene, or to wake a document that looks stuck, write the instruction "
             "in a `[!todo] #review/command` callout.\n"
@@ -412,10 +441,8 @@ _TEMPLATES: dict[str, dict[State, str]] = {
         ),
         State.FINALIZING: "> [!hint] Waiting: finalize #review/finalizing\n",
     },
-    # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-    "ru": {  # noqa: RUF001
-        State.IN_PROCESS: (
-            "> [!hint] {title} #review/in-process\n"
+    LangId.RU: {
+        State.IN_PROCESS: _IN_PROCESS_TITLE_LINE + (
             "{autorun}"
             "> Чтобы вмешаться или разбудить застрявший документ, напишите указание "
             "в коллауте `[!todo] #review/command`.\n"
@@ -434,7 +461,7 @@ _TEMPLATES: dict[str, dict[State, str]] = {
 # `approve` gesture.
 # `{autorun}` takes the stop line of an autorun that ended, or nothing.
 _READY_SINGLE_TEMPLATE: dict[str, str] = {
-    _LANG_EN: (
+    LangId.EN: (
         "> [!success] Ready to approve #review/ready\n"
         "{autorun}"
         "> Tick the box below to approve the whole document.\n"
@@ -442,8 +469,7 @@ _READY_SINGLE_TEMPLATE: dict[str, str] = {
         "or write the instruction in a `[!todo] #review/command` callout.\n"
         "> - [{tick}] approve the whole document\n"
     ),
-    # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-    "ru": (  # noqa: RUF001
+    LangId.RU: (
         "> [!success] Ready to approve #review/ready\n"
         "{autorun}"
         "> Отметьте галочку ниже, чтобы утвердить документ целиком.\n"
@@ -456,7 +482,7 @@ _READY_SINGLE_TEMPLATE: dict[str, str] = {
 # The ready banner once a validation round has run, unless an autorun stopped clean: the three approval
 # checkboxes, in `READY_GESTURE_KINDS` order. `{autorun}` takes the stop line of an autorun that ended, or nothing.
 _READY_TRIPLE_TEMPLATE: dict[str, str] = {
-    _LANG_EN: (
+    LangId.EN: (
         "> [!success] Ready to approve #review/ready\n"
         "{autorun}"
         "> Tick ONE box: approve and send to the validators, approve and let the loop run to the end, "
@@ -467,8 +493,7 @@ _READY_TRIPLE_TEMPLATE: dict[str, str] = {
         "> - [ ] approve and run to the end without stops\n"
         "> - [ ] approve without further validation\n"
     ),
-    # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-    "ru": (  # noqa: RUF001
+    LangId.RU: (
         "> [!success] Ready to approve #review/ready\n"
         "{autorun}"
         "> Отметьте ОДНУ галочку: утвердить и отдать валидаторам, утвердить и дать циклу дойти до конца, "
@@ -483,20 +508,18 @@ _READY_TRIPLE_TEMPLATE: dict[str, str] = {
 
 # The ready banner's opening line after an autorun stopped; `{reason}` comes from `_AUTORUN_STOP_REASONS`.
 _AUTORUN_STOP_LINE: dict[str, str] = {
-    _LANG_EN: "> Autorun stopped after {cycles} cycle(s): {reason}\n",
-    # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-    "ru": "> Автопрогон остановлен после {cycles} круг(ов): {reason}\n",  # noqa: RUF001
+    LangId.EN: "> Autorun stopped after {cycles} cycle(s): {reason}\n",
+    LangId.RU: "> Автопрогон остановлен после {cycles} круг(ов): {reason}\n",
 }
 
 # Why an autorun stopped, keyed by its `review_autorun` stop state; a running or absent autorun has no entry.
 _AUTORUN_STOP_REASONS: dict[str, dict[str, str]] = {
-    _LANG_EN: {
+    LangId.EN: {
         AutorunState.CLEAN: "the validators raised no concerns",
         AutorunState.CAP: "the cycle cap was reached",
         AutorunState.QUESTION: "an expert asked a question",
     },
-    # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-    "ru": {  # noqa: RUF001
+    LangId.RU: {
         AutorunState.CLEAN: "валидаторы не подняли замечаний",
         AutorunState.CAP: "достигнут потолок кругов",
         AutorunState.QUESTION: "эксперт задал вопрос",
@@ -505,9 +528,8 @@ _AUTORUN_STOP_REASONS: dict[str, dict[str, str]] = {
 
 # The in-process banner's progress line while an autorun is still turning.
 _AUTORUN_RUNNING_LINE: dict[str, str] = {
-    _LANG_EN: "> Autorun in progress: {cycles} cycle(s) done without operator stops.\n",
-    # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-    "ru": "> Идёт автопрогон: пройдено кругов без остановок: {cycles}.\n",  # noqa: RUF001
+    LangId.EN: "> Autorun in progress: {cycles} cycle(s) done without operator stops.\n",
+    LangId.RU: "> Идёт автопрогон: пройдено кругов без остановок: {cycles}.\n",
 }
 
 
@@ -523,7 +545,7 @@ def _resolve_for_language(table: dict[str, _EntryType], lang: str) -> _EntryType
     The language's entry, or the English entry when the language has none.
   """
   # every table is complete for English, so the floor always answers
-  return table.get(lang) or table[_LANG_EN]
+  return table.get(lang) or table[LangId.EN]
 
 
 def render(
@@ -534,7 +556,7 @@ def render(
     autorun: str | None = None,
     autorun_cycles: int | None = None,
     waiting_context: str | None = None,
-    lang: str = _LANG_EN,
+    lang: str = LangId.EN,
 ) -> str:
   """
   Render the callout markdown for `state`.
@@ -616,8 +638,8 @@ def render(
   # the ready banner: one box on a clean autorun stop or before any validation round, three otherwise, opened by
   # the stop line of an autorun that ended
   if state is State.READY:
-    three_boxes = validation_seen and autorun != AutorunState.CLEAN
-    ready = _resolve_for_language(_READY_TRIPLE_TEMPLATE if three_boxes else _READY_SINGLE_TEMPLATE, lang)
+    ready = _resolve_for_language(_READY_TRIPLE_TEMPLATE if validation_seen and autorun != AutorunState.CLEAN
+                                  else _READY_SINGLE_TEMPLATE, lang)
     reason = _resolve_for_language(_AUTORUN_STOP_REASONS, lang).get(autorun or "")
     stop_line = "" if reason is None else _resolve_for_language(_AUTORUN_STOP_LINE, lang).format(
         cycles = cycles, reason = reason,
@@ -627,7 +649,7 @@ def render(
   # the waiting banner: a phase-enriched title, plus the progress line of an autorun still turning
   template = _resolve_for_language(_TEMPLATES, lang)[state]
   if state is State.IN_PROCESS:
-    title =_WAITING_CONTEXT_LABELS.get(waiting_context or "", _WAITING_BARE)
+    title = _WAITING_CONTEXT_LABELS.get(waiting_context or "", _WAITING_BARE)
     running_line = (
         _resolve_for_language(_AUTORUN_RUNNING_LINE, lang).format(cycles = cycles)
         if autorun == AutorunState.RUNNING else ""
@@ -684,7 +706,7 @@ def replace_banner(
     autorun: str | None = None,
     autorun_cycles: int | None = None,
     waiting_context: str | None = None,
-    lang: str = _LANG_EN,
+    lang: str = LangId.EN,
 ) -> str:
   """
   Return `body` with its banner replaced (or inserted, if absent).
@@ -724,11 +746,11 @@ def replace_banner(
   # # Banner anchoring invariant
   # A review document carries exactly one status banner, and it always sits at the very top of
   # the document's content — directly below the frontmatter block when one is present, never
-  # above it and never further down. Whenever the banner is repainted, whatever occupies that
-  # role is removed first, wherever it currently sits, because an earlier round can leave a
-  # stray banner mis-anchored deeper in the body; only after that removal does the fresh banner
-  # get placed at the top, so the document never ends up carrying two banners or one sitting
-  # below its own content.
+  # above it and never further down. Whenever the banner is repainted, every prior banner found
+  # outside code fences is removed first, wherever each one currently sits, because earlier
+  # rounds can leave banners mis-anchored deeper in the body or stacked up; only after all of
+  # them are gone does the fresh banner get placed at the top, so a document carrying several
+  # prior banners ends up with exactly one, the fresh one, and none sitting below its content.
 
   new_banner = render(
       state,
@@ -750,6 +772,6 @@ def replace_banner(
   # head-only strip would duplicate it. Leading whitespace ahead of the banner is dropped so the
   # blank-line-or-not ambiguity (Bug 30 part a) cannot bleed in.
 
-  # drop the old banner and anchor the fresh one at the top of the remaining content
-  rest = _parser.sub_outside_fences(_BANNER_BLOCK_RE, "", rest, count = 1).lstrip("\n")
+  # drop every old banner and anchor the fresh one at the top of the remaining content
+  rest = _parser.sub_outside_fences(_BANNER_BLOCK_RE, "", rest).lstrip("\n")
   return fm_prefix + new_banner + rest

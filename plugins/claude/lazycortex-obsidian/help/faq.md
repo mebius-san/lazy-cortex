@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about vault setup, Iconize, diagram render glue, the vault manifest, plugin updates, and tag pages for lazycortex-obsidian.
-last_regen: 2026-10-06
+last_regen: 2026-11-10
 no_diagram: true
 source_skills:
   - lazy-obsidian.install
@@ -14,8 +14,8 @@ source_skills:
   - lazy-obsidian.audit
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: 2b8e9e79da15a0e25e187f4c05ae6011a36f0740
-surface_sha: 789f8e700f5d535daefe8163bb70652acb8a6ae50976f612b989179a91c96f21
+source_sha: 95a6f5224213cc4af073635a199aa35b8e68949b
+surface_sha: 21caa7f5b3de5d2982c65ca9566655b984d9ea7fa64e677d248c2f60966773b5
 ---
 # Frequently asked questions
 
@@ -145,7 +145,7 @@ Either the id is misspelled, or you are trying to install a plugin that ships bu
 
 ## I ran `/plugin update lazycortex-obsidian@lazycortex`. Do I need to do anything else?
 
-Yes. The plugin update refreshes the plugin cache but does not automatically re-sync rule templates, CSS snippets, or the icon-map template into your consumer repos. Re-run `/lazy-obsidian.install` in each project to pick up any updated templates — including the CSS snippets, since `/lazy-obsidian.install`'s shared snippet step is the one writer of `appearance.json`'s enabled-snippets array. That step also drops any `enabledCssSnippets` entry naming a snippet this plugin used to ship and no longer does — the dead file was removed from the vault but the array entry stayed, so a stale pointer no longer lingers after an upgrade that retires a snippet; the report line reads **retired: `<name>`** when that happens. If only the `mermaid-popup` override changed, running `/lazy-obsidian.diagram-install` on its own is sufficient for that part.
+Yes. The plugin update refreshes the plugin cache but does not automatically re-sync rule templates, CSS snippets, or the icon-map template into your consumer repos. Re-run `/lazy-obsidian.install` in each project to pick up any updated templates — including the CSS snippets, since `/lazy-obsidian.install`'s shared snippet step is the one writer of `appearance.json`'s enabled-snippets array. That step enables the snippets through the plugin's `snippet-enable` verb, which reports each snippet as **enabled** (added this run), **already-enabled**, or **deferred** (the snippet file is absent from the vault, so no entry pointing at a missing file is registered); if `appearance.json` cannot be edited safely it is left untouched and the snippets are reported as **refused** with the reason. The step only adds entries — it does not remove ones you already have. If only the `mermaid-popup` override changed, running `/lazy-obsidian.diagram-install` on its own is sufficient for that part.
 
 ---
 

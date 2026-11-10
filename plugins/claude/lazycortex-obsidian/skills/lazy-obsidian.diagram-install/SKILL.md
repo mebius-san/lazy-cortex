@@ -1,7 +1,7 @@
 ---
 name: lazy-obsidian.diagram-install
 description: "Run when the operator asks to make click-to-zoom work on lazycortex diagrams in Obsidian, or when they report that clicking a mermaid diagram doesn't zoom. Installs the `mermaid-popup` vault plugin. Does NOT install the fit-CSS snippets (mermaid fences overflowing the column, sitting on a white box, or clipped ASCII diagrams) — those are installed and enabled by `/lazy-obsidian.install`'s shared snippet step; run that instead for those symptoms. Project scope only, idempotent, and chained from `/lazy-obsidian.install`."
-allowed-tools: Write, Bash(mkdir -p *), Bash(git rev-parse*), Bash(test *), Bash(date *), Agent
+allowed-tools: Write, Bash(mkdir -p *), Bash(git rev-parse*), Bash(test *), Bash(date *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
 argument-hint: "(no arguments — scaffolds into <repo-root>/.obsidian/)"
 ---
 # Install diagram render glue (Obsidian)
@@ -10,7 +10,7 @@ Install `mermaid-popup`, the click-to-zoom vault plugin for diagram fences emitt
 
 | Artifact | Target | Source |
 |---|---|---|
-| `mermaid-popup` plugin | `<vault>/.obsidian/plugins/mermaid-popup/` | Obsidian community registry (deep-merged with overrides from `templates/obsidian/plugin-settings.json`) |
+| `mermaid-popup` plugin | `<vault>/.obsidian/plugins/mermaid-popup/` | Obsidian community registry, installed by the `plugin-install` verb (its `overrides` field reports the `templates/obsidian/plugin-settings.json` block) |
 
 This skill also declares — but does not install — the two CSS snippets that fit diagrams to the editor column:
 
@@ -47,11 +47,11 @@ Outcome: `asserted (vault=<path>)` or `[FAIL] no-vault`.
 
 `mermaid-popup` is the click-to-zoom community plugin (registry id: `mermaid-popup`). The plugin's data.json is configured via the `mermaid-popup` override block in `${CLAUDE_PLUGIN_ROOT}/templates/obsidian/plugin-settings.json` (`{"ZoomRatioValue": "0.1"}` — 10% zoom step per scroll wheel tick, calibrated for mermaid fences).
 
-`update-plugin` is version-aware and idempotent — invoke it unconditionally. "Manifest present" does NOT mean "already current" — that's `update-plugin`'s job.
+The `plugin-install` verb is version-aware and idempotent — run it unconditionally. "Manifest present" does NOT mean "already current" — that's the verb's job.
 
-1. Invoke `/lazy-obsidian.update-plugin mermaid-popup`.
-2. Record the state tuple (`binary=created|updated-<x>-to-<y>|unchanged overrides=applied|unchanged community=registered|already-registered`) for the Step 4 report.
-3. If `update-plugin` returns **FAIL** (registry fetch failed, plugin id not in registry, etc.), surface the failure. Diagram rendering still works without `mermaid-popup` (the CSS snippets alone cover fit + theme color once `/lazy-obsidian.install` enables them), so DO NOT abort the skill — record `failed:<reason>` for the Step 4 report and continue.
+1. Run `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-obsidian" plugin-install mermaid-popup --vault <vault>)`. It prints one JSON line.
+2. Record the state tuple `binary=<binary> overrides=<overrides> community=<community>` from the JSON fields of those names, plus any `warnings`, for the Step 4 report.
+3. If the verb exits 1 (`status: refused` — registry fetch failed, plugin id not in registry, etc.), surface its `reason`. Diagram rendering still works without `mermaid-popup` (the CSS snippets alone cover fit + theme color once `/lazy-obsidian.install` enables them), so DO NOT abort the skill — record `failed:<reason>` for the Step 4 report and continue.
 
 Outcome: state tuple or `failed:<reason>`.
 
@@ -83,7 +83,7 @@ Next steps shown to user:
 
 ## Idempotency
 
-Safe to re-run. Step 2 delegates to `/lazy-obsidian.update-plugin`, which is itself idempotent. Step 3 never deletes — the legacy snippet reports **kept-orphan** on every run while it's on disk (no prompt), **absent** once the user removes it manually.
+Safe to re-run. Step 2 delegates to the `plugin-install` verb, which is itself idempotent. Step 3 never deletes — the legacy snippet reports **kept-orphan** on every run while it's on disk (no prompt), **absent** once the user removes it manually.
 
 ## Notes
 

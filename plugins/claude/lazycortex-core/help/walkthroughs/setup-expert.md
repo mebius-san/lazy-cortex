@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Add a named expert role and dispatch your first async job — keep working while the daemon runs it, then collect the result.
-last_regen: 2026-10-06
+last_regen: 2026-11-10
 diagram_spec:
   anchor: "How the pieces fit"
   request: "Sequence diagram showing a user dispatching a job via /lazy-expert.dispatch-job, the daemon picking it up from the .experts/.jobs/ queue, the expert agent writing response.json + DONE marker, and the user collecting the result via /lazy-expert.collect-job. Nodes: User, Claude session, .experts/.jobs/ queue, daemon (runner), expert agent."
@@ -11,8 +11,8 @@ source_skills:
   - lazy-expert.dispatch-job
   - lazy-expert.list-jobs
   - lazy-expert.collect-job
-source_sha: 2b8e9e79da15a0e25e187f4c05ae6011a36f0740
-surface_sha: a75d36cb8a39c73b78ec16658f40ceaae0c7ee3b18250fea4ce773720689e904
+source_sha: 3fadd77433a2100975275f22c7c7e8cb8e544c9d
+surface_sha: a6207050a77b8f6f1ae1955556c1d3e102ac83d86a34c60449644c15625fbcf4
 ---
 # Add a named expert and dispatch your first async job
 
@@ -37,11 +37,12 @@ After this walkthrough you have:
 
 Run `/lazy-core.install` in the repo you want the async team to work in. Alongside the rest of its bootstrap, the install skill:
 
-- Registers every expert candidate it finds — any installed plugin's agent carrying `expert_protocol:` frontmatter is registered automatically in `lazy.settings.json[experts]`, no per-candidate prompt. Registration happens whether or not a background daemon runs anywhere — experts are dispatch-routing config used by interactive flows too. The `.experts/` directory itself is not created by install — it materializes lazily the first time a job is actually dispatched (Step 2 below), along with its own self-ignoring `.gitignore`.
+- Registers every expert candidate it finds — any installed plugin's agent carrying `expert_protocol:` frontmatter is registered automatically in `lazy.settings.json[experts]`, no per-candidate prompt. Registration happens whether or not a background daemon runs anywhere — experts are dispatch-routing config used by interactive flows too. The `.experts/` job-queue directory is runtime scratch and stays out of git; if `/lazy-expert.dispatch-job` ever reports that `.experts/` is not initialised, re-run `/lazy-core.install`.
 - Registers the built-in routines, including the queue-draining `lazy-expert.pump`, in `lazy.settings.json[routines]` — again unconditionally. The daemon is never required for the queue itself to exist.
 - Seeds `lazy.settings.json[daemon]` with `enabled: false` as the default and never asks about it. Install does not touch the background daemon: it installs no supervisor unit and does not ask `daemon.run_here`. Both belong to `/lazy-core.daemon-setup`, which you run only if you decide the project should get a daemon (see below).
 - Does **not** seed `daemon.token_env`. Whenever the daemon process actually runs — the supervisor or the manual shim, never `/lazy-runtime.tick` — it refuses to start under the machine's ambient login and instead requires an explicit token, named by this key. Setting it is on you; see the queue-draining bullet below.
 - Pins LF line endings for the whole checkout, unconditionally: writes `* text=auto eol=lf` as the first rule in `<repo>/.gitattributes`, so git checks out text files with LF on every machine regardless of OS or `core.autocrlf`. This matters most for the daemon checkout below — a checkout synced between machines by something other than git (Dropbox, for example) is exactly how CRLF or half-written files creep in.
+- Configures the expert-spawn sandbox in `.runtime/sandbox.settings.json`, so every expert job — whether a daemon or a manual `/lazy-runtime.tick` spawns it — runs confined to the repo. The sandbox applies only to expert spawns, never to your interactive session. If an existing sandbox file records `enabled: false`, install asks once whether to merge the shipped value or keep yours.
 - Seeds the `git` section of the project's `lazy.settings.json` with the git-guard's `enabled`, `pathspec_enabled`, and `mutex_enabled` flags — defaults that match the guard's current behavior, written down so you (or the expert's dispatched work) can tune them later without reading the hook source.
 
 Confirm two things are in place before dispatching:
@@ -160,7 +161,9 @@ If status comes back as `deferred`, the expert deliberately postponed the work r
 
 If status is `missing`, the `job_id` or `expert_name` is wrong — verify against the output from Step 2.
 
-If `/lazy-expert.list-jobs` shows the job as `dead` but `/lazy-expert.collect-job` returns `pending`, the pump stalled before writing the DONE marker — the job needs to be re-dispatched or recovered. Run `/lazy-runtime.recover` to clear any daemon halt, then re-dispatch the job.
+If status comes back as `dead`, the pump killed the job as stuck; it has no response and no result file. The skill prints the job's `dead.json` forensic record — when it was queued and claimed, the claimant PID, any partial output files, and the likely cause. Re-dispatch the job, and run `/lazy-runtime.recover` first if the daemon is halted.
+
+If status comes back as `cancelled`, the job was stopped with `/lazy-expert.cancel-job`. Cancellation outranks every other marker, so even a job that also finished reports `cancelled`, with no result to collect.
 
 ## After you're done
 

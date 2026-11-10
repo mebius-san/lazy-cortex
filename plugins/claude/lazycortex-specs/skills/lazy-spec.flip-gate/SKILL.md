@@ -5,14 +5,14 @@ execution-discipline-waiver: "Thin confirm-then-subprocess wrapper over bin/flip
 ---
 # Flip a Gate
 
-Thin Claude wrapper over the gate-flip primitive `bin/flip_gate.py`. The gate model — the five flat booleans, the linear S0..S5 ladder, and what the primitive mutates — lives in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.lifecycle-protocol.md`. This skill never restates it.
+Thin Claude wrapper over the gate-flip primitive `bin/flip_gate.py`. The gate model — the flat booleans (`spec_design_done` and `spec_released` on a design-only asset, the six-gate linear S0..S6 ladder on a release), and what the primitive mutates — lives in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.lifecycle-protocol.md`. This skill never restates it.
 
-**The flip is unconditional.** The primitive refuses only when the target asset is cancelled (`spec_cancelled: true`) — there is no precondition table it checks on its own. Deciding WHEN a gate is ready to move is `spec.coordinator`'s job, reasoning from `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.coordination-playbook.md`; this skill (and the primitive underneath it) trusts whoever called it to have already made that call. The operator confirmation in step 2 below exists precisely because a human invoking this skill directly has not necessarily gone through that reasoning — the confirmation is the human's own check, not a stand-in for a removed precondition.
+**The flip is unconditional.** The primitive refuses only an unknown gate name, a gate the note's own `spec_role` ladder does not carry, opening one of the four middle gates on a design-only note, and any flip while the target asset is cancelled (`spec_cancelled: true`) other than the un-cancel `spec_cancelled --off`, which also returns the asset's cancelled documents to `draft` — there is no readiness precondition table it checks on its own. Deciding WHEN a gate is ready to move is `spec.coordinator`'s job, reasoning from `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.coordination-playbook.md`; this skill (and the primitive underneath it) trusts whoever called it to have already made that call. The operator confirmation in step 2 below exists precisely because a human invoking this skill directly has not necessarily gone through that reasoning — the confirmation is the human's own check, not a stand-in for a removed precondition.
 
 ## Input
 
 1. **Asset** — a status folder-note path, asset directory, or any path/slug the product resolver can map to one asset folder under `<spec_path>` at any depth. Resolve the product per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md` → Resolving a Product, then narrow to the single asset directory.
-2. **Gate** — one of `spec_design_done`, `spec_plan_done`, `spec_develop_done`, `spec_tests_passing`, `spec_released`.
+2. **Gate** — one of `spec_design_done`, `spec_plan_done`, `spec_develop_done`, `spec_tests_passing`, `spec_built`, `spec_released`. The four middle gates exist on a `release` note only: on a design-only note (every other `spec_asset_type`, or none) the primitive refuses to turn one on (`design-only` refusal) — `spec_released` there is the publishing release's write, and only a repair ever calls `--off` on a stale middle key.
 3. **`--off`** (optional) — regress the gate true→false instead of flipping it on.
 4. **`--auto`** (optional) — skip the confirmation question (`spec.coordinator` and other non-interactive callers pass this). Without it, this is an interactive operator action.
 
@@ -29,9 +29,9 @@ Unless `--auto` was passed, ask a single `AskUserQuestion` to confirm:
 ```
 Context (print before asking):
 - Where: /lazy-spec.flip-gate · Step 2 — Confirm the flip; target <asset-dir>/<slug>.md
-- Found: <gate> currently <true | false>; the other gates <the four booleans>; spec_cancelled false
-- Why asking: flipping a gate is the recorded progression signal, and the primitive performs the mutation unconditionally once confirmed — it does not itself check whether the gate's usual readiness condition holds; a human-signal gate (`spec_develop_done` / `spec_tests_passing` / `spec_released`) asserts that external work (deploy / green tests / merge) actually happened, and this confirmation is the human's own check
-- Answers: `yes` — runs the flip now, the asset advances one notch along the S0..S5 ladder (or regresses when `--off`), the folder-note's `spec_<gate>_at` stamp records the moment (dropped on `--off`), no history line; `no` — no-op, asset unchanged (`skipped-per-user-choice`). See: `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.lifecycle-protocol.md`, `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.coordination-playbook.md`
+- Found: <gate> currently <true | false>; the other gates <the note's other gate booleans>; spec_cancelled false
+- Why asking: flipping a gate is the recorded progression signal, and the primitive performs the mutation unconditionally once confirmed — it does not itself check whether the gate's usual readiness condition holds; a human-signal gate (`spec_develop_done` / `spec_tests_passing` / `spec_built` / `spec_released`) asserts that external work (deploy / green tests / merge) actually happened, and this confirmation is the human's own check
+- Answers: `yes` — runs the flip now, the asset advances one notch along its ladder (or regresses when `--off`), the folder-note's `spec_<gate>_at` stamp records the moment (dropped on `--off`), no history line; `no` — no-op, asset unchanged (`skipped-per-user-choice`). See: `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.lifecycle-protocol.md`, `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.coordination-playbook.md`
 AskUserQuestion: header "Flip <gate>", question "Flip <gate> to <true | false> on <product>/<path>?", options `yes` / `no`, each with a one-sentence consequence.
 ```
 
@@ -39,7 +39,7 @@ On `no` → exit no-op (outcome `skipped-per-user-choice`). On `yes` → continu
 
 ### 3. Subprocess the primitive
 
-Run `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" flip-gate <asset_dir> <gate>`, appending `--off` when regressing. Do NOT pass `--auto` from the interactive path — `--auto` is only for the non-interactive callers that skipped step 2. Report the primitive's result verbatim: on success, the flipped gate and new value; on refusal, the primitive's refusal message (always "asset is cancelled" — the only refusal case) — do NOT retry or work around it.
+Run `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" flip-gate <asset_dir> <gate>`, appending `--off` when regressing. Do NOT pass `--auto` from the interactive path — `--auto` is only for the non-interactive callers that skipped step 2. Report the primitive's result verbatim: on success, the flipped gate and new value; on refusal, the primitive's refusal message (`unknown gate: <gate>`, `gate <gate> is not on the '<role>' ladder`, `gate <gate> is not on a design-only ladder`, or `asset is cancelled`) — do NOT retry or work around it.
 
 ## Output
 
@@ -48,6 +48,8 @@ Run `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs
 
 ## Failure modes
 
-- **`/lazy-spec.flip-gate` refuses with "asset is cancelled"** — `spec_cancelled: true` freezes all gates, the one refusal the primitive still enforces on its own → uncancel the asset before flipping.
+- **`/lazy-spec.flip-gate` refuses with "asset is cancelled"** — `spec_cancelled: true` freezes all gates, on or off, except the un-cancel `spec_cancelled --off` itself → un-cancel the asset first with `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" flip-gate <asset> spec_cancelled --off` (its cancelled documents return to `draft`), then flip.
+- **`/lazy-spec.flip-gate` refuses with "gate `<gate>` is not on a design-only ladder"** — a middle gate (`spec_plan_done`, `spec_develop_done`, `spec_tests_passing`, `spec_built`) was asked on any note but a release's → nothing to flip; a design-only asset's code lands through a release, whose own note carries those gates.
+- **`/lazy-spec.flip-gate` refuses with "unknown gate" or "is not on the `<role>` ladder"** — the gate name is a typo, or belongs to the other ladder (an asset gate on a level note, or a level gate on an asset note) → pass a gate the note's own ladder carries.
 - **`/lazy-spec.flip-gate` cannot resolve the asset** — the input maps to zero or more than one asset → pass an unambiguous asset directory or slug.
-- **A gate was flipped that shouldn't have been** — the primitive trusted the caller; there is no precondition to have caught it. Flip it back with `--off` (also unconditional, refused only while cancelled), then check `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.coordination-playbook.md` Chapter 3 for what the gate's readiness actually requires before flipping forward again.
+- **A gate was flipped that shouldn't have been** — the primitive trusted the caller; there is no precondition to have caught it. Flip it back with `--off` (also unconditional apart from the gate-name, note-ladder and cancelled-asset refusals; on a cancelled asset only `spec_cancelled --off` itself is accepted), then check `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.coordination-playbook.md` Chapter 3 for what the gate's readiness actually requires before flipping forward again.

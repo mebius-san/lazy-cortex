@@ -43,8 +43,8 @@ if str(_BIN) not in sys.path:
 from keys import JobMarker, Paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
-# The closed field schema of one document's entry. A field outside it is refused the way
-# `set-key` refuses a frontmatter key outside its own schema — a typo must not become state.
+# The closed field schema of one document's entry. A field outside it is refused, so a typo
+# never becomes state.
 _FIELDS = (
     JobMarker.COORDINATOR_JOB, JobMarker.ACTIVE_JOB, JobMarker.PENDING_WAKE,
     JobMarker.LAST_SEEN_SHA,
@@ -109,7 +109,7 @@ def empty_entry() -> dict[str, str | None]:
   return dict.fromkeys(_FIELDS)
 
 
-def _read_store(repo: Path) -> dict[str, dict]:
+def read_store(repo: Path) -> dict[str, dict]:
   """
   Read the whole sidecar.
 
@@ -157,7 +157,7 @@ def read(repo: Path, doc: Path) -> dict[str, str | None]:
     The entry with every field of the closed schema present, unrecorded ones as `None`.
   """
   entry = empty_entry()
-  stored = _read_store(repo).get(doc_key(repo, doc))
+  stored = read_store(repo).get(doc_key(repo, doc))
 
   # guard: nothing recorded for this document — the all-`None` entry is the answer
   if not isinstance(stored, dict):
@@ -168,7 +168,7 @@ def read(repo: Path, doc: Path) -> dict[str, str | None]:
   return entry
 
 
-def doc_for_job(repo: Path, job_id: str) -> str | None:
+def find_doc_for_job(repo: Path, job_id: str) -> str | None:
   """
   Find the document whose `active_job` marker names one job.
 
@@ -185,7 +185,7 @@ def doc_for_job(repo: Path, job_id: str) -> str | None:
     return None
 
   # scan the whole store — the sidecar is one small JSON object, keyed by document
-  for key, entry in _read_store(repo).items():
+  for key, entry in read_store(repo).items():
     # guard: only a dict entry carries the closed marker schema
     if not isinstance(entry, dict):
       continue
@@ -239,7 +239,7 @@ def update(repo: Path, doc: Path, changes: Mapping[str, str | None]) -> dict[str
     entry[field] = value.strip() if isinstance(value, str) and value.strip() else None
 
   # an all-`None` entry is indistinguishable from an absent one, so drop the row instead
-  store = _read_store(repo)
+  store = read_store(repo)
   key = doc_key(repo, doc)
   if any(entry.values()):
     store[key] = entry
@@ -294,7 +294,7 @@ def main(argv: list[str]) -> int:
     sys.stderr.write("mark-job: pass either a job id or --clear, not both and not neither\n")
     return 2
 
-  # `file` resolves against `--repo` unless it is already absolute, mirroring every other verb
+  # a relative `file` resolves against `--repo`; an absolute one is taken as is
   # (pathlib drops the left operand of `/` when the right one is absolute). The document need
   # not exist on disk: the marker is runtime state about a path, and a clear on a document that
   # was just finalized away is exactly the case that must still work.

@@ -1,7 +1,7 @@
 ---
 name: lazy-core.slim-context
 description: "Run when startup feels slow, the always-loaded context budget crosses its WARN threshold, a rules file has grown oversized, or a project-specific permission leaked into global settings. Unlike `lazy-core.audit`, which only reports, this one rewrites: it moves reference material out of rules into on-demand agent definitions and relocates leaked settings entries to the local scope."
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash(mkdir -p *), AskUserQuestion, Agent
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash(mkdir -p *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), AskUserQuestion, Agent
 ---
 # Slim Context
 
@@ -32,27 +32,17 @@ This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reord
 
 Measure everything that loads at conversation start.
 
-### 1a. Always-loaded context budget
+### 1a. Measure
 
-Measure byte sizes of everything Claude Code loads into every session's context on every turn:
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" context-scan --section weight)
+```
 
-- `$HOME/.claude/CLAUDE.md` (global instructions)
-- `<project>/.claude/CLAUDE.md` (project instructions) — also `CLAUDE.md` at repo root if present
-- Every `$HOME/.claude/rules/*.md` **without** a `paths:` key in YAML frontmatter (scoped rules only load when files matching their glob are touched, so they don't count)
-- Every `<project>/.claude/rules/*.md` **without** a `paths:` key
-- `$HOME/.claude/projects/<project-key>/memory/MEMORY.md` (memory index — auto-loaded)
-
-Thresholds (mirror `lazy-core.doctor`): total > 20 KB → WARN, > 40 KB → FAIL. This is the real token budget — each turn pays this cost.
+The `context-scan` verb's `weight` section measures, in exact bytes, everything Claude Code loads into every session's context on every turn (`always_loaded`, summed in `always_total`) and the files that cost nothing until used (`on_demand`, each with its `kind`: `rule`, `agent`, `skill`, `command`, `memory`). Its `level` — `PASS`, `WARN`, `FAIL` — grades `always_total` against the 20 KB / 40 KB thresholds `lazy-core.doctor` uses. This is the real token budget — each turn pays this cost.
 
 ### 1b. On-demand files (no startup cost)
 
-Count and total sizes of:
-- `.claude/agents/*.md`
-- `.claude/skills/*/SKILL.md`
-- `.claude/commands/*.md`
-- `$HOME/.claude/commands/*.md` (global commands)
-- `$HOME/.claude/skills/*/SKILL.md` (global skills)
-- Individual memory files (everything in memory dir except MEMORY.md)
+The `on_demand` list of the same reply, grouped by `kind` with a count and total per group.
 
 ### 1c. Report
 
@@ -256,11 +246,11 @@ After all moves, show a summary: N entries moved, from which global section to w
 
 ## Phase 5: Memory index health
 
-Check the memory index at `$HOME/.claude/projects/<project-key>/memory/MEMORY.md`:
+Check the memory index at `$HOME/.claude/projects/<project-key>/memory/MEMORY.md`. Items 1–3 come from one call, `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" context-scan --section memory-index)`:
 
-1. **Oversized index**: if > 5 KB, suggest consolidating related entries
-2. **Orphaned files**: memory files that exist but aren't in the index
-3. **Broken links**: index entries pointing to files that don't exist
+1. **Oversized index**: `oversized` true (the verb's 5 KB limit) → suggest consolidating related entries
+2. **Orphaned files**: the `orphans` list
+3. **Broken links**: the `broken` list
 4. **Stale entries**: entries about features/state that can be verified against current code (flag for manual review, don't auto-delete)
 
 Report findings. Fix orphaned/broken links automatically, flag stale for user review.
@@ -271,10 +261,7 @@ Operates on the `.memory/<expert>/` subtree (Spec §8 — distinct from Phase 5'
 
 ### 5.5a. Orphan notes
 
-For every note under `.memory/<expert>/*.md` (skip `.tags/`):
-
-- Read its frontmatter `tags:`. For each tag, check whether the matching local tag file `.memory/<expert>/.tags/<topic>.md` lists this note.
-- A note is **orphan** when none of its tags are listed in any local tag file. This is symmetric drift — either the note's tags are stale or the tag files are.
+Run `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" context-scan --section expert-memory)` once for both checks. Its `orphan_notes` list (`{expert, path, tags}`) names every note none of whose tags lists it in a local `.memory/<expert>/.tags/<topic>.md`. This is symmetric drift — either the note's tags are stale or the tag files are.
 
 For each orphan note, one question per note. Each iteration fills the block from that note:
 
@@ -293,7 +280,7 @@ AskUserQuestion: header "Orphan memory note", question "Orphan memory note `<pat
 
 ### 5.5b. Near-duplicate notes
 
-For every pair of notes within the same `.memory/<expert>/` that share at least one tag and whose titles match by Levenshtein distance ≤ 3:
+The same reply's `near_duplicates` list (`{a, b, shared_tags, distance}`) names every pair of notes of one expert that share a tag and whose titles are within the verb's edit distance of 3.
 
 One question per pair. Each iteration fills the block from that pair:
 
@@ -329,14 +316,14 @@ Find skills that should be refactored to the coordinator-plus-parallel-Explore-a
 
 ### Heuristics (all four must hit for a candidate)
 
-For each SKILL.md, Read the body (not the frontmatter) and test:
+Heuristics 1 and 3 come from one call over the three scan areas, `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" context-scan --section skill-size)`, one `{path, lines, bytes, over_size, has_parallel_dispatch}` entry per SKILL.md body. Read the body (not the frontmatter) only for a skill whose `over_size` is true and `has_parallel_dispatch` false, and test 2 and 4:
 
-1. **Size**: > 120 lines **or** > 5 KB.
+1. **Size**: the entry's `over_size`.
 2. **Multiple independent scan blocks**: ≥ 3 distinct scan-like blocks in the body. Count as a scan block any of:
    - Numbered check heading (`### N.`, `### Na.`)
    - Heading like `Check N:` or `Phase N:` where each phase reads a distinct file set
    - Directive block mentioning a Glob / Grep pattern or a Read of a different file tree than the previous block
-3. **No existing parallel dispatch**: body does NOT contain any of — `subagent_type: "Explore"`, `subagent_type: "general-purpose"`, `in parallel`, `dispatching-parallel-agents`, `references/lazy-core.parallel-scan.md`, `rules/lazy-core.parallel-scan.md`, "multiple Agent tool calls".
+3. **No existing parallel dispatch**: the entry's `has_parallel_dispatch` is false.
 4. **Read-heavy before interaction**: the first user prompt (search for `AskUserQuestion`, "ask the user", "confirm", "fix which", `[y/N]`) appears after more than half the scan blocks in (2).
 
 If a skill hits all four, it is a candidate.

@@ -8,21 +8,21 @@ description: Contract for external references a spec doc carries — source attr
 Every external reference a spec doc carries goes through one of three channels. They share a single principle: forward-only links in frontmatter as source of truth, optional body-rendering as a projection.
 
 - **Source attribution** (Part 1) — `spec_source_requests` + `spec_source_docs` → `# Sources` H1 section. Records *which inputs contributed* (requests) and *which docs to read alongside* (source-docs).
-- **Source-code links** (Part 2) — `lazy-spec.source-url` primitive + `spec_source_branches` frontmatter. Centralized forge-URL building and branch pinning for source-code references inside spec prose.
-- **Product dependencies** (Part 3) — `products[<key>].dependencies` config + `lazy-spec.resolve-dependency` primitive. Informational metadata about upstream products / repos / external tools.
+- **Source-code links** (Part 2) — `lazy-spec.source-url` primitive. Root links from a spec doc to files of the product's code in the same repository.
+- **Product dependencies** (Part 3) — `products[<key>].dependencies` config + `lazy-spec.resolve-dependency` primitive. Informational metadata about upstream products and external tools.
 
 ## Part 1 — Source attribution (`spec_source_*` + `# Sources` section)
 
 How an asset (and each of its authored docs) records which external inputs contributed to it AND which reference documents accompany it. Two `spec_source_*` frontmatter keys are sources of truth; the body's `# Sources` H1 section is a human-readable projection of both.
 
-The pattern is cross-spec — every stage-bearing authored doc at every level (asset-level `design.md`, `use-cases.md`, `architecture.md`, `ui-design.md`, `code-plan.md`, `test-plan.md`, `bug.md`, `research.md` and its `research-design` sibling, plus product-level and content-root `vision.md`, `use-cases.md`, `design.md`, `ui-design.md`, `tech.md`) and the asset's status folder-note carry the same attribution shape. The opt-in `code-report.md` / `test-report.md` journals carry neither key — they are execution logs, not sourced deliverables. Today two source kinds contribute — requests (via `lazy-spec.request-apply`) and source-docs (via `lazy-spec.create-asset` at scaffold time + `lazy-spec.refresh-sources` later); the body shape is designed so additional source kinds (external links, RFCs, tickets) can land alongside them without restructuring.
+The pattern is cross-spec — every stage-bearing authored doc at every level (asset-level `design.md`, `use-cases.md`, `ui-design.md`, `test-plan.md`, `bug.md`, `research.md` and its `research-design` sibling, a release's `code-plan.md`, plus product-level and content-root `vision.md`, `use-cases.md`, `design.md`, `ui-design.md`, `tech.md`, and the product root's `architecture.md`) and the asset's status folder-note carry the same attribution shape. The opt-in `code-report.md` / `test-report.md` journals carry neither key — they are execution logs, not sourced deliverables. Today two source kinds contribute — requests (via `lazy-spec.request-apply`) and source-docs (via `lazy-spec.create-asset` at scaffold time + `lazy-spec.refresh-sources` later); the body shape is designed so additional source kinds (external links, RFCs, tickets) can land alongside them without restructuring.
 
 ### Frontmatter — `spec_source_requests`
 
 A list of path-qualified wikilinks pointing at request files in the vault-root `requests/` inbox. Forward-only — the reverse link (request → asset) lives in the request's terminal status callout body, not as a separate field.
 
 Lives on:
-- every stage-bearing authored spec doc (the full stage-bearing set of [file-roles](./lazy-spec.file-roles-protocol.md) § Frontmatter fields — `vision`, `system-vision`, `use-cases`, `system-use-cases`, `design`, `system-design`, `architecture`, `ui-design`, `system-ui-design`, `code-plan`, `test-plan`, `bug`, `system-tech`, `content-design`, `research-design`, `research-report`) — the per-doc subset of requests that contributed to THIS doc;
+- every stage-bearing authored spec doc (the full stage-bearing set of [file-roles](./lazy-spec.file-roles-protocol.md) § Frontmatter fields — `vision`, `system-vision`, `use-cases`, `system-use-cases`, `design`, `system-design`, `system-architecture`, `ui-design`, `system-ui-design`, `code-plan`, `test-plan`, `system-test-plan`, `bug`, `system-tech`, `content-design`, `research-design`, `research-report`) — the per-doc subset of requests that contributed to THIS doc;
 - the asset's status folder-note — the union of every request that has ever attached to the asset.
 
 `[]` when the doc / asset was created directly (no request origin).
@@ -84,6 +84,8 @@ The bullet list between `<!-- auto:spec-requests:start --> / :end -->` is a dete
 1. update the doc's frontmatter `spec_source_requests` (append the request wikilink if not already present);
 2. re-project the `## Requests` sub-section from the now-current frontmatter list — rewriting only the bytes between the request-kind markers.
 
+The `refresh-sources` verb behind `lazy-spec.refresh-sources` is the second writer: on demand it re-projects `## Requests` from the frontmatter list in the same format, so a sub-section edited by hand comes back in line with its source of truth.
+
 Frontmatter is the source of truth; the body sub-section is a projection. A doctor check (planned) verifies the two are in sync.
 
 #### `## Docs` sub-section — projection from frontmatter
@@ -101,7 +103,7 @@ The bullet list between `<!-- auto:spec-docs:start --> / :end -->` is a determin
 
 Writers:
 - `lazy-spec.create-asset` at scaffold time — writes the default `spec_source_docs` per doc-role AND emits the initial `## Docs` sub-section with the projected bullets.
-- `lazy-spec.refresh-sources` on demand — re-projects the `## Docs` sub-section from the current `spec_source_docs` frontmatter list, preserving operator-edited displays.
+- the `refresh-sources` verb, which `lazy-spec.refresh-sources` calls on demand — re-projects the `## Docs` sub-section from the current `spec_source_docs` frontmatter list in the format above, preserving operator-edited displays.
 
 Frontmatter is the source of truth; the body sub-section is a projection. A doctor check (planned) verifies the two are in sync.
 
@@ -137,90 +139,28 @@ Both shapes coexist freely under one `# Sources` container — the protected tag
 |---|---|
 | `lazy-spec.request-apply` | frontmatter `spec_source_requests` on the touched docs + the asset's folder-note; the `## Requests` sub-section between its marker pair. |
 | `lazy-spec.create-asset` | frontmatter `spec_source_docs` on every authored doc it scaffolds; the initial `## Docs` sub-section between its marker pair. |
-| `lazy-spec.refresh-sources` | re-projection of the `## Docs` sub-section from the current `spec_source_docs` frontmatter list. |
+| `lazy-spec.refresh-sources` (the `refresh-sources` verb) | re-projection of the `## Docs` and `## Requests` sub-sections from the current `spec_source_docs` / `spec_source_requests` frontmatter lists. |
 | Future per-kind writers | their respective frontmatter key + the matching `## <Kind>` sub-section between their own marker pair. |
 | Operator | manual edits to `spec_source_docs` frontmatter (extension / trimming the list); the `<display>` text in `## Docs` bullets (preserved across re-projections); unmarked sub-sections inside `# Sources` (manual entries the operator chooses to track outside any automated projection); prose appended below the `# Sources` container; everything outside the section. |
 
 No other writer touches the `# Sources` container or its `#protected/spec/sources` tag.
 
-## Part 2 — Source-code links and branch pinning
+## Part 2 — Source-code links
 
-Source code is referenced by forge URL (GitHub / GitLab / Bitbucket / Gitea / Forgejo / Sourcehut). The vault never contains source-code symlinks.
+A product's code lives in the same repository as the spec catalog, so a spec doc links to code with a plain in-repo markdown link. The vault never contains source-code symlinks and never a forge URL into its own code.
 
-**Format**: source URLs are ALWAYS produced by the `lazy-spec.source-url` primitive. Skills and agents MUST NOT inline forge-specific path schemes (`/blob/…`, `/-/blob/…`, `/src/…`, `/src/branch/…`, `/tree/…/item/…`) anywhere. The known-forges table below is the ONE place in the system that knows how forge URLs differ.
+**Format**: a code link is written from the repository root with a leading `/` and points at a FILE — `[flip_gate.py](/plugins/claude/lazycortex-specs/bin/flip_gate.py)`. The `lazy-spec.source-url` primitive builds it: given a repo-relative file path it returns `[<basename>](/<path>)`. Obsidian opens a root link to a code or markdown file, but reads a link to a folder as a new note and creates it; a folder is therefore named in text in backticks (`` `plugins/claude/lazycortex-specs/bin/` ``), never linked, and `lazy-spec.source-url` returns that backticked form for a folder path.
 
-**Display-text conventions** (`[display](url)` in prose) are unchanged — skills choose the display text per their own conventions; only URL construction is centralized.
+**Display-text conventions** (`[display](/<path>)` in prose) are the writing skill's own choice; the primitive's default display is the file's basename.
 
 **Rules**:
-- Always use full absolute forge URLs — never relative paths into source
+- Always the root form with a leading `/` — never a path relative to the doc, never a forge URL
+- Files only — a folder is named in backticks without a link
 - Never include line-number fragments (`#L42`); file path + symbol name is enough (see global rule "No line numbers in generated registries or docs")
-- The `<path>` is relative to the repo root, not relative to the product's `source.paths`
-- Skills **read** source from `<repo-config>.local_path/<path>` during generation; only the written links go through the forge
+- The `<path>` is relative to the repository root, not relative to the product's `source.paths`
+- A link always points at the file in the current tree; nothing pins it to a branch, and nothing rewrites it after a branch merges. A spec mirror in another repository (`spec.upstream`) carries the link as written, and there it does not resolve
 
-**Where source URLs belong** — see [file-roles](./lazy-spec.file-roles-protocol.md). Source URLs are permitted in `tech` files (product-level `tech.md`), `code-plan` / `test-plan` files, and the `## Related code / logs` section of a `bug` file. They are FORBIDDEN in any `design` file, and — mirroring `design`'s own rule — FORBIDDEN in `architecture.md` too. Behavior/design docs describe WHAT, and the architecture doc describes the code's SHAPE (module boundaries, dependency direction) without pinning it to specific lines of already-written code; source references belong with the code-level `tech` / plan docs.
-
-### Known-forges table
-
-`lazy-spec.resolve-repo` maps a git remote hostname to a forge key; `lazy-spec.source-url` maps `(forge key, kind)` to a URL template. `<base>` in each template is `https://<host>/<owner>/<repo>` (no trailing slash, no `.git` suffix). A repo record whose `local_path` is `"."` (same-repo product) resolves to `git rev-parse --show-toplevel` in the current checkout before the remote is read — the forge/`<base>` derivation is otherwise identical (see [config-protocol](./lazy-spec.config-protocol.md) Part 1 § Repo records).
-
-| Forge key | Hostname match | File URL (`kind=blob`) | Tree URL (`kind=tree`) |
-|---|---|---|---|
-| `github` | `github.com` | `<base>/blob/<branch>/<path>` | `<base>/tree/<branch>/<path>` |
-| `gitlab` | `gitlab.com` | `<base>/-/blob/<branch>/<path>` | `<base>/-/tree/<branch>/<path>` |
-| `bitbucket` | `bitbucket.org` | `<base>/src/<branch>/<path>` | `<base>/src/<branch>/<path>` |
-| `gitea` | — (explicit `forge:` only) | `<base>/src/branch/<branch>/<path>` | `<base>/src/branch/<branch>/<path>` |
-| `forgejo` | `codeberg.org` | `<base>/src/branch/<branch>/<path>` | `<base>/src/branch/<branch>/<path>` |
-| `sourcehut` | `git.sr.ht` | `<base>/tree/<branch>/item/<path>` | `<base>/tree/<branch>` |
-
-- Hosts not listed above require an explicit `forge: <key>` in the repo config. `lazy-spec.resolve-repo` aborts with a configuration error otherwise.
-- Self-hosted instances (e.g., `gitlab.company.internal`, a private Gitea) use the `forge:` override; pick the key whose path scheme matches the instance.
-- The table covers the common forges. When adding a new forge, update this table and the `lazy-spec.resolve-repo` abort message together — those are the only two places that enumerate forge keys.
-
-### Branch Pinning
-
-Spec files that reference source code may pin those references to a non-default branch via the `spec_source_branches` frontmatter key — a dict keyed by repo-config key (e.g., `backend`, `shared`):
-
-```yaml
----
-tags:
-  - <tag-path>
-spec_source_branches:
-  <repo-key>: <branch-name>
----
-```
-
-- **Absent or empty**: source links in this file use each repo's default `branch` (from the repo config).
-- **Key present**: source links for that repo use the named branch — `lazy-spec.source-url(<repo-key>, <path>, <kind>, branch=<branch-name>)`.
-- Dict shape — one spec can pin different branches per repo.
-
-**Which files may carry pins**: only files whose role permits source URLs and may pin — `code-plan` / `test-plan` files and the product-level `tech.md`. A `spec_source_branches` key on any other file is a bug; `lazy-spec.rebase-pins` and `lazy-spec.audit` treat it as a violation.
-
-**When to pin**: content-generating skills auto-pin a file they are creating IF (a) the source repo is currently checked out on a non-default branch AND (b) the generated file body will contain at least one forge URL for that repo. Files with no source URLs get no pin.
-
-**When NOT to touch pins**: skills reconciling existing specs never silently overwrite a pin whose branch is still open — pinned URLs keep pointing at the open branch until the branch actually merges or is deleted.
-
-### Pin Reconciliation
-
-Shared primitive invoked by `lazy-spec.sync-with-code`, `lazy-spec.create-from-code` (regeneration path), `lazy-spec.audit` (dry-run), and `lazy-spec.rebase-pins`.
-
-**Inputs**: a spec file with a `spec_source_branches` dict.
-
-**Per entry `<repo-key>: <branch>`:**
-
-1. Resolve the repo via `lazy-spec.resolve-repo(<repo-key>)` → `{local_path, branch (= default), forge, base_url, …}`. Pick a remote name (prefer `origin`; else the first remote returned by `git -C <local_path> remote`).
-2. Run `git -C <local_path> fetch --prune <remote>`. **Mandatory auto-fetch** — if it fails (network/auth), abort the whole skill run with a clear error. Never operate on stale data.
-3. Determine branch status:
-   - **Merged** — `git -C <local_path> merge-base --is-ancestor refs/remotes/<remote>/<pinned-branch> refs/remotes/<remote>/<default-branch>` (or local ref if the remote-tracking ref is absent). Action: rewrite + unpin.
-   - **Open** — branch exists on remote (or locally) but is not an ancestor. Action: leave pin and URLs untouched.
-   - **Deleted** — branch does not exist anywhere (remote or local). Action: rewrite + unpin (deleted is treated as merged).
-4. Rewrite: in the file body, find every URL that starts with `<base_url>` (the resolved `base_url` for this repo — never touch URLs for other hosts or other repos) and whose branch segment equals `<pinned-branch>`. Rebuild each such URL by calling `lazy-spec.source-url(<repo-key>, <path>, <kind>, branch=<default-branch>)` and substituting the result. Detecting the branch segment is forge-aware and delegated to the primitive — skills MUST NOT do literal substring replacement on `/blob/<branch>/` or similar.
-5. Unpin: remove the `<repo-key>` entry from `spec_source_branches`. If the dict becomes empty, remove the `spec_source_branches:` key entirely.
-
-**Guarantees**:
-- Idempotent — a second run finds no matching pins.
-- Never rewrites an unmerged pin, even when a skill is explicitly asked about that branch.
-- Deleted = merged (agreed project policy).
-- Squash-merges aren't detected by ancestor check; they're picked up once the branch is deleted, or can be forced via `lazy-spec.rebase-pins --force-merged`.
+**Where source links belong** — see [file-roles](./lazy-spec.file-roles-protocol.md). Source links are permitted in `tech` files (product-level `tech.md`), `code-plan` / `test-plan` files, and the `## Related code / logs` section of a `bug` file. They are FORBIDDEN in any `design` file, and — mirroring `design`'s own rule — FORBIDDEN in `architecture.md` too. Behavior/design docs describe WHAT, and the architecture doc describes the code's SHAPE (module boundaries, dependency direction) without pinning it to specific lines of already-written code; source references belong with the code-level `tech` / plan docs.
 
 ## Part 3 — Dependencies & prerequisites
 
@@ -231,19 +171,16 @@ A product MAY declare upstream dependencies in its `dependencies` array under `p
 ```json
 "dependencies": [
   { "product": "server-tester-chapter" },
-  { "repo": "backend" },
   { "external": { "name": "<external-tool-name>", "spec_url": "https://…", "dev_url": "https://github.com/…" } }
 ]
 ```
 
 - `product` — internal, by product compound-key (resolved via `resolve-product`).
-- `repo` — internal, by repo key (resolved via the `lazy.settings.json[repos]` section).
 - `external` — `name`, `spec_url` (user-facing doc / external spec), `dev_url` (source repository).
 
-Each dep entry resolves to `{kind, spec_link, dev_link, local_spec_path?}` via the shared primitive `lazy-spec.resolve-dependency`:
+Each dep entry resolves to `{kind, spec_link, dev_link?, code_paths?, local_spec_path?}` via the shared primitive `lazy-spec.resolve-dependency`:
 
-- `product` entries: `kind: internal-product`, `spec_link` = path-qualified wikilink to the dep's `<spec_path>/design`, `dev_link` = `base_url` from `lazy-spec.resolve-repo(<dep product's source.repo>)`, `local_spec_path` = the dep's `spec_path`.
-- `repo` entries: `kind: internal-repo`, `spec_link` = wikilink to whichever product owns that repo as `source.repo` (or a documentation page; skill chooses the first product that lists the repo), `dev_link` = `base_url` from `lazy-spec.resolve-repo(<repo key>)`, `local_spec_path` = that product's `spec_path` if resolvable.
+- `product` entries: `kind: internal-product`, `spec_link` = path-qualified wikilink to the dep's `<spec_path>/design`, `local_spec_path` = the dep's `spec_path`, `code_paths` = the dep's own `source.paths` as backticked paths (never links: a folder link makes Obsidian create a note; unset for a design-only product), `dev_link` = unset — the dep's code is in this repository and the `spec_link` carries the navigation.
 - `external` entries: `kind: external`, `spec_link` = `spec_url` (plain URL), `dev_link` = `dev_url`, `local_spec_path` = unset.
 
 ### Informational only

@@ -14,7 +14,8 @@ dispatch is prose the coordinator persona carries out via `Bash`, not Python cod
 
 The asset half is structural: an asset folder carries its own status folder-note
 (`<dir>/<dir.name>.md` with `spec_role: status`). The product half reads
-`.claude/lazy.settings.json`'s `spec.vault_root` and `products` map directly: the owning
+the settings' `spec.vault_root` and `products` map, local overlay merged on, through core's
+`settings-get` verb: the owning
 product is the one whose `spec_path` is the longest covering the folder, so an asset nested
 inside another asset, or sitting straight at the product root, still finds its product, and a
 product nested inside another resolves to the inner one. Without a registered product the legacy
@@ -23,7 +24,6 @@ the product registry is read from the asset folder's grandparent.
 """
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -36,6 +36,10 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import core_settings as _core_settings  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+from errors import SettingsReadError  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import frontmatter as _fm  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
@@ -118,13 +122,13 @@ def _owning_product_root(start_dir: Path) -> Path | None:
   if settings_root is None:
     return None
 
-  # Decision: read the settings file directly rather than subprocessing the specs CLI — plain
-  # data read, not a call into another plugin's code (dev.plugin-boundaries.md § 1 governs the latter)
+  # Decision: one reader of the merged view, core's `settings-get --scope merged` through `core_settings`, replacing
+  # the direct file read — the local overlay is honoured (a product registered only in the overlay still counts) and every reader sees the same values
 
-  # parse the settings JSON; a missing or malformed file resolves to no product
+  # the merged `spec` and `products` sections; an unreadable settings layer resolves to no product
   try:
-    data = json.loads((settings_root / _SETTINGS_REL).read_text(encoding = "utf-8"))
-  except (OSError, json.JSONDecodeError):
+    data = _core_settings.read_merged_sections(settings_root, _SPEC_SECTION_KEY, _PRODUCTS_KEY)
+  except SettingsReadError:
     return None
 
   # the content root mirrors spec_paths.spec_content_root: settings_root / vault_root, default "specs"

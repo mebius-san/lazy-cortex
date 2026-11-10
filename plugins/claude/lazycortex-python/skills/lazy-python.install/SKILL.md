@@ -1,7 +1,7 @@
 ---
 name: lazy-python.install
 description: "Run when the operator asks to set up Python tooling in a repo, after a lazycortex-python update, or when `/lazy-python.audit` reports missing rules, wrappers, pyproject checker sections, or overlay guidelines. Also the fix whenever `chk-py` / `tst-py` aren't on hand in a repo that should have them. Idempotent and near-silent — it asks only on a genuine file conflict or when several env-bootstrap scripts are candidates."
-allowed-tools: Bash, Read, Edit, Write, Glob, Grep, Skill, AskUserQuestion, Agent
+allowed-tools: Bash, Read, Edit, Write, Glob, Grep, AskUserQuestion, Agent
 user-invocable: true
 ---
 # Install lazycortex-python
@@ -21,7 +21,7 @@ This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 3 — Detect PyCharm inspect.sh prerequisite`
    - `Step 4 — Bootstrap pyproject.toml checker sections (pch gated on PyCharm presence)`
    - `Step 5 — Scaffold project overlay guidelines under docs/guidelines/`
-   - `Step 6 — Sync scaffold templates via lazy-core.scaffold-sync`
+   - `Step 6 — Sync scaffold templates via scaffold sync-plugin`
    - `Step 7 — Record python.env_source when a project env script is present`
    - `Step 7.5 — Seed agent-model tiers`
    - `Step 7.6 — Register the code-reviewer expert`
@@ -141,19 +141,19 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.i
 
 Outcome: `overlay-created-N` (where `N` is the count of newly-created files) when at least one was scaffolded; `overlay-already-present` when all four files already existed.
 
-## Step 6: Sync scaffold templates via lazy-core.scaffold-sync
+## Step 6: Sync scaffold templates via scaffold sync-plugin
 
-Copies the plugin's authoring templates into the consumer's `.claude/templates/python/` and upserts the matching scaffold-registry entries — so `lazy-core.scaffold` matches new `*.py` files against the consumer-local copies of the Python templates (`python-template.py` for regular files, `init-template.py` for `**/__init__.py` — most-specific glob wins). The registry values are the consumer-local paths under `.claude/templates/python/`, never `${CLAUDE_PLUGIN_ROOT}/...` (rule bodies do not expand `${CLAUDE_PLUGIN_ROOT}`). No user prompt unless template drift is detected.
+The `scaffold sync-plugin` verb copies this plugin's authoring templates into the consumer and registers them in the scaffold registry, asking nothing. The step is here so `lazy-core.scaffold` matches new `*.py` files against the consumer-local copies of the Python templates (`python-template.py` for regular files, `init-template.py` for `**/__init__.py`).
 
-Resolve this plugin's own `<installPath>` (what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-python` prints: the authoring repo's `plugins/claude/lazycortex-python/` when this checkout ships the plugin, else the exported copy or the install `~/.claude/plugins/installed_plugins.json` records — never `installed_plugins.json` read by hand; `<core-cli>` is the core plugin's `bin/lazycortex-core` file: when this repo authors the plugin itself (`plugins/claude/lazycortex-core/.claude-plugin/plugin.json` exists) that is `<repo-root>/plugins/claude/lazycortex-core/bin/lazycortex-core`; otherwise `Read` `$HOME/.claude/plugins/installed_plugins.json` and take `<installPath>/bin/lazycortex-core` from the highest-`version` `lazycortex-core@lazycortex` record (the registry keeps one record per project; never a walk of `~/.claude/plugins/cache/`). Every verb runs through the interpreter because the file carries no exec bit.) and the detected `<scope>` (`project` / `user`), then dispatch:
+Resolve this plugin's own `<installPath>` (what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-python` prints: the `$LAZYCORTEX_PLUGIN_DIRS` entry first, then the dev-vault sibling, then the repo's own `plugins/claude/lazycortex-python/`, and last the `installPath` the install `~/.claude/plugins/installed_plugins.json` records — never `installed_plugins.json` read by hand; `<core-cli>` is the core plugin's `bin/lazycortex-core` file: when this repo authors the plugin itself (`plugins/claude/lazycortex-core/.claude-plugin/plugin.json` exists) that is `<repo-root>/plugins/claude/lazycortex-core/bin/lazycortex-core`; otherwise `Read` `$HOME/.claude/plugins/installed_plugins.json` and take `<installPath>/bin/lazycortex-core` from the highest-`version` `lazycortex-core@lazycortex` record (the registry keeps one record per project; never a walk of `~/.claude/plugins/cache/`). Every verb runs through the interpreter because the file carries no exec bit.) and the detected `<scope>` (`project` / `user`), then run:
 
 ```
-Skill(skill: "lazycortex-core:lazy-core.scaffold-sync", args: "plugin=lazycortex-python installPath=<installPath> scope=<scope>")
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold sync-plugin --plugin lazycortex-python --install-path <installPath> --scope <scope>)
 ```
 
-The skill discovers `<installPath>/templates/python/scaffold.entries.json`, copies `templates/python/*` (excluding the manifest) into `<consumerScope>/.claude/templates/python/`, and upserts the `lazycortex-python` registry key via `scaffold upsert` (surgical — the consumer's `lazycortex-core` and `_local` keys stay byte-for-byte).
+The verb prints one JSON line: its `templates` array carries one copy state per template (`installed` / `unchanged` / `refreshed` / `protected` / `failed`) and its `status` is the registry outcome (`registered` / `unchanged` / `created-and-registered` / `none` / `collision` / `error`). Exit 3 means a template write did not verify — the `failed` array names it.
 
-Outcome: the `scaffold-sync` report — per-template copy state (`installed` / `unchanged` / `merged` / `updated` / `kept-local`) plus the registry upsert status (`registered` / `unchanged` / `created-and-registered`).
+Outcome: one line per `templates` entry (`<group>/<file>: <state>`), then the `status` value. The step succeeded only when that `status` came back from the verb; never report the sync without its reply.
 
 ## Step 7: Record python.env_source when a project env script is present
 
@@ -195,20 +195,15 @@ Outcome: `env-source-already-set` / `env-source-no-candidate` / `env-source-reco
 
 ## Step 7.5: Seed agent-model tiers
 
-Seed the `agent_models.lazycortex` group with every subagent this plugin ships, by dispatching the shared primitive — it owns the `default-tiers.json` locate, the `lazycortex-python:`-prefix filter, and the per-key semantics. No inline tier logic here, and no list of agent names here either: the prefix filter over the SOT is what enumerates them, so an agent added to the plugin is seeded without this step being edited. Scope is `project` — lazycortex-python is per-repo tooling (see "Decisions are remembered" above), so the primitive targets `<repo-root>/.claude/lazy.settings.json`.
-
-Dispatch:
+The `agent-models-seed` verb seeds the `agent_models.lazycortex` group with every `lazycortex-python:` subagent the core tier table lists. The step is here so the expert runtime and interactive dispatch resolve a model for this plugin's agents; scope is `project` because lazycortex-python is per-repo tooling (see "Decisions are remembered" above). `<core-cli>` is the file Step 6 resolved.
 
 ```
-Skill(skill: "lazycortex-core:lazy-core.agent-models-seed", args: "prefix=lazycortex-python scope=project")
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> agent-models-seed --prefix lazycortex-python --scope project)
 ```
 
-Fold the primitive's returned report block verbatim into this skill's Report. Surface its terminal outcomes:
+The verb prints one JSON line: `outcome` is `seeded-N`, `unchanged`, or `no-entries` (exit 0), or a refusal — `sot-missing`, `missing-prefix`, `missing-scope`, `settings-unparseable` (exit 1, with a `message`); `entries` carries one `{dispatch, tier, state}` line per key, `state` being `added` / `unchanged` / `refreshed` / `kept-local`. Fold the `entries` lines into the Report; on a refusal relay its `message` and write no seed lines. `no-entries` is reported plainly (a maintainer must extend `default-tiers.json`), not an abort.
 
-- **`sot-missing`** — `lazycortex-core`'s `default-tiers.json` was not found → the primitive aborts; relay its message (`lazycortex-core not installed; install it before seeding lazycortex-python tiers`) and do not fabricate seed lines.
-- **`no-entries`** — the SOT lists no `lazycortex-python:` agents → report it plainly (a maintainer must extend `default-tiers.json`); not an abort.
-
-Outcome: `seeded` (any entry added) or `unchanged`.
+Outcome: `seeded` (the verb answered `seeded-N`) or `unchanged` (it answered `unchanged` or `no-entries`); never report a seed the verb did not answer.
 
 ## Step 7.6: Register the code-reviewer expert
 

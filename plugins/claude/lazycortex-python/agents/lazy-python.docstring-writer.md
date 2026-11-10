@@ -39,8 +39,8 @@ This agent has 6 ordered steps. The executing agent MUST NOT skip, merge, reorde
 - **Responsibilities / Guarantees / Subclassing / Notes:** Bulleted list, 2-space indent under title, empty line before each section.
 - **Type Parameters / Attributes:** No bullets. `name: description` format. 2-space indent. Empty line before each section.
 - **Attributes:** Mandatory when the class has any public attributes to show. Omit only when there are zero qualifying attributes.
-  - **Include:** Public instance fields assigned in `__init__` as `self.name` without a leading underscore. Public class variables without a leading underscore. Private fields or properties only if covered by the project's declared escape hatch (overlay + `[tool.pcf] d2_exempt_marker_attrs`). All enum members except `INVALID`.
-  - **Exclude:** All private (`_`-prefix) fields and all `@property` methods not covered by the project's declared escape hatch. Type annotations. The `INVALID` enum member.
+  - **Include:** Public instance fields assigned in `__init__` as `self.name` without a leading underscore. Public class variables without a leading underscore. Private fields or properties only if covered by the project's declared escape hatch (overlay + `[tool.pcf] d2_exempt_marker_attrs` / `[tool.pcf] d2_exempt_attr_names`). All enum members.
+  - **Exclude:** All private (`_`-prefix) fields and all `@property` methods not covered by the project's declared escape hatch. Type annotations.
   - **Content:** Mention meaning and units/ranges if relevant. Do not add defaults, mutability (read-only or writable), or `None` possibility — these are visible in the code and clutter the docstring.
   - **Style:** `name: description` format. No bullets, dashes, or prefixes. 2-space indent. Noun phrase per item, period at the end. Empty line before a section. Separate public and private groups with an empty line if both exist.
 - **Interface / ABC / Protocol:** Start summary with "Interface base for ..." / "Abstract base for ..." / "Protocol for ...".
@@ -86,6 +86,7 @@ These are always enforced, regardless of project guidelines:
 - No implementation steps, algorithms, architecture jargon, or internal mechanism descriptions in Summary or Scope.
 - No describing a class in terms of what it "combines", "wraps", or "extends" from parent classes in Scope.
 - No referencing method names in class Summary or Scope — describe what the class does, not which methods do it.
+- No inventory in Summary or Scope: no sentence that walks through the measures, fields, axes or cases the body handles one by one. Name the kind of answer; the Attributes and the methods' own docstrings carry the items. An existing inventory is compressed, never appended to.
 - No exceeding the 117-character line limit.
 
 # Preservation Rules
@@ -93,6 +94,7 @@ These are always enforced, regardless of project guidelines:
 - When editing an existing docstring, keep all valid parts intact unless they are wrong, describe the code incorrectly, or violate the guidelines.
 - Do not remove existing Guarantees unless factually wrong.
 - Do not remove caller-visible invariants or postconditions.
+- An inventory sentence is not a caller-visible invariant; compress it instead of extending it.
 - If a section violates rules, normalize and fix it — do not delete it.
 
 # Style Rules
@@ -146,6 +148,7 @@ Before declaring a docstring done, walk every checkpoint below for every docstri
 6. **Tautology check on dunder summaries.** *"Initialize the instance"* / *"Enter the context manager"* / *"Exit the context manager"* with no further substance is a tautology. Either remove the docstring (if the entire body is mechanical) or rewrite to state the caller-visible purpose.
 7. **Returns section present iff non-None return.** Every method whose annotation is not `None` must have a `Returns:` (or `Yields:` for generators). Properties are exempt.
 8. **No private attrs in `Attributes:`.** Every label in the `Attributes:` section either has no leading `_` or is covered by the project's declared escape hatch. No exceptions.
+9. **Inventory check.** A Scope sentence with four or more parallel how/whether/what clauses, or a Scope that would need a new clause whenever a method, field or case is added, is an inventory. Rewrite it to the kind of answer and stop.
 
 Outcome: `clean` or `<N>-rewrites-applied`.
 

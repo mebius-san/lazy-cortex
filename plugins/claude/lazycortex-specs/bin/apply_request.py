@@ -16,8 +16,10 @@ under the `lazy-spec.request-apply` bot identity.
 Routing prose grammar (parsed leniently — the router agent emits free
 text, so the patterns below match the conventional shapes):
 
-- **Class verdict** — `Class: <verdict>` or `**Class:** \\<verdict>\\`
-  (case-insensitive, optional surrounding backticks / asterisks).
+- **Class verdict** — the word `class` (case-insensitive) followed by a
+  colon or a bar (`|`) separator, anywhere in the routing section, then the
+  verdict, with optional asterisks / backticks around it (`Class: <verdict>`,
+  `**Class:** <verdict>`, `Class | <verdict>`).
   Verdict is one of `feature` / `change` / `bug` / `task` / `spec` /
   `plan` / `feedback` / `unknown`.
 - **Spawn target** — a `Target:` / `Spawn:` line that mentions any shipped
@@ -51,17 +53,20 @@ fields the router decides and this worker never guesses at:
   run.
 - `targets=<path>[,...]` on a `change`-kind spawn line — design-cascade
   targets, each a product-relative path token of any depth.
-- `drop=<name>[,...]` on an attach line — the documents a pre-launch
-  rollback removes; absent rolls the gates back and deletes nothing.
+- `drop=<name>[,...]` on an attach line — the sibling documents the attach
+  deletes from the attached asset, each a bare sibling filename (no path
+  separator, no `:`) that is neither the asset's status folder-note nor its start
+  document, matched without regard to letter case; absent or empty cancels and
+  deletes nothing. `drop=` is refused on a level-document target, which is
+  never dropped.
 
-A fourth verb, `spawn-product key=<key> path=<spec_path> [experts=<role>:<name>[,...]] ::
-<description>`, registers a whole design-only product: `key=`, `path=` and the
-`::` separator are all mandatory, `experts=` is optional. Enacting one writes
-the `products[<key>]` record, clones the shared review classes into
-product-scoped overrides for the role experts that diverge, creates the spec
-folder, backfills the product level note, seeds its `vision.md`, stamps the
-request's attribution on that document and opens its review — all inside the
-one apply commit.
+A fourth verb, `spawn-product key=<key> path=<spec_path> :: <description>`,
+registers a whole design-only product: `key=`, `path=` and the `::` separator
+are all mandatory. A well-formed line (one carrying `::`) that carries any field other than
+`key=` / `path=` fails the run before anything is written; a line without `::` is skipped. Enacting one
+writes the `products[<key>]` record, creates the spec folder, backfills the
+product level note, seeds its `vision.md`, stamps the request's attribution on
+that document and opens its review — all inside the one apply commit.
 
 An `attach` target naming a level document (`vision.md` / `design.md` /
 `tech.md` sitting directly in the content root or in a registered product's
@@ -96,18 +101,39 @@ Outputs written:
   itself — never on the referenced asset, whose doc and folder-note
   stay untouched.
 - Each populated doc's folder-note: `## Source requests` bullet.
-- An attach target whose implementation ladder started but never
-  launched: its live expert job cancelled via the `lazycortex-core
-  cancel-job` CLI and its `active_job` marker cleared, best-effort
-  review-stop plus worktree deletion of its `architecture.md` /
-  `code-plan.md` / `test-plan.md` siblings, and `spec_plan_done` / `spec_develop_done`
-  / `spec_tests_passing` / `spec_released` flipped back to false.
-- On a rollback that cannot complete cleanly: the asset halted via
-  `flip_gate.halt_asset` and the whole run aborted instead of
-  committing a half-dropped ladder.
+- An attach target whose `drop=` field names documents: the asset's live
+  expert job cancelled via the `lazycortex-core cancel-job` CLI and its
+  `active_job` marker cleared, review stopped on a best-effort basis on each
+  named sibling, then the siblings deleted from the worktree. The deleted
+  paths still tracked by git are staged in the run's single commit. An attach
+  never rolls back and never flips a gate, whatever the asset type.
+- Before any document is dropped or job cancelled, every attach and reference
+  target is resolved, and every attach target is also checked (cancelled /
+  halted refusals); a reference target only has to resolve and is never refused
+  as cancelled or halted. Every `drop=` name must be a bare sibling filename (no
+  path separator, no `:`) that is neither the asset's status folder-note nor its
+  start document, matched without regard to letter case, and `drop=` is
+  refused on a level-document target (a level document is never dropped). An
+  unresolvable or refused target, an invalid `drop=` name, or a `drop=` on a
+  level-document target aborts the run with nothing dropped.
+- On a `drop=` failure: once a running job is confirmed cancelled, any failure
+  before the asset's first deletion (clearing the job's tracking record,
+  reading the folder, a surviving named sibling, any other error) halts the
+  asset via `flip_gate.halt_asset` with `PLAN_DROP_PARTIAL` exactly once before
+  the run aborts, and so does a job whose cancel is not confirmed. With no job
+  cancelled and nothing deleted, only a surviving named sibling halts the
+  asset; any other failure (e.g. the core CLI cannot be resolved) aborts the
+  run without a halt. After the asset's first deletion its own drop halts
+  nothing: the run-level handler halts each asset that lost something in the
+  pass (`PLAN_DROP_PARTIAL`), for any exception (another target's drop, an
+  error later in the same asset's drop, the attribution, a reference write,
+  the review opening, the request stamp or the commit). An asset whose own
+  folder lost documents is halted with those deletions; an asset whose live
+  job was cancelled with nothing deleted is halted with none. Never an outer
+  or nested asset. Every target's drop runs before any target's attribution.
+  A non-`SystemExit` error propagates unchanged after the halt.
 - Each populated doc: review cycle opened via the `lazycortex-review`
-  CLI's `start` subcommand, or `submit` when a pre-launch ladder
-  rollback re-opened an already-drafted doc.
+  CLI's `start` subcommand (opening writer round), never `submit`.
 - Request file: `request_class` / `request_status` frontmatter,
   `request/<status>` mirror tag, status callout above first H1,
   `# Routing` stripped.
@@ -121,14 +147,13 @@ not a markdown file.
 from __future__ import annotations
 
 import argparse
-import copy
 import datetime as _dt
 import json
 import os
 import re
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -144,20 +169,18 @@ from summary_render import apply_container_stats  # noqa: E402  # pylint: disabl
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_paths import (  # noqa: E402
-    find_settings_root, read_text, resolve_plugin_cli, spec_content_root, write_text_atomic,
+    find_settings_root, read_text, require_plugin_cli, resolve_core_cli, spec_content_root, write_text_atomic,
 )
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from spec_keys import (  # noqa: E402  # pylint: disable=import-error,wrong-import-position
     BOOL_TRUE,
     LEVEL_ROLES,
-    FlipResult,
     Gate,
-    GateCheckbox,
     HaltReason,
     JobMarker,
     LevelDoc,
     PlanReview,
-    SiblingDoc,
+    Section,
     SpecHaltKey,
     SpecTargetsKey,
 )
@@ -172,49 +195,14 @@ import iconize_inline  # noqa: E402  # pylint: disable=import-error,wrong-import
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import scaffold_asset  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+from spec_markers import Markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
-
-# Gates a pre-launch ladder rollback flips back to false, in the same order `GATE_ORDER`
-# carries them from `spec_plan_done` onward — the design gate is left alone since design is
-# what the incoming request is about to revise.
-_ROLLBACK_GATES = ( Gate.PLAN_DONE, Gate.DEVELOP_DONE, Gate.TESTS_PASSING, Gate.RELEASED )
-
-# Placeholder a product-scoped override glob carries where the product's own `spec_path` goes.
-_SPEC_PATH_TOKEN = "{spec_path}"
-
-# The product-scoped globs each review class is re-emitted with when a spawned product's role
-# experts diverge from the shared set, and the role the class's first `experts.main` writer fills
-# (every later main writer is the editor).
-# Both mirror `lazy-spec.product-config`'s Step 12 binding table; a validation writer's role is
-# read off its section id instead (`<role>_review`), so no second table names those. An
-# asset-level glob is `<spec_path>/*/**/<doc>.md`: at least one segment below the product root
-# (so the product's own level doc stays with its `system-*` class) and then any depth, since an
-# asset may sit straight at the product root or nested inside another asset.
-_OVERRIDE_CLASSES = {
-    "use-cases": ( "use-case-writer", [ f"{_SPEC_PATH_TOKEN}/*/**/use-cases.md" ] ),
-    "design": ( "designer", [ f"{_SPEC_PATH_TOKEN}/*/**/design.md" ] ),
-    "vision": ( "designer", [ f"{_SPEC_PATH_TOKEN}/*/**/vision.md" ] ),
-    "system-vision": ( "system-designer", [ f"{_SPEC_PATH_TOKEN}/vision.md" ] ),
-    "system-design": ( "system-designer", [ f"{_SPEC_PATH_TOKEN}/design.md" ] ),
-    "system-tech": ( "architect", [ f"{_SPEC_PATH_TOKEN}/tech.md" ] ),
-    "architecture": ( "architect", [ f"{_SPEC_PATH_TOKEN}/*/**/architecture.md" ] ),
-    "ui-design": ( "ui-designer", [ f"{_SPEC_PATH_TOKEN}/*/**/ui-design.md" ] ),
-    "system-ui-design": ( "ui-designer", [ f"{_SPEC_PATH_TOKEN}/ui-design.md" ] ),
-    "system-use-cases": ( "use-case-writer", [ f"{_SPEC_PATH_TOKEN}/use-cases.md" ] ),
-    "code-plan": ( "planner", [ f"{_SPEC_PATH_TOKEN}/*/**/code-plan.md" ] ),
-    "test-plan": ( "tester", [ f"{_SPEC_PATH_TOKEN}/*/**/test-plan.md" ] ),
-    "bug": ( "tester", [ f"{_SPEC_PATH_TOKEN}/*/**/bug.md" ] ),
-    "code-report": ( "developer", [ f"{_SPEC_PATH_TOKEN}/*/**/code-report.md" ] ),
-    "test-report": ( "tester", [ f"{_SPEC_PATH_TOKEN}/*/**/test-report.md" ] ),
-    "data-report": ( "data-writer", [ f"{_SPEC_PATH_TOKEN}/*/**/data-report.md" ] ),
-    "docs-report": ( "docs-writer", [ f"{_SPEC_PATH_TOKEN}/*/**/docs-report.md" ] ),
-    "content-design": ( "designer", [ f"{_SPEC_PATH_TOKEN}/*/**/design.md" ] ),
-    "research-design": ( "designer", [ f"{_SPEC_PATH_TOKEN}/*/**/design.md" ] ),
-    "research-report": ( "researcher", [ f"{_SPEC_PATH_TOKEN}/*/**/research.md" ] ),
-}
 
 # The shipped types' folders, for a prose path-form spawn target parsed with no settings at hand.
 # `feature` (and every other type whose `default_path` is the product root itself) contributes no
@@ -243,7 +231,6 @@ class _K:
     TAG_PREFIX: Prefix of the request-status mirror tag.
     DESIGN_MD: Filename of the design doc.
     BUG_MD: Filename of the bug-layout design-side doc.
-    FEATURE_KIND: The feature asset kind.
     CHANGE_KIND: The change asset kind.
     CLAUDE_DIR: The `.claude` directory segment.
     SETTINGS_FILE: Filename of the settings file.
@@ -263,26 +250,10 @@ class _K:
       nothing.
     DECISION_VERB_SPAWN_PRODUCT: The routing-decision verb registering a whole design-only product.
     DECISION_KEY_PREFIX: Prefix marking the mandatory `key=` field naming a spawned product's key.
-    DECISION_EXPERTS_PREFIX: Prefix marking the optional `experts=` field naming a spawned
-      product's role experts.
-    ROLE_NAME_SEP: Token separating a role from its expert name inside the `experts=` field.
     SETTINGS_SPEC: Settings section holding the vault-wide spec configuration.
-    SETTINGS_REVIEW: Settings section holding the review configuration.
-    SETTINGS_EXPERTS: Settings section holding the registered experts, keyed by expert name.
     LANGUAGE: Settings key naming a product's authoring language.
     ICON: Settings key naming a product's explorer icon.
     ICON_PRODUCT: The default explorer icon every registered product carries.
-    REVIEW_CLASSES: Review-section key holding the ordered class list.
-    CLASS_LABEL: Review-class key carrying the class's identity label.
-    CLASS_PATHS: Review-class key carrying the class's glob list.
-    CLASS_EXPERTS: Review-class key carrying the class's writer buckets.
-    EXPERTS_MAIN: Expert-bucket key holding the opening-writer chain.
-    EXPERTS_VALIDATION: Expert-bucket key holding the named validation writers.
-    EXPERTS_TERMINAL: Expert-bucket key holding the named post-approve routing writers.
-    EXPERT_NAME: Writer-object key carrying the expert's registered name.
-    OVERRIDE_LABEL_SEP: Token joining a class label to the product key it is scoped to.
-    VALIDATION_ROLE_SUFFIX: Suffix a validation section id carries after the role it binds.
-    EDITOR_ROLE: Role of every main writer after the first in a review class.
     NOTE_KEY: Result key under which `catalog-note backfill` reports the note it wrote.
     CLI_SETTINGS_GET: The `lazycortex-core` subcommand reading one settings section.
     CLI_SETTINGS_SET: The `lazycortex-core` subcommand persisting one settings section.
@@ -300,11 +271,6 @@ class _K:
     SCAFFOLD_GROUP_NOTE_KEY: The scaffold result key naming the group folder-note it seeded.
     SPEC_TOOLS_KEY: Frontmatter key listing the tools the asset is realised and checked with.
     ASSET_TYPES: Settings key holding a product's own asset-type declarations.
-    SOURCES_H1: Heading marking a doc's sources section.
-    SOURCES_TAG: Protected-section tag guarding a doc's sources section.
-    REQUESTS_H2: Sub-heading marking a doc's requests projection.
-    REQUESTS_MARKER_START: Opening marker delimiting a doc's requests projection.
-    REQUESTS_MARKER_END: Closing marker delimiting a doc's requests projection.
     SOURCE_REQUESTS_H2: Sub-heading marking a folder-note's source-requests list.
     HISTORY_H2: Sub-heading marking a doc's history log.
     CALLOUT_SUCCESS: The callout text stamped on an accepted request.
@@ -316,14 +282,9 @@ class _K:
     PROG: CLI program name shown in `--help` output.
     CLI_LAZYCORTEX_SPECS: Plugin name used to resolve the `lazycortex-specs` CLI.
     CLI_LAZYCORTEX_REVIEW: Plugin name used to resolve the `lazycortex-review` CLI.
-    CLI_LAZYCORTEX_CORE: Plugin name used to resolve the `lazycortex-core` CLI.
-    ENV_PLUGIN_DIRS: Env var listing plugin dirs to walk for CLI resolution.
     ENV_REPO_ROOT: Env var passed to the `lazycortex-core` CLI naming the repo it should
       resolve settings and job storage against.
-    ROLLBACK_GATE_OFF_REASON: Reason text recorded on every gate a pre-launch ladder rollback
-      flips back to false.
     REVIEW_STOP_TIMEOUT_S: Seconds the best-effort `lazycortex-review stop` subprocess may run.
-    BIN_DIR: Per-plugin `bin/` subdir holding a CLI binary.
     MD_SUFFIX: The markdown file extension.
     BOT_NAME_DEFAULT: Default git author name for the apply-transition commit.
     BOT_EMAIL_DEFAULT: Default git author email for the apply-transition commit.
@@ -351,7 +312,7 @@ class _K:
     CLASS_ENUM: The closed set of valid `request_class` verdicts.
   """
 
-  # Frontmatter keys
+  # Frontmatter key naming a file's spec-role discriminator.
   SPEC_ROLE = "spec_role"
   # Frontmatter key naming a request's lifecycle status.
   REQUEST_STATUS = "request_status"
@@ -367,7 +328,7 @@ class _K:
   TAGS = "tags"
   # Frontmatter key listing the requests that populated a doc.
   SPEC_SOURCE_REQUESTS = "spec_source_requests"
-  # Frontmatter values
+  # The pre-terminal `request_status` value.
   STATUS_DRAFT = "draft"
   # The accepted terminal `request_status` value.
   STATUS_ACCEPTED = "accepted"
@@ -377,17 +338,15 @@ class _K:
   CLASS_UNKNOWN = "unknown"
   # The canonical `spec_role` value for a request file.
   ROLE_REQUEST = "request"
-  # Tag prefixes / members
+  # Prefix of the request-status mirror tag.
   TAG_PREFIX = "request/"
-  # Filenames + doc roles
+  # Filename of the design doc.
   DESIGN_MD = "design.md"
   # Filename of the bug-layout design-side doc.
   BUG_MD = "bug.md"
-  # The feature asset kind.
-  FEATURE_KIND = "feature"
   # The change asset kind.
   CHANGE_KIND = "change"
-  # Path segments
+  # The `.claude` directory segment.
   CLAUDE_DIR = ".claude"
   # Filename of the settings file.
   SETTINGS_FILE = "lazy.settings.json"
@@ -401,7 +360,7 @@ class _K:
   REQUESTS_DIR = "requests"
   # Filename of the requests folder-note.
   REQUESTS_NOTE = "requests.md"
-  # Routing-section markers
+  # Heading marking a request's routing section.
   ROUTING_H1 = "# Routing"
   # Heading marking a file's history log section.
   HISTORY_H1 = "# History"
@@ -420,10 +379,6 @@ class _K:
   DECISION_VERB_SPAWN_PRODUCT = "spawn-product"
   # Prefix marking the mandatory `key=` field naming a spawned product's key.
   DECISION_KEY_PREFIX = "key="
-  # Prefix marking the optional `experts=` field naming a spawned product's role experts.
-  DECISION_EXPERTS_PREFIX = "experts="
-  # Token separating a role from its expert name inside the `experts=` field.
-  ROLE_NAME_SEP = ":"
   # Token separating a routing-decision line's target spec from its free-text description.
   DECISION_DESC_SEP = "::"
   # Prefix marking the optional design-cascade `targets=` field on a change-spawn line.
@@ -444,57 +399,21 @@ class _K:
   SPEC_TOOLS_KEY = "spec_tools"
   # Settings key holding a product's own asset-type declarations.
   ASSET_TYPES = "asset_types"
-  # Settings sections and the product-record / review-class keys a spawn-product writes
+  # Settings section holding the vault-wide spec configuration.
   SETTINGS_SPEC = "spec"
-  # Settings section holding the review configuration.
-  SETTINGS_REVIEW = "review"
-  # Settings section holding the registered experts, keyed by expert name.
-  SETTINGS_EXPERTS = "experts"
   # Settings key naming a product's authoring language.
   LANGUAGE = "language"
   # Settings key naming a product's explorer icon.
   ICON = "icon"
   # The default explorer icon every registered product carries.
   ICON_PRODUCT = "LiPackage"
-  # Review-section key holding the ordered class list.
-  REVIEW_CLASSES = "classes"
-  # Review-class key carrying the class's identity label.
-  CLASS_LABEL = "class"
-  # Review-class key carrying the class's glob list.
-  CLASS_PATHS = "paths"
-  # Review-class key carrying the class's writer buckets.
-  CLASS_EXPERTS = "experts"
-  # Expert-bucket key holding the opening-writer chain.
-  EXPERTS_MAIN = "main"
-  # Expert-bucket key holding the named validation writers.
-  EXPERTS_VALIDATION = "validation"
-  # Expert-bucket key holding the named post-approve routing writers.
-  EXPERTS_TERMINAL = "terminal"
-  # Writer-object key carrying the expert's registered name.
-  EXPERT_NAME = "name"
-  # Token joining a class label to the product key it is scoped to.
-  OVERRIDE_LABEL_SEP = "@"
-  # Suffix a validation section id carries after the role it binds.
-  VALIDATION_ROLE_SUFFIX = "_review"
-  # Role of every main writer after the first in a review class.
-  EDITOR_ROLE = "editor"
   # Result key under which `catalog-note backfill` reports the note it wrote.
   NOTE_KEY = "note"
-  # Heading marking a doc's sources section.
-  SOURCES_H1 = "# Sources"
-  # Protected-section tag guarding a doc's sources section.
-  SOURCES_TAG = "#protected/spec/sources"
-  # Sub-heading marking a doc's requests projection.
-  REQUESTS_H2 = "## Requests"
-  # Opening marker delimiting a doc's requests projection.
-  REQUESTS_MARKER_START = "<!-- auto:spec-requests:start -->"
-  # Closing marker delimiting a doc's requests projection.
-  REQUESTS_MARKER_END = "<!-- auto:spec-requests:end -->"
   # Sub-heading marking a folder-note's source-requests list.
   SOURCE_REQUESTS_H2 = "## Source requests"
   # Sub-heading marking a doc's history log.
   HISTORY_H2 = "## History"
-  # Status callout strings
+  # The callout text stamped on an accepted request.
   CALLOUT_SUCCESS = "[!success] Request accepted #status/accepted"
   # The callout text stamped on a rejected request.
   CALLOUT_WARNING = "[!warning] Request rejected #status/rejected"
@@ -504,16 +423,14 @@ class _K:
   REJECT_HINT = "To re-open: clear request_status, clear review_result, restore review_active: true."
   # Default rejection reason when routing names no target.
   REJECT_REASON_DEFAULT = "Routing prose named no resolvable target."
-  # Subprocess + git
+  # The git executable name.
   GIT = "git"
-  # CLI identity
+  # CLI program name shown in `--help` output.
   PROG = "lazycortex-specs apply-request"
   # Plugin name used to resolve the `lazycortex-specs` CLI.
   CLI_LAZYCORTEX_SPECS = "lazycortex-specs"
   # Plugin name used to resolve the `lazycortex-review` CLI.
   CLI_LAZYCORTEX_REVIEW = "lazycortex-review"
-  # Plugin name used to resolve the `lazycortex-core` CLI.
-  CLI_LAZYCORTEX_CORE = "lazycortex-core"
   # The `lazycortex-core` subcommand reading one settings section.
   CLI_SETTINGS_GET = "settings-get"
   # The `lazycortex-core` subcommand persisting one settings section.
@@ -526,16 +443,10 @@ class _K:
   SEED_DOC_FLAG = "--doc"
   # The `<name>:<type>` token seeding a level's own vision document.
   VISION_DOC_TOKEN = f"{LevelDoc.VISION}:system-vision"
-  # Env var listing plugin dirs to walk for CLI resolution.
-  ENV_PLUGIN_DIRS = "LAZYCORTEX_PLUGIN_DIRS"
   # Env var passed to the `lazycortex-core` CLI naming the repo it should resolve settings and job storage against.
   ENV_REPO_ROOT = "LAZY_REPO_ROOT"
-  # Reason text recorded on every gate a pre-launch ladder rollback flips back to false.
-  ROLLBACK_GATE_OFF_REASON = "request attached before implementation launched"
   # Seconds the best-effort `lazycortex-review stop` subprocess may run.
   REVIEW_STOP_TIMEOUT_S = 60
-  # Per-plugin `bin/` subdir holding a CLI binary.
-  BIN_DIR = "bin"
   # The markdown file extension.
   MD_SUFFIX = ".md"
   # Default git author name for the apply-transition commit.
@@ -554,9 +465,9 @@ class _K:
   ERR_NO_PRODUCTS = (
       "no products registered in lazy.settings.json; cannot resolve spawn target"
   )
-  # Outcome / error categories
+  # The error category for invalid-input failures.
   CAT_LOGICAL = "logical"
-  # stdout-envelope field names — the wire contract the calling routine parses
+  # The stdout-envelope field carrying the outcome token; the calling routine parses the envelope.
   OUT_OUTCOME = "outcome"
   # The stdout-envelope field carrying a failure's own object.
   OUT_ERROR = "error"
@@ -586,7 +497,7 @@ class _K:
   OUTCOME_TERMINAL_SKIP = "terminal-state-skip"
   # Outcome token for a no-op on a request with no routing section.
   OUTCOME_NO_ROUTING_SKIP = "no-routing-skip"
-  # Allowed class enum
+  # The closed set of valid `request_class` verdicts.
   CLASS_ENUM = ( "feature", "change", "bug", "task", "spec", "plan", "feedback", "unknown" )
 
 
@@ -625,25 +536,43 @@ def _repo_root(start: Path) -> Path:
   return start.resolve()
 
 
-def _resolve_sibling_cli(name: str) -> Path:
+def _resolve_sibling_cli(name: str, repo: Path) -> Path:
   """
-  Locate a sibling plugin's CLI binary through `$LAZYCORTEX_PLUGIN_DIRS`.
+  Locate a required sibling plugin's CLI binary other than the core plugin's.
 
   Args:
     name: CLI filename (e.g. `lazycortex-specs`, `lazycortex-review`).
+    repo: Repository root whose own plugin tree is one of the searched stages.
 
   Returns:
-    Absolute path to the CLI binary in the first registered plugin dir that carries it.
+    Absolute path to the resolved CLI binary.
 
   Raises:
-    SystemExit: When the env var is unset or no plugin dir holds the named CLI.
+    SystemExit: When no lookup stage carries the named CLI; the error names every stage searched.
   """
-  cli = resolve_plugin_cli(name)
+  try:
+    return require_plugin_cli(name, repo)
+  except RuntimeError as error:
+    _fail(_K.CAT_LOGICAL, str(error))
 
-  # guard: unresolved — env var unset or no plugin dir carries the named CLI
-  if cli is None:
-    _fail(_K.CAT_LOGICAL, f"no '{name}' resolvable via ${_K.ENV_PLUGIN_DIRS}")
-  return cli
+
+def _resolve_core(repo: Path) -> Path:
+  """
+  Locate the core plugin's CLI binary.
+
+  Args:
+    repo: Repository root whose own plugin tree is one of the searched stages.
+
+  Returns:
+    Absolute path to the resolved `lazycortex-core` binary.
+
+  Raises:
+    SystemExit: When no lookup stage carries the core CLI; the error names every stage searched.
+  """
+  try:
+    return resolve_core_cli(repo)
+  except RuntimeError as error:
+    _fail(_K.CAT_LOGICAL, str(error))
 
 
 def parse_frontmatter(text: str) -> tuple[dict, int]:
@@ -821,7 +750,7 @@ def _parse_reference_targets(block: str) -> list[tuple[str, str]]:
     description = desc_part.strip()
     tokens = head.split()
 
-    # guard: not a `reference <path>` line — every other verb is another function's business
+    # only a `reference <path>` line is collected here, every other verb belongs to another parser
     if len(tokens) < 2 or tokens[0].lower() != _K.DECISION_VERB_REFERENCE:
       continue
     target = tokens[1]
@@ -831,25 +760,28 @@ def _parse_reference_targets(block: str) -> list[tuple[str, str]]:
   return reference
 
 
-def _parse_spawn_product_targets(block: str) -> list[tuple[str, str, str, dict[str, str]]]:
+def _parse_spawn_product_targets(block: str) -> list[tuple[str, str, str]]:
   """
   Scan a `<!-- routing-decision ... -->` block body for `spawn-product` lines.
 
-  Grammar: `spawn-product key=<key> path=<spec_path> [experts=<role>:<name>[,...]] ::
-  <description>`. `key=`, `path=` and the `::` separator are all mandatory — a line missing any
-  of them names no product and is skipped, exactly as every other malformed decision line is, so
-  a routing block carrying nothing else leaves the request rejected. `experts=` is optional and
-  names the role experts the request's own review already settled.
+  Grammar: `spawn-product key=<key> path=<spec_path> :: <description>`. `key=`, `path=` and the
+  `::` separator are all mandatory — a line missing any of them names no product and is skipped,
+  exactly as every other malformed decision line is, so a routing block carrying nothing else
+  leaves the request rejected. A line carrying any token other than `key=` and `path=` fails the
+  whole run, so the apply exits before anything is written.
 
   Args:
     block: Inner text of the comment block (between the opening and closing markers).
 
   Returns:
-    List of `(key, spec_path, description, experts)` tuples, dedup applied per product key
-    (preserves insertion order, first occurrence wins). `experts` maps a role to the expert name
-    bound to it, and is empty when the line carried no `experts=` field.
+    List of `(key, spec_path, description)` tuples, dedup applied per product key (preserves
+    insertion order, first occurrence wins).
+
+  Raises:
+    SystemExit: When a `spawn-product` line carries a token other than `key=` and `path=`; the run
+      fails with a logical error.
   """
-  targets: list[tuple[str, str, str, dict[str, str]]] = []
+  targets: list[tuple[str, str, str]] = []
   seen: set[str] = set()
   for raw_line in block.splitlines():
     stripped = raw_line.strip()
@@ -867,50 +799,22 @@ def _parse_spawn_product_targets(block: str) -> list[tuple[str, str, str, dict[s
     # every field is scanned rather than read positionally, so their order stays free
     fields: dict[str, str] = {}
     for tok in tokens[1:]:
-      for prefix in ( _K.DECISION_KEY_PREFIX, _K.DECISION_PATH_PREFIX, _K.DECISION_EXPERTS_PREFIX ):
-        if tok.startswith(prefix):
-          fields[prefix] = tok[len(prefix):].strip()
-          break
+      prefix = next(
+        ( known for known in ( _K.DECISION_KEY_PREFIX, _K.DECISION_PATH_PREFIX ) if tok.startswith(known) ), None
+      )
+      # guard: a field the grammar does not know is refused, never silently dropped
+      if prefix is None:
+        _fail(_K.CAT_LOGICAL, f"spawn-product line carries an unknown field '{tok}': {stripped}")
+      fields[prefix] = tok[len(prefix):].strip()
     key = fields.get(_K.DECISION_KEY_PREFIX, "")
     spec_path = fields.get(_K.DECISION_PATH_PREFIX, "")
 
     # guard: a line missing `key=` or `path=` names no product, and a key already seen repeats one
     if not key or not spec_path or key in seen:
       continue
-    experts: dict[str, str] = {}
-    for pair in fields.get(_K.DECISION_EXPERTS_PREFIX, "").split(","):
-      role, _rsep, name = pair.strip().partition(_K.ROLE_NAME_SEP)
-      if role.strip() and name.strip():
-        experts[role.strip()] = name.strip()
     seen.add(key)
-    targets.append(( key, spec_path, desc_part.strip(), experts ))
+    targets.append(( key, spec_path, desc_part.strip() ))
   return targets
-
-
-def _class_expert_names(entry: dict) -> list[str]:
-  """
-  Collect every expert name one review class's writer buckets carry.
-
-  Args:
-    entry: A review-class object as `review.classes` stores it.
-
-  Returns:
-    The names found under `experts.main`, `experts.validation` and `experts.terminal`, in that
-    order; duplicates are preserved and a bucket the class omits contributes nothing.
-  """
-  names: list[str] = []
-  experts_block = entry.get(_K.CLASS_EXPERTS) or {}
-
-  # the main bucket is a writer list, the other two are section-id keyed dicts of writers
-  for writer in experts_block.get(_K.EXPERTS_MAIN) or []:
-    if isinstance(writer, dict) and isinstance(writer.get(_K.EXPERT_NAME), str):
-      names.append(writer[_K.EXPERT_NAME])
-  for bucket in ( _K.EXPERTS_VALIDATION, _K.EXPERTS_TERMINAL ):
-    section = experts_block.get(bucket)
-    if isinstance(section, dict):
-      names.extend(writer[_K.EXPERT_NAME] for writer in section.values()
-                   if isinstance(writer, dict) and isinstance(writer.get(_K.EXPERT_NAME), str))
-  return names
 
 
 def _parse_spawn_products(block: str) -> dict[tuple[str, str], str]:
@@ -929,10 +833,10 @@ def _parse_spawn_products(block: str) -> dict[tuple[str, str], str]:
     Dict `{(kind, slug): product_key}` — only entries whose spawn line actually carried a
     non-empty `product=` field; a spawn line without one is simply absent from the dict.
   """
-  return _spawn_field(block, _K.DECISION_PRODUCT_PREFIX)
+  return _parse_spawn_field(block, _K.DECISION_PRODUCT_PREFIX)
 
 
-def _spawn_field(block: str, prefix: str) -> dict[tuple[str, str], str]:
+def _parse_spawn_field(block: str, prefix: str) -> dict[tuple[str, str], str]:
   """
   Scan a routing-decision block for one named field on each spawn line.
 
@@ -957,7 +861,7 @@ def _spawn_field(block: str, prefix: str) -> dict[tuple[str, str], str]:
     head, _sep, _desc_part = stripped.partition(_K.DECISION_DESC_SEP)
     tokens = head.split()
 
-    # guard: not a `spawn <kind> <slug> ...` line with room for optional fields
+    # only a `spawn <kind> <slug> ...` line is collected here, every other verb belongs to another parser
     # waiver: structural token count for `spawn <kind> <slug>` line format, same as the sibling
     # guard in `_parse_routing_decision_rich`
     if len(tokens) < 3 or tokens[0].lower() != _K.DECISION_VERB_SPAWN:
@@ -982,7 +886,7 @@ def _parse_spawn_paths(block: str) -> dict[tuple[str, str], str]:
     Dict `{(kind, slug): folder}` — the folder under the product's `spec_path` the asset lands
     in; a spawn line without the field is absent, and the type's `default_path` applies instead.
   """
-  return _spawn_field(block, _K.DECISION_PATH_PREFIX)
+  return _parse_spawn_field(block, _K.DECISION_PATH_PREFIX)
 
 
 def _parse_spawn_tools(block: str) -> dict[tuple[str, str], list[str]]:
@@ -997,15 +901,15 @@ def _parse_spawn_tools(block: str) -> dict[tuple[str, str], list[str]]:
     the asset's tools undetermined for the coordinator to settle on its own wake.
   """
   return { key: [ tool.strip() for tool in raw.split(",") if tool.strip() ]
-           for key, raw in _spawn_field(block, _K.DECISION_TOOLS_PREFIX).items() }
+           for key, raw in _parse_spawn_field(block, _K.DECISION_TOOLS_PREFIX).items() }
 
 
 def _parse_attach_drops(block: str) -> dict[str, list[str]]:
   """
   Scan a routing-decision block for each attach line's own `drop=` field.
 
-  `drop=` names the documents a pre-launch rollback removes from the attached asset. An attach
-  line without it drops nothing at all — the gates still roll back, the files stay.
+  `drop=` names the sibling documents the attach deletes from the attached asset. An attach
+  line without it drops nothing at all — no job is cancelled and every file stays.
 
   Args:
     block: Inner text of the comment block (between the opening and closing markers).
@@ -1023,7 +927,7 @@ def _parse_attach_drops(block: str) -> dict[str, list[str]]:
     head, _sep, _desc_part = stripped.partition(_K.DECISION_DESC_SEP)
     tokens = head.split()
 
-    # guard: not an `attach <path> ...` line with room for optional fields
+    # only an `attach <path> ...` line is collected here, every other verb belongs to another parser
     # waiver: structural token count for the `attach <path>` line format
     if len(tokens) < 2 or tokens[0].lower() != _K.DECISION_VERB_ATTACH:
       continue
@@ -1088,8 +992,9 @@ def _parse_routing(
   Returns:
     Four-tuple `(class_verdict, spawn_list, attach_list, routing_text)`.
     `class_verdict` is the lowercased verdict word or `None` when absent; when the
-    structured decision block carries spawn lines of one uniform kind, that kind is the
-    verdict and overrides any prose marker.
+    structured decision block carries spawn lines of one uniform kind that is a known
+    request class, that kind is the verdict and overrides any prose marker. Any other
+    uniform kind leaves the prose class verdict standing.
     `spawn_list` carries `(kind, slug)` pairs. `attach_list` carries folder-note
     paths — on the prose path, wikilinks whose last segment equals the previous
     one; the structured `<!-- routing-decision -->` branch takes its `attach`
@@ -1100,15 +1005,18 @@ def _parse_routing(
   # Domain(spec.requests):
   # # Routing grammar — prose verdict versus structured decision
   # A request carries its routing decision in one of two grammars. The older one is prose an
-  # operator wrote: a class verdict named in a marked line, and spawn or attach intents phrased as
+  # operator wrote: a class verdict named anywhere in the routing section as the word class
+  # followed by a colon or a bar and the class, and spawn or attach intents phrased as
   # sentences, recognised by the words they contain. The newer one is a structured decision block,
   # one decision per line, each naming a verb and its target with an optional human description.
-  # When the structured block is present it is authoritative in full and the prose is not consulted
-  # at all — the block's vocabulary is language-independent, while the prose markers are English
-  # only, so a vault authored in another language can express a decision only through the block.
-  # A block whose spawn lines all name one kind also settles the request's class, overriding any
-  # prose verdict, because the decisions themselves are stronger evidence of the class than a word
-  # somebody typed above them. Once a decision has been applied, the routing section is removed
+  # When the structured block is present, its spawn and attach decisions are authoritative in full
+  # and the prose describing them is not consulted — the block's vocabulary is
+  # language-independent, while the prose markers are English only, so a vault authored in
+  # another language can express a decision only through the block. The prose class verdict is
+  # the one exception: it is read first and stands as the request's class unless the block's spawn
+  # lines all name one kind that is a known request class. In that case the decisions themselves
+  # settle the class, being stronger evidence than a word somebody typed above them. Once a
+  # decision has been applied, the routing section is removed
   # from the request outright: it is an instruction to the apply pass, not a record, and leaving it
   # behind would invite a second application of decisions already enacted.
 
@@ -1136,8 +1044,9 @@ def _parse_routing(
     if candidate in _K.CLASS_ENUM:
       cls = candidate
 
-  # primary source: the structured `<!-- routing-decision ... -->` block; when present, its
-  # contents are authoritative and prose-parsing is skipped entirely. format:
+  # primary source: the structured `<!-- routing-decision ... -->` block; when present, its spawn
+  # and attach lines replace the prose targets, and the prose class verdict above stands unless the
+  # block's spawn lines share one known request class. format:
   # one decision per line, each with an optional `:: <description>` suffix and,
   # on a change spawn, an optional `targets=` field (see _parse_routing_decision_rich):
   #     spawn <kind> <slug> [targets=<path>[,...]] [:: <description>]
@@ -1300,7 +1209,7 @@ def _strip_prior_status_callout(body: str) -> str:
         in_status_callout = True
         continue
 
-      # guard: continuation line of a callout we are already eating
+      # drop the continuation lines of the status callout being stripped
       if in_status_callout:
         continue
       out_lines.append(line)
@@ -1350,7 +1259,7 @@ def _insert_status_callout(body: str, callout: str) -> str:
   """
   m_h1 = re.search(r"(?m)^# ", body)
 
-  # guard: no H1 — prepend at start
+  # a body without an H1 gets the callout at its start
   if not m_h1:
     return callout + "\n\n" + body
   return body[:m_h1.start()] + callout + "\n\n" + body[m_h1.start():]
@@ -1404,58 +1313,6 @@ def _del_fm_key(fm_text: str, key: str) -> str:
   return pat.sub("", fm_text, count = 1)
 
 
-def _is_launched_feature(note_fm: dict, folder_note: Path) -> bool:
-  """
-  Decide whether a feature has already launched its implementation.
-
-  Mirrors the launched-feature definition the coordinator (`lazy-spec.coordinator.md`) uses to keep a
-  launched feature off the attach path in the first place — this check is the worker-side
-  safety net for a coordinator mistake, not the primary enforcement.
-
-  Args:
-    note_fm: The folder-note's parsed frontmatter.
-    folder_note: Absolute path to the feature's `<slug>/<slug>.md`, used to check for a
-      `code-report.md` sibling.
-
-  Returns:
-    True when `spec_develop_done` is true, the active job's checkbox is `Start implementation`,
-    or a `code-report.md` sibling already exists.
-  """
-  # signal 1 — the develop-done gate is the strongest, most direct launched marker
-  if note_fm.get(Gate.DEVELOP_DONE, "").strip().lower() == BOOL_TRUE:
-    return True
-
-  # signal 2 — an active job dispatched for the implementation checkbox counts as launched
-  # even before spec_develop_done itself flips true
-  job_info = spec_job_markers.read(flip_gate.repo_root(folder_note.parent), folder_note)[JobMarker.ACTIVE_JOB]
-  if isinstance(job_info, dict) and job_info.get(JobMarker.CHECKBOX) == GateCheckbox.START_IMPLEMENTATION:
-    return True
-
-  # signal 3 — a code-report.md sibling can only exist once implementation has actually run
-  return (folder_note.parent / SiblingDoc.CODE_REPORT).is_file()
-
-
-def _has_ladder_started(note_fm: dict, folder_note: Path) -> bool:
-  """
-  Decide whether a feature's implementation ladder has already been set in motion.
-
-  Args:
-    note_fm: The folder-note's parsed frontmatter.
-    folder_note: Absolute path to the feature's `<slug>/<slug>.md`.
-
-  Returns:
-    True when an `architecture.md` / `code-plan.md` / `test-plan.md` sibling exists, or any gate
-    from `spec_plan_done` onward already reads true; False for an untouched feature.
-  """
-  if (
-      (folder_note.parent / SiblingDoc.ARCHITECTURE).is_file()
-      or (folder_note.parent / SiblingDoc.CODE_PLAN).is_file()
-      or (folder_note.parent / SiblingDoc.TEST_PLAN).is_file()
-  ):
-    return True
-  return any(note_fm.get(gate, "").strip().lower() == BOOL_TRUE for gate in _ROLLBACK_GATES)
-
-
 def _sweep_request_tag(fm_text: str, new_tag_member: str) -> str:
   """
   Replace every `request/*` member in the `tags:` block with the new one; keep other tags.
@@ -1468,18 +1325,8 @@ def _sweep_request_tag(fm_text: str, new_tag_member: str) -> str:
     Frontmatter text with the `request/*` mirror-tag swept and rewritten;
     non-`request/*` members untouched.
   """
-  # the first `request/*` member is replaced in place, every other one dropped, the rest kept
-  members: list[str] = []
-  for member in spec_frontmatter.read_list(fm_text, _K.TAGS):
-    if not member.startswith(_K.TAG_PREFIX):
-      members.append(member)
-    elif new_tag_member not in members:
-      members.append(new_tag_member)
-
-  # a list carrying no `request/*` member yet gains the new one at its end
-  if new_tag_member not in members:
-    members.append(new_tag_member)
-  return spec_frontmatter.write_list(fm_text, _K.TAGS, members)
+  # the request mirror tag is the shared sweep bound to the `request/` prefix
+  return spec_frontmatter.sweep_tag(fm_text, _K.TAG_PREFIX, new_tag_member)
 
 
 def _stamp_request_terminal(fm_text: str, *, request_class: str, request_status: str) -> str:
@@ -1496,8 +1343,7 @@ def _stamp_request_terminal(fm_text: str, *, request_class: str, request_status:
   """
   fm_text = _set_fm_scalar(fm_text, _K.REQUEST_CLASS, request_class)
   fm_text = _set_fm_scalar(fm_text, _K.REQUEST_STATUS, request_status)
-  fm_text = _sweep_request_tag(fm_text, f"{_K.TAG_PREFIX}{request_status}")
-  return fm_text
+  return _sweep_request_tag(fm_text, f"{_K.TAG_PREFIX}{request_status}")
 
 
 def _request_h1_title(body: str) -> str:
@@ -1529,11 +1375,11 @@ def _request_content_block(body: str) -> str:
   for sec in re.finditer(r"(?ms)^# (\S.*?)$(.*?)(?=^# \S|\Z)", body):
     title = sec.group(1).strip()
 
-    # guard: skip the routing section — it is the apply worker's input, not body content
+    # leave out the routing section — it is the apply worker's input, not body content
     if title.lower() == _K.ROUTING_H1[2:].lower():
       continue
 
-    # guard: skip the history section — it is per-document review state, not request prose
+    # leave out the history section — it is per-document review state, not request prose
     if title.lower() == _K.HISTORY_H1[2:].lower():
       continue
     segments.append(f"# {title}\n{sec.group(2).rstrip()}\n")
@@ -1649,17 +1495,18 @@ class _Attach:
     values, fm_end = parse_frontmatter(text)
 
     # the entries already listed, each reduced to its bare wikilink target
-    for raw in values.get(_K.SPEC_SOURCE_REQUESTS) or []:
-      pure = raw.strip().strip('"').strip("'").split("|")[0].strip("[]")
+    listed = [ raw.strip().strip('"').strip("'").split("|")[0].strip("[]")
+               for raw in values.get(_K.SPEC_SOURCE_REQUESTS) or [] ]
 
-      # guard: idempotent — request already listed
-      if pure == request_wikilink:
-        return False
+    # guard: idempotent — request already listed
+    if request_wikilink in listed:
+      return False
 
     # the request joins both projections, frontmatter list and body section, in one write
     write_text_atomic(doc_path,
                       _Attach.append_source_requests_fm(text[:fm_end], f"[[{request_wikilink}]]")
-                      + _Attach._project_requests_body(text[fm_end:], request_wikilink, request_display))
+                      + _Attach._project_requests_body(text[fm_end:], [ *listed, request_wikilink ],
+                                                       request_wikilink, request_display))
     return True
 
   @staticmethod
@@ -1680,54 +1527,26 @@ class _Attach:
         [ *spec_frontmatter.read_list(fm_text, _K.SPEC_SOURCE_REQUESTS), member ])
 
   @staticmethod
-  def _project_requests_body(body: str, request_wikilink: str,
+  def _project_requests_body(body: str, targets: list[str], request_wikilink: str,
                              request_display: str) -> str:
     """
-    Append the request bullet inside the `## Requests` projection markers.
+    Re-project the `## Requests` bullets from every request the doc lists, keeping existing bullets.
+
+    The new request's bullet shows `request_display` and today's date.
 
     Args:
       body: Doc body (post-frontmatter).
-      request_wikilink: Wikilink target.
-      request_display: Display gloss.
+      targets: Every request wikilink target the frontmatter lists, the new one included.
+      request_wikilink: Wikilink target of the request being attached.
+      request_display: Display text for the new request's bullet.
 
     Returns:
-      Body with the new bullet appended between the projection markers; the
-      `# Sources` container and `## Requests` sub-section are created on demand
-      when absent.
+      Body with the projection markers holding one bullet per listed request; the `# Sources`
+      container and `## Requests` sub-section are created on demand when absent.
     """
-    # the dated bullet is the projection's unit, and doubles as the idempotence key below
-    new_bullet = f"- [[{request_wikilink}|{request_display}]] — {_today_iso()}"
-
-    # an existing marker pair means the projection is already in place, so append inside it
-    if _K.REQUESTS_MARKER_START in body and _K.REQUESTS_MARKER_END in body:
-      pat = re.compile(
-          rf"({re.escape(_K.REQUESTS_MARKER_START)}\n)(.*?)(\n?{re.escape(_K.REQUESTS_MARKER_END)})",
-          re.DOTALL,
-      )
-      match = pat.search(body)
-      if match:
-        block = match.group(2)
-
-        # guard: bullet already projected, a re-run must not duplicate it
-        if new_bullet in block:
-          return body
-        new_block = block.rstrip("\n")
-        new_block = (new_block + "\n" if new_block else "") + new_bullet
-        return body[:match.start(2)] + new_block + body[match.end(2):]
-
-    # no marker pair yet, so the whole container and sub-section are created around the bullet
-    container = "\n".join([
-        "",
-        _K.SOURCES_H1,
-        _K.SOURCES_TAG,
-        "",
-        _K.REQUESTS_H2,
-        _K.REQUESTS_MARKER_START,
-        new_bullet,
-        _K.REQUESTS_MARKER_END,
-        "",
-    ])
-    return body.rstrip() + "\n" + container
+    # the shared projection keeps every listed request's bullet and dates the new one today
+    return Markers().project_requests(body, targets, today = _today_iso(),
+                                      displays = { request_wikilink: request_display })
 
 
 class _FolderNote:
@@ -1775,10 +1594,7 @@ class _FolderNote:
       return False
 
     # the new bullet, dated today
-    # waiver: `today` stays a named local — tests/specs/request/automatic pins this bullet's source
-    # text verbatim to prove it is composed only of the wikilink, the gloss and the date
-    today = _today_iso()
-    bullet = f"- [[{request_wikilink}|{request_display}]] — {today}"
+    bullet = f"- [[{request_wikilink}|{request_display}]] — {_today_iso()}"
 
     # an existing section takes the bullet at its end; a missing one is created around it
     match = re.search(
@@ -1789,12 +1605,10 @@ class _FolderNote:
       new_text = (text[:match.start(1)] + cleaned + ("\n\n" if cleaned else "\n") + bullet + "\n"
                   + text[match.end(1):])
     else:
-      # insert the section before the `## History` anchor when present, otherwise append
-      # TODO: the status folder-note body shape uses `# History` (H1, Section.HISTORY) since A4,
-      # so HISTORY_H2 = "## History" is a stale anchor kept only for pre-migration notes whose
-      # operator-zone still carries the legacy H2; update the anchor to Section.HISTORY and
-      # verify the insert lands above the protected `# History` section (A9-code task).
-      hist_idx = text.find(f"\n{_K.HISTORY_H2}\n")
+      # the new section goes above the protected `# History` H1, else above an unmigrated note's legacy
+      # `## History` heading, else at the end, so it never lands inside the history section
+      hist_idx = next((idx for idx in (text.find(f"\n{Section.HISTORY}\n"), text.find(f"\n{_K.HISTORY_H2}\n"))
+                       if idx >= 0), -1)
       block_text = f"{_K.SOURCE_REQUESTS_H2}\n\n{bullet}\n\n"
       if hist_idx >= 0:
         new_text = text[:hist_idx + 1] + block_text + text[hist_idx + 1:]
@@ -1836,8 +1650,10 @@ class _Apply:
     attach_folder_notes: Folder-notes populated by enacting an attach target during this run.
     warnings: Non-fatal issues collected during this run, such as an unresolvable design-cascade
       target named in a change spawn's `targets=` field.
-    submit_docs: Populated docs that must re-enter review via `submit` (skipping the opening
-      writer round) instead of `start`, because a pre-launch ladder rollback re-opened them.
+    dropped_docs: Sibling documents deleted from disk by an attach `drop=` during this run; those still
+      tracked by git are staged in the run's single commit.
+    cancelled_assets: Folders of attached assets whose live expert job an attach `drop=` cancelled during this
+      run without deleting any of their documents.
     spawn_product_dirs: Spec folders created by enacting a `spawn-product` target during this run.
     settings_written: True once this run has persisted a settings section, so the settings file
       joins the commit set.
@@ -1853,21 +1669,22 @@ class _Apply:
       author_email: Git author email for the atomic commit.
 
     Raises:
-      SystemExit: When the `lazycortex-specs` or `lazycortex-review` sibling CLI cannot be
-        resolved via `$LAZYCORTEX_PLUGIN_DIRS`.
+      SystemExit: When no lookup stage can find the `lazycortex-specs` or `lazycortex-review`
+        sibling CLI.
     """
     self.file_path = file_path.resolve()
     self.repo = _repo_root(self.file_path.parent)
     self.author_name = author_name
     self.author_email = author_email
-    self.specs_cli = _resolve_sibling_cli(_K.CLI_LAZYCORTEX_SPECS)
-    self.review_cli = _resolve_sibling_cli(_K.CLI_LAZYCORTEX_REVIEW)
+    self.specs_cli = _resolve_sibling_cli(_K.CLI_LAZYCORTEX_SPECS, self.repo)
+    self.review_cli = _resolve_sibling_cli(_K.CLI_LAZYCORTEX_REVIEW, self.repo)
     self.populated_docs: list[Path] = []
     self.spawn_folder_notes: list[Path] = []
     self.spawn_group_notes: list[Path] = []
     self.attach_folder_notes: list[Path] = []
     self.warnings: list[str] = []
-    self.submit_docs: list[Path] = []
+    self.dropped_docs: list[Path] = []
+    self.cancelled_assets: set[Path] = set()
     self.spawn_product_dirs: list[Path] = []
     self.settings_written = False
 
@@ -2001,7 +1818,7 @@ class _Apply:
       return {}
     return record or {}
 
-  def _known_kinds(self) -> frozenset[str]:
+  def _read_known_kinds(self) -> frozenset[str]:
     """
     Collect every asset type a spawn line may name in this repo.
 
@@ -2120,7 +1937,7 @@ class _Apply:
         non-zero, or its output is not JSON.
     """
     res = subprocess.run(
-        [ sys.executable, str(_resolve_sibling_cli(_K.CLI_LAZYCORTEX_CORE)), _K.CLI_SETTINGS_GET, section,
+        [ sys.executable, str(_resolve_core(self.repo)), _K.CLI_SETTINGS_GET, section,
           _K.CLI_CWD_FLAG, str(self.repo) ],
         cwd = str(self.repo), capture_output = True, text = True, check = False, encoding = "utf-8",
     )
@@ -2151,7 +1968,7 @@ class _Apply:
         `settings-set` CLI exits non-zero.
     """
     res = subprocess.run(
-        [ sys.executable, str(_resolve_sibling_cli(_K.CLI_LAZYCORTEX_CORE)), _K.CLI_SETTINGS_SET, section,
+        [ sys.executable, str(_resolve_core(self.repo)), _K.CLI_SETTINGS_SET, section,
           _K.CLI_CWD_FLAG, str(self.repo) ],
         input = json.dumps(value), cwd = str(self.repo),
         capture_output = True, text = True, check = False, encoding = "utf-8",
@@ -2165,141 +1982,6 @@ class _Apply:
 
     # the settings file changed, so it must reach this pass's commit pathspec
     self.settings_written = True
-
-  @staticmethod
-  def _retarget_experts(experts_block: dict, label: str, experts: dict[str, str]) -> bool:
-    """
-    Rewrite one cloned review class's writer names onto a spawned product's role experts.
-
-    Args:
-      experts_block: The class's own `experts` object, mutated in place.
-      label: The bare class label, naming the role its first main writer fills; every later
-        main writer takes the `editor` role instead.
-      experts: The spawned product's role-to-expert mapping.
-
-    Returns:
-      True when at least one writer name actually changed, False when the class already carries
-      the product's experts and therefore needs no product-scoped override.
-    """
-    changed = False
-    main_role = _OVERRIDE_CLASSES[label][0]
-
-    # Domain(review.config):
-    # # Main writers of a review class
-    # A review class lists its author as its first main writer, and any main writer after the
-    # author is the editor, who brings the author's prose to the writing canon. So only the first
-    # main writer fills the role the class is named for, and every later one fills the editor's.
-
-    # the first main writer fills the class's own role, every later one the editor's
-    for index, writer in enumerate(experts_block.get(_K.EXPERTS_MAIN) or []):
-      role = main_role if index == 0 else _K.EDITOR_ROLE
-      if isinstance(writer, dict) and role in experts and writer.get(_K.EXPERT_NAME) != experts[role]:
-        writer[_K.EXPERT_NAME] = experts[role]
-        changed = True
-
-    # a validation writer names its own role in its section id (`<role>_review`)
-    if isinstance(validation := experts_block.get(_K.EXPERTS_VALIDATION), dict):
-      for section_id, writer in validation.items():
-        role = str(section_id).removesuffix(_K.VALIDATION_ROLE_SUFFIX)
-        if isinstance(writer, dict) and role in experts and writer.get(_K.EXPERT_NAME) != experts[role]:
-          writer[_K.EXPERT_NAME] = experts[role]
-          changed = True
-    return changed
-
-  def _plan_review_classes(self, key: str, spec_path: str,
-                           experts: dict[str, str]) -> dict | None:
-    """
-    Compose the review section a spawned product needs, without writing anything.
-
-    Follows `lazy-spec.product-config` Step 12's deterministic branch: a product whose experts
-    match the shared set rides that set and gets no class of its own; a product with at least one
-    diverging role gets the affected classes re-emitted as `<type>@<key>` overrides, carrying
-    product-scoped globs. A scoped class outranks the bare one by how deep its globs anchor
-    before their first wildcard, so a nested product's own override always beats its parent's;
-    list position only breaks an equal-depth tie, and drives the match for an untyped document.
-
-    Args:
-      key: The spawned product's compound key.
-      spec_path: The product's content-root-relative spec directory.
-      experts: The product's role-to-expert mapping, as the routing decision resolved it.
-
-    Returns:
-      The whole `review` section with this product's overrides spliced in, or `None` when the
-      product needs no class of its own and nothing should be written.
-
-    Raises:
-      SystemExit: When an override would name an expert absent from the registry, when the
-        `lazycortex-core` sibling CLI cannot be resolved, or when reading a settings section
-        fails (a non-zero `settings-get` exit or malformed JSON output).
-    """
-
-    # overrides are cloned from the shared classes already on record, so a vault carrying no
-    # shared set gets none; seeding a class table from nothing is `/lazy-spec.product-config`'s job
-    review = self._read_settings_section(_K.SETTINGS_REVIEW)
-    classes = review.get(_K.REVIEW_CLASSES)
-
-    # guard: no class list to clone from — nothing this worker can derive an override out of
-    if not isinstance(classes, list):
-      return None
-
-    # the shared set is every bare-labelled class; a later duplicate never displaces the first
-    shared: dict[str, dict] = {}
-    for entry in classes:
-      if isinstance(entry, dict) and isinstance(entry.get(_K.CLASS_LABEL), str):
-        label = entry[_K.CLASS_LABEL]
-        if _K.OVERRIDE_LABEL_SEP not in label:
-          shared.setdefault(label, entry)
-
-    # Decision: only the classes whose writer actually changed are re-emitted, not Step 12's full
-    # set — a class the product does not diverge on is served correctly by the shared set, and
-    # a needless `<type>@<key>` clone would freeze today's shared writers for this product,
-    # silently opting it out of every later change to them.
-
-    # a class is cloned only when the product's experts actually differ from the shared writer's
-    overrides: list[dict] = []
-    for label, ( _role, globs ) in _OVERRIDE_CLASSES.items():
-      base = shared.get(label)
-
-      # guard: a type the vault declares no shared class for has nothing to shadow
-      if base is None:
-        continue
-      entry = copy.deepcopy(base)
-
-      # guard: the shared class already names this product's experts — it needs no shadow
-      if not self._retarget_experts(entry.get(_K.CLASS_EXPERTS) or {}, label, experts):
-        continue
-      entry[_K.CLASS_LABEL] = f"{label}{_K.OVERRIDE_LABEL_SEP}{key}"
-      entry[_K.CLASS_PATHS] = [ glob.replace(_SPEC_PATH_TOKEN, spec_path) for glob in globs ]
-      overrides.append(entry)
-
-    # guard: every role matches the shared set — the product rides it, no class is written
-    if not overrides:
-      return None
-
-    # a dangling expert reference must be impossible to persist (`lazy-spec.product-config`
-    # Step 12), so every name the overrides are about to carry is re-checked against the registry
-    registered = self._read_settings_section(_K.SETTINGS_EXPERTS)
-    missing = sorted({ name for entry in overrides for name in _class_expert_names(entry)
-                       if name not in registered })
-
-    # guard: a class naming an expert nobody registered would dispatch its documents to nothing
-    if missing:
-      _fail(_K.CAT_LOGICAL,
-            f"spawn-product '{key}': review classes would name unregistered experts: "
-            f"{', '.join(missing)}")
-
-    # a re-run replaces this product's own overrides and leaves every other product's alone
-    suffix = f"{_K.OVERRIDE_LABEL_SEP}{key}"
-    kept = [ entry for entry in classes
-             if not (isinstance(entry, dict)
-                     and str(entry.get(_K.CLASS_LABEL, "")).endswith(suffix)) ]
-    insert_at = next(
-        ( index for index, entry in enumerate(kept)
-          if isinstance(entry, dict) and entry.get(_K.CLASS_LABEL) in _OVERRIDE_CLASSES ),
-        len(kept),
-    )
-    review[_K.REVIEW_CLASSES] = kept[:insert_at] + overrides + kept[insert_at:]
-    return review
 
   def _is_language_inherited(self, ancestor_key: str | None) -> bool:
     """
@@ -2327,16 +2009,11 @@ class _Apply:
     inside a registered product's tree whose folder-note carries no role — a plain group
     folder — is that product's own ground, which a nested product spawns onto.
 
-    Guarantees:
-      - A key already on record under the very same `spec_path` is re-applied as a no-op: the
-        recorded record is never rewritten, so a re-run never clobbers fields an operator has
-        since edited.
-      - Every refusal is raised before the first settings write, so a refused registration
-        leaves `lazy.settings.json` byte-identical.
-      - `language` is written only when no product enclosing the new one already supplies one,
-        so a nested product never shadows the language its ancestors set.
-      - The saved record carries no `source` block and no empty asset-type, tool-type, or
-        guideline placeholder keys.
+    A key already on record under the very same `spec_path` is re-applied as a no-op, leaving the
+    recorded record as an operator may have edited it. Every refusal is raised before the first
+    settings write. `language` is written only when no enclosing product already supplies one, and
+    the saved record carries no `source` block and no empty asset-type, tool-type, or guideline
+    placeholder keys.
 
     Args:
       key: The product compound-key the routing decision named.
@@ -2352,32 +2029,78 @@ class _Apply:
         product record fails (a non-zero `settings-set` exit).
     """
 
-    # Contract:
-    # A key already on record under the same `spec_path` is re-applied as a no-op — the recorded
-    # record is never rewritten, so a re-run never clobbers fields an operator has since edited.
-
-    # Contract:
-    # Every refusal is raised before the first settings write, so a refused registration leaves
-    # `lazy.settings.json` byte-identical.
+    # every refusal is raised here, before the registry is read for writing
+    self._validate_product_target(key, spec_path)
 
     # the registry as it stands, and whatever it already records under this key
     products = self._read_settings_section(_K.PRODUCTS)
     recorded = products.get(key)
 
+    # guard: a key already on record under the same path is re-applied idempotently, never rewritten
+    if isinstance(recorded, dict) and recorded.get(_K.SPEC_PATH) == spec_path:
+      return
+
+    # the nearest registered product enclosing this path — the ancestor a nested product inherits
+    # its effective record from; None at the top level
+    ancestor_key, _ancestor = resolve_product.resolve_product_by_path(self.repo, spec_path)
+
+    # the record carries no `source` block and no empty asset-type, tool-type or guideline
+    # placeholders: a request registers the spec tree only, and `tool_types` is inherited whole
+    # from the nearest declaring ancestor, so an empty one here would shadow what they declare
+    record: dict = { _K.SPEC_PATH: spec_path }
+
+    # Domain(spec.config):
+    # # A nested product never shadows its ancestors' language
+    # A product spawned from a request is given the vault's own document language only when no
+    # product enclosing it already supplies one. A nested product that carries no language of
+    # its own keeps following the language its ancestors set, so a parent's choice reaches the
+    # whole tree beneath it instead of being overridden by the vault default at each level.
+
+    # the vault's own language, when it declares one; a vault that declares none leaves the key
+    # absent, so the product keeps following whatever `spec.language` becomes
+    language = self._read_settings_section(_K.SETTINGS_SPEC).get(_K.LANGUAGE)
+    if isinstance(language, str) and language and not self._is_language_inherited(ancestor_key):
+      record[_K.LANGUAGE] = language
+
+    # the product's default icon, then the registration itself written back to the settings
+    record[_K.ICON] = _K.ICON_PRODUCT
+    products[key] = record
+    self._write_settings_section(_K.PRODUCTS, products)
+
+  def _validate_product_target(self, key: str, spec_path: str) -> None:
+    """
+    Refuse a `spawn-product` target the registry or the disk cannot take, writing nothing.
+
+    A key already on record under the very same `spec_path` is accepted without further checks.
+    Neither the settings nor the disk are touched.
+
+    Args:
+      key: The product compound-key the routing decision named.
+      spec_path: The product's content-root-relative spec directory.
+
+    Raises:
+      SystemExit: When the key is on record under a different `spec_path`, when another key is
+        already registered at this very `spec_path`, when its directory already carries a
+        folder-note declaring any `spec_role` (another product's level note or an asset's
+        status note), when its directory exists outside every registered product's tree, when
+        the `lazycortex-core` sibling CLI cannot be resolved, or when reading a settings
+        section fails (a non-zero `settings-get` exit or malformed JSON output).
+    """
+
+    # the registry as it stands, and whatever it already records under this key
+    recorded = self._read_settings_section(_K.PRODUCTS).get(key)
+
     # guard: the key is already registered — only a matching path is accepted, as a no-op
     if isinstance(recorded, dict):
-      # guard: the registry keeps the path, the decision drives the folder and the review globs —
-      # a divergence would coordinate one tree and scaffold another, so it is never guessed
+      # guard: the registry keeps the path the coordinators watch, the decision names the folder to
+      # scaffold — a divergence would coordinate one tree and scaffold another, so it is never guessed
       if recorded.get(_K.SPEC_PATH) != spec_path:
         _fail(_K.CAT_LOGICAL,
               f"spawn-product '{key}': registered spec_path "
               f"'{recorded.get(_K.SPEC_PATH)}' does not match the decision's path '{spec_path}'")
-
-      # a key already on record under the same path is re-applied idempotently, never rewritten
       return
 
-    # the nearest registered product enclosing this path — the ancestor a nested product is
-    # spawned under, and the one whose effective record it inherits; None at the top level
+    # the nearest registered product enclosing this path
     ancestor_key, ancestor = resolve_product.resolve_product_by_path(self.repo, spec_path)
 
     # guard: the path itself is already somebody's product root — a second key over the same tree
@@ -2386,6 +2109,8 @@ class _Apply:
       _fail(_K.CAT_LOGICAL,
             f"spawn-product '{key}': path '{spec_path}' is already registered "
             f"under the key '{ancestor_key}'")
+
+    # the product's directory on disk, which the remaining guards inspect
     target = spec_content_root(self.repo) / spec_path
 
     # guard: a folder already carrying a spec folder-note of its own is taken — a level note
@@ -2401,30 +2126,6 @@ class _Apply:
       _fail(_K.CAT_LOGICAL,
             f"spawn-product '{key}': path '{spec_path}' already exists on disk and belongs to "
             "no registered product")
-
-    # Contract:
-    # The saved product record carries no `source` block and no empty asset-type, tool-type,
-    # or guideline placeholder keys.
-
-    # the record carries no `source` block and no empty asset-type, tool-type or guideline
-    # placeholders: a request registers the spec tree only, and `tool_types` is inherited whole
-    # from the nearest declaring ancestor, so an empty one here would shadow what they declare
-    record: dict = { _K.SPEC_PATH: spec_path }
-
-    # Contract:
-    # `language` is written onto a spawned product only when no product enclosing it already
-    # supplies one, so a nested product never shadows the language its ancestors set.
-
-    # the vault's own language, when it declares one; a vault that declares none leaves the key
-    # absent, so the product keeps following whatever `spec.language` becomes
-    language = self._read_settings_section(_K.SETTINGS_SPEC).get(_K.LANGUAGE)
-    if isinstance(language, str) and language and not self._is_language_inherited(ancestor_key):
-      record[_K.LANGUAGE] = language
-
-    # the product's default icon, then the registration itself written back to the settings
-    record[_K.ICON] = _K.ICON_PRODUCT
-    products[key] = record
-    self._write_settings_section(_K.PRODUCTS, products)
 
   def _seed_level_vision(self, key: str, note: Path) -> Path:
     """
@@ -2461,59 +2162,45 @@ class _Apply:
             f"stderr={res.stderr.strip()[:240]}")
     return vision
 
-  def _spawn_product(self, key: str, spec_path: str, experts: dict[str, str],
-                     request_display: str) -> Path:
+  def _spawn_product(self, key: str, spec_path: str, request_display: str) -> Path:
     """
-    Enact one `spawn-product` decision, from the settings record through to the opened review.
+    Enact one `spawn-product` decision, leaving the new product registered with its level note and a
+    seeded `vision.md` that carries the request's attribution.
 
-    Runs the registration order the catalog spec fixes: the settings record, the product's own
-    review classes, the spec folder, the level note, its seeded `vision.md`, and the request's
-    attribution on that document — every write landing in this pass's single commit.
+    Every write lands in this pass's single commit.
 
-    Guarantees:
-      - Every refusal this enactment can raise over the settings file lands before its first
-        settings write, so a refused spawn-product leaves the settings file byte-identical.
+    Every refusal over the registry or the directory is raised before this enactment's first write.
 
     Args:
       key: The product compound-key the routing decision named.
       spec_path: The product's content-root-relative spec directory.
-      experts: The product's role-to-expert mapping; empty when the decision named none.
       request_display: Display gloss used in the vision document's `## Requests` bullet.
 
     Returns:
       Absolute path to the product's level folder-note.
 
     Raises:
-      SystemExit: When a role override would name an expert absent from the settings registry,
-        when the product key or its `spec_path` conflicts with an existing registration, when
-        the directory already carries a folder-note declaring any `spec_role` (another
+      SystemExit: When the product key or its `spec_path` conflicts with an existing registration,
+        when the directory already carries a folder-note declaring any `spec_role` (another
         product's level note or an asset's status note), when the directory exists outside
         every registered product's tree, when reading or persisting a settings section fails,
-        when the `lazycortex-core` sibling CLI cannot be resolved, or when seeding the level's
-        `vision.md` fails.
+        when the `lazycortex-core` sibling CLI cannot be resolved, when the level note is
+        refused, or when seeding the level's `vision.md` fails.
     """
 
-    # Contract:
-    # Every settings refusal — an occupied or already-registered `spec_path`, and an override
-    # naming an unregistered expert — MUST be raised before the first `settings-set`, so a
-    # refused spawn-product never leaves half of its registration (the product record without
-    # its classes, or the reverse) persisted in `lazy.settings.json`.
-
-    # a decision that settled no role experts leaves the vault's shared classes serving the product
-    pending_review = self._plan_review_classes(key, spec_path, experts) if experts else None
-
-    # the registration itself, then the product's own classes when it diverges from the shared set
+    # the product's settings record comes first, so every later write has a registered key
     self._register_product(key, spec_path)
-    if pending_review is not None:
-      self._write_settings_section(_K.SETTINGS_REVIEW, pending_review)
 
     # the product's spec root on disk, recorded so the commit carries it
     folder = spec_content_root(self.repo) / spec_path
     folder.mkdir(parents = True, exist_ok = True)
     self.spawn_product_dirs.append(folder)
 
-    # the product's level note, created or brought up to the level schema
-    note = self.repo / catalog_note.backfill(self.repo, product = key, root = False)[_K.NOTE_KEY]
+    # the product's level note, created or brought up to the level schema; a refused level note ends the apply
+    try:
+      note = self.repo / catalog_note.backfill(self.repo, product = key, root = False)[_K.NOTE_KEY]
+    except scaffold_asset.ScaffoldRefusal as refusal:
+      _fail(refusal.category, refusal.message)
 
     # attribution on the document itself is the review trigger, exactly as an attach's is
     vision = self._seed_level_vision(key, note)
@@ -2604,7 +2291,8 @@ class _Apply:
     # guard: an empty token, or one stepping out of the product tree, names nothing
     if not parts or any(part in (".", "..") for part in parts):
       return None
-    candidate = self._resolve_folder_note_path(f"{spec_path}/{'/'.join(parts)}/{parts[-1]}")
+    # `spec_path` is content-root-relative, so the token resolves under the content root
+    candidate = spec_content_root(self.repo).joinpath(spec_path, *parts, f"{parts[-1]}{_K.MD_SUFFIX}")
     return candidate if candidate.is_file() else None
 
   def _validate_change_targets(self, spec_path: str,
@@ -2646,20 +2334,14 @@ class _Apply:
     """
     Write the request's resolved `reference` decision targets into its own frontmatter.
 
-    Guarantees:
-      - The referenced asset's own doc and folder-note are never touched — no doc edit, no
-        `spec_source_requests` attribution, no review opened. The link lives only on the
-        request file's own `spec_targets`.
+    The referenced asset's own doc and folder-note are left untouched — no doc edit, no
+    `spec_source_requests` attribution, no review opened. The link lives only on the request
+    file's own `spec_targets`.
 
     Args:
       resolved_paths: Repo-relative folder-note paths (wikilink form, no `.md` suffix) the
         `reference` decision named — every one already confirmed to resolve to a real asset.
     """
-
-    # Contract:
-    # A `reference` routing decision touches NOTHING on the referenced asset — no doc edit, no
-    # `spec_source_requests` attribution, no review opened. The link lives ONLY on the request
-    # file's own `spec_targets`.
 
     # ref: `lazy-spec.coordination-playbook.md` Chapter 7 — a reference target is recorded in the
     # request's own `spec_targets`, the list key a change's design cascade also writes
@@ -2672,11 +2354,11 @@ class _Apply:
 
   def _cancel_active_job(self, job_info: dict) -> bool:
     """
-    Cancel a feature's live expert job via the `lazycortex-core cancel-job` CLI.
+    Cancel an asset's live expert job via the `lazycortex-core cancel-job` CLI.
 
     Unlike a best-effort follow-up, a caller cannot treat this as fire-and-forget: a False
     return means the job may still be running and must be handled accordingly rather than
-    letting the rollback proceed.
+    letting the document deletion proceed.
 
     Args:
       job_info: The tracked active-job marker (`checkbox` / `expert` / `job_id`).
@@ -2686,8 +2368,7 @@ class _Apply:
       non-zero exit, meaning the job may still be live.
 
     Raises:
-      SystemExit: When the `lazycortex-core` sibling CLI cannot be resolved via
-        `$LAZYCORTEX_PLUGIN_DIRS`.
+      SystemExit: When no lookup stage can find the `lazycortex-core` sibling CLI.
     """
     # the core CLI resolves the job against this repo's runtime, named through the environment
     env = os.environ.copy()
@@ -2695,7 +2376,7 @@ class _Apply:
 
     # the cancel request names the job by its expert and id; only a clean exit counts as cancelled
     res = subprocess.run(
-        [ sys.executable, str(_resolve_sibling_cli(_K.CLI_LAZYCORTEX_CORE)), "cancel-job" ],
+        [ sys.executable, str(_resolve_core(self.repo)), "cancel-job" ],
         input = json.dumps({
             "expert": job_info.get(JobMarker.EXPERT),
             "job_id": job_info.get(JobMarker.JOB_ID),
@@ -2710,14 +2391,13 @@ class _Apply:
 
   def _stop_review_best_effort(self, doc_path: Path) -> None:
     """
-    Stop review, best-effort, on a sibling doc about to be dropped.
+    Stop review, best-effort, on a sibling doc an attach `drop=` names for deletion.
 
     Safe to call unconditionally, whether or not the doc was ever opened into review; any
     failure degrades to a silent skip, since the doc is about to be deleted regardless.
 
     Args:
-      doc_path: Absolute path to the `architecture.md` / `code-plan.md` / `test-plan.md` sibling
-        being dropped.
+      doc_path: Absolute path to the sibling document being dropped.
     """
     try:
       subprocess.run(
@@ -2731,121 +2411,143 @@ class _Apply:
       pass
 
 
-  def _rollback_pre_launch_ladder(self, folder_note: Path, drop_docs: list[str]) -> None:
+  def _drop_attached_docs(self, folder_note: Path, drop_docs: list[str]) -> None:
     """
-    Roll a feature's implementation ladder back to the pre-launch state.
+    Delete the sibling documents an attach line's `drop=` names from the attached asset.
 
-    Enacted when an attach request lands on a not-yet-halted feature whose ladder has already
-    started but has not yet launched implementation (the caller refuses to call this at all on
-    an already-halted asset). On success the feature ends in the same gate state as one that
-    never started its ladder. Every failure halts the asset (a half-dropped ladder — job
-    cancelled, pre-launch siblings gone, but the gates never actually flipped — is worse than an
-    intact one) and aborts the whole apply run without proceeding to the attribution step, whether
-    the failure is a job that never confirmed cancelled, a pre-launch sibling surviving its own
-    deletion, or a gate flip refused outright by a cancelled asset after the earlier steps
-    already ran.
+    Applies to every asset type and never flips a gate. An empty `drop_docs` cancels and deletes
+    nothing. Otherwise the asset's live expert job is cancelled, review on each named sibling is
+    stopped on a best-effort basis, and the siblings are deleted; each deleted path is recorded
+    in `dropped_docs` for the run's single commit as soon as it is deleted. A failed review stop
+    never aborts the drop. Once a running job is confirmed cancelled, any failure before this
+    asset's first deletion (clearing the job's tracking record, reading the folder, a surviving
+    named sibling, any other error) halts the asset here with `PLAN_DROP_PARTIAL` exactly once
+    before the failure propagates, because a half-dropped asset is worse than an intact one. A job
+    that cannot be confirmed cancelled halts the asset too. With no job cancelled and nothing
+    deleted, only a surviving named sibling halts the asset; any other failure, such as an
+    unresolvable core CLI, propagates without a halt. After this asset's first deletion the caller
+    halts the asset once with those deletions. A completed drop that cancelled the job but deleted
+    nothing is recorded in `cancelled_assets`. Every failure aborts the whole apply run before the
+    request is attributed, and all drops precede any attribution. When a later step of the run
+    fails with any error, the caller halts every asset of the targets dropped before it that lost
+    documents or had its job cancelled.
 
     Args:
-      folder_note: Absolute path to the feature's `<slug>/<slug>.md`.
-      drop_docs: Bare filenames the attach decision's own `drop=` field named. An empty list
-        rolls the gates back and leaves every file on disk — which documents a rollback removes
-        is the router's decision, not a fixed ladder this worker knows.
+      folder_note: Absolute path to the asset's `<slug>/<slug>.md`.
+      drop_docs: Bare sibling filenames, already validated by the caller, that the attach decision's
+        own `drop=` field named. An empty list cancels and deletes nothing — which documents are
+        dropped is the router's decision, not a fixed list this worker knows.
 
     Raises:
-      SystemExit: When `cancel-job` does not confirm the active job is no longer live, when a
-        pre-launch sibling survives its own deletion attempt, or when a gate flip is refused —
-        each case halts the asset before aborting the run. Also raised, before any halt, when
-        the `lazycortex-core` sibling CLI needed to cancel the job cannot be resolved via
-        `$LAZYCORTEX_PLUGIN_DIRS`.
+      SystemExit: When `cancel-job` does not confirm the active job is no longer live, or when a
+        named sibling survives its deletion attempt while nothing of this asset was deleted yet;
+        the asset is halted here first. Also raised, without a halt here, when a named sibling
+        survives after this asset's first deletion (the caller halts the asset with its deleted
+        paths) and when no lookup stage can find the `lazycortex-core` sibling CLI needed to
+        cancel the job.
+      OSError: When clearing the job's tracking record or reading the asset folder fails before
+        this asset's first deletion; the asset is halted here first once a running job was cancelled,
+        otherwise the error propagates without a halt.
+      Exception: Any other failure before the first deletion propagates unchanged, after the halt
+        here when a running job was cancelled; any failure after the first deletion propagates
+        unchanged and the caller halts the asset with the deletions made so far.
     """
 
     # Domain(spec.lifecycle):
-    # # Pre-launch rollback
-    # An asset whose ladder has started but has not yet launched implementation can be returned to
-    # the state it held before it started, so a late change of direction does not require
-    # abandoning the asset. Rollback is defined only between those two points: an asset that never
-    # started has nothing to undo, and one that already launched has produced work no gate flip can
-    # take back. The rollback moves the ladder's later gates back to their unmet state, cancels any
-    # expert job still running against the asset, and removes the documents the routing decision
-    # named — which documents those are is the router's judgement, not a fixed list, so a decision
-    # naming none rolls the gates back and leaves every file where it is.
+    # # Attach drop
+    # The drop is the one destructive part of an attach. When the routing decision names documents to drop, any
+    # expert job still running against the asset is cancelled first, review on each named document is stopped, and
+    # only then are the documents removed. When the pass completes, the deletions land in the same apply commit as
+    # the rest of the run; when it fails after a deletion, they land in the halt record instead. Which documents are
+    # named is the router's judgement, not a fixed list, so a decision naming none deletes and cancels nothing. A
+    # drop never flips a gate, whatever the asset type.
     #
-    # Every failure along the way halts the asset instead of continuing. A half-finished rollback —
-    # a cancelled job and deleted documents with the gates still claiming the work is done — is a
-    # worse state than the one the rollback started from, because nothing downstream can tell it
-    # apart from real progress. Halting stops the whole pass before the request is ever attributed,
-    # leaving a state an operator can see and resolve rather than one the automation will act on.
+    # A failure before anything was lost stops the pass without a halt, because the asset lost nothing: the tooling
+    # to cancel the job cannot be found, or no job was running and nothing has been deleted yet. The one exception is
+    # a named document that survives its deletion, which halts the asset even then. Once a running job is confirmed
+    # cancelled, the asset has lost something, so any failure before its first deletion halts it here, exactly once:
+    # the job's tracking record cannot be cleared, the folder cannot be read, or a document survives. A job that
+    # cannot be confirmed cancelled halts it as well. A failure after the first deletion is halted by the pass as a
+    # whole, with the deletions recorded. A later failure in the pass also halts an asset whose job was cancelled but
+    # none of whose documents was deleted, with no deleted paths. Either way the whole pass stops before the request
+    # is attributed. A cancelled job with documents half deleted is a state nothing downstream can tell apart from
+    # intended work, so the automation must not act on it; halting leaves a state an operator can see and resolve.
 
+    # guard: an empty drop list touches nothing — no job cancel, no sidecar change, no deletion
+    if not drop_docs:
+      return
+
+    # the asset folder holds every named sibling and is the unit a halt marks
     asset_dir = folder_note.parent
 
     # step 1a — read the tracked job off the runtime sidecar; the folder-note carries no marker
+    cancelled = False
     job_info = spec_job_markers.read(self.repo, folder_note)[JobMarker.ACTIVE_JOB]
     if isinstance(job_info, dict):
-      # step 1b — a live expert job must be cancelled before anything else touches the ladder
-      # guard: cancel-job could not confirm the job is dead — a half-dropped ladder is worse
-      # than an intact one, so halt the asset and abort rather than continue past a live job
+      # step 1b — a live expert job must be cancelled before any named document is touched
+      # guard: cancel-job could not confirm the job is dead — deleting documents a live job may
+      # still write is worse than leaving them, so halt the asset and abort rather than continue
       if not self._cancel_active_job(job_info):
         flip_gate.halt_asset(asset_dir, HaltReason.PLAN_DROP_PARTIAL)
         _fail(_K.CAT_LOGICAL,
-              f"pre-launch rollback halted on {asset_dir.name}: cancel-job did not confirm "
+              f"attach drop halted on {asset_dir.name}: cancel-job did not confirm "
               "the active job is no longer live")
 
-      # step 1c — the job is confirmed dead, so its stale marker comes off the sidecar.
-      spec_job_markers.update(self.repo, folder_note, { JobMarker.ACTIVE_JOB: None })
+      # the job is confirmed dead, so its stale marker comes off the sidecar below
+      cancelled = True
 
-    # step 2 — best-effort review stop on each pre-launch sibling before it is deleted
-    ladder_siblings = [ asset_dir / name for name in drop_docs ]
-    for sibling in ladder_siblings:
-      if sibling.is_file():
-        self._stop_review_best_effort(sibling)
+    # once the job was cancelled the asset has lost something, so any failure before its first deletion halts
+    # it here exactly once; after a first deletion the run-level handler halts it with those deletions instead
+    halted = False
+    deleted_any = False
+    try:
+      # step 1c — the cancelled job is no longer tracked on the note
+      if cancelled:
+        spec_job_markers.update(self.repo, folder_note, { JobMarker.ACTIVE_JOB: None })
 
-    # step 3 — drop the pre-launch siblings from the worktree; a survivor means a half-dropped ladder
-    # Deleted paths are named explicitly to the first Step 4 commit below, rather than staged
-    # here for whichever commit happens to run next.
-    deleted_siblings: list[Path] = []
-    for sibling in ladder_siblings:
-      if sibling.exists():
-        try:
-          sibling.unlink()
-        # a failed unlink (e.g. a non-empty directory in the file's place) is diagnosed by the
-        # existence re-check right below, not by the exception itself
-        except OSError:
-          pass
+      # step 2 — best-effort review stop on each dropped sibling before it is deleted
+      named_siblings = [ asset_dir / name for name in drop_docs ]
+      for sibling in named_siblings:
+        if sibling.is_file():
+          self._stop_review_best_effort(sibling)
 
-        # guard: the sibling survived its own deletion attempt — halt rather than proceed
-        # to flip gates over a ladder that is only partly dropped; any sibling already deleted
-        # this same pass rides into this halt's commit too, named explicitly
+      # step 3 — drop the named siblings from the worktree; a survivor means a half-done drop
+      # Each deleted path is recorded the moment it is gone, for the run's own apply commit rather
+      # than staged here for whichever commit happens to run next, so an error raised mid-drop still
+      # finds every deletion so far and the caller's handler halts the asset with them in its commit.
+      for sibling in named_siblings:
         if sibling.exists():
-          flip_gate.halt_asset(asset_dir, HaltReason.PLAN_DROP_PARTIAL, extra_paths = deleted_siblings)
-          _fail(_K.CAT_LOGICAL,
-                f"pre-launch rollback halted on {asset_dir.name}: {sibling.name} did not unlink")
-        deleted_siblings.append(sibling)
+          try:
+            sibling.unlink()
+          # a failed unlink (e.g. a non-empty directory in the file's place) is diagnosed by the
+          # existence re-check right below, not by the exception itself
+          except OSError:
+            pass
 
-    # step 4 — flip every gate from spec_plan_done onward back to false, unconditionally; only
-    # the first flip's commit carries the Step 3 deletions — each commit names its own paths.
-    for gate_index, gate in enumerate(_ROLLBACK_GATES):
-      result = flip_gate.flip_gate(
-          asset_dir, gate, off = True, auto = True, reason = _K.ROLLBACK_GATE_OFF_REASON,
-          extra_paths = deleted_siblings if gate_index == 0 else None,
-      )
+          # guard: the sibling survived its own deletion attempt — abort rather than attribute the
+          # request to an asset that is only partly dropped; once a sibling of this asset is already
+          # deleted, the caller's handler halts it with those deletions, so only an asset that lost
+          # nothing yet is halted here and no asset is ever halted twice
+          if sibling.exists():
+            if not deleted_any:
+              flip_gate.halt_asset(asset_dir, HaltReason.PLAN_DROP_PARTIAL)
+              halted = True
+            _fail(_K.CAT_LOGICAL,
+                  f"attach drop halted on {asset_dir.name}: {sibling.name} did not unlink")
 
-      # guard: a cancelled asset refuses every flip (on or off) and mutates nothing — the job
-      # is already cancelled and the pre-launch siblings already gone, so continuing silently would
-      # leave the gates lying about a ladder that no longer exists
-      if result.get(FlipResult.STATUS) == FlipResult.REFUSED:
-        # waiver: "reason" mirrors flip_gate.flip_gate's own untyped result-dict key (see
-        # flip_gate.py's refusal returns) — no FlipResult constant names it
-        refused_reason = result.get("reason")
+          # the deletion joins the run's single apply commit, which stages it by explicit path
+          self.dropped_docs.append(sibling)
+          deleted_any = True
+    except BaseException:
+      # guard: a cancelled job with nothing deleted and no halt yet leaves the asset halted before re-raising
+      if cancelled and not deleted_any and not halted:
+        flip_gate.halt_asset(asset_dir, HaltReason.PLAN_DROP_PARTIAL)
+      raise
 
-        # by this point Steps 1-3 already cancelled the job and deleted the pre-launch siblings —
-        # a refused flip still leaves that half-done, exactly like the Step 1b / Step 3
-        # failures above, so it halts the same way instead of aborting into a dirty tree; the
-        # deletions ride into this halt's commit whether or not an earlier flip already
-        # committed them (best-effort staging drops what has nothing left to stage)
-        flip_gate.halt_asset(asset_dir, HaltReason.PLAN_DROP_PARTIAL, extra_paths = deleted_siblings)
-        _fail(_K.CAT_LOGICAL,
-              f"pre-launch rollback refused on {asset_dir.name}: {gate} flip was refused "
-              f"({refused_reason})")
+    # a completed drop that cancelled the job but deleted nothing is remembered, so a later failure of the
+    # pass still halts the asset that lost its job; one that deleted something is found through its deletions
+    if cancelled and not deleted_any:
+      self.cancelled_assets.add(asset_dir)
 
   def _attach_to_folder_note(self, folder_note: Path,
                              request_display: str) -> list[Path]:
@@ -2874,34 +2576,30 @@ class _Apply:
     _FolderNote.append_source_request(folder_note, self.request_wikilink, request_display)
     return populated
 
-  def _open_review(self, doc_path: Path, *, verb: str = PlanReview.START_VERB) -> None:
+  def _open_review(self, doc_path: Path) -> None:
     """
     Open a review cycle on a populated doc via the `lazycortex-review` CLI.
 
     Args:
       doc_path: Absolute path to the populated authored doc.
-      verb: The review CLI subcommand to invoke — `start` for a fresh opening writer round
-        (the default, used by a plain attach's attribution re-entry), or `submit` to skip that
-        round when the doc already carries prior content (used after a pre-launch ladder
-        rollback re-opens an already-drafted `design.md`).
 
     Raises:
       SystemExit: When the review CLI exits non-zero for a reason other than an already-open
         review.
     """
     res = subprocess.run(
-        [ sys.executable, str(self.review_cli), verb, str(doc_path) ],
+        [ sys.executable, str(self.review_cli), PlanReview.START_VERB, str(doc_path) ],
         cwd = str(self.repo),
         capture_output = True,
         text = True,
         check = False, encoding = "utf-8",
     )
 
-    # guard: review-start/submit is idempotent — non-zero exit on already-open is benign;
+    # guard: review-start is idempotent — non-zero exit on already-open is benign;
     # surface only when stderr names an unexpected failure
     if res.returncode != 0 and _K.REVIEW_START_IDEMPOTENT_MARK not in (res.stderr or "").lower():
       _fail(_K.CAT_LOGICAL,
-            f"lazycortex-review {verb} failed on {doc_path}: "
+            f"lazycortex-review {PlanReview.START_VERB} failed on {doc_path}: "
             f"exit={res.returncode} stderr={res.stderr.strip()[:240]}")
 
   def _stamp_request_file(self, *, request_class: str, request_status: str,
@@ -2959,7 +2657,7 @@ class _Apply:
     # a spawned product's level note and seeded vision both live under its own spec folder
     paths.extend(self.spawn_product_dirs)
 
-    # the product record and its review classes are part of the same atomic apply
+    # the product record is part of the same atomic apply
     if self.settings_written:
       paths.append(self._settings_path)
 
@@ -2973,85 +2671,140 @@ class _Apply:
 
   def _commit(self, *, subject: str) -> None:
     """
-    Stage the paths this pass touched and commit them under the bot identity in one atomic step.
+    Commit the paths this pass touched, their icon repaint and the dropped documents under the bot identity.
+
+    Notes:
+      - The requests inbox note's stats line is refreshed first and joins the commit.
 
     Args:
-      subject: One-line commit subject describing the staged diff.
+      subject: One-line commit subject describing the pass.
 
     Raises:
-      SystemExit: When staging the touched paths fails, or when the commit itself fails.
+      SystemExit: When the commit itself fails.
     """
     # the inbox stats line goes stale on every apply, so refresh it before it joins the commit set
     inbox = spec_content_root(find_settings_root(self.file_path.parent)) / _K.REQUESTS_DIR / _K.REQUESTS_NOTE
     if inbox.is_file():
       apply_container_stats(inbox)
 
-    # the resolve-walk behind the touched set is not free, and the same set feeds the repaint,
-    # the staging pathspec, and the commit pathspec below
+    # the resolve-walk behind the touched set is not free, and the same set feeds the repaint
+    # and the commit pathspec below
     touched_paths = self._touched_paths(inbox)
 
     # fold the touched notes' icon repaint into this same commit so no separate icons commit
     # follows; the repaint op itself skips non-markdown paths
     touched_paths.extend(iconize_inline.repaint_paths(self.repo, touched_paths))
 
-    # never `git add -A` — the worktree belongs to the operator and may carry unrelated work
-    add_res = subprocess.run(
-        [ _K.GIT, "add", "--", *touched_paths ],
-        cwd = str(self.repo),
-        capture_output = True,
-        text = True,
-        check = False, encoding = "utf-8",
-    )
+    # a dropped document rides the commit as a deletion, each named once; one the index never knew
+    # drops out of the pathspec on its own, and a re-run that changed nothing commits nothing
+    dropped = [ str(doc.resolve().relative_to(self.repo)) for doc in self.dropped_docs ]
+    touched_paths.extend(rel for rel in dict.fromkeys(dropped) if rel not in touched_paths)
+    try:
+      flip_gate.commit_paths(
+          self.repo, touched_paths, subject = subject,
+          author_name = self.author_name, author_email = self.author_email, repaint = False,
+      )
 
-    # guard: staging failed, the commit below would snapshot the wrong set
-    if add_res.returncode != 0:
-      _fail(_K.CAT_LOGICAL,
-            f"git add failed: exit={add_res.returncode} stderr={add_res.stderr.strip()[:240]}")
-
-    # an idempotent re-run on terminal state stages nothing, so ask git whether anything landed
-    status_res = subprocess.run(
-        [ _K.GIT, "diff", "--cached", "--quiet" ],
-        cwd = str(self.repo),
-        check = False,
-    )
-
-    # guard: empty staged diff — nothing to commit on this apply pass
-    if status_res.returncode == 0:
-      return
-
-    # commit under the request bot's identity so the operator's authorship stays untouched
-    commit_res = subprocess.run(
-        [
-            _K.GIT,
-            "-c", f"user.name={self.author_name}",
-            "-c", f"user.email={self.author_email}",
-            "-c", "commit.gpgsign=false",
-            "commit", "-q", "-m", subject, "--", *touched_paths,
-        ],
-        cwd = str(self.repo),
-        capture_output = True,
-        text = True,
-        check = False, encoding = "utf-8",
-    )
-
-    # guard: a failed commit leaves the tree dirty and would halt the daemon silently
-    if commit_res.returncode != 0:
-      _fail(_K.CAT_LOGICAL,
-            f"git commit failed: exit={commit_res.returncode} "
-            f"stderr={commit_res.stderr.strip()[:240]}")
+    # a failed commit leaves the tree dirty and would halt the daemon silently, so the run aborts loudly
+    except subprocess.CalledProcessError as error:
+      stderr = os.fsdecode(error.stderr or b"")
+      _fail(_K.CAT_LOGICAL, f"git commit failed: exit={error.returncode} stderr={stderr.strip()[:240]}")
 
   def run(self) -> int:
     """
     Drive one apply transition on the request file.
 
+    Guarantees:
+      - Every attach and reference target is resolved and checked before any document is dropped or any
+        expert job cancelled; a refusal aborts the run with no attached asset touched. Assets the same request
+        spawns are created before the checks and are not covered.
+      - Cancelled and halted refusals apply to attach targets only; a reference target must merely resolve.
+      - A `drop=` name is refused when it is not a bare sibling filename (a path separator or `:` in it
+        included) or when it names the asset's status note or start document, in any letter case. A name that
+        passes this rule but cannot be deleted, such as a folder, is not refused up front; the drop halts that
+        asset when the document survives.
+      - An attach line onto a level document that carries any `drop=` name is refused up front, with nothing
+        dropped or cancelled on any attached asset.
+      - Every attach target's documents are dropped before any target is attributed to the request, so a
+        failed drop leaves no start document attributed, neither on disk nor in a halt commit.
+      - Once the drop of an attach asset has completed having deleted one of its documents or cancelled its
+        live expert job, a later failure of any kind halts each such asset with `PLAN_DROP_PARTIAL` and then
+        propagates unchanged. The halt of an asset whose own folder lost documents carries its deleted paths;
+        an asset whose job was cancelled while none of its documents was deleted is halted with none. This
+        includes a failure inside one asset's own drop after its first deletion: that asset is
+        halted once, by this handler, with its already-deleted paths; the drop halts the asset itself only when
+        nothing of it was deleted yet.
+      - An asset is never halted for the deletions of an outer or nested asset.
+
     Returns:
       Exit code: `0` on success or idempotent terminal-state skip.
 
     Raises:
-      SystemExit: On any logical refusal — an unresolvable target, an occupied `spec_path`, a
-        registered key whose path diverges from the decision's, or a failed sibling CLI —
-        carrying a JSON error object on stdout and exit `1`.
+      SystemExit: On any logical refusal — an unresolvable or refused target, a `drop=` name that is not a
+        bare sibling filename (a path separator or `:` in it included) or that names the asset's status
+        note or start document in any letter case, an attach line onto a level document that carries any
+        `drop=` name (refused up front), an occupied `spec_path`, a registered key whose path
+        diverges from the decision's, two `spawn-product` targets of the decision over one `spec_path`
+        (every `spawn-product` target is refused before the first is registered), a failed sibling CLI,
+        a named sibling that survives its deletion after the asset's first deletion (the run-level
+        handler halts the asset with its deleted paths before the abort), or a failed review opening, request
+        stamp or commit — carrying a JSON error object on stdout and exit `1`.
+      Exception: Any non-`SystemExit` error raised after a document was dropped or an expert job was cancelled
+        propagates unchanged, after the assets that lost documents or whose job was cancelled are halted.
     """
+
+    # Contract:
+    # Every attach and reference target MUST be resolved and checked against its refusal guards before any
+    # document is dropped or any expert job is cancelled. An unresolvable target, a cancelled or halted
+    # attach target, a drop name that is not a bare sibling filename (one containing a path separator or a
+    # colon included), a drop name that matches the asset's status note or start document in any letter
+    # case, and an attach line onto a level document that carries any drop name each abort the run, with
+    # nothing dropped or cancelled on any attached asset. A reference target is only required to
+    # resolve. Assets the same request spawns are created before the checks and are not covered by this
+    # promise. A drop name that passes the name rule but cannot be deleted, for instance a folder, is not
+    # refused up front: the drop halts that asset when the document survives.
+
+    # Contract:
+    # Once the drop of an attach asset has completed having deleted one of its documents or cancelled its
+    # live expert job, any later failure of the same run, of whatever kind, MUST halt each such asset with
+    # PLAN_DROP_PARTIAL, and then propagate unchanged: a refusal stays a refusal and any other error
+    # reaches the caller as itself. The halt of an asset whose own folder lost documents carries that
+    # asset's deleted paths; an asset whose job was cancelled while none of its documents was deleted is
+    # halted all the same, with no deleted paths. This also covers a failure inside one asset's own drop
+    # after its first deletion: that asset is halted once, by the run-level handler, with its
+    # already-deleted paths in the halt commit, while the drop halts the asset itself only when nothing of
+    # it was deleted yet. An asset is NEVER halted for the deletions of an outer or nested asset.
+
+    # Contract:
+    # The documents of every attach target MUST be dropped before any target is attributed to the request,
+    # so a failed drop leaves no start document attributed, neither on disk nor in a halt commit.
+
+    # Domain(spec.lifecycle):
+    # # One attach pass, all or nothing
+    # A request can attach to or reference several assets at once, so every one of them is checked before anything is
+    # touched: each must resolve. An attached asset must in addition be neither cancelled nor halted; a reference
+    # touches nothing on the referenced asset, so those two refusals never apply to it. A document named for dropping
+    # must be a plain document sitting directly in the attached asset's own folder, never its status note nor its
+    # start document, matched regardless of letter case. A level document is never dropped, so a request naming
+    # documents to drop from one is refused up front like any other bad name. A name that could reach outside the
+    # folder, through path separators, a parent-directory step, or a drive or stream colon, is refused. A named
+    # document that passes this name rule but cannot be deleted, for instance because it is a folder, is not refused
+    # up front: the drop halts that asset when the document survives its deletion. Only when all checks pass does any
+    # document get dropped or any job get cancelled, so a refusal anywhere refuses the whole pass with every attached
+    # asset exactly as it was. New assets the same request spawns are created before the checks, because an attach
+    # may target a product spawned in the same request, so the promise covers the attached assets and not the
+    # request's new ones.
+    #
+    # The documents of every attached asset are dropped before any asset is attributed to the request, so a failed
+    # drop leaves no asset attributed.
+    #
+    # Any failure after the drops, of whatever kind, halts exactly the attached assets that lost something in this
+    # pass, and then the failure propagates. An asset lost something when documents were deleted from its own folder,
+    # or when a running job against it was cancelled, even if no document of it was deleted. The failure may be
+    # another asset's drop failing, a failure inside the asset's own drop after its first deletion, the request's
+    # attribution, the review not reopening, or the pass not being recorded. An asset around such an asset or nested
+    # inside it lost nothing of its own and is never halted.
+
     # the frontmatter status decides whether this pass has anything left to do
     text = read_text(self.file_path)
     values, fm_end = parse_frontmatter(text)
@@ -3084,10 +2837,10 @@ class _Apply:
     spawn_paths: dict[tuple[str, str], str] = {}
     spawn_tools: dict[tuple[str, str], list[str]] = {}
     attach_drops: dict[str, list[str]] = {}
-    product_targets: list[tuple[str, str, str, dict[str, str]]] = []
+    product_targets: list[tuple[str, str, str]] = []
     if decision_block is not None:
       spawn_rich, _attach_rich = _parse_routing_decision_rich(
-          decision_block, known_kinds = self._known_kinds())
+          decision_block, known_kinds = self._read_known_kinds())
       for kind, slug, _description, targets in spawn_rich:
         spawn_cascades[( kind, slug )] = targets
       reference_targets = [ path for path, _description in _parse_reference_targets(decision_block) ]
@@ -3123,10 +2876,26 @@ class _Apply:
     # the wikilinks of every target this pass resolves, stamped into the accepted request's callout
     resolved_wikilinks: list[str] = []
 
+    # every product target is checked before the first is written, against the registry and the
+    # disk and against the other targets of this decision, so a refused line leaves the settings
+    # untouched instead of half a decision registered
+    claimed: dict[str, str] = {}
+    for key, spec_path, _description in product_targets:
+      self._validate_product_target(key, spec_path)
+
+      # guard: two targets of one decision over the same tree would register it twice
+      if (other := claimed.setdefault(spec_path, key)) != key:
+        _fail(_K.CAT_LOGICAL,
+              f"spawn-product '{key}': path '{spec_path}' is also claimed by '{other}' in this decision")
+
+    # an enclosing product is registered before the products nested in it, so a nested folder
+    # never appears on disk ahead of its parent's registration
+    product_targets.sort(key = lambda target: len(PurePosixPath(target[1]).parts))
+
     # a product is registered before any asset spawn, so a spawn line may already name it in its
     # own `product=` field within the same routing decision
-    for key, spec_path, _description, product_experts in product_targets:
-      resolved_wikilinks.append(str(self._spawn_product(key, spec_path, product_experts, request_display)
+    for key, spec_path, _description in product_targets:
+      resolved_wikilinks.append(str(self._spawn_product(key, spec_path, request_display)
                                     .relative_to(self.repo).with_suffix("")))
 
     # a spawn target scaffolds its folder and folder-note alone — documents are seeded later,
@@ -3152,91 +2921,128 @@ class _Apply:
           if valid:
             self._write_spec_targets(folder_note, valid)
 
-    # an attach target already exists, so only the attribution delta applies — but a feature
-    # whose ladder already started rolls back to the pre-launch state first (the rule that, before
-    # code is launched, a request edits the spec directly via gate rollback plus a new review);
-    # a launched feature must never reach this path at all (the router should have
-    # spawned a change instead, so a launched target here is a worker-side refusal, not a rollback)
+    # every attach target is resolved and checked against its refusal guards before anything is
+    # dropped — a refusal on a later target must never find an earlier target's documents already
+    # gone or its job already cancelled; each entry names the level document or the asset
+    # folder-note the target resolved to, flagged True for a level document
+    attach_plan: list[tuple[str, Path, bool]] = []
     for target in attach_targets:
       # a level has no status note above its documents, so a level document is stamped directly
       # and re-enters review on its own, with nothing else to resolve or roll back
       if (level_doc := self._level_doc_target(target)) is not None:
-        # the token may carry `.md`, a wikilink never does — the spawn branch drops it the same way
-        resolved_wikilinks.append(str(level_doc.relative_to(self.repo).with_suffix("")))
-        if _Attach.ensure_source_request(level_doc, self.request_wikilink, request_display):
-          self.populated_docs.append(level_doc)
+        # guard: a level document is never dropped, so a `drop=` field on a level target is refused rather than
+        # ignored
+        if attach_drops.get(target):
+          _fail(_K.CAT_LOGICAL, f"attach target '{target}' is a level document — `drop=` is refused there")
+        attach_plan.append(( target, level_doc, True ))
         continue
 
       # an asset target is read through its status folder-note, whose state gates what follows
       folder_note = self._resolve_attach_folder_note(target)
       fm_values, _ = parse_frontmatter(folder_note.read_text(encoding = "utf-8"))
 
-      # guard: a cancelled asset refuses every attach outright, before any rollback runs — a
-      # rollback would destroy the pre-launch siblings and only discover the refusal at its own
-      # step 4, and a plain (non-rollback) attach would otherwise reopen review on a dead asset
+      # guard: a cancelled asset refuses every attach outright, before any named document is
+      # deleted — an attach would otherwise destroy siblings and reopen review on a dead asset
       if fm_values.get(Gate.SPEC_CANCELLED, "").strip().lower() == BOOL_TRUE:
         _fail(_K.CAT_LOGICAL,
               f"attach target '{target}' is cancelled — automation is refused")
 
-      # guard: all automation stays off a halted asset until an operator resolves it by hand,
-      # regardless of ladder state — a plain attach must not attribute + reopen review either
+      # guard: all automation stays off a halted asset until an operator resolves it by hand —
+      # an attach must neither delete documents nor attribute and reopen review
       if fm_values.get(SpecHaltKey.HALTED, "").strip().lower() == BOOL_TRUE:
         _fail(_K.CAT_LOGICAL,
               f"attach target '{target}' is halted — automation is refused until an "
               "operator resolves it")
 
-      # a feature whose ladder already started rolls back to the pre-launch state before the
-      # attribution lands; every other kind (and a not-yet-started feature) attaches plainly
-      rolled_back = False
-      if _Attach.kind_from_folder_note(folder_note) == _K.FEATURE_KIND:
-        # guard: a launched feature must never be silently attached — the router should have
-        # spawned a change instead, so this is a refusal, not a rollback
-        if _is_launched_feature(fm_values, folder_note):
+      # every `drop=` name is checked here, before any cancel or deletion of any target: only a bare
+      # sibling filename is droppable, never the status note itself nor the start document the attach
+      # reopens for review; a name free of both separators and of `:` cannot be absolute or
+      # drive-relative either. The comparison ignores letter case, since on a case-insensitive
+      # filesystem a differently cased name opens the same file
+      start_doc = _Attach.primary_doc_for_kind(
+          _Attach.kind_from_folder_note(folder_note), self._record_for_note(folder_note))
+      undroppable = { doc_name.casefold() for doc_name in ( folder_note.name, start_doc ) }
+      for name in attach_drops.get(target, []):
+        # guard: a path-shaped name could reach outside the asset folder or into a nested asset; a `:`
+        # marks a drive-relative path or an alternate data stream, never a bare sibling filename
+        if "/" in name or "\\" in name or ":" in name or name in ( "", ".", ".." ):
           _fail(_K.CAT_LOGICAL,
-                f"attach target '{target}' is a launched feature — routing must spawn a "
-                "change instead of attaching")
-        if _has_ladder_started(fm_values, folder_note):
-          # not halted (checked above) — safe to roll the ladder back before the attribution lands
-          self._rollback_pre_launch_ladder(folder_note, attach_drops.get(target, []))
-          rolled_back = True
+                f"attach target '{target}': drop name '{name}' is not a bare sibling filename")
 
-      # the attribution step itself is unconditional — a rollback only changes what state it
-      # lands on, never whether it runs
-      resolved_wikilinks.append(target)
-      populated = self._attach_to_folder_note(folder_note, request_display)
-      self.populated_docs.extend(populated)
+        # guard: the status note and the start document are the asset itself, never droppable siblings
+        if name.casefold() in undroppable:
+          _fail(_K.CAT_LOGICAL,
+                f"attach target '{target}': drop name '{name}' names the asset's status note or "
+                "start document")
 
-      # a rolled-back feature's primary doc already carries prior content, so it re-enters
-      # review via `submit` (skip the opening writer round) instead of `start`
-      if rolled_back:
-        self.submit_docs.extend(populated)
-      self.attach_folder_notes.append(folder_note)
+      # the asset passed every guard, so its folder-note joins the plan
+      attach_plan.append(( target, folder_note, False ))
 
     # a reference target registers only a link — no scaffold, no seed, no review, and the
     # target's own doc/folder-note is never touched (playbook Chapter 7 / upstream § 10);
-    # existence is still validated, reusing the same resolver an attach target uses (any
-    # unresolvable target aborts the whole run via `_fail`, so every survivor here is real)
+    # existence is still validated, reusing the same resolver an attach target uses, and before
+    # any drop (any unresolvable target aborts the whole run via `_fail`, so every survivor is real)
     for target in reference_targets:
       self._resolve_attach_folder_note(target)
-      resolved_wikilinks.append(target)
-    if reference_targets:
-      self._write_reference_targets(reference_targets)
 
-    # every doc whose attribution changed enters the review loop
-    for doc in self.populated_docs:
-      self._open_review(doc, verb = PlanReview.SUBMIT_VERB if doc in self.submit_docs
-                        else PlanReview.START_VERB)
+    # an attach target already exists, so only the attribution delta applies, plus the deletion
+    # of any documents its `drop=` field names; no gate moves, whatever the asset type — attach
+    # or a change was the operator's choice at routing
+    # once the first document is dropped, an abort from there on would leave the asset dirty and
+    # un-halted, so every asset that lost documents is halted with its deletions before the abort
+    # propagates — a failing drop on a later target included, and any error, not only a refusal
+    try:
+      # every target's `drop=` documents are deleted before any target is attributed, so a drop that
+      # fails on a later target never finds an earlier target's start document already attributed;
+      # an empty `drop=` leaves the asset's files, its job and its review state as they are
+      for target, target_path, is_level in attach_plan:
+        if not is_level:
+          self._drop_attached_docs(target_path, attach_drops.get(target, []))
 
-    # the stamp records where the request landed, and the commit makes the whole pass atomic
-    self._stamp_request_file(
-        request_class = request_class,
-        request_status = _K.STATUS_ACCEPTED,
-        resolved_wikilinks = resolved_wikilinks,
-        reject_reason = None,
-    )
-    self._commit(
-        subject = f"apply: stamp accepted + strip Routing on {self.file_path.relative_to(self.repo)}",
-    )
+      # only once every drop has landed does any target take the request's attribution
+      for target, target_path, is_level in attach_plan:
+        # a level document takes the attribution directly; the token may carry `.md`, a wikilink
+        # never does — the spawn branch drops it the same way
+        if is_level:
+          resolved_wikilinks.append(str(target_path.relative_to(self.repo).with_suffix("")))
+          if _Attach.ensure_source_request(target_path, self.request_wikilink, request_display):
+            self.populated_docs.append(target_path)
+          continue
+
+        # the attribution step itself is unconditional — a drop never decides whether it runs
+        resolved_wikilinks.append(target)
+        self.populated_docs.extend(self._attach_to_folder_note(target_path, request_display))
+        self.attach_folder_notes.append(target_path)
+
+      # the reference targets were resolved above; they land as links only
+      resolved_wikilinks.extend(reference_targets)
+      if reference_targets:
+        self._write_reference_targets(reference_targets)
+
+      # every doc whose attribution changed re-enters the review loop through a writer round
+      for doc in self.populated_docs:
+        self._open_review(doc)
+
+      # the stamp records where the request landed, and the commit makes the whole pass atomic
+      self._stamp_request_file(
+          request_class = request_class,
+          request_status = _K.STATUS_ACCEPTED,
+          resolved_wikilinks = resolved_wikilinks,
+          reject_reason = None,
+      )
+      self._commit(
+          subject = f"apply: stamp accepted + strip Routing on {self.file_path.relative_to(self.repo)}",
+      )
+    except BaseException:
+      # each attach asset whose documents this run deleted, or whose job it cancelled, is halted, its deletions in
+      # the commit; a drop names bare siblings only, so an asset's deletions sit directly in its own folder and a
+      # nested asset's never count toward the asset around it. An asset halts itself in its own drop only before it
+      # lost any document, so it records no deletion here and is never halted twice.
+      for _target, target_path, is_level in attach_plan:
+        asset_deleted = [ doc for doc in self.dropped_docs if not is_level and doc.parent == target_path.parent ]
+        if asset_deleted or (not is_level and target_path.parent in self.cancelled_assets):
+          flip_gate.halt_asset(target_path.parent, HaltReason.PLAN_DROP_PARTIAL, extra_paths = asset_deleted)
+      raise
 
     # the counts let the calling routine report what this pass produced
     print(json.dumps({
@@ -3254,6 +3060,21 @@ class _Apply:
 def main(argv: list[str]) -> int:
   """
   Run the `apply-request` subcommand against one request file.
+
+  Guarantees:
+    - Re-running the subcommand on a `spawn-product` decision for a key already on record under the same
+      `spec_path` is a no-op: the recorded product record is never rewritten, so a re-run never clobbers
+      fields an operator has since edited.
+    - Every `spawn-product` target of a routing decision is validated before the first is registered, against
+      the registry, the disk, and the other targets of the same decision, so two targets over one `spec_path`
+      are refused. A refusal of any target, including a well-formed `spawn-product` line (one carrying the
+      `::` separator) with any field other than `key` and `path`, ends the run with exit status `1` before
+      the first settings write. A refused decision registers no product, creates no product folder, persists
+      nothing else, and leaves `lazy.settings.json` byte-identical.
+    - Nested `spawn-product` targets are registered enclosing-product-first, whatever order the decision
+      lists them in.
+    - A `reference` routing decision touches nothing on the referenced asset: no doc edit, no
+      `spec_source_requests` attribution, no review opened.
 
   Args:
     argv: Subcommand argv tail (positional `<file>` + optional `--author-*` flags).
@@ -3273,7 +3094,7 @@ def main(argv: list[str]) -> int:
   args = parser.parse_args(argv)
   file_path: Path = args.file
 
-  # argparse hands relative paths straight through, so resolve to absolute here
+  # guard: a relative path from argparse — resolve it to absolute before use
   if not file_path.is_absolute():
     file_path = file_path.resolve()
 
@@ -3281,6 +3102,30 @@ def main(argv: list[str]) -> int:
   if not file_path.exists() or file_path.suffix.lower() != _K.MD_SUFFIX:
     sys.stderr.write(f"not a markdown file: {file_path}\n")
     return 2
+
+  # Contract:
+  # Re-running apply-request on a spawn-product decision for a key already on record under the
+  # same spec_path is a no-op. The recorded product record is never rewritten, so a re-run
+  # never clobbers fields an operator has since edited.
+
+  # Contract:
+  # Every spawn-product target of a routing decision is validated before the first one is
+  # registered: against the registry, against the disk, and against the other targets of the
+  # same decision, so two targets over one spec_path are refused. A refusal of any target,
+  # whether an occupied or already-registered spec_path, a spec_path shared by two targets, or
+  # a well-formed spawn-product line (one carrying the :: separator) with any field other than
+  # key and path, ends the run with exit status 1 before the first settings write. A refused
+  # decision registers no product, creates no product folder, persists nothing else, and leaves
+  # lazy.settings.json byte-identical, so it never leaves half a registration.
+
+  # Contract:
+  # Nested spawn-product targets are registered enclosing-product-first, whatever order the
+  # decision lists them in.
+
+  # Contract:
+  # A reference routing decision touches nothing on the referenced asset: no doc edit,
+  # no spec_source_requests attribution, no review opened. The link lives only on the
+  # request file's own spec_targets.
 
   # one apply pass over the request, its exit code handed straight back
   return _Apply(

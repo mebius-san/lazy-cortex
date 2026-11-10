@@ -13,21 +13,34 @@ file types are silently skipped.
 """
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TypeAlias
 
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import explainers as _explainers  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import nodes as _nodes  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import scope as _scope  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from textfile import TextFile  # pylint: disable=import-error
+import sys
+from pathlib import Path
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
 
+
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import explainers as _explainers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import nodes as _nodes  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import scope as _scope  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+from textfile import TextFile  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+
+
+# One listed node of the topics index: `(rel_link, link_text, summary, connectors, badges)`.
+_NodeEntry: TypeAlias = tuple[str, str, str | None, list[str], list[str]]
+# The topics index tree: axis, then value, then the node entries listed under that value.
+_IndexTree: TypeAlias = dict[str, dict[str, list[_NodeEntry]]]
 
 # Wiki frontmatter key and value written into topics.md.
 _KEY_WIKI_ROLE = "wiki_role"
@@ -99,10 +112,9 @@ class TopicIndex:
     """
     Build the topic tree and write `topics.md` to the configured path.
 
-    Nodes that carry no `wiki/*` tags and have no `wiki_summary` are
-    skipped entirely — there is nothing meaningful to index.  Nodes with
-    `wiki/*` tags but no summary appear under their tags with an empty
-    gloss.  Files of an unsupported type are skipped gracefully.
+    A node is listed only when it carries at least one well-formed topic tag.  Nodes with no topic tag, or
+    only malformed ones, are skipped even when they have a `wiki_summary`.  A listed node without a summary
+    appears under its tags with an empty gloss.  Files of an unsupported type are skipped gracefully.
 
     Guarantees:
       - Rebuilding an unchanged scope writes a byte-identical file; the output never depends on the order
@@ -123,11 +135,9 @@ class TopicIndex:
     # rebuild unchanged; the builder never drops nor rewrites it.
 
     # assemble the catalog from the scope's nodes and write it to the configured path
-    node_paths = self._resolver.iter_nodes(self._cfg)
     index_path = self._resolve_index_path()
-    synced_sha = self._read_synced_sha(index_path)
-    tree = self._collect_tree(node_paths, index_path)
-    content = self._render(tree, synced_sha)
+    tree = self._collect_tree(self._resolver.find_all_nodes(self._cfg), index_path)
+    content = self._render(tree, self._read_synced_sha(index_path))
     index_path.parent.mkdir(parents = True, exist_ok = True)
     TextFile(path = index_path).write(content)
     return index_path
@@ -159,8 +169,7 @@ class TopicIndex:
     # guard: no index file yet — there is no anchor to preserve
     if not index_path.is_file():
       return None
-    text = index_path.read_text(encoding = _ENCODING)
-    return _nodes.get_scalar_field(text, _KEY_WIKI_SYNCED_SHA)
+    return _nodes.get_scalar_field(index_path.read_text(encoding = _ENCODING), _KEY_WIKI_SYNCED_SHA)
 
   # ── private ───────────────────────────────────────────────────────────────
 
@@ -172,14 +181,11 @@ class TopicIndex:
       Absolute `Path` derived from `cfg["topics_index"]` relative to
       the repository root.
     """
-    raw: str = self._cfg.get(self._CFG_TOPICS_INDEX, self._DEFAULT_TOPICS_INDEX)
-    return (self._repo / raw).resolve()
+    return (self._repo / self._cfg.get(self._CFG_TOPICS_INDEX, self._DEFAULT_TOPICS_INDEX)).resolve()
 
-  def _collect_tree(
-    self,
-    node_paths: list[Path],
-    index_path: Path,
-  ) -> dict[str, dict[str, list[tuple[str, str, str | None, list[str], list[str]]]]]:
+  def _collect_tree(self,
+                    node_paths: list[Path],
+                    index_path: Path) -> _IndexTree:
     """
     Traverse node files and build the axis → value → node-entries tree.
 
@@ -194,7 +200,7 @@ class TopicIndex:
     keys and entry lists are sorted for determinism.
 
     Args:
-      node_paths: Absolute paths of candidate nodes from `iter_nodes`.
+      node_paths: Absolute paths of candidate nodes from `find_all_nodes`.
       index_path: Absolute path of the topics.md file; used to compute
         relative links from the index's directory to each node.
 
@@ -209,9 +215,10 @@ class TopicIndex:
     # A wiki scope is entered through a single categorical catalog that groups the scope's nodes by the topics
     # they declare. The catalog is a projection of what the nodes say about themselves, never an independent
     # judgement: a node is listed under exactly the topics it carries, and a node carrying several topics is
-    # listed once under each of them. A node earns a place by declaring at least one topic or a one-line
-    # gloss; one that declares neither says nothing about itself and stays out, as do files of a kind the wiki
-    # does not know how to read. Each listing is named by the node's file name; when several listed nodes share
+    # listed once under each of them. A node earns a place by declaring at least one well-formed topic: the
+    # catalog is organised by topic, so a node with a gloss but no usable topic has no heading to sit under
+    # and is not listed, and one that declares nothing says nothing about itself and stays out, as do files of
+    # a kind the wiki does not know how to read. Each listing is named by the node's file name; when several listed nodes share
     # a file name, each of them takes on its enclosing folders, one at a time and only as far as needed to tell
     # it apart from the others, the parts separated by a middle dot. Only nodes the catalog actually lists count
     # when judging whether a name is shared, and the judgement spans the whole scope rather than one topic, so a
@@ -232,7 +239,7 @@ class TopicIndex:
     index_badges = [ k for k in raw_keys if isinstance(k, str) ] if isinstance(raw_keys, list) else []
 
     # Raw accumulator: axis → value_path → list of (rel_link, link_text, summary, connectors, badges)
-    raw: dict[str, dict[str, list[tuple[str, str, str | None, list[str], list[str]]]]] = {}
+    raw: _IndexTree = {}
 
     # keep only the nodes the catalog will list, so their names are judged among them alone
     indexed: list[tuple[Path, list[str], str | None, list[str], list[str]]] = []
@@ -264,8 +271,8 @@ class TopicIndex:
         badges = []
       connectors = node.connectors
 
-      # guard: nothing to index — no wiki tags and no summary
-      if not wiki_tags and summary is None:
+      # only a node with a well-formed topic has a heading to sit under and is listed
+      if not any(self._split_tag(tag)[0] is not None for tag in wiki_tags):
         continue
       indexed.append((node_path, wiki_tags, summary, connectors, badges))
 
@@ -292,7 +299,7 @@ class TopicIndex:
         raw[axis][value_path].append((rel_link, link_text, summary, connectors, badges))
 
     # Sort: axes → values → nodes (by rel_link for stability)
-    result: dict[str, dict[str, list[tuple[str, str, str | None, list[str], list[str]]]]] = {}
+    result: _IndexTree = {}
     for axis in sorted(raw):
       result[axis] = {}
       for value_path in sorted(raw[axis]):
@@ -333,7 +340,7 @@ class TopicIndex:
       # lengthen every colliding name that still has a folder left to take
       grown = False
       for members in holders.values():
-        # guard: a name held by one node is already unique
+        # a name held by one node is already unique
         if len(members) < 2:
           continue
         for node_path in members:
@@ -343,7 +350,7 @@ class TopicIndex:
           depth[node_path] += 1
           grown = True
 
-      # guard: a pass that lengthened nothing has settled every name
+      # a pass that lengthened nothing has settled every name
       if not grown:
         return texts
 
@@ -377,17 +384,14 @@ class TopicIndex:
       return None, None
 
     # everything past the prefix is the axis plus its value segments
-    rest = tag[len(_WIKI_TAG_PREFIX):]
-    segs = rest.split("/")
+    segs = tag[len(_WIKI_TAG_PREFIX):].split("/")
 
     # guard: fewer than two segments means no value under the axis
     if len(segs) < 2:
       return None, None
 
     # first segment names the axis; the remainder re-joins as a nested value path
-    axis = segs[0]
-    value_path = "/".join(segs[1:])
-    return axis, value_path
+    return segs[0], "/".join(segs[1:])
 
   def _relative_link(self, node_path: Path, index_path: Path) -> str:
     """
@@ -404,7 +408,7 @@ class TopicIndex:
     try:
       return node_path.relative_to(index_dir).as_posix()
     except ValueError:
-      # guard: node is not under the index directory — build a ../.. path
+      # a node outside the index directory is reached through a ../.. path
       parts_index = index_dir.parts
       parts_node = node_path.parts
       common_len = sum(
@@ -414,11 +418,9 @@ class TopicIndex:
       down = "/".join(parts_node[common_len:])
       return "../" * ups + down
 
-  def _render(
-    self,
-    tree: dict[str, dict[str, list[tuple[str, str, str | None, list[str], list[str]]]]],
-    synced_sha: str | None,
-  ) -> str:
+  def _render(self,
+              tree: _IndexTree,
+              synced_sha: str | None) -> str:
     """
     Render the topic tree as a `topics.md` markdown document.
 

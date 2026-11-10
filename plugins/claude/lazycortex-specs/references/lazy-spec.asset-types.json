@@ -6,7 +6,7 @@
       "default_path": ".",
       "start_doc": "design.md:design",
       "playbook": "lazycortex-specs:lazy-spec.feature-playbook",
-      "vision": "mandatory"
+      "vision": "opt-in"
     },
     "change": {
       "icon": "LiRefreshCcw",
@@ -44,6 +44,18 @@
         "research"
       ],
       "playbook": "lazycortex-specs:lazy-spec.research-playbook",
+      "vision": "none"
+    },
+    "release": {
+      "icon": "LiPackageCheck",
+      "color": "#64748b",
+      "default_path": "releases",
+      "start_doc": "code-plan.md:code-plan",
+      "default_tools": [
+        "code",
+        "test"
+      ],
+      "playbook": "lazycortex-specs:lazy-spec.release-playbook",
       "vision": "none"
     },
     "catalog": {

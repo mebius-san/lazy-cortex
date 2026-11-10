@@ -11,9 +11,10 @@ import os
 from pathlib import Path
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from constants import SettingsFile, SettingsKey  # pylint: disable=import-error
+from constants import EnvVar, SettingsFile, SettingsKey  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from lazy_settings import load_section  # pylint: disable=import-error
+
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
@@ -150,6 +151,48 @@ def validate_entry(name: str, entry: object) -> dict:
   }
 
 
+# waiver: `model` is typed `object` because it is the raw, unvalidated settings value — any JSON type can
+# arrive, and rejecting a non-tier value of any type is this function's job
+def validate_expert_model(name: str, model: object) -> None:
+  """
+  Validate the explicit model pinned on an expert bound to a provider.
+
+  Guarantees:
+    - A set `model` that is not one of the tier aliases in `PROVIDER_TIERS` always raises
+      `ProviderConfigError`.
+    - An unset `model` always passes.
+
+  Args:
+    name: Provider key the expert is bound to, used to identify it in the error message.
+    model: The expert's own `model` value, or a falsy value when the expert pins none.
+
+  Raises:
+    ProviderConfigError: If `model` is set and is not one of the tier aliases in `PROVIDER_TIERS`.
+  """
+
+  # Contract:
+  # A provider-bound expert's explicit `model` MUST be one of the tier aliases, otherwise
+  # `ProviderConfigError` is raised; an expert that pins no model MUST pass.
+
+  # Domain(runtime.providers):
+  # # A provider-bound expert names a tier, never a model
+  # An expert sent to a foreign endpoint reaches that endpoint's models only through the provider's
+  # tier map, so the one model choice it may make for itself is which tier to run on. A full model
+  # name pinned on the expert would skip the map: a Claude-owned name would reach an endpoint that
+  # does not know it, and a hand-written route name could borrow a route reserved for other traffic.
+  # An expert that pins nothing takes its agent's tier, which is already a tier.
+
+  # guard: no explicit model — the agent's tier applies, and a tier always passes through the map
+  if not model:
+    return
+
+  # guard: only a tier alias reaches the provider's tier map
+  if model not in PROVIDER_TIERS:
+    raise ProviderConfigError(
+      f"provider {name!r}: expert model {model!r} must be one of the tier aliases {list(PROVIDER_TIERS)}"
+    )
+
+
 def resolve_provider(repo: Path, name: str) -> dict:
   """
   Resolve and validate the named provider entry from project settings.
@@ -168,8 +211,7 @@ def resolve_provider(repo: Path, name: str) -> dict:
   """
   # the merged providers registry is the single source of truth for endpoints
   providers = load_section(Path(repo) / SettingsFile.REL, SettingsKey.PROVIDERS)
-  entry = providers.get(name)
-  return validate_entry(name, entry)
+  return validate_entry(name, providers.get(name))
 
 
 def resolve_token(token_env: str, *, env_file: Path | None = None) -> str | None:
@@ -199,7 +241,7 @@ def resolve_token(token_env: str, *, env_file: Path | None = None) -> str | None
   # check process environment first
   value = os.environ.get(token_env)
 
-  # guard: the process environment wins — same precedence the daemon's token gate uses
+  # the process environment wins — an exported token is this run's explicit choice, the file only a fallback
   if value:
     return value
 
@@ -212,8 +254,8 @@ def resolve_token(token_env: str, *, env_file: Path | None = None) -> str | None
     return None
 
   # parse the env file, favoring the last assignment of the variable
-  # waiver: export prefix and quote chars are file-format literals
   for line in reversed(path.read_text(encoding = "utf-8").splitlines()):
+    # waiver: export prefix and quote chars are file-format literals
     stripped = line.strip().removeprefix("export ").strip()
     if stripped.startswith(f"{token_env}="):
       return (
@@ -256,8 +298,9 @@ def build_spawn_env(provider: dict, token: str) -> dict[str, str]:
   overrides = { _TIER_ENV[tier]: models[tier] for tier in PROVIDER_TIERS }
 
   # add the provider endpoint and token
-  # waiver: ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN are harness-canonical env var names
+  # waiver: ANTHROPIC_BASE_URL is a harness-canonical env var name
   overrides["ANTHROPIC_BASE_URL"] = provider[ProviderKey.BASE_URL]
+  # waiver: ANTHROPIC_AUTH_TOKEN is a harness-canonical env var name
   overrides["ANTHROPIC_AUTH_TOKEN"] = token
 
   # Domain(runtime.providers):
@@ -277,3 +320,47 @@ def build_spawn_env(provider: dict, token: str) -> dict[str, str]:
   # waiver: CLAUDE_CODE_SUBAGENT_MODEL is a harness-canonical env var name
   overrides["CLAUDE_CODE_SUBAGENT_MODEL"] = models["sonnet"]
   return overrides
+
+
+# waiver: `daemon_token_env` is typed `object` because it is the raw `daemon.token_env` settings value — any
+# JSON type can arrive, and a non-string is treated as unset
+def apply_spawn_env(env: dict[str, str], provider: dict, token: str, *, daemon_token_env: object) -> None:
+  """
+  Point a spawn environment at a provider's endpoint and strip the operator's own credentials from it.
+
+  Guarantees:
+    - Every override `build_spawn_env` returns is present, so every model-selection surface the
+      harness can address is redirected to the provider.
+    - Neither the operator's Anthropic credentials, nor the daemon's own token variable, nor its token
+      digest marker remain in the environment.
+
+  Args:
+    env: Spawn environment to rewrite in place.
+    provider: Resolved provider configuration block to spawn against.
+    token: Auth token to use for this provider's endpoint.
+    daemon_token_env: The `daemon.token_env` settings value naming the daemon's own token variable, or any
+      non-string value when none is configured.
+  """
+
+  # Contract:
+  # The rewritten environment MUST carry every override `build_spawn_env` returns, so every
+  # model-selection surface the harness can address is redirected to the provider.
+
+  # Contract:
+  # The rewritten environment MUST NOT carry `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, the
+  # daemon's token digest marker, or the variable `daemon_token_env` names — no credential of
+  # the operator's own reaches a foreign endpoint.
+
+  # redirect every model-selection surface to the provider
+  env.update(build_spawn_env(provider, token))
+
+  # the Anthropic OAuth token and API key must never travel to a foreign endpoint
+  # waiver: CLAUDE_CODE_OAUTH_TOKEN and ANTHROPIC_API_KEY are harness-canonical env var names
+  env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+  # waiver: ANTHROPIC_API_KEY is a harness-canonical env var name
+  env.pop("ANTHROPIC_API_KEY", None)
+
+  # nor may the daemon's own token source variable or its digest marker
+  env.pop(EnvVar.DAEMON_TOKEN_MARK, None)
+  if isinstance(daemon_token_env, str) and daemon_token_env.strip():
+    env.pop(daemon_token_env.strip(), None)

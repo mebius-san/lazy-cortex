@@ -15,23 +15,29 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import time
 from pathlib import Path
-
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import domains as _domains  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import index as _index  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import mirror as _mirror  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import nodes as _nodes  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import scope as _scope  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
+
+
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import domains as _domains  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import index as _index  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import mirror as _mirror  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import nodes as _nodes  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import scope as _scope  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -47,7 +53,7 @@ _CFG_PATHS        = "paths"
 _CFG_EXCLUDE      = "exclude_paths"
 
 # Default topics-index path when missing from config.
-_DEFAULT_TOPICS_INDEX = "wiki/topics.md"
+DEFAULT_TOPICS_INDEX = "wiki/topics.md"
 
 # File encoding used throughout.
 _ENCODING = "utf-8"
@@ -139,15 +145,13 @@ _SECONDS_PER_DAY      = 86400
 # Finding dataclass (plain dict for simplicity / zero-dependency)
 # ────────────────────────────────────────────────────────────────────────────
 
-def _finding(
-  check: str,
-  severity: str,
-  message: str,
-  node: str = "-",
-  *,
-  fixable: bool = False,
-  applied: bool = False,
-) -> dict:
+def _build_finding(check: str,
+             severity: str,
+             message: str,
+             node: str = "-",
+             *,
+             fixable: bool = False,
+             applied: bool = False) -> dict:
   """
   Return a structured finding dict.
 
@@ -248,8 +252,7 @@ def _read_topics_md_tags(index_path: Path) -> set[str] | None:
   # guard: index file absent
   if not index_path.is_file():
     return None
-  content = index_path.read_text(encoding = _ENCODING)
-  return _parse_topics_md(content)
+  return _parse_topics_md(index_path.read_text(encoding = _ENCODING))
 
 
 def _read_topics_md_links(index_path: Path) -> list[str] | None:
@@ -276,9 +279,7 @@ def _read_topics_md_links(index_path: Path) -> list[str] | None:
   return links
 
 
-def _see_also_lines_from_node(
-  node: _nodes.MarkdownNode | _nodes.CodeNode,
-) -> list[str]:
+def _see_also_lines_from_node(node: _nodes.MarkdownNode | _nodes.CodeNode) -> list[str]:
   """
   Return the raw See-also items from a node.
 
@@ -293,6 +294,8 @@ def _see_also_lines_from_node(
   """
   if isinstance(node, _nodes.MarkdownNode):
     inner = node.see_also_inner
+
+    # guard: a node without a See-also section has no items
     if not inner:
       return []
     lines = []
@@ -302,7 +305,7 @@ def _see_also_lines_from_node(
         lines.append(stripped[2:].strip())
     return lines
 
-  # CodeNode
+  # a code node already holds its See-also items as bare strings
   return list(node.see_also)
 
 
@@ -362,15 +365,14 @@ def _drop_see_also_line(node: _nodes.MarkdownNode, broken_target: str) -> None:
     item_text = stripped[2:].strip()
     target, _ = _extract_link_target(item_text)
 
-    # guard: this line has the broken target — drop it
+    # a line carrying the broken target is dropped
     if target == broken_target:
       continue
     kept_lines.append(ln)
-  new_inner = "\n".join(kept_lines)
 
   # Keep the full `- [text](target) — gloss` list-item strings: apply_link grafts
   # see_also_lines verbatim (ready-to-graft, per the curator protocol).
-  kept_items = [ ln.strip() for ln in new_inner.splitlines() if ln.strip().startswith("- ") ]
+  kept_items = [ ln.strip() for ln in kept_lines if ln.strip().startswith("- ") ]
   node.apply_link(see_also_lines = kept_items)
 
 
@@ -382,23 +384,20 @@ def _drop_code_see_also_line(node: _nodes.CodeNode, broken_target: str) -> None:
     node: The code node to modify (writes in-place).
     broken_target: The link target string to drop.
   """
-  items = node.see_also
   kept = []
-  for item in items:
+  for item in node.see_also:
     target, _ = _extract_link_target(item)
 
-    # guard: this item has the broken target — drop it
+    # an item carrying the broken target is dropped
     if target == broken_target:
       continue
     kept.append(item)
   node.apply_link(see_also_lines = kept)
 
 
-def _refresh_gloss_markdown(
-  node: _nodes.MarkdownNode,
-  stale_target: str,
-  new_gloss: str,
-) -> None:
+def _refresh_gloss_markdown(node: _nodes.MarkdownNode,
+                            stale_target: str,
+                            new_gloss: str) -> None:
   """
   Refresh a stale gloss in a markdown node's See-also section.
 
@@ -432,11 +431,9 @@ def _refresh_gloss_markdown(
   node.apply_link(see_also_lines = items)
 
 
-def _refresh_gloss_code(
-  node: _nodes.CodeNode,
-  stale_target: str,
-  new_gloss: str,
-) -> None:
+def _refresh_gloss_code(node: _nodes.CodeNode,
+                        stale_target: str,
+                        new_gloss: str) -> None:
   """
   Refresh a stale gloss in a code node's `<wiki>` block.
 
@@ -445,9 +442,8 @@ def _refresh_gloss_code(
     stale_target: Link target whose gloss should be refreshed.
     new_gloss: Updated gloss text (the target node's current summary).
   """
-  items = node.see_also
   new_items = []
-  for item in items:
+  for item in node.see_also:
     target, _ = _extract_link_target(item)
     if target == stale_target:
       new_items.append(f"{target} — {new_gloss}")
@@ -482,7 +478,7 @@ class Doctor:
       target's current summary.
     CHECK_UNKNOWN_AXIS: Check identifier for a tag whose axis is not declared for the scope.
     CHECK_DUP_BRANCH: Check identifier for near-duplicate tag values within the same axis.
-    CHECK_BROKEN_WIKI_BLOK: Check identifier for a code node with an unterminated `<wiki>` block.
+    CHECK_BROKEN_WIKI_BLOCK: Check identifier for a code node with an unterminated `<wiki>` block.
     CHECK_SCOPE_OVERLAP: Check identifier for a node claimed by more than one configured scope.
     CHECK_MIRROR_ORPHAN_CLONE: Check identifier for a runtime clone whose scope has no `mirror` block.
     CHECK_MIRROR_DIR_MISSING: Check identifier for a configured mirror whose directory does not exist.
@@ -509,7 +505,7 @@ class Doctor:
   CHECK_UNKNOWN_AXIS    = "unknown-axis"
   CHECK_DUP_BRANCH      = "dup-branch"
   # Check identifier for a code node with an unterminated `<wiki>` block.
-  CHECK_BROKEN_WIKI_BLOK = "broken-wiki-block"
+  CHECK_BROKEN_WIKI_BLOCK = "broken-wiki-block"
   CHECK_SCOPE_OVERLAP   = "scope-overlap"
   # Check identifier for a runtime clone whose scope has no `mirror` block.
   CHECK_MIRROR_ORPHAN_CLONE = "mirror-clone-orphaned"
@@ -518,14 +514,11 @@ class Doctor:
   CHECK_MIRROR_STALE        = "mirror-stale-fetch"
   CHECK_MIRROR_LOCAL_EDIT   = "mirror-local-edit"
 
-  def __init__(
-    self,
-    *,
-    repo: Path,
-    scope_id: str,
-    cfg: dict,
-    apply: bool = False,
-  ) -> None:
+  def __init__(self, *,
+               repo: Path,
+               scope_id: str,
+               cfg: dict,
+               apply: bool = False) -> None:
     """
     Initialise the doctor for one scope.
 
@@ -571,12 +564,12 @@ class Doctor:
 
     # the scope's axes and index address gate the classification checks below; the vocabulary is
     # the repository's, narrowed by whatever this scope declares
-    tag_axes     = self._resolver.tag_axes(self._cfg)
+    tag_axes     = self._resolver.read_tag_axes(self._cfg)
     index_path   = self._resolve_index_path()
 
     # the generated topics-index file is excluded by the resolver itself, so this is
     # the curated-node set already
-    node_paths = self._resolver.iter_nodes(self._cfg)
+    node_paths = self._resolver.find_all_nodes(self._cfg)
 
     # Load every node once; skip unrecognised types.
     nodes: list[tuple[Path, _nodes.MarkdownNode | _nodes.CodeNode]] = []
@@ -602,8 +595,7 @@ class Doctor:
       all_findings += self._check_unknown_axis(node, rel, tag_axes)
 
       # linking checks — what the node points at
-      sa_findings = self._check_see_also(node, rel)
-      all_findings += sa_findings
+      all_findings += self._check_see_also(node, rel)
 
     # Scope-level checks.
     all_findings += self._check_index_desync(nodes, index_path)
@@ -634,7 +626,7 @@ class Doctor:
     # Apply fixable findings.
     if self._apply:
       for f in all_findings:
-        # guard: finding is not fixable — skip
+        # only fixable findings are applied
         if not f[_FK_FIXABLE]:
           continue
         if f[_FK_CHECK] in (self.CHECK_ORPHAN_TOPIC, self.CHECK_INDEX_DESYNC, self.CHECK_INDEX_STALE):
@@ -650,7 +642,7 @@ class Doctor:
       # Base rewrites run last: every other per-line repair matches on the target string
       # as currently written, so rewriting the base first would make those matches miss.
       for f in all_findings:
-        # guard: not a base-rewrite finding
+        # only base-rewrite findings are handled here
         if f[_FK_CHECK] != self.CHECK_PATH_BASE:
           continue
         self._apply_rebase_see_also(f)
@@ -658,24 +650,21 @@ class Doctor:
 
       # Run index rebuild once at the end when any orphan/desync fix was requested.
       if needs_index_rebuild:
-        builder = _index.TopicIndex(
+        _index.TopicIndex(
           repo     = self._repo,
           cfg      = self._cfg,
           scope_id = self._scope_id,
-        )
-        builder.build()
+        ).build()
 
     # findings carry their own applied/fixable flags — the caller renders from this alone
     return all_findings
 
   # ── check: orphan-topic ───────────────────────────────────────────────────
 
-  def _check_orphan_topic(
-    self,
-    node: _nodes.MarkdownNode | _nodes.CodeNode,
-    rel: str,
-    index_path: Path,
-  ) -> list[dict]:
+  def _check_orphan_topic(self,
+                          node: _nodes.MarkdownNode | _nodes.CodeNode,
+                          rel: str,
+                          index_path: Path) -> list[dict]:
     """
     Report any `wiki/*` tag on the node that is absent from `topics.md`.
 
@@ -706,12 +695,11 @@ class Doctor:
     # divergence.
 
     # a tag the index never learned about means the node was classified after the last build
-    wiki_tags = self._node_wiki_tags(node)
-    for tag in wiki_tags:
-      # guard: tag present in index — no finding
+    for tag in self._node_wiki_tags(node):
+      # tag present in index — no finding
       if tag in index_tags:
         continue
-      findings.append(_finding(
+      findings.append(_build_finding(
         check    = self.CHECK_ORPHAN_TOPIC,
         severity = SEV_WARN,
         message  = f"tag '{tag}' not in topics.md (index out of sync)",
@@ -722,11 +710,9 @@ class Doctor:
 
   # ── check: broken-see-also + dangling-at-prefix + stale-gloss ─────────────
 
-  def _check_see_also(
-    self,
-    node: _nodes.MarkdownNode | _nodes.CodeNode,
-    rel: str,
-  ) -> list[dict]:
+  def _check_see_also(self,
+                      node: _nodes.MarkdownNode | _nodes.CodeNode,
+                      rel: str) -> list[dict]:
     """
     Run three related See-also checks: broken links, dangling `@` prefixes, stale glosses.
 
@@ -762,10 +748,10 @@ class Doctor:
       if not target:
         continue
 
-      # guard: leftover cross-repo form — the `@` prefix resolves nowhere anymore; the
+      # a leftover cross-repo form is reported — the `@` prefix resolves nowhere anymore; the
       # link must be rewritten to a mirrored node's local path or dropped by the operator
       if target.startswith(_AT_PREFIX):
-        findings.append(_finding(
+        findings.append(_build_finding(
           check    = self.CHECK_DANGLING_AT,
           severity = SEV_WARN,
           message  = (
@@ -785,7 +771,7 @@ class Doctor:
         # dropping the line — the edge itself is sound.
         rebased = _nodes.resolve_see_also_target(target, self._repo / rel)
         if rebased is not None:
-          finding = _finding(
+          finding = _build_finding(
             check    = self.CHECK_PATH_BASE,
             severity = SEV_WARN,
             message  = (
@@ -801,7 +787,7 @@ class Doctor:
           abs_target = rebased
         else:
           # no base recovers it — the edge itself is gone, so the line must be dropped
-          finding = _finding(
+          finding = _build_finding(
             check    = self.CHECK_BROKEN_SEE_ALSO,
             severity = SEV_FAIL,
             message  = f"see-also target '{target}' does not exist",
@@ -824,15 +810,12 @@ class Doctor:
     # all three See-also checks report through one list so the caller applies them together
     return findings
 
-  def _check_stale_gloss_for_target(
-    self,
-    *,
-    node: _nodes.MarkdownNode | _nodes.CodeNode,
-    rel: str,
-    target: str,
-    gloss: str,
-    abs_path: Path,
-  ) -> list[dict]:
+  def _check_stale_gloss_for_target(self, *,
+                                    node: _nodes.MarkdownNode | _nodes.CodeNode,
+                                    rel: str,
+                                    target: str,
+                                    gloss: str,
+                                    abs_path: Path) -> list[dict]:
     """
     Check whether the gloss in a See-also entry matches the target's current summary.
 
@@ -870,7 +853,7 @@ class Doctor:
     if not current_summary:
       return []
 
-    # guard: gloss matches current summary — no finding
+    # gloss matches current summary — no finding
     if gloss == current_summary:
       return []
 
@@ -879,7 +862,7 @@ class Doctor:
       return []
 
     # the gloss survived a summary edit — carry the replacement text for the apply step
-    f = _finding(
+    f = _build_finding(
       check    = self.CHECK_STALE_GLOSS,
       severity = SEV_WARN,
       message  = (
@@ -896,11 +879,9 @@ class Doctor:
 
   # ── check: index-desync ───────────────────────────────────────────────────
 
-  def _check_index_desync(
-    self,
-    nodes: list[tuple[Path, _nodes.MarkdownNode | _nodes.CodeNode]],
-    index_path: Path,
-  ) -> list[dict]:
+  def _check_index_desync(self,
+                          nodes: list[tuple[Path, _nodes.MarkdownNode | _nodes.CodeNode]],
+                          index_path: Path) -> list[dict]:
     """
     Report `wiki/*` tags in `topics.md` that no node actually carries.
 
@@ -925,7 +906,7 @@ class Doctor:
 
     # anything the index still lists but no node carries is a leftover from an earlier build
     for tag in sorted(index_tags - live_tags):
-      findings.append(_finding(
+      findings.append(_build_finding(
         check    = self.CHECK_INDEX_DESYNC,
         severity = SEV_WARN,
         message  = f"topics.md declares '{tag}' but no node carries it",
@@ -936,11 +917,9 @@ class Doctor:
 
   # ── check: index-stale ────────────────────────────────────────────────────
 
-  def _check_index_stale(
-    self,
-    nodes: list[tuple[Path, _nodes.MarkdownNode | _nodes.CodeNode]],
-    index_path: Path,
-  ) -> list[dict]:
+  def _check_index_stale(self,
+                         nodes: list[tuple[Path, _nodes.MarkdownNode | _nodes.CodeNode]],
+                         index_path: Path) -> list[dict]:
     """
     Report `topics.md` links whose file is gone and tagged nodes the index never links.
 
@@ -971,10 +950,10 @@ class Doctor:
       target = (index_path.parent / link).resolve()
       linked.add(target)
 
-      # guard: the linked file is still there
+      # a linked file still on disk produces no finding
       if target.is_file():
         continue
-      findings.append(_finding(
+      findings.append(_build_finding(
         check    = self.CHECK_INDEX_STALE,
         severity = SEV_WARN,
         message  = f"topics.md links '{link}' but no file exists there",
@@ -988,10 +967,10 @@ class Doctor:
       if not self._node_wiki_tags(node):
         continue
 
-      # guard: the node is linked from the index
+      # a node linked from the index produces no finding
       if node_path.resolve() in linked:
         continue
-      findings.append(_finding(
+      findings.append(_build_finding(
         check    = self.CHECK_INDEX_STALE,
         severity = SEV_WARN,
         message  = _MSG_NODE_UNLINKED,
@@ -1002,11 +981,9 @@ class Doctor:
 
   # ── check: missing-summary ────────────────────────────────────────────────
 
-  def _check_missing_summary(
-    self,
-    node: _nodes.MarkdownNode | _nodes.CodeNode,
-    rel: str,
-  ) -> list[dict]:
+  def _check_missing_summary(self,
+                             node: _nodes.MarkdownNode | _nodes.CodeNode,
+                             rel: str) -> list[dict]:
     """
     Report scope nodes that have no `wiki_summary` / `summary` value.
 
@@ -1022,10 +999,10 @@ class Doctor:
     else:
       summary = node.summary
 
-    # guard: summary present — no finding
+    # summary present — no finding
     if summary:
       return []
-    return [_finding(
+    return [_build_finding(
       check    = self.CHECK_MISSING_SUMMARY,
       severity = SEV_INFO,
       message  = _MSG_NO_SUMMARY,
@@ -1035,12 +1012,10 @@ class Doctor:
 
   # ── check: unknown-axis ───────────────────────────────────────────────────
 
-  def _check_unknown_axis(
-    self,
-    node: _nodes.MarkdownNode | _nodes.CodeNode,
-    rel: str,
-    tag_axes: list[str],
-  ) -> list[dict]:
+  def _check_unknown_axis(self,
+                          node: _nodes.MarkdownNode | _nodes.CodeNode,
+                          rel: str,
+                          tag_axes: list[str]) -> list[dict]:
     """
     Report `wiki/*` tags whose axis is not declared in `tag_axes`.
 
@@ -1075,10 +1050,10 @@ class Doctor:
       rest = tag[len(_WIKI_TAG_PREFIX):]
       axis = rest.split("/")[0] if "/" in rest else rest
 
-      # guard: axis is known
+      # a known axis produces no finding
       if axis in axes_set:
         continue
-      findings.append(_finding(
+      findings.append(_build_finding(
         check    = self.CHECK_UNKNOWN_AXIS,
         severity = SEV_WARN,
         message  = f"tag '{tag}' uses unknown axis '{axis}' (not in tag_axes {tag_axes})",
@@ -1089,10 +1064,8 @@ class Doctor:
 
   # ── check: dup-branch ─────────────────────────────────────────────────────
 
-  def _check_dup_branch(
-    self,
-    nodes: list[tuple[Path, _nodes.MarkdownNode | _nodes.CodeNode]],
-  ) -> list[dict]:
+  def _check_dup_branch(self,
+                        nodes: list[tuple[Path, _nodes.MarkdownNode | _nodes.CodeNode]]) -> list[dict]:
     """
     Report near-duplicate tag values within a single axis across all scope nodes.
 
@@ -1160,11 +1133,11 @@ class Doctor:
           if is_dup:
             pair = (min(a, b), max(a, b))
 
-            # guard: already reported this pair
+            # a pair already reported is not reported again
             if pair in reported:
               continue
             reported.add(pair)
-            findings.append(_finding(
+            findings.append(_build_finding(
               check    = self.CHECK_DUP_BRANCH,
               severity = SEV_WARN,
               message  = (
@@ -1180,13 +1153,13 @@ class Doctor:
 
   def _check_broken_wiki_block(self, node_paths: list[Path]) -> list[dict]:
     """
-    Report code nodes with unterminated `<wiki>` blocks or unrecognised comment prefixes.
+    Report code nodes whose `<wiki>` block has only one of its two markers, and code nodes that cannot be read.
 
     Skips markdown files (they have no `<wiki>` block) and skips files with
     unrecognised extensions (those aren't code nodes at all).
 
     Args:
-      node_paths: All file paths returned by `iter_nodes` for this scope.
+      node_paths: All file paths returned by `find_all_nodes` for this scope.
 
     Returns:
       List of findings.
@@ -1196,20 +1169,19 @@ class Doctor:
       # guard: markdown files don't have <wiki> blocks
       if p.suffix.lower() == _MD_EXT:
         continue
-      ext = p.suffix.lower()
-      style = _nodes._comment_style(ext)
+      style = _nodes._comment_style(p.suffix.lower())
 
       # guard: unrecognised extension — not a code node
       if style is None:
         continue
 
-      # guard: unreadable file — report it instead of aborting the whole sweep
+      # an unreadable file is reported instead of aborting the whole sweep
       rel = p.relative_to(self._repo).as_posix()
       try:
         text = p.read_text(encoding = _ENCODING)
       except OSError:
-        findings.append(_finding(
-          check    = self.CHECK_BROKEN_WIKI_BLOK,
+        findings.append(_build_finding(
+          check    = self.CHECK_BROKEN_WIKI_BLOCK,
           severity = SEV_WARN,
           message  = _MSG_UNREADABLE,
           node     = rel,
@@ -1226,16 +1198,16 @@ class Doctor:
 
       # either tag alone means the block cannot be parsed or rewritten safely
       if open_found and not close_found:
-        findings.append(_finding(
-          check    = self.CHECK_BROKEN_WIKI_BLOK,
+        findings.append(_build_finding(
+          check    = self.CHECK_BROKEN_WIKI_BLOCK,
           severity = SEV_FAIL,
           message  = _MSG_OPEN_NO_CLOSE,
           node     = rel,
           fixable  = False,
         ))
       elif close_found and not open_found:
-        findings.append(_finding(
-          check    = self.CHECK_BROKEN_WIKI_BLOK,
+        findings.append(_build_finding(
+          check    = self.CHECK_BROKEN_WIKI_BLOCK,
           severity = SEV_FAIL,
           message  = _MSG_CLOSE_NO_OPEN,
           node     = rel,
@@ -1295,17 +1267,17 @@ class Doctor:
 
   def _check_scope_overlap(self, node_paths: list[Path]) -> list[dict]:
     """
-    Report nodes that match multiple scopes' `paths` globs in the same repo.
+    Report nodes of the audited scope that another scope in the same repo also claims.
 
-    Uses `ScopeResolver.load_scopes` and tests each node against all scopes,
-    flagging when more than one scope claims a path.  Report-only (never
-    auto-fixed).
+    A node counts as claimed by another scope only when that scope's actual membership contains it, so the
+    repository-wide exclusions, the scope's own topics index, and its frontmatter filter all apply.  A repo
+    with a single configured scope yields nothing.  Report-only (never auto-fixed).
 
     Args:
-      node_paths: All file paths returned by `iter_nodes` for the current scope.
+      node_paths: All node file paths of the audited scope.
 
     Returns:
-      List of `WARN` findings.
+      One `WARN` finding per node claimed by more than one scope.
     """
     findings: list[dict] = []
     all_scopes = self._resolver.load_scopes()
@@ -1316,31 +1288,37 @@ class Doctor:
 
     # Domain(wiki.scope):
     # # A node belongs to exactly one scope
-    # A scope claims a file when the file matched at least one including pattern and no excluding one. Competing
-    # claims are resolved not by priority but by separation: an overlap counts as a configuration error, not as a
-    # situation that has a winner.
+    # For overlap purposes a scope claims a document exactly when the document is a member of that scope by the
+    # ordinary membership rule: an including pattern matches, no exclusion matches (the scope's own and the
+    # repository-wide ones), the document is not a generated topic catalogue, and it passes the scope's
+    # frontmatter condition.
+    # A document withdrawn from a scope by its frontmatter condition, by being a catalogue, or by a repository-wide
+    # exclusion is therefore not a competing claim, and only real double membership is reported.
+    # Competing claims are resolved not by priority but by separation: an overlap counts as a configuration error,
+    # not as a situation that has a winner.
     # Double ownership means two topic indexes classify and link the same node independently, overwriting each
     # other's work. The only cure is narrowing the patterns, so an overlap is reported to the operator and never
     # resolved automatically.
     # A single configured scope has nothing to overlap with.
 
-    # replay every scope's own glob logic against each node to see who else claims it
-    matcher = _scope.GlobMatcher()
+    # every other scope's real membership, enumerated once by the resolver's own rule
+    other_members = {
+      sid: set(self._resolver.find_all_nodes(scfg))
+      for sid, scfg in all_scopes.items()
+      if sid != self._scope_id
+    }
+
+    # the audited scope claims every node it was handed; list claimants in declaration order
     for p in node_paths:
       rel = p.relative_to(self._repo).as_posix()
-      matching_scopes = []
-      for sid, scfg in all_scopes.items():
-        # a scope claims the node only when an include glob hits and no exclude does
-        paths_globs = scfg.get(_CFG_PATHS) or []
-        exclude_globs = scfg.get(_CFG_EXCLUDE) or []
-        included = any(matcher.match(rel, pat) for pat in paths_globs)
-        excluded = any(matcher.match(rel, ep) for ep in exclude_globs)
-        if included and not excluded:
-          matching_scopes.append(sid)
+      matching_scopes = [
+        sid for sid in all_scopes
+        if sid == self._scope_id or p in other_members.get(sid, set())
+      ]
 
       # two claimants means two indexes would curate the same node against each other
       if len(matching_scopes) > 1:
-        findings.append(_finding(
+        findings.append(_build_finding(
           check    = self.CHECK_SCOPE_OVERLAP,
           severity = SEV_WARN,
           message  = (
@@ -1358,13 +1336,9 @@ class Doctor:
     """
     Audit the scope's mirror wiring and content drift (all report-only).
 
-    Five checks: a leftover runtime clone for a scope with no `mirror` block;
-    a configured mirror whose directory does not exist yet; a `mirror_path`
-    the scope's `paths` globs do not cover (mirrored files are silently not
-    nodes); a clone whose last fetch is older than the staleness window; and
-    mirror files whose source-owned body drifted from the clone (local edits
-    the next sync overwrites).  The drift and staleness checks need the clone
-    on disk and are skipped without one.
+    Reports findings on how the scope's mirror is wired and on content drift between the
+    mirror and its source.  The drift and staleness checks need the clone on disk and are
+    skipped without one.
 
     Returns:
       List of `WARN` findings.
@@ -1373,9 +1347,9 @@ class Doctor:
     sync = _mirror.MirrorSync(repo = self._repo, scope_id = self._scope_id, cfg = self._cfg)
 
     # guard: no mirror block — the only defect possible is a leftover runtime clone
-    if not sync.configured:
+    if not sync.is_configured:
       if sync.clone_dir.is_dir():
-        findings.append(_finding(
+        findings.append(_build_finding(
           check    = self.CHECK_MIRROR_ORPHAN_CLONE,
           severity = SEV_WARN,
           message  = (
@@ -1388,7 +1362,7 @@ class Doctor:
     # Domain(wiki.scope):
     # # A mirror of a foreign repository inside the vault
     # Foreign documents a scope needs are pulled into the vault as copies: the body belongs to the source, while the
-    # wiki superstructure over it belongs to the receiving side. Hence four ways for a mirror to diverge from
+    # wiki superstructure over it belongs to the receiving side. Hence five ways for a mirror to diverge from
     # expectations.
     # A copy on disk with no declared mirror is a leftover of an earlier configuration: nobody updates it, and
     # deleting it is safe. A declared mirror with no directory means synchronisation has never run.
@@ -1400,28 +1374,26 @@ class Doctor:
     # next synchronisation will overwrite it, so the warning comes in advance.
 
     # a configured mirror whose directory never materialised has not been synced yet
-    mirror_path = sync.mirror_path
-    if not (self._repo / mirror_path).is_dir():
-      findings.append(_finding(
+    if not (self._repo / sync.mirror_path).is_dir():
+      findings.append(_build_finding(
         check    = self.CHECK_MIRROR_DIR_MISSING,
         severity = SEV_WARN,
         message  = (
-          f"mirror configured but '{mirror_path}' does not exist "
+          f"mirror configured but '{sync.mirror_path}' does not exist "
           f"(run `lazycortex-wiki mirror-sync {self._scope_id}`)"
         ),
       ))
 
     # every mirrored file must fall under a paths glob, or it is silently not a node
-    probe = f"{mirror_path}/__probe__.md"
-    paths_globs: list[str] = self._cfg.get(_CFG_PATHS) or []
+    probe = f"{sync.mirror_path}/__probe__.md"
     matcher = _scope.GlobMatcher()
-    if not any(matcher.match(probe, pat) for pat in paths_globs):
-      findings.append(_finding(
+    if not any(matcher.match(probe, pat) for pat in self._cfg.get(_CFG_PATHS) or []):
+      findings.append(_build_finding(
         check    = self.CHECK_MIRROR_UNCOVERED,
         severity = SEV_WARN,
         message  = (
-          f"scope paths do not cover mirror_path '{mirror_path}' — mirrored files are "
-          f"silently not nodes (add '{mirror_path}/**' to the scope's paths)"
+          f"scope paths do not cover mirror_path '{sync.mirror_path}' — mirrored files are "
+          f"silently not nodes (add '{sync.mirror_path}/**' to the scope's paths)"
         ),
       ))
 
@@ -1432,7 +1404,7 @@ class Doctor:
     # a clone the routine stopped fetching means the mirror silently lags the source
     age_days = (time.time() - self._clone_fetch_time(sync.clone_dir)) / _SECONDS_PER_DAY
     if age_days > _MIRROR_STALE_DAYS:
-      findings.append(_finding(
+      findings.append(_build_finding(
         check    = self.CHECK_MIRROR_STALE,
         severity = SEV_WARN,
         message  = (
@@ -1442,19 +1414,19 @@ class Doctor:
       ))
 
     # body drift outside the wiki layer is work the next sync silently erases
-    for source_rel in sync.source_files():
-      mirror_rel = f"{mirror_path}/{source_rel}"
+    for source_rel in sync.find_all_source_files():
+      mirror_rel = f"{sync.mirror_path}/{source_rel}"
       mirror_abs = self._repo / mirror_rel
 
       # guard: not mirrored yet — nothing to drift
       if not mirror_abs.is_file():
         continue
-      mirror_side = sync.consumer_stripped(mirror_abs.read_text(encoding = _ENCODING))
-      source_side = sync.consumer_stripped(
+      mirror_side = sync.to_source_remainder(mirror_abs.read_text(encoding = _ENCODING))
+      source_side = sync.to_source_remainder(
         (sync.clone_dir / source_rel).read_text(encoding = _ENCODING)
       )
       if mirror_side != source_side:
-        findings.append(_finding(
+        findings.append(_build_finding(
           check    = self.CHECK_MIRROR_LOCAL_EDIT,
           severity = SEV_WARN,
           message  = _MSG_MIRROR_LOCAL_EDIT,
@@ -1577,15 +1549,12 @@ class Doctor:
 
     Returns:
       Absolute `Path` derived from `cfg["topics_index"]` relative to
-      the repository root, falling back to `_DEFAULT_TOPICS_INDEX`.
+      the repository root, falling back to `DEFAULT_TOPICS_INDEX`.
     """
-    raw: str = self._cfg.get(_CFG_TOPICS_INDEX, _DEFAULT_TOPICS_INDEX)
-    return (self._repo / raw).resolve()
+    return (self._repo / self._cfg.get(_CFG_TOPICS_INDEX, DEFAULT_TOPICS_INDEX)).resolve()
 
-  def _node_wiki_tags(
-    self,
-    node: _nodes.MarkdownNode | _nodes.CodeNode,
-  ) -> list[str]:
+  def _node_wiki_tags(self,
+                      node: _nodes.MarkdownNode | _nodes.CodeNode) -> list[str]:
     """
     Return the `wiki/*`-prefixed topic tags for either node type.
 
@@ -1674,7 +1643,7 @@ class DomainDoctor:
     # guard: domains not configured — the only defect possible is a leftover routine
     if self._cfg is None:
       return [
-        _finding(
+        _build_finding(
           check    = self.CHECK_ROUTINE_MISMATCH,
           severity = SEV_WARN,
           message  = f"routine '{name}' registered but wiki.domains is not configured",
@@ -1688,7 +1657,7 @@ class DomainDoctor:
 
     # guard: configured dictionary missing — content checks are meaningless without it
     if not dictionary_file.is_present():
-      findings.append(_finding(
+      findings.append(_build_finding(
         check    = self.CHECK_DICTIONARY_MISSING,
         severity = SEV_FAIL,
         message  = f"wiki.domains configured but dictionary '{self._cfg.dictionary}' does not exist",
@@ -1698,26 +1667,32 @@ class DomainDoctor:
 
     # Domain(wiki.domains):
     # # The group dictionary is the single source of truth
-    # Domain knowledge lives as markup right inside the code and is collected into documents group by group. The list
-    # of groups is set by the dictionary, and the dictionary outranks the code: a group met in the code but not
-    # declared in the dictionary silently drops out of the build — its knowledge reaches nowhere.
+    # Domain knowledge lives as markup right inside the code and is published as one document per block, in a folder
+    # per group opened by the group's folder note. The list of groups is set by the dictionary, and the dictionary
+    # outranks the code: a group met in the code but not declared in the dictionary silently drops out of the build —
+    # its knowledge reaches nowhere.
     # Hence four kinds of divergence. A group present in the code but absent from the dictionary — knowledge is lost.
-    # A group declared without its gloss line — it stays unnamed in the index, and the overview of its document has
-    # to be synthesised from the blocks alone. A file in the output tree answering to no declared group — it is
-    # either left over from a rename or was put there by a foreign hand. A group's document lagging behind the code —
-    # the content of the group's blocks is folded into a fingerprint, and a mismatch with the fingerprint recorded in
-    # the document means the code was edited after the last build.
+    # A group declared without its gloss line — it stays unnamed in the index, and the overview of its folder note has
+    # to be synthesised from the blocks alone. A file in the output tree that sits in no declared group's folder, or
+    # the single document per group the earlier layout wrote beside the folder — it is left over from a rename or a
+    # layout change, or was put there by a foreign hand; a path that a current document of the layout owns is never
+    # foreign. A group's folder note lagging behind the code — the content of the group's blocks and of the guarantees
+    # attributed to them is folded into a fingerprint, and a mismatch with the fingerprint recorded in the folder note
+    # means the code was edited after the last build.
     # None of these divergences repairs itself: editing the dictionary, rebuilding, and re-registering the background
     # work are the operator's decisions.
 
-    # content checks share one dictionary parse and one code scan
-    dictionary = dictionary_file.groups()
-    scanned = _domains.DomainScanner(repo = self._repo, code_globs = self._cfg.code).scan()
+    # content checks share one dictionary parse and one scanner, so the block and contract sweeps parse each
+    # code file once
+    dictionary = dictionary_file.read_groups()
+    scanner = _domains.DomainScanner(repo = self._repo, code_globs = self._cfg.code)
+    scanned = scanner.scan()
+    contracts = scanner.scan_contracts()
     layout = _domains.DomainLayout(output = self._cfg.output)
     findings += self._check_group_unknown(dictionary, scanned)
     findings += self._check_gloss_missing(dictionary)
-    findings += self._check_doc_unknown(dictionary, layout)
-    findings += self._check_hash_stale(dictionary, scanned, layout)
+    findings += self._check_doc_unknown(dictionary, scanned, layout)
+    findings += self._check_hash_stale(dictionary, scanned, contracts, layout)
     findings += self._check_tag_axis_unknown(dictionary, layout)
     findings += self._check_output_in_scope()
     findings += self._check_routines(routines)
@@ -1725,11 +1700,9 @@ class DomainDoctor:
 
   # ── check: domain-group-unknown ───────────────────────────────────────────
 
-  def _check_group_unknown(
-    self,
-    dictionary: dict[str, str],
-    scanned: dict[str, list[dict]],
-  ) -> list[dict]:
+  def _check_group_unknown(self,
+                           dictionary: dict[str, str],
+                           scanned: dict[str, list[dict]]) -> list[dict]:
     """
     Report code groups the dictionary does not list.
 
@@ -1742,11 +1715,11 @@ class DomainDoctor:
     """
     findings: list[dict] = []
     for group in sorted(scanned):
-      # guard: listed or reserved — not a finding
+      # listed or reserved — not a finding
       if group in dictionary or group == _domains.RESERVED_GROUP:
         continue
       files = sorted({ blk[_domains.BLOCK_PATH] for blk in scanned[group] })
-      findings.append(_finding(
+      findings.append(_build_finding(
         check    = self.CHECK_GROUP_UNKNOWN,
         severity = SEV_WARN,
         message  = (
@@ -1768,26 +1741,24 @@ class DomainDoctor:
     Returns:
       One `WARN` finding per group whose gloss is empty.
     """
-    cfg = self._cfg
-
     # guard: unreachable without config — content checks run only when configured
-    if cfg is None:
+    if self._cfg is None:
       return []
 
     # a gloss-less group reaches the index bare and the writer with nothing but its blocks
     findings: list[dict] = []
     for group in sorted(dictionary):
-      # guard: the group carries a gloss — nothing to report
+      # the group carries a gloss — nothing to report
       if dictionary[group]:
         continue
-      findings.append(_finding(
+      findings.append(_build_finding(
         check    = self.CHECK_GLOSS_MISSING,
         severity = SEV_WARN,
         message  = (
           f"group '{group}' has no gloss line in the dictionary — its index line stays bare "
           "and the writer synthesises the doc's overview from the blocks alone"
         ),
-        node     = cfg.dictionary,
+        node     = self._cfg.dictionary,
       ))
     return findings
 
@@ -1802,12 +1773,10 @@ class DomainDoctor:
       the first such doc. The tree is excluded structurally, so the finding reports a
       misleading glob rather than a contested file.
     """
-    cfg = self._cfg
-
     # guard: unreachable without config — content checks run only when configured
-    if cfg is None:
+    if self._cfg is None:
       return []
-    output_abs = self._repo / cfg.output
+    output_abs = self._repo / self._cfg.output
 
     # guard: no output tree yet — no file exists for two writers to fight over
     if not output_abs.is_dir():
@@ -1830,13 +1799,13 @@ class DomainDoctor:
     for sid, scfg in _scope.ScopeResolver(repo = self._repo).load_scopes().items():
       claimed = next(( rel for rel in docs if self._is_claimed_by_scope(scfg, rel, matcher) ), None)
 
-      # guard: this scope claims nothing under the output tree
+      # this scope claims nothing under the output tree
       if claimed is None:
         continue
-      findings.append(_finding(
+      findings.append(_build_finding(
         check    = self.CHECK_OUTPUT_IN_SCOPE,
         severity = SEV_WARN,
-        message  = f"scope '{sid}' globs reach '{cfg.output}' — {_MSG_OUTPUT_IN_SCOPE}",
+        message  = f"scope '{sid}' globs reach '{self._cfg.output}' — {_MSG_OUTPUT_IN_SCOPE}",
         node     = claimed,
       ))
     return findings
@@ -1872,53 +1841,72 @@ class DomainDoctor:
     Returns:
       True when an include glob hits and no exclude glob does.
     """
-    included = any(matcher.match(rel, pat) for pat in scfg.get(_CFG_PATHS) or [])
-    excluded = any(matcher.match(rel, pat) for pat in scfg.get(_CFG_EXCLUDE) or [])
-    return included and not excluded
+    return (
+      any(matcher.match(rel, pat) for pat in scfg.get(_CFG_PATHS) or [])
+      and not any(matcher.match(rel, pat) for pat in scfg.get(_CFG_EXCLUDE) or [])
+    )
 
   # ── check: domain-doc-unknown ─────────────────────────────────────────────
 
-  def _check_doc_unknown(
-    self,
-    dictionary: dict[str, str],
-    layout: _domains.DomainLayout,
-  ) -> list[dict]:
+  def _check_doc_unknown(self,
+                         dictionary: dict[str, str],
+                         scanned: dict[str, list[dict]],
+                         layout: _domains.DomainLayout) -> list[dict]:
     """
-    Report files under the output tree that match no dictionary group.
+    Report files under the output tree that sit in no listed group's folder.
 
     Args:
       dictionary: Group→gloss mapping from the dictionary file.
+      scanned: Group→blocks mapping from the code scan.
       layout: Path mapper for the output directory.
 
     Returns:
-      One `WARN` finding per foreign file (the index itself is exempt).
+      One `WARN` finding per foreign file, the retired flat doc of a listed group
+      included unless a live doc owns that path (the index itself is exempt).
     """
-    cfg = self._cfg
-
     # guard: unreachable without config — content checks run only when configured
-    if cfg is None:
+    if self._cfg is None:
       return []
-    output_abs = self._repo / cfg.output
+    output_abs = self._repo / self._cfg.output
 
     # guard: no output tree yet — nothing to check
     if not output_abs.is_dir():
       return []
 
-    # every file under output must be the index or a doc of a listed group
+    # the paths the current layout owns: the block doc of every block of a listed group
+    live = {
+      layout.doc_rel(group, slug)
+      for group, blocks in scanned.items() if group in dictionary
+      for blk in blocks
+      if (slug := layout.slug_for(blk.get(_domains.BLOCK_HEADING) or ""))
+    }
+
+    # ... plus the folder note of every listed group with blocks, and every section note above them
+    live.update(layout.folder_note_rel(group) for group in dictionary if scanned.get(group))
+    live.update(
+      layout.folder_note_rel(section)
+      for section in layout.compute_section_prefixes([ group for group in dictionary if scanned.get(group) ])
+    )
+
+    # a retired flat path is foreign only while no live block doc or folder note of the current layout owns it
+    legacy = { layout.legacy_doc_rel(group) for group in dictionary } - live
+
+    # walk the output tree: every file under output must be the index or a file inside a listed group's folder
     findings: list[dict] = []
     for base, _dirs, files in os.walk(str(output_abs)):
       for fname in files:
         rel = (Path(base) / fname).relative_to(self._repo).as_posix()
 
-        # guard: the index file is engine-owned and always legal
-        if rel == f"{cfg.output}/{_domains.INDEX_NAME}":
+        # the index file is engine-owned and always legal
+        if rel == f"{self._cfg.output}/{_domains.INDEX_NAME}":
           continue
-        group = layout.group_for(rel)
+        ref = layout.classify(rel)
 
-        # guard: a doc of a listed group is legal
-        if group is not None and group in dictionary:
+        # a current doc or section note is legal, and so is any file inside a listed group's
+        # folder unless it is the flat doc the retired layout left beside that folder
+        if rel in live or (ref is not None and ref.group in dictionary and rel not in legacy):
           continue
-        findings.append(_finding(
+        findings.append(_build_finding(
           check    = self.CHECK_DOC_UNKNOWN,
           severity = SEV_WARN,
           message  = _MSG_DOC_UNKNOWN,
@@ -1928,22 +1916,22 @@ class DomainDoctor:
 
   # ── check: domain-hash-stale ──────────────────────────────────────────────
 
-  def _check_hash_stale(
-    self,
-    dictionary: dict[str, str],
-    scanned: dict[str, list[dict]],
-    layout: _domains.DomainLayout,
-  ) -> list[dict]:
+  def _check_hash_stale(self,
+                        dictionary: dict[str, str],
+                        scanned: dict[str, list[dict]],
+                        contracts: dict[str, list[dict]],
+                        layout: _domains.DomainLayout) -> list[dict]:
     """
-    Report groups whose generated doc lags the code's block content.
+    Report groups whose folder note lags the code's block content.
 
     Args:
       dictionary: Group→gloss mapping from the dictionary file.
       scanned: Group→blocks mapping from the code scan.
+      contracts: Group→contracts mapping from the code scan.
       layout: Path mapper for the output directory.
 
     Returns:
-      One `WARN` finding per stale or missing group doc.
+      One `WARN` finding per stale or missing group folder note.
     """
     findings: list[dict] = []
     for group in sorted(dictionary):
@@ -1952,29 +1940,27 @@ class DomainDoctor:
       # guard: no blocks in code — nothing to be stale against
       if not blocks:
         continue
-      doc_rel = layout.doc_rel(group)
-      stored = _domains.DomainPlanner.stored_hash(self._repo / doc_rel)
-      digest = _domains.DomainPlanner.group_hash(blocks)
+      doc_rel = layout.folder_note_rel(group)
+      stored = _domains.DomainPlanner.read_stored_hash(self._repo / doc_rel)
+      digest = _domains.DomainPlanner.compute_group_hash(blocks, contracts.get(group) or [])
 
-      # guard: doc current — no finding
+      # doc current — no finding
       if stored == digest:
         continue
       state = "missing" if stored is None else "stale"
-      findings.append(_finding(
+      findings.append(_build_finding(
         check    = self.CHECK_HASH_STALE,
         severity = SEV_WARN,
-        message  = f"group '{group}' doc is {state} (run /wiki.domain-sync or wait for the routine)",
+        message  = f"group '{group}' folder note is {state} (run /wiki.domain-sync or wait for the routine)",
         node     = doc_rel,
       ))
     return findings
 
   # ── check: domain-tag-axis-unknown ────────────────────────────────────────
 
-  def _check_tag_axis_unknown(
-    self,
-    dictionary: dict[str, str],
-    layout: _domains.DomainLayout,
-  ) -> list[dict]:
+  def _check_tag_axis_unknown(self,
+                              dictionary: dict[str, str],
+                              layout: _domains.DomainLayout) -> list[dict]:
     """
     Report `wiki/<axis>/...` tags on generated domain docs whose axis is not
     declared in `wiki.tag_axes`.
@@ -1998,23 +1984,22 @@ class DomainDoctor:
 
     # one finding per unknown axis, naming the first doc that carries it
     carriers: dict[str, str] = {}
-    for group in sorted(dictionary):
-      doc_rel = layout.doc_rel(group)
-      for tag in _domains.DomainPlanner.stored_tags(self._repo / doc_rel):
+    for doc_rel in self._find_all_group_docs(dictionary, layout):
+      for tag in _domains.DomainPlanner.read_stored_tags(self._repo / doc_rel):
         # guard: not a wiki tag — irrelevant to axis vocabulary
         if not tag.startswith(_WIKI_TAG_PREFIX):
           continue
         rest = tag[len(_WIKI_TAG_PREFIX):]
         axis = rest.split("/")[0] if "/" in rest else rest
 
-        # guard: axis is known
+        # a known axis has no carrier to record
         if axis in axes_set:
           continue
         carriers.setdefault(axis, doc_rel)
 
     # one finding per unknown axis collected above
     return [
-      _finding(
+      _build_finding(
         check    = self.CHECK_TAG_AXIS_UNKNOWN,
         severity = SEV_WARN,
         message  = f"tag axis '{axis}' not in wiki.tag_axes {tag_axes} (carrier: {doc_rel})",
@@ -2024,6 +2009,31 @@ class DomainDoctor:
       for axis, doc_rel in sorted(carriers.items())
     ]
 
+  def _find_all_group_docs(self, dictionary: dict[str, str], layout: _domains.DomainLayout) -> list[str]:
+    """
+    List every markdown file inside a listed group's folder.
+
+    Args:
+      dictionary: Group→gloss mapping from the dictionary file.
+      layout: Path mapper for the output directory.
+
+    Returns:
+      Sorted repo-relative paths of the folder notes and block docs of listed groups.
+    """
+    # guard: unreachable without config, or no output tree yet
+    if self._cfg is None or not (self._repo / self._cfg.output).is_dir():
+      return []
+
+    # every markdown file the layout places inside a listed group's folder
+    docs: list[str] = []
+    for base, _dirs, files in os.walk(str(self._repo / self._cfg.output)):
+      for fname in files:
+        rel = (Path(base) / fname).relative_to(self._repo).as_posix()
+        ref = layout.classify(rel)
+        if ref is not None and ref.group in dictionary:
+          docs.append(rel)
+    return sorted(docs)
+
   def _tag_axes(self) -> list[str]:
     """
     Return the repository-wide tag-axis vocabulary declared in `wiki.tag_axes`.
@@ -2031,8 +2041,7 @@ class DomainDoctor:
     Returns:
       The declared axis names, or `[]` when unconfigured or malformed.
     """
-    wiki = _scope.ScopeResolver(repo = self._repo).load_wiki()
-    axes = wiki.get(_KEY_TAG_AXES)
+    axes = _scope.ScopeResolver(repo = self._repo).load_wiki().get(_KEY_TAG_AXES)
     return list(axes) if isinstance(axes, list) else []
 
   # ── check: domain-routine-mismatch ────────────────────────────────────────
@@ -2052,7 +2061,7 @@ class DomainDoctor:
     if not self._is_daemon_enabled():
       return []
     return [
-      _finding(
+      _build_finding(
         check    = self.CHECK_ROUTINE_MISMATCH,
         severity = SEV_WARN,
         message  = f"wiki.domains configured but routine '{name}' is not registered (re-run /wiki.install)",
@@ -2070,8 +2079,7 @@ class DomainDoctor:
     Returns:
       The registered domain-routine names, in canonical order.
     """
-    settings = self._read_settings()
-    routines = settings.get(_ROUTINES_KEY) or {}
+    routines = self._read_settings().get(_ROUTINES_KEY) or {}
     return [ name for name in _DOMAIN_ROUTINES if name in routines ]
 
   def _is_daemon_enabled(self) -> bool:
