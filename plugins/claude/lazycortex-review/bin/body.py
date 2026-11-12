@@ -11,8 +11,7 @@ must not edit is mechanically restored from the operator's document.
 - `phase="section"` — the body comes from the operator (any agent body edit is ignored); only the writer's
   owned section is taken from the agent.
 
-Frontmatter overlay keys are applied exactly as the caller passes them; filtering the overlay is the
-caller's responsibility.
+Frontmatter overlay keys are applied exactly as the caller passes them.
 
 The module also offers section-level helpers: status-callout upsert and strip, owned-section stripping,
 protected-section lift and restore, answered-question stripping, and edit-marker folding.
@@ -230,7 +229,7 @@ def _drop_sections(
     return body
   keep_ranges: list[tuple[int, int]] = []
 
-  # Preamble (anything before first H1) always kept.
+  # preamble (anything before first H1) always kept.
   if spans[0][0] > 0:
     keep_ranges.append((0, spans[0][0]))
   for start, end, _title, _heading in spans:
@@ -315,7 +314,7 @@ def section_content_for_owner(body: str, owner: tuple[str, str]) -> str | None:
   heading_line = _heading_line_for(0, len(section_text), section_text)
   rest = section_text[len(heading_line):]
 
-  # Strip the leading ownership tag line. Tag may sit on the first
+  # strip the leading ownership tag line. Tag may sit on the first
   # non-empty line; preserve blank lines around it for the caller's
   # whitespace check (see `has_section_concerns`).
   lines = rest.split("\n")
@@ -724,11 +723,11 @@ def _apply_frontmatter_overlay(
     overlay: Mapping[str, object],
 ) -> str:
   """
-  Apply `overlay` keys to `frontmatter_text`.
+  Write every key of `overlay` into `frontmatter_text` as given.
 
-  The caller allowlist-filters the overlay per expert
-  (`review.classes[].experts.*.frontmatter_keys`) before passing it here, so every key
-  in `overlay` is applied unconditionally.
+  Args:
+    frontmatter_text: Frontmatter text, fences included.
+    overlay: Keys and values to write into the frontmatter.
 
   Returns:
     The updated frontmatter text with all overlay keys written in.
@@ -816,7 +815,7 @@ def reassemble(
   _op_meta, op_body = _fm.parse(operator_text)
   op_fm_text = operator_text[: len(operator_text) - len(op_body)]
 
-  # Always apply the (filtered) frontmatter overlay on top of operator's.
+  # the operator's frontmatter is the base; the overlay, as passed, is written on top of it
   new_fm_text = _apply_frontmatter_overlay(op_fm_text, agent_frontmatter_overlay)
 
   # the phase decides which half of the document the agent was allowed to touch
@@ -873,7 +872,7 @@ def _restore_owned_and_history(
       history_section = section_text
       continue
 
-    # Spec inv 8: preserve EVERY tagged H1 section (any tag), not
+    # spec inv 8: preserve EVERY tagged H1 section (any tag), not
     # only 2-part #expert/<flat>/<section-id>. Downstream consumer
     # overlays may carry other prefixes. All foreign to the main writer.
     # only foreign-owned tagged sections get re-placed; untagged main-writer body and the
@@ -943,11 +942,11 @@ def _carry_banner_from_operator(operator_body: str, new_body: str) -> str:
   if (match := _BANNER_BLOCK_RE.match(operator_body)) is None:
     return new_body
 
-  # Normalize: strip all trailing newlines, then re-attach exactly one
+  # normalize: strip all trailing newlines, then re-attach exactly one
   # trailing newline + one blank-line separator.
   head = match.group(0).rstrip("\n") + "\n\n"
 
-  # Strip any banner already in new_body to avoid duplication.
+  # strip any banner already in new_body to avoid duplication.
   new_body_no_banner = _strip_banner(new_body).lstrip("\n")
   return head + new_body_no_banner
 
@@ -1108,11 +1107,11 @@ def _reassemble_section(
     The reassembled document text with the new frontmatter, operator body with the agent's
     owned section spliced in at the configured position, and the operator's banner restored.
   """
-  # Body comes from operator — agent's body edits are IGNORED.
+  # body comes from operator — agent's body edits are IGNORED.
   # Pull only the agent's owned section.
   agent_owned = _extract_writer_section(agent_body, owned_owner, operator_body)
 
-  # Operator body minus owned sections AND History — we re-add both
+  # operator body minus owned sections AND History — we re-add both
   # below in canonical order (owned first, History last). Bug 30.
   op_body_no_owned = _drop_sections(
       operator_body,
@@ -1120,7 +1119,7 @@ def _reassemble_section(
       drop_history=True,
   )
 
-  # Splice the agent's owned section in BEFORE History so the History
+  # splice the agent's owned section in BEFORE History so the History
   # terminal invariant holds. Position is taken from `section_layout`
   # — `"top"` prepends the section above the operator's free body,
   # `"bottom"` (or unmapped) appends it below. Without this lookup

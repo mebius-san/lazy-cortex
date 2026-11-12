@@ -144,7 +144,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 |---|---|---|
 | `lazy-core.git-guard` | `Bash`, `mcp__git__git_commit`, `mcp__git__git_add`, `mcp__git__git_reset`, `Stop`, `SubagentStop` | Pre/PostToolUse/PostToolUseFailure + Stop/SubagentStop hook guarding the shared git index against agent sessions. |
 | `lazy-core.model-router` | `Agent` | PreToolUse hook — route Agent dispatches to a configured model. |
-| `lazy-guard.check-public` | `Bash`, `mcp__git__git_commit` | PreToolUse hook: warn about PII and infrastructure leaks staged for a public repo (or for |
+| `lazy-guard.check-public` | `Bash`, `mcp__git__git_commit` | PreToolUse hook: warn about PII and infrastructure leaks staged for a public repo (or for the public subtree of a partially-public repo). |
 | `lazy-guard.secrets` | `Bash`, `mcp__git__git_commit` | PreToolUse hook: block any git commit whose staged diff contains a secret. |
 | `lazy-guard.settings` | `Edit\|Write` | PreToolUse hook: guard Claude Code settings files against dangerous changes. |
 | `lazy-log.commit-recorder` | `Bash`, `mcp__git__git_commit` | PostToolUse hook that records every successful git commit to `.logs/commits.jsonl`. |

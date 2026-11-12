@@ -16,6 +16,8 @@ the markup into the final text.
 """
 from __future__ import annotations
 
+from types import MappingProxyType
+
 import re
 
 # waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
@@ -23,27 +25,29 @@ import parser as _parser  # pylint: disable=import-error,deprecated-module
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  from collections.abc import Callable
+  from collections.abc import Callable, Mapping
 
 
 # ------------------------------------------------------- paragraphs
 
 
-# an ATX heading line of any level — a paragraph never runs across one
+# An ATX heading line of any level — a paragraph never runs across one
 _HEADING_LINE_RE = re.compile(r"^#{1,6}(?:[ \t]|$)")
 
 
 def _fold_paragraphs(text: str, fold: Callable[[str], str]) -> str:
   """
-  Apply an inline-markup fold to each paragraph and heading line of `text` on its own, skipping code fences.
+  Fold each paragraph and heading line of `text` on its own and drop the list items and headings the fold emptied.
+
+  Fenced code blocks are left untouched.
 
   Args:
     text: Markdown text to fold.
-    fold: Inline-markup fold applied to one paragraph at a time.
+    fold: Inline-markup fold applied to one paragraph or heading line at a time.
 
   Returns:
-    `text` with every paragraph folded and everything else unchanged; fenced code blocks come back
-    byte-for-byte.
+    `text` with every paragraph and heading line folded and each list-item or heading line the fold left bare
+    removed; a line that was already bare in `text` stays, and fenced code blocks come back byte-for-byte.
   """
 
   # Domain(review.markup):
@@ -66,21 +70,65 @@ def _fold_paragraphs(text: str, fold: Callable[[str], str]) -> str:
     for line in chunk.text.split("\n"):
       if not line.strip() or _HEADING_LINE_RE.match(line):
         if para:
-          units.append(fold("\n".join(para)))
+          units.append(_fold_unit("\n".join(para), fold))
           para = []
-        units.append(fold(line))
+        units.append(_fold_unit(line, fold))
         continue
       para.append(line)
     if para:
-      units.append(fold("\n".join(para)))
+      units.append(_fold_unit("\n".join(para), fold))
     out.append("\n".join(units))
   return "".join(out)
+
+
+# A line holding nothing but a list-item or heading prefix — an optional blockquote prefix, then a bullet, an
+# ordered-item number, a task box, or an ATX heading marker, and no content after it
+_BARE_PREFIX_LINE_RE = re.compile(
+    r"^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d{1,9}[.)])(?:[ \t]+\[[ xX]\])?|#{1,6})[ \t]*$",
+)
+
+
+def _fold_unit(unit: str, fold: Callable[[str], str]) -> str:
+  """
+  Fold one paragraph or heading line and drop every list-item or heading line the fold left without content.
+
+  Args:
+    unit: One paragraph or one heading line.
+    fold: Inline-markup fold applied to `unit`.
+
+  Returns:
+    The folded `unit` without the lines whose whole content the fold removed; a line that was already a bare
+    prefix in `unit` stays.
+  """
+
+  # Domain(review.markup):
+  # # A line emptied by a deletion goes with it
+  # When a deletion covers the whole content of a list item or a heading, the item or heading is
+  # deleted too: nothing of it — no bullet, number, task box or heading marker — stays in the
+  # folded text. An item or heading the author left empty on purpose is not a deletion and stays.
+
+  # count the bare-prefix lines the author wrote, so only those the fold produced are dropped
+  authored: dict[str, int] = {}
+  for line in unit.split("\n"):
+    if _BARE_PREFIX_LINE_RE.match(line):
+      authored[line.rstrip()] = authored.get(line.rstrip(), 0) + 1
+
+  # keep authored bare prefixes, drop the ones the fold emptied
+  kept: list[str] = []
+  for line in fold(unit).split("\n"):
+    key = line.rstrip()
+    if _BARE_PREFIX_LINE_RE.match(line):
+      if authored.get(key, 0) == 0:
+        continue
+      authored[key] -= 1
+    kept.append(line)
+  return "\n".join(kept)
 
 
 # -------------------------------------------------------- simple style
 
 
-_SIMPLE_RULES: list[tuple[re.Pattern[str], Callable[[re.Match[str]], str]]] = [
+_SIMPLE_RULES: tuple[tuple[re.Pattern[str], Callable[[re.Match[str]], str]], ...] = (
     # Deletions: drop content entirely.
     (re.compile(r"~~(.*?)~~", re.DOTALL), lambda _: ""),
     # Comments (Obsidian hidden): drop the whole span.
@@ -88,11 +136,11 @@ _SIMPLE_RULES: list[tuple[re.Pattern[str], Callable[[re.Match[str]], str]]] = [
     # Insertions: keep content, drop wrappers (with surrounding spaces
     # inside backticks accommodated by writers but not by us).
     (re.compile(r"==(.*?)==", re.DOTALL), lambda m: m.group(1)),
-]
+)
 
 
 def _apply_rules(
-    text: str, rules: list[tuple[re.Pattern[str], Callable[[re.Match[str]], str]]],
+    text: str, rules: tuple[tuple[re.Pattern[str], Callable[[re.Match[str]], str]], ...],
 ) -> str:
   """
   Apply each substitution rule to `text` in order.
@@ -122,10 +170,10 @@ def _strip_simple(text: str) -> str:
 # --------------------------------------------------------- diff style
 
 
-# the info string of an edit-annotation fence
+# The info string of an edit-annotation fence
 _DIFF_INFO = "diff"
 
-# a line only a real unified diff carries — a hunk header, a marker glued to its content, or a
+# A line only a real unified diff carries — a hunk header, a marker glued to its content, or a
 # one-space context line; the edit protocol always separates a marker from its content by a space
 _REAL_DIFF_LINE_RE = re.compile(r"^(?:@@|[-+][^ ]| [^ ])")
 
@@ -173,7 +221,7 @@ def _resolve_diff_block(block_body: str) -> str:
   """
   out_lines: list[str] = []
   for raw in block_body.splitlines():
-    # A diff line is a 1-char marker ("-"/"+"/"!"/" ") optionally followed
+    # a diff line is a 1-char marker ("-"/"+"/"!"/" ") optionally followed
     # by " " + content. A BARE marker (no trailing space) is that marker on
     # an empty line — a deleted / inserted blank line — and folds like its
     # content form (Bug 102): "-" drops; "+"/"!" keep an empty line. raw[2:]
@@ -221,7 +269,7 @@ def _parse_fence_body(block_body: str) -> tuple[list[tuple[bool, str]], list[str
   output_lines: list[tuple[bool, str]] = []
   deletions: list[str] = []
   for raw in block_body.splitlines():
-    # A diff line is a 1-char marker ("-"/"+"/"!"/" ") optionally followed
+    # a diff line is a 1-char marker ("-"/"+"/"!"/" ") optionally followed
     # by " " + content. A BARE marker (no trailing space) is that marker on
     # an empty line — a deleted / inserted blank line — and folds like its
     # content form (Bug 102): "-" drops; "+"/"!" keep an empty line. raw[2:]
@@ -246,7 +294,7 @@ def _parse_fence_body(block_body: str) -> tuple[list[tuple[bool, str]], list[str
       output_lines.append((False, raw[2:]))
       continue
 
-    # Anything else (e.g. unknown marker): keep verbatim, treat as cancellable.
+    # anything else (e.g. unknown marker): keep verbatim, treat as cancellable
     output_lines.append((True, raw))
   return output_lines, deletions
 
@@ -290,13 +338,15 @@ def _strip_diff(text: str) -> str:
   # guard: no fences present — return source verbatim
   if not fences:
     return text
+
+  # split every fence into its emissions and its deletions
   parsed = [_parse_fence_body(body) for _start, _end, body in fences]
 
-  # cancelled[(fence_idx, emit_idx)] — emissions retracted by a later fence's deletion.
+  # cancelled[(fence_idx, emit_idx)] — emissions retracted by a later fence's deletion
   cancelled: set[tuple[int, int]] = set()
   for later_idx, (_, deletions) in enumerate(parsed):
     for del_content in deletions:
-      # Find the earliest prior fence with a still-live cancellable emission matching this deletion.
+      # find the earliest prior fence with a still-live cancellable emission matching this deletion.
       matched = False
       for earlier_idx in range(later_idx):
         emissions = parsed[earlier_idx][0]
@@ -311,6 +361,8 @@ def _strip_diff(text: str) -> str:
         # cancellation done for this deletion — stop scanning earlier fences
         if matched:
           break
+
+  # rebuild the text with every fence replaced by its surviving emissions
   pieces: list[str] = []
   last_end = 0
   for fence_idx, (start, end, _body) in enumerate(fences):
@@ -424,7 +476,7 @@ def drop_whitespace_only_diff_fences(text: str) -> str:
 # ----------------------------------------------------- criticmarkup style
 
 
-_CRITIC_RULES: list[tuple[re.Pattern[str], Callable[[re.Match[str]], str]]] = [
+_CRITIC_RULES: tuple[tuple[re.Pattern[str], Callable[[re.Match[str]], str]], ...] = (
     # Substitution: old~>new — keep new only.
     (re.compile(r"\{~~(.*?)~>(.*?)~~\}", re.DOTALL), lambda m: m.group(2)),
     # Insertion.
@@ -435,7 +487,7 @@ _CRITIC_RULES: list[tuple[re.Pattern[str], Callable[[re.Match[str]], str]]] = [
     (re.compile(r"\{>>(.*?)<<\}", re.DOTALL), lambda _: ""),
     # Highlight.
     (re.compile(r"\{==(.*?)==\}", re.DOTALL), lambda m: m.group(1)),
-]
+)
 
 
 def _strip_criticmarkup(text: str) -> str:
@@ -451,7 +503,7 @@ def _strip_criticmarkup(text: str) -> str:
 # ----------------------------------------------------------- html style
 
 
-_HTML_RULES: list[tuple[re.Pattern[str], Callable[[re.Match[str]], str]]] = [
+_HTML_RULES: tuple[tuple[re.Pattern[str], Callable[[re.Match[str]], str]], ...] = (
     # HTML comment.
     (re.compile(r"<!--.*?-->", re.DOTALL), lambda _: ""),
     # Deletion.
@@ -460,7 +512,7 @@ _HTML_RULES: list[tuple[re.Pattern[str], Callable[[re.Match[str]], str]]] = [
     (re.compile(r"<ins>(.*?)</ins>", re.DOTALL | re.IGNORECASE), lambda m: m.group(1)),
     # Highlight.
     (re.compile(r"<mark>(.*?)</mark>", re.DOTALL | re.IGNORECASE), lambda m: m.group(1)),
-]
+)
 
 
 def _strip_html(text: str) -> str:
@@ -476,12 +528,12 @@ def _strip_html(text: str) -> str:
 # ------------------------------------------------------------ public api
 
 
-_STRIPPERS: dict[str, Callable[[str], str]] = {
+_STRIPPERS: Mapping[str, Callable[[str], str]] = MappingProxyType({
     "simple": _strip_simple,
     "diff": _strip_diff,
     "criticmarkup": _strip_criticmarkup,
     "html": _strip_html,
-}
+})
 
 
 SUPPORTED_STYLES = tuple(_STRIPPERS.keys())
@@ -522,6 +574,10 @@ def strip_markers(text: str, *, style: str) -> str:
     - For every style except `diff`, an inline-markup fold never spans two paragraphs, a heading
       together with another line, or any line of a fenced code block; an unpaired opening mark
       stays literal text instead of reaching into later content.
+    - For every style except `diff`, a list item (bullet, ordered, task or nested) or an ATX heading whose
+      whole content the fold removed is removed as a line, so no bare bullet, number, task box or heading
+      marker is left in the output; a list-item or heading line that was already bare in the input stays
+      as it is.
     - For the `diff` style, a fence holding any line only a real unified diff carries, an unclosed
       fence, and a `diff` fence nested inside another code block are never treated as
       edit-annotation fences and are left untouched.
@@ -547,6 +603,12 @@ def strip_markers(text: str, *, style: str) -> str:
   # For every style except `diff`, an inline-markup fold MUST never span two paragraphs, a
   # heading together with another line, or any line of a fenced code block; an unpaired
   # opening mark stays literal text instead of reaching into later content.
+
+  # Contract:
+  # For every style except `diff`, a list item (bullet, ordered, task or nested) or an ATX heading
+  # whose whole content the fold removed MUST be removed as a line: no bare bullet, number, task
+  # box or heading marker is left in the output. A list-item or heading line that was already
+  # bare in the input stays as it is.
 
   # Contract:
   # For the `diff` style, a fence holding any line only a real unified diff carries, an

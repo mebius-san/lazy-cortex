@@ -25,8 +25,10 @@ Subcommands:
 - `submit`   — delegate to :mod:`submit` (skip opening writer round).
 - `stop`     — delegate to :mod:`stop`.
 - `finalize` — delegate to :mod:`finalize`.
-- `strip-markup` — print the document with its edit-annotation markup resolved (the
-                 markup-final view validation / terminal dispatches use as source).
+- `strip-markup` — print the document body, without frontmatter, with its edit-annotation
+                 markup resolved (the markup-final view validation / terminal dispatches use as source).
+- `strip-frontmatter` — print the document body without frontmatter, edit-annotation markup
+                 left as it is (the view a main-writer dispatch uses as source).
 - `fold-markup` — fold the document's edit-annotation markup in place, frontmatter untouched,
                  printing `{"changed": bool}` — run on an operator approve gesture.
 - `repair-structure` — delegate to :mod:`structure_repair` (repair an unclosed fence or frontmatter
@@ -409,21 +411,25 @@ def cmd_finalize(args: argparse.Namespace) -> int:
 
 def cmd_strip_markup(args: argparse.Namespace) -> int:
   """
-  Print the document with its edit-annotation markup resolved to final text.
+  Print the document body with its edit-annotation markup resolved to final text.
 
-  The body is resolved according to the document's own marker style, falling back to the
-  repo's configured style; the frontmatter is printed untouched.
+  The frontmatter is left out of the output. The markup is resolved according to the document's own marker
+  style, falling back to the repo's configured style.
 
   Guarantees:
     - Never aborts on an unrecognized configured edit-marker style; the document's body is
       printed with its markup left unresolved instead.
+    - The output never contains the document's frontmatter; it is the body alone, with its edit markup resolved.
 
   Args:
     args: Parsed namespace with a `file` attribute.
 
   Returns:
     Exit code: 0 on success (unknown configured style degrades to printing the
-    document unchanged), 2 when the file is missing or not markdown.
+    body unchanged), 2 when the file is missing or not markdown.
+
+  Raises:
+    ParseError: If the document has an opening frontmatter fence with no matching closing fence.
   """
   # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
@@ -442,11 +448,9 @@ def cmd_strip_markup(args: argparse.Namespace) -> int:
     sys.stderr.write(f"not a markdown file: {file_path}\n")
     return 2
 
-  # split the document once — the frontmatter half passes through untouched
+  # split the document once — only the body half reaches the writer
   # waiver: explicit utf-8 for pylint W1514; the repo-wide file encoding, not a domain constant
-  text = file_path.read_text(encoding = "utf-8")
-  _meta, body = _fm.parse(text)
-  fm_text = text[: len(text) - len(body)]
+  _meta, body = _fm.parse(file_path.read_text(encoding = "utf-8"))
 
   # Domain(review.dispatch):
   # # Resolved text for judging, raw markup for revising
@@ -458,9 +462,22 @@ def cmd_strip_markup(args: argparse.Namespace) -> int:
   # wrong view risks approving or rejecting text that no longer exists once the markup
   # resolves.
 
+  # Domain(review.dispatch):
+  # # A writer sees the body, never the frontmatter
+  # The frontmatter is machine state: review keys, wiki summaries and spec keys written by
+  # their own owners, none of which a writer may change. A writer handed it judges or rewrites
+  # values it cannot touch — a validator flags a stale summary no writer round can ever close,
+  # and the review circles. Every writer is therefore handed the body alone; only the
+  # structural repair, which fixes the frontmatter fence itself, works from the whole file.
+
   # Contract:
   # An unrecognized configured edit-marker style never aborts the dispatch; the document's
   # body is returned with its markup left unresolved instead of raising.
+
+  # Contract:
+  # The output NEVER contains the document's frontmatter; it is the body alone, with its edit markup resolved.
+  # Writers take this output as their source, and a writer that sees frontmatter raises concerns no writer
+  # round can close.
 
   # resolve the body's edit markup per the document's pinned style; an unknown style must not
   # kill the dispatch — `body` stays the raw document half and the verb degrades gracefully
@@ -470,8 +487,49 @@ def cmd_strip_markup(args: argparse.Namespace) -> int:
   except ValueError:
     pass
 
-  # the resolved document goes to stdout whole — the caller pipes it straight into a source file
-  sys.stdout.write(fm_text + body)
+  # the resolved body goes to stdout — the caller pipes it straight into a source file
+  sys.stdout.write(body)
+  return 0
+
+
+def cmd_strip_frontmatter(args: argparse.Namespace) -> int:
+  """
+  Print the document body without its frontmatter.
+
+  The edit-annotation markup is printed exactly as it stands in the document.
+
+  Guarantees:
+    - The body's edit-annotation markup is printed exactly as written; no marker style is resolved.
+
+  Args:
+    args: Parsed namespace with a `file` attribute.
+
+  Returns:
+    Exit code: 0 on success, 2 when the file is missing or not markdown.
+
+  Raises:
+    ParseError: If the document has an opening frontmatter fence with no matching closing fence.
+  """
+
+  # Contract:
+  # The body's edit-annotation markup is printed exactly as written; no marker style is ever resolved.
+  # The main writer needs the raw markup as working material.
+
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
+  import frontmatter as _fm  # type: ignore  # pylint: disable=import-error
+  file_path = Path(args.file).resolve()
+
+  # guard: only an existing markdown file has a review body to print
+  # waiver: filesystem path idiom
+  if not file_path.is_file() or file_path.suffix.lower() != ".md":
+    sys.stderr.write(f"not a markdown file: {file_path}\n")
+    return 2
+
+  # the body goes to stdout with its edit markup intact — the main writer's working material
+  # waiver: explicit utf-8 for pylint W1514; the repo-wide file encoding, not a domain constant
+  _meta, body = _fm.parse(file_path.read_text(encoding = "utf-8"))
+  sys.stdout.write(body)
   return 0
 
 
@@ -807,10 +865,17 @@ def build_parser() -> argparse.ArgumentParser:
 
   # `strip-markup` — markup-resolved view for validation / terminal dispatch sources
   # waiver: argparse CLI signature, not a domain key
-  p_strip = sub.add_parser("strip-markup", help="print the doc with edit markup resolved")
+  p_strip = sub.add_parser("strip-markup", help="print the doc body, without frontmatter, with edit markup resolved")
   # waiver: argparse CLI signature, not a domain key
   p_strip.add_argument("file")
   p_strip.set_defaults(func=cmd_strip_markup)
+
+  # `strip-frontmatter` — body-only view with raw markup, the main writer's dispatch source
+  # waiver: argparse CLI signature, not a domain key
+  p_strip_fm = sub.add_parser("strip-frontmatter", help="print the doc body without its frontmatter")
+  # waiver: argparse CLI signature, not a domain key
+  p_strip_fm.add_argument("file")
+  p_strip_fm.set_defaults(func=cmd_strip_frontmatter)
 
   # `fold-markup` — fold the edit markers in place on an operator approve gesture
   # waiver: argparse CLI signature, not a domain key

@@ -111,11 +111,8 @@ def reapply(
   # neither confirms nor produces the required signal is a failed run, not a silent commit of
   # a document still missing state the rest of the system depends on.
 
-  # the overlay is applied as the caller passes it — filtering it against
-  # review.classes[].experts.*.frontmatter.allow is the caller's job. Enforce the require half here: a
-  # required key must end up set — written this round (overlay) OR already present from an
-  # earlier round (operator frontmatter). The router declares require: [request_class] so a
-  # run that fails to classify is caught rather than silently committed.
+  # a required key must end up set — written this round (overlay) OR already present from an
+  # earlier round (operator frontmatter); the overlay itself is applied as the caller passes it
   if require_fm:
     op_meta, _ = _fm.parse(operator_text)
     missing = set(require_fm) - (set(agent_frontmatter_overlay) | set(op_meta))
@@ -124,12 +121,12 @@ def reapply(
     if missing:
       raise ValueError(f"missing required frontmatter keys: {sorted(missing)}")
 
-  # Defensive normalize: drop ```diff fences that only wrap whitespace
+  # defensive normalize: drop ```diff fences that only wrap whitespace
   # differences (Bug 28). Writer's whitespace reflow does not earn a
   # diff-block — the operator should see the paragraph raw.
   agent_body = _edit_markup.drop_whitespace_only_diff_fences(agent_body)
 
-  # Section-writer body-drift check — diagnostic only, never blocks.
+  # section-writer body-drift check — diagnostic only, never blocks.
   ownership_violation: _payload.OwnershipViolationInfo | None = None
   if phase == Phase.SECTION:
     # guard: section phase needs the owner pair to run the body-drift check; bail loudly rather than NoneType-crash downstream

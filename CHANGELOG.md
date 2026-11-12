@@ -1632,6 +1632,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+### 6.14.2 — 2026-11-12 UTC
+
+- Writers no longer see the document's frontmatter, only its body, so review metadata can't leak into or get altered by their edits.
+- Folding edit markers on approval no longer leaves empty list items or headings behind: when a deletion empties a whole list item or heading, the line goes with it.
+
 ### 6.14.1 — 2026-11-12 UTC
 
 - Shorter skill and agent descriptions across the plugin. Each one keeps the occasion it answers to and the sibling it should be picked over (`/lazy-review.start` vs `/lazy-review.submit`, `/lazy-review.stop` vs `/lazy-review.finalize`), and drops the mechanism detail. The `lazy-review.coordinator` and `lazy-review.doc_doctor` agents now read as "dispatched by the review runtime, not for direct use". This lowers per-session context cost.
