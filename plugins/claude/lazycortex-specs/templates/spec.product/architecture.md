@@ -22,7 +22,7 @@ spec_source_docs: []
 <!-- Optional. When the document has nothing to say here, the section is removed together with its heading. The terms this document uses, with their meaning. One line per term, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, and a term this document introduces is defined here first. A term the document does not use does not belong here. -->
 
 ## Module boundaries
-<!-- The static decomposition of the code: which modules or components own which responsibility, and the dependency direction between them. One bullet per module: its responsibility, its public contract, and what stays internal. The data crossing those boundaries lives in Data & contracts. -->
+<!-- The static decomposition of the code: which modules or components own which responsibility, and the dependency direction between them. One bullet per module: its responsibility, its public contract, what stays internal, and where its unit tests sit and the seam they reach it through. The data crossing those boundaries lives in Data & contracts. -->
 
 ## Data & contracts
 <!-- The data shapes, schemas and interfaces the product exposes between its modules and to the outside, the seams other code calls across. One bullet per shape or interface. Which module owns it lives in Module boundaries. -->

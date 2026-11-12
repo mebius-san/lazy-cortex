@@ -15,6 +15,7 @@ import functools
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -60,8 +61,8 @@ _SOURCEHUT_HOST = "git.sr.ht"
 # The segment sourcehut puts before the path.
 _SOURCEHUT_ITEM = "item"
 
-# A remote in scp form, `user@host:owner/repo`, which `urlsplit` cannot read.
-_SCP_REMOTE_RE = re.compile(r"^[^@/\s]+@(?P<host>[^:/\s]+):(?P<path>.+)$")
+# A remote in scp form, `host:owner/repo` with an optional `user@` before the host, which `urlsplit` cannot read.
+_SCP_REMOTE_RE = re.compile(r"^(?:[^@/\s]+@)?(?P<host>[^:/\s]+):(?P<path>.+)$")
 # The scp remote's host group.
 _HOST_GROUP = "host"
 # The scp remote's path group.
@@ -70,6 +71,19 @@ _PATH_GROUP = "path"
 _SCHEME_MARK = "://"
 # The suffix a remote's repository name may carry.
 _GIT_SUFFIX = ".git"
+# The scheme of a remote written as an ssh URL, whose host may be an ssh config alias like an scp host.
+_SSH_SCHEME = "ssh"
+
+# The ssh client, which prints the effective config for a host without connecting.
+_SSH = "ssh"
+# The flag making ssh print the effective config and exit.
+_SSH_PRINT_CONFIG = "-G"
+# The effective-config key naming the real host an alias stands for.
+_SSH_HOSTNAME_KEY = "hostname"
+# The lead character of an option, never the start of a host handed to ssh.
+_OPTION_MARK = "-"
+# Seconds `ssh -G` may run before the host is taken as written.
+_SSH_TIMEOUT_S = 120
 
 # The git commands that name the repository's remote: `origin` first, else the first remote listed.
 _GIT = "git"
@@ -177,8 +191,9 @@ def _read_forge_identity(root: Path) -> tuple[str, tuple[str, ...]] | None:
     root: The repository root.
 
   Returns:
-    The lower-cased host and the lower-cased path segments of the `origin` remote, else of the first remote listed;
-    None when the directory is not a git repository, has no remote, or the remote names no forge repository.
+    The lower-cased host and the lower-cased path segments of the `origin` remote, else of the first remote listed,
+    an ssh host given as the real host its ssh config names; None when the directory is not a git repository, has
+    no remote, or the remote names no forge repository.
 
   Raises:
     OSError: When git cannot be started.
@@ -198,10 +213,61 @@ def _read_forge_identity(root: Path) -> tuple[str, tuple[str, ...]] | None:
   scp = None if _SCHEME_MARK in url else _SCP_REMOTE_RE.match(url)
   parts = urlsplit(url)
   host, path = ( scp[_HOST_GROUP], scp[_PATH_GROUP] ) if scp else ( parts.hostname or "", parts.path )
+
+  # an ssh host may be a config alias, so the real host it stands for is the one links carry
+  if host and ( scp or parts.scheme == _SSH_SCHEME ):
+    host = _resolve_ssh_host(host)
+
+  # the repository path, without a leading slash or the `.git` suffix
   segments = tuple(seg.lower() for seg in path.strip(_SLASH).removesuffix(_GIT_SUFFIX).split(_SLASH) if seg)
 
   # a forge repository is a host and at least an owner and a name
   return ( host.lower(), segments ) if host and len(segments) >= 2 else None
+
+
+def _resolve_ssh_host(host: str) -> str:
+  """
+  Resolve an ssh host, possibly a config alias, to the real host the ssh config names for it.
+
+  Notes:
+    - Runs `ssh -G`, which reads the ssh config and does not connect.
+
+  Args:
+    host: The host as the remote writes it.
+
+  Returns:
+    The `hostname` the ssh config gives for the host; the host as written when ssh is absent, fails, times out,
+    prints no `hostname`, or the host reads as an option.
+  """
+
+  # Domain(unfiled):
+  # # Ssh config aliases in remotes
+  # An ssh remote may name a host alias from the user's ssh config rather than the forge host itself, so that one
+  # machine can reach the same forge under several identities. The forge's web links always carry the real host, so
+  # the alias is read through the ssh config to the host it stands for before the two are compared. Without an ssh
+  # client, or when the config cannot be read, the host is compared as the remote writes it.
+
+  ssh = shutil.which(_SSH)
+
+  # guard: without ssh, or for a host that would read as an option, the host is compared as written
+  if ssh is None or host.startswith(_OPTION_MARK):
+    return host
+
+  # the effective config ssh would use for the host
+  try:
+    proc = subprocess.run([ ssh, _SSH_PRINT_CONFIG, host ], capture_output = True, text = True, check = False,
+                          encoding = _ENCODING, timeout = _SSH_TIMEOUT_S)
+  except (OSError, subprocess.TimeoutExpired):
+    return host
+
+  # guard: a config ssh could not read leaves the host as written
+  if proc.returncode != 0:
+    return host
+
+  # the first `hostname` line names the real host
+  pairs = ( line.split(None, 1) for line in proc.stdout.splitlines() )
+  return next(( pair[1].strip() for pair in pairs if len(pair) == 2 and pair[0].lower() == _SSH_HOSTNAME_KEY ),
+              host)
 
 
 def _run_git(root: Path, *args: str) -> str | None:

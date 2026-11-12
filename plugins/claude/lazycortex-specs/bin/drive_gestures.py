@@ -301,7 +301,7 @@ def build_menu(note: Path) -> dict[str, object]:
     note: The folder-note's path.
 
   Returns:
-    A mapping with `checkboxes` (a label and tick for every gate block under `# Gates`), `questions` (the
+    A mapping with `checkboxes` (a label and tick for every launch row under `# Gates`), `questions` (the
     coordinator-signed questions, each with a 1-based index, its summary and its 1-based options carrying text and
     tick), and `commands_pending` (whether `# Coordinator commands` holds text that wakes the dispatcher).
 
@@ -311,9 +311,9 @@ def build_menu(note: Path) -> dict[str, object]:
   lines = _read(note)
   gates = _find_section_span(lines, Section.GATES)
 
-  # the gate blocks of `# Gates`, each with its tick
-  blocks = review_rows.parse_gate_blocks(lines[gates[0]:gates[1]]) if gates is not None else []
-  checkboxes = [ { "label": block.label, "ticked": block.ticked } for block in blocks ]
+  # the launch rows of `# Gates`, each with its tick
+  rows = review_rows.parse_gate_rows(lines[gates[0]:gates[1]]) if gates is not None else []
+  checkboxes = [ { "label": row.label, "ticked": row.ticked } for row in rows ]
 
   # the coordinator's questions, numbered from one, each option numbered from one
   questions = []
@@ -347,49 +347,51 @@ def _tick_line(line: str) -> str:
 
 def tick(lines: list[str], label: str) -> list[str] | None:
   """
-  Tick the first unticked checkbox of a named gate block.
+  Tick the checkbox of a named launch row.
+
+  Both shapes a gate callout comes in are read: a one-row block, and a callout holding the checkboxes of every row
+  of one verb.
 
   Args:
     lines: The note's lines.
-    label: The label of the gate block under `# Gates`.
+    label: The label of the launch row under `# Gates`, as its checkbox line writes it.
 
   Returns:
-    The edited lines, or `None` when the block is already ticked.
+    The edited lines, with only the row's own checkbox line ticked, or `None` when the row is already ticked.
 
   Raises:
     GestureRefusedError: With `no-gates-section` when the note has no `# Gates` section, or `no-such-checkbox` when
-      no block carries the label.
+      no row carries the label or the row's callout carries no checkbox.
   """
   gates = _find_section_span(lines, Section.GATES)
 
-  # guard: no `# Gates` section, no block to tick
+  # guard: no `# Gates` section, no row to tick
   if gates is None:
     raise GestureRefusedError(_NO_GATES)
 
   # the lines of the `# Gates` section alone
   section = lines[gates[0]:gates[1]]
 
-  # each parsed block is found again in order, so its lines are known by index
-  cursor = 0
-  for block in review_rows.parse_gate_blocks(section):
-    start = section.index(block.lines[0], cursor)
-    cursor = start + len(block.lines)
+  # the first row under the asked label decides, whichever callout shape holds it
+  for row in review_rows.parse_gate_rows(section):
 
-    # a block under another label is not the one asked for: scan on
-    if block.label != label:
+    # a row under another label is not the one asked for: scan on
+    if row.label != label:
       continue
 
-    # guard: an already ticked block needs nothing
-    if block.ticked:
+    # guard: an already ticked row needs nothing
+    if row.ticked:
       return None
 
-    # the block's first unticked checkbox line takes the tick
-    for idx in range(start, cursor):
-      match = _OPTION_RE.match(section[idx])
-      if match is not None and match.group(1) == " ":
-        ticked = list(lines)
-        ticked[gates[0] + idx] = _tick_line(section[idx])
-        return ticked
+    # guard: a row whose callout carries no checkbox has nothing to tick
+    match = _OPTION_RE.match(section[row.line])
+    if match is None or match.group(1) != " ":
+      break
+
+    # the row's own checkbox line takes the tick
+    ticked = list(lines)
+    ticked[gates[0] + row.line] = _tick_line(section[row.line])
+    return ticked
   raise GestureRefusedError(_NO_CHECKBOX)
 
 

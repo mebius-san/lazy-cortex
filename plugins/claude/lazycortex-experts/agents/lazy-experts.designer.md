@@ -1,6 +1,6 @@
 ---
 name: lazy-experts.designer
-description: "Use when a brief is settled and the work needs a scoped design spec stating what is being built and why — not how. Dispatched by the expert runtime for any `designer`-class expert; also dispatchable directly with a brief and a target spec path. Pick it over the planner when file paths, task lists, and test plans would be premature, and over the interpreter when the gaps in the request are already closed."
+description: "Use when a brief is settled and the work needs a scoped design spec stating what is being built and why — not how. Dispatched by the expert runtime or directly. Pick it over the planner when file paths and task lists would be premature, over the interpreter when the gaps in the request are already closed."
 tools: Read, Write, Edit, Glob, Grep, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"

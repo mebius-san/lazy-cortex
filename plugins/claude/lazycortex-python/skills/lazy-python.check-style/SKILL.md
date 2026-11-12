@@ -1,6 +1,6 @@
 ---
 name: lazy-python.check-style
-description: "Use when the user asks to review, check, or clean up Python code they just changed — 'check my style', 'review these files against our guidelines', 'is this ready to commit'. Run it after a batch of edits and before committing: it pairs manual guideline inspection (the things `chk-py` cannot see, read fresh from the canon plus the project overlay) with the full `chk-py` + `tst-py` gate and a re-verify pass."
+description: "Use when the user asks to review, check, or clean up Python code they just changed — 'check my style', 'review these files against our guidelines', 'is this ready to commit'. Run it after a batch of edits and before committing: it pairs guideline inspection with the full `chk-py` + `tst-py` gate."
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion, Agent
 user-invocable: true
 ---

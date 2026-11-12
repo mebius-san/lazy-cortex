@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Add a named expert role and dispatch your first async job — keep working while the daemon runs it, then collect the result.
-last_regen: 2026-11-10
+last_regen: 2026-11-12
 diagram_spec:
   anchor: "How the pieces fit"
   request: "Sequence diagram showing a user dispatching a job via /lazy-expert.dispatch-job, the daemon picking it up from the .experts/.jobs/ queue, the expert agent writing response.json + DONE marker, and the user collecting the result via /lazy-expert.collect-job. Nodes: User, Claude session, .experts/.jobs/ queue, daemon (runner), expert agent."
@@ -11,8 +11,8 @@ source_skills:
   - lazy-expert.dispatch-job
   - lazy-expert.list-jobs
   - lazy-expert.collect-job
-source_sha: 3fadd77433a2100975275f22c7c7e8cb8e544c9d
-surface_sha: a6207050a77b8f6f1ae1955556c1d3e102ac83d86a34c60449644c15625fbcf4
+source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
+surface_sha: 54a4b7a1b90762ee89d562d95104e8b12692a2c8208090b9023572e84f7d9f73
 ---
 # Add a named expert and dispatch your first async job
 
@@ -28,7 +28,8 @@ After this walkthrough you have:
 ## What you need
 
 - `lazycortex-core` installed and restarted in Claude Code.
-- A git repo to run async jobs in (the runtime is always per-repo).
+- Python 3.12 or newer on the machine. `/lazy-core.install` checks this first: if nothing qualifies it stops with install instructions for your platform, and if only a non-default command (for example `python`) qualifies it records that choice for the project and asks you to restart Claude Code and re-run it.
+- A git repo to run async jobs in (the runtime is always per-repo). If you run `/lazy-core.install` outside a repo, it asks once whether to initialise git there; declining skips the runtime setup for that run.
 - A way to drain the queue — either the background daemon (a supervisor unit, or the `.claude/bin/lazy.runtime.sh` shim started manually) or manual ticks via `/lazy-runtime.tick`. Neither is on by default; see Step 1 below. `/lazy-core.install` never sets up the daemon — that is `/lazy-core.daemon-setup`. If you go the background-daemon route, the checkout the daemon runs from must be a plain git clone outside Dropbox — the daemon refuses to start otherwise (details in Step 1).
 
 ## The journey
@@ -38,7 +39,10 @@ After this walkthrough you have:
 Run `/lazy-core.install` in the repo you want the async team to work in. Alongside the rest of its bootstrap, the install skill:
 
 - Registers every expert candidate it finds — any installed plugin's agent carrying `expert_protocol:` frontmatter is registered automatically in `lazy.settings.json[experts]`, no per-candidate prompt. Registration happens whether or not a background daemon runs anywhere — experts are dispatch-routing config used by interactive flows too. The `.experts/` job-queue directory is runtime scratch and stays out of git; if `/lazy-expert.dispatch-job` ever reports that `.experts/` is not initialised, re-run `/lazy-core.install`.
-- Registers the built-in routines, including the queue-draining `lazy-expert.pump`, in `lazy.settings.json[routines]` — again unconditionally. The daemon is never required for the queue itself to exist.
+- Also registers two built-in experts that ship with core, `runtime.doctor` and `core.autocheckup`, and seeds their model tiers. They are what the runtime's own maintenance routines dispatch; you can leave them alone.
+- Registers the built-in routines — the queue-draining `lazy-expert.pump`, `lazy-runtime.doctor`, `lazy-core.index-guard`, a daily `lazy-core.runtime-gc` cleanup, and a weekly `lazy-core.autocheckup` — in `lazy.settings.json[routines]`, again unconditionally. Re-running install fills in default keys an older registration lacked. The daemon is never required for the queue itself to exist.
+- Restores externally-sourced working directories when the repo declares any (directories it does not carry in git). It reads what is already on record and only asks once, on a fresh checkout with nothing recorded: link them from a source root you name, or leave them. If git can see the freshly linked directories, it offers to append the missing `.gitignore` lines — decline and the tree stays dirty, so a daemon on this checkout halts on its first tick.
+- Installs the `lazy-claude` wrapper into `~/.local/bin/` for any other daemon on the host that wants the shared subscription rate-limit guard. It is host-wide and needs no action from you here.
 - Seeds `lazy.settings.json[daemon]` with `enabled: false` as the default and never asks about it. Install does not touch the background daemon: it installs no supervisor unit and does not ask `daemon.run_here`. Both belong to `/lazy-core.daemon-setup`, which you run only if you decide the project should get a daemon (see below).
 - Does **not** seed `daemon.token_env`. Whenever the daemon process actually runs — the supervisor or the manual shim, never `/lazy-runtime.tick` — it refuses to start under the machine's ambient login and instead requires an explicit token, named by this key. Setting it is on you; see the queue-draining bullet below.
 - Pins LF line endings for the whole checkout, unconditionally: writes `* text=auto eol=lf` as the first rule in `<repo>/.gitattributes`, so git checks out text files with LF on every machine regardless of OS or `core.autocrlf`. This matters most for the daemon checkout below — a checkout synced between machines by something other than git (Dropbox, for example) is exactly how CRLF or half-written files creep in.
@@ -47,7 +51,7 @@ Run `/lazy-core.install` in the repo you want the async team to work in. Alongsi
 
 Confirm two things are in place before dispatching:
 
-- **At least one expert is registered.** Check `lazy.settings.json[experts]` for a key besides `_version`. If it's empty, no plugin you have installed ships an expert candidate yet — install one, or re-run `/lazy-core.install` after adding your own agent with `expert_protocol:` frontmatter.
+- **The expert you want to dispatch to is registered.** Check `lazy.settings.json[experts]`. The two built-in maintenance experts (`runtime.doctor`, `core.autocheckup`) are always there after install, so a key besides `_version` does not mean your own expert exists. If the one you need is missing, install the plugin that ships it, or re-run `/lazy-core.install` after adding your own agent with `expert_protocol:` frontmatter.
 - **Decide how the queue gets drained.** With `daemon.enabled` left at its default `false`, nothing drains the queue automatically — run `/lazy-runtime.tick` by hand whenever you want queued jobs picked up; it runs the same routines, in the same priority order, as the daemon would, and needs no token of its own. If you'd rather have it run continuously, three things need to be true before the daemon process will actually start:
   - **`daemon.token_env` is set.** The daemon refuses to run under the machine's ambient login — it requires an explicit OAuth token, named by `daemon.token_env` (a string naming an environment variable, e.g. `"CLAUDE_TOKEN_MYPROJECT"`) in the tracked `lazy.settings.json[daemon]` section, resolved from either the real environment or a matching line in `~/.claude/.env`. `/lazy-core.install` does not seed this key — set it yourself before the daemon's first start. Left absent, blank, or naming a variable that resolves nowhere, the daemon process exits immediately with an explicit error naming what's missing.
   - **`daemon.enabled: true` and `daemon.run_here` name this checkout.** Run `/lazy-core.daemon-setup` — it sets `daemon.enabled`, asks the `run_here` question (which machine and checkout drive the daemon), and installs the supervisor unit (launchd on macOS, systemd on Linux) once you confirm.
@@ -61,7 +65,7 @@ Confirm two things are in place before dispatching:
 
 The shim resolves the runner from the plugin cache and starts it — the same token gate and Dropbox check apply here too. The daemon logs to stdout; it wakes on each polling cycle, drains any queued jobs, and runs registered routines. Leave it running in a `tmux` or `screen` pane — you do not need to restart it for each job.
 
-**Verification gate**: `lazy.settings.json[experts]` contains at least one expert key besides `_version`, and either you know to run `/lazy-runtime.tick` by hand, or — for a background daemon — `daemon.token_env` is set and resolves, the checkout is outside Dropbox, and the daemon prints its startup message and enters its polling loop instead of exiting on a missing-token or Dropbox refusal.
+**Verification gate**: `lazy.settings.json[experts]` contains the expert you plan to dispatch to, and either you know to run `/lazy-runtime.tick` by hand, or — for a background daemon — `daemon.token_env` is set and resolves, the checkout is outside Dropbox, and the daemon prints its startup message and enters its polling loop instead of exiting on a missing-token or Dropbox refusal.
 
 ### (Optional) Aspects, arguments, and provider
 

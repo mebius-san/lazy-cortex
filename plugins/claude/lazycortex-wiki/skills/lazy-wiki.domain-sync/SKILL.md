@@ -1,6 +1,6 @@
 ---
 name: lazy-wiki.domain-sync
-description: "Use when the domain-spec tree needs regenerating right now — this checkout runs no runtime daemon, domain markers or the dictionary just changed and the operator wants the docs current, or a `/lazy-python.knowledge-sweep` backfill has landed. Computes the domain plan, dispatches the domain-spec writer synchronously per changed group and lands every returned file — the group's folder note and the docs of its changed blocks — through `domain-land`, removes orphaned docs, repairs moved anchors and dead Related links, rebuilds `domains.md`, and makes one commit under the operator identity. An optional group key limits the run to that group."
+description: "Use when the domain-spec tree needs regenerating right now — this checkout runs no runtime daemon, domain markers or the dictionary just changed and the operator wants the docs current, or a `/lazy-python.knowledge-sweep` backfill has landed. An optional group key limits the run to one group; reading the tree is `/lazy-wiki.domains`."
 allowed-tools: Read, Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(date -u *), Bash(git *), Bash(mkdir -p *), Bash(rm *), Write, Agent
 ---
 # lazy-wiki.domain-sync
@@ -99,7 +99,7 @@ Outcome: `repaired:<n>` (or `unchanged`).
 Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" domain-apply-index --repo <repo-root>)
 ```
 
-Parse `{index, updated, sections}`; track the index path for the commit when `updated` is true, and every path in `sections`. The index lists every group whose folder note exists and, under `## Discrepancies`, every doc a writer tagged `domains/discrepancy`. `sections` names the notes the engine wrote for folders above the groups that are not groups themselves (`pytool/pytool.md` above `pytool.code-discipline`), each listing the groups and sections directly inside it.
+Parse `{index, updated, sections}`; track the index path for the commit when `updated` is true, and every path in `sections`. The index lists every group whose folder note exists and, under `## Discrepancies`, every doc that has a `## Discrepancies` section. `sections` names the notes the engine wrote for folders above the groups that are not groups themselves (`pytool/pytool.md` above `pytool.code-discipline`), each listing the groups and sections directly inside it.
 
 Outcome: `index-updated` or `index-unchanged`.
 

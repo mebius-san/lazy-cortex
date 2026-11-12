@@ -702,7 +702,7 @@ def _set_scalar_field(text: str, key: str, value: str) -> str:
   return text[:open_end] + new_block + text[close_start:]
 
 
-def _set_tags_field(text: str, new_tags: list[str]) -> str:
+def set_tags_field(text: str, new_tags: list[str]) -> str:
   """
   Replace the entire `tags:` key entry with a block-sequence of `new_tags`.
 
@@ -710,6 +710,8 @@ def _set_tags_field(text: str, new_tags: list[str]) -> str:
   If `new_tags` is empty and the key is absent, the text is returned unchanged.
   If the key is absent and `new_tags` is non-empty, a new block-style entry
   is appended before the closing fence.
+  If the text has no frontmatter and `new_tags` is non-empty, a frontmatter
+  block holding only the tags is prepended.
 
   Args:
     text: Full document text.
@@ -797,7 +799,7 @@ def _set_block_seq_field(text: str, key: str, new_values: list[str]) -> str:
   """
   Replace the entire `key` entry with a block-sequence of `new_values`.
 
-  Mirrors the surgical semantics of `_set_tags_field` for any top-level
+  Mirrors the surgical semantics of `set_tags_field` for any top-level
   sequence key: an empty `new_values` removes the key when present (no-op
   when absent); a non-empty list appends a fresh block-style entry when the
   key is absent, or replaces the whole existing entry in place.
@@ -1062,7 +1064,7 @@ def _strip_managed_md(text: str) -> str:
 
   # Keep only the non-wiki/* subset of tags (drop the key when none remain).
   non_wiki = [ t for t in _get_array_field(out, _KEY_TAGS) if not t.startswith(_WIKI_TAG_PREFIX) ]
-  out = _set_tags_field(out, non_wiki)
+  out = set_tags_field(out, non_wiki)
 
   # Collapse a now-empty frontmatter block so curation of a frontmatter-free
   # node hashes identically before and after.
@@ -1493,7 +1495,7 @@ class MarkdownNode:
     if topics is not None:
       current_tags = _get_array_field(text, _KEY_TAGS)
       non_wiki = [ t for t in current_tags if not t.startswith(_WIKI_TAG_PREFIX) ]
-      text = _set_tags_field(text, non_wiki + topics)
+      text = set_tags_field(text, non_wiki + topics)
 
     # Step 3 — wiki_connectors (managed block, excluded from source_hash)
     # a None means "leave the block as it is"; an empty list means "clear it"

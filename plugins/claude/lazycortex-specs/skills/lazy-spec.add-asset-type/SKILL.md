@@ -1,6 +1,6 @@
 ---
 name: lazy-spec.add-asset-type
-description: "Use when a product must grow a new kind of asset beyond the shipped feature / change / bug / content / research / release set — characters, scenes, chapters, endpoints, whatever the operator names — or when `lazy-spec.request-classify` has no type to route a request into. Writes the type declaration into `products[<key>].asset_types.<name>` and settles the playbook the coordinator will work assets of that type under; review coverage is automatic, so it never touches `review.classes`."
+description: "Use when a product must grow a new kind of asset beyond the shipped feature / change / bug / content / research / release set — characters, scenes, chapters, endpoints, whatever the operator names — or when `lazy-spec.request-classify` has no type to route a request into."
 allowed-tools: Read, Glob, Grep, Bash, Edit, Write, AskUserQuestion, Agent
 ---
 # Add Asset Type

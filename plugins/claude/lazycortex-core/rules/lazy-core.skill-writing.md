@@ -133,6 +133,13 @@ The description **opens** with the invocation condition, in one of three shapes:
 
 A restated purpose (`Use to resolve a dependency`), a condition that cannot be evaluated without already doing the work, and a feature list of the skill's own output are **not** triggers.
 
+Every session lists every description on every turn, whether the artifact is used or not, so its length is a standing cost:
+
+- **At most 400 characters** for a description that carries a trigger and, when needed, the one clause that sets it apart from a sibling.
+- **One sentence of at most 150 characters** for a single-caller description (`… not for direct use`). It names the caller and nothing else; the caller dispatches the artifact by name, so a list of wake conditions earns nothing.
+- **No `<example>` block**, at any length. Request shapes the artifact must fire on go into the trigger sentence.
+- **Over 1024 characters is `FAIL`**: that is the field limit of the skill format.
+
 Shapes, anti-patterns, worked rewrites, and the judging procedure: `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.description-triggers.md` — read it before authoring or auditing a description. Agents follow the same requirement, see `lazy-core.agent-writing § 1`.
 
 ## 9. `allowed-tools` — `Agent` is mandatory when the field is used
@@ -236,7 +243,7 @@ Opting a skill into `lazy-core.setup`: see `${CLAUDE_PLUGIN_ROOT}/references/laz
 - `lazy-core.audit` Agent B enforces §§ 1–4 (preamble presence, no-Optional, narrative-padding heuristic) and § 6 (no dirty working tree — heuristic write-without-commit detection). Absent preamble and "Optional" in heading are `FAIL`; narrative-padding denylist match and unwaived dirty-tree finding are `WARN`.
 - `lazy-core.doctor` surfaces these findings in Phase 3 and prompts the user to fix or waive.
 - § 7 is informational: `lazy-core.audit` Agent B emits `INFO` when a SKILL.md with documented aborts lacks a `## Failure modes` section.
-- § 8: `lazy-core.audit` Agent B judges each `description:` against the three trigger shapes and emits `WARN` on a mechanism-only one, across skills, agents, **and commands** — a command is routed by its description exactly as a skill is. Judgement, not a grep: a description may phrase its trigger in its own words. A missing `description:` is `FAIL`.
+- § 8: `lazy-core.audit` Agent B judges each `description:` against the three trigger shapes and emits `WARN` on a mechanism-only one, across skills, agents, **and commands** — a command is routed by its description exactly as a skill is. Judgement, not a grep: a description may phrase its trigger in its own words. A missing `description:` is `FAIL`. The length limits and the `<example>` ban are measured by the core `context-scan --section weight` verb, which grades every description it lists: over the ceiling or carrying an `<example>` block is `WARN`, over 1024 characters is `FAIL`; `lazy-core.audit` Agent A reports its grades.
 - § 9: `lazy-core.audit` Agent B flags `allowed-tools:` missing `Agent` as `WARN`. A file with no `allowed-tools:` field is out of scope for this check.
 - § 11: `lazy-core.audit` Agent B flags an `AskUserQuestion` site with no preceding `Context (print before asking):` block (or, for a policy paragraph, no naming of the four items) as `WARN`.
 - § 10: `lazy-core.audit` Agent B judges each skill's description/body against the research-marker convention — search/pull-shaped without the marker, or marker present without a documented query contract, both `WARN`.

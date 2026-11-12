@@ -62,17 +62,18 @@ The coordinator reconciles this set on every relevant wake: it hangs the ones wh
 
 No `Write` row's tick is a writer job. For `Write bug` the coordinator seeds the document with `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> seed-doc <product> <folder-note-path> --doc bug.md:bug` — the type's template chain, stage `empty`, the folder-note's `spec_source_requests` copied onto the doc — and then opens its review immediately with `Skill(lazycortex-review:lazy-review.start, "bug.md")`, whether or not the folder-note carries any `## Source requests` entry. The class's main writer works round 1 from whatever exists: the request(s) `context_from_frontmatter` resolves from the doc's own attribution, when there are any, and the documents its research aspect obliges it to read every time — the asset's own approved siblings and the system documents of the product chain. With neither a request nor an approved document above it, the writer starts from the asset's folder-note and raises what it cannot ground as in-document `[!question]` callouts. The coordinator never waits for the operator to write a first draft; an operator who edits the document does so during the review, as an ordinary operator edit.
 
-**A parked document hangs no `Write` row.** Every row of this table reads "the document doesn't exist", and a document at `spec_stage: deferred` exists — so its row stays down and nothing seeds a replacement beside it, ever. The row that hangs for it instead is the review-launch `Review <doc>` block, whose deferred-document case (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.coordination-playbook.md` Chapter 5) unparks and resubmits the document in one commit when the operator ticks it.
+**A parked document hangs no `Write` row.** Every row of this table reads "the document doesn't exist", and a document at `spec_stage: deferred` exists — so its row stays down and nothing seeds a replacement beside it, ever. The row that hangs for it instead is the review-launch `Review <doc>` row, whose deferred-document case (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.coordination-playbook.md` Chapter 5) unparks and resubmits the document in one commit when the operator ticks it.
 
-Block shape in `# Gates`:
+Callout shape in `# Gates` (`lazy-spec.coordination-playbook.md` Chapter 5):
 
 ```
-> [!gate] Write test-plan
+> [!gate] Write
 > - [ ] Write test-plan
-> tick to dispatch: tester writes test-plan.md from bug.md
+>
+> tick to create the document and open its review
 ```
 
-The tick is an operator gesture; on its next wake the coordinator enacts it — the seed-then-start flow above, for `Write bug` and `Write test-plan` alike — and removes the block.
+The tick is an operator gesture; on its next wake the coordinator enacts it — the seed-then-start flow above, for `Write bug` and `Write test-plan` alike — and removes the row's checkbox line.
 
 `Write test-plan` rides the same flow with its own document: the coordinator seeds it with `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> seed-doc <product> <folder-note-path> --doc test-plan.md:test-plan` and branches on `## Source requests` exactly as above; the class's main writer works round 1 inside the review loop, where `bug.md` plays exactly the source role that a design document plays on other types. `test-plan.md` is a definition document with test cases, not a plan of work: it goes through review and approval like `bug.md`, takes part in no gate of the asset, and the tester of the release that ships the fix later composes the release test plan from the product's standing test instructions, these cases and the regression. The row stays open while `test-plan.md` does not exist, including while the bug is already in an open release's `spec_includes`. A new or re-approved `test-plan.md` of an included bug hangs `Rebuild` on the release note, which pulls it into the next build.
 

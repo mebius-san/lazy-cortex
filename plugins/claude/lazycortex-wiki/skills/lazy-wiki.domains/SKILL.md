@@ -1,6 +1,6 @@
 ---
 name: lazy-wiki.domains
-description: "Use when a question needs domain knowledge synthesised from code's `Domain(…)` markers — defining a term, looking up a mechanic or formula, or surveying a group of related domain concepts — and `wiki.domains` is configured in this repo. A research skill: given a group key or a search term, hands back a bounded slice of the domain-spec tree (`docs/domains/` by default, materialized by `/lazy-wiki.domain-sync`) — a group's overview and document list, one document's section, or matching excerpts — never a whole document or the whole tree. Mirrors `lazy-wiki.structure`'s query mode, over the domain tree instead of the project structure map."
+description: "Use when a question needs domain knowledge from code's `Domain(…)` markers — defining a term, looking up a mechanic or formula, or surveying a group of related concepts — and `wiki.domains` is configured. A research skill: it hands back a bounded slice of the domain-spec tree, never the whole tree; regenerating the tree is `/lazy-wiki.domain-sync`."
 research: true
 allowed-tools: Read, Grep, Glob, Agent, AskUserQuestion, Bash(test -f *), Bash(git rev-parse *), Bash(mkdir -p *), Bash(date -u *), Write
 ---

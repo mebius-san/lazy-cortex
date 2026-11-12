@@ -1,16 +1,6 @@
 ---
 name: lazy-obsidian.gen-tag-pages
-description: |
-  Use when tags were added, renamed, or removed on the vault's notes and the pages under `Tags/` no longer match — or when the operator asks to regenerate tag pages.
-  Scans all `.md` files for `tags:` frontmatter, then creates/updates/removes tag pages
-  under `Tags/` keeping the folder hierarchy matching the tag hierarchy.
-  Template is read from the consumer repo at `.claude/templates/lazy-obsidian.tag-page-template.md`
-  (bootstrap via `lazy-obsidian.install`).
-  <example>
-  Context: New notes were added with new tags, or tags were added/removed from existing notes
-  user: "Regenerate tag pages"
-  assistant: "I'll use the lazy-obsidian.gen-tag-pages agent to regenerate the Obsidian tag pages"
-  </example>
+description: "Use when tags were added, renamed, or removed on the vault's notes and the pages under `Tags/` no longer match, or when the operator asks to 'regenerate tag pages'."
 model: inherit
 color: purple
 tools: Bash, Read, Write, Edit, Glob, Grep, Skill, Agent

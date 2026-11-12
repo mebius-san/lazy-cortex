@@ -1,13 +1,13 @@
 ---
 chapter_type: block
 summary: Bootstrap lazycortex-experts via seeded tiers and composed experts, then verify with the plugin's own read-only audit skill.
-last_regen: 2026-11-10
+last_regen: 2026-11-12
 no_diagram: true
 source_skills:
   - lazy-experts.install
   - lazy-experts.audit
-source_sha: 2f3083ebe46203415379eccf8333b1c13b39b779
-surface_sha: 9ba683b9065dc2b09bc1057b57a7c5714e3dbccf9d6721eaecbd502a823e3a5f
+source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
+surface_sha: 0c29839685f56b7ca7e293726a2b9e861c07533e3c2c8dc18ca1c2da01900d7b
 ---
 # Installing and auditing lazycortex-experts
 
@@ -19,7 +19,7 @@ surface_sha: 9ba683b9065dc2b09bc1057b57a7c5714e3dbccf9d6721eaecbd502a823e3a5f
 - You've updated the plugin and a new release shipped additional domain aspects, revised tier entries, a new role agent, or a newly-mandatory field — re-running install picks up everything new without disturbing your existing config.
 - You're setting up a fresh project-scoped environment and want agent-model tiers and expert entries isolated from your global config.
 - You added a new agent or domain aspect to the plugin cache and want the class-map entries seeded without writing them by hand.
-- Dispatching an expert fails in a way that smells like config — a job aborts saying the agent ref does not resolve, an expert writes to a contract it should not have, a role the class map prescribes turns out to have no entry — and you want to know exactly what's wrong before re-running install.
+- Dispatching an expert fails in a way that smells like config — a job aborts saying the agent ref does not resolve, a role the class map prescribes turns out to have no entry — and you want to know exactly what's wrong before re-running install.
 - You want a periodic sanity check that your composed experts still match what the plugin actually ships, without risking any write to `lazy.settings.json`.
 
 ## How it fits together

@@ -1,6 +1,6 @@
 ---
 name: lazy-experts.install
-description: "Run when the operator asks to set up lazycortex-experts in a repo, to add or complete an expert class (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, `sci-fi`, `fantasy`), or when dispatching an expert fails because `lazy.settings.json` has no matching `experts` entry or no model tier for a generic agent. Unlike the sibling install skills, it syncs no rules — it only seeds composed expert entries per the class map plus agent-model tiers, asks for classes only on a project that has none yet, and never overwrites what an operator chose — the one thing it completes on an existing entry is a missing mandatory cross-cutting aspect. Idempotent and quiet on re-run; install scope is detected."
+description: "Run when the operator asks to set up lazycortex-experts in a repo or to add or complete an expert class (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, `sci-fi`, `fantasy`), or when an expert dispatch fails because `lazy.settings.json` lacks its `experts` entry or model tier. `/lazy-experts.audit` only checks; this writes."
 allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, Bash(mkdir -p *), Bash(git rev-parse*), Bash(test *), Bash(date *), Bash(ls *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
 ---
 # Install lazycortex-experts

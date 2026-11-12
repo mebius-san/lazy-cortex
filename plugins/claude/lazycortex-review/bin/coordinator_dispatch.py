@@ -755,8 +755,8 @@ def dispatch_job_done(repo: Path, asset_note: Path, dedup_hint: str) -> dict:
 
   The postman calls this the moment a writer's job goes DONE: no payload commit is made
   any more, so no git-watch item can carry the wake — the postman raises the sidecar flag
-  and queues the coordinator itself. The coordinator lands the payload with `collect-job
-  --no-commit` inside its own wake and commits once.
+  and queues the coordinator itself. The coordinator lands the payload with `collect-job`
+  inside its own wake and commits once.
 
   Guarantees:
     - At most one coordinator job runs per document across both dispatch paths: a live

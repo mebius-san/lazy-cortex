@@ -1,6 +1,6 @@
 ---
 name: lazy-spec.product-config
-description: Use when creating a new product in the spec system OR editing an existing product's registration — unified wizard that collects answers via AskUserQuestion, writes the product record into lazy.settings.json[products][<compound-key>], scaffolds the product root with its level note (spec_role product) and iconize icon (group folders appear lazily with their first asset), and auto-detects code dependencies. Edit mode adds source to a design-only product, extends dependencies, or switches language/icon without clobbering asset_types.
+description: "Use when the operator asks to create a new product in the spec system or edit an existing product's registration — 'add a product', 'register this repo as a product', 'add source to this design-only product', 'change its dependencies, language or icon'. Products are registered here, never by /lazy-spec.install."
 allowed-tools: Read, Glob, Grep, Bash, Edit, Write, Skill, AskUserQuestion, Agent
 ---
 # Configure Product

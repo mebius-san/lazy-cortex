@@ -41,6 +41,8 @@ import block_owner as _owner  # noqa: E402  # pylint: disable=import-error,wrong
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import explainers as _explainers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import nodes as _nodes  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import scope as _scope  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from textfile import TextFile  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -97,8 +99,10 @@ FM_DOMAIN_SECTION = "domain_section"
 # Frontmatter key carrying a generated doc's tag list.
 FM_TAGS = "tags"
 
-# The tag a writer puts on a doc whose block disagrees with the code it describes.
-DISCREPANCY_TAG = "domains/discrepancy"
+# The section of a generated doc listing where its block disagrees with the code it describes, and
+# the tag the engine stamps on exactly the docs that carry that section.
+DISCREPANCIES_HEADING = "## Discrepancies"
+DISCREPANCY_TAG       = "domains/discrepancy"
 
 # Settings key carrying the repository-wide tag-axis vocabulary (`wiki.tag_axes`).
 _KEY_TAG_AXES = "tag_axes"
@@ -986,8 +990,8 @@ class DomainIndex:
   Renderer of the `domains.md` index inside the output directory.
 
   Owns the title, the group listing — one line per group folder note, linking its group
-  key with the dictionary gloss — and the `## Discrepancies` list of docs tagged as
-  disagreeing with their code; the rest of the file is operator territory.
+  key with the dictionary gloss — and the `## Discrepancies` list of docs whose body has a
+  `## Discrepancies` section; the rest of the file is operator territory.
 
   Guarantees:
     - Preserves everything from the first `##` heading other than `## Discrepancies`
@@ -1008,7 +1012,6 @@ class DomainIndex:
   _CONTEXT_HEADING = "## Context map"
   _STUB            = "<!-- Hand-written cross-domain relationships; the list above is engine-rendered. -->"
   _SECTION_PREFIX  = "## "
-  _DISCREPANCIES_HEADING = "## Discrepancies"
   _GROUPS_HEADING  = "## Groups"
 
   def __init__(self, *, cfg: DomainConfig) -> None:
@@ -1037,7 +1040,7 @@ class DomainIndex:
 
     Returns:
       The complete index file content, listing every dictionary group whose
-      folder note exists and every doc marked as disagreeing with its code, with
+      folder note exists and every doc whose body has a `## Discrepancies` section, with
       the preserved (or stub) tail sections appended.
     """
     dictionary = DomainDictionary(path = self._cfg.repo / self._cfg.dictionary).read_groups()
@@ -1047,7 +1050,8 @@ class DomainIndex:
     # The index of the domain tree is shared between the engine and the operator. The engine owns the
     # head: the title, the self-describing line in the language the documents are written in, one entry
     # per listed group whose folder note already exists, each carrying the gloss the dictionary gave it,
-    # and the list of documents marked as disagreeing with the code they describe. Everything from the
+    # and the list of documents whose own Discrepancies section says they disagree with the code they
+    # describe. Everything from the
     # first other section heading onward belongs to the operator: cross-domain relationships that no
     # block states on its own are written there by hand and survive every rebuild.
 
@@ -1069,10 +1073,10 @@ class DomainIndex:
     explainer = _explainers.explainer_line(_explainers.SURFACE_DOMAINS_INDEX, self._cfg.language_code)
     head = self._TITLE + "\n" + explainer + "\n\n" + "\n".join(listing) + "\n"
 
-    # the engine's list of docs marked as disagreeing with their code, only when there is one
+    # the engine's list of docs with a Discrepancies section, only when there is one
     marked = self._render_discrepancy_lines()
     if marked:
-      head += "\n" + self._DISCREPANCIES_HEADING + "\n\n" + "\n".join(marked) + "\n"
+      head += "\n" + DISCREPANCIES_HEADING + "\n\n" + "\n".join(marked) + "\n"
 
     # the operator's tail survives as it is; a brand-new index gets the stub in its place
     tail = self._read_preserved_tail()
@@ -1082,11 +1086,12 @@ class DomainIndex:
 
   def _render_discrepancy_lines(self) -> list[str]:
     """
-    List every generated doc tagged as disagreeing with its code.
+    List every generated doc whose body has a `## Discrepancies` section.
 
     Returns:
-      One `- [<title>](<path>)` line per doc carrying the discrepancy tag, sorted by path,
-      the path relative to the output directory and the title taken from the doc's H1.
+      One `- [<title>](<path>)` line per doc with that section, sorted by path, the path
+      relative to the output directory and the title taken from the doc's H1. The doc's
+      tags play no part in the selection.
     """
     output_abs = self._cfg.repo / self._cfg.output
 
@@ -1094,21 +1099,24 @@ class DomainIndex:
     if not output_abs.is_dir():
       return []
 
-    # every tagged markdown doc of the tree, titled by its own H1
+    # every markdown doc of the tree with a section of its own listing disagreements, titled by its own H1
     lines: list[tuple[str, str]] = []
     for base, _dirs, files in os.walk(str(output_abs)):
       for fname in files:
         doc_abs = Path(base) / fname
         rel = doc_abs.relative_to(self._cfg.repo).as_posix()
 
-        # not a generated doc, or not tagged as disagreeing with its code
-        if self._layout.classify(rel) is None or DISCREPANCY_TAG not in DomainPlanner.read_stored_tags(doc_abs):
+        # guard: not a generated doc (index, non-markdown)
+        if self._layout.classify(rel) is None:
+          continue
+
+        # the doc's own section, never its tag, decides whether it is listed
+        text = doc_abs.read_text(encoding = _ENCODING)
+        if not DomainPlanner.has_discrepancies(text):
           continue
 
         # the doc's own H1 names it, its file stem when it has none
-        heads = [
-          line[2:].strip() for line in doc_abs.read_text(encoding = _ENCODING).splitlines() if line.startswith("# ")
-        ]
+        heads = [ line[2:].strip() for line in text.splitlines() if line.startswith("# ") ]
         title = heads[0] if heads else fname[:-len(_MD_EXT)]
         link = rel[len(self._cfg.output) + 1:]
         lines.append((link, f"- [{title}]({link})"))
@@ -1228,7 +1236,7 @@ class DomainIndex:
     lines = index_abs.read_text(encoding = _ENCODING).splitlines()
     for idx, line in enumerate(lines):
       # not a section heading, or the engine's own discrepancy list — keep looking
-      if not line.startswith(self._SECTION_PREFIX) or line.strip() == self._DISCREPANCIES_HEADING:
+      if not line.startswith(self._SECTION_PREFIX) or line.strip() == DISCREPANCIES_HEADING:
         continue
       return "\n".join(lines[idx:]) + "\n"
     return ""
@@ -1247,8 +1255,9 @@ class DomainLanding:
   The one route a domain-spec writer's document takes into the repository.
 
   Places a returned document at the path its dispatch named — a block doc or a folder note —
-  stamped with the digest the dispatch carries for that path and the configured explainer line
-  under the title heading. The bullet of a contract citation the dispatch attributed nothing to
+  stamped with the digest the dispatch carries for that path, the configured explainer line
+  under the title heading, and a discrepancy tag that follows the document's own
+  `## Discrepancies` section. The bullet of a contract citation the dispatch attributed nothing to
   is removed from the document before it lands. It never refreshes the index and never
   commits — the caller owns both.
 
@@ -1258,6 +1267,8 @@ class DomainLanding:
     - The landed doc's `domain_hash` is always the payload's digest for that path, never the
       writer's value, and the explainer line under the title heading is always the configured
       one for the doc's kind.
+    - The landed doc carries the `domains/discrepancy` tag exactly when its body has a
+      `## Discrepancies` section; every other tag is kept as the writer returned it.
     - A returned document that cannot be stamped (no `domain_hash` key in a leading frontmatter
       block, no title heading, or no digest in the payload for its path) is refused, and
       nothing is written.
@@ -1278,6 +1289,10 @@ class DomainLanding:
   # under its title heading, the configured explainer line for the doc's kind.
 
   # Contract:
+  # A landed doc carries the `domains/discrepancy` tag exactly when its body has a
+  # `## Discrepancies` section, whatever tags the writer returned; every other tag is kept.
+
+  # Contract:
   # A returned document that cannot be stamped is refused and nothing is written: one with no
   # `domain_hash` key in a leading frontmatter block, one with no title heading, or one at a
   # path the payload names no digest for.
@@ -1295,7 +1310,7 @@ class DomainLanding:
 
   def save_doc(self, doc_rel: str, body: str, *, payload: dict) -> str:
     """
-    Write one returned document at its doc path, stamped with its digest and explainer line.
+    Write one returned document at its doc path, stamped with its digest, explainer line and discrepancy tag.
 
     Args:
       doc_rel: Repo-relative doc path the dispatch named.
@@ -1332,6 +1347,7 @@ class DomainLanding:
     # the stamps: the payload's digest and the configured explainer line replace the writer's own
     stamped = DomainPlanner.stamp_hash(body, self._read_digest(payload, doc_rel))
     stamped = self._stamp_explainer(stamped, rel)
+    stamped = DomainPlanner.stamp_discrepancy_tag(stamped)
 
     # the whole document replaces whatever the previous generation left
     target = self._cfg.repo / rel
@@ -1991,12 +2007,14 @@ class DomainPlanner:
     regenerating any doc.
 
     Meant for a one-off run after the digest rule changes: every block doc and folder note
-    whose group still has blocks in code is taken as current as written and re-anchored to
-    the new digest.
+    whose group still has blocks in code is taken as current as written, re-anchored to
+    the new digest, and has its discrepancy tag brought in line with its own section.
 
     Guarantees:
-      - No doc is created or regenerated; only the `domain_hash` frontmatter line and the
-        stale contract anchors of existing docs are rewritten.
+      - No doc is created or regenerated; only the `domain_hash` frontmatter line, the
+        `domains/discrepancy` tag and the stale contract anchors of existing docs are rewritten.
+      - Afterwards a restamped doc carries the `domains/discrepancy` tag exactly when its body
+        has a `## Discrepancies` section; every other tag is kept.
 
     Notes:
       - Scans the configured code tree, reads every existing generated doc, and writes the
@@ -2009,7 +2027,9 @@ class DomainPlanner:
 
     # Contract:
     # No doc is ever created or regenerated by a restamp; only the `domain_hash`
-    # frontmatter line and the stale contract anchors of docs that already exist change.
+    # frontmatter line, the `domains/discrepancy` tag and the stale contract anchors of docs
+    # that already exist change. A restamped doc carries the tag exactly when its body has a
+    # `## Discrepancies` section; every other tag is kept.
 
     survey = self._read_survey()
 
@@ -2035,12 +2055,12 @@ class DomainPlanner:
         anchors += len(fixes)
         touched.update(self.apply_anchor_fixes(fixes))
 
-        # the stamp: the doc as it stands, re-anchored to the current digest
+        # the stamps: the doc as it stands, re-anchored to the current digest and tagged by its own section
         doc_file = TextFile(path = doc_abs)
         text = doc_file.read()
-        stamped = self.stamp_hash(text, digest)
+        stamped = self.stamp_discrepancy_tag(self.stamp_hash(text, digest))
 
-        # the digest is already the current one — the anchors above were the whole change
+        # both stamps are already current — the anchors above were the whole change
         if stamped == text:
           continue
         doc_file.write(stamped)
@@ -2567,6 +2587,77 @@ class DomainPlanner:
     return "".join(lines)
 
   @staticmethod
+  def has_discrepancies(text: str) -> bool:
+    """
+    Tell whether a document's body has a `## Discrepancies` section.
+
+    Args:
+      text: The full document text.
+
+    Returns:
+      `True` when a line of the text is exactly the `## Discrepancies` heading, trailing
+      whitespace aside; `False` otherwise.
+    """
+    return any(line.rstrip() == DISCREPANCIES_HEADING for line in text.splitlines())
+
+  @classmethod
+  def stamp_discrepancy_tag(cls, text: str) -> str:
+    """
+    Bring a document's `domains/discrepancy` tag in line with its own `## Discrepancies` section.
+
+    Guarantees:
+      - Every tag other than `domains/discrepancy` is kept, and the rest of the text is unchanged.
+      - The result carries the tag exactly when its body has a `## Discrepancies` section.
+
+    Args:
+      text: The full document text.
+
+    Returns:
+      The text with the tag added when the body has the section and the tag is missing, or
+      removed when the body lacks the section and the tag is present; the text itself when
+      the tag already matches.
+    """
+
+    # Domain(wiki.domains):
+    # # A document's discrepancy mark follows its section
+    # A generated document disagrees with its code exactly when it lists the disagreements in its own
+    # Discrepancies section. The mark that lets a reader filter such documents by tag is derived from
+    # that section, never authored: a document carrying the section gets the mark, one without it loses
+    # the mark, and every other tag stays where it was. A folder note follows the same rule: without a
+    # section of its own it carries no mark, even when a document inside its folder does.
+
+    # Contract:
+    # The stamped text carries `domains/discrepancy` exactly when its body has a `## Discrepancies`
+    # section; every other tag keeps its place and the rest of the text keeps its bytes.
+
+    # the tags the text carries now, and whether its own section calls for the mark
+    tags = cls.parse_text_tags(text)
+    wanted = cls.has_discrepancies(text)
+
+    # the mark already matches the section — the text stays byte-identical
+    if (DISCREPANCY_TAG in tags) == wanted:
+      return text
+
+    # the mark is appended after the other tags, or removed from among them
+    kept = [ tag for tag in tags if tag != DISCREPANCY_TAG ]
+    return _nodes.set_tags_field(text, [ *kept, DISCREPANCY_TAG ] if wanted else kept)
+
+  @classmethod
+  def parse_text_tags(cls, text: str) -> list[str]:
+    """
+    Parse the tags a document lists in its leading frontmatter.
+
+    Args:
+      text: The full document text.
+
+    Returns:
+      The tags in listed order, each as a string; an empty list when the document has no
+      frontmatter block or its `tags` field is not a list.
+    """
+    value = cls.parse_frontmatter(text).get(FM_TAGS)
+    return [ str(tag) for tag in value ] if isinstance(value, list) else []
+
+  @staticmethod
   def locate_hash_line(lines: list[str]) -> int | None:
     """
     Find the `domain_hash` line inside a doc's leading frontmatter block.
@@ -2669,7 +2760,24 @@ class DomainPlanner:
     return ref.kind == KIND_BLOCK_DOC and FM_DOMAIN_GROUP in frontmatter and FM_DOMAIN_BLOCK not in frontmatter
 
   @staticmethod
-  def read_frontmatter(doc_abs: Path) -> dict:
+  def parse_frontmatter(text: str) -> dict:
+    """
+    Parse the leading frontmatter of a document text.
+
+    Args:
+      text: The full document text.
+
+    Returns:
+      The frontmatter mapping; an empty dict when the text has no frontmatter or the frontmatter is not
+      a mapping.
+    """
+    # waiver: `scope` owns this plugin's only frontmatter parser and exposes no public name for it; reusing it keeps
+    # one YAML notation across the plugin
+    frontmatter = _scope._parse_frontmatter(text)
+    return frontmatter if isinstance(frontmatter, dict) else {}
+
+  @classmethod
+  def read_frontmatter(cls, doc_abs: Path) -> dict:
     """
     Read the frontmatter of a generated doc.
 
@@ -2677,15 +2785,13 @@ class DomainPlanner:
       doc_abs: Absolute path of the doc.
 
     Returns:
-      The parsed frontmatter mapping; empty when the doc is absent or carries none.
+      The parsed frontmatter mapping; empty when the doc is absent, carries none, or its frontmatter is not a
+      mapping.
     """
     # guard: doc not generated yet
     if not doc_abs.is_file():
       return {}
-    # waiver: `scope` owns this plugin's only frontmatter parser and exposes no public name for it; reusing it keeps
-    # one YAML notation across the plugin
-    frontmatter = _scope._parse_frontmatter(doc_abs.read_text(encoding = _ENCODING))
-    return frontmatter if isinstance(frontmatter, dict) else {}
+    return cls.parse_frontmatter(doc_abs.read_text(encoding = _ENCODING))
 
   @staticmethod
   def read_stored_hash(doc_abs: Path) -> str | None:

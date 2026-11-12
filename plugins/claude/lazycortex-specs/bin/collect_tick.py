@@ -6,8 +6,9 @@ A finished expert job leaves its terminal marker (`DONE` / `DEAD` / `CANCELLED`)
 note's folder is untouched when a job finishes. This worker is the delivery channel, the specs-side
 analog of `lazycortex-review`'s `collect-tick`: each tick it reads the sidecar rows
 (`spec_job_markers.entries`) and runs the same per-note `gate_tick` poll in-process for every note
-still carrying a marker or a pending wake. gate-tick's own job-done commit is what then wakes
-`lazy-spec.coordinator-watch`; this sweep commits nothing itself and dispatches nothing itself.
+still carrying a marker or a pending wake. A note whose poll leaves a `job-done` wake raised gets
+the coordinator dispatched on it directly, with no git item — a finished job commits nothing to its
+note, so no commit could carry that wake. This sweep commits nothing itself.
 
 A row whose note file no longer exists is stale runtime scratch and is skipped silently. One note's
 failing poll is logged to stderr and folded into the summary's `error` field without stopping the
@@ -30,23 +31,26 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import coordinator_dispatch  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import gate_tick  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from spec_keys import TickAction  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+from spec_keys import JobMarker, TickAction  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
-# waiver: 'notes'/'ticked'/'error' are this sweep's own wire-shape keys, mirroring the review
+# waiver: 'notes'/'ticked'/'dispatched'/'error' are this sweep's own wire-shape keys, mirroring the review
 # sibling's 'files'/'dispatched'/'error' summary shape
 _NOTES_KEY = "notes"
 _TICKED_KEY = "ticked"
+_DISPATCHED_KEY = "dispatched"
 _ERROR_KEY = "error"
 
 
 def collect_tick(repo: Path) -> dict:
   """
-  Poll every sidecar-recorded note once and report how many polls did work.
+  Poll every sidecar-recorded note once, wake the coordinator on every raised `job-done`, and report the counts.
 
   Guarantees:
     - A poll failure on one note never aborts the sweep; every other recorded note is still
@@ -56,9 +60,10 @@ def collect_tick(repo: Path) -> dict:
     repo: Absolute path to the repository root.
 
   Returns:
-    `{"notes": N, "ticked": M}` — N is the number of rows whose note existed and whose poll
-    completed, M is how many of those polls reported a non-noop action. Carries an additional
-    `"error"` field summarizing the failures when one or more polls raised.
+    `{"notes": N, "ticked": M, "dispatched": D}` — N is the number of rows whose note existed and
+    whose poll completed, M is how many of those polls reported a non-noop action, D is how many
+    notes had their coordinator dispatched on a raised `job-done` wake. Carries an additional
+    `"error"` field summarizing the failures when one or more polls or dispatches raised.
   """
 
   # Contract:
@@ -68,6 +73,7 @@ def collect_tick(repo: Path) -> dict:
 
   swept = 0
   ticked = 0
+  dispatched = 0
   failed: list[str] = []
 
   # one gate-tick poll per recorded row; rows exist only while a job or a wake is live, so an
@@ -89,8 +95,23 @@ def collect_tick(repo: Path) -> dict:
     if result.get(TickAction.ACTION) != TickAction.NOOP:
       ticked += 1
 
-  # the "error" field is additive — a clean sweep's summary stays exactly the two counters
-  summary: dict[str, int | str] = { _NOTES_KEY: swept, _TICKED_KEY: ticked }
+    # guard: only a raised job-done wake is this sweep's to deliver; every other wake rides a commit
+    if spec_job_markers.read(repo, note).get(JobMarker.PENDING_WAKE) != JobMarker.JOB_DONE:
+      continue
+
+    # a finished job commits nothing to its note, so the sweep wakes the coordinator itself
+    try:
+      woken = coordinator_dispatch.coordinator_dispatch(note, {}, job_done = True)
+    # waiver: this sweep's per-note error boundary — one failed wake must not stop the rest
+    except Exception as error:
+      sys.stderr.write(f"collect-tick: {key}: {error}\n")
+      failed.append(key)
+      continue
+    if woken.get(TickAction.ACTION) == TickAction.DISPATCHED:
+      dispatched += 1
+
+  # the "error" field is additive — a clean sweep's summary stays exactly the three counters
+  summary: dict[str, int | str] = { _NOTES_KEY: swept, _TICKED_KEY: ticked, _DISPATCHED_KEY: dispatched }
   if failed:
     summary[_ERROR_KEY] = f"{len(failed)} note(s) failed to tick: {', '.join(failed)}"
   return summary
@@ -112,11 +133,11 @@ def main(argv: list[str]) -> int:
   parser.add_argument("--repo", default = ".")
   args = parser.parse_args(argv)
 
-  # resolve --repo then run the sweep; only the two counters are printed — the error detail
+  # resolve --repo then run the sweep; only the three counters are printed — the error detail
   # already went to stderr line by line
   repo = Path(args.repo).resolve()
   summary = collect_tick(repo)
-  print(json.dumps({ _NOTES_KEY: summary[_NOTES_KEY], _TICKED_KEY: summary[_TICKED_KEY] }))
+  print(json.dumps({ key: summary[key] for key in ( _NOTES_KEY, _TICKED_KEY, _DISPATCHED_KEY ) }))
   return 1 if _ERROR_KEY in summary else 0
 
 

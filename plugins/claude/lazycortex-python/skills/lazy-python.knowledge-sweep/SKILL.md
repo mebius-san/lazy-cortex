@@ -1,6 +1,6 @@
 ---
 name: lazy-python.knowledge-sweep
-description: "Run when the operator asks to update or grow the domain-groups dictionary — 'add these groups', 'the dictionary is missing half our domains', 'file the unfiled blocks' — or when parked `Domain(unfiled):` findings have piled up in the checker output and nobody can clear them by hand. Also the backfill route for a repo that just adopted domain markers: clusters the parked knowledge into candidate groups, writes the ones the operator accepts into the dictionary, then sweeps the sources so every block lands under a real group."
+description: "Run when the operator asks to update or grow the domain-groups dictionary — 'add these groups', 'the dictionary is missing half our domains', 'file the unfiled blocks' — when parked `Domain(unfiled):` findings have piled up, or to backfill a repo that just adopted domain markers. Pick it over the domain-writer agent when the dictionary itself must change, not one block."
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent
 user-invocable: true
 ---

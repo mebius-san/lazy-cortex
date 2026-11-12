@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Take one document through a full review cycle from opt-in to finalize.
-last_regen: 2026-11-10
+last_regen: 2026-11-12
 diagram_spec:
   anchor: "How the review loop flows"
   request: "Sequence diagram showing: operator runs /lazy-review.start → banner inserted + commit → daemon dispatches expert jobs per section → operator reads suggestions and ticks approve → operator checks status via /lazy-review.status → all sections approved → operator runs /lazy-review.finalize → finalized commit with Doc-Review-Phase: finalize trailer"
@@ -10,8 +10,8 @@ source_skills:
   - lazy-review.start
   - lazy-review.status
   - lazy-review.finalize
-source_sha: 2000c19f9ba6873134098a25704427b1bf0423f4
-surface_sha: be4f4bd56b88377ca6b184291792c896eeeef67d66a55797e2ce054b6780634e
+source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
+surface_sha: 6fbf3de942d5f2a9c15c0c0b6c1b325ffdbc3774f18ddd0804b0733722692c3a
 ---
 # Run a document through the review loop
 
@@ -68,12 +68,13 @@ Continue reading suggestions and approving sections across as many rounds as you
 
 ### Step 6 — Finalize the document
 
-Once every section in the final round is approved, run `/lazy-review.finalize <file>`. The skill:
+Normally the loop finalizes the document on its own once every final writer has confirmed. If that automatic finalize never fired, or you want to close the document out by hand, run `/lazy-review.finalize <file>` once every section in the final round is approved. The skill:
 
 - Folds all edit-annotation markers into the final document text, using the edit-marker style pinned into `review_marker_style` at Step 1 — the document's own pin wins over the current repo setting, so a setting change made mid-cycle never changes how an already-open review gets folded.
 - Strips the Waiting banner, approve checkboxes, and system callouts.
 - Preserves the `# History` section the coordinator built up across rounds.
 - Unsets every `review_*` key in frontmatter except `review_result` — a finalized document carries no `review_active` at all, unlike a stopped one, which keeps `review_active: false`.
+- Stamps `review_result` with the terminal outcome — `approved`, or `approved-with-concerns` when validation was skipped — only when the document's approval flag is set.
 - Commits with the `Doc-Review-Phase: finalize` trailer under the bot identity, and reports `finalized: <file> (sha=<short-sha>)`.
 
 If the body still carries an unfolded `[!decision-candidate]` callout — ticked or not — or a `[!todo] #review/command` callout whose mini-plan is still unfinished, finalize refuses instead of writing anything, naming the offending line numbers. Don't delete the callout by hand to get past this: the fold belongs to the main writer round, so the fix is letting the document reopen at the main round and re-dispatch, the same way any other unfolded round is picked back up.

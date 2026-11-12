@@ -25,7 +25,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 ## What runs unattended
 
 - `lazy-review.coordinator-watch` — git-watch routine; one worker call per tick carrying every changed opted-in document, each judged for its own coordinator wake; a document whose dispatch fails is named in a trailing `failed_paths` line and retried alone.
-- `lazy-review.collect` — interval routine; lands finished expert payloads, clears the runtime job marker, raises the job-done wake, commits the batch.
+- `lazy-review.collect` — interval routine; for every document with a finished expert job it clears the runtime job marker, raises the job-done wake and dispatches the coordinator directly, landing nothing and committing nothing — the coordinator lands the payload in its own wake.
 
 Both need the `lazycortex-core` runtime daemon; with the daemon off, nothing wakes.
 

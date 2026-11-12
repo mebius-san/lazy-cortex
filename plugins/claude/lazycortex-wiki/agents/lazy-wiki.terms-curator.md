@@ -1,6 +1,6 @@
 ---
 name: lazy-wiki.terms-curator
-description: "Dispatch when a document just changed and the scope's terms dictionary may need a term (kind=curate, from the terms-scan routine — reads its job dir), or when a whole scope must be checked for terminology divergence (kind=report, from the terms section of `/lazy-wiki.audit` — no job dir, the prompt names the real files). Owns the dictionary file and nothing else: it never edits the document that triggered it, and on report it writes nothing at all."
+description: "Dispatch when a document just changed and the scope's terms dictionary may need a term (kind=curate, from the terms-scan routine), or when a whole scope must be checked for terminology divergence (kind=report, from `/lazy-wiki.audit`). Owns the dictionary file only; looking a term up is `/lazy-wiki.terms`."
 tools: Read, Write, Edit, Glob, Grep, Bash, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response-per-kind expert — one dispatch in, one dictionary commit or one findings reply out; the terms protocol is the contract"

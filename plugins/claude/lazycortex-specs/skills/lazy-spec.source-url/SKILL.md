@@ -1,6 +1,6 @@
 ---
 name: lazy-spec.source-url
-description: "Dispatched by every `spec.*` skill and generator agent that emits a link to a file of the product's code — `lazy-spec.create-from-code`, `lazy-spec.sync-with-code`, `lazy-spec.audit`, `lazy-spec.product-config`. Not for direct use except when a human is debugging a wrong link. Nobody writes a code link by hand anywhere else."
+description: "Dispatched by every `spec.*` skill and agent that emits a link to a file of the product's code; not for direct use."
 execution-discipline-waiver: "Single-purpose primitive — formats one root link; no multi-phase orchestration where step-skip can hide."
 ---
 # Source URL

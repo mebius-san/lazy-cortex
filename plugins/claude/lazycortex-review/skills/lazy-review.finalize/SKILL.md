@@ -1,6 +1,6 @@
 ---
 name: lazy-review.finalize
-description: "Use when a document is already approved but still looks like a review artefact — banner, approve checkbox, edit markers, system callouts — and the operator wants it closed out by hand: 'finalize this', 'clean up the review markup', or the dispatcher's automatic finalize never fired. Leaves an ordinary markdown file with `approved: true` and its `# History`. Not for an unapproved doc — that is `/lazy-review.stop`."
+description: "Use when a document is already approved but still looks like a review artefact — banner, approve checkbox, edit markers, system callouts — and the operator wants it closed out by hand: 'finalize this', 'clean up the review markup', or the automatic finalize never fired. Not for an unapproved doc — that is `/lazy-review.stop`."
 allowed-tools: Read, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Agent
 execution-discipline-waiver: "thin dispatcher — work lives in bin/finalize.py (finalize_text + atomic git commit), this SKILL.md is a single subprocess call with no decision logic"
 ---

@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, configuring, and running the lazycortex-review document-review loop.
-last_regen: 2026-11-10
+last_regen: 2026-11-12
 no_diagram: true
 source_skills:
   - lazy-review.install
@@ -12,8 +12,8 @@ source_skills:
   - lazy-review.stop
   - lazy-review.finalize
   - lazy-review.audit
-source_sha: 2abf80046eef55ba4f805c6dfcc9c95f40ef997c
-surface_sha: f1caf5daf46f7c6a7f3c2766d818a723715c25547cb63e1a1bfe85cb4f195be8
+source_sha: 4174e6713950dbebf58535a76dcbfccdcc27c47e
+surface_sha: aedd2686322274bf10cd1ec9c6005ade5626d112c8a18a72cae4ffeb93ebd396
 ---
 # Frequently asked questions
 
@@ -25,7 +25,7 @@ surface_sha: f1caf5daf46f7c6a7f3c2766d818a723715c25547cb63e1a1bfe85cb4f195be8
 
 ## What routines does `/lazy-review.install` register, and does the daemon have to be running?
 
-Three routines carry the review loop: `lazy-review.coordinator-watch` (the git-watch that turns a commit into a coordinator wake — one worker call per tick carrying every changed document, with a failing document reported back in a trailing `failed_paths` line so only it is retried), `lazy-review.collect` (the interval postman that lands finished expert payloads into the reviewed document), and `lazy-review.sanitize` (a daily deterministic sweep that repairs lost writer wakes, orphaned reviews, and markers on documents that have since vanished). All three are registered unconditionally, whatever the repo's daemon posture is — `/lazy-runtime.tick` fires the same interval, git-watch, and cron routines on a checkout with no daemon running, so withholding registration behind `daemon.enabled` would only leave the manual tick with less config to work from. If a routine is missing after install, re-run `/lazy-review.install` — Step 1 is idempotent and re-applies the seed.
+Three routines carry the review loop: `lazy-review.coordinator-watch` (the git-watch that turns a commit into a coordinator wake — one worker call per tick carrying every changed document, with a failing document reported back in a trailing `failed_paths` line so only it is retried), `lazy-review.collect` (the interval postman that wakes the coordinator directly when an expert job finishes), and `lazy-review.sanitize` (a daily deterministic sweep that repairs lost writer wakes, orphaned reviews, and markers on documents that have since vanished). All three are registered unconditionally, whatever the repo's daemon posture is — `/lazy-runtime.tick` fires the same interval, git-watch, and cron routines on a checkout with no daemon running, so withholding registration behind `daemon.enabled` would only leave the manual tick with less config to work from. If a routine is missing after install, re-run `/lazy-review.install` — Step 1 is idempotent and re-applies the seed.
 
 ---
 

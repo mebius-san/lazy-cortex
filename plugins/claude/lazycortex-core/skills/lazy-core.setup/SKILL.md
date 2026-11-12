@@ -1,6 +1,6 @@
 ---
 name: lazy-core.setup
-description: "Run after `/plugin update`, on a fresh clone, after enabling a new plugin, or whenever the operator asks to set lazycortex up in this project — the meta-installer that discovers and runs every enabled plugin's `<namespace>.install` skill plus any `lazy_setup_phase:` configurator in one ordered pass, so the operator never invokes install skills one by one. Idempotent; `--dry-run` previews the plan without executing."
+description: "Run after `/plugin update`, on a fresh clone, after enabling a new plugin, or whenever the operator asks to set lazycortex up in this project — the meta-installer that runs every enabled plugin's `<namespace>.install` skill in one ordered pass, so install skills are never invoked one by one."
 allowed-tools: Read, Write, AskUserQuestion, Skill, Bash(mkdir -p *), Bash(rm *.runtime/lazy-setup-guard.json*), Bash(git rev-parse *), Bash(date *), Bash(PYTHONPATH=* python3 *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
 ---
 # Run lazycortex meta-installer

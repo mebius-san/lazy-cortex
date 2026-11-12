@@ -1,6 +1,6 @@
 ---
 name: lazy-runtime.recover
-description: "Run when the runtime daemon has stopped scheduling — routines no longer fire, or `.runtime/state.json` carries a `daemon_halted` block. Branches on the halt reason: `uncommitted_changes` walks the operator through commit / stash / discard of the dirt a routine left behind; every other reason — `git_pull_diverged`, `git_push_failed`, `git_remote_unavailable`, `git_local_failed`, `git_rebase_not_started`, `suspected_loop`, `inbox_collision`, `routine_config_invalid`, `config_violation`, `rate_limit` — prints reason-specific guidance and waits for the operator to repair the cause outside the skill. Ends by atomically clearing the halt so the daemon resumes."
+description: "Run when the runtime daemon has stopped scheduling — routines no longer fire, or `.runtime/state.json` carries a `daemon_halted` block — and the operator asks to unblock it. Walks the operator through the halt reason, then clears the halt so the daemon resumes."
 allowed-tools: Read, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(git status *), Bash(date -u *), Write, AskUserQuestion, Agent
 dirty-tree-waiver: "applies operator-chosen cleanup ops to the working tree (commit/stash/discard) — the operator is the commit author, not this skill"
 ---

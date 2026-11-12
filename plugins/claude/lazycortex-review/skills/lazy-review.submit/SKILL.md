@@ -1,6 +1,6 @@
 ---
 name: lazy-review.submit
-description: "Use when a document is NOT yet in the review loop, its content is already written, and the operator wants it reviewed rather than drafted — 'submit this for review', 'I've made the edits, get it reviewed'. Skips the opening writer round and lands the document straight on the operator's Ready banner; use `/lazy-review.start` instead when the experts should write the document first. `--expert <name>` pins a per-document main-writer override. No-op on a document already opted in."
+description: "Use when a document is NOT yet in the review loop, its content is already written, and the operator wants it reviewed rather than drafted — 'submit this for review', 'I've made the edits, get it reviewed'. Use `/lazy-review.start` instead when the experts should write the document first."
 allowed-tools: Read, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Agent
 execution-discipline-waiver: "thin dispatcher — work lives in bin/submit.py (open_submit + atomic git add/commit), this SKILL.md is a single subprocess call with no decision logic"
 ---

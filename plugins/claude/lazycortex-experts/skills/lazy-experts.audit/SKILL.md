@@ -1,6 +1,6 @@
 ---
 name: lazy-experts.audit
-description: "Run when the operator asks whether this project's expert composition is still sound, or when dispatching an expert fails in a way that smells like config — a job aborts saying the agent ref does not resolve, an expert writes to a contract it should not have, a role the class map prescribes turns out to have no entry. Delegated from `lazy-core.doctor` Phase 3. Read-only check of the plugin's shipped agents and aspect references against the `experts` entries in `.claude/lazy.settings.json`; reports PASS / WARN / FAIL / INFO and never writes — the fix is `/lazy-experts.install`."
+description: "Run when the operator asks whether this project's expert composition is still sound, or when an expert dispatch fails in a way that smells like config — an agent ref that does not resolve, a class-map role with no entry. Delegated from `lazy-core.doctor` Phase 3. Read-only; the fix is `/lazy-experts.install`."
 allowed-tools: Read, Glob, Grep, Write, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Agent
 ---
 # lazy-experts.audit

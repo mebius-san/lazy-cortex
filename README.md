@@ -25,7 +25,7 @@ Each plugin addresses one of these pains without forcing you to adopt the others
 
 Core skills, agents, and runtime daemon for Claude Code (expert runtime + agent-model routing + settings management)
 
-34 skills, 7 agents, 6 hooks.
+34 skills, 7 agents, 2 commands, 12 rules, 6 hooks
 
 See [`plugins/claude/lazycortex-core/`](plugins/claude/lazycortex-core/) for details.
 
@@ -33,7 +33,7 @@ See [`plugins/claude/lazycortex-core/`](plugins/claude/lazycortex-core/) for det
 
 Format-agnostic diagram engine: /lazy-diagram.draw dispatcher + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
 
-4 skills, 2 agents.
+4 skills, 2 agents, 1 command, 1 rule
 
 Requires: lazycortex-core
 
@@ -43,7 +43,7 @@ See [`plugins/claude/lazycortex-diagram/`](plugins/claude/lazycortex-diagram/) f
 
 Generic lifecycle experts (interpreter, use-case-writer, designer, architect, ui-designer, planner, implementer, data-implementer, docs-writer, debugger, reviewer, tester, editor) plus fiction-writer and fiction-editor agents, a starter set of domain aspects (claude-plugin, game-dev, dotfiles, obsidian-plugin, data-pipeline, sci-fi, fantasy), and five cross-cutting aspects (discipline, research, tech-writing, terms, structure). Building blocks — compose specialists in lazy.settings.json[experts] with one agent + one or more aspects.
 
-2 skills, 16 agents.
+2 skills, 16 agents, 1 command
 
 Requires: lazycortex-core
 
@@ -53,7 +53,7 @@ See [`plugins/claude/lazycortex-experts/`](plugins/claude/lazycortex-experts/) f
 
 Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.
 
-3 skills.
+3 skills, 1 command
 
 Requires: lazycortex-core
 
@@ -63,7 +63,7 @@ See [`plugins/claude/lazycortex-observe/`](plugins/claude/lazycortex-observe/) f
 
 Obsidian vault bootstrap and configuration management for Claude Code
 
-9 skills, 1 agent, 1 hook.
+9 skills, 1 agent, 1 command, 1 rule, 1 hook
 
 Requires: lazycortex-core
 
@@ -73,7 +73,7 @@ See [`plugins/claude/lazycortex-obsidian/`](plugins/claude/lazycortex-obsidian/)
 
 Python coding discipline as a plugin: shared rules + reference guidelines + chk/tst checkers + PostToolUse hook + docstring-writer/test-writer agents + canonical file template. Installs once per repo via /lazy-python.install.
 
-4 skills, 5 agents, 1 hook.
+4 skills, 5 agents, 1 command, 4 rules, 1 hook
 
 Requires: lazycortex-core
 
@@ -83,7 +83,7 @@ See [`plugins/claude/lazycortex-python/`](plugins/claude/lazycortex-python/) for
 
 Coordinator-driven markdown document review loop: a closed set of Python primitive verbs (parse-note / set-key / paint-banner / collect-job), an LLM coordinator that owns every decision from a prose playbook, and a git-watch wake plus an interval postman that carry commits and finished expert jobs back into the loop.
 
-8 skills, 2 agents.
+8 skills, 2 agents, 1 command
 
 Requires: lazycortex-core
 
@@ -93,7 +93,7 @@ See [`plugins/claude/lazycortex-review/`](plugins/claude/lazycortex-review/) for
 
 Specification and design skills for Claude Code
 
-24 skills, 3 agents.
+24 skills, 3 agents, 1 command, 1 rule
 
 Requires: lazycortex-core, lazycortex-diagram, lazycortex-review
 
@@ -103,7 +103,7 @@ See [`plugins/claude/lazycortex-specs/`](plugins/claude/lazycortex-specs/) for d
 
 Maintains a curated, LLM-navigable semantic wiki over a markdown+code base — summaries, hierarchical topic tags, and glossed See-also links, kept in sync via git-watch and weekly full-scan routines.
 
-9 skills, 7 agents.
+9 skills, 7 agents, 1 command, 2 rules
 
 Requires: lazycortex-core
 

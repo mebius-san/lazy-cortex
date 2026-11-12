@@ -1,6 +1,6 @@
 ---
 name: lazy-obsidian.deploy
-description: "Run on a checkout whose vault config is missing or stale — a fresh clone of a vault repo, a machine that never opened this vault, a teammate setting up from the repo alone — or when the operator asks to deploy / restore / rebuild the Obsidian config. Rebuilds `.obsidian/` from the tracked `.obsidian.manifest.json`, fetching every plugin bundle at its latest release. The sibling `/lazy-obsidian.capture` is what wrote that manifest."
+description: "Run on a checkout whose vault config is missing or stale — a fresh clone of a vault repo, a machine that never opened this vault, a teammate setting up from the repo alone — or when the operator asks to deploy / restore / rebuild the Obsidian config. The sibling `/lazy-obsidian.capture` records the manifest this rebuilds from."
 allowed-tools: Read, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(git rev-parse*), Bash(test *), Bash(mkdir -p *), Bash(date *), Write, AskUserQuestion, Agent
 argument-hint: "[<repo-root>]"
 dirty-tree-waiver: "writes only into `.obsidian/`, which the manifest workflow keeps gitignored; on a vault that still tracks it, restoring the operator's own recorded config is theirs to commit"

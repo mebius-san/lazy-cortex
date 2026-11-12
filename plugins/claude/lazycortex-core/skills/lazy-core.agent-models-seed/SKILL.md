@@ -1,6 +1,6 @@
 ---
 name: lazy-core.agent-models-seed
-description: "Dispatched by a plugin's install flow that cannot run the core plugin's `bin/lazycortex-core` itself, to seed that plugin's agent-model tiers into the consumer's `lazy.settings.json`; not for direct use. An install skill that can run it calls the `agent-models-seed` verb directly. Tiers come from `lazycortex-core`'s `default-tiers.json`, and an operator's existing value is never overwritten."
+description: "Dispatched by a plugin install flow that cannot run `bin/lazycortex-core` itself, to seed its agent-model tiers; not for direct use."
 allowed-tools: Read, Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
 execution-discipline-waiver: "nested-from-install — the calling install skill owns step discipline; a preamble here would re-anchor the caller and drop its remaining steps (lazy-core.skill-writing § 1.5)"
 ---

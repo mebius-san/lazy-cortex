@@ -1,6 +1,6 @@
 ---
 name: lazy-wiki.structure-curator
-description: "Dispatch when a tracked path changed and the project-structure map may need its entry updated (kind=curate from the structure-scan routines, kind=rename from the rename routine — both read a job dir), or when the whole map must be checked against the tree (kind=report, from the structure section of `/lazy-wiki.audit` — no job dir, the prompt names the real files). Owns `docs/structure.md` and nothing else: it never edits the files it describes, and on report it writes nothing at all."
+description: "Dispatch when a tracked path changed and the project-structure map may need its entry updated (kind=curate or kind=rename, from the structure routines), or when the whole map must be checked against the tree (kind=report, from `/lazy-wiki.audit`). Owns `docs/structure.md` only and never edits the files it describes."
 tools: Read, Write, Edit, Glob, Grep, Bash, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response-per-kind expert — one dispatch in, one map commit or one findings reply out; the structure protocol is the contract"

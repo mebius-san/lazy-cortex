@@ -1,14 +1,14 @@
 ---
 chapter_type: block
 summary: Assign model tiers to every agent, prune dead entries, and register non-Anthropic provider endpoints for expert jobs to spawn against.
-last_regen: 2026-11-10
+last_regen: 2026-11-12
 no_diagram: true
 source_skills:
   - lazy-core.agent-models
   - lazy-core.agent-models-seed
   - lazy-core.providers
-source_sha: 3fadd77433a2100975275f22c7c7e8cb8e544c9d
-surface_sha: 3aab3d349ec22393035812af41f92460a821f29a28492f37454bb4f1e9b829a8
+source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
+surface_sha: 55d9c35c2c38526c0cd3bddfc9633a8c6829681003b0c941396e57666b5eb3f6
 ---
 # Per-agent model routing
 
@@ -56,6 +56,8 @@ When this wizard runs without you at the keyboard — for example when `lazy-cor
 
 Run `/lazy-core.providers` (or `/lazy-core.providers list`) to see every registered endpoint, its base URL, its token variable name, and whether it came from the local overlay or — flagged as a warning — was hand-written into the tracked settings file, where a machine-local fact doesn't belong. `/lazy-core.providers add <name>` walks you through the fields one at a time; `/lazy-core.providers update <name>` re-asks the same fields pre-filled with the current values; `/lazy-core.providers remove <name>` deletes an entry, warning you first if any expert's `provider` field still points at it.
 
+If the mode and the registry disagree — `add` with a name that is already registered, or `update` with a name that is not — the skill asks whether to switch modes or pick a different name, so a typo never silently overwrites or creates an entry. `remove` run without a name asks which provider to drop (a registry with a single entry needs no answer).
+
 Before writing anything, the skill validates the candidate entry against the same checks the runtime's own dispatch-time resolver enforces, so a broken entry can never slip through: the four tiers must all be present and none may hold a bare `claude-*` model name (which cannot pass through a foreign endpoint or the local proxy), the `openai` provider's tiers must carry the `rt-openai/` prefix, the token variable must actually resolve from your environment or `~/.claude/.env`, and the endpoint itself is probed live — a `curl` against `<base_url>/v1/models` with the resolved token must return `200` before the entry is written. The token value itself never appears in a tool-call transcript; only a presence verdict does.
 
 Assigning a provider to a specific expert is a separate, content-level decision made on that expert's own `provider` field in `lazy.settings.json` — out of scope for this skill, which owns only the registry of available endpoints.
@@ -98,6 +100,10 @@ Two constraints are worth knowing before you register an endpoint:
 **`/lazy-core.providers` fails: "provider `<name>` is not registered".** `remove` or `update` named a provider that isn't in the merged registry. Run `/lazy-core.providers list` to see the actual names.
 
 **`/lazy-core.providers` fails validation on add/update.** A `claude-*` literal in one of the four tiers, a missing tier, an `openai` provider tier missing the `rt-openai/` prefix, a token variable that can't be found in your environment or `~/.claude/.env`, or an endpoint that doesn't answer `<base_url>/v1/models` with `200` — each aborts the write with the specific check that failed, before anything is saved. Fix the named field and re-run.
+
+**`/lazy-core.providers` fails: "`base_url` is required" or "`token_env` is required".** The wizard left a mandatory field empty. Re-run the command and answer both.
+
+**`/lazy-core.providers` fails: "models must cover tiers".** One or more of `fable`, `opus`, `sonnet`, `haiku` is missing or blank. Supply all four.
 
 **A plugin install reports `sot-missing` while seeding tiers.** The curated tier table (`default-tiers.json`) shipped with the core plugin could not be found. Install the core plugin first, then re-run the plugin's install.
 

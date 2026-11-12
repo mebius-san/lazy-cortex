@@ -1,6 +1,6 @@
 ---
 name: lazy-review.doc_doctor
-description: "Dispatched by the review.coordinator as the repair step when a document in the review loop still does not parse after the `repair-structure` verb ran — a missing frontmatter delimiter, malformed inline markup; not for direct use. Repairs structure only, never content, and declares the file irreparable rather than guessing."
+description: "Dispatched by lazy-review.coordinator when a document under review still does not parse after `repair-structure`; not for direct use."
 tools: Read, Write, Edit, Glob, Grep, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response specialist; no multi-phase orchestration"

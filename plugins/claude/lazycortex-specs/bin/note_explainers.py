@@ -42,7 +42,7 @@ import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-impo
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 # pylint: disable-next=import-error,wrong-import-position
-from spec_keys import GateRowGroup, HistoryEvent, LangId, Section  # noqa: E402
+from spec_keys import GateCheckbox, GateRowGroup, HistoryEvent, LangId, Section  # noqa: E402
 
 
 # A section's owner tag line sits directly under the heading and stays the first content line
@@ -99,12 +99,6 @@ HISTORY_LINES: dict[tuple[str, str], str] = {
     (HistoryEvent.HALTED_CALLOUT, LangId.EN): "asset halted: {reason}",
     (HistoryEvent.HALTED_CALLOUT, LangId.RU):
         "ассет остановлен: {reason}",
-    (HistoryEvent.JOB_DONE, LangId.EN): "job {job_id} ({label}) done",
-    (HistoryEvent.JOB_DONE, LangId.RU):
-        "job {job_id} ({label}) завершён",
-    (HistoryEvent.JOB_CANCELLED, LangId.EN): "job {job_id} ({label}) cancelled",
-    (HistoryEvent.JOB_CANCELLED, LangId.RU):
-        "job {job_id} ({label}) отменён",
     (HistoryEvent.JOB_DEAD, LangId.EN):
         "WARNING: coordinator job {job_id} ({trigger}) died — cleared the coordinator-job marker, "
         "asset NOT halted; a pending operator edit, if any, survives for the next genuine wake",
@@ -150,11 +144,14 @@ HISTORY_LINES: dict[tuple[str, str], str] = {
         "сверка {doc}: конфликтов — {count}, соседей отброшено по лимиту размера — {dropped}",
 }
 
-# The fourth line of a `Review <file>` gate block, under the checkbox, keyed by language; `{file}`
-# is the basename the block opens review on
-REVIEW_HELPER: dict[str, str] = {
-    LangId.EN: "tick to open review: {file} re-enters the loop at the reviewer round",
-    LangId.RU: "отметьте, чтобы открыть ревью {file}",
+# The footer line of the gate callout holding the rows of one verb, keyed by the verb and the note's language; a
+# verb without an entry carries the hints its rows brought along
+GATE_VERB_HELPERS: dict[tuple[str, str], str] = {
+    (GateCheckbox.WRITE_VERB, LangId.EN): "tick to create the document and open its review",
+    (GateCheckbox.WRITE_VERB, LangId.RU): "отметьте, чтобы создать документ и открыть его ревью",
+    (GateCheckbox.REVIEW_VERB, LangId.EN):
+        "tick to open review: the document re-enters the loop at the reviewer round",
+    (GateCheckbox.REVIEW_VERB, LangId.RU): "отметьте, чтобы открыть ревью документа",
 }
 
 # The `##` sub-headings the `review-rows` verb writes inside `# Gates`, one per row group, keyed by group and language

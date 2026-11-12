@@ -1,6 +1,6 @@
 ---
 name: lazy-spec.request-classify
-description: "Dispatched by the `spec.catalog-coordinator` agent in its routing mode during a request's review loop to label one body with a `request_class` token; not for direct use. Resolves the legal class set from `lazy.settings.json` on every dispatch, so an asset type declared via `lazy-spec.add-asset-type` is recognised on the next run without a rubric edit."
+description: "Dispatched by the `spec.catalog-coordinator` agent in routing mode to label a request with a `request_class`; not for direct use."
 execution-discipline-waiver: "Single-purpose primitive — one input, one classification token."
 ---
 # Classify a request

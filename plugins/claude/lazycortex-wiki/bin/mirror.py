@@ -422,7 +422,7 @@ class MirrorSync:
         tag for tag in _nodes._get_array_field(merged, _KEY_TAGS)
         if not tag.startswith(_WIKI_TAG_PREFIX)
       ]
-      merged = _nodes._set_tags_field(merged, non_wiki + wiki_tags)
+      merged = _nodes.set_tags_field(merged, non_wiki + wiki_tags)
 
     # connectors and operator pins are block sequences preserved wholesale
     for key in _PRESERVED_SEQ_KEYS:

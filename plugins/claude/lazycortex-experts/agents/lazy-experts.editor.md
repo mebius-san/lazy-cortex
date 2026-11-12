@@ -1,6 +1,6 @@
 ---
 name: lazy-experts.editor
-description: "Use when a document is already written and its prose still has to be brought up to the project's writing canon — shop talk, coined terminology, synonym rotation, filler, evaluative epithets, broken language. Dispatched by the expert runtime for any `editor`-class expert; also dispatchable directly with the document to edit and a report to journal into. Pick it over the reviewer when the defects are to be corrected in place rather than reported, and over the expert whose document it is when nothing about the content is in question. Never dispatch it for literary text — that is the fiction-editor's job."
+description: "Use when a written document's prose must be brought up to the project's writing canon — shop talk, coined terms, synonym rotation, filler, evaluative epithets, broken language. Dispatched by the expert runtime or directly. Pick it over the reviewer when defects are corrected in place rather than reported; never for literary text, which is the fiction-editor's."
 tools: Read, Write, Edit, Glob, Grep, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"

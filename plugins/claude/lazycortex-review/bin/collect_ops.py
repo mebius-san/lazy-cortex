@@ -4,11 +4,11 @@
 DONE-and-not-CONSUMED job bundles and, per target document, clears the runtime `active_job`
 marker, raises the `job-done` pending wake, and dispatches the coordinator directly — the
 sweep itself no longer lands payloads and no longer commits.
-The landing happens inside the coordinator's own wake, via `collect-job --no-commit`:
-payloads are applied to the working tree via `reapply.reapply`, each
-applied job is marked `CONSUMED`, and the coordinator's single `commit-doc` carries payload
-and settle together. The standalone `collect-job` (without `--no-commit`) keeps the old
-one-mechanical-bot-commit shape for hand runs. This module carries no scheduling judgment:
+The landing happens inside the coordinator's own wake, via `collect-job`: payloads are
+applied to the working tree via `reapply.reapply`, each applied job is marked `CONSUMED`,
+the `active_job` marker is cleared, and the coordinator's single `commit-doc` carries payload
+and settle together — `collect-job` itself never commits and raises no wake. This module
+carries no scheduling judgment:
 a `DEAD` job, a job still pending, or a job already `CONSUMED` is left exactly as found for
 whoever dispatched it to decide what happens next.
 
@@ -83,7 +83,7 @@ import coordinator_dispatch as _coordinator_dispatch  # noqa: E402
 import reapply as _reapply  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from keys import (  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-    BotIdentity, CoreCommand, EnvVar, JobFile, JobKey, JobMarker, JobStatus, Outcome, Phase, Tag,
+    CoreCommand, EnvVar, JobFile, JobKey, JobMarker, JobStatus, Outcome, Phase, Tag,
 )
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from errors import PayloadError  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -549,23 +549,22 @@ def _consume_job(repo: Path, jdir: Path) -> None:
 # ------------------------------------------------------------------- collect
 
 
-def collect_for_file(repo: Path, file_path: Path, *, commit: bool = True) -> dict:
+def collect_for_file(repo: Path, file_path: Path) -> dict:
   """
-  Land every DONE-and-not-CONSUMED job targeting `file_path`.
+  Land every DONE-and-not-CONSUMED job targeting `file_path` into the working tree.
+
+  Runs inside the coordinator's own wake: the payloads are applied to the working tree and
+  the `active_job` marker is cleared, but nothing is committed and no pending wake is
+  raised — the wake being served is the one that asked for this landing, and the
+  coordinator's own `commit-doc` carries the result.
 
   Guarantees:
-    - An `empty` job is consumed and counted with the document left byte-identical, and a
-      batch holding only `empty` jobs raises no commit.
+    - An `empty` job is consumed and counted with the document left byte-identical.
+    - Nothing is committed and no `pending_wake` is raised, whatever the batch holds.
 
   Args:
     repo: Absolute path to the repository root.
     file_path: Absolute path to the review document.
-    commit: When `True` (the standalone `collect-job` shape), the batch lands as one
-      mechanical bot commit and the `job-done` pending wake is raised. When `False` (the
-      coordinator collecting inside its own wake, `collect-job --no-commit`), the payloads
-      are applied to the working tree only — no commit and no pending wake, because the
-      wake being served is the one that asked for this landing; the coordinator's own
-      `commit-doc` carries the result.
 
   Returns:
     `{"collected": N}` — the number of jobs consumed: `edited` payloads applied plus `empty`
@@ -579,8 +578,8 @@ def collect_for_file(repo: Path, file_path: Path, *, commit: bool = True) -> dic
   # # An empty verdict still closes the round
   # A section writer that finds nothing to change is not a failure to land — its verdict is
   # consumed exactly like a writer that produced an edit, only without touching the document.
-  # A batch made entirely of such empty verdicts must not force a commit of its own: the round
-  # still closes within the same sweep, but nothing new enters the document's history.
+  # A batch made entirely of such empty verdicts leaves the document untouched: the round
+  # still closes within the same wake, but nothing new enters the document's history.
 
   # every DONE bundle targeting the document is a landing candidate
   candidates = [jdir for jdir in _job_dirs_for_file(repo, file_path) if read_job_status(jdir) == JobStatus.DONE]
@@ -591,13 +590,13 @@ def collect_for_file(repo: Path, file_path: Path, *, commit: bool = True) -> dic
   text, ending = _atomic_io.to_lf(original)
   applied: list[Path] = []
 
-  # every attachment this batch delivered, as repo-relative paths, for the commit pathspec
+  # every attachment this batch delivered, as repo-relative paths, for the caller's commit pathspec
   landed: list[str] = []
 
   # Contract:
   # A DONE job with `outcome == "empty"` is consumed and counted with the document left
-  # byte-identical: no text change is applied for it, and a batch of only-empty jobs raises
-  # no commit — the round still closes instead of stranding the `active_job` marker until
+  # byte-identical: no text change is applied for it, and a batch of only-empty jobs still
+  # clears the `active_job` marker — the round closes instead of stranding the marker until
   # the daily sanitizer.
 
   # apply each parseable bundle: `edited` lands its payload, `empty` is drained content-free
@@ -638,38 +637,21 @@ def collect_for_file(repo: Path, file_path: Path, *, commit: bool = True) -> dic
   # the LF result takes the document's own line ending once, just before it is written
   text = _atomic_io.restore_ending(text, ending)
 
-  # drain the queue either way; the wake plumbing differs per caller below
+  # drain the queue: every applied job is consumed
   for jdir in applied:
     _consume_job(repo, jdir)
 
-  # the coordinator collecting inside its own wake: worktree write only, its `commit-doc`
+  # Contract:
+  # Landing never creates a commit and never raises a `pending_wake`, whatever the batch holds.
+  # The caller runs inside the wake that asked for the landing and owns the single commit that
+  # carries the result; a commit here would split that result, and a new wake would re-wake the
+  # caller for a landing it is already serving.
+
+  # the coordinator collects inside its own wake: worktree write only, its `commit-doc`
   # carries the result and no new wake is raised for a landing already being served
-  if not commit:
-    _job_markers.update(repo, file_path, { JobMarker.ACTIVE_JOB: None })
-    if text != original:
-      _atomic_io.write_text_atomic(file_path, text)
-    return summary
-
-  # standalone shape: hand the turn back — the `active_job` marker comes off and the
-  # `job-done` wake goes up in the same sidecar write, before the commit that carries it — a
-  # commit that lands without the flag would be an operator-edit wake instead of a job-done one
-  _job_markers.update(
-      repo, file_path,
-      { JobMarker.ACTIVE_JOB: None, JobMarker.PENDING_WAKE: JobMarker.JOB_DONE },
-  )
-
-  # limit: a payload that reproduces the document byte-for-byte leaves nothing to commit, so no
-  # git item carries the wake and the document waits for the next commit to deliver it; give the
-  # postman its own wake channel if experts start landing no-op edits routinely
-  if text != original or landed:
-    if text != original:
-      _atomic_io.write_text_atomic(file_path, text)
-    _git_ops.commit_mechanical(
-        repo, file_path,
-        author = {JobKey.NAME: BotIdentity.NAME, JobKey.EMAIL: BotIdentity.EMAIL},
-        message = f"review: collect {len(applied)} job(s)",
-        extra_paths = tuple(landed),
-    )
+  _job_markers.update(repo, file_path, { JobMarker.ACTIVE_JOB: None })
+  if text != original:
+    _atomic_io.write_text_atomic(file_path, text)
   return summary
 
 
@@ -684,7 +666,7 @@ def collect_tick(repo: Path) -> dict:
   carrying at least one DONE-and-not-CONSUMED job it clears the `active_job` marker, raises
   the `job-done` pending wake, and dispatches the coordinator directly (no git item is
   needed — nothing was committed). The coordinator lands the payload itself with
-  `collect-job --no-commit` inside its wake and commits once, payload and settle together.
+  `collect-job` inside its wake and commits once, payload and settle together.
 
   A target whose coordinator is still busy is left with its wake raised and its jobs still
   DONE — the next sweep retries the dispatch, so a died coordinator job cannot strand the
@@ -842,8 +824,6 @@ def main(argv: list[str]) -> int:
   parser.add_argument("file")
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--repo", default = ".")
-  # waiver: argparse CLI signature, not a domain key
-  parser.add_argument("--no-commit", action = "store_true")
   args = parser.parse_args(argv)
 
   # `file` resolves against `--repo` unless it's already absolute
@@ -856,7 +836,7 @@ def main(argv: list[str]) -> int:
     return 2
 
   # the CLI's whole contract is this one summary line
-  print(json.dumps(collect_for_file(repo, file_path, commit = not args.no_commit)))
+  print(json.dumps(collect_for_file(repo, file_path)))
   return 0
 
 

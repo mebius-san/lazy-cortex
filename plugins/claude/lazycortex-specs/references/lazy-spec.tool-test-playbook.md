@@ -12,7 +12,7 @@ The tool is declared in the product's config as `products[<key>].tool_types.test
 
 ## What the tool delivers
 
-The deliverable of `test` is **tests and their run**: tests written (or extended) in the product repository, plus a recorded green run through the repository's own runner against the deployed release — on `staging`, or on a local instance the tester brings up itself. Not an opinion on quality and not a code review — verification by execution. The `test-report` document is the journal of what was run and with what outcome, never the deliverable itself.
+The deliverable of `test` is **tests and their run**: tests written (or extended) in the product repository, plus a recorded green run through the repository's own runner against the deployed release — on `staging`, or on a local instance the tester brings up itself. Not an opinion on quality and not a code review — verification by execution. Not unit tests either: those belong to the `code` tool, written and run by the implementer inside the build (`lazy-spec.tool-code-playbook.md`), and neither this tool's plan nor its report covers them. The `test-report` document is the journal of what was run and with what outcome, never the deliverable itself.
 
 ## The plan
 

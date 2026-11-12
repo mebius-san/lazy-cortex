@@ -1,6 +1,6 @@
 ---
 name: lazy-wiki.audit
-description: "Run when the operator asks to check the wiki's health, or when the wiki misbehaves — `/lazy-wiki.query` misses material it should cover or returns entries that no longer exist, See-also links point at moved or deleted nodes, the topic index disagrees with the files on disk, or documents and the terms dictionary have drifted onto different words for one concept. Read-only audit of one scope or all: it reports findings as `PASS` / `INFO` / `WARN` / `FAIL` with a repair route per finding and writes nothing itself, so the repairs are the operator's to run."
+description: "Run when the operator asks to check the wiki's health, or when the wiki misbehaves — `/lazy-wiki.query` misses covered material or returns entries that no longer exist, See-also links point at moved nodes, the topic index disagrees with the disk, or documents and the terms dictionary use different words for one concept. Read-only: it reports and leaves the repairs to the operator."
 allowed-tools: Read, Write, Grep, Glob, Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" doctor *), Bash(date -u *), Bash(git rev-parse *), Bash(mkdir -p *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
 ---
 # lazy-wiki.audit

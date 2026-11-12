@@ -1,5 +1,5 @@
 ---
-description: "Run when the operator asks what lazycortex-core can do, which of its verbs handles a job, or what is available now that it is installed — lists this plugin's whole surface: config install / audit / doctor / slim-context / setup, the expert job runtime with its routines and per-expert memory, model-tier and LLM-provider routing, the git staging-lock verbs, the guard scans that catch secrets and PII before a repo goes public, the change-history log agents, and the ten authoring rules it ships."
+description: "Run when the operator asks what lazycortex-core can do, which of its verbs handles a job, or what is available now that it is installed — config install / audit / doctor / setup, the expert job runtime and routines, model and provider routing, git staging-lock verbs, guard scans, and the change-history log agents."
 execution-discipline-waiver: "help command — static text, no multi-step logic"
 ---
 Output the block below verbatim to the user. Do not summarize, rephrase, or add commentary. Do not invoke any tools. Do not log this run.

@@ -1,6 +1,6 @@
 ---
 name: lazy-wiki.install
-description: "Run when the operator asks to set up the wiki in a repo, after a lazycortex-wiki update, or when wiki skills fail because the `lazy-wiki.navigation` rule, the `wiki`, `structure`, or `terms` settings section, or the `wiki.curator` / `wiki.terms-curator` / `wiki.structure-curator` / `wiki.tag-curator` expert is missing from the project. Bootstrap only — defining what the wiki covers is `/lazy-wiki.configure`, what the terms dictionary covers is `/lazy-wiki.configure terms`, and the structure map's profiles and routines are `/lazy-wiki.configure structure`. Idempotent and quiet on re-run; install scope is detected, never asked."
+description: "Run when the operator asks to set up the wiki in a repo, after a lazycortex-wiki update, or when wiki skills fail because the `lazy-wiki.navigation` rule, a `wiki` / `structure` / `terms` settings section, or a wiki expert is missing. Bootstrap only — what the wiki, the terms dictionary or the structure map covers is `/lazy-wiki.configure`."
 allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *), Bash(ls *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
 ---
 # Install lazycortex-wiki

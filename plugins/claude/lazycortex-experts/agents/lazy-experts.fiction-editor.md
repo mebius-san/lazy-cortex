@@ -1,6 +1,6 @@
 ---
 name: lazy-experts.fiction-editor
-description: "Use when literary text is already drafted and needs an editing pass — rhythm, filter words, dead metaphor, named emotion where behaviour belongs, point-of-view leaks, the tics machine prose falls into. Dispatched by the expert runtime for any `fiction-editor`-class expert; also dispatchable directly with the scene to edit and a report to journal into. Pick it over the fiction-writer when the text exists and only its prose is in question, and over the editor when the text is a scene rather than a technical document. Never dispatch it to change what happens — plot, character decisions, and outcome come from upstream and stay."
+description: "Use when literary text is already drafted and needs an editing pass — rhythm, filter words, dead metaphor, named emotion, point-of-view leaks. Dispatched by the expert runtime or directly. Pick it over the fiction-writer when only the prose is in question, over the editor when the text is a scene rather than a technical document; never to change plot or outcome."
 tools: Read, Write, Edit, Glob, Grep, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"

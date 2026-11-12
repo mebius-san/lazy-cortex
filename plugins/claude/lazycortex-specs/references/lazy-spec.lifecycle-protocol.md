@@ -171,7 +171,7 @@ CLI: `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> flip-gate <asset_dir> <gate> [
 
 `bin/gate_tick.py` is dispatched per matched status folder-note by the `lazy-spec.gate-tick` `md-scan` routine, same as before. It performs exactly two concerns now, both mechanical:
 
-1. **Active-job polling.** An asset whose runtime sidecar tracks an `active_job` has that job bundle's terminal marker (`DONE` / `DEAD` / `CANCELLED`, read file-wise from the `lazycortex-core` job-runtime layout, never imported cross-plugin) checked before anything else. Every marker clears the tracked job and raises `pending_wake: job-done` in its place — both sidecar writes, so that half costs no commit. `DONE` and `CANCELLED` then journal one `# History` line each (through the core `history-append` verb, never composed by hand). `DEAD` sets `spec_halted: true`, journals the halt, and appends a persistent `[!failure]` callout to `# Gates` — un-halting is a manual operator act, out of scope for this worker.
+1. **Active-job polling.** An asset whose runtime sidecar tracks an `active_job` has that job bundle's terminal marker (`DONE` / `DEAD` / `CANCELLED`, read file-wise from the `lazycortex-core` job-runtime layout, never imported cross-plugin) checked before anything else. Every marker clears the tracked job and raises `pending_wake: job-done` in its place — both sidecar writes, so that half costs no commit. `DONE` and `CANCELLED` write nothing into the folder-note: the raised flag is the whole wake, and the `lazy-spec.collect` postman dispatches the coordinator on it directly, with no commit behind it. `DEAD` sets `spec_halted: true`, journals the halt, and appends a persistent `[!failure]` callout to `# Gates` — un-halting is a manual operator act, out of scope for this worker.
 
 **This worker opens no review.** Opening review on any freshly-written document, a job's report included, is a `lazy-review.submit` call made by the coordinator on the `job-done` wake this very pass raises (`lazy-spec.coordination-playbook.md` Chapter 6) — never a follow-up wired into the poller.
 2. **Structural note-check.** `note_ops.note_check`'s violations (an unrecognized or mistyped frontmatter key, a missing or misordered required section) are folded into the tick's own result — read-only; repairing what it finds is the coordinator's job, through its pen and `note-set-key`, never this worker's.
@@ -203,7 +203,7 @@ spec_halted: false
 
 ## Part 3 — Launch checkboxes (operator-triggered dispatch)
 
-A layer on top of the gates: checkbox blocks the coordinator renders, reconciles, and dispatches in `# Gates`, letting the operator queue the next unit of work with a single tick. **This section documents the WIRE shape only — the frontmatter keys, the runtime job marker, and the checkbox block's markdown shape.** Which labels exist, when each appears, when it comes down, and what a tick dispatches is declared by the asset's type and tool playbooks and applied by the coordinator (`lazy-spec.coordination-playbook.md` Chapter 5) — no script hangs, removes, or dispatches a checkbox anymore.
+A layer on top of the gates: checkbox rows the coordinator renders, reconciles, and dispatches in `# Gates`, letting the operator queue the next unit of work with a single tick. **This section documents the WIRE shape only — the frontmatter keys, the runtime job marker, and the checkbox callout's markdown shape.** Which labels exist, when each appears, when it comes down, and what a tick dispatches is declared by the asset's type and tool playbooks and applied by the coordinator (`lazy-spec.coordination-playbook.md` Chapter 5) — no script hangs, removes, or dispatches a checkbox anymore.
 
 ### Frontmatter and the job marker
 
@@ -234,45 +234,46 @@ The one label outside that arrangement is the review-launch label documented bel
 ### Checkbox block shape
 
 ```
-> [!gate] Write code-plan
+> [!gate] Write
 > - [ ] Write code-plan
+> - [ ] Write test-plan
 >
-> tick to dispatch: planner writes code-plan.md from the included assets' start documents
+> tick to create the document and open its review
 ```
 
-Four lines, in this order: a `[!gate]` callout head carrying the bare label, a `- [ ]` / `- [x]` line repeating the same label, a blank quoted line (`>`), and a `tick to dispatch: <one-line description>` line. The blank quoted line is structural: without it the description is the checkbox item's continuation, and Obsidian's task renderer hides it in reading view (`lazy-spec.status-note-protocol.md` Part 4). `[!gate]` blocks in `# Gates` are checkbox blocks and nothing else — `lazy-spec.flip-gate` writes no callout of its own.
+A launch row is one checkbox line, `- [ ] <label>` or `- [x] <label>`. The rows whose labels open with the same verb — the label's first word: `Write`, `Review`, `Start`, `Rebuild`, `Publish`, `Revise`, any other — share one `[!gate]` callout inside each layout group: a head line naming the verb exactly as the labels write it, in every note language, one checkbox line per row, a blank quoted line (`>`), and one footer line, in the note's language, saying what a tick does. No row carries a hint of its own. The blank quoted line is structural: without it the footer is the last checkbox item's continuation, and Obsidian's task renderer hides it in reading view (`lazy-spec.status-note-protocol.md` Part 4). A row's label is always read off its checkbox line, never off the callout's head. A note written before this shape may still carry one block per row — the label in the head, the same label on the checkbox line, a blank quoted line, a hint — and every reader takes it the same way. `[!gate]` callouts in `# Gates` are checkbox callouts and nothing else — `lazy-spec.flip-gate` writes no callout of its own.
 
-A head line therefore reads one of two ways, and both are checkbox blocks: a **dispatch label** declared by the asset's type or tool playbook, or the **review-launch label** `Review <file>.md`, naming a reviewable markdown file of the asset. The second is the one label class this protocol names itself, because it belongs to no playbook's vocabulary — see below.
+A label therefore reads one of two ways: a **dispatch label** declared by the asset's type or tool playbook, or the **review-launch label** `Review <file>.md`, naming a reviewable markdown file of the asset. The second is the one label class this protocol names itself, because it belongs to no playbook's vocabulary — see below.
 
 ### The review-launch block
 
-The second class of `[!gate]` block. Same callout, same single `- [ ]` row, the same blank quoted line, label `Review <file>.md`, and a fourth line that says `tick to open review` rather than `tick to dispatch`:
+The second class of launch row. Label `Review <file>.md`, in the `Review` callout of its group, under the footer that says a tick opens review:
 
 ```
-> [!gate] Review pricing.md
+> [!gate] Review
 > - [ ] Review pricing.md
 >
-> tick to open review: pricing.md re-enters the loop at the reviewer round
+> tick to open review: the document re-enters the loop at the reviewer round
 ```
 
-The blocks are written by one verb, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> review-rows <note>`: it computes the reviewable set below for the note, hangs the missing blocks in exactly this four-line shape, takes down an un-ticked block whose document left the set, never removes a ticked one, and commits nothing. The coordinator runs it on every wake and again after enacting a tick; when it runs and how a tick is enacted is `lazy-spec.coordination-playbook.md` Chapter 5.
+The rows are written by one verb, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> review-rows <note>`: it computes the reviewable set below for the note, hangs a missing row into its `Review` callout, takes down an un-ticked row whose document left the set by deleting its checkbox line (the callout goes with its last row), never removes a ticked one, lays the whole section out into the grouped shape, and commits nothing. The coordinator runs it on every wake and again after enacting a tick; when it runs and how a tick is enacted is `lazy-spec.coordination-playbook.md` Chapter 5. The `migrate-gate-rows` verb folds an older note's one-row blocks into the grouped shape the same way, without adding or removing a row.
 
 - **The reviewable set.** One row per markdown file of the asset whose `spec_doc_type` declares `review: true` and not `append_only: true`, in any `spec_stage` except `cancelled`. The verb reads each file's type declaration; a document whose type has `review: false` never hangs a box, and neither does a file carrying no type at all. The append-only report journals never hang one: a report enters review only when the job writing it finishes. Ownership does not enter this — an attachment and a canonical document are gathered by exactly the same rule, which is the point of typing. A level note (product root, catalog root) is gathered by the same rule over the level's own documents.
 - **Granularity is the file.** The asset layout is flat, so there is nothing coarser to offer.
 - **A document already under review hangs no box.** A file carrying `review_active: true` is in the loop; a second entry gesture is meaningless. The box returns when the review ends.
-- **The tick opens review, it does not dispatch.** It invokes `lazy-review.submit` for that file — preceded by the `set-stage` verb with `<file> draft` when the file sits at `empty` or `deferred` — so review opens at the reviewer round, and the writer-round entry is never reachable from this block. A file that is still the untouched template has nothing to review, and its tick launches nothing. No expert job is queued and no `active_job` marker is written, which is the one structural difference from a dispatch label. In that respect it behaves like `Publish` below, but it clears no flag and hangs on a per-file rather than a per-asset condition.
-- **Class resolution is not this block's business.** Every row resolves its class the same way any document does, from its own `spec_doc_type`. The block only decides which files get a row.
+- **The tick opens review, it does not dispatch.** It invokes `lazy-review.submit` for that file — preceded by the `set-stage` verb with `<file> draft` when the file sits at `empty` or `deferred` — so review opens at the reviewer round, and the writer-round entry is never reachable from this row. A file that is still the untouched template has nothing to review, and its tick launches nothing. No expert job is queued and no `active_job` marker is written, which is the one structural difference from a dispatch label. In that respect it behaves like `Publish` below, but it clears no flag and hangs on a per-file rather than a per-asset condition.
+- **Class resolution is not this block's business.** Every row resolves its class the same way any document does, from its own `spec_doc_type`. The verb only decides which files get a row.
 - **`spec_halted: true` takes every un-ticked row down**, exactly as it does for a dispatch label.
 
 ### Dispatch (ticked checkbox → expert job)
 
-A `[!gate]` block a human left ticked is queued as one expert job through the `dispatch-job` verb. WHICH role, source, context and result each label carries is named by the playbook that declares the label; what stays fixed across every label is the wire below:
+A launch row a human left ticked is queued as one expert job through the `dispatch-job` verb. WHICH role, source, context and result each label carries is named by the playbook that declares the label; what stays fixed across every label is the wire below:
 
 - **`target_doc` in the payload** — every job dispatched to write a catalog document carries `target_doc` in its `request.json` payload: the repo-relative path of the document that job writes. The job returns only content, through its own `result/`; where that content belongs is settled at dispatch, by the side that knows the ladder, and travels with the job. The `land-result` collector reads the key to place the returned document, and refuses a job that declares none — nothing is landed, the document stays in the job's `result/`, and the job reads as undelivered. A declared path outside the asset's own folder is refused the same way — except a cascade job, whose target lies in another asset's folder by design and is named explicitly by the coordinator at landing time (Part 4).
 - **Expert resolution** — the dispatched expert is resolved from the review class of the checkbox's own RESULT document (its basename with `.md` stripped — for a release's `Build` job, the declared `report_doc` of the implementer's tool), read from `review.classes[<class>].experts.main[0].name` — the same class the document's own review loop uses once it exists.
 - **Guidelines context** — the product's `guidelines[<role>]` paths, then the asset type's `asset_types[<type>].guidelines`, then the wildcard `guidelines["*"]` paths (per `lazy-spec.config-protocol.md`) fold into the job's `context`; a declared path that does not resolve to a file is a dispatch warning journaled in `# History` as a job that failed to start, never a silent drop.
 - **Dedup key** — `<note-path>:<label>` (the status note's repo-relative path plus the label, per `lazy-spec.coordination-playbook.md` Chapter 5's dedup clause), guarding a second tick of the same checkbox while the first job is still active.
-- **On success** — the coordinator removes the ticked block and marks `active_job: {"checkbox", "expert", "job_id"}` via `mark-job`. Nothing is journaled for the dispatch itself — the job's finish, death, or cancellation is the history event.
+- **On success** — the coordinator removes the ticked block and marks `active_job: {"checkbox", "expert", "job_id"}` via `mark-job`. Nothing is journaled for the dispatch itself, and nothing for the job's finish or cancellation either — only its death, which halts the asset, reaches `# History`.
 - **Guards** — a halted asset ignores every ticked checkbox; an asset already tracking an `active_job` also waits — one active job per asset at a time, checked by the coordinator before it dispatches.
 
 ### `Publish` — the release's freeze point

@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Take one spec asset from a blank slate through its approved design to its publication in a product release.
-last_regen: 2026-11-10
+last_regen: 2026-11-12
 diagram_spec:
   anchor: "How the journey flows"
   request: "Sequence diagram showing the lifecycle of one asset: lazy-spec.create-asset scaffolds and authors the asset, lazy-spec.set-stage marks the design approved, lazy-spec.flip-gate closes spec_design_done, the operator ticks Start release and a release builds and tests the product, lazy-spec.sync-with-code reconciles code reality and proposes the release's spec_develop_done, and the operator's Publish tick sets the asset's spec_released."
@@ -10,8 +10,8 @@ source_skills:
   - lazy-spec.set-stage
   - lazy-spec.flip-gate
   - lazy-spec.sync-with-code
-source_sha: 66cf213473174fd98434760f9a4d5235f473e144
-surface_sha: 535f316e647071fca848af0eaa2e2c8aba0f8c949c83d467f93c6f7a792b26e7
+source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
+surface_sha: d10d0085600551bb8ed4e2d58317a5a1cee3195f44cea0f388b228b2320db1e2
 ---
 # How do I take an asset from creation all the way to release?
 
@@ -111,7 +111,7 @@ Once the release's build has landed on the default branch, run:
 /lazy-spec.sync-with-code <product>
 ```
 
-`lazy-spec.sync-with-code` treats the code as the truth. It walks the commits since the last sync, and brings every authored document in scope in line with what the code now does: `vision.md`, `design.md`, `architecture.md`, `use-cases.md`, `ui-design.md`, the product `tech.md`, and each folder-note's `# Summary` précis. A statement the code made false is rewritten, behavior no document described is written down, and edits are made in place section by section. Design, vision, use-cases and ui-design documents never gain source links or code names; `tech.md` is limited to what the manifests and configuration prove (stack, versions, platforms). Each edited document gets one line in its own `# History` section naming the synced window and what changed. When a rewrite lands under a heading that already carries a diagram, sync redraws that diagram to match; it never draws one where none existed.
+`lazy-spec.sync-with-code` treats the code as the truth. It walks the commits since the last sync, and brings every authored document in scope in line with what the code now does: `vision.md`, `design.md`, `architecture.md`, `use-cases.md`, `ui-design.md`, the product `tech.md`, and each folder-note's `# Summary` précis. A statement the code made false is rewritten, behavior no document described is written down, and edits are made in place section by section. Design, vision, use-cases and ui-design documents never gain source links or code names; `tech.md` holds the product's technical requirements and infrastructure decisions (stack, platforms, runtime floors, external dependencies, constraints, boundaries). Every statement in it that the code contradicts is reported as drift and rewritten to match the code, and a new stack-level fact the code introduces, such as a new external tool or runtime requirement, is added. A code change that alters no requirement never touches `tech.md`, and the document never turns into a list of functions, verbs or files. Each edited document gets one line in its own `# History` section naming the synced window and what changed. When a rewrite lands under a heading that already carries a diagram, sync redraws that diagram to match; it never draws one where none existed.
 
 Beyond rewrites, the same run creates an asset for a feature-sized code unit no asset covers (every document it creates is born at `spec_stage: deferred`, so nothing acts on it until you move it to `draft`), deletes an asset whose code is gone, and marks a recorded decision obsolete when the code abandoned it. Before touching an asset that holds an approved document, it asks once for the whole asset: `update` applies every finding and keeps each document's stage, `leave` skips the asset until a later `--full` run asks again. An asset whose documents state a reviewed target design that the code has not reached yet is asked the same way, once per asset and whatever its stages read: `update` brings the asset in line with the code and marks its design records obsolete, `keep` leaves it untouched and listed in the report as ahead of the code, to be asked again on the next run that finds it. Sync never rewrites a reviewed target design without your `update`. A folder that has authored documents but no status folder-note gets one scaffolded with its gates `false` (asking you for the asset type when the folder does not settle it), and the sync never sets a gate during that scaffold.
 

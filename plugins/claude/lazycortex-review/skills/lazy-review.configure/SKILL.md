@@ -1,6 +1,6 @@
 ---
 name: lazy-review.configure
-description: "Run when the operator wants a new kind of document to go through review, wants to change which paths a review class matches, or wants to reassign who writes / validates / closes out / narrates it. Wizard over `review.classes` in `.claude/lazy.settings.json`, one question per turn via AskUserQuestion; read-first, so an already-configured class is re-validated without a single prompt. Requires `/lazy-review.install` to have run."
+description: "Run when the operator wants a new kind of document to go through review, wants to change which paths a review class matches, or wants to reassign who writes / validates / closes out / narrates it. Requires `/lazy-review.install` to have run first."
 allowed-tools: Read, Edit, Write, AskUserQuestion, Bash(test -f *), Bash(mktemp), Bash(rm -f *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Agent
 ---
 # lazy-review.configure

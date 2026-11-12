@@ -1,6 +1,6 @@
 ---
 name: lazy-obsidian.diagram-install
-description: "Run when the operator asks to make click-to-zoom work on lazycortex diagrams in Obsidian, or when they report that clicking a mermaid diagram doesn't zoom. Installs the `mermaid-popup` vault plugin. Does NOT install the fit-CSS snippets (mermaid fences overflowing the column, sitting on a white box, or clipped ASCII diagrams) — those are installed and enabled by `/lazy-obsidian.install`'s shared snippet step; run that instead for those symptoms. Project scope only, idempotent, and chained from `/lazy-obsidian.install`."
+description: "Run when the operator asks to make click-to-zoom work on lazycortex diagrams in Obsidian, or reports that clicking a mermaid diagram doesn't zoom. Not for overflowing, white-boxed or clipped diagrams — those fit-CSS snippets come from `/lazy-obsidian.install`."
 allowed-tools: Write, Bash(mkdir -p *), Bash(git rev-parse*), Bash(test *), Bash(date *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
 argument-hint: "(no arguments — scaffolds into <repo-root>/.obsidian/)"
 ---

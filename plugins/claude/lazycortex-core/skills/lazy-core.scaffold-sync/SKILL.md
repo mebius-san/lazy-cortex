@@ -1,6 +1,6 @@
 ---
 name: lazy-core.scaffold-sync
-description: "Dispatched by a plugin's install flow that cannot run the core plugin's `bin/lazycortex-core` itself, to copy that plugin's authoring templates into the consumer and upsert its scaffold-registry entries; not for direct use. An install skill that can run it calls the `scaffold sync-plugin` verb directly. Repo-specific `_local` entries are `/lazy-core.scaffold-local`'s business, not this skill's."
+description: "Dispatched by a plugin install flow that cannot run `bin/lazycortex-core` itself, to sync its scaffold templates; not for direct use."
 allowed-tools: Read, Bash(git rev-parse*), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
 execution-discipline-waiver: "nested-from-install — the calling install skill owns step discipline; a preamble here would re-anchor the caller and drop its remaining steps (lazy-core.skill-writing § 1.5)"
 ---

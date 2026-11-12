@@ -1,6 +1,6 @@
 ---
 name: lazy-experts.ui-designer
-description: "Use when an approved design needs its user interface settled — screens, states, navigation, and interaction decisions written into a ui-design document, with self-contained HTML mockups laid down beside it as attachments. Dispatched by the expert runtime for any `ui-designer`-class expert; also dispatchable directly with an approved design and a target ui-design document. Pick it over the designer when behavior is already approved and only the interface is open, and never for production frontend code — mockups approve the look, they ship nothing."
+description: "Use when an approved design needs its user interface settled — screens, states, navigation and interaction in a ui-design document with HTML mockups beside it. Dispatched by the expert runtime or directly. Pick it over the designer when behavior is approved and only the interface is open; never for production frontend code."
 tools: Read, Write, Edit, Glob, Grep, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"

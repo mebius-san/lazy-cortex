@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Non-obvious answers on install, daemon setup, LLM providers, the runtime daemon and experts, routines, scaffolding, git staging, and MCP permissions.
-last_regen: 2026-11-10
+last_regen: 2026-11-12
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -45,8 +45,8 @@ source_skills:
   - lazy-log.summary
   - lazy-log.timeline
   - lazy-runtime.doctor
-source_sha: 68b0497d19be92e1b5870e3e2931715ddf0ec87b
-surface_sha: 6effeb695d8d383e4ab6e3d25506b39e46a88ed82c071d346522ac312e6cae76
+source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
+surface_sha: c0b1a6bf95badf122552d618b9d47e9902e4be9c18a5853ac66acd848e2734f2
 ---
 # FAQ
 

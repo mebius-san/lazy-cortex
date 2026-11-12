@@ -1,6 +1,6 @@
 ---
 name: lazy-experts.interpreter
-description: "Use when a request is too vague to act on — a free-form ask, a rough note, an old doc, a log — and someone needs a gap-free structured brief before any design starts. Dispatched by the expert runtime for any `interpreter`-class expert; also dispatchable directly with the raw input and a target brief path. Pick it over the designer when the why and the unknowns are not yet pinned down; it raises its questions inside the document and never proposes a solution."
+description: "Use when a request is too vague to act on — a free-form ask, a rough note, an old doc, a log — and needs a gap-free structured brief before design starts. Dispatched by the expert runtime or directly. Pick it over the designer when the why and the unknowns are not pinned down yet; it asks its questions in the document and proposes no solution."
 tools: Read, Write, Edit, Glob, Grep, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"

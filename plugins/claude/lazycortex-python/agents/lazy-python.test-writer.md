@@ -1,12 +1,6 @@
 ---
 name: lazy-python.test-writer
-description: |
-  Use this agent when writing unit tests for a class or module in a Python codebase that adopts the `lazy-python.*` testing conventions. Reads canonical testing and checking guidelines from the plugin plus the project overlay on every dispatch. Never modifies production code — only writes test files. Examples:
-  <example>
-  Context: A new class was written and needs tests.
-  user: "Write tests for Parser"
-  assistant: "I'll use the lazy-python.test-writer agent to create compliant tests."
-  </example>
+description: "Use when a Python class or module needs unit tests written under the `lazy-python.*` testing conventions — 'write tests for Parser'. Writes test files only and never modifies production code."
 model: inherit
 color: green
 tools: Read, Write, Edit, Grep, Glob, Bash, Skill, Agent

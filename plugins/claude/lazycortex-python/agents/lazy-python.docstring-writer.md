@@ -1,12 +1,6 @@
 ---
 name: lazy-python.docstring-writer
-description: |
-  Use this agent when adding or fixing docstrings on classes, methods, or properties in a Python codebase that adopts the `lazy-python.*` documentation conventions. Reads canonical guidelines from the plugin plus the project overlay on every dispatch. Examples:
-  <example>
-  Context: A class or method is missing a docstring or has a non-compliant one.
-  user: "Write docstrings for this class"
-  assistant: "I'll use the lazy-python.docstring-writer agent to generate compliant docstrings."
-  </example>
+description: "Use when classes, methods or properties in Python need docstrings added or fixed under the `lazy-python.*` documentation conventions — 'write docstrings for this class'."
 model: inherit
 color: cyan
 tools: Read, Edit, Grep, Bash, Skill, Agent

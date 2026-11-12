@@ -51,12 +51,16 @@ Mechanism follows, and earns its place only by **disambiguating from a sibling w
 
 One clause about a load-bearing property is fair even without a sibling — "so the topic index never enters the calling context" tells the model this is cheap to call. A paragraph is not.
 
+## Length
+
+Every session lists every description on every turn, so the field has a budget of its own: at most 400 characters, and one sentence of at most 150 for a caller trigger. A caller trigger names the caller and stops; the caller dispatches by name, so wake conditions, inputs and outputs listed in the description are paid for by every session and read by no router. Over 1024 characters breaks the field limit of the skill format. The numbers and their severities are `lazy-core.skill-writing § 8`.
+
 ## What does not count as a trigger
 
 - **Purpose restated.** `Use to resolve a dependency` names what the skill is for. The model already inferred that from the name. `Use when a spec names a dependency that must resolve before the gate can flip` names when to reach for it.
 - **A condition that cannot be evaluated without doing the work.** `Use when the wiki covers the question` requires opening the wiki to find out whether to open the wiki. Circular conditions read as triggers and function as nothing.
 - **A feature list of the skill's own output.** "Shows sizes, loading behaviour, optimization opportunities, preamble presence, …" describes a report, not an occasion.
-- **`<example>` blocks instead of a trigger sentence.** Examples after the trigger are good — they carry request shapes verbatim. Examples doing the trigger's whole job leave the model matching on a transcript.
+- **`<example>` blocks.** A description carries none, with or without a trigger sentence. A transcript costs a hundred tokens or more in every session, and the request shapes it holds fit into the trigger sentence as quoted phrases.
 
 ## Worked rewrites
 
@@ -69,6 +73,6 @@ One clause about a load-bearing property is fair even without a sibling — "so 
 
 ## Judging a batch (audit)
 
-Read the description alone, without the file's name or body, and ask: *given only this line and a user request, could I decide whether to fire it?* If the answer needs the body, it is `WARN`. Phrasing is free — a description that states its occasion in its own words passes without matching any template above.
+Read the description alone, without the file's name or body, and ask: *given only this line and a user request, could I decide whether to fire it?* If the answer needs the body, it is `WARN`. Length and `<example>` blocks are not judged by reading: the core `context-scan --section weight` verb grades them. Phrasing is free — a description that states its occasion in its own words passes without matching any template above.
 
 Absent `description:` is `FAIL`, not `WARN`.

@@ -93,6 +93,8 @@ import note_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-posit
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import review_rows  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_doc_types  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -966,7 +968,8 @@ def _resolve_level_trigger(
   Resolve the wake trigger for a level note, honoring the halt override.
 
   The level ladder runs the same priority order the asset ladder does (COMMAND, halt, ANSWER,
-  transition, OPERATOR_EDIT), minus `JobMarker.PENDING_WAKE`: no level launch checkbox ever
+  transition, OPERATOR_EDIT), with `CoordinatorTrigger.DOC_LANDED` between the transition and the operator edit,
+  minus `JobMarker.PENDING_WAKE`: no level launch checkbox ever
   queues an expert job, so `CoordinatorTrigger.JOB_DONE` has nothing to fire on. Every level
   document named in `members` is scanned for a `review_result` transition in one pass, so none
   is dropped to a later tick just because another transitioned in the same commit.
@@ -987,6 +990,19 @@ def _resolve_level_trigger(
     that transitioned to its new `review_result` value; non-empty only when `trigger` is
     `CoordinatorTrigger.DOC_TRANSITION`.
   """
+
+  # Domain(spec.lifecycle):
+  # # Level wake-trigger priority order
+  # A level note — the catalog root's or a product's own note — is woken for the first reason that
+  # applies, in a fixed order: an explicit operator command, which gets through even when the level
+  # is paused, then — unless paused — a fresh answer to a question the coordinator itself asked,
+  # then a level document's review outcome changing, then a level document that has entered review
+  # while the note still offers to write it, then any other operator edit. A document written from
+  # below, such as a product's architecture written by a release build's first step, wakes the note
+  # whoever made the change, because the stale offer to write it must come down. A level note never
+  # waits on a background job of its own. An edit to a level document under active review is
+  # otherwise the review's own business.
+
   # a non-empty commands section wakes the coordinator even on a halted level, the same
   # exception both asset-side resolvers grant
   if read_section_body(body, Section.COORD_COMMANDS):
@@ -1005,6 +1021,12 @@ def _resolve_level_trigger(
   transitions = _level_doc_transitions(frontmatter, members, raised_lags = raised_lags)
   if transitions:
     return CoordinatorTrigger.DOC_TRANSITION, transitions
+
+  # a document written from below that has entered review while its `Write` row still hangs: the note is stale
+  # whoever authored the commit, and the row comes down only on a wake
+  hanging = review_rows.find_all_hanging_write_docs(body)
+  if any(member.name in hanging and not _is_member_signal_eligible(member) for member in members):
+    return CoordinatorTrigger.DOC_LANDED, {}
 
   # a document-only tick whose every document is under active review is the review loop's
   # business, not an operator-edit signal — the note's own tick (no members) always checks
@@ -1838,7 +1860,8 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
                          level_doc: Path | None = None,
                          asset_approved: str | None = None,
                          release_start: bool = False,
-                         release_published: bool = False) -> dict:
+                         release_published: bool = False,
+                         job_done: bool = False) -> dict:
   """
   Detect operator activity on one coordinated folder-note and dispatch its expert when it wakes.
 
@@ -1925,6 +1948,10 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
       product owning releases after a release was published. Accepted only by a level note — any other note
       refuses it; trigger resolution short-circuits to `CoordinatorTrigger.RELEASE_PUBLISHED` (honoring the
       halt override); `item` is `{}` on this path.
+    job_done: True when this call is the postman sweep's direct wake after a launch-checkbox job finished,
+      with no commit behind it. The trigger is resolved from the note's current state and its raised
+      `job-done` flag alone, the way a remembered wake is redeemed; with no flag raised the call does
+      nothing. `item` is `{}` on this path.
 
   Returns:
     `{"action": "refused", "reason"}` when `release_start` names a note that is not a release, or
@@ -2146,6 +2173,10 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
   elif release_published:
     # halt silences the upward release-published wake the same way; `item` is empty on this synthetic path
     trigger = None if flip_gate.is_true(frontmatter, SpecHaltKey.HALTED) else CoordinatorTrigger.RELEASE_PUBLISHED
+  elif job_done:
+    # the postman's direct wake carries no git item, so nothing here may read as an operator edit: the
+    # raised flag alone decides, through the same redemption a remembered wake takes below
+    trigger = None
   elif is_level:
     # the level ladder reads its own documents rather than an asset's siblings, and resolves the
     # full transition set in one pass exactly as the grouped asset form does

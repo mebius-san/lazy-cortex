@@ -1,17 +1,6 @@
 ---
 name: lazy-python.contract-writer
-description: |
-  Use this agent when a significant caller-visible promise needs formalizing as a `Contract:` block — adding a new guarantee to a public or protected method, class, or attribute (never a private helper), updating an existing contract's wording, or lifting a guarantee out of prose into a formal contract. Writes the block and syncs the owning docstring's `Guarantees` / `Subclassing` section in the same pass. Examples:
-  <example>
-  Context: A method returns a deep copy but nothing records the guarantee.
-  user: "Formalize the deep-copy guarantee on snapshot"
-  assistant: "I'll use the lazy-python.contract-writer agent to write the Contract block and sync Guarantees."
-  </example>
-  <example>
-  Context: A subclassing obligation lives only in a code comment.
-  user: "Make the override obligation on _on_batch_end a contract"
-  assistant: "I'll dispatch lazy-python.contract-writer for the contract and the Subclassing note."
-  </example>
+description: "Use when a caller-visible promise of a public or protected method, class or attribute needs a `Contract:` block — 'formalize the deep-copy guarantee on snapshot', 'make this override obligation a contract', a new guarantee or a reworded one; never for a private helper. Pick it over domain-writer when the knowledge is a promise to callers, not a domain rule."
 model: inherit
 color: cyan
 tools: Read, Edit, Grep, Bash, Write, Skill, Agent

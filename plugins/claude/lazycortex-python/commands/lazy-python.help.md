@@ -1,5 +1,5 @@
 ---
-description: "Run when the operator asks what lazycortex-python enforces, how Python is checked in this repo, which verb runs the checkers, or where domain and contract markers come from — lists the Python-discipline surface: install / audit / check-style / knowledge-sweep, the `chk-py` and `tst-py` wrappers, the docstring-writer / test-writer / code-reviewer agents plus the domain-writer / contract-writer knowledge-marker pair, the always-loaded style, docstring, test and failing-test rules, and the PostToolUse style hook."
+description: "Run when the operator asks what lazycortex-python enforces, how Python is checked in this repo, which verb runs the checkers, or where domain and contract markers come from."
 execution-discipline-waiver: "static help text — no executable steps"
 ---
 Output the block below verbatim to the user. Do not summarize, rephrase, or add commentary. Do not invoke any tools. Do not log this run.

@@ -89,6 +89,27 @@ def find_settings_root(start: Path) -> Path:
   return cur
 
 
+def require_settings_root(start: Path) -> Path:
+  """
+  Find the nearest directory holding `.claude/lazy.settings.json`, refusing when there is none.
+
+  Args:
+    start: Directory to begin the upward search from.
+
+  Returns:
+    The first ancestor (inclusive) containing the settings file.
+
+  Raises:
+    FileNotFoundError: When no ancestor of `start` holds the settings file.
+  """
+  root = find_settings_root(start)
+
+  # guard: the lenient lookup falls back to `start` itself, which may hold no settings file at all
+  if not (root / _SETTINGS_REL).is_file():
+    raise FileNotFoundError(f"no {_SETTINGS_REL.as_posix()} at or above {start.resolve()}")
+  return root
+
+
 def _vault_root_value(settings_root: Path) -> str:
   """
   Read `spec.vault_root` from settings, defaulting to `specs`.

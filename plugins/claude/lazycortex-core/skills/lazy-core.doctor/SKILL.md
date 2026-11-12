@@ -1,6 +1,6 @@
 ---
 name: lazy-core.doctor
-description: "Run when the operator asks whether the project config is healthy, or when something feels off — a rule or skill is not firing, plugins may be behind the marketplace, settings / agents / memory / hooks / CLAUDE.md have drifted apart. Merges its own cross-artifact scan with the installed plugins' audits, applies the repairs that follow mechanically from what it read, and asks per finding about the rest; the sibling `/lazy-core.audit` only measures context weight and authoring compliance and never fixes."
+description: "Run when the operator asks whether the project config is healthy, or when something feels off — a rule or skill is not firing, plugins may be behind the marketplace, settings / agents / memory / hooks / CLAUDE.md have drifted apart. Applies mechanical repairs and asks per finding about the rest; the sibling `/lazy-core.audit` only measures and never fixes."
 allowed-tools: Read, Write, Edit, Bash(ls *), Bash(wc *), Bash(mkdir -p *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(claude plugin update *), mcp__*__recall, mcp__*__retain, AskUserQuestion, Agent
 ---
 # Project Health Check

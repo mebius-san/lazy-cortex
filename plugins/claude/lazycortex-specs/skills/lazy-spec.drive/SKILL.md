@@ -1,6 +1,6 @@
 ---
 name: lazy-spec.drive
-description: "Use when the operator wants to drive one spec asset through its ladder by hand, in a single continuous session, with no runtime daemon acting on this checkout — `/lazy-spec.drive <asset-note-path>`. Reads `lazy-spec.coordination-playbook.md`, the same law `spec.coordinator` follows under the daemon, and drives the identical ladder locally: the operator speaks a word, the skill translates it into the gesture (tick, question-answer, command) ON THE OPERATOR'S BEHALF — never its own decision — commits it, wakes the coordinator via the same CLI the daemon's git-watch routine uses, and pumps whatever expert jobs result to completion with the local manual pump. Refuses to start while a live daemon could act on the same checkout."
+description: "Use when the operator wants to drive one spec asset through its ladder by hand, in one session, with no runtime daemon acting on this checkout — `/lazy-spec.drive <asset-note-path>`. It performs each gesture only on the operator's word, never as its own decision, and refuses to start while a live daemon could act on the same checkout."
 allowed-tools: Read, Write, Edit, Bash, AskUserQuestion, Agent
 ---
 # lazy-spec.drive
@@ -75,13 +75,13 @@ Re-running this skill on an asset MUST resume, never blindly restart. `Read` the
 
 Run **the drive loop** once, unconditionally — this catches a job that finished while nobody was watching (a stale `active_job` / `coordinator_job` marker) and lets the ladder settle before the operator sees anything. `spec_cancelled: true` still runs the loop (gate-tick/coordinator-dispatch are read-first and no-op safely on a cancelled asset) but the render below says so plainly.
 
-Render the current state to the operator: `# Status brief`, every hung `[!gate] <Label>` checkbox block under `# Gates`, every unticked `[!question]` callout, a non-empty `# Coordinator commands` section, and the `git status --porcelain` dirty-path list if non-empty (this is the operator's own prior manual edits still awaiting a commit — see Phase 3's commit option). Outcome: `resumed`.
+Render the current state to the operator: `# Status brief`, every hung launch row (each `- [ ] <Label>` checkbox of a `[!gate]` callout) under `# Gates`, every unticked `[!question]` callout, a non-empty `# Coordinator commands` section, and the `git status --porcelain` dirty-path list if non-empty (this is the operator's own prior manual edits still awaiting a commit — see Phase 3's commit option). Outcome: `resumed`.
 
 ## Phase 3 — Drive the dialog loop
 
 Repeat until the operator says stop:
 
-**Build the menu from current state.** `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" drive-gesture menu <asset-note-path>)` prints one JSON line: `checkboxes` (each `label` and `ticked`, every `[!gate]` block of `# Gates`), `questions` (each coordinator-signed `[!question]` with its `index`, `summary` and `options`, each option with its own `index`, `text` and `ticked`) and `commands_pending`. Then `AskUserQuestion` with one option per row (never a bulk prose list) — one context block per round, filled from the state just rendered:
+**Build the menu from current state.** `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" drive-gesture menu <asset-note-path>)` prints one JSON line: `checkboxes` (each `label` and `ticked`, every launch row of `# Gates`), `questions` (each coordinator-signed `[!question]` with its `index`, `summary` and `options`, each option with its own `index`, `text` and `ticked`) and `commands_pending`. Then `AskUserQuestion` with one option per row (never a bulk prose list) — one context block per round, filled from the state just rendered:
 
 ```
 Context (print before asking):
@@ -92,7 +92,7 @@ Context (print before asking):
 AskUserQuestion: header "Next gesture", question "What should happen next on <product>/<path>?", options below with descriptions.
 ```
 
-- One option per hung checkbox block — a `checkboxes` entry with `ticked: false`: "Tick `<Label>`".
+- One option per hung checkbox row — a `checkboxes` entry with `ticked: false`: "Tick `<Label>`".
 - One option per option under each unanswered `[!question]` callout — a `questions` entry none of whose `options` is ticked.
 - "Add a Coordinator command" — a follow-up free-text question for the command line.
 - "Commit accumulated changes" — only offered when `git status --porcelain` on the spec content root is non-empty (the operator's own hand-edits made outside this tool between rounds, per taskdoc § 8's no-commit-until-said phase).

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Catch secrets, PII, and internal paths before they reach a public repo; stop per-tool allow prompts for new MCP servers in one step.
-last_regen: 2026-11-10
+last_regen: 2026-11-12
 diagram_spec:
   anchor: "How the three skills fit together"
   request: "Flow diagram showing how lazy-guard.check-public feeds findings into lazy-repo.mark-public (which creates .guard-public.json and activates the pre-commit hook), and how lazy-guard.allow-mcp independently classifies MCP server tools into allow/ask/skip buckets and writes them to settings.local.json"
@@ -9,8 +9,8 @@ source_skills:
   - lazy-repo.mark-public
   - lazy-guard.check-public
   - lazy-guard.allow-mcp
-source_sha: 3fadd77433a2100975275f22c7c7e8cb8e544c9d
-surface_sha: e831d4d30b3947574f90432100261ffcf48a0926a6f0463e2cb65b04e3d91a8f
+source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
+surface_sha: 89a670ed2d3de886ede8fc1d3be927de9a826f5121f41f0d970aa5960336ff3e
 ---
 # Public-repo guardrails and MCP permission management
 
@@ -51,6 +51,10 @@ Optionally, `/lazy-guard.allow-mcp` can also install a SessionStart preload hook
 **Reversing a prior allow decision.** Re-run `/lazy-guard.allow-mcp` for the server. If any tool the classifier considers destructive is still sitting in `allow` from a past run, the skill asks you per-tool whether to promote it to `ask`. Your prior `allow` entry is never silently removed — each reversal requires an explicit confirmation. A tool you've pinned into the default (medium-risk) bucket is never touched by this reversal flow at all — that pin is permanent until you change it by hand.
 
 **Cleaning up leaked permissions.** If you previously registered MCP tool permissions in tracked `settings.json` instead of `settings.local.json`, re-running `/lazy-guard.allow-mcp` for that server will find the leaked entries and ask you per-entry whether to move them. Entries in the wrong-scope `settings.local.json` (for example a project server's entries sitting in the global file) are surfaced and cleaned up the same way.
+
+**Server not found, or not loaded.** If the name you pass is not defined in your global or project MCP server definitions, `/lazy-guard.allow-mcp` stops and lists the servers it did find; correct the name or add the server, then re-run. If the server is defined but exposes no tools in the current session, the skill skips it with a warning; restart Claude Code so the server loads, then re-run. If the same server name is defined both globally and in the project, the skill asks once which definition is authoritative before routing its permissions.
+
+**Managing the preload hook.** The hook lives in the gitignored `settings.local.json` at the scope you choose, and the skill asks for a separate confirmation before writing it. Once a hook exists at exactly one scope, later runs merge new tool names into it without asking about scope. Preloaded names are only ever added: the skill never removes a tool from the preload list. A "No" answer is not remembered, so the question comes back on the next run while no hook exists.
 
 **Catching up after a non-interactive rollout.** A cross-project setup pass never registers MCP tools for you — `/lazy-guard.allow-mcp` needs live MCP tool schemas a headless agent doesn't have, so the rollout's report lists it as skipped (live-session-only) for every repo it touched. Run `/lazy-guard.allow-mcp` yourself, interactively, in each repo afterward.
 

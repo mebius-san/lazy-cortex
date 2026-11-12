@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Thirteen aspect files (eight domain, five cross-cutting) that layer knowledge and rigor onto experts via lazy.settings.json composition.
-last_regen: 2026-11-10
+last_regen: 2026-11-12
 diagram_spec:
   - anchor: "Domain aspects feed the composition entry"
     request: "Flow diagram: the eight domain aspect files — claude-plugin-aspect, game-dev-aspect, dotfiles-aspect, obsidian-plugin-aspect, data-pipeline-aspect, software-product-aspect, sci-fi-aspect, fantasy-aspect — each feed into a single lazy.settings.json[experts] composition entry node. The six technical domain aspects carry the edge label 'technical class'; the two genre aspects sci-fi-aspect and fantasy-aspect carry the edge label 'fiction class'. No other nodes."
@@ -24,8 +24,8 @@ source_skills:
   - lazy-experts.terms-aspect
   - lazy-experts.structure-aspect
   - lazy-experts.install
-source_sha: 2f3083ebe46203415379eccf8333b1c13b39b779
-surface_sha: 400947715561ddbf5994ed9b5c59b046ed14d363fd10686f25f560bb779a6e78
+source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
+surface_sha: 6797d7e15b7f2d2ff37e50f4192a5fdd223dbabbe0d1e3d55bab58524bd5341a
 ---
 # Domain aspects and the cross-cutting aspects
 

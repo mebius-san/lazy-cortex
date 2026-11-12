@@ -1,6 +1,6 @@
 ---
 name: lazy-spec.gate-tick
-description: "Dispatched per status folder-note by the daemon's `lazy-spec.gate-tick` md-scan routine to poll one asset's active job and structurally check its folder-note; not for direct use — it is a pure script and makes no Claude calls. Read it when asked why an active-job marker was cleared, why an asset went `spec_halted` from a dead job, or what a `note-check` violation folded into a tick result means. For why a launch checkbox appeared, disappeared, or dispatched a job — or why a gate flipped at all — see `lazy-spec.coordination-playbook.md`; none of that is this worker's decision anymore."
+description: "Dispatched per status folder-note by the daemon's `lazy-spec.gate-tick` md-scan routine; not for direct use."
 execution-discipline-waiver: "Documents a pure script (bin/gate_tick.py) dispatched by the daemon — there is no Claude-side execution to discipline."
 ---
 # Gate Tick
@@ -13,8 +13,8 @@ execution-discipline-waiver: "Documents a pure script (bin/gate_tick.py) dispatc
 
 **Active-job polling.** When the runtime sidecar tracks an `active_job` for the asset, the worker checks that job's bundle for a terminal marker (`DONE` / `DEAD` / `CANCELLED`) before doing anything else. No marker yet → falls through to the structural check below untouched, and so does an asset that tracks no job at all.
 
-- `DONE` clears the key and logs it. The worker opens no review itself: for a release's build jobs (`Revise architecture`, `Build`, `Test`), the coordinator opens the review on the document the job just wrote (the product's `architecture.md`, the release's `code-report.md` / `test-report.md`) on the `job-done` wake this same poll raises.
-- `CANCELLED` clears the key and logs it; no further follow-up.
+- `DONE` clears the key and writes nothing into the folder-note. The worker opens no review itself: for a release's build jobs (`Revise architecture`, `Build`, `Test`), the coordinator opens the review on the document the job just wrote (the product's `architecture.md`, the release's `code-report.md` / `test-report.md`) on the `job-done` wake this same poll raises.
+- `CANCELLED` clears the key and writes nothing into the folder-note; no further follow-up.
 - `DEAD` clears the key, sets `spec_halted: true`, and appends a persistent `[!failure]` callout to `# Gates` — un-halting is a manual operator act, out of scope for this worker. It does NOT drop any launch checkbox; the coordinator owns the checkbox layer entirely and reconciles it on its next wake.
 
 **Structural note-check.** The worker subprocesses `note-check` on the same folder-note and folds its violations (an unrecognized or mistyped frontmatter key, a missing or misordered required section from the canonical roster) into the tick's own result — read-only. Repairing a violation is `spec.coordinator`'s job, through its pen for body sections and `note-set-key` for frontmatter; this worker never fixes anything itself.

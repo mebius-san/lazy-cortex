@@ -55,7 +55,7 @@ An absent `spec_tools` key on the status folder-note means "tools are not determ
 
 ## The checkboxes
 
-Checkboxes live in the status folder-note's `[!gate]` block. The coordinator reconciles the set on every relevant invocation — hangs a block the moment its precondition starts holding, removes an un-ticked one the moment it stops holding — and never ticks one itself: ticking is the operator's gesture. `spec_halted: true` takes every one of them down.
+Checkboxes live in the status folder-note's `# Gates` section, as rows of `[!gate]` callouts (`lazy-spec.coordination-playbook.md` Chapter 5). The coordinator reconciles the set on every relevant invocation — hangs a row the moment its precondition starts holding, removes an un-ticked one the moment it stops holding — and never ticks one itself: ticking is the operator's gesture. `spec_halted: true` takes every one of them down.
 
 | Checkbox | Appears when | On tick |
 |---|---|---|

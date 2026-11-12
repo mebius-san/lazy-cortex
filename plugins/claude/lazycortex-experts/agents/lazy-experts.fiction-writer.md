@@ -1,6 +1,6 @@
 ---
 name: lazy-experts.fiction-writer
-description: "Use when the deliverable is literary text — narrative prose, a scene, dialogue, a lyrical fragment — written from an existing brief or story outline. Dispatched by the expert runtime for any `fiction-writer`-class expert (the only role `/lazy-experts.install` seeds for the sci-fi and fantasy classes); also dispatchable directly with the outline and a target document. Never dispatch it for technical documents, and never for story architecture — what happens, to whom, in what order comes from upstream."
+description: "Use when the deliverable is literary text — narrative prose, a scene, dialogue, a lyrical fragment — written from an existing brief or story outline. Dispatched by the expert runtime or directly. Pick it over the fiction-editor when the text does not exist yet; never for technical documents or story architecture, which come from upstream."
 tools: Read, Write, Edit, Glob, Grep, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"

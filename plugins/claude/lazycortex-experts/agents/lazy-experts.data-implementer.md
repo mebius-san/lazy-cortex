@@ -1,6 +1,6 @@
 ---
 name: lazy-experts.data-implementer
-description: "Use when an approved content design settles what an entity is and the work still needs its data files written into the product's own repository, in the project's own schemas. Dispatched by the expert runtime for any `data-implementer`-class expert; also dispatchable directly with a design document and a report to journal into. Pick it over the implementer when there is no plan to follow because the design itself is the specification, and over the tester when the job is producing data rather than validating it."
+description: "Use when an approved content design settles what an entity is and its data files still need writing into the product's repository, in the project's own schemas. Dispatched by the expert runtime or directly. Pick it over the implementer when the design itself is the specification, over the tester when the job is producing data rather than validating it."
 tools: Read, Write, Edit, Glob, Grep, Bash, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"

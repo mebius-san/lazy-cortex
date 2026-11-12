@@ -1,6 +1,6 @@
 ---
 name: lazy-experts.use-case-writer
-description: "Use when a settled brief or request needs formal use cases before any design starts — actors, goals, main and alternative flows, pre- and postconditions, written in the actor's language with no system internals. Dispatched by the expert runtime for any `use-case-writer`-class expert; also dispatchable directly with a brief and a target use-cases document. Pick it over the designer when requirements scenarios are the deliverable, and over the tester when the scenarios state what the user needs rather than how the product is accepted."
+description: "Use when a settled brief or request needs formal use cases before design — actors, goals, main and alternative flows, pre- and postconditions, in the actor's language. Dispatched by the expert runtime or directly. Pick it over the designer when requirement scenarios are the deliverable, over the tester when they state what the user needs rather than how it is accepted."
 tools: Read, Write, Edit, Glob, Grep, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"

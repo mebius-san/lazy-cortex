@@ -1,6 +1,6 @@
 ---
 name: lazy-observe.audit
-description: "Run when metrics stopped reaching the observer, a dashboard went flat, an alert says the shipper is down, or the operator asks whether metrics shipping is healthy on this host. Delegated from `lazy-core.doctor` Phase 3. Read-only end-to-end check of the service unit, agent process, local `/metrics` endpoints, remote_write success, observer reachability, and WAL size — it reports findings with PASS / INFO / WARN / FAIL, each carrying its own repair route, and never applies them."
+description: "Run when metrics stopped reaching the observer, a dashboard went flat, an alert says the shipper is down, or the operator asks whether metrics shipping is healthy on this host. Delegated from `lazy-core.doctor`. Read-only end-to-end check that names a repair route per finding and never applies it."
 allowed-tools: Read, Glob, Bash(launchctl *), Bash(systemctl *), Bash(curl *), Bash(test *), Bash(date *), Bash(ps *), Bash(du *), Bash(uname *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(git rev-parse*), Write, Agent
 ---
 # Audit lazy-observe

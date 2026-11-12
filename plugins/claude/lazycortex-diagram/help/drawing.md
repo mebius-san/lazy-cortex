@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Insert new diagrams and re-conform existing ones — dispatcher picks kind/format, writer agents render against shipped templates and schemes.
-last_regen: 2026-09-24
+last_regen: 2026-11-12
 diagram_spec:
   anchor: "How draw and fix route a request"
   request: "Flow showing the dispatch path: user invokes draw or fix → dispatcher validates inputs and resolves kind/format → format-compatibility check → writer agent selected (mermaid or ASCII) → byte-compare → fence written or skipped. Include the split-into-N and skipped-below-threshold outcomes as exit branches."
@@ -10,8 +10,8 @@ source_skills:
   - lazy-diagram.fix
   - lazy-diagram.draw-mermaid
   - lazy-diagram.draw-ascii
-source_sha: a74bbe01a78ba5e04c41da9ccd512bb80b7a44d5
-surface_sha: a7bd90089afe82a8673b43aec46db4e85c24f1b551fc5a894000ab1316edf9bf
+source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
+surface_sha: a5c6f1c67c0b117156a9a20ef0753d604e77f05e9ca06d018d93cd0d45f55484
 ---
 # Insert and refresh diagrams in your documentation
 

@@ -1,15 +1,15 @@
 ---
 chapter_type: walkthrough
 summary: Register a dot-namespaced periodic routine with the runtime daemon and remove it cleanly when it is no longer needed.
-last_regen: 2026-11-10
+last_regen: 2026-11-12
 diagram_spec:
   anchor: "How registration and pickup flow"
   request: "Sequence diagram showing the user running /lazy-routine.register, the skill writing lazy.settings.json, the daemon picking up the new routine on its next cycle without restart, and the user later running /lazy-routine.unregister to remove it. Include the built-in protection check for lazy-expert.pump."
 source_skills:
   - lazy-routine.register
   - lazy-routine.unregister
-source_sha: 95a6f5224213cc4af073635a199aa35b8e68949b
-surface_sha: f1f4aa9e5a9927a1dad7e6b6a502152333c32c94308c520ed5a43099a2676f4d
+source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
+surface_sha: 041165a53d882ef553619a2ad634203669193049e619c1878e3b27487bf4807b
 ---
 # Register a periodic routine with the runtime daemon
 
@@ -64,7 +64,7 @@ Command:      ["python3", "bin/review_tick.py"]
 interval_sec: 300
 ```
 
-For an `inbox` routine the wizard additionally checks whether `inbox_dir` is gitignored. If it is not, it offers to append the path to `.gitignore` — accept this. Inbox routines remove a file from the directory once its dispatched job succeeds; a tracked inbox directory would then dirty the working tree and trip the daemon's halt protection. If your expert can report the reserved `deferred` outcome for this routine's work, set `deferred_retry_sec` to match how long you expect the blocking condition to take to resolve — the default of one day is a sensible starting point for anything that waits on a human or an external process.
+For an `inbox` routine the wizard additionally checks whether `inbox_dir` is gitignored. If it is not, it asks whether to add `<inbox_dir>/` to `.gitignore` now (recommended), continue anyway and commit the moves yourself, or abort the registration — accept the recommended option. The `.gitignore` change is left uncommitted for you to commit when ready. Inbox routines remove a file from the directory once its dispatched job succeeds; a tracked inbox directory would then dirty the working tree and trip the daemon's halt protection. If your expert can report the reserved `deferred` outcome for this routine's work, set `deferred_retry_sec` to match how long you expect the blocking condition to take to resolve — the default of one day is a sensible starting point for anything that waits on a human or an external process.
 
 For an `md-scan` routine the wizard asks for the glob list, the optional frontmatter filter dict, and the dispatch shape. Use a `**` segment in a glob (e.g. `requests/**/*.md`) when the routine should sieve an entire directory tree rather than one flat directory. A `null` value in the filter's `in` list matches files where the key is absent — useful for picking up files that have never been processed (e.g. `{"frontmatter": {"request_status": {"in": [null, "draft"], "not_in": []}}}`).
 
@@ -72,7 +72,9 @@ For a `git` routine, supply `watch` (one of `new_commits` / `new_files` / `chang
 
 After the type-specific fields and the `command`/`expert`+`request` question, the wizard asks about the three shared fields — `hooks_enabled`, `ignore_halt`, `git_author`. Accept the defaults (all unset) unless your routine's command needs a specific hook, needs to keep ticking through a daemon halt, or commits under its own bot identity.
 
-The skill validates the `<plugin>.<verb>` (or `<plugin>.<verb>.<scope>`) naming pattern and the per-type schema before writing anything. If validation fails it aborts with a clear message — fix the reported field and re-run.
+The `group` setting is rejected together with `new_commits`, a boolean `group` value fails validation, and the retired `group_globs` key is no longer accepted — use `group` with a list of directory globs instead.
+
+The skill validates the `<plugin>.<verb>` (or `<plugin>.<verb>.<scope>`) naming pattern and the per-type schema before writing anything. If validation fails it aborts with a clear message and nothing is written — fix the reported field and re-run. If `.claude/lazy.settings.json` is read-only or missing, the write fails; re-run `/lazy-core.install` to bootstrap it and check its permissions.
 
 ### Step 3 — Confirm the routine is registered
 
@@ -83,6 +85,8 @@ registered routine `<name>` (type=<type>, <key params>)
 ```
 
 To double-check, run `/lazy-core.doctor` to inspect the current routine registry, or attempt to re-run `/lazy-routine.register` with the same name — it refuses with "already registered", which confirms the entry exists.
+
+Registration never overwrites silently. To change an existing routine's shape you have two options: run `/lazy-routine.unregister` first and register again, or re-run `/lazy-routine.register` with `--force` to overwrite the entry in place. A plugin's install skill uses a third form, `--managed <key>,<key>`, which reconciles only the keys that plugin owns (its request template, path mask, filter block, protocol list) and leaves every other key — your answers — exactly as they stand. Keys the old entry never carried are filled in. In this mode the closing line reads `<outcome> routine <name> (managed: <keys>)`, where the outcome is `registered`, `refreshed`, or `unchanged`.
 
 ### Step 4 — Let the daemon pick it up
 

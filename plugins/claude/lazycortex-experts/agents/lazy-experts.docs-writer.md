@@ -1,6 +1,6 @@
 ---
 name: lazy-experts.docs-writer
-description: "Use when an approved design settles what the user gets and the product's user-facing documentation still needs writing — straight from the design document, with no plan in between. Dispatched by the expert runtime for any `docs-writer`-class expert; also dispatchable directly with a design document and a report to journal into. Pick it over the implementer when the deliverable is documentation rather than code, and over the fiction-writer when the text is user-facing product documentation rather than literary prose."
+description: "Use when an approved design settles what the user gets and the product's user-facing documentation still needs writing, straight from the design. Dispatched by the expert runtime or directly. Pick it over the implementer when the deliverable is documentation rather than code, over the fiction-writer when it is product docs rather than literary prose."
 tools: Read, Write, Edit, Glob, Grep, Bash, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"

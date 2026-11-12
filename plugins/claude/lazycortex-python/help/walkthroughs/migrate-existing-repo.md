@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Adopt lazycortex-python in a repo with pre-existing Python, run chk-py all to surface every drift violation (including pcf's language and project-package checks), then backfill Domain/Contract markers with knowledge-sweep.
-last_regen: 2026-11-10
+last_regen: 2026-11-12
 diagram_spec:
   anchor: "Migration flow"
   request: "Sequence diagram: user invokes /lazy-python.install in a repo with pre-existing Python → install runs its ordered steps fully automatically (mirror rules, deploy chk-py/tst-py wrappers, detect PyCharm, bootstrap pyproject.toml, scaffold overlay, sync scaffold template, record python.env_source with a one-time disambiguation prompt only when multiple bootstrap-script candidates exist, seed agent-model tiers, register the code-reviewer expert, log) → user runs chk-py all -q → the six-step gate (pcf, toi, cmp, mypy, ruff, pylint) surfaces existing violations, including pcf's language and project-package findings → user fixes violations in chunks and commits iteratively until chk-py all exits clean → user dispatches lazy-python.knowledge-sweep to grow the domain-groups dictionary from any parked Domain(unfiled) blocks the fixes surfaced and file them under real groups"
@@ -12,8 +12,8 @@ source_skills:
   - pcf.py
   - lazy-python.knowledge-sweep
   - lazy-python.contract-writer
-source_sha: 2a09f47e1d9e777cff05b9a3c2c3d132fe1c3555
-surface_sha: 30a446bccc45cae94f9ffd077635e9722826a5e0955057361bc8d1a757e8bf10
+source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
+surface_sha: 015abd7187280a2e8707c5c05bf336b8a02f3d455eaaf755791ea6bd302ab388
 ---
 # Adopt the plugin in a repo with pre-existing Python that drifted from the canon
 

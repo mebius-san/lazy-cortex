@@ -1,6 +1,6 @@
 ---
 name: lazy-diagram.audit
-description: "Run when the operator asks to audit the lazycortex-diagram plugin itself — after authoring or editing a template under `templates/diagram.*/` or a `styles-*.json` scheme, or when drawn diagrams come out with unbound roles, a missing init block, or an exemplar that no longer matches the authoring rule. Delegated from `lazy-core.doctor` Phase 3. Audits the plugin's own shipped templates and schemes, never a diagram in your docs — a stale fence in a document is `/lazy-diagram.fix`. Read-only: it reports `PASS` / `INFO` / `WARN` / `FAIL` with the repair route named per finding and writes nothing."
+description: "Run when the operator asks to audit the lazycortex-diagram plugin itself — after editing a template under `templates/diagram.*/` or a `styles-*.json` scheme, or when drawn diagrams come out with unbound roles or a missing init block. Read-only; it checks the shipped templates and schemes, never a diagram in your docs — a stale fence in a document is `/lazy-diagram.fix`."
 allowed-tools: Read, Glob, Grep, Bash, Agent, Write
 ---
 # lazy-diagram.audit

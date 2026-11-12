@@ -1,6 +1,6 @@
 ---
 name: lazy-wiki.terms
-description: "Use when an expert or a live session is about to name a concept in a document and needs the repository's agreed word for it — the research skill that answers 'what do we call this here?' from the scope's terms dictionary. Two modes: look up one term's definition, or check a name you are about to coin against the terms already taken. Returns only the matching entries, never the whole dictionary; it never writes to the dictionary."
+description: "Use when an expert or a live session is about to name a concept in a document and needs the repository's agreed word for it — the research skill that answers 'what do we call this here?' from the scope's terms dictionary. It looks up one term or checks a name about to be coined, and returns only the matching entries."
 research: true
 allowed-tools: Read, Grep, Agent
 execution-discipline-waiver: "nested-from-agent — invoked from a writing expert's body mid-document; a numbered step list here would re-anchor the caller and drop its own remaining steps"

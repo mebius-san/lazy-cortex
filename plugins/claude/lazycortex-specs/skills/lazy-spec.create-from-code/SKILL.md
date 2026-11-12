@@ -1,6 +1,6 @@
 ---
 name: lazy-spec.create-from-code
-description: Use when generating a specification FROM an existing codebase for an already-registered, code-bound product — fans heavy source scanning out to parallel Explore agents, then writes a behavior-only product design doc and a narrow product tech doc naming the stack and platforms read off the code's manifests. Product mode documents the product itself and places candidates by semantic area, registering an area as a nested product when the operator says so; feature mode scaffolds one feature-candidate through lazy-spec.create-asset with `--empty` and authors its documents from the same code scan, asking the operator nothing the code already answers. Requires the product to be registered with a `source` binding via /lazy-spec.product-config first.
+description: "Use when the operator asks to write a spec FROM existing code — 'spec this codebase', 'document this product from its source', 'spec this feature from the code' — for a product already registered with a `source` binding via /lazy-spec.product-config. Pick it over /lazy-spec.sync-with-code when no spec exists yet; sync updates one that does."
 allowed-tools: Read, Glob, Grep, Bash, Edit, Write, Skill, AskUserQuestion, Agent
 ---
 # Create Spec from Code

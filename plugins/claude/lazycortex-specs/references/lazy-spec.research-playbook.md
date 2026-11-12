@@ -42,12 +42,11 @@ The gates remain a strict ladder — `spec_released` requires `spec_design_done`
 
 **Seed-then-start.** The single mechanic for every `Write` row of this table: a tick is never a writer job. The coordinator seeds the one document with `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> seed-doc <product> <folder-note-path> --doc <name>:<type>` — the type's template chain, stage `empty`, the folder-note's `spec_source_requests` copied onto the doc — and then opens its review immediately with `Skill(lazycortex-review:lazy-review.start, "<doc>")`, whether or not the folder-note carries any `## Source requests` entry. The class's main writer works round 1 from whatever exists: the request(s) `context_from_frontmatter` resolves from the doc's own attribution, when there are any, and the documents its research aspect obliges it to read every time — the asset's own approved siblings and the system documents of the product chain. With neither a request nor an approved document above it, the writer starts from the asset's folder-note and raises what it cannot ground as in-document `[!question]` callouts. The coordinator never waits for the operator to write a first draft; an operator who edits the document does so during the review, as an ordinary operator edit.
 
-No architecture checkbox and no plan checkbox ever hang on this type: research introduces no shape of code, and nothing is planned or built. `Start research` is a writer-launch row exactly like `Write design`, declared here and nowhere else: its tick seeds the report and opens its review, and the researcher writes `research.md` inside the loop with the approved design as its source. No `Publish` row hangs either — the approval of the report closes `spec_released` on the same wake. Block shape in `# Gates` is the common one:
+No architecture checkbox and no plan checkbox ever hang on this type: research introduces no shape of code, and nothing is planned or built. `Start research` is a writer-launch row exactly like `Write design`, declared here and nowhere else: its tick seeds the report and opens its review, and the researcher writes `research.md` inside the loop with the approved design as its source. No `Publish` row hangs either — the approval of the report closes `spec_released` on the same wake. Callout shape in `# Gates` is the common one (`lazy-spec.coordination-playbook.md` Chapter 5); `Start` has no fixed footer, so the callout closes on its last checkbox:
 
 ```
-> [!gate] Start research
+> [!gate] Start
 > - [ ] Start research
-> tick to dispatch: researcher writes research.md from design.md
 ```
 
 ## Work that grows out of research

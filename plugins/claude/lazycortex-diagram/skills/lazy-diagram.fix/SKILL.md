@@ -1,6 +1,6 @@
 ---
 name: lazy-diagram.fix
-description: "Use when a diagram fence that already exists has drifted from the current contract — hardcoded palette, missing theme directive, node labels that no longer match the prose around them — or when `/lazy-diagram.audit` offers to repair an offending file. Infers (kind, format) from the fence's syntax marker, re-renders it against the host section's prose, and replaces it in place. For inserting a NEW fence under a heading, see `/lazy-diagram.draw`."
+description: "Use when a diagram fence that already exists has drifted from the current contract — hardcoded palette, missing theme directive, node labels that no longer match the prose around them — or when `/lazy-diagram.audit` offers to repair an offending file. Re-renders the fence in place; for inserting a NEW fence under a heading, see `/lazy-diagram.draw`."
 allowed-tools: Read, Write, Edit, Bash, Agent
 ---
 # lazy-diagram.fix

@@ -1,6 +1,6 @@
 ---
 name: lazy-obsidian.iconize-sync
-description: "Use when a note's or folder's icon is stale and must be re-resolved from the icon-map — after editing `.claude/iconize/obsidian-icon-map.json`, after a bulk frontmatter or stage change, or when files were written via Bash and bypassed the hooks (`reconcile-dirty`). Also invoked non-interactively by the plugin's PostToolUse hook and the `lazy-obsidian.repaint` daemon routine. Writes only `iconize_icon` / `iconize_color` frontmatter — never Iconize's `data.json`."
+description: "Use when a note's or folder's icon is stale and must be re-resolved from the icon-map — after editing `.claude/iconize/obsidian-icon-map.json`, after a bulk frontmatter or stage change, or when files were written via Bash and bypassed the hooks."
 allowed-tools: Read, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Write, Agent
 argument-hint: "<subcommand> [args] | sync <path> | sync-paths <path>... | reconcile [--prefix PATH] | reconcile-plugin <plugin> | reconcile-dirty | reconcile-commit [<sha>] | check-versions"
 execution-discipline-waiver: "thin dispatcher to iconize_sync.py — discipline belongs in the Python worker, not the SKILL.md"

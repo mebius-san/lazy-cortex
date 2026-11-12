@@ -1,6 +1,6 @@
 ---
 name: lazy-obsidian.install
-description: "Run when the operator asks to set up Obsidian for this repo or to wire up a fresh vault, and again after a plugin update so new artifacts land. Also the answer when tag pages render empty (Dataview missing), the tag-page template isn't in `.claude/templates/`, icons are unpainted, or diagrams render unstyled — at project scope this is the plugin family's root entry point and chains `/lazy-obsidian.iconize-install` and `/lazy-obsidian.diagram-install`. Idempotent; install scope is detected, not asked."
+description: "Run when the operator asks to set up Obsidian for this repo or wire up a fresh vault, after a plugin update, or when tag pages render empty, the tag-page template is missing from `.claude/templates/`, icons are unpainted, or diagrams render unstyled. The plugin family's root entry point; it chains `/lazy-obsidian.iconize-install` and `/lazy-obsidian.diagram-install`."
 allowed-tools: Read, Write, Edit, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(ls *), Bash(date *), Bash(diff *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), AskUserQuestion, Skill, Agent
 ---
 # Install lazycortex-obsidian

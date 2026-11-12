@@ -1,6 +1,6 @@
 ---
 name: lazy-obsidian.audit
-description: "Run when the operator asks whether this vault's live Obsidian config still matches its captured manifest — icons or plugin settings changed by hand, a plugin updated past its captured version, or after pulling a checkout onto a new machine. Delegated from `lazy-core.doctor` Phase 3. Read-only comparison of `.obsidian.manifest.json` against the live config directory: every finding names both repair routes — `/lazy-obsidian.capture` when the vault is right, `/lazy-obsidian.deploy` when the manifest is — and the audit runs neither."
+description: "Run when the operator asks whether this vault's live Obsidian config still matches its captured manifest — icons or plugin settings changed by hand, a plugin updated past its captured version, or a checkout pulled onto a new machine. Delegated from `lazy-core.doctor` Phase 3. Read-only; repairs are `/lazy-obsidian.capture` or `/lazy-obsidian.deploy`."
 allowed-tools: Read, Write, Glob, Grep, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(test *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Agent
 argument-hint: "(no arguments — runs the vault-manifest drift check)"
 ---

@@ -1,6 +1,6 @@
 ---
 name: lazy-spec.request-find-candidates
-description: "Dispatched by the `spec.catalog-coordinator` agent in its routing mode, after `lazy-spec.request-classify` has settled the class, to find the existing features / changes / bugs a request could attach to; not for direct use. Read-only — returns a ranked list with rationale that the coordinator turns into its attach-vs-spawn decision."
+description: "Dispatched by the `spec.catalog-coordinator` agent in routing mode to find assets a request could attach to; not for direct use."
 execution-discipline-waiver: "Single-purpose primitive — read-only search; no multi-phase orchestration."
 ---
 # Find candidate entities for a request

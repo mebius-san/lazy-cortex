@@ -112,11 +112,11 @@ Grouped by the surface that writes it. Author is one of the closed set `dispatch
 | Decision statement | `[!decision] #spec/decision` | expert (review writer) | thesis-line title; justification prose; optional `**Supersedes.**` line |
 | Decision candidate | `[!decision-candidate]` | executing expert | one-line thesis naming the call taken; accept/reject `- [ ]` pair |
 | Gate flip record | `[!gate]` (flip form) | dispatcher | gate key, `— flipped <date> (<reason>)` |
-| Launch checkbox | `[!gate]` (checkbox form) | dispatcher | one label from a closed set; a `- [ ]` / `- [x]` line |
+| Launch checkbox | `[!gate]` (checkbox form) | dispatcher | the rows' verb as title; one `- [ ] <label>` / `- [x] <label>` line per row; one footer behind a bare `>` |
 | Halt notice | `[!failure]` | dispatcher | `asset halted: <reason>` |
 | Stage mirror tag | `#spec/<stage>` | dispatcher | — |
 
-`[!gate]` carries two forms under one type, not two roles: a flip-record callout the gate primitive appends on every flip, and a launch-checkbox block a human ticks to request the next expert job. The two never collide — a flip record's head line names the gate plus `— flipped …`; a checkbox block's head line is the bare closed-set label, nothing else.
+`[!gate]` carries two forms under one type, not two roles: a flip-record callout the gate primitive appends on every flip, and a launch-checkbox callout holding the rows of one verb, each a checkbox a human ticks to request the next expert job. The two never collide — a flip record's head line names the gate plus `— flipped …`; a checkbox callout's head line is the bare verb its rows share (in an older note, the bare label of its one row), nothing else.
 
 ### Requests
 

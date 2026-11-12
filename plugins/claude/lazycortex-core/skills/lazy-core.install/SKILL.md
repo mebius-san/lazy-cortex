@@ -1,6 +1,6 @@
 ---
 name: lazy-core.install
-description: "Run when the operator asks to set up lazycortex-core in a repo (or globally), or when core artifacts are missing — the plugin's rules are not in `.claude/rules/`, `lazy.settings.json` has no runtime section, `.experts/` is not initialised. Installs this plugin only; `/lazy-core.setup` is the one that runs every plugin's install. Never sets up the background daemon — that is `/lazy-core.daemon-setup`. Idempotent and quiet on re-run — decisions are persisted and never re-asked."
+description: "Run when the operator asks to set up lazycortex-core in a repo (or globally), or when core artifacts are missing — the plugin's rules are not in `.claude/rules/`, `lazy.settings.json` has no runtime section, `.experts/` is not initialised. Installs this plugin only; `/lazy-core.setup` runs every plugin's install, and `/lazy-core.daemon-setup` sets up the daemon."
 allowed-tools: Read, Write, Edit, AskUserQuestion, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git init*), Bash(cp *), Bash(rm *), Bash(test *), Bash(ls *), Bash(find *), Bash(date *), Bash(diff *), Bash(cmp *), Bash(jq *), Bash(chmod *), Bash(launchctl *), Bash(systemctl *), Bash(python3 *), Bash(python *), Bash(py *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
 ---
 # Install lazycortex-core

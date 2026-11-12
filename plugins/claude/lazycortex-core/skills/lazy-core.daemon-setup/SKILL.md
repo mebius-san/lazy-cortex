@@ -1,6 +1,6 @@
 ---
 name: lazy-core.daemon-setup
-description: "Use when the operator wants a background daemon to drive this project, wants to move the daemon to another machine or checkout, or wants its Prometheus metrics endpoint — or when the daemon never starts because no supervisor unit was installed. Sets `daemon.enabled` and `daemon.run_here`, installs or removes the launchd / systemd unit, and provisions metrics. `/lazy-core.install` never touches the daemon; this skill is the one that does, and it is run rarely."
+description: "Use when the operator wants a background daemon to drive this project, wants to move the daemon to another machine or checkout, or wants its Prometheus metrics endpoint — or when the daemon never starts because no supervisor unit was installed. `/lazy-core.install` never touches the daemon; this skill is the one that does."
 allowed-tools: Read, Write, AskUserQuestion, Bash(mkdir -p *), Bash(git rev-parse*), Bash(ls *), Bash(grep *), Bash(rm *), Bash(launchctl *), Bash(systemctl *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
 dirty-tree-waiver: "writes the daemon gates and metrics design into the tracked lazy.settings.json — the operator commits them, as with /lazy-core.install"
 ---

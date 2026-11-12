@@ -1,6 +1,6 @@
 ---
 name: lazy-wiki.tag-curator
-description: "Dispatch when one tag surface's axis values need consolidating into a canon (kind=normalize-tags) — a wiki scope, or the generated domain-doc tree — as the `tag-tick` dispatch does on its schedule and `/lazy-wiki.relink` does mid-run. One surface per job: it judges the canonical axis-value set and glosses the values the dictionary lacks, then hands both to the deterministic `tag-apply` verb (C-hybrid, no collector), which retags the surface and brings the advisory tag-values dictionary in line. The tail flag (default true) decides what the verb carries. tail:true (daemon path): reads its job dir (request.json + context/collected_tags.json) and passes it to the verb, which also rebuilds the index, commits and writes response.json. tail:false (skill path): no job dir — reads the params named in the dispatch prompt, applies, then stops (the skill owns build-index/commit). Has Bash; rewrites tags and the dictionary only via tag-apply, never by hand."
+description: "Dispatch when one tag surface's axis values need consolidating into a canon (kind=normalize-tags) — a wiki scope or the generated domain-doc tree — from the `tag-tick` schedule or `/lazy-wiki.relink` mid-run. Classifying and See-also linking a single node is the sibling `lazy-wiki.curator`'s job."
 tools: Read, Write, Edit, Glob, Grep, Bash, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response-per-job expert — one job dir in, one response.json out; the dispatching routine + tag-curator protocol are the contract"

@@ -1,15 +1,15 @@
 ---
 chapter_type: block
 summary: Keep specs aligned with the product's code — sync the whole spec tree, one product or one asset with the code, and gap-scan for capabilities no asset documents.
-last_regen: 2026-11-10
+last_regen: 2026-11-12
 diagram_spec:
   anchor: "How the two skills relate"
   request: "Decision-tree showing when to reach for lazy-spec.sync-with-code vs lazy-spec.coverage — inputs are 'code changed since last sync' and 'looking for capabilities the spec tree never documented'; outputs are document rewrites, created and deleted assets, gate proposals, and gap-candidate reports with proposed category+slug."
 source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.coverage
-source_sha: 366f9a33136b31f461b921c6831415c2a11407ca
-surface_sha: 1b2824d42a3c13abf876f442a37912a4f6669f3df690e109dec525a2ce03d298
+source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
+surface_sha: 7443616a8710e447555d3559c8814ed60787902a62557f15f3ad7bd87ed93ead
 ---
 # Keeping specs aligned with source code
 

@@ -1,6 +1,6 @@
 ---
 name: lazy-spec.coherence-checker
-description: "Dispatched by the spec coordinators through `coherence-dispatch` after a spec document is approved or re-approved; not for direct use. Reads the approved document and its approved neighbours and returns, as `result/conflicts.json`, every contradiction the approved document is a party to — two documents promising incompatible things. Read-only: it edits no document, hangs no callout and raises no question; `coherence-apply` turns its result into conflict callouts."
+description: "Dispatched by the spec coordinators through `coherence-dispatch` after a spec document is approved; not for direct use."
 tools: Read, Glob, Write, Edit, Agent
 model: inherit
 execution-discipline-waiver: "single-response-per-job expert — one job dir in, one conflicts.json and one response.json out; lazy-spec.coherence-protocol is the contract"

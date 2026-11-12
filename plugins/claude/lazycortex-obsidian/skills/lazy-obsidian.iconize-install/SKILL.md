@@ -1,6 +1,6 @@
 ---
 name: lazy-obsidian.iconize-install
-description: "Run when the operator asks to set up folder and file icons in this Obsidian vault, or when `/lazy-obsidian.iconize-sync` refuses because the icon-map is missing, or the Iconize / folder-notes / iconize-reloader vault plugins aren't there. Scaffolds the vault-side pieces (icon-map, gitignore entry, schema migration, repaint routine) and installs those three plugins. Chained from `/lazy-obsidian.install`; idempotent, and must be run from the vault's git root."
+description: "Run when the operator asks to set up folder and file icons in this Obsidian vault, or when `/lazy-obsidian.iconize-sync` refuses because the icon-map is missing or the Iconize / folder-notes / iconize-reloader vault plugins aren't there. Chained from `/lazy-obsidian.install`; run from the vault's git root."
 allowed-tools: Read, Write, Edit, Glob, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git ls-files*), Bash(git -C *), Bash(chmod *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(cp *), Bash(test *), Bash(date *), Bash(rm *), AskUserQuestion, Agent
 argument-hint: "[repo=<abs>] [--dry-run] — scaffolds into <repo-root>/.claude/ (repo= sets the target under headless dispatch)"
 ---

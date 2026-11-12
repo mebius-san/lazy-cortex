@@ -1,6 +1,6 @@
 ---
 name: lazy-spec.lookup
-description: "Use when an agent doing research over the spec tree — an expert following its research aspect, a subagent gathering context before writing, or the operator asking where something lives in specs or what depends on it — needs a bounded slice of the spec tree around a product or asset: a question or token plus an optional product/asset anchor, returning matching paths with short excerpts, never whole documents."
+description: "Use when an agent doing research over the spec tree, or the operator asking where something lives in specs or what depends on it, needs a bounded slice around a product or asset — a question or token plus an optional anchor, returning matching paths with short excerpts, never whole documents."
 research: true
 ---
 # lazy-spec.lookup

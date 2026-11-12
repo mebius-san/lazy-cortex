@@ -1,6 +1,6 @@
 ---
 name: lazy-wiki.structure
-description: "Use when an agent doing research (an architect deciding where a new file belongs, any expert asking 'where does X live in this repo') needs the project's structure map, or when the operator asks to resync `docs/structure.md` with the tree after files moved. Two modes: `rebuild` walks the tracked tree and rewrites the map; `query [<path>]` returns just the slice under `<path>` — the whole file is never loaded into the caller's context."
+description: "Use when an agent doing research (an architect deciding where a new file belongs, any expert asking 'where does X live in this repo') needs the project's structure map, or when the operator asks to resync `docs/structure.md` after files moved. `query [<path>]` returns just the slice under `<path>`; `rebuild` rewrites the map."
 research: true
 allowed-tools: Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(git ls-files *), Bash(git add -N *), Bash(git commit *), Bash(git rev-parse *), Bash(test -f *), Bash(mkdir -p *), Bash(date -u *)
 ---

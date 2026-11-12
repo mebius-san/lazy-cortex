@@ -1,6 +1,6 @@
 ---
 name: lazy-python.install
-description: "Run when the operator asks to set up Python tooling in a repo, after a lazycortex-python update, or when `/lazy-python.audit` reports missing rules, wrappers, pyproject checker sections, or overlay guidelines. Also the fix whenever `chk-py` / `tst-py` aren't on hand in a repo that should have them. Idempotent and near-silent — it asks only on a genuine file conflict or when several env-bootstrap scripts are candidates."
+description: "Run when the operator asks to set up Python tooling in a repo, after a lazycortex-python update, when `chk-py` / `tst-py` aren't on hand in a repo that should have them, or when `/lazy-python.audit` reports missing rules, wrappers, pyproject checker sections, or overlay guidelines."
 allowed-tools: Bash, Read, Edit, Write, Glob, Grep, AskUserQuestion, Agent
 user-invocable: true
 ---

@@ -1,6 +1,6 @@
 ---
 name: lazy-log.timeline
-description: "Use when the user wants what happened when — 'what changed last week', 'everything on hooks since 2026-03-01', 'walk me through the last two weeks'. Returns one date-ordered list of changes matching a date range and/or topic, merged from commits and AI run logs. Pick this over `lazy-log.recall` (ranked matches for one specific change) and `lazy-log.summary` (thematic narrative, no dates) when chronology is the point."
+description: "Use when the user wants what happened when — 'what changed last week', 'everything on hooks since 2026-03-01', 'walk me through the last two weeks'. Pick this over `lazy-log.recall` (ranked matches for one change) and `lazy-log.summary` (thematic narrative, no dates) when chronology is the point."
 tools: Read, Glob, Grep, Bash, Skill, Agent
 model: inherit
 ---

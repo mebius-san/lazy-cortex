@@ -100,6 +100,10 @@ def migrate(repo: Path, *, dry_run: bool = False) -> dict:
   Returns:
     `{"changed", "skipped"}` — the notes rewritten and the notes already current, each a list of paths relative to
     the settings root, in walk order.
+
+  Raises:
+    FileNotFoundError: When no settings file lies at or above `repo`.
+    VaultRootError: When `spec.vault_root` names no sub-directory of the settings root.
   """
 
   # Contract:
@@ -107,7 +111,7 @@ def migrate(repo: Path, *, dry_run: bool = False) -> dict:
   # MUST keep its bytes and order. A dry run MUST write no file, and running the verb again over its own output MUST
   # change nothing.
 
-  settings_root = spec_paths.find_settings_root(repo)
+  settings_root = spec_paths.require_settings_root(repo)
   result: dict = { _CHANGED_KEY: [], _SKIPPED_KEY: [] }
 
   # every markdown file under the content root, in a stable order
@@ -279,6 +283,10 @@ def main(argv: list[str]) -> int:
   # "nothing to do"; an uncaught error would exit 1 too, so every failure must leave as exit 2
   except Exception as error:  # pylint: disable=broad-exception-caught
     # an unreadable catalog, malformed settings, or any other fault is not an answer and must never look like one
+    sys.stderr.write(f"migrate-notes: {error!r}\n")
+    return _EXIT_FAILED
+  # a refused content root is a `BaseException` the broad catch above lets through; it fails the run the same way
+  except spec_paths.VaultRootError as error:
     sys.stderr.write(f"migrate-notes: {error!r}\n")
     return _EXIT_FAILED
 

@@ -12,13 +12,13 @@ cascades into its targets. This worker keeps only the four concerns no LLM needs
   layout, read file-wise — never imported across the plugin boundary) checked on every tick.
   `DONE` lands the job's `result/` into the asset folder through the `land-result` collector —
   the only channel a job's document and attachments take into the catalog — then clears the
-  marker, logs a `# History` line, and retires the bundle (`gate_dispatch.consume_stale_job`,
-  freeing its dedup key so the checkbox can be re-dispatched); `CANCELLED` does the same without
-  the landing; `DEAD` additionally sets `spec_halted: true` and appends a persistent `[!failure]`
+  marker and retires the bundle (`gate_dispatch.consume_stale_job`, freeing its dedup key so the
+  checkbox can be re-dispatched), writing nothing into the folder-note; `CANCELLED` does the same
+  without the landing; `DEAD` additionally sets `spec_halted: true` and appends a persistent `[!failure]`
   callout to `# Gates` (un-halting is a manual operator act, out of scope here), leaving its
-  bundle unretired for diagnostics. Every clear also raises `pending_wake: job-done` in the sidecar — that flag,
-  not a diff of the clearing commit, is what makes the transition visible to
-  `coordinator_dispatch.py`'s own `job-done` trigger. This worker opens no review itself; the
+  bundle unretired for diagnostics. Every clear also raises `pending_wake: job-done` in the sidecar, and that
+  flag is the whole wake: the `collect-tick` postman sweep dispatches the coordinator on it directly, with no
+  commit behind it. This worker opens no review itself; the
   coordinator opens it with `lazy-review.submit` on the `job-done` wake this same poll raises.
 - Coordinator-job polling (`spec_job_markers.py`'s `coordinator_job`): the same terminal-marker
   check, applied to the coordinator's own one-job-per-asset slot instead. `DONE` / `CANCELLED` retire the
@@ -598,8 +598,8 @@ def apply_job_marker(
 
   Every marker retires the tracked job and raises a `job-done` wake for the coordinator to act
   on. `DONE` lands the job's `result/` into the asset folder — undelivered when the job left
-  nothing to land — and appends a `# History` line recording the outcome; `CANCELLED` appends the
-  same kind of line with nothing to land. `DEAD` instead halts the asset, appending a persistent
+  nothing to land — and leaves the folder-note untouched; `CANCELLED` leaves everything untouched
+  but the job's own records. `DEAD` instead halts the asset, appending a persistent
   `[!failure]` callout to `# Gates` that stays until an operator resolves it by hand, and leaves
   the job bundle in place for diagnostics. Deciding what happens next on the asset — dispatching a
   replacement job, reacting to the halt — is `spec.coordinator`'s call; this pass only records the
@@ -620,16 +620,16 @@ def apply_job_marker(
     marker: The terminal marker found in the job's bundle directory (`"DONE"` / `"DEAD"` /
       `"CANCELLED"`).
     job_info: The tracked active-job marker (`checkbox` / `expert` / `job_id`).
-    today_str: ISO date string pinned into the callout and history line.
+    today_str: ISO date string pinned into the halt callout.
 
   Returns:
     A result dict naming the applied `TickAction` plus the job's `checkbox` and `job_id`.
 
   Raises:
     RuntimeError: Propagated from `history_journal.append` when the core verb refuses or cannot
-      be resolved.
+      be resolved while journaling a halt.
     subprocess.CalledProcessError: Propagated from `commit_note_change` when staging or
-      committing the rewritten folder-note exits non-zero.
+      committing the halted folder-note exits non-zero.
   """
 
   # Contract:
@@ -642,64 +642,38 @@ def apply_job_marker(
   checkbox_label = job_info[JobMarker.CHECKBOX]
   job_id = job_info[JobMarker.JOB_ID]
 
-  # one language resolution serves every branch's narrative line (the resolver walks to the
-  # settings root and reads config)
-  note_lang = note_explainers.lang_for_note(asset_note)
-  fm_text = text[:fm_end]
-
   # the job is over on every branch: retire the marker and raise the wake the coordinator's
-  # `job-done` trigger reads, before the note write below that the wake will accompany
+  # `job-done` trigger reads; the postman sweep delivers it, so no note write has to carry it
   spec_job_markers.update(
       repo_root, asset_note,
       { JobMarker.ACTIVE_JOB: None, JobMarker.PENDING_WAKE: JobMarker.JOB_DONE },
   )
 
-  # only the body/action/subject differ per marker kind
+  # only DEAD touches the note; a finished or cancelled job leaves it as it is
   if marker == JOB_MARKER_DONE:
     # the job's document and attachments arrive only through `result/`: put them in the asset
     # folder and commit them here, so the document the coordinator submits into review on the
     # `job-done` wake this same call raises is already tracked
     _land_job_result(repo_root, asset_dir, job_info[JobMarker.EXPERT], job_id)
-
-    # the landing writes into the asset folder this call is about to edit, so the note text read
-    # before it is now stale — re-read it, or the write below would revert what just landed
-    text = spec_paths.read_text(asset_note)
-    _, fm_end = flip_gate.parse_frontmatter(text)
-    fm_text, body = text[:fm_end], text[fm_end:]
-
-    # the localized narrative tail of the History line, in the note's authoring language
-    done_tail = note_explainers.history_line_for_lang(note_lang, HistoryEvent.JOB_DONE,
-                                                      job_id = job_id, label = checkbox_label)
-    body = history_journal.append(body, done_tail, today_str, repo = repo_root)
     action = TickAction.JOB_DONE
-    subject = f"{_PROMOTE_AUTHOR_NAME}: job {job_id} ({checkbox_label}) done on {asset_dir.name}"
 
     # retire the bundle so its dedup key frees for a retry — same move the coordinator-job
     # branch already makes; the bundle's files stay on disk for the coordinator's wake to read
     gate_dispatch.consume_stale_job(repo_root, job_info[JobMarker.EXPERT], job_id)
   elif marker == _JOB_MARKER_CANCELLED:
-    # the localized narrative tail of the History line, in the note's authoring language
-    cancelled_tail = note_explainers.history_line_for_lang(note_lang, HistoryEvent.JOB_CANCELLED,
-                                                           job_id = job_id, label = checkbox_label)
-    body = history_journal.append(body, cancelled_tail, today_str, repo = repo_root)
-    action = TickAction.JOB_CANCELLED
-    subject = f"{_PROMOTE_AUTHOR_NAME}: job {job_id} ({checkbox_label}) cancelled on {asset_dir.name}"
-
     # a cancelled bundle is equally spent — retire it so the checkbox can be re-dispatched
+    action = TickAction.JOB_CANCELLED
     gate_dispatch.consume_stale_job(repo_root, job_info[JobMarker.EXPERT], job_id)
   else:
     # marker == JOB_MARKER_DEAD — halt the asset via the shared text-core primitive, in this
     # branch's own single write+commit (the marker clear above touched no note text)
     reason = HaltReason.JOB_DIED.format(job_id = job_id, label = checkbox_label)
     fm_text, body, _ = flip_gate.halt_asset_text(
-        fm_text, body, reason, today = today_str, lang = note_lang,
+        text[:fm_end], body, reason, today = today_str, lang = note_explainers.lang_for_note(asset_note),
     )
+    spec_paths.write_text_atomic(asset_note, note_explainers.heal_note_text(asset_note, fm_text + body))
+    commit_note_change(asset_dir, asset_note, f"{_PROMOTE_AUTHOR_NAME}: halt {asset_dir.name} — {reason}")
     action = TickAction.ASSET_HALTED
-    subject = f"{_PROMOTE_AUTHOR_NAME}: halt {asset_dir.name} — {reason}"
-
-  # one write, one commit, shared by every branch above
-  spec_paths.write_text_atomic(asset_note, note_explainers.heal_note_text(asset_note, fm_text + body))
-  commit_note_change(asset_dir, asset_note, subject)
 
   # the applied marker's action plus the job identity it acted on, for every branch above
   return {

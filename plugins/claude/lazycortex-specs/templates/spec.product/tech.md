@@ -19,7 +19,7 @@ spec_source_docs: []
 <!-- Optional. When the document has nothing to say here, the section is removed together with its heading. The terms this document uses, with their meaning. One line per term, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, and a term this document introduces is defined here first. A term the document does not use does not belong here. -->
 
 ## Stack
-<!-- The languages, runtimes, frameworks, libraries, and build and deployment tooling the product depends on. One bullet per technology, with the version the product commits to. A choice between alternatives is a `[!decision]` callout and lands in `decisions.md`. -->
+<!-- The languages, runtimes, frameworks, libraries, the unit-test framework with the command that runs it, and build and deployment tooling the product depends on. One bullet per technology, with the version the product commits to. A choice between alternatives is a `[!decision]` callout and lands in `decisions.md`. -->
 
 ## Platforms
 <!-- Where the product runs: operating systems, browsers or devices, hosting and cloud services, and deployment environments. One bullet per platform; an environment is listed only when it differs in technology. What runs there lives in Stack. -->

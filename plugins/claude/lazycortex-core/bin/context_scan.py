@@ -43,6 +43,15 @@ _PARALLEL_MARKERS = (
 )
 # A frontmatter key that scopes a rule to on-demand loading.
 _PATHS_KEY = "paths"
+# The frontmatter key a session lists for every skill, agent and command.
+_DESCRIPTION_KEY = "description"
+# Description length ceilings in characters: a plain one, a single-caller one, and the hard field limit.
+_DESCRIPTION_CHARS = 400
+_SINGLE_CALLER_CHARS = 150
+_DESCRIPTION_HARD_CHARS = 1024
+# The phrase that marks an artifact with a single caller, and the block a description must not carry.
+_SINGLE_CALLER_MARKER = "not for direct use"
+_EXAMPLE_MARKER = "<example>"
 # The memory index file and the note-tag vocabulary.
 _INDEX = "MEMORY.md"
 _TAG_PREFIX = "memory/"
@@ -99,6 +108,8 @@ class _Field:
   PATH = "path"
   BYTES = "bytes"
   KIND = "kind"
+  # A measured description's length in characters.
+  CHARS = "chars"
 
 
 def _split_frontmatter(text: str) -> tuple[str, str]:
@@ -200,17 +211,19 @@ def _scan_weight(cwd: Path, home: Path) -> dict:
 
   Returns:
     A mapping with the always-loaded files by descending size, the on-demand files with their kind, the
-    always-loaded byte total, and the severity level the total grades to.
+    always-loaded byte total, the severity level the total grades to, the graded descriptions of the skills,
+    agents and commands a session lists (longest first), and the total character count of those descriptions.
   """
 
   # Domain(unfiled):
   # # Always-loaded context and its budget
   # A session pays for some instructions on every turn and for the rest only when they are used. The operator and
   # project instruction files, the memory index and every rule that is not scoped to particular files are paid for
-  # every turn. A rule scoped to matching files, an agent, a skill, a command and a memory note cost nothing until
-  # they are touched. Only the always-loaded part is a budget: its total size is graded PASS up to 20 KB, WARN
-  # above 20 KB and up to 40 KB, and FAIL above 40 KB. Scoping a rule to the files it concerns is the way to move
-  # weight out of the budget.
+  # every turn. The bodies of a rule scoped to matching files, an agent, a skill and a command, and every memory
+  # note, cost nothing until they are touched; only the description of an agent, a skill or a command is listed
+  # every turn, and it has a budget of its own. Only the always-loaded files are this budget: their total size is
+  # graded PASS up to 20 KB, WARN above 20 KB and up to 40 KB, and FAIL above 40 KB. Scoping a rule to the files
+  # it concerns is the way to move weight out of the budget.
 
   # the load classes and the roots they are read from
   always: list[dict] = []
@@ -249,7 +262,101 @@ def _scan_weight(cwd: Path, home: Path) -> dict:
   always.sort(key = lambda item: item[_Field.BYTES], reverse = True)
   total = sum(item[_Field.BYTES] for item in always)
   level = _PASS if total <= _WEIGHT_WARN else (_WARN if total <= _WEIGHT_FAIL else _FAIL)
-  return { "always_loaded": always, "on_demand": on_demand, "always_total": total, "level": level }
+
+  # the descriptions every session lists are measured apart from the file budget
+  descriptions = _read_descriptions(cwd, home)
+  return {
+    "always_loaded": always, "on_demand": on_demand, "always_total": total, "level": level,
+    "descriptions": descriptions, "descriptions_total": sum(item[_Field.CHARS] for item in descriptions),
+  }
+
+
+def _find_all_described(cwd: Path, home: Path) -> list[tuple[str, Path]]:
+  """
+  List the skills, agents and commands whose descriptions a session lists.
+
+  Covers the project, the operator's home directory and every plugin the project ships.
+
+  Args:
+    cwd: Project root the session runs in.
+    home: Operator's home directory.
+
+  Returns:
+    Pairs of artifact kind (skill, agent or command) and entry file path, grouped by the root they were found in.
+  """
+  # the project and home settings directories, and every plugin tree a repo that ships plugins carries
+  roots = [ cwd / _Layout.CLAUDE_DIR, home / _Layout.CLAUDE_DIR ]
+  plugins = cwd.joinpath(*_Layout.PLUGINS)
+  if plugins.is_dir():
+    roots += [ plugins / name for name in sorted(os.listdir(plugins)) if (plugins / name).is_dir() ]
+
+  # each root contributes its skills, agents and commands
+  found: list[tuple[str, Path]] = []
+  for root in roots:
+    found += [ ( "skill", path ) for path in _find_all_skill_files(root / _Layout.SKILLS) ]
+    found += [ ( "agent", path ) for path in _find_all_md_files(root / _Layout.AGENTS) ]
+    found += [ ( "command", path ) for path in _find_all_md_files(root / _Layout.COMMANDS) ]
+  return found
+
+
+def _evaluate_description(text: str) -> dict:
+  """
+  Grade one description against the length ceilings and the example ban.
+
+  Args:
+    text: The description value.
+
+  Returns:
+    A mapping with the character count, whether the description marks a single caller, whether it carries an
+    example block, and the severity level the description grades to.
+  """
+
+  # Domain(unfiled):
+  # # Description length budget
+  # A session lists the name and description of every skill, agent and command on every turn, so a description
+  # is paid for whether or not the artifact is ever used. A description states when to invoke the artifact and,
+  # at most, what sets it apart from a sibling. One that marks its artifact as not for direct use has a single
+  # caller and needs only to name it, so it gets at most 150 characters, about one sentence. Any other description
+  # gets at most 400 characters. Going over either ceiling is a warning, and so is an example block, which is
+  # never part of a description. More than 1024 characters breaks the field limit of the skill format and fails.
+
+  # the facts the grade rests on: the length, the single-caller marker and an example block
+  chars = len(text)
+  single = _SINGLE_CALLER_MARKER in text.lower()
+  example = _EXAMPLE_MARKER in text
+
+  # the single-caller marker picks the ceiling; an example block is a warning at any length; the hard limit fails
+  level = _PASS
+  if chars > (_SINGLE_CALLER_CHARS if single else _DESCRIPTION_CHARS) or example:
+    level = _WARN
+  if chars > _DESCRIPTION_HARD_CHARS:
+    level = _FAIL
+  return { _Field.CHARS: chars, "single_caller": single, "has_example": example, "level": level }
+
+
+def _read_descriptions(cwd: Path, home: Path) -> list[dict]:
+  """
+  Measure and grade the description of every skill, agent and command a session lists.
+
+  Args:
+    cwd: Project root the session runs in.
+    home: Operator's home directory.
+
+  Returns:
+    One entry per artifact that has a description, longest first, each carrying the artifact path, its kind and
+    the grade of its description.
+  """
+  # an artifact without a description is left out; its absence is a separate finding
+  out = []
+  for kind, path in _find_all_described(cwd, home):
+    head = _split_frontmatter(path.read_text(encoding = "utf-8"))[0]
+    text = parse_frontmatter(head).get(_DESCRIPTION_KEY)
+    if isinstance(text, str) and text.strip():
+      out.append({ _Field.PATH: str(path), _Field.KIND: kind, **_evaluate_description(text) })
+
+  # longest first, the same order the file budget reports in
+  out.sort(key = lambda item: item[_Field.CHARS], reverse = True)
+  return out
 
 
 def _scan_memory_index(cwd: Path, home: Path) -> dict:

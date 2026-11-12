@@ -1,6 +1,6 @@
 ---
 name: lazy-core.autocheckup
-description: "Dispatch from a cross-project rollout loop (one agent per project), or directly when ONE repo's lazycortex config should be checked and mechanically repaired with no operator in the loop. Receives `repo=<absolute path>` in the prompt, optionally `ignore=<prefix>[,<prefix>]` naming operator work-in-progress the run must leave alone. Runs the read-only checks `lazy-core.checkup` orchestrates, then applies ONLY mechanically derivable fixes (install-managed mirror regeneration, missing dirs/registrations, derived-file drift, unpinned models whose tier is in default-tiers.json, pruning agent_models entries whose agent was deleted or whose plugin was retired); everything content-shaped or preference-shaped is reported, never applied. Commits its own fixes and nothing else in the target repo, and refuses only when the dirty tree overlaps what the repairs write. Sibling `lazy-core.autosetup` runs the install chain instead of the checks."
+description: "Dispatch from a cross-project rollout loop (one agent per project), or directly with `repo=<absolute path>`, when ONE repo's lazycortex config should be checked and mechanically repaired with no operator in the loop. Applies only derivable fixes and reports everything else. Sibling `lazy-core.autosetup` runs the install chain instead of the checks."
 tools: Read, Write, Edit, Bash, Skill, Agent
 model: inherit
 ---

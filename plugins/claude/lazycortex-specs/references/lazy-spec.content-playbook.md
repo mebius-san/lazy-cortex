@@ -41,12 +41,13 @@ The data is written inside the product's release build by the data writer the re
 
 **Seed-then-start.** The single mechanic for every `Write` row of this table: a tick is never a writer job. The coordinator seeds the one document with `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> seed-doc <product> <folder-note-path> --doc <name>:<type>` — the type's template chain, stage `empty`, the folder-note's `spec_source_requests` copied onto the doc — and then opens its review immediately with `Skill(lazycortex-review:lazy-review.start, "<doc>")`, whether or not the folder-note carries any `## Source requests` entry. The class's main writer works round 1 from whatever exists: the request(s) `context_from_frontmatter` resolves from the doc's own attribution, when there are any, and the documents its research aspect obliges it to read every time — the asset's own approved siblings and the system documents of the product chain. With neither a request nor an approved document above it, the writer starts from the asset's folder-note and raises what it cannot ground as in-document `[!question]` callouts. The coordinator never waits for the operator to write a first draft; an operator who edits the document does so during the review, as an ordinary operator edit.
 
-Neither `Write architecture` nor a plan checkbox ever hangs on this type: there is no architecture step for a unit of content by definition of the type, and plans belong to the release, not to the asset. Block shape in `# Gates` is the common one:
+Neither `Write architecture` nor a plan checkbox ever hangs on this type: there is no architecture step for a unit of content by definition of the type, and plans belong to the release, not to the asset. Callout shape in `# Gates` is the common one (`lazy-spec.coordination-playbook.md` Chapter 5):
 
 ```
-> [!gate] Write design
+> [!gate] Write
 > - [ ] Write design
-> tick to dispatch: designer writes design.md
+>
+> tick to create the document and open its review
 ```
 
 No `Start data entry` or `Start testing` row hangs anywhere: the data is written and tested inside a release build. The rows of the release note (`Write code-plan`, `Write test-plan`, `Rebuild`, `Publish`) are declared by `lazy-spec.release-playbook.md` — they are not here.

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Nine execution-stage agents that carry approved work into code, data, docs, or prose, plus two editors that fix wording without touching meaning.
-last_regen: 2026-11-10
+last_regen: 2026-11-12
 diagram_spec:
   anchor: "The execution-stage lineup"
   request: "Flow diagram with two subgraphs. 'Execution-stage' contains seven nodes left-to-right: Implementer, Data Implementer, Docs Writer, Debugger, Reviewer, Tester, Editor — no mandatory ordering edges between them. 'Literary' contains two nodes, Fiction Writer and Fiction Editor, connected by a solid edge from Fiction Writer to Fiction Editor labelled 'draft'. A dashed edge labelled 'implementation plan' arrives at Implementer from outside the subgraph (source: Planner, upstream). A dashed edge labelled 'approved design' arrives at Data Implementer from outside the subgraph (source: Designer, upstream), and another dashed edge labelled 'approved design' arrives at Docs Writer from the same outside source. Do not add a dispatching-routine node and do not fan any protocol edges out to the agents — keep this to the nine nodes plus the two upstream source labels."
@@ -15,8 +15,8 @@ source_skills:
   - lazy-experts.editor
   - lazy-experts.fiction-writer
   - lazy-experts.fiction-editor
-source_sha: 94bcae6d8529797e085b2e53adf9c9593919fb13
-surface_sha: 181349fdabea3f0c9c74e7cca585d4eb3a9a234c9a015ff5d596979af23f0df0
+source_sha: 4cb5a8c2afe6cb034ba46b94541514fe69e6bcf3
+surface_sha: fa0ae2002accee77cf93b6d5b4ba158e891b3a01bb1bece1eedbb88329596d81
 ---
 # Execution-stage agents
 

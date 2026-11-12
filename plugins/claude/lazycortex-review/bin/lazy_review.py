@@ -8,8 +8,8 @@ Subcommands:
 - `mark-job` — delegate to :mod:`job_markers` (write one runtime job marker; the only door
                into the sidecar the coordinator and the watch worker share).
 - `paint-banner` — delegate to :mod:`note_ops` (repaint the top banner from frontmatter state).
-- `collect-job` — delegate to :mod:`collect_ops` (land DONE job payloads; `--no-commit`
-                 applies them to the working tree for the coordinator's own `commit-doc`).
+- `collect-job` — delegate to :mod:`collect_ops` (land DONE job payloads into the working
+                 tree for the coordinator's own `commit-doc`; no commit, no wake).
 - `collect-tick` — delegate to :mod:`collect_ops` (sweep the job queue, raise `job-done`
                  wakes and dispatch the coordinator — no landing, no commit).
 - `sanitize` — delegate to :mod:`sanitize` (repair the three file-provable stuck review-loop
@@ -260,8 +260,7 @@ def cmd_collect_job(args: argparse.Namespace) -> int:
   # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import collect_ops  # type: ignore  # pylint: disable=import-error
-  extra = ["--no-commit"] if args.no_commit else []
-  return collect_ops.main([args.file, "--repo", args.repo, *extra])
+  return collect_ops.main([args.file, "--repo", args.repo])
 
 
 def cmd_collect_tick(args: argparse.Namespace) -> int:
@@ -718,15 +717,13 @@ def build_parser() -> argparse.ArgumentParser:
   p_paint.add_argument("--repo", default=".")
   p_paint.set_defaults(func=cmd_paint_banner)
 
-  # `collect-job` — land DONE job payloads for one file as one bot commit
+  # `collect-job` — land DONE job payloads for one file into the working tree, no commit
   # waiver: argparse CLI signature, not a domain key
   p_collect = sub.add_parser("collect-job", help="land DONE job payloads for one review document")
   # waiver: argparse CLI signature, not a domain key
   p_collect.add_argument("file")
   # waiver: argparse CLI signature, not a domain key
   p_collect.add_argument("--repo", default=".")
-  # waiver: argparse CLI signature, not a domain key
-  p_collect.add_argument("--no-commit", action="store_true")
   p_collect.set_defaults(func=cmd_collect_job)
 
   # `collect-tick` — sweep the whole job queue, landing every DONE-and-not-CONSUMED job

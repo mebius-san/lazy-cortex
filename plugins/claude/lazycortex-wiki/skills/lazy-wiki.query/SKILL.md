@@ -1,6 +1,6 @@
 ---
 name: lazy-wiki.query
-description: "Use when a question needs material the wiki curates — 'why is it built this way', 'where is X described', 'what relates to Y', or any request whose answer lives in files a wiki scope covers. Run it BEFORE grepping or opening files in a covered scope, and whenever the user asks about a topic rather than a specific file. A research skill: given a question, it hands back a bounded matched slice of the wiki graph, never the whole topic index. With the `Agent` tool available it dispatches per-scope seekers plus one gatherer so the topic index and traversed node bodies never enter the calling context; without `Agent` (a one-shot expert job or subagent) it runs the same lookup agentless, reading the scope's topics.md directly in its own context."
+description: "Use when a question needs material the wiki curates — 'why is it built this way', 'where is X described', 'what relates to Y', or any request whose answer lives in files a wiki scope covers. Run it BEFORE grepping or opening files in a covered scope. A research skill: it hands back a bounded matched slice of the wiki graph, so the topic index never enters the calling context."
 research: true
 allowed-tools: Read, Grep, Agent, Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(test -f *), Bash(date -u *), Bash(git rev-parse *), Bash(mkdir -p *), Write
 ---

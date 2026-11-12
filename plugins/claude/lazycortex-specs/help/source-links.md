@@ -1,21 +1,21 @@
 ---
 chapter_type: block
 summary: Build root links from spec documents to the product's code files and resolve product dependencies, so every spec link opens the file it names.
-last_regen: 2026-11-10
+last_regen: 2026-11-12
 diagram_spec:
   anchor: "How the two skills compose"
   request: "Show how lazy-spec.source-url and lazy-spec.resolve-dependency work: lazy-spec.source-url takes a repo-relative path, returns a root link [name](/path) for a file or the backticked path for a folder; lazy-spec.resolve-dependency classifies an entry as product or external, reads the product record from lazy.settings.json[products] for a product entry and returns a spec wikilink, and returns the spec_url and dev_url of an external entry as-is. Output is a link or a dep record."
 source_skills:
   - lazy-spec.resolve-dependency
   - lazy-spec.source-url
-source_sha: 1242c53133a1bcc792827f679b54f13e19208c06
-surface_sha: 3f74c618ec5a6192144f466a79225e444c30031c8eef7870c72f779ce9858424
+source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
+surface_sha: 2582acdf4c2f48e7bd94621e610ae21ab68da203fc253a9416ef3b46a161f9f6
 ---
 # Source links — root links and dependencies
 
 A product's code lives in the same repository as its spec catalog, so a spec document links to code with a plain in-repo link written from the repository root: `[flip_gate.py](/plugins/claude/lazycortex-specs/bin/flip_gate.py)`. Obsidian opens such a link to a code or markdown file directly. The source-links block keeps every emitter on that one form through two small primitives.
 
-`/lazy-spec.source-url` builds the link: give it a repo-relative path and it returns `[<basename>](/<path>)` for a file, or the path in backticks for a folder. `/lazy-spec.resolve-dependency` turns one entry of a product's `dependencies` array — another product, or an external tool — into a record with a spec link and, for an external tool, its source URL.
+`/lazy-spec.source-url` builds the link: give it a repo-relative path without a leading slash (a path ending in `/`, or one that is a directory in the working tree, counts as a folder) and it returns `[<basename>](/<path>)` for a file, or the path in backticks for a folder. `/lazy-spec.resolve-dependency` turns one entry of a product's `dependencies` array — another product, or an external tool — into a record with a spec link and, for an external tool, its source URL.
 
 ## When you'd use this
 
@@ -29,11 +29,11 @@ A product's code lives in the same repository as its spec catalog, so a spec doc
 
 Source links belong in the product `tech.md`, in `code-plan.md` and `test-plan.md`, and in the `## Related code / logs` section of a `bug.md`. Design, vision, use-cases, ui-design and architecture documents describe behaviour and shape and carry no code links.
 
-`/lazy-spec.resolve-dependency` handles the dependency side. A product's `dependencies` array in `lazy.settings.json` accepts two entry shapes. A `product:` entry names another product by compound key; the skill looks it up and returns a wikilink to its design doc — that product's code is in this repository too, so the wikilink is all the navigation the record carries. The record also lists the product's own code locations as `code_paths`, each one a backticked path and never a link, because a link to a folder makes Obsidian create a note there; a design-only product has no `source` and so no `code_paths`. An `external:` entry already has `spec_url` and `dev_url` spelled out — the skill validates that all three fields (`name`, `spec_url`, `dev_url`) are present and returns them as-is, with the spec link as a plain markdown link. The output is always `{kind, spec_link, dev_link?, local_spec_path?}`, with `dev_link` present only for an external tool and `code_paths` present only for a product that has a `source`.
+`/lazy-spec.resolve-dependency` handles the dependency side. A product's `dependencies` array in `lazy.settings.json` accepts two entry shapes. A `product:` entry names another product by compound key; the skill looks it up and returns a wikilink to its design doc — that product's code is in this repository too, so the wikilink is all the navigation the record carries. The record also lists the product's own code locations as `code_paths`, each one a backticked path and never a link, because a link to a folder makes Obsidian create a note there; a design-only product has no `source` and so no `code_paths`. An `external:` entry already has `spec_url` and `dev_url` spelled out — the skill validates that all three fields (`name`, `spec_url`, `dev_url`) are present and returns them as-is, with the spec link as a plain markdown link. The output is always `{kind, spec_link, dev_link?, local_spec_path?, code_paths?}`, with `dev_link` present only for an external tool and `code_paths` present only for a product that has a `source`.
 
 ## Common adjustments
 
-**Linking to a file by hand** — write `[<name>](/<repo-relative path>)`. Any display text works; the target must start with `/` and name a file.
+**Linking to a file by hand** — write `[<name>](/<repo-relative path>)`. Any display text works; the target must start with `/` and name a file. Do not append a line fragment such as `#L42`, and if the path contains spaces, encode them yourself — the skill passes the path through verbatim and never encodes it.
 
 **Naming a folder** — write its path in backticks, `` `src/chapter/` ``, without a link.
 

@@ -1,6 +1,6 @@
 ---
 name: lazy-review.audit
-description: "Run when the operator asks whether the review setup is sane, or when review misbehaves in a way that smells like config — a document never enters the loop, a class points at an expert that was never registered, commits land under the wrong identity. Read-only check of the `review` section of the repo's merged settings, `.claude/lazy.settings.json` with its local overlay merged on; reports `PASS` / `INFO` / `WARN` / `FAIL` and writes no file — fixes come from `/lazy-review.configure` or `/lazy-review.install`."
+description: "Run when the operator asks whether the review setup is sane, or when review misbehaves in a way that smells like config — a document never enters the loop, a class points at an expert that was never registered, commits land under the wrong identity. Read-only; fixes come from `/lazy-review.configure` or `/lazy-review.install`."
 allowed-tools: Read, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(date *), Bash(git rev-parse *), Agent
 ---
 # lazy-review.audit

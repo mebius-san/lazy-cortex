@@ -75,6 +75,7 @@ _SUB_MIGRATE_REVIEW_CLASS = "migrate-review-class"
 _SUB_MIGRATE_REQUESTS = "migrate-requests"
 _SUB_MIGRATE_SOURCE_LINKS = "migrate-source-links"
 _SUB_MIGRATE_UPSTREAM_HISTORY = "migrate-upstream-history"
+_SUB_MIGRATE_GATE_ROWS = "migrate-gate-rows"
 # waiver: usage string -- help text printed to stderr; not a domain constant
 _USAGE = (
     "usage: lazycortex-specs <subcommand> [args...]\n"
@@ -194,6 +195,7 @@ _USAGE = (
     "                                  spec_source_branches (no commit); --check exits 0 when a document would\n"
     "                                  change, 1 when none would, 2 on failure\n"
     "  migrate-upstream-history [--dry-run | --check] [--cwd DIR]\n"
+    "  migrate-gate-rows [--dry-run | --check] [--cwd DIR]\n"
     "                                  regroup the flat # History list of upstream unit notes under day headings\n"
     "                                  (no commit); --check exits 0 when a note would change, 1 when none\n"
     "                                  would, 2 on failure\n"
@@ -258,6 +260,7 @@ _ROUTES: dict[str, tuple[str, str]] = {
     _SUB_MIGRATE_REQUESTS: ( "request_migrate", _MAIN ),
     _SUB_MIGRATE_SOURCE_LINKS: ( "source_link_migrate", _MAIN ),
     _SUB_MIGRATE_UPSTREAM_HISTORY: ( "upstream_history_migrate", _MAIN ),
+    _SUB_MIGRATE_GATE_ROWS: ( "gate_rows_migrate", _MAIN ),
 }
 
 

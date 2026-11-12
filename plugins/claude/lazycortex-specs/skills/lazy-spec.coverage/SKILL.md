@@ -1,6 +1,6 @@
 ---
 name: lazy-spec.coverage
-description: "Run when the operator asks to find capabilities the code already has that the product's spec tree does not cover yet — 'what's missing from the specs', 'gap-scan this product against its code'. Audits the product's structure map (`docs/structure.md`) and domain groups against its spec-asset tree, reporting uncovered capabilities with a proposed category + slug for a retro-spec. This is a whole-product audit sweep with judgment calls on every match, not a bounded lookup by query or anchor — it carries no `research: true` marker despite reading through `lazy-wiki.structure` and `lazy-wiki.domains`."
+description: "Run when the operator asks to find capabilities the code already has that the product's spec tree does not cover yet — 'what's missing from the specs', 'gap-scan this product against its code'. A whole-product sweep, not a bounded lookup (/lazy-spec.lookup) and not a spec-health check (/lazy-spec.audit)."
 ---
 # Spec Coverage
 

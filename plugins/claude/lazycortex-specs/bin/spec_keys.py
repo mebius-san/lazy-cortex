@@ -596,8 +596,6 @@ class HistoryEvent:
     SCAFFOLDED: An asset folder-note was scaffolded by `lazy-spec.create-asset`.
     HALTED: An asset was halted with a recorded reason.
     HALTED_CALLOUT: Tail of the persistent `[!failure]` Gates callout the same halt appends.
-    JOB_DONE: A launch-checkbox expert job finished.
-    JOB_CANCELLED: A launch-checkbox expert job was cancelled.
     JOB_DEAD: A coordinator job died and its marker was cleared.
     REQUEST_PROCESSED: An upstream request reached its processed state.
     DEPLOYED: A release was deployed to one of the product's targets.
@@ -618,10 +616,6 @@ class HistoryEvent:
   HALTED = "halted"
   # Tail of the persistent `[!failure]` Gates callout the same halt appends.
   HALTED_CALLOUT = "halted-callout"
-  # A launch-checkbox expert job finished.
-  JOB_DONE = "job-done"
-  # A launch-checkbox expert job was cancelled.
-  JOB_CANCELLED = "job-cancelled"
   # A coordinator job died and its marker was cleared.
   JOB_DEAD = "job-dead"
   # An upstream request reached its processed state.
@@ -841,7 +835,7 @@ class TickAction:
 # ----------------------------------------------------------------------------------------
 class GateCheckbox:
   """
-  Gate-readiness checkbox labels written to the folder-note's `# Gates` section.
+  Launch-row labels, label prefix and verbs written to the folder-note's `# Gates` section.
 
   Attributes:
     WRITE_CODE_PLAN: Label for the code-plan-readiness checkbox.
@@ -858,6 +852,8 @@ class GateCheckbox:
       prefix followed by the reviewable markdown file's basename. Unlike the fixed
       labels, its tick opens a review rather than dispatching an expert job, so it never
       carries an `active_job` entry.
+    WRITE_VERB: The verb, the first word of a label, shared by every `Write <doc>` row.
+    REVIEW_VERB: The verb, the first word of a label, shared by every `Review <doc>` row.
     GATE_CALLOUT_MARK: Markdown callout prefix marking a gate-readiness block.
   """
 
@@ -881,6 +877,10 @@ class GateCheckbox:
   # markdown file's basename. Unlike the fixed labels, its tick opens a review rather than dispatching an expert
   # job, so it never carries an `active_job` entry.
   REVIEW_PREFIX = "Review "
+  # The verb every `Write <doc>` row's label opens with; the rows of one verb share one gate callout.
+  WRITE_VERB = "Write"
+  # The verb every `Review <doc>` row's label opens with.
+  REVIEW_VERB = "Review"
   # Markdown callout prefix marking a gate-readiness block.
   GATE_CALLOUT_MARK = "[!gate]"
 
@@ -1196,6 +1196,8 @@ class CoordinatorTrigger:
       verdict on the revised `architecture.md` of the build's first step. Synthetic, never derived from `item`.
     RELEASE_PUBLISHED: A release was published; raised on the release owner's level note. Synthetic, never
       derived from `item`.
+    DOC_LANDED: A level document entered review while the level note still hangs its `Write` row, regardless of
+      the commit's author.
   """
 
   # A non-`@bot.`-authored commit that changed the asset note, or — on a grouped tick — a sibling doc not carrying
@@ -1234,6 +1236,10 @@ class CoordinatorTrigger:
   # note after the publish commit, so it can recompute the delta, hang or take down `Start release` and rewrite its
   # brief. Synthetic, never derived from `item`; it creates and launches nothing.
   RELEASE_PUBLISHED = "release-published"
+  # A level document entered review while the level note still hangs its `Write` row — a document written from
+  # below, such as the product's `architecture.md` from a release build's first step. Wakes the level note whoever
+  # authored the commit; the coordinator takes the row down and creates nothing.
+  DOC_LANDED = "doc-landed"
 
 
 # ----------------------------------------------------------------------------------------

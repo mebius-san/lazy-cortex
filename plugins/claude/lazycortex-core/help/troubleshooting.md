@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-11-10
+last_regen: 2026-11-12
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, generic iteration loops, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys, seed data gaps), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models, plugin-path resolution, stale source paths at claim time), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources, worker import errors), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
@@ -42,8 +42,8 @@ source_skills:
   - lazy-runtime.preflight
   - lazy-runtime.recover
   - lazy-runtime.tick
-source_sha: 68b0497d19be92e1b5870e3e2931715ddf0ec87b
-surface_sha: 6b362363da59b4aba9a73a8131a7f84471e482cad2b846b6bc1871befea48534
+source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
+surface_sha: b2114ccd084f3eb71fabd74793ad653e0b42e96952d00ca35bfdc4961019ebc2
 ---
 # Troubleshooting
 
@@ -591,6 +591,26 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: Reference docs (protocols, schemas, contracts under `references/`) carry the same size discipline as rules — over 25 KB is a WARN, over 50 KB is a FAIL. A reference that grew past the threshold without anyone noticing is the usual cause; the audit measures every reference's byte size on every run, whether or not it changed recently.
 
 **Fix**: Split the file along a natural section boundary — move the material no single reader needs together into a sibling reference, leaving a short numbered pointer behind, per `lazy-core.reference-writing § 4.1`. If the file is genuinely read whole by its one consumer and splitting would only fragment that reading, add `size-waiver: "<reason naming the reader>"` to its frontmatter instead — a boolean or empty value (`size-waiver: true`, `size-waiver: ""`) is itself flagged as an invalid-waiver finding and does not suppress the size finding, so the reason must be a real string. `/lazy-core.audit` only reports; it does not split or waive the file for you.
+
+---
+
+## `/lazy-core.audit` or `/lazy-core.slim-context` flags a description as too long, or carrying an example block
+
+**Symptom**: `/lazy-core.audit` (in its always-loaded section) or the scan in `/lazy-core.slim-context` reports one or more findings like "`description <chars> chars over its 400 ceiling`", "`description <chars> chars over its 150 ceiling`", "`description carries an <example> block`", or, as a FAIL, "`description <chars> chars over the 1024 field limit`", each naming the skill, agent, or command file. The report also carries a `descriptions_total` line next to the always-loaded total.
+
+**Likely cause**: Every session lists the description of every skill, agent, and command on every turn, so the field has its own length budget: at most 400 characters, and a single sentence of at most 150 characters for a skill or agent that is only ever called by name from another one. A description that narrates wake conditions, inputs, and outputs, or embeds `<example>` blocks, is paid for by every session and read by no router. Past 1024 characters it also breaks the field limit of the skill format. The `descriptions_total` figure is the sum of all these descriptions; it is a separate measurement and never counts toward the always-loaded total, so a large value there does not mean the startup budget is blown.
+
+**Fix**: Shorten the flagged description in its own file until the finding clears: say when the artifact should fire (or, for a caller-triggered one, who calls it) and stop. Move example blocks and detailed behaviour into the body of the file, where they cost nothing until the artifact runs. Neither `/lazy-core.audit` nor `/lazy-core.slim-context` rewrites a description for you. Re-run `/lazy-core.audit` to confirm. Descriptions of plugins installed outside this repository are not yours to shorten — they are listed by Claude Code, measured by nobody here, and no repair in this repository reduces them.
+
+---
+
+## `/lazy-core.audit` warns "description states no invocation condition"
+
+**Symptom**: `/lazy-core.audit` reports "`description states no invocation condition`" against a skill, agent, or command file, even though the description is short.
+
+**Likely cause**: The description explains what the artifact does or how it works but never says when to use it. A router choosing between artifacts decides by condition — "Run when …", "Use when …", "Dispatched by …" — so a description that only describes mechanism gives it nothing to match on, and the artifact is skipped when it should fire. Length is not judged here; the length and `<example>` findings are a separate check.
+
+**Fix**: Rewrite the description to open with the invocation condition — the situation in which the operator or a caller should reach for it — followed by, at most, a short note on how it differs from its nearest sibling. Re-run `/lazy-core.audit` to confirm the WARN clears. The audit only reports; it never edits the description.
 
 ---
 

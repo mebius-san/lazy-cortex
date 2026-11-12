@@ -13,7 +13,7 @@ Agents are dispatched as one-shot subagents via the `Agent` tool. Their output i
 ## 1. Frontmatter requirements (FAIL if missing)
 
 - `name:` — dot-namespaced (`<namespace>.<name>`).
-- `description:` — must **open** with when to dispatch, not with what the agent does. The dispatching model matches the task against this field to pick a `subagent_type`; a description that narrates the agent's internal job spec ("takes X, produces Y, stays out of Z") gives it nothing to match on. Use one of the shapes in `lazy-core.skill-writing § 8`: `Use when <task shape>` for generally-dispatchable agents, or `Dispatched by /<skill>; not for direct use.` for agents with a single caller — naming the sole caller is itself a valid trigger. `<example>` blocks are welcome after the trigger sentence, never in place of it. Mechanism-only → `WARN`; missing → `FAIL`.
+- `description:` — must **open** with when to dispatch, not with what the agent does. The dispatching model matches the task against this field to pick a `subagent_type`; a description that narrates the agent's internal job spec ("takes X, produces Y, stays out of Z") gives it nothing to match on. Use one of the shapes in `lazy-core.skill-writing § 8`: `Use when <task shape>` for generally-dispatchable agents, or `Dispatched by /<skill>; not for direct use.` for agents with a single caller — naming the sole caller is itself a valid trigger. The length limits of `lazy-core.skill-writing § 8` apply unchanged: at most 400 characters, one sentence of at most 150 for a single-caller agent, and no `<example>` block at all. Mechanism-only, over the ceiling, or carrying an `<example>` block → `WARN`; over 1024 characters or missing → `FAIL`.
 - `tools:` — explicit allowlist. See § 5.
 - `model: inherit` — always set to `inherit`. This is Claude Code's native keyword meaning "use the parent's model". Actual model routing is handled by `lazy.settings.json` via the `lazy-core.model-router` hook; the frontmatter value is the fallback when no config override exists.
 
@@ -64,6 +64,6 @@ If `lazy.settings.json` does not exist at either scope (uninstalled / opted out)
 
 ## Enforcement
 
-`lazy-core.audit` Agent B enforces §§ 1, 2, 5, 8 (frontmatter complete, no AskUserQuestion, tool allowlist including the mandatory `Agent` member, model tier registered when config exists) on `.claude/agents/*.md` and `plugins/claude/*/agents/*.md`. Preamble presence per § 4 reuses the skill-writing check.
+`lazy-core.audit` Agent B enforces §§ 1, 2, 5, 8 (frontmatter complete, no AskUserQuestion, tool allowlist including the mandatory `Agent` member, model tier registered when config exists) on `.claude/agents/*.md` and `plugins/claude/*/agents/*.md`. The `description:` length limits and the `<example>` ban of § 1 are graded by the core `context-scan --section weight` verb and reported by `lazy-core.audit` Agent A. Preamble presence per § 4 reuses the skill-writing check.
 
 Dirty-tree heuristic (no write-without-commit) reuses the skill-writing § 6 check; agents are scanned alongside skills in the same Agent B pass.

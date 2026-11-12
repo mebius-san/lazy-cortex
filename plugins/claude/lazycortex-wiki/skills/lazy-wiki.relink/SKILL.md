@@ -1,6 +1,6 @@
 ---
 name: lazy-wiki.relink
-description: "Use when a wiki scope's nodes need classifying and See-also linking right now — this checkout runs no runtime daemon, or the operator wants to force a relink instead of waiting for the `lazy-wiki.scan` / `lazy-wiki.relink-weekly` routines. Computes the plan (initial / incremental / anchor-lost), dispatches the wiki curator synchronously per node in tail-off mode, rebuilds `topics.md`, records the new anchor, and makes one commit under the operator identity."
+description: "Use when a wiki scope's nodes need classifying and See-also linking right now — this checkout runs no runtime daemon, or the operator wants to force a relink instead of waiting for the `lazy-wiki.scan` / `lazy-wiki.relink-weekly` routines."
 allowed-tools: Read, Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(date -u *), Bash(git rev-parse *), Bash(mktemp), Bash(mktemp *), Bash(rm -f *), Bash(mkdir -p *), Bash(rm -rf *), Bash(test *), Bash(cp *), Write, Agent, AskUserQuestion
 ---
 # lazy-wiki.relink

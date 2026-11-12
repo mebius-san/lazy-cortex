@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Drive an asset's readiness gates and per-file doc stages from creation through release using a two-layer progression model.
-last_regen: 2026-11-10
+last_regen: 2026-11-12
 diagram_spec:
   anchor: "How the layers feed each other"
   request: "Show the two-layer progression model: per-file spec_stage transitions (empty→draft→approved) feeding into an asset's design-only gates (spec_design_done, then spec_released set by a release's Publish) and a release note's full six-gate ladder via spec.coordinator's auto-flips and human signals, with lazy-spec.set-stage, lazy-spec.flip-gate, and spec.coordinator as the labeled actors — lazy-spec.gate-tick is a pure poller and decides no gate, so it is not one of the actors."
@@ -9,9 +9,9 @@ source_skills:
   - lazy-spec.flip-gate
   - lazy-spec.gate-tick
   - lazy-spec.set-stage
-  - spec.coherence-checker
-source_sha: 66cf213473174fd98434760f9a4d5235f473e144
-surface_sha: 858ffee34a6fc201e1d7fead74c716270795467ddb2aefc546c9463b5c47bd93
+  - lazy-spec.coherence-checker
+source_sha: a21d7a1a3f8df22fd45f1c40d9ae3c41f687090c
+surface_sha: a8064e1b325ebd82293c5583108ce819d77d7a84e0dcf38dabd83c2458c55d45
 ---
 # Gates — driving asset readiness from design to release
 

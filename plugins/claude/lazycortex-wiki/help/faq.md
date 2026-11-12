@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about setting up scopes, running relinks, mirroring foreign repos, querying the wiki, the terms dictionary, the structure map, the domain-spec tree, the tag-values canon, and the wiki's own writing language.
-last_regen: 2026-11-10
+last_regen: 2026-11-12
 no_diagram: true
 source_skills:
   - lazy-wiki.install
@@ -20,8 +20,8 @@ source_skills:
   - lazy-wiki.structure-curator
   - lazy-wiki.tag-curator
   - lazy-wiki.terms-curator
-source_sha: da1672544263b333bcb2e2d1f69a8a3b386bcafc
-surface_sha: 08e3739d5808eb66b3d528d5561e25d336660903f06b3ec844495e11df3ab378
+source_sha: ad0af4b3de1d6d94702b63bf41f28c5c902e3fc4
+surface_sha: 0c8da8bc7ffba1d6878c8f66e6b1537c76d85e1913ecd19dc51feb43d1c3ce9f
 ---
 # Frequently asked questions
 

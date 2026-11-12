@@ -1,6 +1,6 @@
 ---
 name: lazy-log.recall
-description: "Use when the user asks why or when one specific thing changed — 'why was X changed?', 'when did we switch to Y?', 'what commit removed Z?'. Searches every change-history source (run logs, commits.jsonl, git log, memory) and returns ranked individual matches with git SHAs to jump to. Pick this over `lazy-log.summary` (thematic narrative of a whole topic) and `lazy-log.timeline` (dated what-happened-when list) when the answer is a particular change to point at."
+description: "Use when the user asks why or when one specific thing changed — 'why was X changed?', 'when did we switch to Y?', 'what commit removed Z?'. Returns ranked matches with git SHAs. Pick this over `lazy-log.summary` (thematic narrative of a topic) and `lazy-log.timeline` (dated list) when the answer is a particular change to point at."
 tools: Read, Glob, Grep, Bash, Skill, Agent
 model: inherit
 ---

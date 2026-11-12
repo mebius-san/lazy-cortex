@@ -38,7 +38,7 @@ Measure everything that loads at conversation start.
 Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" context-scan --section weight)
 ```
 
-The `context-scan` verb's `weight` section measures, in exact bytes, everything Claude Code loads into every session's context on every turn (`always_loaded`, summed in `always_total`) and the files that cost nothing until used (`on_demand`, each with its `kind`: `rule`, `agent`, `skill`, `command`, `memory`). Its `level` — `PASS`, `WARN`, `FAIL` — grades `always_total` against the 20 KB / 40 KB thresholds `lazy-core.doctor` uses. This is the real token budget — each turn pays this cost.
+The `context-scan` verb's `weight` section measures, in exact bytes, everything Claude Code loads into every session's context on every turn (`always_loaded`, summed in `always_total`) and the files that cost nothing until used (`on_demand`, each with its `kind`: `rule`, `agent`, `skill`, `command`, `memory`). Its `level` — `PASS`, `WARN`, `FAIL` — grades `always_total` against the 20 KB / 40 KB thresholds `lazy-core.doctor` uses. Its `descriptions` list grades every skill, agent and command description a session lists against the length limits of `lazy-core.skill-writing § 8`; those descriptions are summed in `descriptions_total` and never count toward `always_total`. This is the real token budget — each turn pays this cost.
 
 ### 1b. On-demand files (no startup cost)
 

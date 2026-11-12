@@ -4,6 +4,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 11.1.0 — 2026-11-12 UTC
+
+- `lazy-core.audit` now grades every skill, agent and command description by length, so oversized descriptions that load into every session show up. Descriptions over 400 characters, single-caller ones over 150, and any carrying an `<example>` block warn. Descriptions over 1024 characters fail. The report also gains a `descriptions_total` line. A description that states no invocation condition now warns too.
+- Shortened the descriptions of the core agents `lazy-core.autocheckup`, `lazy-core.autosetup`, `lazy-log.recall`, `lazy-log.summary`, `lazy-log.timeline` and `lazy-runtime.doctor`. The same applies to the commands and skills `lazy-core.checkup`, `lazy-core.help`, `lazy-core.agent-models-seed`, `lazy-core.daemon-setup`, `lazy-core.doctor`, `lazy-core.install`, `lazy-core.providers`, `lazy-core.scaffold-sync`, `lazy-core.setup`, `lazy-guard.allow-mcp`, `lazy-routine.register`, `lazy-runtime.preflight` and `lazy-runtime.recover`. Each now says when to invoke it and what sets it apart from its siblings. The mechanism, inputs and outputs it used to list are gone.
+- The markdown style reference now describes launch-checkbox `[!gate]` callouts as one callout per verb. The verb is the title, each row is a checkbox line, and a single footer follows.
+
 ### 11.0.0 — 2026-11-10 UTC
 
 - **Breaking:** The `repos` settings section is retired, and the `products` section moves to version 3, which drops `source.repo` from every product record and removes every `repo`-kind dependency, since a product's code always lives in the repository that holds its spec catalog. The settings migration applies this to `lazy.settings.json` and to the local overlay `lazy.settings.local.json`; run `/lazy-core.setup` once after updating.
@@ -805,6 +811,18 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 11.0.0 — 2026-11-12 UTC
+
+- **Breaking:** spec documents in the catalog that link into your repository's code through a forge, where the git remote is an ssh config alias such as `<alias>:owner/repo.git`, were skipped by the earlier source-link step. The migration now resolves the alias and rewrites those links to root-relative `[<name>](/<path>)` links. It edits the spec documents on disk; `/lazy-core.setup` applies it.
+- **Breaking:** spec folder notes written by an earlier release hold one `[!gate]` callout per launch row in their `# Gates` section. The migration folds them into the new grouped shape, one callout per verb. It edits the status, product and catalog notes on disk; `/lazy-core.setup` applies it.
+- Launch rows in `# Gates` now group into one callout per verb, with one shared footer line, in place of a block per row.
+- A level document written from below now takes its Write row down once its review opens.
+- A finished job now wakes the coordinator directly and leaves no History line.
+- `lazy-spec.sync-with-code` now keeps the product's `tech.md` true to the code.
+- Unit tests now belong to the build, and the test tool covers the deployed product. The release and tool playbooks and the product `architecture.md` and `tech.md` templates reflect this.
+- Shortened `description:` text on the plugin's skills and agents to fit the length limits, so routing for `lazy-spec.*` requests may shift slightly.
+- `lazy-spec.catalog-coordinator` description now names the `asset-approved` wake by its trigger value, so it is picked for that wake.
+
 ### 10.0.0 — 2026-11-10 UTC
 
 - **Breaking:** The old `spec.decisions.md` rule is renamed to `lazy-spec.decisions.md` (plugin namespace), so the update deletes the stale `.claude/rules/spec.decisions.md` copy that would otherwise load twice; `/lazy-core.setup` applies it.
@@ -1239,6 +1257,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 6.2.1 — 2026-11-12 UTC
+
+- Shorter skill and agent descriptions across the plugin (audit, capture, deploy, diagram-install, iconize-install, iconize-sync, install, and the tag-pages agent). Each now states only when to invoke it and what sets it apart from its siblings, which cuts the context the plugin costs in every session. The tag-pages agent no longer carries example dialogues.
+
 ### 6.2.0 — 2026-11-10 UTC
 
 - `tag-pages apply --templated` writes descriptions for new tag pages from a template, with no agent run needed. The tag-pages agent and the plugin skills now go through the `tag-pages`, `plugin-install` and `snippet-enable` commands.
@@ -1503,6 +1525,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-diagram
 
+### 2.0.4 — 2026-11-12 UTC
+
+- Shorter descriptions for `lazy-diagram.draw`, `lazy-diagram.fix`, `lazy-diagram.audit` and the `lazy-diagram.draw-mermaid` agent. Each now says only when to use it and how it differs from its sibling (`draw` for a new diagram, `fix` for re-conforming an existing one, `audit` for the plugin's own templates). Mechanism, input and output details are dropped, so the plugin costs less context in every session.
+
 ### 2.0.3 — 2026-11-10 UTC
 
 - `/lazy-diagram.install` seeds the drawer agents' model tiers through the core plugin's seeding verb. It reports that step as `seeded` or `unchanged`, and relays a missing core tier table instead of inventing seed lines.
@@ -1605,6 +1631,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
 
 ## lazycortex-review
+
+### 6.14.1 — 2026-11-12 UTC
+
+- Shorter skill and agent descriptions across the plugin. Each one keeps the occasion it answers to and the sibling it should be picked over (`/lazy-review.start` vs `/lazy-review.submit`, `/lazy-review.stop` vs `/lazy-review.finalize`), and drops the mechanism detail. The `lazy-review.coordinator` and `lazy-review.doc_doctor` agents now read as "dispatched by the review runtime, not for direct use". This lowers per-session context cost.
+- `collect-job` now only lands finished expert payloads in the working tree. It never commits and raises no wake, so a hand run leaves the result uncommitted. The `--no-commit` flag is gone because that is now the only behaviour.
 
 ### 6.14.0 — 2026-11-10 UTC
 
@@ -1871,6 +1902,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-observe
 
+### 2.2.7 — 2026-11-12 UTC
+
+- The `lazy-observe.audit`, `lazy-observe.install` and `lazy-observe.uninstall` skill descriptions are shorter, so the plugin costs less session context. Each still names when to invoke it: audit when metrics stop arriving, install when you start shipping metrics (or integrate with an existing collector), uninstall when you stop shipping or switch observers.
+
 ### 2.2.6 — 2026-11-10 UTC
 
 - The runtime dashboard now prices provider models and lists models it cannot price as unpriced instead of leaving them out of the cost figures.
@@ -2034,6 +2069,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.
 
 ## lazycortex-experts
+
+### 1.10.1 — 2026-11-12 UTC
+
+- The architect now says where each module's unit tests sit and the seam they reach it through, and never picks a test framework or runner. The planner takes the framework and the unit-test command from the product's `tech.md`, and flags a `tech.md` that lacks them. The implementer writes and runs the unit tests itself, using the `tech.md` tooling. Testing the deployed product stays with the tester.
+- Shorter descriptions on every shipped agent, skill and command (all 15 agents, `lazy-experts.audit`, `lazy-experts.install`, `lazy-experts.help`). Each now states when to pick it and what sets it apart from its siblings, so the plugin costs less context in every session.
 
 ### 1.10.0 — 2026-11-10 UTC
 
@@ -2246,6 +2286,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 4.13.1 — 2026-11-12 UTC
+
+- Reworded descriptions of the `lazy-python.code-reviewer`, `lazy-python.contract-writer`, `lazy-python.docstring-writer`, `lazy-python.domain-writer` and `lazy-python.test-writer` agents, the `lazy-python.check-style`, `lazy-python.install` and `lazy-python.knowledge-sweep` skills, and the `lazy-python.help` command. The descriptions are shorter and name the occasion each answers to. Two pick-over hints were added: contract-writer versus domain-writer, and knowledge-sweep versus domain-writer.
 
 ### 4.13.0 — 2026-11-10 UTC
 
@@ -2532,6 +2576,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 3.7.2 — 2026-11-12 UTC
+
+- Generated domain documents now get the `domains/discrepancy` tag only when they carry a `## Discrepancies` section, and the domain index lists exactly those documents. The tag no longer depends on the writer's choice, and a tree written before this fix is repaired by the domain tick's `--restamp` run without regenerating any document.
+- Skill and agent descriptions across the plugin are shorter, so the plugin costs less session context. Each now states when to reach for it and which sibling to use instead: `lazy-wiki.query`, `lazy-wiki.audit`, `lazy-wiki.configure`, `lazy-wiki.install`, `lazy-wiki.relink`, `lazy-wiki.domain-sync`, `lazy-wiki.domains`, `lazy-wiki.structure`, `lazy-wiki.terms`, and the curator, tag-curator, terms-curator, structure-curator and domain-spec-writer agents.
 
 ### 3.7.0 — 2026-11-10 UTC
 

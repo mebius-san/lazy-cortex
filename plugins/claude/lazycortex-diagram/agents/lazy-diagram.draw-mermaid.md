@@ -1,6 +1,6 @@
 ---
 name: lazy-diagram.draw-mermaid
-description: "Dispatched by /lazy-diagram.draw or /lazy-diagram.fix once kind and format are settled; dispatch it directly only when you have ALREADY chosen format=mermaid and kind=<one of: flow, sequence, state, erd, class, architecture, layout, nav, tree, controls-scheme, decision-tree, screen-scheme, journey, mindmap, gantt, timeline> — it never infers either. Single-pass writer: its whole response is the mermaid fence body, without the surrounding triple-backticks."
+description: "Dispatched by /lazy-diagram.draw or /lazy-diagram.fix once kind and format are settled; dispatch it directly only when you have ALREADY chosen format=mermaid and kind=<one of: flow, sequence, state, erd, class, architecture, layout, nav, tree, controls-scheme, decision-tree, screen-scheme, journey, mindmap, gantt, timeline> — it never infers either."
 tools: Read, Glob, Grep, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response writer; output IS the return value, no multi-step process"

@@ -1,12 +1,12 @@
 ---
 chapter_type: block
 summary: Keep a Tags/ folder in sync with every tag used across your vault — pages created, updated, and pruned automatically.
-last_regen: 2026-11-10
+last_regen: 2026-11-12
 no_diagram: true
 source_skills:
   - lazy-obsidian.gen-tag-pages
-source_sha: 0fbf083425e77d4114828956e4ab35cfecddbc4d
-surface_sha: a9932f36619109e844ef0c0dbc3981ddb8b0290d956576b028ad2021c4dbd327
+source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
+surface_sha: f122c389fa1e8abe69bf1d948e610008a86b1cb88fdf37df5e592fb04d053ade
 ---
 # Tag page generation
 

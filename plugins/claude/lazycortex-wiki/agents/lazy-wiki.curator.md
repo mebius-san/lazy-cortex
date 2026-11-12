@@ -1,6 +1,6 @@
 ---
 name: lazy-wiki.curator
-description: "Dispatch when a wiki node needs classification (kind=classify) or See-also linking (kind=link). It applies its result via the deterministic apply-node primitive (C-hybrid, no collector); consolidating a surface's tag values is the sibling lazy-wiki.tag-curator's job, not this one's. The tail flag (default true) decides what the apply carries. tail:true (daemon path): reads its job dir (request.json + source/) and hands apply-node the job dir, which runs the whole tail — build-index, commit, dispatch-link, response.json. tail:false (/lazy-wiki.relink skill path): no job dir — reads the real files named in the dispatch prompt, applies, then stops (the skill owns build-index/commit). Has Bash; writes node content only via apply-node, never by hand."
+description: "Dispatch when a wiki node needs classification (kind=classify) or See-also linking (kind=link) — from the daemon's scan routines or `/lazy-wiki.relink`. Consolidating a surface's tag values is the sibling `lazy-wiki.tag-curator`'s job, not this one's."
 tools: Read, Write, Edit, Glob, Grep, Bash, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response-per-kind expert — one job dir in, one response.json out; the dispatching routine + curator protocol are the contract"

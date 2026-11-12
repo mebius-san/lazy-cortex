@@ -1,17 +1,6 @@
 ---
 name: lazy-python.code-reviewer
-description: |
-  Dispatch as the review phase of the Python check pipeline — `chk-py review` prints a manifest and names this agent — or directly with an explicit file list when new or changed Python needs judging against the `lazy-python.*` guidelines plus the project's own overlay, the layer no script can check. It reports findings only; it never edits code. Examples:
-  <example>
-  Context: The checkers are green and the change is ready for the review phase.
-  user: "chk-py review printed a manifest"
-  assistant: "I'll dispatch the lazy-python.code-reviewer agent against that manifest."
-  </example>
-  <example>
-  Context: The user wants an existing file reviewed for guideline conformance.
-  user: "Review src/billing/invoice.py against our guidelines"
-  assistant: "I'll use the lazy-python.code-reviewer agent to review that file."
-  </example>
+description: "Use when new or changed Python needs judging against the `lazy-python.*` guidelines and the project overlay — 'review src/billing/invoice.py against our guidelines'. Dispatched when `chk-py review` prints a manifest, or directly with a file list. Reports findings only and never edits; `/lazy-python.check-style` is the full check-and-clean-up pass."
 model: inherit
 color: yellow
 tools: Read, Write, Edit, Grep, Glob, Bash, Skill, Agent

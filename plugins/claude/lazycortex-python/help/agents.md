@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Manual review via /lazy-python.check-style, the chk-py review guideline phase and its lazy-python.code-reviewer agent, docstring/test writer agents, a Domain/Contract knowledge-marker pair, and the knowledge-sweep skill that backfills markers across an existing codebase.
-last_regen: 2026-11-10
+last_regen: 2026-11-12
 diagram_spec:
   anchor: "How the seven members fit together"
   request: "Overview flow of the seven members as entry points only — what each one is entered by and what they share, never the steps inside any of them. Seven entry nodes: /lazy-python.check-style (manual review), lazy-python.docstring-writer, lazy-python.test-writer, lazy-python.domain-writer, lazy-python.contract-writer, lazy-python.code-reviewer (named for dispatch by chk-py review), and /lazy-python.knowledge-sweep. Every one of the seven first passes through one shared node: read the canon guidelines plus the project overlay. From that shared node the work fans back out and every member ends at one shared node: verify with chk-py and tst-py. Keep it to those nine nodes and no decision diamonds — the per-member steps are prose in the chapter, not part of this diagram. Label the shared read node 'Read canon guidelines + project overlay' and the shared verify node 'Verify with chk-py / tst-py'."
@@ -14,8 +14,8 @@ source_skills:
   - lazy-python.domain-writer
   - lazy-python.contract-writer
   - lazy-python.knowledge-sweep
-source_sha: 11cd9823e09073d5cf547901e664f01d9b88f07b
-surface_sha: e9bf17fa94a0738385f91b00b705c0828008fa3c81c179ad5490eb80f08a2824
+source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
+surface_sha: 35aca63d12fde7b4c13c3ed24b2b2e4f10337c44a444c61aa5cc710266eabbd1
 ---
 # Code quality agents — review, document, test, mark knowledge
 

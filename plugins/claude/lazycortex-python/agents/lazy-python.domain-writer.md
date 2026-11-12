@@ -1,17 +1,6 @@
 ---
 name: lazy-python.domain-writer
-description: |
-  Use this agent when domain knowledge implemented in code needs a `Domain(…):` block — documenting a mechanic, formula, or domain rule, adding concept-level rationale, or updating an existing block after the mechanic changed — or when a file's parked `Domain(unfiled):` blocks must be refiled because the dictionary has since grown (dispatch with `refile=true`). Validates groups against the project's domain-groups dictionary and never invents a permanent group. Examples:
-  <example>
-  Context: A calculation implements a domain rule that is documented nowhere.
-  user: "Document the late-fee rule next to its calculation"
-  assistant: "I'll use the lazy-python.domain-writer agent to write the Domain block."
-  </example>
-  <example>
-  Context: An existing Domain block describes a mechanic that has since changed.
-  user: "The discount rules changed — update their Domain comment"
-  assistant: "I'll dispatch lazy-python.domain-writer to rewrite that block."
-  </example>
+description: "Use when domain knowledge in code needs a `Domain(…):` block — 'document the late-fee rule next to its calculation', a mechanic, formula or rule, or an existing block after the mechanic changed — or when parked `Domain(unfiled):` blocks must be refiled (dispatch with `refile=true`). Pick it over contract-writer when the knowledge is a domain rule, not a promise to callers."
 model: inherit
 color: cyan
 tools: Read, Edit, Grep, Bash, Write, Skill, Agent

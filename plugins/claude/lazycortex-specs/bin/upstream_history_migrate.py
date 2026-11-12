@@ -103,7 +103,7 @@ def migrate(repo: Path, *, dry_run: bool = False) -> dict:
     left as they are, each a `{"path", "reason"}` record; both in walk order.
 
   Raises:
-    OSError: When a note cannot be read or written.
+    OSError: When a note cannot be read or written, or no settings file lies at or above `repo`.
     RuntimeError: When the journal writer refuses a line or cannot be resolved.
   """
 
@@ -118,7 +118,7 @@ def migrate(repo: Path, *, dry_run: bool = False) -> dict:
   # are never guessed at: the note MUST be left as it is and reported skipped with a reason, and the run MUST go on.
   # A dry run MUST write no file, and running the verb again over its own output MUST change nothing.
 
-  settings_root = spec_paths.find_settings_root(repo)
+  settings_root = spec_paths.require_settings_root(repo)
   upstream_root = settings_root / _UPSTREAM_DIR
   result: dict = { _CHANGED_KEY: [], _SKIPPED_KEY: [] }
 
@@ -152,7 +152,7 @@ def migrate(repo: Path, *, dry_run: bool = False) -> dict:
     # the regrouped text, and the reason when the note is left as it is
     new_text, reason = _migrate_text(text, repo = settings_root)
 
-    # guard: a note the migration leaves as it is goes unwritten, reported with the reason
+    # a note the migration leaves as it is goes unwritten, reported with the reason
     if new_text == text:
       result[_SKIPPED_KEY].append({ _PATH_KEY: rel, _REASON_KEY: reason })
       continue

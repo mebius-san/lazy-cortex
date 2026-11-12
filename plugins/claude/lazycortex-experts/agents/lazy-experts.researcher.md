@@ -1,6 +1,6 @@
 ---
 name: lazy-experts.researcher
-description: "Use when a research asset's approved research design (`design.md` typed `research-design`) states the questions and the research report `research.md` still needs writing — the routes walked, findings each with a source, compared options, a conclusion that answers every question and rules on each hypothesis, and the sources — from the spec tree, the code, the wiki, and the internet once the internal routes run dry. Dispatched by the expert runtime for any `researcher`-class expert as the `research` tool's job; also the validator of a research design in review. Pick it over the interpreter when the questions are already settled and only the answer is missing, and over the designer when nothing is being built — the deliverable is the report, and an approved report is immutable."
+description: "Use when an approved research design states the questions and the research report `research.md` still needs writing — findings with sources from specs, code, wiki and the internet. Dispatched by the expert runtime or directly. Pick it over the interpreter when the questions are settled and only the answer is missing, over the designer when nothing is being built."
 tools: Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"

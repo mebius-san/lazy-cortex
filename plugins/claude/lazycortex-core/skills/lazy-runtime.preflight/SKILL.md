@@ -1,6 +1,6 @@
 ---
 name: lazy-runtime.preflight
-description: "Run before wiring a new expert or MCP server into a live routine, and when a routine's expert spawns keep timing out, die instantly, or never produce a response. Emulates each expert launch with a trivial prompt (no real work) to expose the unresolvable agent, missing aspect/protocol, bad `mcp_config` path, or MCP server that hangs at init, then proposes a concrete fix and applies it only after the operator confirms."
+description: "Run before wiring a new expert or MCP server into a live routine, and when a routine's expert spawns keep timing out, die instantly, or never produce a response. Emulates each expert launch with a trivial prompt and proposes a fix, applied only after the operator confirms."
 allowed-tools: Read, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(git rev-parse *), Bash(git commit *), Bash(date -u *), Write, Edit, AskUserQuestion, Agent
 ---
 # Runtime Preflight
